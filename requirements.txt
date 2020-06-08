@@ -3,3 +3,6 @@ psycopg2
 djangorestframework>=3.9.1
 pylint
 pydash
+django-cors-headers
+pyyaml
+colour_runner
