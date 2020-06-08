@@ -12,3 +12,4 @@ DEFAULT_ACCESS_TYPE = ACCESS_TYPE_VIEW
 ACCESS_TYPE_CHOICES = ((ACCESS_TYPE_VIEW, 'View'),
                        (ACCESS_TYPE_EDIT, 'Edit'),
                        (ACCESS_TYPE_NONE, 'None'))
+SUPER_ADMIN_USER_ID = 1

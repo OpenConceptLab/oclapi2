@@ -3,7 +3,10 @@ from django.core.validators import RegexValidator
 from django.db import models
 from pydash import get
 
-from core.common.constants import ACCESS_TYPE_CHOICES, DEFAULT_ACCESS_TYPE, NAMESPACE_REGEX
+from .constants import (
+    ACCESS_TYPE_CHOICES, DEFAULT_ACCESS_TYPE, NAMESPACE_REGEX,
+    ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT, SUPER_ADMIN_USER_ID
+)
 
 
 class BaseModel(models.Model):
@@ -19,8 +22,20 @@ class BaseModel(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    created_by = models.TextField()
-    updated_by = models.TextField()
+    created_by = models.ForeignKey(
+        'users.UserProfile',
+        related_name='%(app_label)s_%(class)s_related_created_by',
+        related_query_name='%(app_label)s_%(class)ss_created_by',
+        on_delete=models.DO_NOTHING,
+        default=SUPER_ADMIN_USER_ID,
+    )
+    updated_by = models.ForeignKey(
+        'users.UserProfile',
+        related_name='%(app_label)s_%(class)s_related_updated_by',
+        related_query_name='%(app_label)s_%(class)ss_updated_by',
+        on_delete=models.DO_NOTHING,
+        default=SUPER_ADMIN_USER_ID,
+    )
     is_active = models.BooleanField(default=True)
     is_being_saved = False
     extras = JSONField(null=True, blank=True)
@@ -78,6 +93,22 @@ class BaseModel(models.Model):
         if not self.is_active:
             self.is_active = True
             self.save()
+
+    @property
+    def public_can_view(self):
+        return self.public_access in [ACCESS_TYPE_EDIT, ACCESS_TYPE_VIEW]
+
+    @classmethod
+    def resource_type(cls):
+        return get(cls, 'OBJECT_TYPE')
+
+    @property
+    def num_stars(self):
+        return 0
+
+    @staticmethod
+    def get_url_kwarg():
+        return 'org'
 
 
 class BaseResourceModel(BaseModel):

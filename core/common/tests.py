@@ -4,4 +4,3 @@ from django.test.runner import DiscoverRunner
 
 class CustomTestRunner(ColourRunnerMixin, DiscoverRunner):
     pass
-
