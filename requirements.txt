@@ -1,0 +1,5 @@
+Django>=3.0.7
+psycopg2
+djangorestframework>=3.9.1
+pylint
+pydash

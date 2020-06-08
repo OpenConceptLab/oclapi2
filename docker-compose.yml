@@ -1,0 +1,35 @@
+version: '3'
+
+services:
+  db:
+    image: postgres
+    restart: always
+    container_name: oclapi2_db
+    ports:
+      - "5433:5432"
+    environment:
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_HOST_AUTH_METHOD=trust
+  api:
+    build: .
+    container_name: oclapi2
+    restart: always
+    volumes:
+      - .:/code
+    command: sh -c ./startup.sh
+    ports:
+      - "7000:7000"
+    depends_on:
+      - db
+    environment:
+      - REDIS_HOST=redis
+      - DB_HOST=db
+      - ENV=dev
+      - SECRET_KEY
+      - SENTRY_DSN_KEY
+      - EMAIL_HOST_PASSWORD
+      - AWS_ACCESS_KEY_ID
+      - AWS_SECRET_ACCESS_KEY
+      - AWS_STORAGE_BUCKET_NAME
+    env_file:
+      - .env
