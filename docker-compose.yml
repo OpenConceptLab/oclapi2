@@ -2,7 +2,7 @@ version: '3'
 
 services:
   db:
-    image: postgres
+    image: postgres:12.3
     restart: always
     container_name: oclapi2_db
     ports:
