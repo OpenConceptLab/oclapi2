@@ -6,3 +6,7 @@ pydash
 django-cors-headers
 pyyaml
 colour_runner
+boto
+git+https://github.com/snyaggarwal/django-queryset-csv
+six
+python-dateutil

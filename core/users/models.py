@@ -22,6 +22,10 @@ class UserProfile(AbstractUser, BaseModel):
         return "{} {}".format(self.first_name, self.last_name)
 
     @property
+    def full_name(self):
+        return self.name
+
+    @property
     def mnemonic(self):
         return self.username
 

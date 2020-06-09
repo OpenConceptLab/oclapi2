@@ -15,5 +15,9 @@ class Organization(BaseResourceModel):
     website = models.TextField(null=True, blank=True)
     location = models.TextField(null=True, blank=True)
 
+    @property
+    def members(self):
+        return self.userprofile_set
+
 
 admin.site.register(Organization)
