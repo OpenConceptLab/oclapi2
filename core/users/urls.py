@@ -1,4 +1,4 @@
-from django.urls import re_path, path
+from django.urls import re_path
 
 from core.common.constants import NAMESPACE_PATTERN
 from . import views
@@ -11,7 +11,7 @@ urlpatterns = [
         views.UserDetailView.as_view(),
         name='userprofile-detail'
     ),
-    path(
+    re_path(
         r'^(?P<user>' + NAMESPACE_PATTERN + ')/reactivate/$',
         views.UserReactivateView.as_view(),
         name='userprofile-reactivate'

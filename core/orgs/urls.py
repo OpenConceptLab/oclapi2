@@ -1,4 +1,4 @@
-from django.urls import path, re_path
+from django.urls import re_path
 
 from core.common.constants import NAMESPACE_PATTERN
 from core.orgs.models import Organization
@@ -12,15 +12,16 @@ urlpatterns = [
         views.OrganizationDetailView.as_view(),
         name='organization-detail'
     ),
-    path(
+    re_path(
         r'^(?P<org>' + NAMESPACE_PATTERN + ')/members/$',
         UserListView.as_view(),
         {
             'related_object_type': Organization,
             'related_object_kwarg': 'org',
             'related_object_attribute': 'members'
-        }, name='organization-members'),
-    path(
+        }, name='organization-members'
+    ),
+    re_path(
         r'^(?P<org>' + NAMESPACE_PATTERN + ')/members/(?P<user>' + NAMESPACE_PATTERN + ')/$',
         views.OrganizationMemberView.as_view(),
         name='organization-member-detail'

@@ -14,6 +14,7 @@ from core.common.views import BaseAPIView
 from core.orgs.models import Organization
 from core.orgs.serializers import OrganizationDetailSerializer, OrganizationListSerializer, OrganizationCreateSerializer
 from core.users.models import UserProfile
+from core.users.serializers import UserDetailSerializer
 
 
 class OrganizationListView(BaseAPIView,
@@ -107,13 +108,14 @@ class OrganizationDetailView(mixins.UpdateModelMixin, OrganizationBaseView):
 class OrganizationMemberView(generics.GenericAPIView):
     userprofile = None
     user_in_org = False
+    serializer_class = UserDetailSerializer
 
     def initial(self, request, *args, **kwargs):
         org_id = kwargs.pop('org')
         self.organization = Organization.objects.get(mnemonic=org_id)
-        userprofile_id = kwargs.pop('user')
+        username = kwargs.pop('user')
         try:
-            self.userprofile = UserProfile.objects.get(id=userprofile_id)
+            self.userprofile = UserProfile.objects.get(username=username)
         except UserProfile.DoesNotExist:
             pass
         try:

@@ -12,7 +12,7 @@ class OrganizationListSerializer(serializers.ModelSerializer):
         model = Organization
         fields = ('id', 'name', 'url')
         extra_kwargs = {
-            'url': {'view_name': 'organization-detail', 'lookup_field': 'org_id'},
+            'url': {'view_name': 'organization-detail', 'lookup_field': 'org'},
         }
 
 

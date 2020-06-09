@@ -16,8 +16,8 @@ class Organization(BaseResourceModel):
     location = models.TextField(null=True, blank=True)
 
     @property
-    def org_id(self):
-        return self.id
+    def org(self):
+        return self.mnemonic
 
     @property
     def members(self):
