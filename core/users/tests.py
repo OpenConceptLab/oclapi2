@@ -57,6 +57,6 @@ class UserProfileTest(TestCase):
         self.assertEqual(UserProfile().mnemonic, '')
         self.assertEqual(UserProfile(username='foo').mnemonic, 'foo')
 
-    def test_user_id(self):
-        self.assertEqual(UserProfile().user_id, None)
-        self.assertEqual(UserProfile(id=1).user_id, 1)
+    def test_user(self):
+        self.assertEqual(UserProfile().user, '')
+        self.assertEqual(UserProfile(username='foo').user, 'foo')

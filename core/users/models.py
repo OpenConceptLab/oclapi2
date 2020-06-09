@@ -18,8 +18,8 @@ class UserProfile(AbstractUser, BaseModel):
     preferred_locale = models.TextField(null=True, blank=True)
 
     @property
-    def user_id(self):
-        return self.id
+    def user(self):
+        return self.username
 
     @property
     def name(self):

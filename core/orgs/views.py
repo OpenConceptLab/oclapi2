@@ -73,8 +73,7 @@ class OrganizationListView(BaseAPIView,
 
 
 class OrganizationBaseView(BaseAPIView, RetrieveAPIView, DestroyAPIView):
-    lookup_field = 'org_id'
-    pk_field = 'id'
+    lookup_field = 'org'
 
     model = Organization
     queryset = Organization.objects.filter(is_active=True)

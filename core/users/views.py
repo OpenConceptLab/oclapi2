@@ -18,7 +18,7 @@ class UserListView(BaseAPIView,
                    mixins.CreateModelMixin):
     model = UserProfile
     queryset = UserProfile.objects.filter(is_active=True)
-    pk_field = 'id'
+    pk_field = 'username'
     lookup_field = 'user'
 
     def initial(self, request, *args, **kwargs):
@@ -49,8 +49,8 @@ class UserListView(BaseAPIView,
 
 
 class UserBaseView(BaseAPIView):
-    lookup_field = 'user_id'
-    pk_field = 'id'
+    lookup_field = 'user'
+    pk_field = 'username'
     model = UserProfile
     queryset = UserProfile.objects.filter(is_active=True)
     user_is_self = False
