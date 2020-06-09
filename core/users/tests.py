@@ -42,7 +42,21 @@ class UserProfileTest(TestCase):
             "First Last"
         )
 
+    def test_full_name(self):
+        self.assertEqual(
+            UserProfile(first_name='First', last_name="Last").full_name,
+            "First Last"
+        )
+
     def test_resource_type(self):
         user = UserProfile()
 
         self.assertEqual(USER_OBJECT_TYPE, user.resource_type())
+
+    def test_mnemonic(self):
+        self.assertEqual(UserProfile().mnemonic, '')
+        self.assertEqual(UserProfile(username='foo').mnemonic, 'foo')
+
+    def test_user_id(self):
+        self.assertEqual(UserProfile().user_id, None)
+        self.assertEqual(UserProfile(id=1).user_id, 1)

@@ -54,3 +54,25 @@ def get_csv_from_s3(filename, is_owner):
     bucket = S3ConnectionFactory.get_export_bucket()
     key = bucket.get_key(filename)
     return key.generate_url(expires_in=600) if key else None
+
+
+def add_user_to_org(userprofile, organization):
+    transaction_complete = False
+    if not organization.is_member(userprofile):
+        try:
+            userprofile.organizations.add(organization)
+            transaction_complete = True
+        finally:
+            if not transaction_complete:
+                userprofile.organizations.remove(organization)
+
+
+def remove_user_from_org(userprofile, organization):
+    transaction_complete = False
+    if organization.is_member(userprofile):
+        try:
+            userprofile.organizations.remove(organization)
+            transaction_complete = True
+        finally:
+            if not transaction_complete:
+                userprofile.organizations.add(organization)

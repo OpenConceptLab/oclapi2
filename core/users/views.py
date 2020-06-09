@@ -49,7 +49,7 @@ class UserListView(BaseAPIView,
 
 
 class UserBaseView(BaseAPIView):
-    lookup_field = 'id'
+    lookup_field = 'user_id'
     pk_field = 'id'
     model = UserProfile
     queryset = UserProfile.objects.filter(is_active=True)

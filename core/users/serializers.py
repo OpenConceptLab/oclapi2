@@ -10,7 +10,7 @@ class UserListSerializer(serializers.ModelSerializer):
     class Meta:
         model = UserProfile
         extra_kwargs = {
-            'url': {'view_name': 'userprofile-detail', 'lookup_field': 'id'},
+            'url': {'view_name': 'userprofile-detail', 'lookup_field': 'user_id'},
         }
         fields = (
             'username', 'name', 'url'
