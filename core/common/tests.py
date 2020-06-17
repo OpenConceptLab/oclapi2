@@ -1,12 +1,17 @@
-import unittest
 from unittest.mock import patch, Mock, mock_open
 
 import boto3
 from botocore.exceptions import ClientError
 from colour_runner.django_runner import ColourRunnerMixin
+from django.core.management import call_command
+from django.test import TestCase
 from django.test.runner import DiscoverRunner
 from moto import mock_s3
 
+from core.concepts.models import Concept, LocalizedText
+from core.orgs.models import Organization
+from core.sources.models import Source
+from core.users.models import UserProfile
 from .services import S3
 
 
@@ -14,7 +19,22 @@ class CustomTestRunner(ColourRunnerMixin, DiscoverRunner):
     pass
 
 
-class S3Test(unittest.TestCase):
+class OCLTestCase(TestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        call_command("loaddata", "core/fixtures/base_entities.yaml")
+
+    def tearDown(self):
+        Concept.objects.all().delete()
+        LocalizedText.objects.all().delete()
+        Source.objects.all().delete()
+        Organization.objects.exclude(id=1).all().delete()
+        UserProfile.objects.exclude(id=1).all().delete()
+
+
+
+class S3Test(TestCase):
     @mock_s3
     def test_upload(self):
         _conn = boto3.resource('s3', region_name='us-east-1')

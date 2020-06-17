@@ -1,0 +1,1 @@
+CONCEPT_TYPE = 'Concept'

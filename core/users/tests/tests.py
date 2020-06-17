@@ -1,23 +1,13 @@
-from django.core.management import call_command
-from django.test import TestCase
-
+from core.common.tests import OCLTestCase
 from core.orgs.models import Organization
-from .constants import USER_OBJECT_TYPE
-from .models import UserProfile
+from core.users.constants import USER_OBJECT_TYPE
+from core.users.models import UserProfile
 
 
-class UserProfileTest(TestCase):
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        call_command("loaddata", "core/fixtures/base_entities.yaml")
-
+class UserProfileTest(OCLTestCase):
     def setUp(self):
+        super().setUp()
         self.org = Organization.objects.get(id=1)
-
-    def tearDown(self):
-        Organization.objects.exclude(id=1).all().delete()
-        UserProfile.objects.exclude(id=1).all().delete()
 
     def test_create_userprofile_positive(self):
         self.assertFalse(UserProfile.objects.filter(username='user1').exists())

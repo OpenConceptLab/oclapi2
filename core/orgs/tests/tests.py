@@ -1,7 +1,7 @@
 from django.test import TestCase
 
 from core.orgs.constants import ORG_OBJECT_TYPE
-from .models import Organization
+from core.orgs.models import Organization
 
 
 class OrganizationTest(TestCase):
