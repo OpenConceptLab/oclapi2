@@ -12,3 +12,4 @@ git+https://github.com/snyaggarwal/django-queryset-csv
 six
 python-dateutil
 requests
+factory_boy
