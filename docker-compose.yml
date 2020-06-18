@@ -3,6 +3,8 @@ version: '3'
 services:
   db:
     image: postgres:12.3
+    volumes:
+      - postgre_data:/data/db
     restart: always
     container_name: oclapi2_db
     ports:
@@ -33,3 +35,5 @@ services:
       - AWS_STORAGE_BUCKET_NAME
     env_file:
       - .env
+volumes:
+  postgres_data:
