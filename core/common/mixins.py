@@ -1,9 +1,11 @@
+from django.db.models import Q
 from django.urls import resolve
 from pydash import compact
 from rest_framework.mixins import ListModelMixin, CreateModelMixin
 from rest_framework.response import Response
 
-from core.common.constants import HEAD
+from core.common.constants import HEAD, ACCESS_TYPE_EDIT, ACCESS_TYPE_VIEW
+from core.common.permissions import HasPrivateAccess
 from .utils import write_csv_to_s3, get_csv_from_s3
 
 
@@ -188,3 +190,8 @@ class SubResourceMixin(PathWalkerMixin):
     def get_level(self):
         levels = 1 if isinstance(self, (ListModelMixin, CreateModelMixin)) else 2
         return levels
+
+
+class ConceptDictionaryMixin(SubResourceMixin):
+    base_or_clause = [Q(public_access=ACCESS_TYPE_EDIT), Q(public_access=ACCESS_TYPE_VIEW)]
+    permission_classes = (HasPrivateAccess,)

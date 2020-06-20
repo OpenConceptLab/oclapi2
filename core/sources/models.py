@@ -25,7 +25,7 @@ class Source(ConceptContainerModel):
 
     @property
     def versions_url(self):
-        return reverse_resource(self, 'sourceversion-list')
+        return reverse_resource(self, 'source-version-list')
 
     @property
     def concepts_url(self):

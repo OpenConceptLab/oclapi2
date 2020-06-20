@@ -6,6 +6,7 @@ from pydash import get
 
 from core.common.constants import TEMP
 from core.common.models import VersionedModel
+from core.common.utils import reverse_resource
 from core.concepts.constants import CONCEPT_TYPE
 
 
@@ -114,6 +115,10 @@ class Concept(VersionedModel):
     @property
     def custom_validation_schema(self):
         return get(self, 'parent.custom_validation_schema')
+
+    @property
+    def versions_url(self):
+        return reverse_resource(self, 'concept-version-list')
 
     def clone(self):
         concept_version = Concept(

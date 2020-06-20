@@ -10,4 +10,9 @@ urlpatterns = [
         views.ConceptRetrieveUpdateDestroyView.as_view(),
         name='concept-detail'
     ),
+    re_path(
+        r'^(?P<concept>' + NAMESPACE_PATTERN + ')/versions/$',
+        views.ConceptVersionsView.as_view(),
+        name='concept-version-list'
+    ),
 ]

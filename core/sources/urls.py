@@ -13,7 +13,7 @@ urlpatterns = [
     re_path(
         r'^(?P<source>' + NAMESPACE_PATTERN + ')/versions/$',
         views.SourceVersionListView.as_view(),
-        name='sourceversion-list'
+        name='source-version-list'
     ),
     re_path(r'^(?P<source>' + NAMESPACE_PATTERN + ')/concepts/', include('core.concepts.urls')),
 ]

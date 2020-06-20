@@ -21,7 +21,7 @@ class ConceptListSerializer(ModelSerializer):
         model = Concept
         fields = (
             'id', 'external_id', 'concept_class', 'datatype', 'url', 'retired', 'source',
-            'owner', 'owner_type', 'owner_url', 'display_name', 'display_locale'
+            'owner', 'owner_type', 'owner_url', 'display_name', 'display_locale', 'version',
         )
 
 
@@ -39,5 +39,5 @@ class ConceptDetailSerializer(ModelSerializer):
         fields = (
             'id', 'external_id', 'concept_class', 'datatype', 'url', 'retired', 'source',
             'owner', 'owner_type', 'owner_url', 'display_name', 'display_locale', 'names', 'descriptions',
-            'created_on', 'updated_on',
+            'created_on', 'updated_on', 'versions_url', 'version',
         )

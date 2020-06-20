@@ -3,7 +3,7 @@ from rest_framework.generics import RetrieveAPIView, DestroyAPIView
 from rest_framework.response import Response
 
 from core.common.constants import HEAD
-from core.common.mixins import ListWithHeadersMixin
+from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryMixin
 from core.common.views import BaseAPIView
 from core.concepts.models import Concept
 from core.concepts.permissions import CanViewParentDictionary
@@ -50,3 +50,12 @@ class ConceptRetrieveUpdateDestroyView(ConceptBaseView, RetrieveAPIView, Destroy
             return Response({'detail': ex.message}, status=status.HTTP_400_BAD_REQUEST)
 
         return Response({'detail': 'Successfully deleted concept.'}, status=status.HTTP_204_NO_CONTENT)
+
+
+class ConceptVersionsView(ConceptBaseView, ConceptDictionaryMixin, ListWithHeadersMixin):
+    serializer_class = ConceptListSerializer
+    permission_classes = (CanViewParentDictionary,)
+
+    def get(self, request, *args, **kwargs):
+        self.serializer_class = ConceptDetailSerializer if self.is_verbose(request) else ConceptListSerializer
+        return self.list(request, *args, **kwargs)
