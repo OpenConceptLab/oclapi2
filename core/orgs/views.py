@@ -9,7 +9,6 @@ from rest_framework.response import Response
 from core.common.constants import ACCESS_TYPE_NONE
 from core.common.mixins import ListWithHeadersMixin
 from core.common.permissions import IsSuperuser
-from core.common.utils import add_user_to_org, remove_user_from_org
 from core.common.views import BaseAPIView
 from core.orgs.models import Organization
 from core.orgs.serializers import OrganizationDetailSerializer, OrganizationListSerializer, OrganizationCreateSerializer
@@ -65,7 +64,7 @@ class OrganizationListView(BaseAPIView,
             self.pre_save(serializer.object)
             self.object = serializer.save(force_insert=True)
             self.post_save(self.object, created=True)
-            add_user_to_org(request.user, self.object)
+            request.user.organizations.add(self.object)
             headers = self.get_success_headers(serializer.data)
             serializer = OrganizationDetailSerializer(self.object, context={'request': request})
             return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
@@ -134,20 +133,20 @@ class OrganizationMemberView(generics.GenericAPIView):
             return Response(status=status.HTTP_204_NO_CONTENT)
         return Response(status=status.HTTP_404_NOT_FOUND)
 
-    def put(self, request, *args, **kwargs):  # pylint: disable=unused-argument
+    def put(self, request):
         if not request.user.is_staff and not self.user_in_org:
             return Response(status=status.HTTP_403_FORBIDDEN)
         if not self.userprofile:
             return Response(status=status.HTTP_404_NOT_FOUND)
 
-        add_user_to_org(self.userprofile, self.organization)
+        self.userprofile.organizations.add(self.organization)
 
         return Response(status=status.HTTP_204_NO_CONTENT)
 
-    def delete(self, request, *args, **kwargs):  # pylint: disable=unused-argument
+    def delete(self, request):
         if not request.user.is_staff and not self.user_in_org:
             return Response(status=status.HTTP_403_FORBIDDEN)
 
-        remove_user_from_org(self.userprofile, self.organization)
+        self.userprofile.organizations.remove(self.organization)
 
         return Response(status=status.HTTP_204_NO_CONTENT)
