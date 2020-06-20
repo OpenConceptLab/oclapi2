@@ -11,9 +11,6 @@ class OrganizationListSerializer(serializers.ModelSerializer):
     class Meta:
         model = Organization
         fields = ('id', 'name', 'url')
-        extra_kwargs = {
-            'url': {'view_name': 'organization-detail', 'lookup_field': 'org'},
-        }
 
 
 class OrganizationCreateSerializer(serializers.ModelSerializer):
@@ -78,6 +75,7 @@ class OrganizationDetailSerializer(serializers.ModelSerializer):
         fields = (
             'type', 'uuid', 'id', 'public_access', 'name', 'company', 'website', 'location', 'members',
             'created_on', 'updated_on', 'url', 'extras', 'members_url', 'created_by', 'updated_by', 'location',
+            'sources_url'
         )
 
     def restore_object(self, attrs, instance=None):

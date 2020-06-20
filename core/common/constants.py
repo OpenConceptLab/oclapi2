@@ -15,3 +15,5 @@ ACCESS_TYPE_CHOICES = ((ACCESS_TYPE_VIEW, 'View'),
                        (ACCESS_TYPE_NONE, 'None'))
 SUPER_ADMIN_USER_ID = 1
 UPDATED_SINCE_PARAM = 'updatedSince'
+RELEASED_PARAM = 'released'
+PROCESSING_PARAM = 'processing'

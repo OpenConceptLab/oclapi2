@@ -1,4 +1,4 @@
-from django.urls import re_path
+from django.urls import re_path, include
 
 from core.common.constants import NAMESPACE_PATTERN
 from . import views
@@ -16,4 +16,5 @@ urlpatterns = [
         views.UserReactivateView.as_view(),
         name='userprofile-reactivate'
     ),
+    re_path(r'^(?P<user>' + NAMESPACE_PATTERN + ')/sources/', include('core.sources.urls')),
 ]

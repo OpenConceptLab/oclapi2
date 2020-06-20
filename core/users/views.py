@@ -13,13 +13,22 @@ from core.users.serializers import UserDetailSerializer, UserCreateSerializer, U
 from .models import UserProfile
 
 
-class UserListView(BaseAPIView,
-                   ListWithHeadersMixin,
-                   mixins.CreateModelMixin):
+class UserBaseView(BaseAPIView):
+    lookup_field = 'user'
+    pk_field = 'username'
     model = UserProfile
     queryset = UserProfile.objects.filter(is_active=True)
-    pk_field = 'username'
-    lookup_field = 'user'
+    user_is_self = False
+
+    def initialize(self, request, path_info_segment, **kwargs):
+        super().initialize(request, path_info_segment, **kwargs)
+        if (request.method == 'DELETE') or (request.method == 'POST' and not self.user_is_self):
+            self.permission_classes = (IsAdminUser, )
+
+
+class UserListView(UserBaseView,
+                   ListWithHeadersMixin,
+                   mixins.CreateModelMixin):
 
     def initial(self, request, *args, **kwargs):
         self.related_object_type = kwargs.pop('related_object_type', None)
@@ -46,19 +55,6 @@ class UserListView(BaseAPIView,
             return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
         self.serializer_class = UserCreateSerializer
         return self.create(request, *args, **kwargs)
-
-
-class UserBaseView(BaseAPIView):
-    lookup_field = 'user'
-    pk_field = 'username'
-    model = UserProfile
-    queryset = UserProfile.objects.filter(is_active=True)
-    user_is_self = False
-
-    def initialize(self, request, path_info_segment, **kwargs):
-        super().initialize(request, path_info_segment, **kwargs)
-        if (request.method == 'DELETE') or (request.method == 'POST' and not self.user_is_self):
-            self.permission_classes = (IsAdminUser, )
 
 
 class UserDetailView(UserBaseView, RetrieveAPIView, mixins.UpdateModelMixin):

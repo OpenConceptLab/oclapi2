@@ -1,6 +1,7 @@
 from django.contrib import admin
 from django.core.validators import RegexValidator
 from django.db import models
+from django.urls import reverse
 
 from core.common.constants import NAMESPACE_REGEX
 from core.common.models import BaseResourceModel
@@ -35,6 +36,13 @@ class Organization(BaseResourceModel):
 
     def is_member(self, userprofile):
         return userprofile and self.members.filter(id=userprofile.id).exists()
+
+    @staticmethod
+    def get_url_kwarg():
+        return 'org'
+
+    def sources_url(self):
+        return reverse('source-list', kwargs={self.get_url_kwarg(): self.mnemonic})
 
 
 admin.site.register(Organization)

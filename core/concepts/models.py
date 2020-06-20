@@ -41,12 +41,12 @@ class Concept(VersionedModel):
     external_id = models.TextField(null=True, blank=True)
     concept_class = models.TextField()
     datatype = models.TextField()
-    names = models.ManyToManyField(LocalizedText, related_name='name_locales', null=True, blank=True)
-    descriptions = models.ManyToManyField(LocalizedText, related_name='description_locales', null=True, blank=True)
+    names = models.ManyToManyField(LocalizedText, related_name='name_locales')
+    descriptions = models.ManyToManyField(LocalizedText, related_name='description_locales')
     retired = models.BooleanField(default=False)
     comment = models.TextField(null=True, blank=True)
     parent = models.ForeignKey('sources.Source', related_name='concepts_set', on_delete=models.DO_NOTHING)
-    sources = models.ManyToManyField('sources.Source', null=True, blank=True, related_name='concepts')
+    sources = models.ManyToManyField('sources.Source', related_name='concepts')
 
     OBJECT_TYPE = CONCEPT_TYPE
 
@@ -57,6 +57,26 @@ class Concept(VersionedModel):
     @staticmethod
     def get_url_kwarg():
         return 'concept'
+
+    @property
+    def owner(self):
+        return self.parent.parent
+
+    @property
+    def owner_name(self):
+        return str(self.owner)
+
+    @property
+    def owner_type(self):
+        return self.parent.resource_type()
+
+    @property
+    def owner_url(self):
+        return self.parent.url
+
+    @property
+    def parent_resource(self):
+        return self.parent.mnemonic
 
     @property
     def display_name(self):

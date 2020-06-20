@@ -1,4 +1,4 @@
-from django.urls import re_path
+from django.urls import re_path, include
 
 from core.common.constants import NAMESPACE_PATTERN
 from core.orgs.models import Organization
@@ -26,4 +26,5 @@ urlpatterns = [
         views.OrganizationMemberView.as_view(),
         name='organization-member-detail'
     ),
+    re_path(r'^(?P<org>' + NAMESPACE_PATTERN + ')/sources/', include('core.sources.urls')),
 ]

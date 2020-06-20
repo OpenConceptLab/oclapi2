@@ -1,6 +1,7 @@
 from django.contrib import admin
 from django.contrib.auth.models import AbstractUser
 from django.db import models
+from django.urls import reverse
 
 from core.common.models import BaseModel
 from .constants import USER_OBJECT_TYPE
@@ -32,6 +33,13 @@ class UserProfile(AbstractUser, BaseModel):
     @property
     def mnemonic(self):
         return self.username
+
+    @staticmethod
+    def get_url_kwarg():
+        return 'user'
+
+    def sources_url(self):
+        return reverse('source-list', kwargs={self.get_url_kwarg(): self.mnemonic})
 
 
 admin.site.register(UserProfile)

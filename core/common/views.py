@@ -1,9 +1,6 @@
-from dateutil import parser
 from django.db import DatabaseError
 from django.http import Http404
 from rest_framework import response, generics, status
-
-from .constants import UPDATED_SINCE_PARAM
 
 
 def get_object_or_404(queryset, **filter_kwargs):
@@ -11,26 +8,6 @@ def get_object_or_404(queryset, **filter_kwargs):
         return generics.get_object_or_404(queryset, **filter_kwargs)
     except DatabaseError:
         raise Http404
-
-
-def parse_updated_since_param(request):
-    updated_since = request.query_params.get(UPDATED_SINCE_PARAM)
-    if updated_since:
-        try:
-            return parser.parse(updated_since)
-        except ValueError:
-            pass
-    return None
-
-
-def parse_boolean_query_param(request, param, default=None):
-    val = request.query_params.get(param, default)
-    if val is None:
-        return None
-    for boolean in [True, False]:
-        if str(boolean).lower() == val.lower():
-            return boolean
-    return None
 
 
 class BaseAPIView(generics.GenericAPIView):

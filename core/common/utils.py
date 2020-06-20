@@ -3,9 +3,12 @@ import tempfile
 import zipfile
 
 from boto.s3.connection import S3Connection
+from dateutil import parser
 from django.conf import settings
+from django.urls import NoReverseMatch, reverse
 from djqscsv import csv_file_for
 
+from core.common.constants import UPDATED_SINCE_PARAM
 from core.common.services import S3
 
 
@@ -83,3 +86,53 @@ def get_owner_type(owner, resources_url):
 
 def join_uris(resources):
     return ', '.join([resource.uri for resource in resources])
+
+
+def reverse_resource(resource, viewname, args=None, kwargs=None, **extra):
+    """
+    Generate the URL for the view specified as viewname of the object specified as resource.
+    """
+    kwargs = kwargs or {}
+    parent = resource
+    while parent is not None:
+        if not hasattr(parent, 'get_url_kwarg'):
+            return NoReverseMatch('Cannot get URL kwarg for %s' % resource)
+        kwargs.update({parent.get_url_kwarg(): parent.mnemonic})
+        parent = parent.parent if hasattr(parent, 'parent') else None
+    return reverse(viewname=viewname, args=args, kwargs=kwargs, **extra)
+
+
+def reverse_resource_version(resource, viewname, args=None, kwargs=None, **extra):
+    """
+    Generate the URL for the view specified as viewname of the object that is
+    versioned by the object specified as resource.
+    Assumes that resource extends ResourceVersionMixin, and therefore has a versioned_object attribute.
+    """
+    kwargs = kwargs or {}
+    val = None
+    if resource.mnemonic and resource.mnemonic != '':
+        val = resource.mnemonic
+    kwargs.update({
+        resource.get_url_kwarg(): val
+    })
+    return reverse_resource(resource.versioned_object, viewname, args, kwargs, **extra)
+
+
+def parse_updated_since_param(request):
+    updated_since = request.query_params.get(UPDATED_SINCE_PARAM)
+    if updated_since:
+        try:
+            return parser.parse(updated_since)
+        except ValueError:
+            pass
+    return None
+
+
+def parse_boolean_query_param(request, param, default=None):
+    val = request.query_params.get(param, default)
+    if val is None:
+        return None
+    for boolean in [True, False]:
+        if str(boolean).lower() == val.lower():
+            return boolean
+    return None

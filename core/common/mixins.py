@@ -1,5 +1,6 @@
+from django.urls import resolve
 from pydash import compact
-from rest_framework.mixins import ListModelMixin
+from rest_framework.mixins import ListModelMixin, CreateModelMixin
 from rest_framework.response import Response
 
 from core.common.constants import HEAD
@@ -124,3 +125,66 @@ class ListWithHeadersMixin(ListModelMixin):
         if current.versioned_object_id not in prev_version_ids:
             prev.append(current)
         return prev
+
+
+class PathWalkerMixin:
+    """
+    A Mixin with methods that help resolve a resource path to a resource object
+    """
+    path_info = None
+
+    @staticmethod
+    def get_parent_in_path(path_info, levels=1):
+        last_index = len(path_info) - 1
+        last_slash = path_info.rindex('/')
+        if last_slash == last_index:
+            last_slash = path_info.rindex('/', 0, last_index)
+        path_info = path_info[0:last_slash+1]
+        if levels > 1:
+            i = 1
+            while i < levels:
+                last_index = len(path_info) - 1
+                last_slash = path_info.rindex('/', 0, last_index)
+                path_info = path_info[0:last_slash+1]
+                i += 1
+        return path_info
+
+    @staticmethod
+    def get_object_for_path(path_info, request):
+        callback, _, callback_kwargs = resolve(path_info)
+        view = callback.cls(request=request, kwargs=callback_kwargs)
+        view.initialize(request, path_info, **callback_kwargs)
+        return view.get_object()
+
+
+class SubResourceMixin(PathWalkerMixin):
+    """
+    Base view for a sub-resource.
+    Includes a post-initialize step that determines the parent resource,
+    and a get_queryset method that applies the appropriate permissions and filtering.
+    """
+    user = None
+    userprofile = None
+    user_is_self = False
+    parent_path_info = None
+    parent_resource = None
+    base_or_clause = []
+
+    def initialize(self, request, path_info_segment, **kwargs):
+        super().initialize(request, path_info_segment, **kwargs)
+        self.user = request.user
+        self.userprofile = self.user
+        self.parent_resource = self.userprofile
+        if self.user_is_self:
+            self.userprofile = self.user
+            self.parent_resource = self.userprofile
+        else:
+            levels = self.get_level()
+            self.parent_path_info = self.get_parent_in_path(path_info_segment, levels=levels)
+            self.parent_resource = None
+            if self.parent_path_info and self.parent_path_info != '/':
+                self.parent_resource = self.get_object_for_path(self.parent_path_info, request)
+
+    def get_level(self):
+        levels = 1 if isinstance(self, (ListModelMixin, CreateModelMixin)) else 2
+        return levels

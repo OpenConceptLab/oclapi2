@@ -4,6 +4,7 @@ from django.core.validators import RegexValidator
 from django.db import models
 from pydash import get
 
+from core.common.utils import reverse_resource
 from core.settings import DEFAULT_LOCALE
 from .constants import (
     ACCESS_TYPE_CHOICES, DEFAULT_ACCESS_TYPE, NAMESPACE_REGEX,
@@ -108,9 +109,26 @@ class BaseModel(models.Model):
     def num_stars(self):
         return 0
 
-    @staticmethod
-    def get_url_kwarg():
-        return 'org'
+    @property
+    def url(self):
+        return self.uri or reverse_resource(self, self.view_name)
+
+    @property
+    def view_name(self):
+        return self.get_default_view_name()
+
+    @property
+    def _default_view_name(self):
+        return '%(model_name)s-detail'
+
+    def get_default_view_name(self):
+        model = self.__class__
+        model_meta = model._meta  # pylint: disable=protected-access
+        format_kwargs = {
+            'app_label': model_meta.app_label,
+            'model_name': model_meta.object_name.lower()
+        }
+        return self._default_view_name % format_kwargs
 
 
 class BaseResourceModel(BaseModel):
@@ -261,3 +279,6 @@ class ConceptContainerModel(VersionedModel):
             if not persisted:
                 errors['non_field_errors'] = "An error occurred while trying to persist new %s." % cls.__name__
         return errors
+
+    def get_active_concepts(self):
+        return self.concepts_set.filter(is_active=True, retired=False, version=HEAD)
