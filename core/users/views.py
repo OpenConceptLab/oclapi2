@@ -1,10 +1,8 @@
-from django.contrib.auth.hashers import check_password
-from rest_framework import mixins, status, views
-from rest_framework.generics import RetrieveAPIView, UpdateAPIView
-from rest_framework.permissions import IsAdminUser, AllowAny
-from rest_framework.response import Response
+from rest_framework import mixins, status
 from rest_framework.authtoken.models import Token
-
+from rest_framework.generics import RetrieveAPIView, UpdateAPIView
+from rest_framework.permissions import IsAdminUser
+from rest_framework.response import Response
 
 from core.common.mixins import ListWithHeadersMixin
 from core.common.views import BaseAPIView
@@ -89,30 +87,6 @@ class UserDetailView(UserBaseView, RetrieveAPIView, mixins.UpdateModelMixin):
         obj = self.get_object()
         obj.soft_delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
-
-
-class UserLoginView(views.APIView):
-    permission_classes = (AllowAny,)
-
-    @staticmethod
-    def post(request, *args, **kwargs):  # pylint: disable=unused-argument
-        errors = {}
-        username = request.DATA.get('username')
-        if not username:
-            errors['username'] = ['This field is required.']
-        password = request.DATA.get('password')
-        hashed_password = request.DATA.get('hashed_password')
-        if not password and not hashed_password:
-            errors['password'] = ['This field is required.']
-        if errors:
-            return Response(errors, status=status.HTTP_400_BAD_REQUEST)
-        try:
-            profile = UserProfile.objects.get(username=username)
-            if check_password(password, profile.password) or hashed_password == profile.password:
-                return Response({'token': profile.auth_token.key}, status=status.HTTP_200_OK)
-            return Response({'detail': 'No such user or wrong password.'}, status=status.HTTP_401_UNAUTHORIZED)
-        except UserProfile.DoesNotExist:
-            return Response({'detail': 'No such user or wrong password.'}, status=status.HTTP_401_UNAUTHORIZED)
 
 
 class UserReactivateView(UserBaseView, UpdateAPIView):
