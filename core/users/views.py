@@ -28,9 +28,12 @@ class UserListView(UserBaseView,
                    ListWithHeadersMixin,
                    mixins.CreateModelMixin):
 
-    def initial(self, request, *args, **kwargs):
-        self.related_object_type = kwargs.pop('related_object_type', None)
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
         self.related_object_kwarg = kwargs.pop('related_object_kwarg', None)
+        self.related_object_type = kwargs.pop('related_object_type', None)
+
+    def initial(self, request, *args, **kwargs):
         if request.method == 'POST':
             self.permission_classes = (IsAdminUser, )
         super().initial(request, *args, **kwargs)
@@ -41,9 +44,9 @@ class UserListView(UserBaseView,
             related_object_key = kwargs.pop(self.related_object_kwarg)
             if Organization == self.related_object_type:
                 organization = Organization.objects.get(mnemonic=related_object_key)
-                if organization.public_access == 'None':
+                if not organization.public_can_view:
                     if not request.user.is_staff:
-                        if not organization.userprofile_set.filter(id=request.user.id):
+                        if not organization.userprofile_set.filter(id=request.user.id).exists():
                             return Response(status=status.HTTP_403_FORBIDDEN)
                 self.queryset = organization.userprofile_set.all()
         return self.list(request, *args, **kwargs)
@@ -64,24 +67,23 @@ class UserDetailView(UserBaseView, RetrieveAPIView, mixins.UpdateModelMixin):
         return super().get_object(queryset)
 
     def post(self, request, *args, **kwargs):
-        password = request.DATA.get('password')
-        hashed_password = request.DATA.get('hashed_password')
+        password = request.data.get('password')
+        hashed_password = request.data.get('hashed_password')
         if password:
             obj = self.get_object()
             obj.set_password(password)
             obj.save()
-            Token.objects.filter(user=obj).delete()
-            Token.objects.create(user=obj)
         elif hashed_password:
             obj = self.get_object()
             obj.password = hashed_password
             obj.save()
+        if obj:
             Token.objects.filter(user=obj).delete()
             Token.objects.create(user=obj)
 
         return self.partial_update(request, *args, **kwargs)
 
-    def delete(self, request, *args, **kwargs):  # pylint: disable=unused-argument
+    def delete(self):
         if self.user_is_self:
             return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
         obj = self.get_object()
