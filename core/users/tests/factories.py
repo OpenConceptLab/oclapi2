@@ -21,4 +21,3 @@ class UserProfileFactory(factory.django.DjangoModelFactory):
         if extracted:
             for org in extracted:
                 self.organizations.add(org)
-

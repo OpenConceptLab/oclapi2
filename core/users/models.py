@@ -38,8 +38,13 @@ class UserProfile(AbstractUser, BaseModel):
     def get_url_kwarg():
         return 'user'
 
+    @property
     def sources_url(self):
         return reverse('source-list', kwargs={self.get_url_kwarg(): self.mnemonic})
+
+    @property
+    def organizations_url(self):
+        return reverse('userprofile-orgs', kwargs={'user': self.mnemonic})
 
 
 admin.site.register(UserProfile)

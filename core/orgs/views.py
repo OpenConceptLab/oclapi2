@@ -12,6 +12,7 @@ from core.common.permissions import IsSuperuser
 from core.common.views import BaseAPIView
 from core.orgs.models import Organization
 from core.orgs.serializers import OrganizationDetailSerializer, OrganizationListSerializer, OrganizationCreateSerializer
+from core.sources.views import SourceListView
 from core.users.models import UserProfile
 from core.users.serializers import UserDetailSerializer
 
@@ -37,16 +38,15 @@ class OrganizationListView(BaseAPIView,
         if self.related_object_type and self.related_object_kwarg:  # /users/(user)/orgs/
             related_object_key = kwargs.pop(self.related_object_kwarg)
             if UserProfile == self.related_object_type:
-                userprofile = UserProfile.objects.get(id=related_object_key)
-                self.queryset = userprofile.organizations
+                userprofile = UserProfile.objects.get(username=related_object_key)
+                self.queryset = userprofile.organizations.all()
         elif self.user_is_self:  # /user/orgs/
-            self.queryset = request.user.organizations
+            self.queryset = request.user.organizations.all()
         else:  # /orgs
             if isinstance(request.user, AnonymousUser):
                 self.queryset = self.queryset.filter(~Q(public_access=ACCESS_TYPE_NONE))
             else:
-                self.queryset = request.user.organizations
-                self.queryset = self.queryset.filter(~Q(public_access=ACCESS_TYPE_NONE))
+                self.queryset = request.user.organizations.filter(~Q(public_access=ACCESS_TYPE_NONE))
 
         return self.list(request, *args, **kwargs)
 
@@ -150,3 +150,9 @@ class OrganizationMemberView(generics.GenericAPIView):
         self.userprofile.organizations.remove(self.organization)
 
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class OrganizationSourceListView(SourceListView):
+    def get_queryset(self):
+        user = UserProfile.objects.get(username=self.kwargs.get('user', None))
+        return self.queryset.filter(organization__in=user.organizations.all())

@@ -4,3 +4,5 @@ disable=missing-docstring,too-few-public-methods,no-member,too-many-ancestors,at
 ignore=migrations,fixtures,scripts,celeryconf,commands
 [FORMAT]
 max-line-length=120
+[DESIGN]
+max-attributes=12
