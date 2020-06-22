@@ -6,7 +6,7 @@ from . import views
 
 urlpatterns = [
     re_path(r'^$', views.UserListView.as_view(), name='userprofile-list'),
-    path('login/', obtain_auth_token, name='api_token_auth'),
+    path('login/', obtain_auth_token, name='user-login'),
     re_path(
         r'^(?P<user>' + NAMESPACE_PATTERN + ')/$',
         views.UserDetailView.as_view(),
