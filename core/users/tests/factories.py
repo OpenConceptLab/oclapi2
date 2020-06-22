@@ -1,7 +1,6 @@
 import factory
-from factory import Sequence, SubFactory
+from factory import Sequence
 
-from core.orgs.tests.factories import OrganizationFactory
 from core.users.models import UserProfile
 
 
