@@ -2,9 +2,10 @@
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
-from pydash import get
+from django.db.models import F
+from pydash import get, compact
 
-from core.common.constants import TEMP
+from core.common.constants import TEMP, HEAD
 from core.common.models import VersionedModel
 from core.common.utils import reverse_resource
 from core.concepts.constants import CONCEPT_TYPE
@@ -34,7 +35,7 @@ class LocalizedText(models.Model):
         return self.type in ("INDEX_TERM", "Index Term")
 
 
-class Concept(VersionedModel):
+class Concept(VersionedModel):  # pylint: disable=too-many-public-methods
     class Meta:
         db_table = 'concepts'
         unique_together = ('mnemonic', 'version', 'parent')
@@ -133,6 +134,7 @@ class Concept(VersionedModel):
             extras=self.extras,
             parent=self.parent,
             is_latest_version=self.is_latest_version,
+            parent_id=self.parent_id,
         )
         concept_version.cloned_names = list(self.names.all())
         concept_version.cloned_descriptions = list(self.descriptions.all())
@@ -150,6 +152,19 @@ class Concept(VersionedModel):
 
         return version
 
+    def set_labels(self):
+        if not self.id:
+            return
+
+        self.names.set(get(self, 'cloned_names', []))
+        self.descriptions.set(get(self, 'cloned_descriptions', []))
+
+    def remove_labels(self):
+        if not self.id:
+            return
+        [self.names.remove(name) for name in get(self, 'cloned_names', [])]  # pylint: disable=expression-not-assigned
+        [self.descriptions.remove(desc) for desc in get(self, 'cloned_descriptions', [])]  # pylint: disable=expression-not-assigned
+
     @classmethod
     def persist_clone(cls, obj, user=None, **kwargs):
         errors = dict()
@@ -161,25 +176,32 @@ class Concept(VersionedModel):
         persisted = False
         errored_action = 'saving new concept version'
         latest_versions = None
+        head_versions = None
         try:
             obj.clean()
             obj.save(**kwargs)
+            obj.set_labels()
             latest_versions = obj.versions.filter(is_latest_version=True)
             latest_versions.update(is_latest_version=False)
+            head_versions = obj.versions.filter(version=HEAD)
+            head_versions.update(version=F('id'))
             obj.is_latest_version = True
-            obj.version = str(obj.id)
+            obj.version = HEAD
             obj.names.set(obj.cloned_names or [])
             obj.descriptions.set(obj.cloned_descriptions or [])
             obj.save()
-            obj.sources.set([obj.parent, parent_head])
+            obj.sources.set(compact([obj.parent, parent_head]))
             persisted = True
         except ValidationError as err:
             errors.update(err.message_dict)
         finally:
             if not persisted:
                 obj.sources.remove(parent_head)
+                obj.remove_labels()
                 if latest_versions:
                     latest_versions.update(is_latest_version=True)
+                if head_versions:
+                    head_versions.update(version=HEAD)
                 if obj.id:
                     obj.delete()
                 errors['non_field_errors'] = ['An error occurred while %s.' % errored_action]

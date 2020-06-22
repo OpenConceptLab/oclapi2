@@ -2,6 +2,8 @@ from django.db import DatabaseError
 from django.http import Http404
 from rest_framework import response, generics, status
 
+from core.common.mixins import PathWalkerMixin
+
 
 def get_object_or_404(queryset, **filter_kwargs):
     try:
@@ -10,7 +12,7 @@ def get_object_or_404(queryset, **filter_kwargs):
         raise Http404
 
 
-class BaseAPIView(generics.GenericAPIView):
+class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     """
     An extension of generics.GenericAPIView that:
     1. Adds a hook for a post-initialize step
