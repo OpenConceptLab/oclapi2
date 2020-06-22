@@ -37,6 +37,8 @@ class SourceBaseView(BaseAPIView):
             queryset = queryset.filter(organization__mnemonic=org)
         if 'source' in self.kwargs:
             queryset = queryset.filter(mnemonic=self.kwargs['source'])
+        if 'version' in self.kwargs:
+            queryset = queryset.filter(version=self.kwargs['version'])
 
         return queryset.all()
 
