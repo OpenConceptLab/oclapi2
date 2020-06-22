@@ -1,3 +1,4 @@
+from django.db.models.query import QuerySet
 from pydash import get
 from rest_framework import status
 from rest_framework.generics import RetrieveAPIView, DestroyAPIView, ListCreateAPIView, RetrieveUpdateDestroyAPIView
@@ -176,7 +177,7 @@ class ConceptLabelRetrieveUpdateDestroyView(ConceptBaseView, RetrieveUpdateDestr
             new_version.cloned_descriptions = resource_instance.descriptions.all() or []
             subject_label_attr = "cloned_{}".format(self.parent_list_attribute)
             labels = getattr(new_version, subject_label_attr, [])
-            if labels:
+            if isinstance(labels, QuerySet):
                 labels = labels.exclude(id=instance.id)
             setattr(new_version, subject_label_attr, labels)
             new_version.comment = 'Deleted %s in %s.' % (instance.name, self.parent_list_attribute)
