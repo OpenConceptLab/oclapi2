@@ -36,5 +36,12 @@ urlpatterns = [
             pattern=NAMESPACE_PATTERN
         ),
         views.SourceExtraRetrieveUpdateDestroyView.as_view(),
-        name='sourceversion-extra'),
+        name='sourceversion-extra'
+    ),
+    re_path(
+        r"^(?P<source>{pattern})/(?P<version>{pattern})/concepts/$".format(
+            pattern=NAMESPACE_PATTERN
+        ),
+        include('core.concepts.urls')
+    ),
 ]
