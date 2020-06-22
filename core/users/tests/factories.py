@@ -13,4 +13,13 @@ class UserProfileFactory(factory.django.DjangoModelFactory):
     first_name = Sequence("First-{}".format)
     last_name = Sequence("Last-{}".format)
     password = 'Password1$'
-    organization = SubFactory(OrganizationFactory)
+
+    @factory.post_generation
+    def organizations(self, create, extracted):
+        if not create:
+            return
+
+        if extracted:
+            for org in extracted:
+                self.organizations.add(org)
+
