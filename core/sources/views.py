@@ -1,6 +1,7 @@
 from django.db import IntegrityError
+from pydash import get
 from rest_framework import status, mixins
-from rest_framework.generics import DestroyAPIView, RetrieveAPIView
+from rest_framework.generics import DestroyAPIView, RetrieveAPIView, ListAPIView, RetrieveUpdateDestroyAPIView
 from rest_framework.response import Response
 
 from core.common.constants import HEAD, RELEASED_PARAM, PROCESSING_PARAM
@@ -104,7 +105,6 @@ class SourceRetrieveUpdateDestroyView(SourceBaseView, RetrieveAPIView, DestroyAP
 class SourceVersionListView(SourceBaseView, mixins.CreateModelMixin, ListWithHeadersMixin):
     released_filter = None
     processing_filter = None
-    permission_classes = (CanViewConceptDictionary,)
 
     def get(self, request, *args, **kwargs):
         self.serializer_class = SourceDetailSerializer if self.is_verbose(request) else SourceListSerializer
@@ -119,7 +119,7 @@ class SourceVersionListView(SourceBaseView, mixins.CreateModelMixin, ListWithHea
     def create(self, request, *args, **kwargs):
         if not self.versioned_object:
             return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
-        serializer = self.get_serializer(data=request.DATA, files=request.FILES)
+        serializer = self.get_serializer(data=request.data, files=request.FILES)
         if serializer.is_valid():
             self.pre_save(serializer.object)
             try:
@@ -142,3 +142,57 @@ class SourceVersionListView(SourceBaseView, mixins.CreateModelMixin, ListWithHea
         if self.released_filter is not None:
             queryset = queryset.filter(released=self.released_filter)
         return queryset.order_by('-created_at')
+
+
+class SourceExtrasBaseView(SourceBaseView):
+    def get_object(self, queryset=None):
+        return self.get_queryset().filter(version=HEAD).first()
+
+
+class SourceExtrasView(SourceExtrasBaseView, ListAPIView):
+    def list(self, request, *args, **kwargs):
+        return Response(get(self.get_object(), 'extras', {}))
+
+
+class SourceExtraRetrieveUpdateDestroyView(SourceExtrasBaseView, RetrieveUpdateDestroyAPIView):
+    def retrieve(self, request, *args, **kwargs):
+        key = kwargs.get('extra')
+        instance = self.get_object()
+        extras = get(instance, 'extras', {})
+        if key in extras:
+            return Response({key: extras[key]})
+
+        return Response(dict(detail='Not found.'), status=status.HTTP_404_NOT_FOUND)
+
+    def update(self, request, **kwargs):
+        key = kwargs.get('extra')
+        value = request.data.get(key)
+        if not value:
+            return Response(['Must specify %s param in body.' % key], status=status.HTTP_400_BAD_REQUEST)
+
+        instance = self.get_object()
+        instance.extras = get(instance, 'extras', {})
+        instance.extras[key] = value
+        instance.comment = 'Updated extras: %s=%s.' % (key, value)
+        head = instance.get_head()
+        head.extras = get(head, 'extras', {})
+        head.extras.update(instance.extras)
+        instance.save()
+        head.save()
+        return Response({key: value})
+
+    def delete(self, request, *args, **kwargs):
+        key = kwargs.get('extra')
+        instance = self.get_object()
+        instance.extras = get(instance, 'extras', {})
+        if key in instance.extras:
+            del instance.extras[key]
+            instance.comment = 'Deleted extra %s.' % key
+            head = instance.get_head()
+            head.extras = get(head, 'extras', {})
+            del head.extras[key]
+            instance.save()
+            head.save()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+
+        return Response(dict(detail='Not found.'), status=status.HTTP_404_NOT_FOUND)

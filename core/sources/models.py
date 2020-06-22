@@ -31,3 +31,20 @@ class Source(ConceptContainerModel):
     def concepts_url(self):
         parent_kwarg = self.parent.get_url_kwarg()
         return reverse('concept-list', kwargs={'source': self.mnemonic, parent_kwarg: self.parent_resource})
+
+    def update_version_data(self, obj=None):
+        if obj:
+            self.description = obj.description
+        else:
+            obj = self.get_head()
+
+        if obj:
+            self.name = obj.name
+            self.full_name = obj.full_name
+            self.website = obj.website
+            self.public_access = obj.public_access
+            self.source_type = obj.source_type
+            self.supported_locales = obj.supported_locales
+            self.custom_validation_schema = obj.custom_validation_schema
+            self.default_locale = obj.default_locale
+            self.external_id = obj.external_id

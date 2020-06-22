@@ -16,4 +16,10 @@ urlpatterns = [
         name='source-version-list'
     ),
     re_path(r'^(?P<source>' + NAMESPACE_PATTERN + ')/concepts/', include('core.concepts.urls')),
+    re_path(r'^(?P<source>' + NAMESPACE_PATTERN + ')/extras/$', views.SourceExtrasView.as_view(), name='source-extras'),
+    re_path(
+        r'^(?P<source>' + NAMESPACE_PATTERN + ')/extras/(?P<extra>' + NAMESPACE_PATTERN + ')/$',
+        views.SourceExtraRetrieveUpdateDestroyView.as_view(),
+        name='source-extra'
+    ),
 ]

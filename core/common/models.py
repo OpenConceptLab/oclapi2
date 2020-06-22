@@ -40,7 +40,7 @@ class BaseModel(models.Model):
         default=SUPER_ADMIN_USER_ID,
     )
     is_active = models.BooleanField(default=True)
-    extras = JSONField(null=True, blank=True)
+    extras = JSONField(null=True, blank=True, default=dict)
     uri = models.TextField(null=True, blank=True)
     extras_have_been_encoded = False
     extras_have_been_decoded = False
