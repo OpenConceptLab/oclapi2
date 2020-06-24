@@ -4,6 +4,7 @@ from django.urls import reverse
 from core.common.models import ConceptContainerModel
 from core.common.utils import reverse_resource
 from core.sources.constants import SOURCE_TYPE
+from core.concepts.models import LocalizedText
 
 
 class Source(ConceptContainerModel):
@@ -48,3 +49,6 @@ class Source(ConceptContainerModel):
             self.custom_validation_schema = obj.custom_validation_schema
             self.default_locale = obj.default_locale
             self.external_id = obj.external_id
+
+    def get_concept_name_locales(self):
+        return LocalizedText.objects.filter(name_locales__in=self.get_active_concepts())

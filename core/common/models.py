@@ -187,6 +187,8 @@ class VersionedModel(BaseResourceModel):
     def get_head(self):
         return self.active_versions.filter(version=HEAD).first()
 
+    head = property(get_head)
+
     def get_latest_version(self):
         return self.active_versions.order_by('-created_at').first()
 

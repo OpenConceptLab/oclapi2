@@ -39,7 +39,7 @@ urlpatterns = [
         name='sourceversion-extra'
     ),
     re_path(
-        r"^(?P<source>{pattern})/(?P<version>{pattern})/concepts/$".format(
+        r"^(?P<source>{pattern})/(?P<version>{pattern})/concepts/".format(
             pattern=NAMESPACE_PATTERN
         ),
         include('core.concepts.urls')

@@ -8,7 +8,8 @@ from pydash import get, compact
 from core.common.constants import TEMP, HEAD, ISO_639_1
 from core.common.models import VersionedModel
 from core.common.utils import reverse_resource
-from core.concepts.constants import CONCEPT_TYPE
+from core.concepts.constants import CONCEPT_TYPE, LOCALES_FULLY_SPECIFIED, LOCALES_SHORT, LOCALES_SEARCH_INDEX_TERM
+from core.concepts.mixins import ConceptValidationMixin
 
 
 class LocalizedText(models.Model):
@@ -22,20 +23,30 @@ class LocalizedText(models.Model):
     locale_preferred = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
+    @staticmethod
+    def get_filter_criteria_for_attribute(attribute):
+        if attribute == 'is_fully_specified':
+            return dict(type__in=LOCALES_FULLY_SPECIFIED)
+        if attribute == 'is_short':
+            return dict(type__in=LOCALES_SHORT)
+        if attribute == 'is_search_index_term':
+            return dict(type__in=LOCALES_SEARCH_INDEX_TERM)
+        return {attribute: True}
+
     @property
     def is_fully_specified(self):
-        return self.type in ("FULLY_SPECIFIED", "Fully Specified")
+        return self.type in LOCALES_FULLY_SPECIFIED
 
     @property
     def is_short(self):
-        return self.type in ("SHORT", "Short")
+        return self.type in LOCALES_SHORT
 
     @property
     def is_search_index_term(self):
-        return self.type in ("INDEX_TERM", "Index Term")
+        return self.type in LOCALES_SEARCH_INDEX_TERM
 
 
-class Concept(VersionedModel):  # pylint: disable=too-many-public-methods
+class Concept(VersionedModel, ConceptValidationMixin):  # pylint: disable=too-many-public-methods
     class Meta:
         db_table = 'concepts'
         unique_together = ('mnemonic', 'version', 'parent')
@@ -90,8 +101,12 @@ class Concept(VersionedModel):  # pylint: disable=too-many-public-methods
 
     @property
     def preferred_locale(self):
-        locales = self.names.filter(locale_preferred=True) or self.names
+        locales = self.preferred_name_locales or self.names
         return locales.order_by('-created_at').first()
+
+    @property
+    def preferred_name_locales(self):
+        return self.saved_unsaved_names.filter(locale_preferred=True)
 
     @property
     def default_name_locales(self):
@@ -124,6 +139,40 @@ class Concept(VersionedModel):  # pylint: disable=too-many-public-methods
     @property
     def versions_url(self):
         return reverse_resource(self, 'concept-version-list')
+
+    @property
+    def fully_specified_names(self):
+        return self.saved_unsaved_names.filter(
+            **LocalizedText.get_filter_criteria_for_attribute('is_fully_specified')
+        )
+
+    @property
+    def short_names(self):
+        return self.saved_unsaved_names.filter(
+            **LocalizedText.get_filter_criteria_for_attribute('is_short')
+        )
+
+    @property
+    def non_short_names(self):
+        return self.saved_unsaved_names.exclude(
+            **LocalizedText.get_filter_criteria_for_attribute('is_short')
+        )
+
+    @property
+    def saved_unsaved_names(self):
+        names = self.names.all()
+        if get(self, 'cloned_names'):
+            names |= self.cloned_names
+
+        return names
+
+    @property
+    def saved_unsaved_descriptions(self):
+        descriptions = self.descriptions.all()
+        if get(self, 'cloned_descriptions'):
+            descriptions |= self.cloned_descriptions
+
+        return descriptions
 
     def clone(self):
         concept_version = Concept(
