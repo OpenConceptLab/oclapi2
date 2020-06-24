@@ -11,11 +11,6 @@ urlpatterns = [
         name='concept-detail'
     ),
     re_path(
-        r"^(?P<concept>{pattern})/versions/$".format(pattern=NAMESPACE_PATTERN),
-        views.ConceptVersionsView.as_view(),
-        name='concept-version-list'
-    ),
-    re_path(
         r"^(?P<concept>{pattern})/descriptions/$".format(pattern=NAMESPACE_PATTERN),
         views.ConceptDescriptionListCreateView.as_view(),
         name='concept-descriptions'
@@ -34,5 +29,20 @@ urlpatterns = [
         r'^(?P<concept>{pattern})/names/(?P<id>{pattern})/$'.format(pattern=NAMESPACE_PATTERN),
         views.ConceptNameRetrieveUpdateDestroyView.as_view(),
         name='concept-name'
+    ),
+    re_path(
+        r'^(?P<concept>{pattern})/extras/$'.format(pattern=NAMESPACE_PATTERN),
+        views.ConceptExtrasView.as_view(),
+        name='concept-extras'
+    ),
+    re_path(
+        r'^(?P<concept>{pattern})/extras/(?P<extra>{pattern})/$'.format(pattern=NAMESPACE_PATTERN),
+        views.ConceptExtraRetrieveUpdateDestroyView.as_view(),
+        name='concept-extra'
+    ),
+    re_path(
+        r"^(?P<concept>{pattern})/versions/$".format(pattern=NAMESPACE_PATTERN),
+        views.ConceptVersionsView.as_view(),
+        name='concept-version-list'
     ),
 ]
