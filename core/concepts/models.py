@@ -5,7 +5,7 @@ from django.db import models
 from django.db.models import F
 from pydash import get, compact
 
-from core.common.constants import TEMP, HEAD
+from core.common.constants import TEMP, HEAD, ISO_639_1
 from core.common.models import VersionedModel
 from core.common.utils import reverse_resource
 from core.concepts.constants import CONCEPT_TYPE
@@ -112,6 +112,10 @@ class Concept(VersionedModel):  # pylint: disable=too-many-public-methods
     @property
     def descriptions_for_default_locale(self):
         return list(self.default_description_locales.values_list('name', flat=True))
+
+    @property
+    def iso_639_1_locale(self):
+        return get(self.names.filter(type=ISO_639_1).first(), 'name')
 
     @property
     def custom_validation_schema(self):

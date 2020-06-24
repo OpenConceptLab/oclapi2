@@ -1,4 +1,4 @@
-from rest_framework.fields import CharField, DateTimeField, BooleanField
+from rest_framework.fields import CharField, DateTimeField, BooleanField, URLField
 from rest_framework.serializers import ModelSerializer
 
 from core.concepts.models import Concept, LocalizedText
@@ -94,4 +94,29 @@ class ConceptDetailSerializer(ModelSerializer):
             'id', 'external_id', 'concept_class', 'datatype', 'url', 'retired', 'source',
             'owner', 'owner_type', 'owner_url', 'display_name', 'display_locale', 'names', 'descriptions',
             'created_on', 'updated_on', 'versions_url', 'version',
+        )
+
+
+class ConceptVersionDetailSerializer(ModelSerializer):
+    type = CharField(source='resource_type')
+    uuid = CharField(source='id')
+    id = CharField(source='mnemonic')
+    names = LocalizedTextSerializer(many=True)
+    descriptions = LocalizedTextSerializer(many=True)
+    source = CharField(source='parent_resource')
+    source_url = URLField(source='owner_url')
+    owner = CharField(source='owner_name')
+    created_on = DateTimeField(source='created_at', read_only=True)
+    updated_on = DateTimeField(source='updated_at', read_only=True)
+    version_created_on = DateTimeField(source='created_at')
+    version_created_by = CharField(source='created_by')
+    locale = CharField(source='iso_639_1_locale')
+
+    class Meta:
+        model = Concept
+        fields = (
+            'type', 'uuid', 'id', 'external_id', 'concept_class', 'datatype', 'display_name', 'display_locale',
+            'names', 'descriptions', 'extras', 'retired', 'source', 'source_url', 'owner', 'owner_name', 'owner_url',
+            'version', 'created_on', 'updated_on', 'version_created_on', 'version_created_by', 'extras',
+            'is_latest_version', 'locale'
         )

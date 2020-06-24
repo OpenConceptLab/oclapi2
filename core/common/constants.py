@@ -17,3 +17,4 @@ SUPER_ADMIN_USER_ID = 1
 UPDATED_SINCE_PARAM = 'updatedSince'
 RELEASED_PARAM = 'released'
 PROCESSING_PARAM = 'processing'
+ISO_639_1 = 'ISO 639-1'

@@ -45,4 +45,10 @@ urlpatterns = [
         views.ConceptVersionsView.as_view(),
         name='concept-version-list'
     ),
+    re_path(
+        r'^(?P<concept>{pattern})/(?P<concept_version>{pattern})/$'.format(pattern=NAMESPACE_PATTERN),
+        views.ConceptVersionRetrieveView.as_view(),
+        name='concept-version-detail'
+    ),
+
 ]

@@ -11,7 +11,7 @@ from core.common.views import BaseAPIView
 from core.concepts.models import Concept, LocalizedText
 from core.concepts.permissions import CanViewParentDictionary, CanEditParentDictionary
 from core.concepts.serializers import ConceptDetailSerializer, ConceptListSerializer, ConceptDescriptionSerializer, \
-    ConceptNameSerializer
+    ConceptNameSerializer, ConceptVersionDetailSerializer
 
 
 class ConceptBaseView(BaseAPIView):
@@ -77,6 +77,14 @@ class ConceptVersionsView(ConceptBaseView, ConceptDictionaryMixin, ListWithHeade
     def get(self, request, *args, **kwargs):
         self.serializer_class = ConceptDetailSerializer if self.is_verbose(request) else ConceptListSerializer
         return self.list(request, *args, **kwargs)
+
+
+class ConceptVersionRetrieveView(ConceptBaseView, RetrieveAPIView):
+    serializer_class = ConceptVersionDetailSerializer
+    permission_classes = (CanViewParentDictionary,)
+
+    def get_object(self, queryset=None):
+        return self.get_queryset().first()
 
 
 class ConceptLabelListCreateView(ConceptBaseView, ListWithHeadersMixin, ListCreateAPIView):
