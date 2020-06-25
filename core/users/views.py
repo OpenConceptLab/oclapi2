@@ -66,7 +66,7 @@ class UserDetailView(UserBaseView, RetrieveAPIView, mixins.UpdateModelMixin):
             return self.request.user
         return super().get_object(queryset)
 
-    def post(self, request, *args, **kwargs):
+    def put(self, request, *args, **kwargs):
         password = request.data.get('password')
         hashed_password = request.data.get('hashed_password')
         if password:
