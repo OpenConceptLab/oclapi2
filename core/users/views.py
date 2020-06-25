@@ -1,5 +1,4 @@
 from rest_framework import mixins, status
-from rest_framework.authtoken.models import Token
 from rest_framework.generics import RetrieveAPIView, UpdateAPIView
 from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
@@ -67,19 +66,8 @@ class UserDetailView(UserBaseView, RetrieveAPIView, mixins.UpdateModelMixin):
         return super().get_object(queryset)
 
     def put(self, request, *args, **kwargs):
-        password = request.data.get('password')
-        hashed_password = request.data.get('hashed_password')
-        if password:
-            obj = self.get_object()
-            obj.set_password(password)
-            obj.save()
-        elif hashed_password:
-            obj = self.get_object()
-            obj.password = hashed_password
-            obj.save()
-        if obj:
-            Token.objects.filter(user=obj).delete()
-            Token.objects.create(user=obj)
+        obj = self.get_object()
+        obj.update_password(request.data.get('password'), request.data.get('hashed_password'))
 
         return self.partial_update(request, *args, **kwargs)
 

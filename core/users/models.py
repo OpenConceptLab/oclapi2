@@ -2,6 +2,7 @@ from django.contrib import admin
 from django.contrib.auth.models import AbstractUser
 from django.db import models
 from django.urls import reverse
+from rest_framework.authtoken.models import Token
 
 from core.common.models import BaseModel
 from .constants import USER_OBJECT_TYPE
@@ -45,6 +46,21 @@ class UserProfile(AbstractUser, BaseModel):
     @property
     def organizations_url(self):
         return reverse('userprofile-orgs', kwargs={'user': self.mnemonic})
+
+    def update_password(self, password=None, hashed_password=None):
+        if not password and not hashed_password:
+            return
+
+        if password:
+            self.set_password(password)
+        elif hashed_password:
+            self.password = hashed_password
+        self.save()
+        self.refresh_token()
+
+    def refresh_token(self):
+        Token.objects.filter(user=self).delete()
+        Token.objects.create(user=self)
 
 
 admin.site.register(UserProfile)
