@@ -90,7 +90,7 @@ class OrganizationDetailView(mixins.UpdateModelMixin, OrganizationBaseView):
             self.permission_classes = (IsAuthenticated, )  # fixme
         super().initial(request, *args, **kwargs)
 
-    def post(self, request, *args, **kwargs):
+    def put(self, request, *args, **kwargs):
         return self.partial_update(request, *args, **kwargs)
 
     def destroy(self, request, *args, **kwargs):
