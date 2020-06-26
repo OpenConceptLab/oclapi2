@@ -23,6 +23,15 @@ class LocalizedText(models.Model):
     locale_preferred = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
+    def clone(self):
+        return LocalizedText(
+            external_id=self.external_id,
+            name=self.name,
+            type=self.type,
+            locale=self.locale,
+            locale_preferred=self.locale_preferred
+        )
+
     @staticmethod
     def get_filter_criteria_for_attribute(attribute):
         if attribute == 'is_fully_specified':
@@ -106,7 +115,7 @@ class Concept(VersionedModel, ConceptValidationMixin):  # pylint: disable=too-ma
 
     @property
     def preferred_name_locales(self):
-        return self.saved_unsaved_names.filter(locale_preferred=True)
+        return self.names.filter(locale_preferred=True)
 
     @property
     def default_name_locales(self):
@@ -142,37 +151,21 @@ class Concept(VersionedModel, ConceptValidationMixin):  # pylint: disable=too-ma
 
     @property
     def fully_specified_names(self):
-        return self.saved_unsaved_names.filter(
+        return self.names.filter(
             **LocalizedText.get_filter_criteria_for_attribute('is_fully_specified')
         )
 
     @property
     def short_names(self):
-        return self.saved_unsaved_names.filter(
+        return self.names.filter(
             **LocalizedText.get_filter_criteria_for_attribute('is_short')
         )
 
     @property
     def non_short_names(self):
-        return self.saved_unsaved_names.exclude(
+        return self.names.exclude(
             **LocalizedText.get_filter_criteria_for_attribute('is_short')
         )
-
-    @property
-    def saved_unsaved_names(self):
-        names = self.names.all()
-        if get(self, 'cloned_names'):
-            names |= self.cloned_names
-
-        return names
-
-    @property
-    def saved_unsaved_descriptions(self):
-        descriptions = self.descriptions.all()
-        if get(self, 'cloned_descriptions'):
-            descriptions |= self.cloned_descriptions
-
-        return descriptions
 
     def clone(self):
         concept_version = Concept(
@@ -189,8 +182,8 @@ class Concept(VersionedModel, ConceptValidationMixin):  # pylint: disable=too-ma
             is_latest_version=self.is_latest_version,
             parent_id=self.parent_id,
         )
-        concept_version.cloned_names = list(self.names.all())
-        concept_version.cloned_descriptions = list(self.descriptions.all())
+        concept_version.cloned_names = [name.clone() for name in list(self.names.all())]
+        concept_version.cloned_descriptions = [desc.clone() for desc in list(self.descriptions.all())]
 
         return concept_version
 
@@ -205,18 +198,26 @@ class Concept(VersionedModel, ConceptValidationMixin):  # pylint: disable=too-ma
 
         return version
 
-    def set_labels(self):
+    def set_locales(self):
         if not self.id:
             return
 
-        self.names.set(get(self, 'cloned_names', []))
-        self.descriptions.set(get(self, 'cloned_descriptions', []))
+        names = get(self, 'cloned_names', [])
+        descriptions = get(self, 'cloned_descriptions', [])
 
-    def remove_labels(self):
-        if not self.id:
-            return
-        [self.names.remove(name) for name in get(self, 'cloned_names', [])]  # pylint: disable=expression-not-assigned
-        [self.descriptions.remove(desc) for desc in get(self, 'cloned_descriptions', [])]  # pylint: disable=expression-not-assigned
+        for name in names:
+            if not name.id:
+                name.save()
+        for desc in descriptions:
+            if not desc.id:
+                desc.save()
+
+        self.names.set(names)
+        self.descriptions.set(descriptions)
+
+    def remove_locales(self):
+        self.names.all().delete()
+        self.descriptions.all().delete()
 
     @classmethod
     def persist_clone(cls, obj, user=None, **kwargs):
@@ -231,17 +232,15 @@ class Concept(VersionedModel, ConceptValidationMixin):  # pylint: disable=too-ma
         latest_versions = None
         head_versions = None
         try:
-            obj.clean()
             obj.save(**kwargs)
-            obj.set_labels()
+            obj.set_locales()
+            obj.clean()  # clean here to validate locales that can only be saved after obj is saved
             latest_versions = obj.versions.filter(is_latest_version=True)
             latest_versions.update(is_latest_version=False)
             head_versions = obj.versions.filter(version=HEAD)
             head_versions.update(version=F('id'))
             obj.is_latest_version = True
             obj.version = HEAD
-            obj.names.set(obj.cloned_names or [])
-            obj.descriptions.set(obj.cloned_descriptions or [])
             obj.save()
             obj.sources.set(compact([obj.parent, parent_head]))
             persisted = True
@@ -249,8 +248,8 @@ class Concept(VersionedModel, ConceptValidationMixin):  # pylint: disable=too-ma
             errors.update(err.message_dict)
         finally:
             if not persisted:
+                obj.remove_locales()
                 obj.sources.remove(parent_head)
-                obj.remove_labels()
                 if latest_versions:
                     latest_versions.update(is_latest_version=True)
                 if head_versions:

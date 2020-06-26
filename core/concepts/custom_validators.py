@@ -69,7 +69,7 @@ class OpenMRSConceptValidator(BaseConceptValidator):
         from core.concepts.models import LocalizedText
 
         self_id = get(concept, 'head.id', get(concept, 'id'))
-        names = concept.saved_unsaved_names.filter(**LocalizedText.get_filter_criteria_for_attribute(attribute))
+        names = concept.names.filter(**LocalizedText.get_filter_criteria_for_attribute(attribute))
         for name in names:
             if self.no_other_record_has_same_name(name, self_id):
                 continue
@@ -155,14 +155,14 @@ class OpenMRSConceptValidator(BaseConceptValidator):
             raise ValidationError({'data_type': [OPENMRS_DATATYPE]})
 
     def name_type_should_be_valid_attribute(self, concept):
-        invalid_names = concept.saved_unsaved_names.exclude(
+        invalid_names = concept.names.exclude(
             type__in=[FULLY_SPECIFIED, SHORT, *self.reference_values['NameTypes']]
         )
         if invalid_names.exists():
             raise ValidationError({'names': [message_with_name_details(OPENMRS_NAME_TYPE, invalid_names.first())]})
 
     def description_type_should_be_valid_attribute(self, concept):
-        invalid_descriptions = concept.saved_unsaved_descriptions.exclude(
+        invalid_descriptions = concept.descriptions.exclude(
             type__in=self.reference_values['DescriptionTypes']
         )
         if invalid_descriptions.exists():
@@ -172,11 +172,11 @@ class OpenMRSConceptValidator(BaseConceptValidator):
         if not concept.names or not concept.descriptions:
             return
 
-        invalid_names = concept.saved_unsaved_names.exclude(locale__in=self.reference_values['Locales'])
+        invalid_names = concept.names.exclude(locale__in=self.reference_values['Locales'])
         if invalid_names.exists():
             raise ValidationError({'names': [OPENMRS_NAME_LOCALE]})
 
-        invalid_descriptions = concept.saved_unsaved_descriptions.exclude(locale__in=self.reference_values['Locales'])
+        invalid_descriptions = concept.descriptions.exclude(locale__in=self.reference_values['Locales'])
         if invalid_descriptions.exists():
             raise ValidationError({'descriptions': [OPENMRS_DESCRIPTION_LOCALE]})
 

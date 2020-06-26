@@ -1,7 +1,21 @@
+from mock import patch
+from pydash import omit
+
 from core.common.tests import OCLTestCase
 from core.concepts.models import Concept
 from core.concepts.tests.factories import LocalizedTextFactory, ConceptFactory
 from core.sources.tests.factories import SourceFactory
+
+
+class LocalizedTextTest(OCLTestCase):
+    def test_clone(self):
+        saved_locale = LocalizedTextFactory()
+        cloned_locale = saved_locale.clone()
+        self.assertEqual(
+            omit(saved_locale.__dict__, ['_state', 'id', 'created_at']),
+            omit(cloned_locale.clone().__dict__, ['_state', 'id', 'created_at'])
+        )
+        self.assertIsNone(cloned_locale.id)
 
 
 class ConceptTest(OCLTestCase):
@@ -54,7 +68,8 @@ class ConceptTest(OCLTestCase):
 
         self.assertEqual(concept.descriptions_for_default_locale, [en_locale.name])
 
-    def test_clone(self):
+    @patch('core.concepts.models.LocalizedText.clone')
+    def test_clone(self, locale_clone_mock):
         es_locale = LocalizedTextFactory(locale='es', name='Not English')
         en_locale = LocalizedTextFactory(locale='en', name='English')
 
@@ -64,8 +79,9 @@ class ConceptTest(OCLTestCase):
         self.assertEqual(cloned_concept.version, '--TEMP--')
         self.assertEqual(cloned_concept.mnemonic, concept.mnemonic)
         self.assertEqual(cloned_concept.parent, concept.parent)
-        self.assertEqual(cloned_concept.cloned_names, list(concept.names.all()))
-        self.assertEqual(cloned_concept.cloned_descriptions, list(concept.descriptions.all()))
+        self.assertEqual(len(cloned_concept.cloned_names), concept.names.count())
+        self.assertEqual(len(cloned_concept.cloned_descriptions), concept.descriptions.count())
+        self.assertEqual(locale_clone_mock.call_count, 3)
         self.assertTrue(cloned_concept.released)
 
     def test_version_for_concept(self):

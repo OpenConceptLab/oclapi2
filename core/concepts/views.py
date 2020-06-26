@@ -112,8 +112,6 @@ class ConceptLabelListCreateView(ConceptBaseView, ListWithHeadersMixin, ListCrea
         if serializer.is_valid():
             instance = self.get_object()
             new_version = instance.clone()
-            new_version.cloned_names = instance.names.all() or []
-            new_version.cloned_descriptions = instance.descriptions.all() or []
             subject_label_attr = "cloned_{}".format(self.parent_list_attribute)
             # get the current labels from the object
             labels = getattr(new_version, subject_label_attr, [])
@@ -164,8 +162,6 @@ class ConceptLabelRetrieveUpdateDestroyView(ConceptBaseView, RetrieveUpdateDestr
             resource_instance = self.get_resource_object()
             new_version = resource_instance.clone()
             saved_instance = serializer.save()
-            new_version.cloned_names = resource_instance.names.all() or []
-            new_version.cloned_descriptions = resource_instance.descriptions.all() or []
             subject_label_attr = "cloned_{}".format(self.parent_list_attribute)
             labels = getattr(new_version, subject_label_attr, [])
             labels.append(saved_instance)
@@ -184,8 +180,6 @@ class ConceptLabelRetrieveUpdateDestroyView(ConceptBaseView, RetrieveUpdateDestr
         if instance:
             resource_instance = self.get_resource_object()
             new_version = resource_instance.clone()
-            new_version.cloned_names = resource_instance.names.all() or []
-            new_version.cloned_descriptions = resource_instance.descriptions.all() or []
             subject_label_attr = "cloned_{}".format(self.parent_list_attribute)
             labels = getattr(new_version, subject_label_attr, [])
             if isinstance(labels, QuerySet):
