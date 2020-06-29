@@ -45,7 +45,7 @@ class UserProfileTest(OCLTestCase):
     def test_resource_type(self):
         user = UserProfile()
 
-        self.assertEqual(USER_OBJECT_TYPE, user.resource_type())
+        self.assertEqual(user.resource_type, USER_OBJECT_TYPE)
 
     def test_mnemonic(self):
         self.assertEqual(UserProfile().mnemonic, '')

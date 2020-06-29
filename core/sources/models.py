@@ -3,8 +3,8 @@ from django.urls import reverse
 
 from core.common.models import ConceptContainerModel
 from core.common.utils import reverse_resource
-from core.sources.constants import SOURCE_TYPE
 from core.concepts.models import LocalizedText
+from core.sources.constants import SOURCE_TYPE
 
 
 class Source(ConceptContainerModel):
@@ -52,3 +52,16 @@ class Source(ConceptContainerModel):
 
     def get_concept_name_locales(self):
         return LocalizedText.objects.filter(name_locales__in=self.get_active_concepts())
+
+    def is_validation_necessary(self):
+        origin_source = self.get_latest_version()
+
+        if origin_source.custom_validation_schema == self.custom_validation_schema:
+            return False
+
+        return self.custom_validation_schema is not None and self.num_concepts > 0
+
+    def seed_concepts(self):
+        head = self.head
+        if head:
+            self.concepts.set(head.concepts.all())

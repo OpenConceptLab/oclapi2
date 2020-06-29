@@ -12,11 +12,9 @@ class ConceptValidationMixin:
 
         schema = self.parent_source.custom_validation_schema
         if schema:
-            custom_validator = ValidatorSpecifier()\
-                .with_validation_schema(schema)\
-                .with_repo(self.parent_source)\
-                .with_reference_values()\
-                .get()
+            custom_validator = ValidatorSpecifier().with_validation_schema(
+                schema
+            ).with_repo(self.parent_source).with_reference_values().get()
             validators.append(custom_validator)
 
         for validator in validators:

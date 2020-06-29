@@ -33,7 +33,6 @@ class OCLTestCase(TestCase):
         UserProfile.objects.exclude(id=1).all().delete()
 
 
-
 class S3Test(TestCase):
     @mock_s3
     def test_upload(self):

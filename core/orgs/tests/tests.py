@@ -10,7 +10,7 @@ from core.orgs.tests.factories import OrganizationFactory
 
 class OrganizationTest(OCLTestCase):
     def test_resource_type(self):
-        self.assertEqual(Organization().resource_type(), ORG_OBJECT_TYPE)
+        self.assertEqual(Organization().resource_type, ORG_OBJECT_TYPE)
 
     def test_org(self):
         self.assertEqual(Organization().org, '')
@@ -57,24 +57,24 @@ class OrganizationTest(OCLTestCase):
         # period in mnemonic
         org = OrganizationFactory(name='test', mnemonic='org.1')
         self.assertTrue(org.id)
-        self.assertEquals(org.mnemonic, 'org.1')
+        self.assertEqual(org.mnemonic, 'org.1')
 
         # hyphen in mnemonic
         org = OrganizationFactory(name='test', mnemonic='org-1')
         self.assertTrue(org.id)
-        self.assertEquals(org.mnemonic, 'org-1')
+        self.assertEqual(org.mnemonic, 'org-1')
 
         # underscore in mnemonic
         org = OrganizationFactory(name='test', mnemonic='org_1')
         self.assertTrue(org.id)
-        self.assertEquals(org.mnemonic, 'org_1')
+        self.assertEqual(org.mnemonic, 'org_1')
 
         # all characters in mnemonic
         org = OrganizationFactory(name='test', mnemonic='org.1_2-3')
         self.assertTrue(org.id)
-        self.assertEquals(org.mnemonic, 'org.1_2-3')
+        self.assertEqual(org.mnemonic, 'org.1_2-3')
 
         # @ characters in mnemonic
         org = OrganizationFactory(name='test', mnemonic='org@1')
         self.assertTrue(org.id)
-        self.assertEquals(org.mnemonic, 'org@1')
+        self.assertEqual(org.mnemonic, 'org@1')

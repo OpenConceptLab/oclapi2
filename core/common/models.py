@@ -101,9 +101,9 @@ class BaseModel(models.Model):
     def public_can_view(self):
         return self.public_access in [ACCESS_TYPE_EDIT, ACCESS_TYPE_VIEW]
 
-    @classmethod
-    def resource_type(cls):
-        return get(cls, 'OBJECT_TYPE')
+    @property
+    def resource_type(self):
+        return get(self, 'OBJECT_TYPE')
 
     @property
     def num_stars(self):
@@ -236,13 +236,20 @@ class ConceptContainerModel(VersionedModel):
 
     @property
     def parent_resource_type(self):
-        return self.parent.resource_type()
+        return self.parent.resource_type
 
     @property
     def versions(self):
         return super().versions.filter(
             organization_id=self.organization_id, user_id=self.user_id
         ).order_by('-created_at')
+
+    def get_active_concepts(self):
+        return self.concepts_set.filter(is_active=True, retired=False, version=HEAD)
+
+    @property
+    def num_concepts(self):
+        return self.concepts_set.count()
 
     def set_parent(self, parent_resource):
         if parent_resource.__class__.__name__ == 'Organization':
@@ -282,5 +289,65 @@ class ConceptContainerModel(VersionedModel):
                 errors['non_field_errors'] = "An error occurred while trying to persist new %s." % cls.__name__
         return errors
 
-    def get_active_concepts(self):
-        return self.concepts_set.filter(is_active=True, retired=False, version=HEAD)
+    @classmethod
+    def persist_new_version(cls, obj, user=None, **kwargs):
+        errors = dict()
+
+        obj.is_active = True
+        if user:
+            obj.created_by = user
+            obj.updated_by = user
+        obj.update_version_data()
+        obj.save(**kwargs)
+        obj.seed_concepts()
+
+        return errors
+
+    @classmethod
+    def persist_changes(cls, obj, updated_by, **kwargs):
+        errors = dict()
+        parent_resource = kwargs.pop('parent_resource', obj.parent)
+        if not parent_resource:
+            errors['parent'] = 'Source parent cannot be None.'
+
+        if obj.is_validation_necessary():
+            failed_concept_validations = obj.validate_child_concepts() or []
+            if len(failed_concept_validations) > 0:
+                errors.update({'failed_concept_validations': failed_concept_validations})
+
+        try:
+            obj.full_clean()
+        except ValidationError as ex:
+            errors.update(ex.message_dict)
+
+        if errors:
+            return errors
+
+        obj.updated_by = updated_by
+        obj.save(**kwargs)
+
+        return errors
+
+    def validate_child_concepts(self):
+        # If source is being configured to have a validation schema
+        # we need to validate all concepts
+        # according to the new schema
+        from core.concepts.validators import ValidatorSpecifier
+
+        concepts = self.get_active_concepts()
+        failed_concept_validations = []
+
+        validator = ValidatorSpecifier().with_validation_schema(
+            self.custom_validation_schema
+        ).with_repo(self).with_reference_values().get()
+
+        for concept in concepts:
+            try:
+                validator.validate(concept)
+            except ValidationError as validation_error:
+                concept_validation_error = dict(
+                    mnemonic=concept.mnemonic, url=concept.url, errors=validation_error.message_dict
+                )
+                failed_concept_validations.append(concept_validation_error)
+
+        return failed_concept_validations
