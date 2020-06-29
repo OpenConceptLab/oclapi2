@@ -85,7 +85,7 @@ class UserDetailSerializer(serializers.ModelSerializer):
         fields = (
             'type', 'uuid', 'username', 'name', 'email', 'company', 'location', 'preferred_locale', 'orgs',
             'public_collections', 'public_sources', 'created_on', 'updated_on', 'created_by', 'updated_by',
-            'url', 'organizations_url', 'extras', 'sources_url'
+            'url', 'organizations_url', 'extras', 'sources_url',
         )
 
     def restore_object(self, attrs, instance=None):

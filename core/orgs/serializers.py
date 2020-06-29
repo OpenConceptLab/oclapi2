@@ -27,12 +27,13 @@ class OrganizationCreateSerializer(serializers.ModelSerializer):
     updated_on = serializers.DateTimeField(source='updated_at', read_only=True)
     url = serializers.CharField(read_only=True)
     extras = serializers.Field(required=False)
+    public_sources = serializers.IntegerField(read_only=True)
 
     class Meta:
         model = Organization
         fields = (
             'type', 'uuid', 'id', 'public_access', 'name', 'company', 'website', 'location', 'members',
-            'created_on', 'updated_on', 'url', 'extras'
+            'created_on', 'updated_on', 'url', 'extras', 'public_sources',
         )
 
     def restore_object(self, attrs, _=None):
@@ -69,13 +70,14 @@ class OrganizationDetailSerializer(serializers.ModelSerializer):
     url = serializers.URLField(read_only=True)
     members_url = serializers.URLField(read_only=True)
     extras = serializers.Field(required=False)
+    public_sources = serializers.IntegerField(read_only=True)
 
     class Meta:
         model = Organization
         fields = (
             'type', 'uuid', 'id', 'public_access', 'name', 'company', 'website', 'location', 'members',
             'created_on', 'updated_on', 'url', 'extras', 'members_url', 'created_by', 'updated_by', 'location',
-            'sources_url'
+            'sources_url', 'public_sources'
         )
 
     def restore_object(self, attrs, instance=None):

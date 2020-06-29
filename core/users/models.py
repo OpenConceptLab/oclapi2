@@ -4,11 +4,12 @@ from django.db import models
 from django.urls import reverse
 from rest_framework.authtoken.models import Token
 
+from core.common.mixins import SourceContainerMixin
 from core.common.models import BaseModel
 from .constants import USER_OBJECT_TYPE
 
 
-class UserProfile(AbstractUser, BaseModel):
+class UserProfile(AbstractUser, BaseModel, SourceContainerMixin):
     class Meta:
         db_table = 'user_profiles'
         swappable = 'AUTH_USER_MODEL'
@@ -38,10 +39,6 @@ class UserProfile(AbstractUser, BaseModel):
     @staticmethod
     def get_url_kwarg():
         return 'user'
-
-    @property
-    def sources_url(self):
-        return reverse('source-list', kwargs={self.get_url_kwarg(): self.mnemonic})
 
     @property
     def organizations_url(self):

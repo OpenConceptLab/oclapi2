@@ -1,14 +1,14 @@
 from django.contrib import admin
 from django.core.validators import RegexValidator
 from django.db import models
-from django.urls import reverse
 
 from core.common.constants import NAMESPACE_REGEX
+from core.common.mixins import SourceContainerMixin
 from core.common.models import BaseResourceModel
 from core.orgs.constants import ORG_OBJECT_TYPE
 
 
-class Organization(BaseResourceModel):
+class Organization(BaseResourceModel, SourceContainerMixin):
     class Meta:
         db_table = 'organizations'
 
@@ -40,9 +40,6 @@ class Organization(BaseResourceModel):
     @staticmethod
     def get_url_kwarg():
         return 'org'
-
-    def sources_url(self):
-        return reverse('source-list', kwargs={self.get_url_kwarg(): self.mnemonic})
 
 
 admin.site.register(Organization)

@@ -1,10 +1,10 @@
 from django.db.models import Q
-from django.urls import resolve
+from django.urls import resolve, reverse
 from pydash import compact
 from rest_framework.mixins import ListModelMixin, CreateModelMixin
 from rest_framework.response import Response
 
-from core.common.constants import HEAD, ACCESS_TYPE_EDIT, ACCESS_TYPE_VIEW
+from core.common.constants import HEAD, ACCESS_TYPE_EDIT, ACCESS_TYPE_VIEW, ACCESS_TYPE_NONE
 from core.common.permissions import HasPrivateAccess
 from .utils import write_csv_to_s3, get_csv_from_s3
 
@@ -195,3 +195,13 @@ class SubResourceMixin(PathWalkerMixin):
 class ConceptDictionaryMixin(SubResourceMixin):
     base_or_clause = [Q(public_access=ACCESS_TYPE_EDIT), Q(public_access=ACCESS_TYPE_VIEW)]
     permission_classes = (HasPrivateAccess,)
+
+
+class SourceContainerMixin:
+    @property
+    def public_sources(self):
+        return self.source_set.exclude(public_access=ACCESS_TYPE_NONE).filter(version=HEAD).count()
+
+    @property
+    def sources_url(self):
+        return reverse('source-list', kwargs={self.get_url_kwarg(): self.mnemonic})
