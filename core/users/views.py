@@ -1,5 +1,5 @@
 from rest_framework import mixins, status
-from rest_framework.generics import RetrieveAPIView, UpdateAPIView
+from rest_framework.generics import RetrieveAPIView, UpdateAPIView, DestroyAPIView
 from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
 
@@ -17,11 +17,6 @@ class UserBaseView(BaseAPIView):
     queryset = UserProfile.objects.filter(is_active=True)
     user_is_self = False
 
-    def initialize(self, request, path_info_segment, **kwargs):
-        super().initialize(request, path_info_segment, **kwargs)
-        if (request.method == 'DELETE') or (request.method == 'POST' and not self.user_is_self):
-            self.permission_classes = (IsAdminUser, )
-
 
 class UserListView(UserBaseView,
                    ListWithHeadersMixin,
@@ -32,10 +27,18 @@ class UserListView(UserBaseView,
         self.related_object_kwarg = kwargs.pop('related_object_kwarg', None)
         self.related_object_type = kwargs.pop('related_object_type', None)
 
-    def initial(self, request, *args, **kwargs):
-        if request.method == 'POST':
-            self.permission_classes = (IsAdminUser, )
-        super().initial(request, *args, **kwargs)
+    def get_serializer_class(self):
+        if self.request.method == 'GET':
+            return UserDetailSerializer if self.is_verbose(self.request) else UserListSerializer
+        if self.request.method == 'POST':
+            return UserCreateSerializer
+
+        return UserListSerializer
+
+    def get_permissions(self):
+        if self.request.method in ['POST', 'DELETE']:
+            return [IsAdminUser()]
+        return []
 
     def get(self, request, *args, **kwargs):
         self.serializer_class = UserDetailSerializer if self.is_verbose(request) else UserListSerializer
@@ -57,7 +60,7 @@ class UserListView(UserBaseView,
         return self.create(request, *args, **kwargs)
 
 
-class UserDetailView(UserBaseView, RetrieveAPIView, mixins.UpdateModelMixin):
+class UserDetailView(UserBaseView, RetrieveAPIView, DestroyAPIView, mixins.UpdateModelMixin):
     serializer_class = UserDetailSerializer
 
     def get_object(self, queryset=None):
@@ -71,7 +74,7 @@ class UserDetailView(UserBaseView, RetrieveAPIView, mixins.UpdateModelMixin):
 
         return self.partial_update(request, *args, **kwargs)
 
-    def delete(self):
+    def delete(self, request, *args, **kwargs):
         if self.user_is_self:
             return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
         obj = self.get_object()

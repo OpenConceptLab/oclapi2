@@ -23,6 +23,14 @@ class OrganizationListView(BaseAPIView,
     model = Organization
     queryset = Organization.objects.filter(is_active=True)
 
+    def get_serializer_class(self):
+        if self.request.method == 'GET':
+            return OrganizationDetailSerializer if self.is_verbose(self.request) else OrganizationListSerializer
+        if self.request.method == 'POST':
+            return OrganizationCreateSerializer
+
+        return OrganizationListSerializer
+
     def initial(self, request, *args, **kwargs):
         if request.method == 'POST':
             self.permission_classes = (IsAuthenticated, )  # fixme
@@ -31,7 +39,6 @@ class OrganizationListView(BaseAPIView,
         super().initial(request, *args, **kwargs)
 
     def get(self, request, *args, **kwargs):
-        self.serializer_class = OrganizationDetailSerializer if self.is_verbose(request) else OrganizationListSerializer
         if request.user.is_staff:  # /orgs
             return self.list(request, *args, **kwargs)
 
@@ -53,21 +60,19 @@ class OrganizationListView(BaseAPIView,
     def post(self, request, *args, **kwargs):
         if self.related_object_type or self.related_object_kwarg:
             return HttpResponse(status=status.HTTP_405_METHOD_NOT_ALLOWED)
-        self.serializer_class = OrganizationCreateSerializer
         response = self.create(request, *args, **kwargs)
         return response
 
     def create(self, request, *args, **kwargs):
-        serializer = self.get_serializer(data=request.data, files=request.FILES)
+        serializer = self.get_serializer(data=request.data)
 
         if serializer.is_valid():
-            self.pre_save(serializer.object)
-            self.object = serializer.save(force_insert=True)
-            self.post_save(self.object, created=True)
-            request.user.organizations.add(self.object)
-            headers = self.get_success_headers(serializer.data)
-            serializer = OrganizationDetailSerializer(self.object, context={'request': request})
-            return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+            instance = serializer.save(force_insert=True)
+            if serializer.is_valid():
+                request.user.organizations.add(instance)
+                headers = self.get_success_headers(serializer.data)
+                serializer = OrganizationDetailSerializer(instance, context={'request': request})
+                return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 

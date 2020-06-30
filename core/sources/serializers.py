@@ -1,9 +1,13 @@
-from rest_framework.fields import CharField, SerializerMethodField, IntegerField, DateTimeField
+from django.core.validators import RegexValidator
+from rest_framework.fields import CharField, SerializerMethodField, IntegerField, DateTimeField, ChoiceField, JSONField
+from rest_framework.relations import PrimaryKeyRelatedField
 from rest_framework.serializers import ModelSerializer
 
-from core.common.constants import DEFAULT_ACCESS_TYPE
+from core.common.constants import DEFAULT_ACCESS_TYPE, NAMESPACE_REGEX, ACCESS_TYPE_CHOICES, HEAD
+from core.orgs.models import Organization
 from core.settings import DEFAULT_LOCALE
 from core.sources.models import Source
+from core.users.models import UserProfile
 
 
 class SourceListSerializer(ModelSerializer):
@@ -23,27 +27,93 @@ class SourceCreateOrUpdateSerializer(ModelSerializer):
     class Meta:
         model = Source
         lookup_field = 'mnemonic'
+        fields = (
+            '__all__'
+        )
 
-    def restore_object(self, attrs, instance=None):
+    def prepare_object(self, validated_data, instance=None):
         source = instance if instance else Source()
-        source.mnemonic = attrs.get(self.Meta.lookup_field, source.mnemonic)
-        source.name = attrs.get('name', source.name)
-        source.full_name = attrs.get('full_name', source.full_name)
-        source.description = attrs.get('description', source.description)
-        source.source_type = attrs.get('source_type', source.source_type)
-        source.custom_validation_schema = attrs.get('custom_validation_schema', source.custom_validation_schema)
-        source.public_access = attrs.get('public_access', source.public_access or DEFAULT_ACCESS_TYPE)
-        source.default_locale = attrs.get('default_locale', source.default_locale or DEFAULT_LOCALE)
-        source.website = attrs.get('website', source.website)
-        source.supported_locales = attrs.get('supported_locales').split(',') if attrs.get('supported_locales') \
-            else source.supported_locales
-        source.extras = attrs.get('extras', source.extras)
-        source.external_id = attrs.get('external_id', source.external_id)
+        source.version = validated_data.get('version', source.version) or HEAD
+        source.mnemonic = validated_data.get(self.Meta.lookup_field, source.mnemonic)
+        source.name = validated_data.get('name', source.name)
+        source.full_name = validated_data.get('full_name', source.full_name)
+        source.description = validated_data.get('description', source.description)
+        source.source_type = validated_data.get('source_type', source.source_type)
+        source.custom_validation_schema = validated_data.get(
+            'custom_validation_schema', source.custom_validation_schema
+        )
+        source.public_access = validated_data.get('public_access', source.public_access or DEFAULT_ACCESS_TYPE)
+        source.default_locale = validated_data.get('default_locale', source.default_locale or DEFAULT_LOCALE)
+        source.website = validated_data.get('website', source.website)
+        source.supported_locales = validated_data.get(
+            'supported_locales'
+        ).split(',') if validated_data.get('supported_locales') else source.supported_locales
+        source.extras = validated_data.get('extras', source.extras)
+        source.external_id = validated_data.get('external_id', source.external_id)
+        source.user_id = validated_data.get('user_id', source.user_id)
+        source.organization_id = validated_data.get('organization_id', source.organization_id)
+        source.user = validated_data.get('user', source.user)
+        source.organization = validated_data.get('organization', source.organization)
+        return source
+
+    def update(self, instance, validated_data):
+        source = self.prepare_object(validated_data, instance)
+        user = self.context['request'].user
+        errors = Source.persist_changes(source, user)
+        self._errors.update(errors)
         return source
 
     @staticmethod
     def get_active_concepts(obj):
         return obj.get_active_concepts().count()
+
+
+class SourceCreateSerializer(SourceCreateOrUpdateSerializer):
+    type = CharField(source='resource_type', read_only=True)
+    uuid = CharField(source='id', read_only=True)
+    id = CharField(required=True, validators=[RegexValidator(regex=NAMESPACE_REGEX)], source='mnemonic')
+    short_code = CharField(source='mnemonic', read_only=True)
+    name = CharField(required=True)
+    full_name = CharField(required=False)
+    description = CharField(required=False)
+    source_type = CharField(required=False)
+    custom_validation_schema = CharField(required=False)
+    public_access = ChoiceField(required=False, choices=ACCESS_TYPE_CHOICES)
+    default_locale = CharField(required=False)
+    supported_locales = CharField(required=False)
+    website = CharField(required=False)
+    url = CharField(read_only=True)
+    versions_url = CharField(read_only=True)
+    concepts_url = CharField(read_only=True)
+    mappings_url = CharField(read_only=True)
+    active_concepts = SerializerMethodField(method_name='get_active_concepts')
+    owner = CharField(source='parent_resource', read_only=True)
+    owner_type = CharField(source='parent_resource_type', read_only=True)
+    owner_url = CharField(source='parent_url', read_only=True)
+    versions = IntegerField(source='num_versions', read_only=True)
+    created_on = DateTimeField(source='created_at', read_only=True)
+    updated_on = DateTimeField(source='updated_at', read_only=True)
+    created_by = CharField(source='owner', read_only=True)
+    updated_by = CharField(read_only=True)
+    extras = JSONField(required=False)
+    external_id = CharField(required=False)
+    user_id = PrimaryKeyRelatedField(required=False, queryset=UserProfile.objects.all(), allow_null=True)
+    organization_id = PrimaryKeyRelatedField(required=False, queryset=Organization.objects.all(), allow_null=True)
+    version = CharField(default=HEAD)
+
+    def create(self, validated_data):
+        source = self.prepare_object(validated_data)
+        user = self.context['request'].user
+        errors = Source.persist_new(source, user)
+        self._errors.update(errors)
+        return source
+
+    def create_version(self, validated_data):
+        source = self.prepare_object(validated_data)
+        user = self.context['request'].user
+        errors = Source.persist_new_version(source, user)
+        self._errors.update(errors)
+        return source
 
 
 class SourceDetailSerializer(SourceCreateOrUpdateSerializer):

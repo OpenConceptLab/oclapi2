@@ -1,4 +1,5 @@
 from django.db import models
+from django.db.models import UniqueConstraint
 from django.urls import reverse
 
 from core.common.models import ConceptContainerModel
@@ -10,7 +11,18 @@ from core.sources.constants import SOURCE_TYPE
 class Source(ConceptContainerModel):
     class Meta:
         db_table = 'sources'
-        unique_together = (('mnemonic', 'version', 'organization'), ('mnemonic', 'version', 'user'))
+        constraints = [
+            UniqueConstraint(
+                fields=['mnemonic', 'version', 'organization'],
+                name="org_source_unique",
+                condition=models.Q(user=None),
+            ),
+            UniqueConstraint(
+                fields=['mnemonic', 'version', 'user'],
+                name="user_source_unique",
+                condition=models.Q(organization=None),
+            )
+        ]
 
     source_type = models.TextField(blank=True)
 
@@ -37,7 +49,7 @@ class Source(ConceptContainerModel):
         if obj:
             self.description = obj.description
         else:
-            obj = self.get_head()
+            obj = self.get_latest_version()
 
         if obj:
             self.name = obj.name
@@ -49,6 +61,8 @@ class Source(ConceptContainerModel):
             self.custom_validation_schema = obj.custom_validation_schema
             self.default_locale = obj.default_locale
             self.external_id = obj.external_id
+            self.organization = obj.organization
+            self.user = obj.user
 
     def get_concept_name_locales(self):
         return LocalizedText.objects.filter(name_locales__in=self.get_active_concepts())

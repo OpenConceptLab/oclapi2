@@ -1,16 +1,17 @@
 from django.db import IntegrityError
 from pydash import get
 from rest_framework import status, mixins
-from rest_framework.generics import DestroyAPIView, RetrieveAPIView, ListAPIView, RetrieveUpdateDestroyAPIView
+from rest_framework.generics import DestroyAPIView, RetrieveAPIView, ListAPIView, RetrieveUpdateDestroyAPIView, \
+    UpdateAPIView
 from rest_framework.response import Response
 
 from core.common.constants import HEAD, RELEASED_PARAM, PROCESSING_PARAM
-from core.common.mixins import ListWithHeadersMixin
-from core.common.permissions import CanViewConceptDictionary, CanEditConceptDictionary
+from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryCreateMixin, ConceptDictionaryUpdateMixin
+from core.common.permissions import CanViewConceptDictionary, CanEditConceptDictionary, HasAccessToVersionedObject
 from core.common.utils import parse_boolean_query_param
 from core.common.views import BaseAPIView
 from core.sources.models import Source
-from core.sources.serializers import SourceDetailSerializer, SourceListSerializer, SourceCreateOrUpdateSerializer
+from core.sources.serializers import SourceDetailSerializer, SourceListSerializer, SourceCreateSerializer
 
 
 class SourceBaseView(BaseAPIView):
@@ -21,8 +22,8 @@ class SourceBaseView(BaseAPIView):
     queryset = Source.objects.filter(is_active=True)
 
     @staticmethod
-    def get_detail_serializer(obj, data=None, files=None, partial=False):
-        return SourceDetailSerializer(obj, data, files, partial)
+    def get_detail_serializer(obj):
+        return SourceDetailSerializer(obj)
 
     def get_queryset(self):
         query_params = self.request.query_params
@@ -39,19 +40,24 @@ class SourceBaseView(BaseAPIView):
             queryset = queryset.filter(mnemonic=self.kwargs['source'])
         if 'version' in self.kwargs:
             queryset = queryset.filter(version=self.kwargs['version'])
+        if 'is_latest' in self.kwargs:
+            queryset = queryset.filter(is_latest_version=True)
 
         return queryset.all()
 
 
-class SourceListView(SourceBaseView, ListWithHeadersMixin):
+class SourceListView(SourceBaseView, ConceptDictionaryCreateMixin, ListWithHeadersMixin):
     serializer_class = SourceListSerializer
 
-    def get_queryset(self):
-        queryset = super().get_queryset()
-        return queryset.filter(version=HEAD)
+    def get_serializer_class(self):
+        if self.request.method == 'GET':
+            return SourceDetailSerializer if self.is_verbose(self.request) else SourceListSerializer
+        if self.request.method == 'POST':
+            return SourceCreateSerializer
+
+        return SourceListSerializer
 
     def get(self, request, *args, **kwargs):
-        self.serializer_class = SourceDetailSerializer if self.is_verbose(request) else SourceListSerializer
         return self.list(request, *args, **kwargs)
 
     def get_csv_rows(self, queryset=None):
@@ -84,15 +90,17 @@ class SourceListView(SourceBaseView, ListWithHeadersMixin):
         return values
 
 
-class SourceRetrieveUpdateDestroyView(SourceBaseView, RetrieveAPIView, DestroyAPIView):
+class SourceRetrieveUpdateDestroyView(SourceBaseView, ConceptDictionaryUpdateMixin, RetrieveAPIView, DestroyAPIView):
     serializer_class = SourceDetailSerializer
 
-    def initialize(self, request, path_info_segment, **kwargs):
-        if request.method in ['GET', 'HEAD']:
-            self.permission_classes = (CanViewConceptDictionary,)
-        else:
-            self.permission_classes = (CanEditConceptDictionary,)
-        super().initialize(request, path_info_segment, **kwargs)
+    def get_object(self, queryset=None):
+        return self.get_queryset().filter(version=HEAD).first()
+
+    def get_permissions(self):
+        if self.request.method in ['GET', 'HEAD']:
+            return [CanViewConceptDictionary()]
+
+        return [CanEditConceptDictionary()]
 
     def destroy(self, request, *args, **kwargs):
         source = self.get_object()
@@ -108,29 +116,35 @@ class SourceVersionListView(SourceBaseView, mixins.CreateModelMixin, ListWithHea
     released_filter = None
     processing_filter = None
 
+    def get_serializer_class(self):
+        if self.request.method in ['GET', 'HEAD']:
+            return SourceDetailSerializer if self.is_verbose(self.request) else SourceListSerializer
+        if self.request.method == 'POST':
+            return SourceCreateSerializer
+
+        return SourceListSerializer
+
     def get(self, request, *args, **kwargs):
-        self.serializer_class = SourceDetailSerializer if self.is_verbose(request) else SourceListSerializer
         self.released_filter = parse_boolean_query_param(request, RELEASED_PARAM, self.released_filter)
         self.processing_filter = parse_boolean_query_param(request, PROCESSING_PARAM, self.processing_filter)
         return self.list(request, *args, **kwargs)
 
     def post(self, request, *args, **kwargs):
-        self.serializer_class = SourceCreateOrUpdateSerializer
         return self.create(request, *args, **kwargs)
 
     def create(self, request, *args, **kwargs):
-        if not self.versioned_object:
-            return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
-        serializer = self.get_serializer(data=request.data, files=request.FILES)
+        head_object = self.get_object()
+        payload = {
+            "mnemonic": head_object.mnemonic, "id": head_object.mnemonic, "name": head_object.name, **request.data,
+            "organization_id": head_object.organization_id, "user_id": head_object.user_id
+        }
+        serializer = self.get_serializer(data=payload)
         if serializer.is_valid():
-            self.pre_save(serializer.object)
             try:
-                self.object = serializer.save(force_insert=True, versioned_object=self.versioned_object)
+                instance = serializer.create_version(payload)
                 if serializer.is_valid():
-                    self.post_save(self.object, created=True)
-                    headers = self.get_success_headers(serializer.data)
-                    serializer = SourceDetailSerializer(self.object, context={'request': request})
-                    return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+                    serializer = SourceDetailSerializer(instance, context={'request': request})
+                    return Response(serializer.data, status=status.HTTP_201_CREATED)
             except IntegrityError as ex:
                 return Response(
                     dict(error=str(ex), detail='Source version  \'%s\' already exist. ' % serializer.data.get('id')),
@@ -144,6 +158,30 @@ class SourceVersionListView(SourceBaseView, mixins.CreateModelMixin, ListWithHea
         if self.released_filter is not None:
             queryset = queryset.filter(released=self.released_filter)
         return queryset.order_by('-created_at')
+
+
+class SourceVersionRetrieveUpdateDestroyView(SourceBaseView, RetrieveAPIView, UpdateAPIView, DestroyAPIView):
+    permission_classes = (HasAccessToVersionedObject,)
+    serializer_class = SourceDetailSerializer
+
+    def get_object(self, queryset=None):
+        return self.get_queryset().first()
+
+    def update(self, request, *args, **kwargs):
+        self.object = self.get_object()
+        head = self.object.head
+        if not head:
+            return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
+
+        serializer = self.get_serializer(self.object, data=request.data, partial=True)
+
+        if serializer.is_valid():
+            self.object = serializer.save(force_update=True)
+            if serializer.is_valid():
+                serializer = SourceDetailSerializer(self.object, context={'request': request})
+                return Response(serializer.data, status=status.HTTP_200_OK)
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
 class SourceExtrasBaseView(SourceBaseView):

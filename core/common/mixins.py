@@ -1,11 +1,12 @@
 from django.db.models import Q
 from django.urls import resolve, reverse
 from pydash import compact
+from rest_framework import status
 from rest_framework.mixins import ListModelMixin, CreateModelMixin
 from rest_framework.response import Response
 
 from core.common.constants import HEAD, ACCESS_TYPE_EDIT, ACCESS_TYPE_VIEW, ACCESS_TYPE_NONE
-from core.common.permissions import HasPrivateAccess
+from core.common.permissions import HasPrivateAccess, HasOwnership
 from .utils import write_csv_to_s3, get_csv_from_s3
 
 
@@ -172,8 +173,7 @@ class SubResourceMixin(PathWalkerMixin):
     parent_resource = None
     base_or_clause = []
 
-    def initialize(self, request, path_info_segment, **kwargs):
-        super().initialize(request, path_info_segment, **kwargs)
+    def initialize(self, request, path_info_segment):
         self.user = request.user
         self.userprofile = self.user
         self.parent_resource = self.userprofile
@@ -195,6 +195,83 @@ class SubResourceMixin(PathWalkerMixin):
 class ConceptDictionaryMixin(SubResourceMixin):
     base_or_clause = [Q(public_access=ACCESS_TYPE_EDIT), Q(public_access=ACCESS_TYPE_VIEW)]
     permission_classes = (HasPrivateAccess,)
+
+
+class ConceptDictionaryCreateMixin(ConceptDictionaryMixin):
+    """
+    Concrete view for creating a model instance.
+    """
+    def post(self, request, **kwargs):
+        self.set_parent_resource()
+        return self.create(request, **kwargs)
+
+    def set_parent_resource(self):
+        from core.orgs.models import Organization
+        from core.users.models import UserProfile
+        org = self.kwargs.get('org', None)
+        user = self.kwargs.get('user', None)
+        parent_resource = None
+        if org:
+            parent_resource = Organization.objects.filter(mnemonic=org).first()
+        if user:
+            parent_resource = UserProfile.objects.filter(username=user).first()
+
+        self.kwargs['parent_resource'] = self.parent_resource = parent_resource
+
+    def create(self, request, **kwargs):  # pylint: disable=unused-argument
+        if not self.parent_resource:
+            return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
+        permission = HasOwnership()
+        if not permission.has_object_permission(request, self, self.parent_resource):
+            return Response(status=status.HTTP_403_FORBIDDEN)
+        serializer = self.get_serializer(
+            data={
+                'version': HEAD, **request.data, **{self.parent_resource.resource_type.lower(): self.parent_resource.id}
+            }
+        )
+        if serializer.is_valid():
+            instance = serializer.save(force_insert=True)
+            if serializer.is_valid():
+                headers = self.get_success_headers(serializer.data)
+                serializer = self.get_detail_serializer(instance)
+                return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    @staticmethod
+    def get_success_headers(data):
+        try:
+            return {'Location': data['url']}
+        except (TypeError, KeyError):
+            return {}
+
+
+class ConceptDictionaryUpdateMixin(ConceptDictionaryMixin):
+
+    """
+    Concrete view for updating a model instance.
+    """
+    def put(self, request):
+        super().initialize(request, request.path_info)
+        return self.update(request)
+
+    def update(self, request):
+        if not self.parent_resource:
+            return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
+
+        self.object = self.get_object()
+        save_kwargs = {'force_update': True, 'parent_resource': self.parent_resource}
+        success_status_code = status.HTTP_200_OK
+
+        serializer = self.get_serializer(self.object, data=request.data, partial=True)
+
+        if serializer.is_valid():
+            self.object = serializer.save(**save_kwargs)
+            if serializer.is_valid():
+                serializer = self.get_detail_serializer(self.object)
+                return Response(serializer.data, status=success_status_code)
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
 class SourceContainerMixin:

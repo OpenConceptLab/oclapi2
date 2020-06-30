@@ -90,7 +90,7 @@ class Concept(VersionedModel, ConceptValidationMixin):  # pylint: disable=too-ma
 
     @property
     def owner_type(self):
-        return self.parent.resource_type()
+        return self.parent.resource_type
 
     @property
     def owner_url(self):
@@ -182,8 +182,8 @@ class Concept(VersionedModel, ConceptValidationMixin):  # pylint: disable=too-ma
             is_latest_version=self.is_latest_version,
             parent_id=self.parent_id,
         )
-        concept_version.cloned_names = [name.clone() for name in list(self.names.all())]
-        concept_version.cloned_descriptions = [desc.clone() for desc in list(self.descriptions.all())]
+        concept_version.cloned_names = self.clone_name_locales()
+        concept_version.cloned_descriptions = self.clone_description_locales()
 
         return concept_version
 
@@ -218,6 +218,12 @@ class Concept(VersionedModel, ConceptValidationMixin):  # pylint: disable=too-ma
     def remove_locales(self):
         self.names.all().delete()
         self.descriptions.all().delete()
+
+    def clone_name_locales(self):
+        return [name.clone() for name in self.names.all()]
+
+    def clone_description_locales(self):
+        return [desc.clone() for desc in self.descriptions.all()]
 
     @classmethod
     def persist_clone(cls, obj, user=None, **kwargs):

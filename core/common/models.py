@@ -1,7 +1,7 @@
 from django.contrib.postgres.fields import JSONField, ArrayField
 from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator
-from django.db import models
+from django.db import models, IntegrityError
 from pydash import get
 
 from core.common.utils import reverse_resource
@@ -252,17 +252,20 @@ class ConceptContainerModel(VersionedModel):
         return self.concepts_set.count()
 
     def set_parent(self, parent_resource):
-        if parent_resource.__class__.__name__ == 'Organization':
+        parent_resource_type = parent_resource.resource_type
+
+        if parent_resource_type == 'Organization':
             self.organization = parent_resource
-        elif parent_resource.__class__.__name__ == 'UserProfile':
+        elif parent_resource_type == 'UserProfile':
             self.user = parent_resource
 
     @classmethod
     def persist_new(cls, obj, created_by, **kwargs):
         errors = dict()
-        parent_resource = kwargs.pop('parent_resource', None)
+        parent_resource = kwargs.pop('parent_resource', None) or obj.parent
         if not parent_resource:
             errors['parent'] = 'Parent resource cannot be None.'
+            return errors
         obj.set_parent(parent_resource)
         user = created_by
         if not user:
@@ -284,6 +287,8 @@ class ConceptContainerModel(VersionedModel):
         try:
             obj.save(**kwargs)
             persisted = True
+        except IntegrityError as ex:
+            errors.update({'__all__': ex.args})
         finally:
             if not persisted:
                 errors['non_field_errors'] = "An error occurred while trying to persist new %s." % cls.__name__
@@ -324,7 +329,10 @@ class ConceptContainerModel(VersionedModel):
             return errors
 
         obj.updated_by = updated_by
-        obj.save(**kwargs)
+        try:
+            obj.save(**kwargs)
+        except IntegrityError as ex:
+            errors.update({'__all__': ex.args})
 
         return errors
 

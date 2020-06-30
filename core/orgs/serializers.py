@@ -36,20 +36,25 @@ class OrganizationCreateSerializer(serializers.ModelSerializer):
             'created_on', 'updated_on', 'url', 'extras', 'public_sources',
         )
 
-    def restore_object(self, attrs, _=None):
-        request_user = self.context['request'].user
-        mnemonic = attrs.get('mnemonic', None)
+    def prepare_object(self, validated_data):
+        user = self.context['request'].user
+        mnemonic = validated_data.get('mnemonic', None)
         if Organization.objects.filter(mnemonic=mnemonic).exists():
             self._errors['mnemonic'] = 'Organization with mnemonic %s already exists.' % mnemonic
             return None
-        organization = Organization(name=attrs.get('name'), mnemonic=mnemonic)
-        organization.created_by = request_user
-        organization.updated_by = request_user
-        organization.public_access = attrs.get('public_access', DEFAULT_ACCESS_TYPE)
-        organization.company = attrs.get('company', None)
-        organization.website = attrs.get('website', None)
-        organization.location = attrs.get('location', None)
-        organization.extras = attrs.get('extras', None)
+        organization = Organization(name=validated_data.get('name'), mnemonic=mnemonic)
+        organization.created_by = user
+        organization.updated_by = user
+        organization.public_access = validated_data.get('public_access', DEFAULT_ACCESS_TYPE)
+        organization.company = validated_data.get('company', None)
+        organization.website = validated_data.get('website', None)
+        organization.location = validated_data.get('location', None)
+        organization.extras = validated_data.get('extras', None)
+        return organization
+
+    def create(self, validated_data):
+        organization = self.prepare_object(validated_data)
+        organization.save()
         return organization
 
 
@@ -80,13 +85,13 @@ class OrganizationDetailSerializer(serializers.ModelSerializer):
             'sources_url', 'public_sources'
         )
 
-    def restore_object(self, attrs, instance=None):
+    def update(self, instance, validated_data):
         request_user = self.context['request'].user
-        instance.public_access = attrs.get('public_access', instance.public_access)
-        instance.name = attrs.get('name', instance.name)
-        instance.company = attrs.get('company', instance.company)
-        instance.website = attrs.get('website', instance.website)
-        instance.location = attrs.get('location', instance.website)
-        instance.extras = attrs.get('extras', instance.extras)
+        instance.public_access = validated_data.get('public_access', instance.public_access)
+        instance.name = validated_data.get('name', instance.name)
+        instance.company = validated_data.get('company', instance.company)
+        instance.website = validated_data.get('website', instance.website)
+        instance.location = validated_data.get('location', instance.website)
+        instance.extras = validated_data.get('extras', instance.extras)
         instance.updated_by = request_user
         return instance

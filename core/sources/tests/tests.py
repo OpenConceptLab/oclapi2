@@ -1,5 +1,4 @@
-from django.core.exceptions import ValidationError
-from django.db import transaction
+from django.db import transaction, IntegrityError
 
 from core.common.constants import HEAD
 from core.common.tests import OCLTestCase
@@ -128,7 +127,7 @@ class SourceTest(OCLTestCase):
                 mnemonic=source.mnemonic,
                 organization=source.organization
             )
-            with self.assertRaises(ValidationError):
+            with self.assertRaises(IntegrityError):
                 source_version.full_clean()
                 source_version.save()
             self.assertIsNone(source_version.id)

@@ -36,27 +36,30 @@ class UserCreateSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = UserProfile
+        extra_kwargs = {'password': {'write_only': True}}
         fields = (
             'type', 'uuid', 'username', 'name', 'email', 'company', 'location', 'preferred_locale', 'orgs',
             'public_collections', 'public_sources', 'created_on', 'updated_on', 'created_by', 'updated_by',
-            'url', 'extras',
+            'url', 'extras', 'password',
         )
 
-    def restore_object(self, attrs, _=None):
+    def create(self, validated_data):
         request_user = self.context['request'].user
-        username = attrs.get('username')
+        username = validated_data.get('username')
         if UserProfile.objects.filter(username=username).exists():
             self._errors['username'] = 'User with username %s already exists.' % username
             return None
-        email = attrs.get('email')
-        profile = UserProfile(first_name=attrs.get('name'), username=username, email=email)
+        email = validated_data.get('email')
+        profile = UserProfile(first_name=validated_data.get('name'), username=username, email=email)
         profile.created_by = request_user
         profile.updated_by = request_user
-        profile.password = attrs.get('hashed_password', None)
-        profile.company = attrs.get('company', None)
-        profile.location = attrs.get('location', None)
-        profile.preferred_locale = attrs.get('preferred_locale', None)
-        profile.extras = attrs.get('extras', None)
+        profile.password = validated_data.get('hashed_password', None) or validated_data.get('password', None)
+        profile.company = validated_data.get('company', None)
+        profile.location = validated_data.get('location', None)
+        profile.preferred_locale = validated_data.get('preferred_locale', None)
+        profile.extras = validated_data.get('extras', None)
+        profile.save()
+        profile.update_password(validated_data.get('password', None), validated_data.get('hashed_password', None))
         return profile
 
 
@@ -88,15 +91,14 @@ class UserDetailSerializer(serializers.ModelSerializer):
             'url', 'organizations_url', 'extras', 'sources_url',
         )
 
-    def restore_object(self, attrs, instance=None):
+    def update(self, instance, validated_data):
         request_user = self.context['request'].user
-        instance.email = attrs.get('email', instance.email)
-        instance.username = attrs.get('mnemonic', instance.username)
-        instance.full_name = attrs.get('full_name', instance.full_name)
-        instance.company = attrs.get('company', instance.company)
-        instance.location = attrs.get('location', instance.location)
-        instance.mnemonic = attrs.get('mnemonic', instance.mnemonic)
-        instance.preferred_locale = attrs.get('preferred_locale', instance.preferred_locale)
-        instance.extras = attrs.get('extras', instance.extras)
+        instance.email = validated_data.get('email', instance.email)
+        instance.username = validated_data.get('username', instance.username)
+        instance.company = validated_data.get('company', instance.company)
+        instance.location = validated_data.get('location', instance.location)
+        instance.preferred_locale = validated_data.get('preferred_locale', instance.preferred_locale)
+        instance.extras = validated_data.get('extras', instance.extras)
         instance.updated_by = request_user
+        instance.save()
         return instance
