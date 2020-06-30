@@ -133,7 +133,7 @@ class SourceVersionListView(SourceBaseView, mixins.CreateModelMixin, ListWithHea
         return self.create(request, *args, **kwargs)
 
     def create(self, request, *args, **kwargs):
-        head_object = self.get_object()
+        head_object = self.get_queryset().first()
         payload = {
             "mnemonic": head_object.mnemonic, "id": head_object.mnemonic, "name": head_object.name, **request.data,
             "organization_id": head_object.organization_id, "user_id": head_object.user_id
