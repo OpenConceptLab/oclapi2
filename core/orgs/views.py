@@ -106,7 +106,7 @@ class OrganizationDetailView(mixins.UpdateModelMixin, OrganizationBaseView):
         except Exception as ex:
             return Response({'detail': ex.message}, status=status.HTTP_400_BAD_REQUEST)
 
-        return Response({'detail': 'Successfully deleted org.'}, status=status.HTTP_200_OK)
+        return Response({'detail': 'Successfully deleted org.'}, status=status.HTTP_204_NO_CONTENT)
 
 
 class OrganizationMemberView(generics.GenericAPIView):
