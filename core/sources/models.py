@@ -78,4 +78,4 @@ class Source(ConceptContainerModel):
     def seed_concepts(self):
         head = self.head
         if head:
-            self.concepts.set(head.concepts.all())
+            self.concepts.set(head.concepts_set.all())

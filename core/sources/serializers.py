@@ -19,7 +19,7 @@ class SourceListSerializer(ModelSerializer):
     class Meta:
         model = Source
         fields = (
-            'short_code', 'name', 'url', 'owner', 'owner_type', 'owner_url', 'version',
+            'short_code', 'name', 'url', 'owner', 'owner_type', 'owner_url', 'version', 'created_at'
         )
 
 

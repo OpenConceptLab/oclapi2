@@ -31,6 +31,7 @@ class ConceptBaseView(BaseAPIView):
         user = self.request.query_params.get('user', None) or self.kwargs.get('user', None)
         org = self.request.query_params.get('org', None) or self.kwargs.get('org', None)
         source = self.request.query_params.get('source', None) or self.kwargs.get('source', None)
+        source_version = self.request.query_params.get('version', None) or self.kwargs.get('version', None)
         concept = self.request.query_params.get('concept', None) or self.kwargs.get('concept', None)
         concept_version = self.request.query_params.get(
             'concept_version', None
@@ -42,6 +43,8 @@ class ConceptBaseView(BaseAPIView):
             queryset = queryset.filter(parent__organization__mnemonic=org)
         if source:
             queryset = queryset.filter(parent__mnemonic=source)
+        if source_version and source_version != HEAD:
+            queryset = queryset.filter(parent__version=source_version)
         if concept:
             queryset = queryset.filter(mnemonic=concept)
         if concept_version:
