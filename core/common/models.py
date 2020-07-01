@@ -189,6 +189,10 @@ class VersionedModel(BaseResourceModel):
 
     head = property(get_head)
 
+    @classmethod
+    def get_version(cls, mnemonic, version=HEAD):
+        return cls.objects.filter(mnemonic=mnemonic, version=version).first()
+
     def get_latest_version(self):
         return self.active_versions.order_by('-created_at').first()
 

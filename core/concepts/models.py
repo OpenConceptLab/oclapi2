@@ -232,7 +232,7 @@ class Concept(VersionedModel, ConceptValidationMixin):  # pylint: disable=too-ma
             errors['version_created_by'] = 'Must specify which user is attempting to create a new concept version.'
             return errors
         obj.created_by = user
-        parent_head = obj.parent.get_head()
+        parent_head = obj.parent.head
         persisted = False
         errored_action = 'saving new concept version'
         latest_versions = None

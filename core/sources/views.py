@@ -30,6 +30,27 @@ class SourceBaseView(BaseAPIView):
 
         username = query_params.get('user', None) or self.kwargs.get('user', None)
         org = query_params.get('org', None) or self.kwargs.get('org', None)
+        version = self.kwargs.get('version', HEAD)
+        queryset = self.queryset.filter(version=version)
+
+        if username:
+            queryset = queryset.filter(user__username=username)
+        if org:
+            queryset = queryset.filter(organization__mnemonic=org)
+        if 'source' in self.kwargs:
+            queryset = queryset.filter(mnemonic=self.kwargs['source'])
+        if 'is_latest' in self.kwargs:
+            queryset = queryset.filter(is_latest_version=True)
+
+        return queryset.all()
+
+
+class SourceVersionBaseView(SourceBaseView):
+    def get_queryset(self):
+        query_params = self.request.query_params
+
+        username = query_params.get('user', None) or self.kwargs.get('user', None)
+        org = query_params.get('org', None) or self.kwargs.get('org', None)
         queryset = self.queryset
 
         if username:
@@ -112,7 +133,7 @@ class SourceRetrieveUpdateDestroyView(SourceBaseView, ConceptDictionaryUpdateMix
         return Response({'detail': 'Successfully deleted source.'}, status=status.HTTP_204_NO_CONTENT)
 
 
-class SourceVersionListView(SourceBaseView, mixins.CreateModelMixin, ListWithHeadersMixin):
+class SourceVersionListView(SourceVersionBaseView, mixins.CreateModelMixin, ListWithHeadersMixin):
     released_filter = None
     processing_filter = None
 

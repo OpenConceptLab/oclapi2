@@ -42,9 +42,9 @@ class ConceptBaseView(BaseAPIView):
         if org:
             queryset = queryset.filter(parent__organization__mnemonic=org)
         if source:
-            queryset = queryset.filter(parent__mnemonic=source)
-        if source_version and source_version != HEAD:
-            queryset = queryset.filter(parent__version=source_version)
+            queryset = queryset.filter(sources__mnemonic=source)
+        if source_version:
+            queryset = queryset.filter(sources__version=source_version)
         if concept:
             queryset = queryset.filter(mnemonic=concept)
         if concept_version:
@@ -52,7 +52,7 @@ class ConceptBaseView(BaseAPIView):
         if 'is_latest' in self.kwargs:
             queryset = queryset.filter(is_latest_version=True)
 
-        return queryset
+        return queryset.distinct()
 
 
 class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
@@ -79,9 +79,10 @@ class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
     def set_parent_resource(self):
         from core.sources.models import Source
         source = self.kwargs.pop('source', None)
+        source_version = self.kwargs.pop('version', HEAD)
         parent_resource = None
         if source:
-            parent_resource = Source.objects.filter(mnemonic=source).order_by('-created_at').first()
+            parent_resource = Source.get_version(source, source_version)
         self.kwargs['parent_resource'] = self.parent_resource = parent_resource
 
     def post(self, request, **kwargs):  # pylint: disable=unused-argument
@@ -93,7 +94,7 @@ class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
             self.object = serializer.save()
             if serializer.is_valid():
                 headers = self.get_success_headers(serializer.data)
-                serializer = ConceptVersionDetailSerializer(self.object)
+                serializer = ConceptDetailSerializer(self.object)
                 return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
