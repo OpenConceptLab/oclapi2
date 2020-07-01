@@ -65,7 +65,6 @@ class Concept(VersionedModel, ConceptValidationMixin):  # pylint: disable=too-ma
     datatype = models.TextField()
     names = models.ManyToManyField(LocalizedText, related_name='name_locales')
     descriptions = models.ManyToManyField(LocalizedText, related_name='description_locales')
-    retired = models.BooleanField(default=False)
     comment = models.TextField(null=True, blank=True)
     parent = models.ForeignKey('sources.Source', related_name='concepts_set', on_delete=models.DO_NOTHING)
     sources = models.ManyToManyField('sources.Source', related_name='concepts')
