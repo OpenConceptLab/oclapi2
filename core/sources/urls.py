@@ -17,14 +17,14 @@ urlpatterns = [
     ),
     re_path(r"^(?P<source>{pattern})/concepts/".format(pattern=NAMESPACE_PATTERN), include('core.concepts.urls')),
     re_path(
-        r'^(?P<source>{pattern})/(?P<version>{pattern})/$'.format(pattern=NAMESPACE_PATTERN),
-        views.SourceVersionRetrieveUpdateDestroyView.as_view(),
-        name='sourceversion-detail'
-    ),
-    re_path(
         r"^(?P<source>{pattern})/extras/$".format(pattern=NAMESPACE_PATTERN),
         views.SourceExtrasView.as_view(),
         name='source-extras'
+    ),
+    re_path(
+        r'^(?P<source>{pattern})/(?P<version>{pattern})/$'.format(pattern=NAMESPACE_PATTERN),
+        views.SourceVersionRetrieveUpdateDestroyView.as_view(),
+        name='sourceversion-detail'
     ),
     re_path(
         r"^(?P<source>{pattern})/extras/(?P<extra>{pattern})/$".format(pattern=NAMESPACE_PATTERN),
