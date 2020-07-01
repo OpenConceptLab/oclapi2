@@ -22,3 +22,7 @@ FULLY_SPECIFIED = "FULLY_SPECIFIED"
 LOCALES_FULLY_SPECIFIED = (FULLY_SPECIFIED, "Fully Specified")
 LOCALES_SHORT = (SHORT, "Short")
 LOCALES_SEARCH_INDEX_TERM = ("INDEX_TERM", "Index Term")
+CONCEPT_WAS_RETIRED = 'Concept was retired'
+CONCEPT_WAS_UNRETIRED = 'Concept was un-retired'
+CONCEPT_IS_ALREADY_RETIRED = 'Concept is already retired'
+CONCEPT_IS_ALREADY_NOT_RETIRED = 'Concept is already not retired'

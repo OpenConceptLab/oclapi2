@@ -8,7 +8,8 @@ from pydash import get, compact
 from core.common.constants import TEMP, HEAD, ISO_639_1
 from core.common.models import VersionedModel
 from core.common.utils import reverse_resource
-from core.concepts.constants import CONCEPT_TYPE, LOCALES_FULLY_SPECIFIED, LOCALES_SHORT, LOCALES_SEARCH_INDEX_TERM
+from core.concepts.constants import CONCEPT_TYPE, LOCALES_FULLY_SPECIFIED, LOCALES_SHORT, LOCALES_SEARCH_INDEX_TERM, \
+    CONCEPT_WAS_RETIRED, CONCEPT_IS_ALREADY_RETIRED, CONCEPT_IS_ALREADY_NOT_RETIRED, CONCEPT_WAS_UNRETIRED
 from core.concepts.mixins import ConceptValidationMixin
 
 
@@ -263,4 +264,27 @@ class Concept(VersionedModel, ConceptValidationMixin):  # pylint: disable=too-ma
                     obj.delete()
                 errors['non_field_errors'] = ['An error occurred while %s.' % errored_action]
 
+        return errors
+
+    def retire(self, user, comment=None):
+        if self.retired:
+            return {'__all__': CONCEPT_IS_ALREADY_RETIRED}
+
+        return self.__update_retire(True, comment or CONCEPT_WAS_RETIRED, user)
+
+    def unretire(self, user):
+        if not self.retired:
+            return {'__all__': CONCEPT_IS_ALREADY_NOT_RETIRED}
+
+        return self.__update_retire(False, CONCEPT_WAS_UNRETIRED, user)
+
+    def __update_retire(self, retired, comment, user):
+        latest_version = self.get_latest_version()
+        new_version = latest_version.clone()
+        new_version.retired = retired
+        new_version.comment = comment
+        errors = Concept.persist_clone(new_version, user)
+        if not errors:
+            self.retired = retired
+            self.save()
         return errors

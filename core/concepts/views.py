@@ -122,7 +122,7 @@ class ConceptRetrieveUpdateDestroyView(ConceptBaseView, RetrieveAPIView, UpdateA
 
         self.parent_resource = self.object.parent
 
-        if self.parent_resource != self.parent_resource.get_latest_version():
+        if self.parent_resource != self.parent_resource.head:
             return Response(
                 {'non_field_errors': 'Parent version is not the latest. Cannot update concept.'},
                 status=status.HTTP_400_BAD_REQUEST
@@ -139,14 +139,20 @@ class ConceptRetrieveUpdateDestroyView(ConceptBaseView, RetrieveAPIView, UpdateA
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-    def delete(self, request, *args, **kwargs):
+    def destroy(self, request, *args, **kwargs):
         concept = self.get_object()
-        try:
-            concept.delete()
-        except Exception as ex:
-            return Response({'detail': ex.message}, status=status.HTTP_400_BAD_REQUEST)
+        if not concept:
+            return Response(
+                dict(non_field_errors='Could not find concept to retire'),
+                status=status.HTTP_404_NOT_FOUND
+            )
+        comment = request.data.get('update_comment', None) or request.data.get('comment', None)
+        errors = concept.retire(request.user, comment)
 
-        return Response({'detail': 'Successfully deleted concept.'}, status=status.HTTP_204_NO_CONTENT)
+        if errors:
+            return Response(errors, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class ConceptVersionsView(ConceptBaseView, ConceptDictionaryMixin, ListWithHeadersMixin):
