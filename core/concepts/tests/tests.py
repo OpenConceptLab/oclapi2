@@ -12,6 +12,7 @@ from core.concepts.constants import (
     OPENMRS_NO_MORE_THAN_ONE_SHORT_NAME_PER_LOCALE)
 from core.concepts.models import Concept
 from core.concepts.tests.factories import LocalizedTextFactory, ConceptFactory
+from core.concepts.validators import ValidatorSpecifier
 from core.sources.tests.factories import SourceFactory
 
 
@@ -377,3 +378,26 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
         )
         self.assertEqual(concept.errors, {})
         self.assertIsNotNone(concept.id)
+
+
+class ValidatorSpecifierTest(OCLTestCase):
+    def test_specifier_should_initialize_openmrs_validator_with_reference_values(self):
+        source = SourceFactory(custom_validation_schema=CUSTOM_VALIDATION_SCHEMA_OPENMRS, version=HEAD)
+        expected_reference_values = {
+            'DescriptionTypes': ['None', 'FULLY_SPECIFIED', 'Definition'],
+            'Datatypes': ['None', 'N/A', 'Numeric', 'Coded', 'Text'],
+            'Classes': ['Diagnosis', 'Drug', 'Test', 'Procedure'],
+            'Locales': ['en', 'es', 'fr', 'tr', 'Abkhazian', 'English'],
+            'NameTypes': ['FULLY_SPECIFIED', 'Fully Specified', 'Short', 'SHORT', 'INDEX_TERM', 'Index Term', 'None']}
+
+        validator = ValidatorSpecifier().with_validation_schema(
+            CUSTOM_VALIDATION_SCHEMA_OPENMRS
+        ).with_repo(source).with_reference_values().get()
+
+        actual_reference_values = validator.reference_values
+
+        self.assertEqual(expected_reference_values['DescriptionTypes'], actual_reference_values['DescriptionTypes'])
+        self.assertEqual(expected_reference_values['Datatypes'], actual_reference_values['Datatypes'])
+        self.assertEqual(expected_reference_values['Classes'], actual_reference_values['Classes'])
+        self.assertEqual(expected_reference_values['Locales'], actual_reference_values['Locales'])
+        self.assertEqual(expected_reference_values['NameTypes'], actual_reference_values['NameTypes'])
