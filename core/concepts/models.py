@@ -232,7 +232,8 @@ class Concept(VersionedModel, ConceptValidationMixin):  # pylint: disable=too-ma
             errors['version_created_by'] = 'Must specify which user is attempting to create a new concept version.'
             return errors
         obj.created_by = user
-        parent_head = obj.parent.head
+        parent = obj.parent
+        parent_head = parent.head
         persisted = False
         errored_action = 'saving new concept version'
         latest_versions = None
@@ -248,7 +249,12 @@ class Concept(VersionedModel, ConceptValidationMixin):  # pylint: disable=too-ma
             obj.is_latest_version = True
             obj.version = HEAD
             obj.save()
-            obj.sources.set(compact([obj.parent, parent_head]))
+            obj.sources.set(compact([parent, parent_head]))
+
+            # to update counts
+            parent.save()
+            parent_head.save()
+
             persisted = True
         except ValidationError as err:
             errors.update(err.message_dict)

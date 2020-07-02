@@ -176,3 +176,25 @@ class SourceTest(OCLTestCase):
         ).exists())
 
         self.assertEqual(concept.sources.count(), 1)
+
+    def test_child_count_updates(self):
+        source = SourceFactory(version=HEAD)
+        self.assertEqual(source.active_concepts, 0)
+        datetime_format = '%m/%d/%Y %H:%M:%s'
+        self.assertTrue(
+            source.updated_at.strftime(
+                datetime_format
+            ) == source.last_concept_update.strftime(
+                datetime_format
+            ) == source.last_child_update.strftime(
+                datetime_format
+            )
+        )
+
+        concept = ConceptFactory(sources=[source], parent=source)
+
+        source.save()
+
+        self.assertEqual(source.active_concepts, 1)
+        self.assertEquals(source.last_concept_update, concept.updated_at)
+        self.assertEquals(source.last_child_update, source.last_concept_update)

@@ -122,7 +122,13 @@ class ConceptDetailSerializer(ModelSerializer):
             instance.cloned_names = names
             instance.cloned_descriptions = descriptions
             instance.set_locales()
-            instance.sources.set([instance.parent, instance.parent.head])
+            parent_resource = instance.parent
+            parent_resource_head = parent_resource.head
+            instance.sources.set([parent_resource, parent_resource_head])
+
+            # to update counts
+            parent_resource.save()
+            parent_resource_head.save()
 
         return instance
 
