@@ -91,14 +91,18 @@ class BasicConceptValidator(BaseConceptValidator):
 
     @staticmethod
     def must_have_at_least_one_name(concept):
-        if not concept.names.exists():
-            raise ValidationError({'names': [BASIC_NAMES_CANNOT_BE_EMPTY]})
+        if concept.saved_unsaved_names:
+            return
+
+        raise ValidationError({'names': [BASIC_NAMES_CANNOT_BE_EMPTY]})
 
     @staticmethod
     def description_cannot_be_null(concept):
-        descriptions = concept.descriptions
-        if not descriptions.exists():
+        descriptions = concept.saved_unsaved_descriptions
+        if not descriptions:
             return
 
-        if descriptions.filter(name__isnull=True).exists():
+        empty_descriptions = list(filter(lambda description: not description.name, descriptions))
+
+        if empty_descriptions:
             raise ValidationError({'descriptions': [BASIC_DESCRIPTION_CANNOT_BE_EMPTY]})

@@ -1,4 +1,3 @@
-from django.db import IntegrityError
 from pydash import compact
 from rest_framework.fields import CharField, DateTimeField, BooleanField, URLField, JSONField
 from rest_framework.serializers import ModelSerializer
@@ -110,27 +109,9 @@ class ConceptDetailSerializer(ModelSerializer):
         )
 
     def create(self, validated_data):
-        names = [LocalizedText(**name) for name in validated_data.pop('names', [])]
-        descriptions = [LocalizedText(**name) for name in validated_data.pop('descriptions', [])]
-        try:
-            instance = super().create(validated_data)
-        except IntegrityError as ex:
-            self._errors.update(dict(__all__=ex.args))
-            return Concept()
-
-        if instance.id:
-            instance.cloned_names = names
-            instance.cloned_descriptions = descriptions
-            instance.set_locales()
-            parent_resource = instance.parent
-            parent_resource_head = parent_resource.head
-            instance.sources.set([parent_resource, parent_resource_head])
-
-            # to update counts
-            parent_resource.save()
-            parent_resource_head.save()
-
-        return instance
+        concept = Concept.persist_new(data=validated_data, user=self.context.get('request').user)
+        self._errors.update(concept.errors)
+        return concept
 
     def update(self, instance, validated_data):
         instance.concept_class = validated_data.get('concept_class', instance.concept_class)

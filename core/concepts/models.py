@@ -1,7 +1,7 @@
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
-from django.db import models
+from django.db import models, IntegrityError
 from django.db.models import F
 from pydash import get, compact
 
@@ -56,7 +56,7 @@ class LocalizedText(models.Model):
         return self.type in LOCALES_SEARCH_INDEX_TERM
 
 
-class Concept(VersionedModel, ConceptValidationMixin):  # pylint: disable=too-many-public-methods
+class Concept(ConceptValidationMixin, VersionedModel):  # pylint: disable=too-many-public-methods
     class Meta:
         db_table = 'concepts'
         unique_together = ('mnemonic', 'version', 'parent')
@@ -167,6 +167,22 @@ class Concept(VersionedModel, ConceptValidationMixin):  # pylint: disable=too-ma
             **LocalizedText.get_filter_criteria_for_attribute('is_short')
         )
 
+    @property
+    def saved_unsaved_descriptions(self):
+        unsaved_descriptions = get(self, 'cloned_descriptions', [])
+        if self.id:
+            return compact([*list(self.descriptions.all()), *unsaved_descriptions])
+        return unsaved_descriptions
+
+    @property
+    def saved_unsaved_names(self):
+        unsaved_names = get(self, 'cloned_names', [])
+
+        if self.id:
+            return compact([*list(self.names.all()), *unsaved_names])
+
+        return unsaved_names
+
     def clone(self):
         concept_version = Concept(
             mnemonic=self.mnemonic,
@@ -224,6 +240,42 @@ class Concept(VersionedModel, ConceptValidationMixin):  # pylint: disable=too-ma
 
     def clone_description_locales(self):
         return [desc.clone() for desc in self.descriptions.all()]
+
+    @classmethod
+    def persist_new(cls, data, user=None):
+        names = [
+            name if isinstance(name, LocalizedText) else LocalizedText(**name) for name in data.pop('names', [])
+        ]
+        descriptions = [
+            desc if isinstance(desc, LocalizedText) else LocalizedText(**desc) for desc in data.pop('descriptions', [])
+        ]
+        concept = Concept(**{**data, 'version': HEAD})
+        if user:
+            concept.created_by = concept.updated_by = user
+        concept.errors = dict()
+
+        try:
+            concept.cloned_names = names
+            concept.cloned_descriptions = descriptions
+            concept.full_clean()
+            concept.save()
+        except ValidationError as ex:
+            concept.errors.update(ex.message_dict)
+        except IntegrityError as ex:
+            concept.errors.update(dict(__all__=ex.args))
+
+        if concept.id:
+            concept.set_locales()
+            parent_resource = concept.parent
+            parent_resource_head = parent_resource.head
+            concept.sources.set([parent_resource, parent_resource_head])
+
+            # to update counts
+            parent_resource.save()
+            parent_resource_head.save()
+
+        return concept
+
 
     @classmethod
     def persist_clone(cls, obj, user=None, **kwargs):

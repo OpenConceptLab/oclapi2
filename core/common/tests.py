@@ -8,6 +8,7 @@ from django.test import TestCase
 from django.test.runner import DiscoverRunner
 from moto import mock_s3
 
+from core.common.constants import HEAD
 from core.concepts.models import Concept, LocalizedText
 from core.orgs.models import Organization
 from core.sources.models import Source
@@ -31,6 +32,150 @@ class OCLTestCase(TestCase):
         Source.objects.all().delete()
         Organization.objects.exclude(id=1).all().delete()
         UserProfile.objects.exclude(id=1).all().delete()
+
+    @staticmethod
+    def create_lookup_concept_classes(user=None, org=None):
+        from core.sources.tests.factories import SourceFactory
+        from core.concepts.tests.factories import LocalizedTextFactory, ConceptFactory
+
+        org = org or Organization.objects.get(mnemonic='OCL')
+        user = user or UserProfile.objects.get(username='ocladmin')
+
+        classes_source = SourceFactory(updated_by=user, organization=org, mnemonic="Classes", version=HEAD)
+        datatypes_source = SourceFactory(updated_by=user, organization=org, mnemonic="Datatypes", version=HEAD)
+        nametypes_source = SourceFactory(updated_by=user, organization=org, mnemonic="NameTypes", version=HEAD)
+        descriptiontypes_source = SourceFactory(
+            updated_by=user, organization=org, mnemonic="DescriptionTypes", version=HEAD
+        )
+        maptypes_source = SourceFactory(updated_by=user, organization=org, mnemonic="MapTypes", version=HEAD)
+        locales_source = SourceFactory(updated_by=user, organization=org, mnemonic="Locales", version=HEAD)
+
+        ConceptFactory(
+            version=HEAD, updated_by=user, parent=classes_source, concept_class="Concept Class",
+            names=[LocalizedTextFactory(name="Diagnosis")]
+        )
+        ConceptFactory(
+            version=HEAD, updated_by=user, parent=classes_source, concept_class="Concept Class",
+            names=[LocalizedTextFactory(name="Drug")]
+        )
+        ConceptFactory(
+            version=HEAD, updated_by=user, parent=classes_source, concept_class="Concept Class",
+            names=[LocalizedTextFactory(name="Test")]
+        )
+        ConceptFactory(
+            version=HEAD, updated_by=user, parent=classes_source, concept_class="Concept Class",
+            names=[LocalizedTextFactory(name="Procedure")]
+        )
+        ConceptFactory(
+            version=HEAD, updated_by=user, parent=datatypes_source, concept_class="Datatype",
+            names=[LocalizedTextFactory(name="None"), LocalizedTextFactory(name="N/A")]
+        )
+        ConceptFactory(
+            version=HEAD, updated_by=user, parent=datatypes_source, concept_class="Datatype",
+            names=[LocalizedTextFactory(name="Numeric")]
+        )
+        ConceptFactory(
+            version=HEAD, updated_by=user, parent=datatypes_source, concept_class="Datatype",
+            names=[LocalizedTextFactory(name="Coded")]
+        )
+        ConceptFactory(
+            version=HEAD, updated_by=user, parent=datatypes_source, concept_class="Datatype",
+            names=[LocalizedTextFactory(name="Text")]
+        )
+        ConceptFactory(
+            version=HEAD, updated_by=user, parent=nametypes_source, concept_class="NameType",
+            names=[LocalizedTextFactory(name="FULLY_SPECIFIED"), LocalizedTextFactory(name="Fully Specified")]
+        )
+        ConceptFactory(
+            version=HEAD, updated_by=user, parent=nametypes_source, concept_class="NameType",
+            names=[LocalizedTextFactory(name="Short"), LocalizedTextFactory(name="SHORT")]
+        )
+        ConceptFactory(
+            version=HEAD, updated_by=user, parent=nametypes_source, concept_class="NameType",
+            names=[LocalizedTextFactory(name="INDEX_TERM"), LocalizedTextFactory(name="Index Term")]
+        )
+        ConceptFactory(
+            version=HEAD, updated_by=user, parent=nametypes_source, concept_class="NameType",
+            names=[LocalizedTextFactory(name="None")]
+        )
+        ConceptFactory(
+            version=HEAD, updated_by=user, parent=descriptiontypes_source, concept_class="DescriptionType",
+            names=[LocalizedTextFactory(name="None")]
+        )
+        ConceptFactory(
+            version=HEAD, updated_by=user, parent=descriptiontypes_source, concept_class="DescriptionType",
+            names=[LocalizedTextFactory(name="FULLY_SPECIFIED")]
+        )
+        ConceptFactory(
+            version=HEAD, updated_by=user, parent=descriptiontypes_source, concept_class="DescriptionType",
+            names=[LocalizedTextFactory(name="Definition")]
+        )
+        ConceptFactory(
+            version=HEAD, updated_by=user, parent=maptypes_source, concept_class="MapType",
+            names=[LocalizedTextFactory(name="SAME-AS"), LocalizedTextFactory(name="Same As")]
+        )
+        ConceptFactory(
+            version=HEAD, updated_by=user, parent=maptypes_source, concept_class="MapType",
+            names=[LocalizedTextFactory(name="Is Subset of")]
+        )
+        ConceptFactory(
+            version=HEAD, updated_by=user, parent=maptypes_source, concept_class="MapType",
+            names=[LocalizedTextFactory(name="Different")]
+        )
+        ConceptFactory(
+            version=HEAD, updated_by=user, parent=maptypes_source, concept_class="MapType",
+            names=[
+                LocalizedTextFactory(name="BROADER-THAN"), LocalizedTextFactory(name="Broader Than"),
+                LocalizedTextFactory(name="BROADER_THAN")
+            ]
+        )
+        ConceptFactory(
+            version=HEAD, updated_by=user, parent=maptypes_source, concept_class="MapType",
+            names=[
+                LocalizedTextFactory(name="NARROWER-THAN"), LocalizedTextFactory(name="Narrower Than"),
+                LocalizedTextFactory(name="NARROWER_THAN")
+            ]
+        )
+        ConceptFactory(
+            version=HEAD, updated_by=user, parent=maptypes_source, concept_class="MapType",
+            names=[LocalizedTextFactory(name="Q-AND-A")]
+        )
+        ConceptFactory(
+            version=HEAD, updated_by=user, parent=maptypes_source, concept_class="MapType",
+            names=[LocalizedTextFactory(name="More specific than")]
+        )
+        ConceptFactory(
+            version=HEAD, updated_by=user, parent=maptypes_source, concept_class="MapType",
+            names=[LocalizedTextFactory(name="Less specific than")]
+        )
+        ConceptFactory(
+            version=HEAD, updated_by=user, parent=maptypes_source, concept_class="MapType",
+            names=[LocalizedTextFactory(name="Something Else")]
+        )
+        ConceptFactory(
+            version=HEAD, updated_by=user, parent=locales_source, concept_class="Locale",
+            names=[LocalizedTextFactory(name="en")]
+        )
+        ConceptFactory(
+            version=HEAD, updated_by=user, parent=locales_source, concept_class="Locale",
+            names=[LocalizedTextFactory(name="es")]
+        )
+        ConceptFactory(
+            version=HEAD, updated_by=user, parent=locales_source, concept_class="Locale",
+            names=[LocalizedTextFactory(name="fr")]
+        )
+        ConceptFactory(
+            version=HEAD, updated_by=user, parent=locales_source, concept_class="Locale",
+            names=[LocalizedTextFactory(name="tr")]
+        )
+        ConceptFactory(
+            version=HEAD, updated_by=user, parent=locales_source, concept_class="Locale",
+            names=[LocalizedTextFactory(name="Abkhazian")]
+        )
+        ConceptFactory(
+            version=HEAD, updated_by=user, parent=locales_source, concept_class="Locale",
+            names=[LocalizedTextFactory(name="English")]
+        )
 
 
 class S3Test(TestCase):
