@@ -198,8 +198,8 @@ class Concept(ConceptValidationMixin, VersionedModel):  # pylint: disable=too-ma
             is_latest_version=self.is_latest_version,
             parent_id=self.parent_id,
         )
-        concept_version.cloned_names = self.clone_name_locales()
-        concept_version.cloned_descriptions = self.clone_description_locales()
+        concept_version.cloned_names = self.__clone_name_locales()
+        concept_version.cloned_descriptions = self.__clone_description_locales()
 
         return concept_version
 
@@ -235,10 +235,10 @@ class Concept(ConceptValidationMixin, VersionedModel):  # pylint: disable=too-ma
         self.names.all().delete()
         self.descriptions.all().delete()
 
-    def clone_name_locales(self):
+    def __clone_name_locales(self):
         return [name.clone() for name in self.names.all()]
 
-    def clone_description_locales(self):
+    def __clone_description_locales(self):
         return [desc.clone() for desc in self.descriptions.all()]
 
     @classmethod
@@ -275,7 +275,6 @@ class Concept(ConceptValidationMixin, VersionedModel):  # pylint: disable=too-ma
             parent_resource_head.save()
 
         return concept
-
 
     @classmethod
     def persist_clone(cls, obj, user=None, **kwargs):
@@ -325,24 +324,20 @@ class Concept(ConceptValidationMixin, VersionedModel):  # pylint: disable=too-ma
         return errors
 
     def retire(self, user, comment=None):
-        if self.retired:
+        if self.head.retired:
             return {'__all__': CONCEPT_IS_ALREADY_RETIRED}
 
         return self.__update_retire(True, comment or CONCEPT_WAS_RETIRED, user)
 
-    def unretire(self, user):
-        if not self.retired:
+    def unretire(self, user, comment=None):
+        if not self.head.retired:
             return {'__all__': CONCEPT_IS_ALREADY_NOT_RETIRED}
 
-        return self.__update_retire(False, CONCEPT_WAS_UNRETIRED, user)
+        return self.__update_retire(False, comment or CONCEPT_WAS_UNRETIRED, user)
 
     def __update_retire(self, retired, comment, user):
         latest_version = self.get_latest_version()
         new_version = latest_version.clone()
         new_version.retired = retired
         new_version.comment = comment
-        errors = Concept.persist_clone(new_version, user)
-        if not errors:
-            self.retired = retired
-            self.save()
-        return errors
+        return Concept.persist_clone(new_version, user)

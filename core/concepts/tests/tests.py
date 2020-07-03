@@ -9,7 +9,8 @@ from core.concepts.constants import (
     OPENMRS_FULLY_SPECIFIED_NAME_UNIQUE_PER_SOURCE_LOCALE, OPENMRS_AT_LEAST_ONE_FULLY_SPECIFIED_NAME,
     OPENMRS_PREFERRED_NAME_UNIQUE_PER_SOURCE_LOCALE, OPENMRS_SHORT_NAME_CANNOT_BE_PREFERRED,
     SHORT, INDEX_TERM, OPENMRS_NAMES_EXCEPT_SHORT_MUST_BE_UNIQUE, OPENMRS_ONE_FULLY_SPECIFIED_NAME_PER_LOCALE,
-    OPENMRS_NO_MORE_THAN_ONE_SHORT_NAME_PER_LOCALE)
+    OPENMRS_NO_MORE_THAN_ONE_SHORT_NAME_PER_LOCALE, CONCEPT_IS_ALREADY_RETIRED, CONCEPT_IS_ALREADY_NOT_RETIRED,
+    OPENMRS_CONCEPT_CLASS, OPENMRS_DATATYPE, OPENMRS_DESCRIPTION_TYPE, OPENMRS_NAME_LOCALE, OPENMRS_DESCRIPTION_LOCALE)
 from core.concepts.models import Concept
 from core.concepts.tests.factories import LocalizedTextFactory, ConceptFactory
 from core.concepts.validators import ValidatorSpecifier
@@ -77,6 +78,19 @@ class ConceptTest(OCLTestCase):
 
         self.assertEqual(concept.descriptions_for_default_locale, [en_locale.name])
 
+    def test_persist_new(self):
+        source = SourceFactory(version=HEAD)
+        concept = Concept.persist_new({
+            **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'c1', 'parent': source,
+            'names': [LocalizedTextFactory.build(locale='en', name='English', locale_preferred=True)]
+        })
+
+        self.assertEqual(concept.errors, {})
+        self.assertIsNotNone(concept.id)
+        self.assertEqual(concept.version, HEAD)
+        self.assertEqual(source.concepts_set.count(), 1)
+        self.assertEqual(source.concepts.count(), 1)
+
     @patch('core.concepts.models.LocalizedText.clone')
     def test_clone(self, locale_clone_mock):
         es_locale = LocalizedTextFactory(locale='es', name='Not English')
@@ -139,10 +153,138 @@ class ConceptTest(OCLTestCase):
         self.assertEqual(persisted_concept.sources.count(), 2)
         self.assertEqual(source_head.concepts.first().id, persisted_concept.id)
 
+    def test_retire(self):
+        source = SourceFactory(version=HEAD)
+        concept = Concept.persist_new({
+            **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'c1', 'parent': source,
+            'names': [LocalizedTextFactory.build(locale='en', name='English', locale_preferred=True)]
+        })
+
+        self.assertEqual(concept.versions.count(), 1)
+        self.assertFalse(concept.retired)
+        self.assertTrue(concept.is_head)
+
+        concept.retire(concept.created_by, 'Forceful retirement')  # concept will become old/prev version
+        concept.refresh_from_db()
+
+        self.assertFalse(concept.is_head)
+        self.assertEqual(concept.versions.count(), 2)
+        self.assertFalse(concept.retired)
+        latest_version = concept.get_latest_version()
+        self.assertTrue(latest_version.retired)
+        self.assertEqual(latest_version.comment, 'Forceful retirement')
+
+        self.assertEqual(
+            concept.retire(concept.created_by),
+            {'__all__': CONCEPT_IS_ALREADY_RETIRED}
+        )
+
+    def test_unretire(self):
+        source = SourceFactory(version=HEAD)
+        concept = Concept.persist_new({
+            **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'c1', 'parent': source, 'retired': True,
+            'names': [LocalizedTextFactory.build(locale='en', name='English', locale_preferred=True)]
+        })
+
+        self.assertEqual(concept.versions.count(), 1)
+        self.assertTrue(concept.retired)
+        self.assertTrue(concept.is_head)
+
+        concept.unretire(concept.created_by, 'World needs you!')  # concept will become old/prev version
+        concept.refresh_from_db()
+
+        self.assertFalse(concept.is_head)
+        self.assertEqual(concept.versions.count(), 2)
+        self.assertTrue(concept.retired)
+        latest_version = concept.get_latest_version()
+        self.assertFalse(latest_version.retired)
+        self.assertEqual(latest_version.comment, 'World needs you!')
+
+        self.assertEqual(
+            concept.unretire(concept.created_by),
+            {'__all__': CONCEPT_IS_ALREADY_NOT_RETIRED}
+        )
+
 
 class OpenMRSConceptValidatorTest(OCLTestCase):
     def setUp(self):
         self.create_lookup_concept_classes()
+
+    def test_concept_class_is_valid_attribute_negative(self):
+        source = SourceFactory(custom_validation_schema=CUSTOM_VALIDATION_SCHEMA_OPENMRS)
+        concept = Concept.persist_new(
+            dict(
+                mnemonic='concept1', version=HEAD, name='concept1', parent=source,
+                concept_class='XYZQWERT', datatype='None',
+                names=[LocalizedTextFactory.build(name='Grip', locale='es', locale_preferred=True)]
+            )
+        )
+
+        self.assertEqual(
+            concept.errors,
+            dict(concept_class=[OPENMRS_CONCEPT_CLASS])
+        )
+
+    def test_data_type_is_valid_attribute_negative(self):
+        source = SourceFactory(custom_validation_schema=CUSTOM_VALIDATION_SCHEMA_OPENMRS)
+        concept = Concept.persist_new(
+            dict(
+                mnemonic='concept1', version=HEAD, name='concept1', parent=source,
+                concept_class='Diagnosis', datatype='XYZWERRTR',
+                names=[LocalizedTextFactory.build(name='Grip', locale='es', locale_preferred=True)]
+            )
+        )
+        self.assertEqual(
+            concept.errors,
+            dict(data_type=[OPENMRS_DATATYPE])
+        )
+
+    def test_description_type_is_valid_attribute_negative(self):
+        source = SourceFactory(custom_validation_schema=CUSTOM_VALIDATION_SCHEMA_OPENMRS)
+        concept = Concept.persist_new(
+            dict(
+                mnemonic='concept1', version=HEAD, name='concept1', parent=source,
+                concept_class='Diagnosis', datatype='None',
+                names=[LocalizedTextFactory.build(locale_preferred=True)],
+                descriptions=[LocalizedTextFactory.build(type='XYZWERRTR')]
+            )
+        )
+
+        self.assertEqual(
+            concept.errors,
+            dict(descriptions=[OPENMRS_DESCRIPTION_TYPE])
+        )
+
+    def test_name_locale_is_valid_attribute_negative(self):
+        source = SourceFactory(custom_validation_schema=CUSTOM_VALIDATION_SCHEMA_OPENMRS)
+        concept = Concept.persist_new(
+            dict(
+                mnemonic='concept1', version=HEAD, name='concept1', parent=source,
+                concept_class='Diagnosis', datatype='None',
+                names=[LocalizedTextFactory.build(locale_preferred=True, locale='FOOBAR')],
+                descriptions=[LocalizedTextFactory.build(locale_preferred=True)]
+            )
+        )
+
+        self.assertEqual(
+            concept.errors,
+            dict(names=[OPENMRS_NAME_LOCALE])
+        )
+
+    def test_description_locale_is_valid_attribute_negative(self):
+        source = SourceFactory(custom_validation_schema=CUSTOM_VALIDATION_SCHEMA_OPENMRS)
+        concept = Concept.persist_new(
+            dict(
+                mnemonic='concept1', version=HEAD, name='concept1', parent=source,
+                concept_class='Diagnosis', datatype='None',
+                names=[LocalizedTextFactory.build(locale_preferred=True)],
+                descriptions=[LocalizedTextFactory.build(locale_preferred=True, locale='FOOBAR')]
+            )
+        )
+        self.assertEqual(
+            concept.errors,
+            dict(descriptions=[OPENMRS_DESCRIPTION_LOCALE])
+        )
 
     def test_concept_should_have_exactly_one_preferred_name_per_locale(self):
         name_en1 = LocalizedTextFactory.build(name='PreferredName1', locale_preferred=True)
@@ -396,8 +538,10 @@ class ValidatorSpecifierTest(OCLTestCase):
 
         actual_reference_values = validator.reference_values
 
-        self.assertEqual(expected_reference_values['DescriptionTypes'], actual_reference_values['DescriptionTypes'])
-        self.assertEqual(expected_reference_values['Datatypes'], actual_reference_values['Datatypes'])
-        self.assertEqual(expected_reference_values['Classes'], actual_reference_values['Classes'])
-        self.assertEqual(expected_reference_values['Locales'], actual_reference_values['Locales'])
-        self.assertEqual(expected_reference_values['NameTypes'], actual_reference_values['NameTypes'])
+        self.assertEqual(sorted(expected_reference_values['Datatypes']), sorted(actual_reference_values['Datatypes']))
+        self.assertEqual(sorted(expected_reference_values['Classes']), sorted(actual_reference_values['Classes']))
+        self.assertEqual(sorted(expected_reference_values['Locales']), sorted(actual_reference_values['Locales']))
+        self.assertEqual(sorted(expected_reference_values['NameTypes']), sorted(actual_reference_values['NameTypes']))
+        self.assertEqual(
+            sorted(expected_reference_values['DescriptionTypes']), sorted(actual_reference_values['DescriptionTypes'])
+        )
