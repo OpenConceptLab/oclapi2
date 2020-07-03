@@ -77,6 +77,14 @@ class ConceptTest(OCLTestCase):
         concept = ConceptFactory(descriptions=(es_locale, en_locale))
 
         self.assertEqual(concept.descriptions_for_default_locale, [en_locale.name])
+        
+    def test_all_names(self):
+        concept = ConceptFactory(names=[
+                    LocalizedTextFactory(name="name1", locale='en', locale_preferred=True),
+                    LocalizedTextFactory(name='name2', locale='en', type='Short'),
+                ])
+        
+        self.assertEqual(concept.all_names, ['name1', 'name2'])
 
     def test_persist_new(self):
         source = SourceFactory(version=HEAD)

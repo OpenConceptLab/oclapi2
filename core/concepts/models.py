@@ -168,6 +168,10 @@ class Concept(ConceptValidationMixin, VersionedModel):  # pylint: disable=too-ma
         )
 
     @property
+    def all_names(self):
+        return list(self.names.values_list('name', flat=True))
+
+    @property
     def saved_unsaved_descriptions(self):
         unsaved_descriptions = get(self, 'cloned_descriptions', [])
         if self.id:
