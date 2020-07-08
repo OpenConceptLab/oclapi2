@@ -2,29 +2,13 @@ import os
 import tempfile
 import zipfile
 
-from boto.s3.connection import S3Connection
 from dateutil import parser
-from django.conf import settings
-from django.urls import NoReverseMatch, reverse
+from django.urls import NoReverseMatch, reverse, get_resolver
 from djqscsv import csv_file_for
+from pydash import flatten
 
 from core.common.constants import UPDATED_SINCE_PARAM
 from core.common.services import S3
-
-
-class S3ConnectionFactory:
-    s3_connection = None
-
-    @classmethod
-    def get_s3_connection(cls):
-        if not cls.s3_connection:
-            cls.s3_connection = S3Connection(settings.AWS_ACCESS_KEY_ID, settings.AWS_SECRET_ACCESS_KEY)
-        return cls.s3_connection
-
-    @classmethod
-    def get_export_bucket(cls):
-        conn = cls.get_s3_connection()
-        return conn.get_bucket(settings.AWS_STORAGE_BUCKET_NAME)
 
 
 def cd_temp():
@@ -46,6 +30,15 @@ def write_csv_to_s3(data, is_owner, **kwargs):
     S3.upload_file(file_path)
     os.chdir(cwd)
     return S3.url_for(file_path)
+
+
+def compact_dict_by_values(_dict):
+    copied_dict = _dict.copy()
+    for key, value in copied_dict.copy().items():
+        if not value:
+            copied_dict.pop(key)
+
+    return copied_dict
 
 
 def get_downloads_path(is_owner):
@@ -75,8 +68,25 @@ def reverse_resource(resource, viewname, args=None, kwargs=None, **extra):
     while parent is not None:
         if not hasattr(parent, 'get_url_kwarg'):
             return NoReverseMatch('Cannot get URL kwarg for %s' % resource)
-        kwargs.update({parent.get_url_kwarg(): parent.mnemonic})
+
+        if parent.is_versioned and not parent.is_head:
+            from core.collections.models import Collection
+            from core.sources.models import Source
+            if isinstance(parent, (Source, Collection)):
+                head = parent.get_latest_version()
+            else:
+                head = parent.head
+            kwargs.update({head.get_url_kwarg(): head.mnemonic, parent.get_url_kwarg(): parent.version})
+            if parent.get_resource_url_kwarg() not in kwargs:
+                kwargs.update({parent.get_resource_url_kwarg(): parent.mnemonic})
+        else:
+            kwargs.update({parent.get_url_kwarg(): parent.mnemonic})
         parent = parent.parent if hasattr(parent, 'parent') else None
+        allowed_kwargs = get_kwargs_for_view(viewname)
+        for key in kwargs.copy():
+            if key not in allowed_kwargs:
+                kwargs.pop(key)
+
     return reverse(viewname=viewname, args=args, kwargs=kwargs, **extra)
 
 
@@ -86,14 +96,30 @@ def reverse_resource_version(resource, viewname, args=None, kwargs=None, **extra
     versioned by the object specified as resource.
     Assumes that resource extends ResourceVersionMixin, and therefore has a versioned_object attribute.
     """
+    from core.collections.models import Collection
+    from core.sources.models import Source
+    if isinstance(resource, (Source, Collection)):
+        head = resource.get_latest_version()
+    else:
+        head = resource.head
+
     kwargs = kwargs or {}
-    val = None
-    if resource.mnemonic and resource.mnemonic != '':
-        val = resource.mnemonic
     kwargs.update({
-        resource.get_url_kwarg(): val
+        resource.get_url_kwarg(): resource.version,
+        head.get_url_kwarg(): head.mnemonic,
     })
-    return reverse_resource(resource.versioned_object, viewname, args, kwargs, **extra)
+    resource_url_kwarg = resource.get_resource_url_kwarg()
+
+    if resource_url_kwarg not in kwargs:
+        kwargs[resource_url_kwarg] = resource.mnemonic
+
+    return reverse_resource(resource, viewname, args, kwargs, **extra)
+
+
+def get_kwargs_for_view(view_name):
+    resolver = get_resolver()
+    patterns = resolver.reverse_dict.getlist(view_name)
+    return list(set(flatten([p[0][0][1] for p in patterns])))
 
 
 def parse_updated_since_param(request):

@@ -105,7 +105,7 @@ class ConceptDetailSerializer(ModelSerializer):
         fields = (
             'id', 'external_id', 'concept_class', 'datatype', 'url', 'retired', 'source',
             'owner', 'owner_type', 'owner_url', 'display_name', 'display_locale', 'names', 'descriptions',
-            'created_on', 'updated_on', 'versions_url', 'version', 'extras', 'parent_id'
+            'created_on', 'updated_on', 'versions_url', 'version', 'extras', 'parent_id',
         )
 
     def create(self, validated_data):
@@ -153,5 +153,5 @@ class ConceptVersionDetailSerializer(ModelSerializer):
             'type', 'uuid', 'id', 'external_id', 'concept_class', 'datatype', 'display_name', 'display_locale',
             'names', 'descriptions', 'extras', 'retired', 'source', 'source_url', 'owner', 'owner_name', 'owner_url',
             'version', 'created_on', 'updated_on', 'version_created_on', 'version_created_by', 'extras',
-            'is_latest_version', 'locale'
+            'is_latest_version', 'locale', 'url'
         )

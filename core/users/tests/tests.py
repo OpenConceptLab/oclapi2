@@ -1,8 +1,10 @@
 from mock import Mock, patch
 
+from core.collections.tests.factories import CollectionFactory
 from core.common.constants import ACCESS_TYPE_NONE, HEAD
 from core.common.tests import OCLTestCase
 from core.orgs.models import Organization
+from core.sources.tests.factories import SourceFactory
 from core.users.constants import USER_OBJECT_TYPE
 from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
@@ -79,3 +81,26 @@ class UserProfileTest(OCLTestCase):
         user.delete()
 
         self.assertFalse(UserProfile.objects.filter(id=user_id).exists())
+
+    def test_user_active_inactive_should_affect_children(self):
+        user = UserProfileFactory(is_active=True)
+        source = SourceFactory(user=user, is_active=True)
+        collection = CollectionFactory(user=user, is_active=True)
+
+        user.is_active = False
+        user.save()
+        source.refresh_from_db()
+        collection.refresh_from_db()
+
+        self.assertFalse(user.is_active)
+        self.assertFalse(source.is_active)
+        self.assertFalse(collection.is_active)
+
+        user.is_active = True
+        user.save()
+        source.refresh_from_db()
+        collection.refresh_from_db()
+
+        self.assertTrue(user.is_active)
+        self.assertTrue(source.is_active)
+        self.assertTrue(collection.is_active)

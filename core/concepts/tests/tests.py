@@ -2,7 +2,7 @@ import factory
 from mock import patch
 from pydash import omit
 
-from core.common.constants import CUSTOM_VALIDATION_SCHEMA_OPENMRS, HEAD
+from core.common.constants import CUSTOM_VALIDATION_SCHEMA_OPENMRS, HEAD, ACCESS_TYPE_EDIT, ACCESS_TYPE_VIEW
 from core.common.tests import OCLTestCase
 from core.concepts.constants import (
     OPENMRS_MUST_HAVE_EXACTLY_ONE_PREFERRED_NAME,
@@ -29,6 +29,9 @@ class LocalizedTextTest(OCLTestCase):
 
 
 class ConceptTest(OCLTestCase):
+    def test_is_versioned(self):
+        self.assertTrue(Concept().is_versioned)
+
     def test_display_name(self):
         concept = ConceptFactory(names=())
         self.assertIsNone(concept.display_name)
@@ -77,13 +80,15 @@ class ConceptTest(OCLTestCase):
         concept = ConceptFactory(descriptions=(es_locale, en_locale))
 
         self.assertEqual(concept.descriptions_for_default_locale, [en_locale.name])
-        
+
     def test_all_names(self):
-        concept = ConceptFactory(names=[
-                    LocalizedTextFactory(name="name1", locale='en', locale_preferred=True),
-                    LocalizedTextFactory(name='name2', locale='en', type='Short'),
-                ])
-        
+        concept = ConceptFactory(
+            names=[
+                LocalizedTextFactory(name="name1", locale='en', locale_preferred=True),
+                LocalizedTextFactory(name='name2', locale='en', type='Short')
+            ]
+        )
+
         self.assertEqual(concept.all_names, ['name1', 'name2'])
 
     def test_persist_new(self):
@@ -98,6 +103,10 @@ class ConceptTest(OCLTestCase):
         self.assertEqual(concept.version, HEAD)
         self.assertEqual(source.concepts_set.count(), 1)
         self.assertEqual(source.concepts.count(), 1)
+        self.assertEqual(
+            concept.uri,
+            '/orgs/{}/sources/{}/concepts/{}/'.format(source.organization.mnemonic, source.mnemonic, concept.mnemonic)
+        )
 
     @patch('core.concepts.models.LocalizedText.clone')
     def test_clone(self, locale_clone_mock):
@@ -132,9 +141,9 @@ class ConceptTest(OCLTestCase):
         es_locale = LocalizedTextFactory(locale='es', name='Not English')
         en_locale = LocalizedTextFactory(locale='en', name='English')
 
-        source_version0 = SourceFactory(version='v0')
-        source_head = SourceFactory(
-            version='HEAD', mnemonic=source_version0.mnemonic, organization=source_version0.organization
+        source_head = SourceFactory(version='HEAD')
+        source_version0 = SourceFactory(
+            version='v0', mnemonic=source_head.mnemonic, organization=source_head.organization
         )
 
         self.assertEqual(source_head.versions.count(), 2)
@@ -160,6 +169,13 @@ class ConceptTest(OCLTestCase):
         self.assertEqual(persisted_concept.parent, source_version0)
         self.assertEqual(persisted_concept.sources.count(), 2)
         self.assertEqual(source_head.concepts.first().id, persisted_concept.id)
+        self.assertEqual(
+            persisted_concept.uri,
+            '/orgs/{}/sources/{}/{}/concepts/{}/'.format(
+                source_version0.organization.mnemonic, source_version0.mnemonic, source_version0.version,
+                persisted_concept.mnemonic
+            )
+        )
 
     def test_retire(self):
         source = SourceFactory(version=HEAD)
@@ -212,6 +228,20 @@ class ConceptTest(OCLTestCase):
             concept.unretire(concept.created_by),
             {'__all__': CONCEPT_IS_ALREADY_NOT_RETIRED}
         )
+
+    def test_concept_access_changes_with_source(self):
+        source = SourceFactory(version=HEAD)
+        self.assertEqual(source.public_access, ACCESS_TYPE_EDIT)
+        concept = ConceptFactory(parent=source, public_access=ACCESS_TYPE_EDIT)
+
+        self.assertEqual(concept.public_access, ACCESS_TYPE_EDIT)
+
+        source.public_access = ACCESS_TYPE_VIEW
+        source.save()
+        concept.refresh_from_db()
+
+        self.assertEqual(source.public_access, ACCESS_TYPE_VIEW)
+        self.assertEqual(source.public_access, concept.public_access)
 
 
 class OpenMRSConceptValidatorTest(OCLTestCase):

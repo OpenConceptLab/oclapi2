@@ -8,7 +8,7 @@ class UserProfileFactory(factory.django.DjangoModelFactory):
     class Meta:
         model = UserProfile
     email = Sequence("email{}@test.com".format)
-    username = Sequence("email{}@test.com".format)
+    username = Sequence("username{}".format)
     first_name = Sequence("First-{}".format)
     last_name = Sequence("Last-{}".format)
     password = 'Password1$'

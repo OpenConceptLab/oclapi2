@@ -14,19 +14,26 @@ class SourceTest(OCLTestCase):
         self.new_source = SourceFactory.build(organization=None)
         self.user = UserProfileFactory()
 
+    def test_is_versioned(self):
+        self.assertTrue(Source().is_versioned)
+
     def test_persist_new_positive(self):
         kwargs = {
             'parent_resource': self.user
         }
         errors = Source.persist_new(self.new_source, self.user, **kwargs)
-        source = Source.objects.get(name=self.new_source.name)
 
+        source = Source.objects.get(name=self.new_source.name)
         self.assertEqual(len(errors), 0)
         self.assertTrue(Source.objects.filter(name=self.new_source.name).exists())
         self.assertEqual(source.num_versions, 1)
         self.assertEqual(source.get_latest_version(), source)
         self.assertEqual(source.version, 'HEAD')
         self.assertFalse(source.released)
+        self.assertEqual(
+            source.uri,
+            '/users/{username}/sources/{source}/'.format(username=self.user.username, source=source.mnemonic)
+        )
 
     def test_persist_new_negative__no_parent(self):
         errors = Source.persist_new(self.new_source, self.user)
@@ -76,6 +83,10 @@ class SourceTest(OCLTestCase):
         self.assertEqual(updated_source.head, updated_source)
         self.assertEqual(updated_source.name, self.new_source.name)
         self.assertEqual(updated_source.source_type, 'Reference')
+        self.assertEqual(
+            updated_source.uri,
+            '/users/{username}/sources/{source}/'.format(username=self.user.username, source=updated_source.mnemonic)
+        )
 
     def test_persist_changes_negative__repeated_mnemonic(self):
         kwargs = {
@@ -111,6 +122,13 @@ class SourceTest(OCLTestCase):
         self.assertEqual(source.organization.mnemonic, source_version.parent_resource)
         self.assertEqual(source.organization.resource_type, source_version.parent_resource_type)
         self.assertEqual(source_version, source.get_latest_version())
+        self.assertEqual(
+            source_version.uri,
+            '/orgs/{org}/sources/{source}/{version}/'.format(
+                org=source_version.organization.mnemonic,
+                source=source_version.mnemonic, version=source_version.version
+            )
+        )
 
     def test_source_version_create_negative__same_version(self):
         source = SourceFactory()
@@ -149,7 +167,7 @@ class SourceTest(OCLTestCase):
 
     def test_source_version_delete(self):
         source = SourceFactory(version=HEAD)
-        concept = ConceptFactory(mnemonic='concept1', version=HEAD, sources=[source])
+        concept = ConceptFactory(mnemonic='concept1', version=HEAD, sources=[source], parent=source)
         self.assertEqual(concept.sources.count(), 1)
         version1 = Source(
             name='version1',
@@ -198,3 +216,21 @@ class SourceTest(OCLTestCase):
         self.assertEqual(source.active_concepts, 1)
         self.assertEqual(source.last_concept_update, concept.updated_at)
         self.assertEqual(source.last_child_update, source.last_concept_update)
+
+    def test_source_active_inactive_should_affect_children(self):
+        source = SourceFactory(is_active=True)
+        concept = ConceptFactory(parent=source, is_active=True)
+
+        source.is_active = False
+        source.save()
+        concept.refresh_from_db()
+
+        self.assertFalse(source.is_active)
+        self.assertFalse(concept.is_active)
+
+        source.is_active = True
+        source.save()
+        concept.refresh_from_db()
+
+        self.assertTrue(source.is_active)
+        self.assertTrue(concept.is_active)

@@ -1,6 +1,7 @@
 import factory
 from factory import Sequence, SubFactory
 
+from core.common.constants import HEAD
 from core.concepts.models import Concept, LocalizedText
 from core.sources.tests.factories import SourceFactory
 
@@ -21,7 +22,7 @@ class ConceptFactory(factory.django.DjangoModelFactory):
 
     mnemonic = Sequence("concept{}".format)
     name = Sequence("concept{}".format)
-    version = Sequence("version-{}".format)
+    version = HEAD
     parent = SubFactory(SourceFactory)
     concept_class = "Diagnosis"
     datatype = "None"
@@ -30,6 +31,8 @@ class ConceptFactory(factory.django.DjangoModelFactory):
     def sources(self, create, extracted):
         if not create:
             return
+
+        self.sources.add(self.parent)
 
         if extracted:
             for source in extracted:

@@ -40,9 +40,11 @@ INSTALLED_APPS = [
     'rest_framework',
     'rest_framework.authtoken',
     'corsheaders',
+    'core.common.apps.CommonConfig',
     'core.users',
     'core.orgs',
-    'core.sources',
+    'core.sources.apps.SourceConfig',
+    'core.collections',
     'core.concepts',
 ]
 

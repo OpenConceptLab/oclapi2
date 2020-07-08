@@ -6,7 +6,7 @@ from django.db.models import Max
 from django.utils import timezone
 from pydash import get
 
-from core.common.utils import reverse_resource
+from core.common.utils import reverse_resource, reverse_resource_version
 from core.settings import DEFAULT_LOCALE
 from .constants import (
     ACCESS_TYPE_CHOICES, DEFAULT_ACCESS_TYPE, NAMESPACE_REGEX,
@@ -100,6 +100,10 @@ class BaseModel(models.Model):
             self.save()
 
     @property
+    def is_versioned(self):
+        return False
+
+    @property
     def public_can_view(self):
         return self.public_access in [ACCESS_TYPE_EDIT, ACCESS_TYPE_VIEW]
 
@@ -113,24 +117,30 @@ class BaseModel(models.Model):
 
     @property
     def url(self):
-        return self.uri or reverse_resource(self, self.view_name)
+        if self.uri:
+            return self.uri
+
+        return self.calculate_uri()
+
+    def calculate_uri(self):
+        if self.is_versioned and not self.is_head:
+            uri = reverse_resource_version(self, self.view_name)
+        else:
+            uri = reverse_resource(self, self.view_name)
+
+        return uri
 
     @property
     def view_name(self):
         return self.get_default_view_name()
 
-    @property
-    def _default_view_name(self):
-        return '%(model_name)s-detail'
-
     def get_default_view_name(self):
-        model = self.__class__
-        model_meta = model._meta  # pylint: disable=protected-access
-        format_kwargs = {
-            'app_label': model_meta.app_label,
-            'model_name': model_meta.object_name.lower()
-        }
-        return self._default_view_name % format_kwargs
+        entity_name = self.__class__.__name__.lower()
+
+        if self.is_versioned and not self.is_head:
+            return "{}-version-detail".format(entity_name)
+
+        return "{}-detail".format(entity_name)
 
 
 class BaseResourceModel(BaseModel):
@@ -147,7 +157,7 @@ class BaseResourceModel(BaseModel):
         abstract = True
 
     def __str__(self):
-        return get(self, 'mnemonic', '')
+        return str(self.mnemonic)
 
 
 class VersionedModel(BaseResourceModel):
@@ -166,6 +176,10 @@ class VersionedModel(BaseResourceModel):
 
     class Meta:
         abstract = True
+
+    @property
+    def is_versioned(self):
+        return True
 
     @property
     def versions(self):
@@ -206,6 +220,15 @@ class VersionedModel(BaseResourceModel):
     def get_version_model(cls):
         return cls
 
+    @property
+    def versioned_object(self):
+        return self.get_latest_version()
+
+    def get_url_kwarg(self):
+        if self.is_head:
+            return self.get_resource_url_kwarg()
+        return self.get_version_url_kwarg()
+
 
 class ConceptContainerModel(VersionedModel):
     """
@@ -223,6 +246,10 @@ class ConceptContainerModel(VersionedModel):
 
     class Meta:
         abstract = True
+
+    @property
+    def concepts_url(self):
+        return reverse_resource(self, 'concept-list')
 
     @property
     def parent(self):
@@ -263,12 +290,16 @@ class ConceptContainerModel(VersionedModel):
     def num_concepts(self):
         return self.concepts_set.count()
 
+    @staticmethod
+    def get_version_url_kwarg():
+        return 'version'
+
     def set_parent(self, parent_resource):
         parent_resource_type = parent_resource.resource_type
 
         if parent_resource_type == 'Organization':
             self.organization = parent_resource
-        elif parent_resource_type == 'UserProfile':
+        elif parent_resource_type in ['UserProfile', 'User']:
             self.user = parent_resource
 
     @classmethod
@@ -317,6 +348,9 @@ class ConceptContainerModel(VersionedModel):
         obj.update_version_data()
         obj.save(**kwargs)
         obj.seed_concepts()
+        from core.collections.models import Collection
+        if isinstance(obj, Collection):
+            obj.seed_references()
 
         return errors
 
@@ -340,7 +374,8 @@ class ConceptContainerModel(VersionedModel):
         if errors:
             return errors
 
-        obj.updated_by = updated_by
+        if updated_by:
+            obj.updated_by = updated_by
         try:
             obj.save(**kwargs)
         except IntegrityError as ex:
@@ -398,3 +433,20 @@ class ConceptContainerModel(VersionedModel):
             self.update_active_counts()
             self.update_last_updates()
         super().save(force_insert, force_update, using, update_fields)
+
+    def update_version_data(self, obj=None):
+        if obj:
+            self.description = obj.description
+        else:
+            obj = self.get_latest_version()
+
+        if obj:
+            self.name = obj.name
+            self.full_name = obj.full_name
+            self.website = obj.website
+            self.public_access = obj.public_access
+            self.supported_locales = obj.supported_locales
+            self.default_locale = obj.default_locale
+            self.external_id = obj.external_id
+            self.organization = obj.organization
+            self.user = obj.user

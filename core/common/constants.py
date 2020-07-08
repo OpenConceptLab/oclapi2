@@ -3,7 +3,7 @@ import re
 HEAD = 'HEAD'
 TEMP = '--TEMP--'
 
-NAMESPACE_PATTERN = r'[a-zA-Z0-9\-\.\_]+'
+NAMESPACE_PATTERN = r'[a-zA-Z0-9\-\.\_\@]+'
 NAMESPACE_REGEX = re.compile(r'^' + NAMESPACE_PATTERN + '$')
 
 ACCESS_TYPE_VIEW = 'View'
@@ -26,3 +26,5 @@ LOOKUP_CONCEPT_CLASSES = ['Concept Class', 'Datatype', 'NameType', 'DescriptionT
 LOOKUP_SOURCES = ['Classes', 'Datatypes', 'NameTypes', 'DescriptionTypes', 'MapTypes', 'Locales']
 REFERENCE_VALUE_SOURCE_MNEMONICS = ['Classes', 'Datatypes', 'NameTypes', 'DescriptionTypes', 'Locales']
 FIVE_MINS = 5 * 60
+DEFAULT_REPOSITORY_TYPE = 'Collection'
+OPENMRS_REPOSITORY_TYPE = 'OpenMRSDictionary'

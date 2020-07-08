@@ -1,4 +1,5 @@
 from django.db.models.query import QuerySet
+from django.shortcuts import get_object_or_404
 from pydash import get
 from rest_framework import status
 from rest_framework.generics import RetrieveAPIView, DestroyAPIView, ListCreateAPIView, RetrieveUpdateDestroyAPIView, \
@@ -8,6 +9,7 @@ from rest_framework.response import Response
 
 from core.common.constants import HEAD
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryMixin
+from core.common.utils import compact_dict_by_values
 from core.common.views import BaseAPIView
 from core.concepts.models import Concept, LocalizedText
 from core.concepts.permissions import CanViewParentDictionary, CanEditParentDictionary
@@ -27,32 +29,17 @@ class ConceptBaseView(BaseAPIView):
         return ConceptDetailSerializer(obj, data, files, partial)
 
     def get_queryset(self):
-        queryset = self.queryset
-        user = self.request.query_params.get('user', None) or self.kwargs.get('user', None)
-        org = self.request.query_params.get('org', None) or self.kwargs.get('org', None)
-        source = self.request.query_params.get('source', None) or self.kwargs.get('source', None)
-        source_version = self.request.query_params.get('version', None) or self.kwargs.get('version', None)
-        concept = self.request.query_params.get('concept', None) or self.kwargs.get('concept', None)
-        concept_version = self.request.query_params.get(
+        params = dict()
+        params['user'] = self.request.query_params.get('user', None) or self.kwargs.get('user', None)
+        params['org'] = self.request.query_params.get('org', None) or self.kwargs.get('org', None)
+        params['source'] = self.request.query_params.get('source', None) or self.kwargs.get('source', None)
+        params['version'] = self.request.query_params.get('version', None) or self.kwargs.get('version', None)
+        params['concept'] = self.request.query_params.get('concept', None) or self.kwargs.get('concept', None)
+        params['concept_version'] = self.request.query_params.get(
             'concept_version', None
         ) or self.kwargs.get('concept_version', None)
-
-        if user:
-            queryset = queryset.filter(parent__user__username=user)
-        if org:
-            queryset = queryset.filter(parent__organization__mnemonic=org)
-        if source:
-            queryset = queryset.filter(sources__mnemonic=source)
-        if source_version:
-            queryset = queryset.filter(sources__version=source_version)
-        if concept:
-            queryset = queryset.filter(mnemonic=concept)
-        if concept_version:
-            queryset = queryset.filter(version=concept_version)
-        if 'is_latest' in self.kwargs:
-            queryset = queryset.filter(is_latest_version=True)
-
-        return queryset.distinct()
+        params['is_latest'] = 'is_latest' in self.kwargs
+        return Concept.get_queryset(compact_dict_by_values(params))
 
 
 class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
@@ -104,7 +91,7 @@ class ConceptRetrieveUpdateDestroyView(ConceptBaseView, RetrieveAPIView, UpdateA
     serializer_class = ConceptDetailSerializer
 
     def get_object(self, queryset=None):
-        return self.get_queryset().filter(version=HEAD).first()
+        return get_object_or_404(self.get_queryset(), version=HEAD)
 
     def get_permissions(self):
         if self.request.method in ['GET']:

@@ -8,7 +8,9 @@ from django.test import TestCase
 from django.test.runner import DiscoverRunner
 from moto import mock_s3
 
+from core.collections.models import Collection
 from core.common.constants import HEAD
+from core.common.utils import compact_dict_by_values
 from core.concepts.models import Concept, LocalizedText
 from core.orgs.models import Organization
 from core.sources.models import Source
@@ -27,6 +29,7 @@ class OCLTestCase(TestCase):
         call_command("loaddata", "core/fixtures/base_entities.yaml")
 
     def tearDown(self):
+        Collection.objects.all().delete()
         Concept.objects.all().delete()
         LocalizedText.objects.all().delete()
         Source.objects.all().delete()
@@ -263,4 +266,32 @@ class S3Test(TestCase):
         self.assertEqual(
             S3.public_url_for('some/path'),
             'http://ocl-api-dev.s3.amazonaws.com/some/path'
+        )
+
+
+class UtilsTest(OCLTestCase):
+    def test_compact_dict_by_values(self):
+        self.assertEqual(
+            compact_dict_by_values(dict()),
+            dict()
+        )
+        self.assertEqual(
+            compact_dict_by_values(dict(foo=None)),
+            dict()
+        )
+        self.assertEqual(
+            compact_dict_by_values(dict(foo=None, bar=None)),
+            dict()
+        )
+        self.assertEqual(
+            compact_dict_by_values(dict(foo=None, bar=1)),
+            dict(bar=1)
+        )
+        self.assertEqual(
+            compact_dict_by_values(dict(foo=2, bar=1)),
+            dict(foo=2, bar=1)
+        )
+        self.assertEqual(
+            compact_dict_by_values(dict(foo=2, bar='')),
+            dict(foo=2)
         )

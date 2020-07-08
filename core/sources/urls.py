@@ -24,7 +24,7 @@ urlpatterns = [
     re_path(
         r'^(?P<source>{pattern})/(?P<version>{pattern})/$'.format(pattern=NAMESPACE_PATTERN),
         views.SourceVersionRetrieveUpdateDestroyView.as_view(),
-        name='sourceversion-detail'
+        name='source-version-detail'
     ),
     re_path(
         r"^(?P<source>{pattern})/extras/(?P<extra>{pattern})/$".format(pattern=NAMESPACE_PATTERN),

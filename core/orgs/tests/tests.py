@@ -6,6 +6,8 @@ from core.common.tests import OCLTestCase
 from core.orgs.constants import ORG_OBJECT_TYPE
 from core.orgs.models import Organization
 from core.orgs.tests.factories import OrganizationFactory
+from core.sources.tests.factories import SourceFactory
+from core.collections.tests.factories import CollectionFactory
 
 
 class OrganizationTest(OCLTestCase):
@@ -15,6 +17,9 @@ class OrganizationTest(OCLTestCase):
     def test_org(self):
         self.assertEqual(Organization().org, '')
         self.assertEqual(Organization(mnemonic='blah').org, 'blah')
+
+    def test_is_versioned(self):
+        self.assertFalse(Organization().is_versioned)
 
     def test_members(self):
         org = Organization(id=123)
@@ -78,3 +83,26 @@ class OrganizationTest(OCLTestCase):
         org = OrganizationFactory(name='test', mnemonic='org@1')
         self.assertTrue(org.id)
         self.assertEqual(org.mnemonic, 'org@1')
+
+    def test_org_active_inactive_should_affect_children(self):
+        org = OrganizationFactory(is_active=True)
+        source = SourceFactory(organization=org, is_active=True)
+        collection = CollectionFactory(organization=org, is_active=True)
+
+        org.is_active = False
+        org.save()
+        source.refresh_from_db()
+        collection.refresh_from_db()
+
+        self.assertFalse(org.is_active)
+        self.assertFalse(source.is_active)
+        self.assertFalse(collection.is_active)
+
+        org.is_active = True
+        org.save()
+        source.refresh_from_db()
+        collection.refresh_from_db()
+
+        self.assertTrue(org.is_active)
+        self.assertTrue(source.is_active)
+        self.assertTrue(collection.is_active)

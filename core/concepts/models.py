@@ -77,8 +77,12 @@ class Concept(ConceptValidationMixin, VersionedModel):  # pylint: disable=too-ma
         return self.mnemonic
 
     @staticmethod
-    def get_url_kwarg():
+    def get_resource_url_kwarg():
         return 'concept'
+
+    @staticmethod
+    def get_version_url_kwarg():
+        return 'concept_version'
 
     @property
     def owner(self):
@@ -186,6 +190,33 @@ class Concept(ConceptValidationMixin, VersionedModel):  # pylint: disable=too-ma
             return compact([*list(self.names.all()), *unsaved_names])
 
         return unsaved_names
+
+    @classmethod
+    def get_queryset(cls, params):
+        queryset = cls.objects.filter(is_active=True)
+        user = params.get('user', None)
+        org = params.get('org', None)
+        source = params.get('source', None)
+        source_version = params.get('version', None)
+        concept = params.get('concept', None)
+        concept_version = params.get('concept_version', None)
+        is_latest = params.get('is_latest', None)
+        if user:
+            queryset = queryset.filter(parent__user__username=user)
+        if org:
+            queryset = queryset.filter(parent__organization__mnemonic=org)
+        if source:
+            queryset = queryset.filter(sources__mnemonic=source)
+        if source_version:
+            queryset = queryset.filter(sources__version=source_version)
+        if concept:
+            queryset = queryset.filter(mnemonic=concept)
+        if concept_version:
+            queryset = queryset.filter(version=concept_version)
+        if is_latest:
+            queryset = queryset.filter(is_latest_version=True)
+
+        return queryset.distinct()
 
     def clone(self):
         concept_version = Concept(

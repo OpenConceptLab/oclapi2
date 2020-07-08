@@ -12,4 +12,4 @@ class OrganizationFactory(factory.django.DjangoModelFactory):
     company = Sequence("Org-Company-{}".format)
     website = Sequence("org.{}.com".format)
     location = Sequence("location-{}".format)
-    mnemonic = Sequence("org-{}".format)
+    mnemonic = Sequence("org{}".format)
