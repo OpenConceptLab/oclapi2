@@ -4,7 +4,7 @@ services:
   db:
     image: postgres:12.3
     volumes:
-      - postgre_data:/data/db
+      - postgres-data:/data/db
     restart: always
     container_name: oclapi2_db
     ports:
@@ -20,7 +20,7 @@ services:
       - .:/code
     command: sh -c ./startup.sh
     ports:
-      - "7000:7000"
+      - "8000:8000"
     depends_on:
       - db
     environment:
@@ -36,4 +36,4 @@ services:
     env_file:
       - .env
 volumes:
-  postgres_data:
+  postgres-data:
