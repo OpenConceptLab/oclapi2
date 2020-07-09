@@ -1,8 +1,9 @@
 from django.db import IntegrityError
 from pydash import get
 from rest_framework import status, mixins
-from rest_framework.generics import DestroyAPIView, RetrieveAPIView, ListAPIView, RetrieveUpdateDestroyAPIView, \
-    UpdateAPIView
+from rest_framework.generics import (
+    DestroyAPIView, RetrieveAPIView, ListAPIView, RetrieveUpdateDestroyAPIView, UpdateAPIView
+)
 from rest_framework.response import Response
 
 from core.common.constants import HEAD, RELEASED_PARAM, PROCESSING_PARAM
@@ -11,7 +12,9 @@ from core.common.permissions import CanViewConceptDictionary, CanEditConceptDict
 from core.common.utils import parse_boolean_query_param
 from core.common.views import BaseAPIView
 from core.sources.models import Source
-from core.sources.serializers import SourceDetailSerializer, SourceListSerializer, SourceCreateSerializer
+from core.sources.serializers import (
+    SourceDetailSerializer, SourceListSerializer, SourceCreateSerializer, SourceVersionDetailSerializer
+)
 
 
 class SourceBaseView(BaseAPIView):
@@ -139,7 +142,7 @@ class SourceVersionListView(SourceVersionBaseView, mixins.CreateModelMixin, List
 
     def get_serializer_class(self):
         if self.request.method in ['GET', 'HEAD']:
-            return SourceDetailSerializer if self.is_verbose(self.request) else SourceListSerializer
+            return SourceVersionDetailSerializer if self.is_verbose(self.request) else SourceListSerializer
         if self.request.method == 'POST':
             return SourceCreateSerializer
 
@@ -157,7 +160,8 @@ class SourceVersionListView(SourceVersionBaseView, mixins.CreateModelMixin, List
         head_object = self.get_queryset().first()
         payload = {
             "mnemonic": head_object.mnemonic, "id": head_object.mnemonic, "name": head_object.name, **request.data,
-            "organization_id": head_object.organization_id, "user_id": head_object.user_id
+            "organization_id": head_object.organization_id, "user_id": head_object.user_id,
+            'version': request.data.pop('id', None)
         }
         serializer = self.get_serializer(data=payload)
         if serializer.is_valid():

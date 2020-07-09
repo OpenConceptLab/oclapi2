@@ -19,14 +19,14 @@ class OrganizationCreateSerializer(serializers.ModelSerializer):
     id = serializers.CharField(required=True, validators=[RegexValidator(regex=NAMESPACE_REGEX)], source='mnemonic')
     public_access = serializers.ChoiceField(required=False, choices=ACCESS_TYPE_CHOICES, default=DEFAULT_ACCESS_TYPE)
     name = serializers.CharField(required=True)
-    company = serializers.CharField(required=False)
-    website = serializers.CharField(required=False)
-    location = serializers.CharField(required=False)
+    company = serializers.CharField(required=False, allow_blank=True)
+    website = serializers.CharField(required=False, allow_blank=True)
+    location = serializers.CharField(required=False, allow_blank=True)
     members = serializers.IntegerField(source='num_members', read_only=True)
     created_on = serializers.DateTimeField(source='created_at', read_only=True)
     updated_on = serializers.DateTimeField(source='updated_at', read_only=True)
     url = serializers.CharField(read_only=True)
-    extras = serializers.Field(required=False)
+    extras = serializers.JSONField(required=False)
     public_sources = serializers.IntegerField(read_only=True)
 
     class Meta:
@@ -74,7 +74,7 @@ class OrganizationDetailSerializer(serializers.ModelSerializer):
     updated_by = serializers.CharField(read_only=True)
     url = serializers.URLField(read_only=True)
     members_url = serializers.URLField(read_only=True)
-    extras = serializers.Field(required=False)
+    extras = serializers.JSONField(required=False)
     public_sources = serializers.IntegerField(read_only=True)
 
     class Meta:

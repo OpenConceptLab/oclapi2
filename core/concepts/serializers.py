@@ -5,11 +5,24 @@ from rest_framework.serializers import ModelSerializer
 from core.concepts.models import Concept, LocalizedText
 
 
-class LocalizedTextSerializer(ModelSerializer):
+class LocalizedNameSerializer(ModelSerializer):
+    type = CharField(source='name_type', required=False, allow_null=True, allow_blank=True)
+
     class Meta:
         model = LocalizedText
         fields = (
             'id', 'name', 'external_id', 'type', 'locale', 'locale_preferred'
+        )
+
+
+class LocalizedDescriptionSerializer(ModelSerializer):
+    description = CharField(source='name')
+    type = CharField(source='description_type', required=False, allow_null=True, allow_blank=True)
+
+    class Meta:
+        model = LocalizedText
+        fields = (
+            'id', 'description', 'external_id', 'type', 'locale', 'locale_preferred'
         )
 
 
@@ -87,11 +100,11 @@ class ConceptDetailSerializer(ModelSerializer):
     owner = CharField(source='owner_name', read_only=True)
     created_on = DateTimeField(source='created_at', read_only=True)
     updated_on = DateTimeField(source='updated_at', read_only=True)
-    names = LocalizedTextSerializer(many=True)
-    descriptions = LocalizedTextSerializer(many=True)
-    external_id = CharField(required=False)
-    concept_class = CharField(required=False)
-    datatype = CharField(required=False)
+    names = LocalizedNameSerializer(many=True)
+    descriptions = LocalizedDescriptionSerializer(many=True)
+    external_id = CharField(required=False, allow_blank=True)
+    concept_class = CharField(required=True)
+    datatype = CharField(required=True)
     display_name = CharField(read_only=True)
     display_locale = CharField(read_only=True)
     retired = BooleanField(required=False)
@@ -105,7 +118,7 @@ class ConceptDetailSerializer(ModelSerializer):
         fields = (
             'id', 'external_id', 'concept_class', 'datatype', 'url', 'retired', 'source',
             'owner', 'owner_type', 'owner_url', 'display_name', 'display_locale', 'names', 'descriptions',
-            'created_on', 'updated_on', 'versions_url', 'version', 'extras', 'parent_id',
+            'created_on', 'updated_on', 'versions_url', 'version', 'extras', 'parent_id', 'name',
         )
 
     def create(self, validated_data):
@@ -136,8 +149,8 @@ class ConceptVersionDetailSerializer(ModelSerializer):
     type = CharField(source='resource_type')
     uuid = CharField(source='id')
     id = CharField(source='mnemonic')
-    names = LocalizedTextSerializer(many=True)
-    descriptions = LocalizedTextSerializer(many=True)
+    names = LocalizedNameSerializer(many=True)
+    descriptions = LocalizedDescriptionSerializer(many=True)
     source = CharField(source='parent_resource')
     source_url = URLField(source='owner_url')
     owner = CharField(source='owner_name')
@@ -153,5 +166,5 @@ class ConceptVersionDetailSerializer(ModelSerializer):
             'type', 'uuid', 'id', 'external_id', 'concept_class', 'datatype', 'display_name', 'display_locale',
             'names', 'descriptions', 'extras', 'retired', 'source', 'source_url', 'owner', 'owner_name', 'owner_url',
             'version', 'created_on', 'updated_on', 'version_created_on', 'version_created_by', 'extras',
-            'is_latest_version', 'locale', 'url'
+            'is_latest_version', 'locale', 'url', 'owner_type',
         )

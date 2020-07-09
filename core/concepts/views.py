@@ -75,7 +75,7 @@ class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
     def post(self, request, **kwargs):  # pylint: disable=unused-argument
         self.set_parent_resource()
         serializer = self.get_serializer(data={
-            **request.data, 'version': HEAD, 'parent_id': self.parent_resource.id
+            **request.data, 'version': HEAD, 'parent_id': self.parent_resource.id, 'name': request.data.get('id', None)
         })
         if serializer.is_valid():
             self.object = serializer.save()
@@ -83,7 +83,6 @@ class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
                 headers = self.get_success_headers(serializer.data)
                 serializer = ConceptDetailSerializer(self.object)
                 return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
-
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 

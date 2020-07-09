@@ -1,5 +1,5 @@
 from django.core.validators import RegexValidator
-from rest_framework.fields import CharField, SerializerMethodField, IntegerField, DateTimeField, ChoiceField, JSONField
+from rest_framework.fields import CharField, IntegerField, DateTimeField, ChoiceField, JSONField
 from rest_framework.relations import PrimaryKeyRelatedField
 from rest_framework.serializers import ModelSerializer
 
@@ -19,7 +19,7 @@ class SourceListSerializer(ModelSerializer):
     class Meta:
         model = Source
         fields = (
-            'short_code', 'name', 'url', 'owner', 'owner_type', 'owner_url', 'version', 'created_at'
+            'short_code', 'name', 'url', 'owner', 'owner_type', 'owner_url', 'version', 'created_at', 'id',
         )
 
 
@@ -63,10 +63,6 @@ class SourceCreateOrUpdateSerializer(ModelSerializer):
         self._errors.update(errors)
         return source
 
-    @staticmethod
-    def get_active_concepts(obj):
-        return obj.get_active_concepts().count()
-
 
 class SourceCreateSerializer(SourceCreateOrUpdateSerializer):
     type = CharField(source='resource_type', read_only=True)
@@ -75,18 +71,17 @@ class SourceCreateSerializer(SourceCreateOrUpdateSerializer):
     short_code = CharField(source='mnemonic', read_only=True)
     name = CharField(required=True)
     full_name = CharField(required=False)
-    description = CharField(required=False)
+    description = CharField(required=False, allow_blank=True)
     source_type = CharField(required=False)
-    custom_validation_schema = CharField(required=False)
+    custom_validation_schema = CharField(required=False, allow_blank=True)
     public_access = ChoiceField(required=False, choices=ACCESS_TYPE_CHOICES)
-    default_locale = CharField(required=False)
-    supported_locales = CharField(required=False)
-    website = CharField(required=False)
+    default_locale = CharField(required=False, allow_blank=True)
+    supported_locales = CharField(required=False, allow_blank=True)
+    website = CharField(required=False, allow_blank=True)
     url = CharField(read_only=True)
     versions_url = CharField(read_only=True)
     concepts_url = CharField(read_only=True)
     mappings_url = CharField(read_only=True)
-    active_concepts = SerializerMethodField(method_name='get_active_concepts')
     owner = CharField(source='parent_resource', read_only=True)
     owner_type = CharField(source='parent_resource_type', read_only=True)
     owner_url = CharField(source='parent_url', read_only=True)
@@ -96,7 +91,7 @@ class SourceCreateSerializer(SourceCreateOrUpdateSerializer):
     created_by = CharField(source='owner', read_only=True)
     updated_by = CharField(read_only=True)
     extras = JSONField(required=False)
-    external_id = CharField(required=False)
+    external_id = CharField(required=False, allow_blank=True)
     user_id = PrimaryKeyRelatedField(required=False, queryset=UserProfile.objects.all(), allow_null=True)
     organization_id = PrimaryKeyRelatedField(required=False, queryset=Organization.objects.all(), allow_null=True)
     version = CharField(default=HEAD)
@@ -121,13 +116,13 @@ class SourceDetailSerializer(SourceCreateOrUpdateSerializer):
     uuid = CharField(source='id')
     id = CharField(source='mnemonic')
     short_code = CharField(source='mnemonic')
-    active_concepts = SerializerMethodField()
     owner = CharField(source='parent_resource')
     owner_type = CharField(source='parent_resource_type')
     owner_url = CharField(source='parent_url')
     versions = IntegerField(source='num_versions')
     created_on = DateTimeField(source='created_at')
     updated_on = DateTimeField(source='updated_at')
+    supported_locales = CharField(required=False, allow_blank=True)
 
     class Meta:
         model = Source
@@ -135,7 +130,32 @@ class SourceDetailSerializer(SourceCreateOrUpdateSerializer):
         fields = (
             'type', 'uuid', 'id', 'short_code', 'name', 'full_name', 'description', 'source_type',
             'custom_validation_schema', 'public_access', 'default_locale', 'supported_locales', 'website',
-            'url', 'active_concepts', 'owner', 'owner_type', 'owner_url', 'versions',
+            'url', 'owner', 'owner_type', 'owner_url', 'versions',
+            'created_on', 'updated_on', 'created_by', 'updated_by', 'extras', 'external_id', 'versions_url',
+            'version', 'concepts_url',
+        )
+
+
+class SourceVersionDetailSerializer(SourceCreateOrUpdateSerializer):
+    type = CharField(source='resource_type')
+    uuid = CharField(source='id')
+    id = CharField(source='version')
+    short_code = CharField(source='mnemonic')
+    owner = CharField(source='parent_resource')
+    owner_type = CharField(source='parent_resource_type')
+    owner_url = CharField(source='parent_url')
+    versions = IntegerField(source='num_versions')
+    created_on = DateTimeField(source='created_at')
+    updated_on = DateTimeField(source='updated_at')
+    supported_locales = CharField(required=False, allow_blank=True)
+
+    class Meta:
+        model = Source
+        lookup_field = 'mnemonic'
+        fields = (
+            'type', 'uuid', 'id', 'short_code', 'name', 'full_name', 'description', 'source_type',
+            'custom_validation_schema', 'public_access', 'default_locale', 'supported_locales', 'website',
+            'url', 'owner', 'owner_type', 'owner_url', 'versions',
             'created_on', 'updated_on', 'created_by', 'updated_by', 'extras', 'external_id', 'versions_url',
             'version', 'concepts_url',
         )

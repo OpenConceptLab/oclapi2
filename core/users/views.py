@@ -22,11 +22,6 @@ class UserListView(UserBaseView,
                    ListWithHeadersMixin,
                    mixins.CreateModelMixin):
 
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.related_object_kwarg = kwargs.pop('related_object_kwarg', None)
-        self.related_object_type = kwargs.pop('related_object_type', None)
-
     def get_serializer_class(self):
         if self.request.method == 'GET':
             return UserDetailSerializer if self.is_verbose(self.request) else UserListSerializer
@@ -42,15 +37,14 @@ class UserListView(UserBaseView,
 
     def get(self, request, *args, **kwargs):
         self.serializer_class = UserDetailSerializer if self.is_verbose(request) else UserListSerializer
-        if self.related_object_type and self.related_object_kwarg:
-            related_object_key = kwargs.pop(self.related_object_kwarg)
-            if Organization == self.related_object_type:
-                organization = Organization.objects.get(mnemonic=related_object_key)
-                if not organization.public_can_view:
-                    if not request.user.is_staff:
-                        if not organization.userprofile_set.filter(id=request.user.id).exists():
-                            return Response(status=status.HTTP_403_FORBIDDEN)
-                self.queryset = organization.userprofile_set.all()
+        org = kwargs.pop('org', None)
+        if org:
+            organization = Organization.objects.get(mnemonic=org)
+            if not organization.public_can_view:
+                if not request.user.is_staff:
+                    if not organization.userprofile_set.filter(id=request.user.id).exists():
+                        return Response(status=status.HTTP_403_FORBIDDEN)
+            self.queryset = organization.userprofile_set.all()
         return self.list(request, *args, **kwargs)
 
     def post(self, request, *args, **kwargs):

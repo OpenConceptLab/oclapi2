@@ -226,6 +226,7 @@ class ConceptDictionaryCreateMixin(ConceptDictionaryMixin):
             return Response(status=status.HTTP_403_FORBIDDEN)
         serializer = self.get_serializer(
             data={
+                'mnemonic': request.data.get('id'),
                 'version': HEAD, **request.data, **{self.parent_resource.resource_type.lower(): self.parent_resource.id}
             }
         )
@@ -251,7 +252,7 @@ class ConceptDictionaryUpdateMixin(ConceptDictionaryMixin):
     """
     Concrete view for updating a model instance.
     """
-    def put(self, request):
+    def put(self, request, **kwargs):  # pylint: disable=unused-argument
         super().initialize(request, request.path_info)
         return self.update(request)
 

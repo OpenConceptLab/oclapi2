@@ -32,7 +32,7 @@ class UserCreateSerializer(serializers.ModelSerializer):
     created_by = serializers.CharField(read_only=True)
     updated_by = serializers.CharField(read_only=True)
     url = serializers.CharField(read_only=True)
-    extras = serializers.Field(required=False)
+    extras = serializers.JSONField(required=False)
 
     class Meta:
         model = UserProfile
@@ -81,7 +81,7 @@ class UserDetailSerializer(serializers.ModelSerializer):
     updated_by = serializers.CharField(read_only=True)
     url = serializers.URLField(read_only=True)
     organizations_url = serializers.URLField(read_only=True)
-    extras = serializers.Field(required=False)
+    extras = serializers.JSONField(required=False)
 
     class Meta:
         model = UserProfile
