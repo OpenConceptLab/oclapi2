@@ -1,5 +1,5 @@
 from django.core.validators import RegexValidator
-from rest_framework.fields import CharField, IntegerField, DateTimeField, ChoiceField, JSONField
+from rest_framework.fields import CharField, IntegerField, DateTimeField, ChoiceField, JSONField, ListField
 from rest_framework.relations import PrimaryKeyRelatedField
 from rest_framework.serializers import ModelSerializer
 
@@ -45,9 +45,14 @@ class SourceCreateOrUpdateSerializer(ModelSerializer):
         source.public_access = validated_data.get('public_access', source.public_access or DEFAULT_ACCESS_TYPE)
         source.default_locale = validated_data.get('default_locale', source.default_locale or DEFAULT_LOCALE)
         source.website = validated_data.get('website', source.website)
-        source.supported_locales = validated_data.get(
-            'supported_locales'
-        ).split(',') if validated_data.get('supported_locales') else source.supported_locales
+
+        supported_locales = validated_data.get('supported_locales')
+        if not supported_locales:
+            supported_locales = source.supported_locales
+        if supported_locales and isinstance(supported_locales, str):
+            supported_locales = supported_locales.split(',')
+
+        source.supported_locales = supported_locales
         source.extras = validated_data.get('extras', source.extras)
         source.external_id = validated_data.get('external_id', source.external_id)
         source.user_id = validated_data.get('user_id', source.user_id)
@@ -76,7 +81,7 @@ class SourceCreateSerializer(SourceCreateOrUpdateSerializer):
     custom_validation_schema = CharField(required=False, allow_blank=True)
     public_access = ChoiceField(required=False, choices=ACCESS_TYPE_CHOICES)
     default_locale = CharField(required=False, allow_blank=True)
-    supported_locales = CharField(required=False, allow_blank=True)
+    supported_locales = ListField(required=False, allow_empty=True)
     website = CharField(required=False, allow_blank=True)
     url = CharField(read_only=True)
     versions_url = CharField(read_only=True)
@@ -122,7 +127,7 @@ class SourceDetailSerializer(SourceCreateOrUpdateSerializer):
     versions = IntegerField(source='num_versions')
     created_on = DateTimeField(source='created_at')
     updated_on = DateTimeField(source='updated_at')
-    supported_locales = CharField(required=False, allow_blank=True)
+    supported_locales = ListField(required=False, allow_empty=True)
 
     class Meta:
         model = Source
@@ -147,7 +152,7 @@ class SourceVersionDetailSerializer(SourceCreateOrUpdateSerializer):
     versions = IntegerField(source='num_versions')
     created_on = DateTimeField(source='created_at')
     updated_on = DateTimeField(source='updated_at')
-    supported_locales = CharField(required=False, allow_blank=True)
+    supported_locales = ListField(required=False, allow_empty=True)
 
     class Meta:
         model = Source

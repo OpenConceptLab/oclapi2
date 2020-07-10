@@ -264,6 +264,7 @@ class ConceptDictionaryUpdateMixin(ConceptDictionaryMixin):
         save_kwargs = {'force_update': True, 'parent_resource': self.parent_resource}
         success_status_code = status.HTTP_200_OK
 
+        request.data['supported_locales'] = compact(request.data.pop('supported_locales', '').split(','))
         serializer = self.get_serializer(self.object, data=request.data, partial=True)
 
         if serializer.is_valid():
