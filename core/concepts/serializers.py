@@ -6,23 +6,25 @@ from core.concepts.models import Concept, LocalizedText
 
 
 class LocalizedNameSerializer(ModelSerializer):
+    name_type = CharField(source='type')
     type = CharField(source='name_type', required=False, allow_null=True, allow_blank=True)
 
     class Meta:
         model = LocalizedText
         fields = (
-            'id', 'name', 'external_id', 'type', 'locale', 'locale_preferred'
+            'id', 'name', 'external_id', 'type', 'locale', 'locale_preferred', 'name_type',
         )
 
 
 class LocalizedDescriptionSerializer(ModelSerializer):
     description = CharField(source='name')
+    description_type = CharField(source='type')
     type = CharField(source='description_type', required=False, allow_null=True, allow_blank=True)
 
     class Meta:
         model = LocalizedText
         fields = (
-            'id', 'description', 'external_id', 'type', 'locale', 'locale_preferred'
+            'id', 'description', 'external_id', 'type', 'locale', 'locale_preferred', 'description_type'
         )
 
 
@@ -84,16 +86,18 @@ class ConceptListSerializer(ModelSerializer):
     id = CharField(source='mnemonic')
     source = CharField(source='parent_resource')
     owner = CharField(source='owner_name')
+    update_comment = CharField(source='comment')
 
     class Meta:
         model = Concept
         fields = (
             'id', 'external_id', 'concept_class', 'datatype', 'url', 'retired', 'source',
-            'owner', 'owner_type', 'owner_url', 'display_name', 'display_locale', 'version',
+            'owner', 'owner_type', 'owner_url', 'display_name', 'display_locale', 'version', 'update_comment',
         )
 
 
 class ConceptDetailSerializer(ModelSerializer):
+    type = CharField(source='versioned_resource_type', read_only=True)
     id = CharField(source='mnemonic', required=True)
     source = CharField(source='parent_resource', read_only=True)
     parent_id = CharField()
@@ -112,13 +116,15 @@ class ConceptDetailSerializer(ModelSerializer):
     owner_type = CharField(read_only=True)
     owner_url = URLField(read_only=True)
     extras = JSONField(required=False)
+    update_comment = CharField(required=False, source='comment')
 
     class Meta:
         model = Concept
         fields = (
             'id', 'external_id', 'concept_class', 'datatype', 'url', 'retired', 'source',
             'owner', 'owner_type', 'owner_url', 'display_name', 'display_locale', 'names', 'descriptions',
-            'created_on', 'updated_on', 'versions_url', 'version', 'extras', 'parent_id', 'name',
+            'created_on', 'updated_on', 'versions_url', 'version', 'extras', 'parent_id', 'name', 'type',
+            'update_comment',
         )
 
     def create(self, validated_data):
@@ -134,11 +140,19 @@ class ConceptDetailSerializer(ModelSerializer):
         instance.comment = validated_data.get('update_comment') or validated_data.get('comment')
         instance.retired = validated_data.get('retired', instance.retired)
 
-        new_names = [LocalizedText(**name) for name in validated_data.get('names', [])]
-        new_descriptions = [LocalizedText(**desc) for desc in validated_data.get('descriptions', [])]
+        new_names = [
+            LocalizedText(
+                **{k: v for k, v in name.items() if k not in ['name_type']}
+            ) for name in validated_data.get('names', [])
+        ]
+        new_descriptions = [
+            LocalizedText(
+                **{k: v for k, v in desc.items() if k not in ['description_type']}
+            ) for desc in validated_data.get('descriptions', [])
+        ]
 
-        instance.cloned_names = compact([*instance.cloned_names, *new_names])
-        instance.cloned_descriptions = compact([*instance.cloned_descriptions, *new_descriptions])
+        instance.cloned_names = compact(new_names)
+        instance.cloned_descriptions = compact(new_descriptions)
         errors = Concept.persist_clone(instance, self.context.get('request').user)
         if errors:
             self._errors.update(errors)

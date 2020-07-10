@@ -94,11 +94,11 @@ class Concept(ConceptValidationMixin, VersionedModel):  # pylint: disable=too-ma
 
     @property
     def owner_type(self):
-        return self.parent.resource_type
+        return self.owner.resource_type
 
     @property
     def owner_url(self):
-        return self.parent.url
+        return self.owner.url
 
     @property
     def parent_resource(self):

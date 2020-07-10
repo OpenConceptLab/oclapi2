@@ -182,6 +182,10 @@ class VersionedModel(BaseResourceModel):
         return True
 
     @property
+    def versioned_resource_type(self):
+        return self.resource_type
+
+    @property
     def versions(self):
         return self.__class__.objects.filter(mnemonic=self.mnemonic).order_by('-created_at')
 
