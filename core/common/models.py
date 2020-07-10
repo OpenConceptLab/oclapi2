@@ -283,6 +283,23 @@ class ConceptContainerModel(VersionedModel):
             organization_id=self.organization_id, user_id=self.user_id
         ).order_by('-created_at')
 
+    @property
+    def sibling_versions(self):
+        return self.versions.exclude(id=self.id)
+
+    @property
+    def prev_version(self):
+        return self.sibling_versions.filter(is_active=True).order_by('-created_at').first()
+
+    def delete(self, using=None, keep_parents=False):
+        if self.is_latest_version:
+            prev_version = self.prev_version
+            if not prev_version:
+                raise ValidationError(dict(detail='Cannot delete only version.'))
+            prev_version.is_latest_version = True
+            prev_version.save()
+        super().delete(using=using, keep_parents=keep_parents)
+
     def get_active_concepts(self):
         return self.concepts_set.filter(is_active=True, retired=False, version=HEAD)
 
@@ -351,6 +368,9 @@ class ConceptContainerModel(VersionedModel):
         from core.collections.models import Collection
         if isinstance(obj, Collection):
             obj.seed_references()
+
+        if obj.id:
+            obj.sibling_versions.update(is_latest_version=False)
 
         return errors
 

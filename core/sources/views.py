@@ -1,3 +1,4 @@
+from django.core.exceptions import ValidationError
 from django.db import IntegrityError
 from pydash import get
 from rest_framework import status, mixins
@@ -185,7 +186,7 @@ class SourceVersionListView(SourceVersionBaseView, mixins.CreateModelMixin, List
         return queryset.order_by('-created_at')
 
 
-class SourceVersionRetrieveUpdateDestroyView(SourceBaseView, RetrieveAPIView, UpdateAPIView, DestroyAPIView):
+class SourceVersionRetrieveUpdateDestroyView(SourceBaseView, RetrieveAPIView, UpdateAPIView):
     permission_classes = (HasAccessToVersionedObject,)
     serializer_class = SourceDetailSerializer
 
@@ -207,6 +208,16 @@ class SourceVersionRetrieveUpdateDestroyView(SourceBaseView, RetrieveAPIView, Up
                 return Response(serializer.data, status=status.HTTP_200_OK)
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def delete(self, _, **kwargs):  # pylint: disable=unused-argument
+        instance = self.get_object()
+
+        try:
+            instance.delete()
+        except ValidationError as ex:
+            return Response(ex.message_dict, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class SourceExtrasBaseView(SourceBaseView):

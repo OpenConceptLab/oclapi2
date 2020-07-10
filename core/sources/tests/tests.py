@@ -1,4 +1,5 @@
 from django.db import transaction, IntegrityError
+from django.core.exceptions import ValidationError
 
 from core.common.constants import HEAD
 from core.common.tests import OCLTestCase
@@ -165,35 +166,72 @@ class SourceTest(OCLTestCase):
         )
         self.assertEqual(source2.num_versions, 2)
 
+    def test_persist_new_version(self):
+        source = SourceFactory(version=HEAD)
+        concept = ConceptFactory(mnemonic='concept1', parent=source)
+
+        self.assertEqual(source.concepts_set.count(), 1)  # parent-child
+        self.assertEqual(source.concepts.count(), 1)
+        self.assertEqual(concept.sources.count(), 1)
+        self.assertTrue(source.is_latest_version)
+
+        version1 = SourceFactory.build(
+            name='version1', version='v1', mnemonic=source.mnemonic, organization=source.organization
+        )
+        Source.persist_new_version(version1, source.created_by)
+        source.refresh_from_db()
+
+        self.assertFalse(source.is_latest_version)
+        self.assertEqual(source.concepts_set.count(), 1)  # parent-child
+        self.assertEqual(source.concepts.count(), 1)
+        self.assertTrue(version1.is_latest_version)
+        self.assertEqual(version1.concepts.count(), 1)
+        self.assertEqual(version1.concepts_set.count(), 0)  # no direct child
+
     def test_source_version_delete(self):
         source = SourceFactory(version=HEAD)
         concept = ConceptFactory(mnemonic='concept1', version=HEAD, sources=[source], parent=source)
+
+        self.assertTrue(source.is_latest_version)
         self.assertEqual(concept.sources.count(), 1)
-        version1 = Source(
-            name='version1',
-            version='version1',
-            mnemonic=source.mnemonic,
-            organization=source.organization,
-            released=True,
+
+        version1 = SourceFactory.build(
+            name='version1', version='v1', mnemonic=source.mnemonic, organization=source.organization
         )
         Source.persist_new_version(version1, source.created_by)
+        source.refresh_from_db()
+
         self.assertEqual(concept.sources.count(), 2)
+        self.assertTrue(version1.is_latest_version)
+        self.assertFalse(source.is_latest_version)
 
         source_versions = Source.objects.filter(
             mnemonic=source.mnemonic,
-            version='version1',
+            version='v1',
         )
         self.assertTrue(source_versions.exists())
         self.assertEqual(version1.concepts.count(), 1)
 
         version1.delete()
+        source.refresh_from_db()
 
         self.assertFalse(Source.objects.filter(
-            version='version1',
+            version='v1',
             mnemonic=source.mnemonic,
         ).exists())
-
+        self.assertTrue(source.is_latest_version)
         self.assertEqual(concept.sources.count(), 1)
+
+        with self.assertRaises(ValidationError) as ex:
+            source.delete()
+
+        self.assertEqual(
+            ex.exception.message_dict,
+            {
+                'detail': ['Cannot delete only version.'],
+            }
+        )
+
 
     def test_child_count_updates(self):
         source = SourceFactory(version=HEAD)
