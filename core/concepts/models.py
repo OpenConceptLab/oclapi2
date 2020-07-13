@@ -33,6 +33,32 @@ class LocalizedText(models.Model):
             locale_preferred=self.locale_preferred
         )
 
+    @classmethod
+    def build(cls, params, used_as='name'):
+        instance = None
+        if used_as == 'name':
+            instance = cls.build_name(params)
+        if used_as == 'description':
+            instance = cls.build_description(params)
+
+        return instance
+
+    @classmethod
+    def build_name(cls, params):
+        return LocalizedText(
+            **{**params, 'type': params.pop('name_type', params.pop('type', None))}
+        )
+
+    @classmethod
+    def build_description(cls, params):
+        return LocalizedText(
+            **{
+                **params,
+                'type': params.pop('description_type', params.pop('type', None)),
+                'name': params.pop('description', params.pop('name', None)),
+            }
+        )
+
     @staticmethod
     def get_filter_criteria_for_attribute(attribute):
         if attribute == 'is_fully_specified':
@@ -279,10 +305,12 @@ class Concept(ConceptValidationMixin, VersionedModel):  # pylint: disable=too-ma
     @classmethod
     def persist_new(cls, data, user=None):
         names = [
-            name if isinstance(name, LocalizedText) else LocalizedText(**name) for name in data.pop('names', [])
+            name if isinstance(name, LocalizedText) else LocalizedText.build(name) for name in data.pop('names', [])
         ]
         descriptions = [
-            desc if isinstance(desc, LocalizedText) else LocalizedText(**desc) for desc in data.pop('descriptions', [])
+            desc if isinstance(desc, LocalizedText) else LocalizedText.build(
+                desc, 'description'
+            ) for desc in data.pop('descriptions', [])
         ]
         concept = Concept(**{**data, 'version': HEAD})
         if user:

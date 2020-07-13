@@ -58,7 +58,9 @@ class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
         return ConceptListSerializer
 
     def get_queryset(self):
-        return super().get_queryset().filter(version=HEAD)
+        return super().get_queryset().filter(version=HEAD).select_related(
+            'parent__organization', 'parent__user',
+        )
 
     def get(self, request, *args, **kwargs):
         return self.list(request, *args, **kwargs)

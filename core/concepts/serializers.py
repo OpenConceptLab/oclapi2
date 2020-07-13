@@ -1,5 +1,5 @@
 from pydash import compact
-from rest_framework.fields import CharField, DateTimeField, BooleanField, URLField, JSONField
+from rest_framework.fields import CharField, DateTimeField, BooleanField, URLField, JSONField, SerializerMethodField
 from rest_framework.serializers import ModelSerializer
 
 from core.concepts.models import Concept, LocalizedText
@@ -87,13 +87,19 @@ class ConceptListSerializer(ModelSerializer):
     source = CharField(source='parent_resource')
     owner = CharField(source='owner_name')
     update_comment = CharField(source='comment')
+    locale = SerializerMethodField()
 
     class Meta:
         model = Concept
         fields = (
             'id', 'external_id', 'concept_class', 'datatype', 'url', 'retired', 'source',
             'owner', 'owner_type', 'owner_url', 'display_name', 'display_locale', 'version', 'update_comment',
+            'locale'
         )
+
+    @staticmethod
+    def get_locale(obj):
+        return obj.iso_639_1_locale
 
 
 class ConceptDetailSerializer(ModelSerializer):
