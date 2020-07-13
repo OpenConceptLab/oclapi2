@@ -10,7 +10,7 @@ from rest_framework.response import Response
 from core.common.constants import HEAD, RELEASED_PARAM, PROCESSING_PARAM
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryCreateMixin, ConceptDictionaryUpdateMixin
 from core.common.permissions import CanViewConceptDictionary, CanEditConceptDictionary, HasAccessToVersionedObject
-from core.common.utils import parse_boolean_query_param
+from core.common.utils import parse_boolean_query_param, compact_dict_by_values
 from core.common.views import BaseAPIView
 from core.sources.models import Source
 from core.sources.serializers import (
@@ -29,46 +29,26 @@ class SourceBaseView(BaseAPIView):
     def get_detail_serializer(obj):
         return SourceDetailSerializer(obj)
 
-    def get_queryset(self):
+    def get_filter_params(self, default_version_to_head=True):
         query_params = self.request.query_params
+        params = dict()
+        version = query_params.get('version', None) or self.kwargs.get('version', None)
+        if not version and default_version_to_head:
+            version = HEAD
+        params['version'] = version
+        params['user'] = query_params.get('user', None) or self.kwargs.get('user', None)
+        params['org'] = query_params.get('org', None) or self.kwargs.get('org', None)
+        params['source'] = query_params.get('source', None) or self.kwargs.get('source', None)
+        params['is_latest'] = self.kwargs.get('is_latest', None)
+        return params
 
-        username = query_params.get('user', None) or self.kwargs.get('user', None)
-        org = query_params.get('org', None) or self.kwargs.get('org', None)
-        version = self.kwargs.get('version', HEAD)
-        queryset = self.queryset.filter(version=version)
-
-        if username:
-            queryset = queryset.filter(user__username=username)
-        if org:
-            queryset = queryset.filter(organization__mnemonic=org)
-        if 'source' in self.kwargs:
-            queryset = queryset.filter(mnemonic=self.kwargs['source'])
-        if 'is_latest' in self.kwargs:
-            queryset = queryset.filter(is_latest_version=True)
-
-        return queryset.all()
+    def get_queryset(self):
+        return Source.get_base_queryset(compact_dict_by_values(self.get_filter_params()))
 
 
 class SourceVersionBaseView(SourceBaseView):
-    def get_queryset(self):
-        query_params = self.request.query_params
-
-        username = query_params.get('user', None) or self.kwargs.get('user', None)
-        org = query_params.get('org', None) or self.kwargs.get('org', None)
-        queryset = self.queryset
-
-        if username:
-            queryset = queryset.filter(user__username=username)
-        if org:
-            queryset = queryset.filter(organization__mnemonic=org)
-        if 'source' in self.kwargs:
-            queryset = queryset.filter(mnemonic=self.kwargs['source'])
-        if 'version' in self.kwargs:
-            queryset = queryset.filter(version=self.kwargs['version'])
-        if 'is_latest' in self.kwargs:
-            queryset = queryset.filter(is_latest_version=True)
-
-        return queryset.all()
+    def get_filter_params(self, default_version_to_head=False):
+        return super().get_filter_params(default_version_to_head)
 
 
 class SourceListView(SourceBaseView, ConceptDictionaryCreateMixin, ListWithHeadersMixin):
@@ -119,7 +99,7 @@ class SourceRetrieveUpdateDestroyView(SourceBaseView, ConceptDictionaryUpdateMix
     serializer_class = SourceDetailSerializer
 
     def get_object(self, queryset=None):
-        return self.get_queryset().filter(version=HEAD).first()
+        return self.get_queryset().filter(is_active=True).order_by('-created_at').first()
 
     def get_permissions(self):
         if self.request.method in ['GET', 'HEAD']:

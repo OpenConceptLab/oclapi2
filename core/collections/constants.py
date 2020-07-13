@@ -11,3 +11,4 @@ CONCEPT_FULLY_SPECIFIED_NAME_UNIQUE_PER_COLLECTION_AND_LOCALE = "Concept fully s
                                                                 "same collection and locale."
 CONCEPT_PREFERRED_NAME_UNIQUE_PER_COLLECTION_AND_LOCALE = "Concept preferred name must be unique for same collection " \
                                                           "and locale."
+INCLUDE_REFERENCES_PARAM = 'includeReferences'

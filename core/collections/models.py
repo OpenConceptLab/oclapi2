@@ -1,8 +1,7 @@
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import UniqueConstraint
-from django.urls import resolve
-from pydash import compact, get
+from pydash import compact
 
 from core.collections.constants import (
     COLLECTION_TYPE, EXPRESSION_INVALID, EXPRESSION_RESOURCE_URI_PARTS_COUNT,
@@ -11,7 +10,9 @@ from core.collections.constants import (
     REFERENCE_ALREADY_EXISTS, CONCEPT_FULLY_SPECIFIED_NAME_UNIQUE_PER_COLLECTION_AND_LOCALE,
     CONCEPT_PREFERRED_NAME_UNIQUE_PER_COLLECTION_AND_LOCALE, EXPRESSION_NUMBER_OF_PARTS_WITH_VERSION
 )
-from core.common.constants import DEFAULT_REPOSITORY_TYPE, CUSTOM_VALIDATION_SCHEMA_OPENMRS
+from core.collections.utils import is_concept, is_mapping, concepts_for
+from core.common.constants import DEFAULT_REPOSITORY_TYPE, CUSTOM_VALIDATION_SCHEMA_OPENMRS, ACCESS_TYPE_VIEW, \
+    ACCESS_TYPE_EDIT
 from core.common.models import ConceptContainerModel
 from core.common.utils import reverse_resource
 from core.concepts.models import Concept
@@ -41,6 +42,23 @@ class Collection(ConceptContainerModel):
     repository_type = models.TextField(default=DEFAULT_REPOSITORY_TYPE, blank=True)
     custom_resources_linked_source = models.TextField(blank=True)
     concepts = models.ManyToManyField('concepts.Concept')
+
+    @classmethod
+    def get_base_queryset(cls, params):
+        collection = params.pop('collection', None)
+        contains_uri = params.pop('contains', None)
+        include_references = params.pop('include_references', None)
+        queryset = super().get_base_queryset(params)
+        if collection:
+            queryset = queryset.filter(mnemonic=collection)
+        if contains_uri:
+            queryset = queryset.filter(
+                references__expression=contains_uri, public_access__in=[ACCESS_TYPE_EDIT, ACCESS_TYPE_VIEW]
+            )
+        if include_references:
+            queryset = queryset.prefetch_related('references')
+
+        return queryset
 
     @property
     def collection(self):
@@ -86,10 +104,6 @@ class Collection(ConceptContainerModel):
 
     def current_references(self):
         return list(self.references.values_list('expression', flat=True))
-
-    @staticmethod
-    def get_concept_id_by_version_information(expression):
-        return get(CollectionReference.get_concept_from_expression(expression), 'id')
 
     def validate(self, reference):
         reference.full_clean()
@@ -178,6 +192,18 @@ class Collection(ConceptContainerModel):
     def is_validation_necessary():
         return False
 
+    def delete_references(self, expressions):
+        concepts = Concept.objects.none()
+        head = self.head
+        for expression in expressions:
+            concepts |= concepts_for(expression)
+
+        concept_ids = concepts.distinct('id').values_list('id', flat=True)
+        head.concepts.set(head.concepts.exclude(id__in=concept_ids))
+        head.references.set(head.references.exclude(expression__in=expressions))
+
+        return [list(concept_ids), []]
+
 
 class CollectionReference(models.Model):
     class Meta:
@@ -190,6 +216,28 @@ class CollectionReference(models.Model):
 
     expression = models.TextField()
     collection = models.ForeignKey(Collection, related_name='references', on_delete=models.CASCADE)
+
+    @classmethod
+    def version_specified(cls, expression):  # conflicting with is_resource_expression
+        return len(expression.split('/')) == EXPRESSION_NUMBER_OF_PARTS_WITH_VERSION
+
+    @staticmethod
+    def get_concept_head_from_expression(expression):  # should it use __get_concepts?
+        """Returns head"""
+        concept_version = Concept.objects.filter(uri=expression).first()
+        if concept_version:
+            return concept_version.head
+
+        return None
+
+    @staticmethod
+    def diff(ctx, _from):
+        prev_expressions = map(lambda r: r.expression, _from)
+        return filter(lambda ref: ref.expression not in prev_expressions, ctx)
+
+    @property
+    def without_version(self):
+        return '/'.join(self.__expression_parts[0:7]) + '/'
 
     @property
     def is_resource_expression(self):
@@ -204,45 +252,19 @@ class CollectionReference(models.Model):
     @property
     def reference_type(self):
         reference = None
-        if self.__is_concept_type():
+        if is_concept(self.expression):
             reference = CONCEPTS_EXPRESSIONS
-        if self.__is_mapping_type():
+        if is_mapping(self.expression):
             reference = MAPPINGS_EXPRESSIONS
 
         return reference
-
-    def __is_concept_type(self):
-        return self.expression and "/concepts/" in self.expression
-
-    def __is_mapping_type(self):
-        return self.expression and "/mappings/" in self.expression
 
     @property
     def __expression_parts(self):
         return self.expression.split('/')
 
-    @classmethod
-    def version_specified(cls, expression):  # conflicting with is_resource_expression
-        return len(expression.split('/')) == EXPRESSION_NUMBER_OF_PARTS_WITH_VERSION
-
     def get_concepts(self):
-        return self.__get_concepts(self.expression)
-
-    @staticmethod
-    def __get_concepts(expression):
-        kwargs = get(resolve(expression), 'kwargs')
-        if kwargs:
-            return Concept.get_queryset(kwargs)
-        return Concept.objects.none()
-
-    @staticmethod
-    def get_concept_from_expression(expression):  # should it use __get_concepts?
-        """Returns head"""
-        concept_version = Concept.objects.filter(uri=expression).first()
-        if concept_version:
-            return concept_version.head
-
-        return None
+        return concepts_for(self.expression)
 
     def clean(self):
         self.original_expression = str(self.expression)
@@ -258,12 +280,3 @@ class CollectionReference(models.Model):
             self.mappings = Mapping.objects.filter(uri=self.expression)
             if not self.mappings:
                 raise ValidationError({'detail': ['Expression specified is not valid.']})
-
-    @staticmethod
-    def diff(ctx, _from):
-        prev_expressions = map(lambda r: r.expression, _from)
-        return filter(lambda ref: ref.expression not in prev_expressions, ctx)
-
-    @property
-    def without_version(self):
-        return '/'.join(self.__expression_parts[0:7]) + '/'

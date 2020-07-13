@@ -27,13 +27,22 @@ class Source(ConceptContainerModel):
 
     OBJECT_TYPE = SOURCE_TYPE
 
-    @property
-    def source(self):
-        return self.mnemonic
+    @classmethod
+    def get_base_queryset(cls, params):
+        source = params.pop('source', None)
+        queryset = super().get_base_queryset(params)
+        if source:
+            queryset = queryset.filter(mnemonic=source)
+
+        return queryset
 
     @staticmethod
     def get_resource_url_kwarg():
         return 'source'
+
+    @property
+    def source(self):
+        return self.mnemonic
 
     @property
     def versions_url(self):

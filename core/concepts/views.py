@@ -39,7 +39,7 @@ class ConceptBaseView(BaseAPIView):
             'concept_version', None
         ) or self.kwargs.get('concept_version', None)
         params['is_latest'] = 'is_latest' in self.kwargs
-        return Concept.get_queryset(compact_dict_by_values(params))
+        return Concept.get_base_queryset(compact_dict_by_values(params))
 
 
 class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):

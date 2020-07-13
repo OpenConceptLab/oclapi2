@@ -6,6 +6,7 @@ from rest_framework.generics import RetrieveAPIView, DestroyAPIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+from core.collections.views import CollectionListView
 from core.common.constants import ACCESS_TYPE_NONE
 from core.common.mixins import ListWithHeadersMixin
 from core.common.permissions import IsSuperuser
@@ -158,6 +159,12 @@ class OrganizationMemberView(generics.GenericAPIView):
 
 
 class OrganizationSourceListView(SourceListView):
+    def get_queryset(self):
+        user = UserProfile.objects.get(username=self.kwargs.get('user', None))
+        return self.queryset.filter(organization__in=user.organizations.all())
+
+
+class OrganizationCollectionListView(CollectionListView):
     def get_queryset(self):
         user = UserProfile.objects.get(username=self.kwargs.get('user', None))
         return self.queryset.filter(organization__in=user.organizations.all())

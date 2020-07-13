@@ -30,5 +30,11 @@ urlpatterns = [
         org_views.OrganizationSourceListView.as_view(),
         name='userprofile-organization-source-list'
     ),
+    re_path(
+        r'^(?P<user>' + NAMESPACE_PATTERN + ')/orgs/collections/$',
+        org_views.OrganizationCollectionListView.as_view(),
+        name='userprofile-organization-collection-list'
+    ),
     re_path(r'^(?P<user>' + NAMESPACE_PATTERN + ')/sources/', include('core.sources.urls')),
+    re_path(r'^(?P<user>' + NAMESPACE_PATTERN + ')/collections/', include('core.collections.urls')),
 ]

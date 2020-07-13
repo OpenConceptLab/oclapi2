@@ -15,4 +15,9 @@ urlpatterns = [
         views.CollectionVersionRetrieveUpdateDestroyView.as_view(),
         name='collection-version-detail'
     ),
+    re_path(
+        r'^(?P<collection>{pattern})/references/$'.format(pattern=NAMESPACE_PATTERN),
+        views.CollectionReferencesView.as_view(),
+        name='collection-references'
+    ),
 ]

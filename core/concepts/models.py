@@ -192,7 +192,7 @@ class Concept(ConceptValidationMixin, VersionedModel):  # pylint: disable=too-ma
         return unsaved_names
 
     @classmethod
-    def get_queryset(cls, params):
+    def get_base_queryset(cls, params):
         queryset = cls.objects.filter(is_active=True)
         user = params.get('user', None)
         org = params.get('org', None)
@@ -376,3 +376,9 @@ class Concept(ConceptValidationMixin, VersionedModel):  # pylint: disable=too-ma
         new_version.retired = retired
         new_version.comment = comment
         return Concept.persist_clone(new_version, user)
+
+    @staticmethod
+    def get_unidirectional_mappings():  # make it use django relations related_names
+        return []  # TODO: remove once mapping model is done
+        # from core.mappings.models import Mapping
+        # return Mapping.objects.filter(parent=self.parent, from_concept=self)

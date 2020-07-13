@@ -251,6 +251,25 @@ class ConceptContainerModel(VersionedModel):
     class Meta:
         abstract = True
 
+    @classmethod
+    def get_base_queryset(cls, params):
+        username = params.get('user', None)
+        org = params.get('org', None)
+        version = params.get('version', None)
+        is_latest = params.get('is_latest', None)
+
+        queryset = cls.objects.filter(is_active=True)
+        if username:
+            queryset = queryset.filter(user__username=username)
+        if org:
+            queryset = queryset.filter(organization__mnemonic=org)
+        if version:
+            queryset = queryset.filter(version=version)
+        if is_latest:
+            queryset = queryset.filter(is_latest_version=True)
+
+        return queryset
+
     @property
     def concepts_url(self):
         return reverse_resource(self, 'concept-list')
