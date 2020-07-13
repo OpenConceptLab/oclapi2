@@ -1,7 +1,7 @@
 from mock import Mock, patch
 
 from core.collections.tests.factories import CollectionFactory
-from core.common.constants import ACCESS_TYPE_NONE, HEAD
+from core.common.constants import ACCESS_TYPE_NONE, HEAD, OCL_ORG_ID
 from core.common.tests import OCLTestCase
 from core.orgs.models import Organization
 from core.sources.tests.factories import SourceFactory
@@ -13,7 +13,7 @@ from core.users.tests.factories import UserProfileFactory
 class UserProfileTest(OCLTestCase):
     def setUp(self):
         super().setUp()
-        self.org = Organization.objects.get(id=1)
+        self.org = Organization.objects.get(id=OCL_ORG_ID)
 
     def test_create_userprofile_positive(self):
         self.assertFalse(UserProfile.objects.filter(username='user1').exists())

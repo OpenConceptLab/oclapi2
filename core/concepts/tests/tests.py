@@ -141,7 +141,7 @@ class ConceptTest(OCLTestCase):
         es_locale = LocalizedTextFactory(locale='es', name='Not English')
         en_locale = LocalizedTextFactory(locale='en', name='English')
 
-        source_head = SourceFactory(version='HEAD')
+        source_head = SourceFactory(version=HEAD)
         source_version0 = SourceFactory(
             version='v0', mnemonic=source_head.mnemonic, organization=source_head.organization
         )
@@ -163,7 +163,9 @@ class ConceptTest(OCLTestCase):
 
         self.assertEqual(Concept.persist_clone(cloned_concept, concept.created_by), {})
 
-        persisted_concept = Concept.objects.last()
+        persisted_concept = Concept.objects.filter(
+            mnemonic=cloned_concept.mnemonic, version=cloned_concept.version
+        ).first()
         self.assertEqual(persisted_concept.names.count(), 1)
         self.assertEqual(persisted_concept.descriptions.count(), 2)
         self.assertEqual(persisted_concept.parent, source_version0)

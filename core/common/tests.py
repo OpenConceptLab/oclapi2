@@ -9,7 +9,7 @@ from django.test.runner import DiscoverRunner
 from moto import mock_s3
 
 from core.collections.models import Collection
-from core.common.constants import HEAD
+from core.common.constants import HEAD, OCL_ORG_ID, SUPER_ADMIN_USER_ID
 from core.common.utils import compact_dict_by_values
 from core.concepts.models import Concept, LocalizedText
 from core.orgs.models import Organization
@@ -33,8 +33,8 @@ class OCLTestCase(TestCase):
         Concept.objects.all().delete()
         LocalizedText.objects.all().delete()
         Source.objects.all().delete()
-        Organization.objects.exclude(id=1).all().delete()
-        UserProfile.objects.exclude(id=1).all().delete()
+        Organization.objects.exclude(id=OCL_ORG_ID).all().delete()
+        UserProfile.objects.exclude(id=SUPER_ADMIN_USER_ID).all().delete()
 
     @staticmethod
     def create_lookup_concept_classes(user=None, org=None):

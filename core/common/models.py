@@ -1,3 +1,5 @@
+import uuid
+
 from django.contrib.postgres.fields import JSONField, ArrayField
 from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator
@@ -22,6 +24,7 @@ class BaseModel(models.Model):
     class Meta:
         abstract = True
 
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     public_access = models.CharField(
         max_length=16, choices=ACCESS_TYPE_CHOICES, default=DEFAULT_ACCESS_TYPE, blank=True
     )

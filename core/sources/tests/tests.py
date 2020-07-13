@@ -149,7 +149,6 @@ class SourceTest(OCLTestCase):
             with self.assertRaises(IntegrityError):
                 source_version.full_clean()
                 source_version.save()
-            self.assertIsNone(source_version.id)
 
         self.assertEqual(source.num_versions, 2)
 
@@ -232,20 +231,10 @@ class SourceTest(OCLTestCase):
             }
         )
 
-
     def test_child_count_updates(self):
         source = SourceFactory(version=HEAD)
         self.assertEqual(source.active_concepts, 0)
-        datetime_format = '%m/%d/%Y %H:%M:%s'
-        self.assertTrue(
-            source.updated_at.strftime(
-                datetime_format
-            ) == source.last_concept_update.strftime(
-                datetime_format
-            ) == source.last_child_update.strftime(
-                datetime_format
-            )
-        )
+        self.assertIsNone(source.last_concept_update)
 
         concept = ConceptFactory(sources=[source], parent=source)
 
