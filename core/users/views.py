@@ -48,8 +48,6 @@ class UserListView(UserBaseView,
         return self.list(request, *args, **kwargs)
 
     def post(self, request, *args, **kwargs):
-        if self.related_object_type and self.related_object_kwarg:
-            return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
         self.serializer_class = UserCreateSerializer
         return self.create(request, *args, **kwargs)
 

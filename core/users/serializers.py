@@ -46,9 +46,10 @@ class UserCreateSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         request_user = self.context['request'].user
         username = validated_data.get('username')
-        if UserProfile.objects.filter(username=username).exists():
+        existing_profile = UserProfile.objects.filter(username=username)
+        if existing_profile.exists():
             self._errors['username'] = 'User with username %s already exists.' % username
-            return None
+            return existing_profile.first()
         email = validated_data.get('email')
         profile = UserProfile(first_name=validated_data.get('name'), username=username, email=email)
         profile.created_by = request_user
