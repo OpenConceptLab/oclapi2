@@ -227,6 +227,7 @@ class ConceptDictionaryCreateMixin(ConceptDictionaryMixin):
         serializer = self.get_serializer(
             data={
                 'mnemonic': request.data.get('id'),
+                'supported_locales': compact(request.data.pop('supported_locales', '').split(',')),
                 'version': HEAD, **request.data, **{self.parent_resource.resource_type.lower(): self.parent_resource.id}
             }
         )

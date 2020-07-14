@@ -1,5 +1,6 @@
 from pydash import compact
-from rest_framework.fields import CharField, DateTimeField, BooleanField, URLField, JSONField, SerializerMethodField
+from rest_framework.fields import CharField, DateTimeField, BooleanField, URLField, JSONField, SerializerMethodField, \
+    UUIDField
 from rest_framework.serializers import ModelSerializer
 
 from core.concepts.models import Concept, LocalizedText
@@ -106,7 +107,7 @@ class ConceptDetailSerializer(ModelSerializer):
     type = CharField(source='versioned_resource_type', read_only=True)
     id = CharField(source='mnemonic', required=True)
     source = CharField(source='parent_resource', read_only=True)
-    parent_id = CharField()
+    parent_id = UUIDField()
     owner = CharField(source='owner_name', read_only=True)
     created_on = DateTimeField(source='created_at', read_only=True)
     updated_on = DateTimeField(source='updated_at', read_only=True)
