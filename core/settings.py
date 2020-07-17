@@ -44,6 +44,7 @@ INSTALLED_APPS = [
     'core.sources.apps.SourceConfig',
     'core.collections',
     'core.concepts',
+    'core.mappings',
 ]
 
 REST_FRAMEWORK = {
