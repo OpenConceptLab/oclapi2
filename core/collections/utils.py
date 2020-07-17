@@ -2,6 +2,7 @@ from django.urls import resolve
 from pydash import get
 
 from core.collections.constants import EXPRESSION_NUMBER_OF_PARTS_WITH_VERSION
+from core.common.utils import get_query_params_from_url_string
 
 
 def is_concept(expression):
@@ -17,9 +18,10 @@ def concepts_for(expression):
     queryset = Concept.objects.none()
 
     try:
-        kwargs = get(resolve(expression), 'kwargs')
-        if kwargs:
-            queryset = Concept.get_base_queryset(kwargs)
+        kwargs = get(resolve(expression), 'kwargs', dict())
+        query_params = get_query_params_from_url_string(expression)  # parsing query parameters
+        kwargs.update(query_params)
+        queryset = Concept.get_base_queryset(kwargs)
     except:  # pylint: disable=bare-except
         pass
 

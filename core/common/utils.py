@@ -1,6 +1,7 @@
 import os
 import tempfile
 import zipfile
+from urllib import parse
 
 from dateutil import parser
 from django.urls import NoReverseMatch, reverse, get_resolver
@@ -140,3 +141,10 @@ def parse_boolean_query_param(request, param, default=None):
         if str(boolean).lower() == val.lower():
             return boolean
     return None
+
+
+def get_query_params_from_url_string(url):
+    try:
+        return dict(parse.parse_qsl(parse.urlsplit(url).query))
+    except:  # pylint: disable=bare-except
+        return dict()
