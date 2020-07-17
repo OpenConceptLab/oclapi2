@@ -14,7 +14,7 @@
   fields:
     email: "admin@openconceptlab.org"
     username: "ocladmin"
-    password: "pbkdf2_sha256$100000$Pa8CnRmKNcze$5aL+yDx8wOU9KlRhkmRK6QH3bAok9ioDfFYLDQB6bL0="
+    password: "pbkdf2_sha256$180000$YSGItUAkg0Wy$dzSLkkOk9FRFsOQOclMfng95jm9C1ufww0H9LQ/yhAg="
     first_name: OCL
     last_name: Admin
     company: OCL

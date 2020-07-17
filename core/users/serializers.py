@@ -21,6 +21,7 @@ class UserCreateSerializer(serializers.ModelSerializer):
     name = serializers.CharField(required=True)
     email = serializers.CharField(required=True)
     password = serializers.CharField(required=False)
+    hashed_password = serializers.CharField(required=False)
     company = serializers.CharField(required=False)
     location = serializers.CharField(required=False)
     preferred_locale = serializers.CharField(required=False)
@@ -36,11 +37,11 @@ class UserCreateSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = UserProfile
-        extra_kwargs = {'password': {'write_only': True}}
+        extra_kwargs = {'password': {'write_only': True}, 'hashed_password': {'write_only': True}}
         fields = (
             'type', 'uuid', 'username', 'name', 'email', 'company', 'location', 'preferred_locale', 'orgs',
             'public_collections', 'public_sources', 'created_on', 'updated_on', 'created_by', 'updated_by',
-            'url', 'extras', 'password',
+            'url', 'extras', 'password', 'hashed_password'
         )
 
     def create(self, validated_data):
@@ -54,7 +55,6 @@ class UserCreateSerializer(serializers.ModelSerializer):
         profile = UserProfile(first_name=validated_data.get('name'), username=username, email=email)
         profile.created_by = request_user
         profile.updated_by = request_user
-        profile.password = validated_data.get('hashed_password', None) or validated_data.get('password', None)
         profile.company = validated_data.get('company', None)
         profile.location = validated_data.get('location', None)
         profile.preferred_locale = validated_data.get('preferred_locale', None)
