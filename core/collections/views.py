@@ -4,11 +4,12 @@ from rest_framework import status, mixins
 from rest_framework.generics import RetrieveAPIView, DestroyAPIView
 from rest_framework.response import Response
 
-from core.collections.constants import INCLUDE_REFERENCES_PARAM
+from core.collections.constants import INCLUDE_REFERENCES_PARAM, HEAD_OF_CONCEPT_ADDED_TO_COLLECTION, \
+    HEAD_OF_MAPPING_ADDED_TO_COLLECTION, CONCEPT_ADDED_TO_COLLECTION_FMT, MAPPING_ADDED_TO_COLLECTION_FMT
 from core.collections.models import Collection, CollectionReference
 from core.collections.serializers import CollectionDetailSerializer, CollectionListSerializer, \
     CollectionCreateSerializer, CollectionReferenceSerializer, CollectionVersionDetailSerializer
-from core.collections.utils import is_concept
+from core.collections.utils import is_concept, is_version_specified
 from core.common.constants import HEAD, RELEASED_PARAM, PROCESSING_PARAM
 from core.common.mixins import ConceptDictionaryCreateMixin, ListWithHeadersMixin, ConceptDictionaryUpdateMixin
 from core.common.permissions import CanViewConceptDictionary, CanEditConceptDictionary
@@ -195,6 +196,88 @@ class CollectionReferencesView(
 
         instance.delete_references(expressions)
         return Response({'message': 'ok!'}, status=status.HTTP_200_OK)
+
+    def update(self, request, *args, **kwargs):  # pylint: disable=too-many-locals,unused-argument # Fixme: Sny
+        collection = self.get_object()
+
+        cascade_mappings_flag = request.query_params.get('cascade', 'none')
+        data = request.data.get('data')
+        concept_expressions = data.get('concepts', [])
+        mapping_expressions = data.get('mappings', [])
+        expressions = data.get('expressions', [])
+        cascade_mappings = self.cascade_mapping_resolver(cascade_mappings_flag)
+
+        (added_references, errors) = collection.add_expressions(
+            data, self.get_host_url(), request.user, cascade_mappings
+        )
+
+        all_expressions = expressions + concept_expressions + mapping_expressions
+
+        added_expressions = [reference.expression for reference in added_references]
+        added_original_expressions = set(
+            [reference.original_expression for reference in added_references] + all_expressions
+        )
+
+        response = []
+
+        for expression in added_original_expressions:
+            response_item = self.create_response_item(added_expressions, errors, expression)
+            if response_item:
+                response.append(response_item)
+
+        return Response(response, status=status.HTTP_200_OK)
+
+    def create_response_item(self, added_expressions, errors, expression):
+        adding_expression_failed = len(errors) > 0 and expression in errors
+        if adding_expression_failed:
+            return self.create_error_message(errors, expression)
+        return self.create_success_message(added_expressions, expression)
+
+    def create_success_message(self, added_expressions, expression):
+        message = self.select_update_message(expression)
+
+        references = list(filter(lambda expr: expr.startswith(expression), added_expressions))
+        if len(references) < 1:
+            return None
+
+        return {
+            'added': True,
+            'expression': references[0],
+            'message': message
+        }
+
+    @staticmethod
+    def create_error_message(errors, expression):
+        error_message = errors.get(expression, {})
+        return {
+            'added': False,
+            'expression': expression,
+            'message': error_message
+        }
+
+    def select_update_message(self, expression):
+        adding_head_version = not is_version_specified(expression)
+
+        expression_parts = expression.split('/')
+        resource_type = expression_parts[5]
+
+        if adding_head_version:
+            return self.adding_to_head_message_by_type(resource_type)
+
+        resource_name = expression_parts[6]
+        return self.version_added_message_by_type(resource_name, self.parent_resource.name, resource_type)
+
+    @staticmethod
+    def adding_to_head_message_by_type(resource_type):
+        if resource_type == 'concepts':
+            return HEAD_OF_CONCEPT_ADDED_TO_COLLECTION
+        return HEAD_OF_MAPPING_ADDED_TO_COLLECTION
+
+    @staticmethod
+    def version_added_message_by_type(resource_name, collection_name, resource_type):
+        if resource_type == 'concepts':
+            return CONCEPT_ADDED_TO_COLLECTION_FMT.format(resource_name, collection_name)
+        return MAPPING_ADDED_TO_COLLECTION_FMT.format(resource_name, collection_name)
 
     @staticmethod
     def cascade_mapping_resolver(cascade_mappings_flag):

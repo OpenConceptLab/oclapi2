@@ -1,22 +1,27 @@
+import json
+
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import UniqueConstraint
 from pydash import compact
+from rest_framework.test import APIRequestFactory
 
 from core.collections.constants import (
     COLLECTION_TYPE, EXPRESSION_INVALID, EXPRESSION_RESOURCE_URI_PARTS_COUNT,
     EXPRESSION_RESOURCE_VERSION_URI_PARTS_COUNT, CONCEPTS_EXPRESSIONS,
     MAPPINGS_EXPRESSIONS,
     REFERENCE_ALREADY_EXISTS, CONCEPT_FULLY_SPECIFIED_NAME_UNIQUE_PER_COLLECTION_AND_LOCALE,
-    CONCEPT_PREFERRED_NAME_UNIQUE_PER_COLLECTION_AND_LOCALE, EXPRESSION_NUMBER_OF_PARTS_WITH_VERSION
+    CONCEPT_PREFERRED_NAME_UNIQUE_PER_COLLECTION_AND_LOCALE, ALL_SYMBOL)
+from core.collections.utils import is_concept, is_mapping, concepts_for, drop_version
+from core.common.constants import (
+    DEFAULT_REPOSITORY_TYPE, CUSTOM_VALIDATION_SCHEMA_OPENMRS, ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT
 )
-from core.collections.utils import is_concept, is_mapping, concepts_for
-from core.common.constants import DEFAULT_REPOSITORY_TYPE, CUSTOM_VALIDATION_SCHEMA_OPENMRS, ACCESS_TYPE_VIEW, \
-    ACCESS_TYPE_EDIT
 from core.common.models import ConceptContainerModel
 from core.common.utils import reverse_resource
 from core.concepts.models import Concept
+from core.concepts.views import ConceptListView
 from core.mappings.models import Mapping
+from core.mappings.view import MappingListView
 
 
 class Collection(ConceptContainerModel):
@@ -84,6 +89,9 @@ class Collection(ConceptContainerModel):
     def add_concept(self, concept):
         self.concepts.add(concept)
 
+    def add_mapping(self, mapping):
+        self.mappings.add(mapping)
+
     def get_concepts_count(self):
         return self.concepts.count()
 
@@ -146,6 +154,105 @@ class Collection(ConceptContainerModel):
             if other_concepts_in_collection.filter(name=name.name, locale=name.locale).exists():
                 raise ValidationError(validation_error)
 
+    @staticmethod
+    def __get_children_uris(url, view_klass):
+        view = view_klass.as_view()
+        request = APIRequestFactory().get(url)
+        response = view(request)
+        response.render()
+        data = json.loads(response.content)
+        return [child['url'] for child in data]
+
+    def __get_expressions_from(self, expressions, url, view_klass):
+        if expressions == ALL_SYMBOL:
+            return self.__get_children_uris(url, view_klass)
+
+        return expressions
+
+    @staticmethod
+    def __get_children_list_url(child_type, host_url, data):
+        return "{host_url}{uri}{child_type}?q={search_term}&limit=0".format(
+            host_url=host_url, uri=data.get('uri'), child_type=child_type, search_term=data.get('search_term', '')
+        )
+
+    def add_expressions(self, data, host_url, user, cascade_mappings=False):
+        expressions = data.get('expressions', [])
+        concept_expressions = data.get('concepts', [])
+        mapping_expressions = data.get('mappings', [])
+
+        expressions.extend(
+            self.__get_expressions_from(
+                concept_expressions, self.__get_children_list_url('concepts', host_url, data), ConceptListView
+            )
+        )
+        expressions.extend(
+            self.__get_expressions_from(
+                mapping_expressions, self.__get_children_list_url('mappings', host_url, data), MappingListView
+            )
+        )
+        if cascade_mappings:
+            all_related_mappings = self.get_all_related_mappings(expressions)
+            expressions = expressions.union(all_related_mappings)
+
+        return self.add_references_in_bulk(expressions, user)
+
+    def add_references_in_bulk(self, expressions, user=None):  # pylint: disable=too-many-locals  # Fixme: Sny
+        errors = {}
+        collection_version = self.head
+
+        new_expressions = set(expressions)
+        new_versionless_expressions = {drop_version(expression): expression for expression in new_expressions}
+        for reference in collection_version.references:
+            existing_versionless_expression = reference.without_version
+            if existing_versionless_expression in new_versionless_expressions:
+                existing_expression = new_versionless_expressions[existing_versionless_expression]
+                new_expressions.discard(existing_expression)
+                errors[existing_expression] = [REFERENCE_ALREADY_EXISTS]
+
+        added_references = list()
+        for expression in new_expressions:
+            ref = CollectionReference(expression=expression)
+            try:
+                ref.clean()
+            except Exception as ex:
+                errors[expression] = ex.messages if hasattr(ex, 'messages') else ex
+                continue
+
+            added = False
+            if ref.concepts:
+                for concept in ref.concepts:
+                    if self.custom_validation_schema == CUSTOM_VALIDATION_SCHEMA_OPENMRS:
+                        try:
+                            self.check_concept_uniqueness_in_collection_and_locale_by_name_attribute(
+                                concept, attribute='is_fully_specified', value=True,
+                                error_message=CONCEPT_FULLY_SPECIFIED_NAME_UNIQUE_PER_COLLECTION_AND_LOCALE
+                            )
+                            self.check_concept_uniqueness_in_collection_and_locale_by_name_attribute(
+                                concept, attribute='locale_preferred', value=True,
+                                error_message=CONCEPT_PREFERRED_NAME_UNIQUE_PER_COLLECTION_AND_LOCALE
+                            )
+                        except Exception as ex:
+                            errors[expression] = ex.messages if hasattr(ex, 'messages') else ex
+                            continue
+                    collection_version.add_concept(concept)
+                    added = True
+            if ref.mappings:
+                for mapping in ref.mappings:
+                    collection_version.add_mapping(mapping)
+                    added = True
+
+            if added:
+                collection_version.references.add(ref)
+                self.references.add(ref)
+                added_references.append(ref)
+
+        if user:
+            collection_version.updated_by = user
+            self.updated_by = user
+        collection_version.save()
+        self.save()
+        return added_references, errors
+
     def add_references(self, expressions, user=None):
         errors = {}
 
@@ -204,6 +311,26 @@ class Collection(ConceptContainerModel):
 
         return [list(concept_ids), []]
 
+    def get_all_related_mappings(self, expressions):
+        all_related_mappings = []
+        unversioned_mappings = concept_expressions = []
+
+        for expression in expressions:
+            if is_mapping(expression):
+                unversioned_mappings.append(drop_version(expression))
+            elif is_concept(expression):
+                concept_expressions.append(expression)
+
+        for concept_expression in concept_expressions:
+            ref = CollectionReference(expression=concept_expression)
+            try:
+                self.validate(ref)
+                all_related_mappings += ref.get_related_mappings(unversioned_mappings)
+            except:  # pylint: disable=bare-except
+                continue
+
+        return all_related_mappings
+
 
 class CollectionReference(models.Model):
     class Meta:
@@ -216,10 +343,6 @@ class CollectionReference(models.Model):
 
     expression = models.TextField()
     collection = models.ForeignKey(Collection, related_name='references', on_delete=models.CASCADE)
-
-    @classmethod
-    def version_specified(cls, expression):  # conflicting with is_resource_expression
-        return len(expression.split('/')) == EXPRESSION_NUMBER_OF_PARTS_WITH_VERSION
 
     @staticmethod
     def get_concept_head_from_expression(expression):  # should it use __get_concepts?
@@ -237,7 +360,7 @@ class CollectionReference(models.Model):
 
     @property
     def without_version(self):
-        return '/'.join(self.__expression_parts[0:7]) + '/'
+        return drop_version(self.expression)
 
     @property
     def is_resource_expression(self):
@@ -280,3 +403,16 @@ class CollectionReference(models.Model):
             self.mappings = Mapping.objects.filter(uri=self.expression)
             if not self.mappings:
                 raise ValidationError({'detail': ['Expression specified is not valid.']})
+
+    def get_related_mappings(self, exclude_mapping_uris):
+        mappings = []
+        concepts = self.get_concepts()
+        if concepts.exists():
+            for concept in concepts:
+                mappings = list(
+                    concept.get_unidirectional_mappings().exclude(
+                        uri__in=exclude_mapping_uris
+                    ).values_list('uri', flat=True)
+                )
+
+        return mappings
