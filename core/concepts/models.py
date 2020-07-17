@@ -5,9 +5,9 @@ from django.db import models, IntegrityError
 from django.db.models import F
 from pydash import get, compact
 
-from core.common.constants import TEMP, HEAD, ISO_639_1
+from core.common.constants import TEMP, HEAD, ISO_639_1, INCLUDE_RETIRED_PARAM, ACCESS_TYPE_NONE
 from core.common.models import VersionedModel
-from core.common.utils import reverse_resource
+from core.common.utils import reverse_resource, parse_updated_since_param
 from core.concepts.constants import CONCEPT_TYPE, LOCALES_FULLY_SPECIFIED, LOCALES_SHORT, LOCALES_SEARCH_INDEX_TERM, \
     CONCEPT_WAS_RETIRED, CONCEPT_IS_ALREADY_RETIRED, CONCEPT_IS_ALREADY_NOT_RETIRED, CONCEPT_WAS_UNRETIRED
 from core.concepts.mixins import ConceptValidationMixin
@@ -140,12 +140,36 @@ class Concept(ConceptValidationMixin, VersionedModel):  # pylint: disable=too-ma
 
     @property
     def preferred_locale(self):
-        locales = self.preferred_name_locales or self.names
-        return locales.order_by('-created_at').first()
+        return get(self.__names_qs(dict(locale_preferred=True), 'created_at', 'desc'), '0') or \
+               get(self.__names_qs(dict(), 'created_at', 'desc'), '0')
 
-    @property
-    def preferred_name_locales(self):
-        return self.names.filter(locale_preferred=True)
+    def __names_qs(self, filters, order_by=None, order='desc'):
+        if getattr(self, '_prefetched_objects_cache', None) and \
+           'names' in self._prefetched_objects_cache:  # pragma: no cover
+            return self.__names_from_prefetched_object_cache(filters, order_by, order)
+
+        return self.__names_from_db(filters, order_by, order)
+
+    def __names_from_db(self, filters, order_by=None, order='desc'):
+        names = self.names.filter(
+            **filters
+        )
+        if order_by:
+            if order:
+                order_by = '-' + order_by if order.lower() == 'desc' else order_by
+
+            names = names.order_by(order_by)
+
+        return names
+
+    def __names_from_prefetched_object_cache(self, filters, order_by=None, order='desc'):  # pragma: no cover
+        def is_eligible(name):
+            return all([get(name, key) == value for key, value in filters.items()])
+
+        names = list(filter(is_eligible, self.names.all()))
+        if order_by:
+            names = sorted(names, key=lambda name: get(name, order_by), reverse=(order.lower() == 'desc'))
+        return names
 
     @property
     def default_name_locales(self):
@@ -169,7 +193,7 @@ class Concept(ConceptValidationMixin, VersionedModel):  # pylint: disable=too-ma
 
     @property
     def iso_639_1_locale(self):
-        return get(self.names.filter(type=ISO_639_1).first(), 'name')
+        return get(self.__names_qs(dict(type=ISO_639_1)), '0.name')
 
     @property
     def custom_validation_schema(self):
@@ -222,27 +246,45 @@ class Concept(ConceptValidationMixin, VersionedModel):  # pylint: disable=too-ma
         queryset = cls.objects.filter(is_active=True)
         user = params.get('user', None)
         org = params.get('org', None)
+        collection = params.get('collection', None)
         source = params.get('source', None)
-        source_version = params.get('version', None)
+        container_version = params.get('version', None)
         concept = params.get('concept', None)
         concept_version = params.get('concept_version', None)
         is_latest = params.get('is_latest', None)
+        include_retired = params.get(INCLUDE_RETIRED_PARAM, False)
+        updated_since = parse_updated_since_param(params)
         if user:
             queryset = queryset.filter(parent__user__username=user)
         if org:
             queryset = queryset.filter(parent__organization__mnemonic=org)
         if source:
             queryset = queryset.filter(sources__mnemonic=source)
-        if source_version:
-            queryset = queryset.filter(sources__version=source_version)
+        if collection:
+            queryset = queryset.filter(collection__mnemonic=collection)
+        if container_version and source:
+            queryset = queryset.filter(sources__version=container_version)
+        if container_version and collection:
+            queryset = queryset.filter(collection__version=container_version)
         if concept:
             queryset = queryset.filter(mnemonic=concept)
         if concept_version:
             queryset = queryset.filter(version=concept_version)
         if is_latest:
             queryset = queryset.filter(is_latest_version=True)
+        if not include_retired:
+            queryset = queryset.filter(retired=False)
+        if updated_since:
+            queryset = queryset.filter(updated_at__gte=updated_since)
 
         return queryset.distinct()
+
+    @classmethod
+    def global_listing_queryset(cls, params, user):
+        queryset = cls.get_base_queryset(params)
+        if not user.is_staff:
+            queryset = queryset.exclude(public_access=ACCESS_TYPE_NONE)
+        return queryset
 
     def clone(self):
         concept_version = Concept(

@@ -7,7 +7,8 @@ from rest_framework.generics import RetrieveAPIView, DestroyAPIView, ListCreateA
 from rest_framework.mixins import CreateModelMixin
 from rest_framework.response import Response
 
-from core.common.constants import HEAD
+from core.common.constants import HEAD, INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_MAPPINGS_PARAM, INCLUDE_RETIRED_PARAM, \
+    UPDATED_SINCE_PARAM, LIMIT_PARAM
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryMixin
 from core.common.utils import compact_dict_by_values
 from core.common.views import BaseAPIView
@@ -28,10 +29,11 @@ class ConceptBaseView(BaseAPIView):
     def get_detail_serializer(obj, data=None, files=None, partial=False):
         return ConceptDetailSerializer(obj, data, files, partial)
 
-    def get_queryset(self):
+    def get_filter_params(self):
         params = dict()
         params['user'] = self.request.query_params.get('user', None) or self.kwargs.get('user', None)
         params['org'] = self.request.query_params.get('org', None) or self.kwargs.get('org', None)
+        params['collection'] = self.request.query_params.get('collection', None) or self.kwargs.get('collection', None)
         params['source'] = self.request.query_params.get('source', None) or self.kwargs.get('source', None)
         params['version'] = self.request.query_params.get('version', None) or self.kwargs.get('version', None)
         params['concept'] = self.request.query_params.get('concept', None) or self.kwargs.get('concept', None)
@@ -39,7 +41,49 @@ class ConceptBaseView(BaseAPIView):
             'concept_version', None
         ) or self.kwargs.get('concept_version', None)
         params['is_latest'] = 'is_latest' in self.kwargs
-        return Concept.get_base_queryset(compact_dict_by_values(params))
+        params[INCLUDE_RETIRED_PARAM] = self.request.query_params.get(
+            INCLUDE_RETIRED_PARAM, None
+        ) or self.kwargs.get(INCLUDE_RETIRED_PARAM, None)
+        params[UPDATED_SINCE_PARAM] = self.request.query_params.get(
+            UPDATED_SINCE_PARAM, None
+        ) or self.kwargs.get(UPDATED_SINCE_PARAM, None)
+
+        return compact_dict_by_values(params)
+
+    def get_queryset(self):
+        return Concept.get_base_queryset(self.get_filter_params())
+
+
+class ConceptVersionListAllView(ConceptBaseView, ListWithHeadersMixin):
+    permission_classes = (CanViewParentDictionary,)
+
+    def get_serializer_class(self):
+        if self.is_verbose(self.request):
+            return ConceptDetailSerializer
+
+        return ConceptListSerializer
+
+    def get_serializer_context(self):
+        context = {'request': self.request}
+        if self.is_verbose(self.request):
+            context.update({'verbose': True})
+        if self.request.GET.get(INCLUDE_INVERSE_MAPPINGS_PARAM):
+            context.update({'include_indirect_mappings': True})
+        if self.request.GET.get(INCLUDE_MAPPINGS_PARAM):
+            context.update({'include_direct_mappings': True})
+        return context
+
+    def get_queryset(self):
+        queryset = Concept.global_listing_queryset(
+            self.get_filter_params(), self.request.user
+        ).select_related(
+            'parent__organization', 'parent__user',
+        ).prefetch_related('names', 'descriptions')
+        limit = int(self.request.query_params.get(LIMIT_PARAM, 25))
+        return queryset[0:limit]
+
+    def get(self, request, *args, **kwargs):
+        return self.list(request, *args, **kwargs)
 
 
 class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
@@ -60,7 +104,7 @@ class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
     def get_queryset(self):
         return super().get_queryset().filter(version=HEAD).select_related(
             'parent__organization', 'parent__user',
-        )
+        ).prefetch_related('names')
 
     def get(self, request, *args, **kwargs):
         return self.list(request, *args, **kwargs)

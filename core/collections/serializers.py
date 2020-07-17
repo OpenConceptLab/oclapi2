@@ -15,6 +15,7 @@ class CollectionListSerializer(ModelSerializer):
     owner = CharField(source='parent_resource')
     owner_type = CharField(source='parent_resource_type')
     owner_url = CharField(source='parent_url')
+    id = CharField(source='mnemonic')
 
     class Meta:
         model = Collection

@@ -41,7 +41,7 @@ class Collection(ConceptContainerModel):
     preferred_source = models.TextField(blank=True)
     repository_type = models.TextField(default=DEFAULT_REPOSITORY_TYPE, blank=True)
     custom_resources_linked_source = models.TextField(blank=True)
-    concepts = models.ManyToManyField('concepts.Concept')
+    concepts = models.ManyToManyField('concepts.Concept', blank=True)
 
     @classmethod
     def get_base_queryset(cls, params):

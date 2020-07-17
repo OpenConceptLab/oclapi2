@@ -1,17 +1,18 @@
+from django.db import IntegrityError
 from django.http import Http404
-from rest_framework import status
+from rest_framework import status, mixins
 from rest_framework.generics import RetrieveAPIView, DestroyAPIView
 from rest_framework.response import Response
 
 from core.collections.constants import INCLUDE_REFERENCES_PARAM
 from core.collections.models import Collection, CollectionReference
 from core.collections.serializers import CollectionDetailSerializer, CollectionListSerializer, \
-    CollectionCreateSerializer, CollectionReferenceSerializer
+    CollectionCreateSerializer, CollectionReferenceSerializer, CollectionVersionDetailSerializer
 from core.collections.utils import is_concept
-from core.common.constants import HEAD
+from core.common.constants import HEAD, RELEASED_PARAM, PROCESSING_PARAM
 from core.common.mixins import ConceptDictionaryCreateMixin, ListWithHeadersMixin, ConceptDictionaryUpdateMixin
 from core.common.permissions import CanViewConceptDictionary, CanEditConceptDictionary
-from core.common.utils import compact_dict_by_values
+from core.common.utils import compact_dict_by_values, parse_boolean_query_param
 from core.common.views import BaseAPIView
 
 
@@ -22,6 +23,19 @@ class CollectionBaseView(BaseAPIView):
     permission_classes = (CanViewConceptDictionary,)
     queryset = Collection.objects.filter(is_active=True)
 
+    def set_parent_resource(self):
+        from core.orgs.models import Organization
+        from core.users.models import UserProfile
+        org = self.kwargs.get('org', None)
+        user = self.kwargs.get('user', None)
+        parent_resource = None
+        if org:
+            parent_resource = Organization.objects.filter(mnemonic=org).first()
+        if user:
+            parent_resource = UserProfile.objects.filter(username=user).first()
+
+        self.kwargs['parent_resource'] = self.parent_resource = parent_resource
+
     def get_serializer_context(self):
         context = super().get_serializer_context()
         context.update({'request': self.request, INCLUDE_REFERENCES_PARAM: self.should_include_references()})
@@ -31,20 +45,32 @@ class CollectionBaseView(BaseAPIView):
     def get_detail_serializer(obj):
         return CollectionDetailSerializer(obj)
 
-    def get_queryset(self):
+    def get_filter_params(self, default_version_to_head=True):
         query_params = self.request.query_params
         params = dict()
+
+        version = query_params.get('version', None) or self.kwargs.get('version', None)
+        if not version and default_version_to_head:
+            version = HEAD
+        params['version'] = version
         params['user'] = query_params.get('user', None) or self.kwargs.get('user', None)
         params['org'] = query_params.get('org', None) or self.kwargs.get('org', None)
         params['collection'] = query_params.get('collection', None) or self.kwargs.get('collection', None)
-        params['version'] = query_params.get('version', None) or self.kwargs.get('version', None) or HEAD
         params['is_latest'] = self.kwargs.get('is_latest', None)
         params['contains'] = query_params.get('contains', None) or self.kwargs.get('contains', None)
         params['include_references'] = self.should_include_references()
-        return Collection.get_base_queryset(compact_dict_by_values(params))
+        return params
+
+    def get_queryset(self):
+        return Collection.get_base_queryset(compact_dict_by_values(self.get_filter_params()))
 
     def should_include_references(self):
         return self.request.query_params.get(INCLUDE_REFERENCES_PARAM, 'false').lower() == 'true'
+
+
+class CollectionVersionBaseView(CollectionBaseView):
+    def get_filter_params(self, default_version_to_head=False):
+        return super().get_filter_params(default_version_to_head)
 
 
 class CollectionListView(CollectionBaseView, ConceptDictionaryCreateMixin, ListWithHeadersMixin):
@@ -148,7 +174,7 @@ class CollectionReferencesView(
         if search_query:
             queryset = queryset.filter(expression__iexact=search_query).order_by(sort + 'expression')
 
-        return queryset
+        return queryset.all()
 
     def retrieve(self, request, *args, **kwargs):
         self.serializer_class = CollectionReferenceSerializer
@@ -196,6 +222,57 @@ class CollectionReferencesView(
                 expression__in=[mapping.url for mapping in related_mappings]
             ).values_list('expression', flat=True)
         )
+
+
+class CollectionVersionListView(CollectionVersionBaseView, mixins.CreateModelMixin, ListWithHeadersMixin):
+    released_filter = None
+    processing_filter = None
+
+    def get_serializer_class(self):
+        if self.request.method in ['GET', 'HEAD']:
+            return CollectionVersionDetailSerializer if self.is_verbose(self.request) else CollectionListSerializer
+        if self.request.method == 'POST':
+            return CollectionCreateSerializer
+
+        return CollectionListSerializer
+
+    def get(self, request, *args, **kwargs):
+        self.released_filter = parse_boolean_query_param(request, RELEASED_PARAM, self.released_filter)
+        self.processing_filter = parse_boolean_query_param(request, PROCESSING_PARAM, self.processing_filter)
+        return self.list(request, *args, **kwargs)
+
+    def post(self, request, *args, **kwargs):
+        return self.create(request, *args, **kwargs)
+
+    def create(self, request, *args, **kwargs):
+        head_object = self.get_queryset().first()
+        payload = {
+            "mnemonic": head_object.mnemonic, "id": head_object.mnemonic, "name": head_object.name, **request.data,
+            "organization_id": head_object.organization_id, "user_id": head_object.user_id,
+            'version': request.data.pop('id', None)
+        }
+        serializer = self.get_serializer(data=payload)
+        if serializer.is_valid():
+            try:
+                instance = serializer.create_version(payload)
+                if serializer.is_valid():
+                    serializer = CollectionDetailSerializer(instance, context={'request': request})
+                    return Response(serializer.data, status=status.HTTP_201_CREATED)
+            except IntegrityError as ex:
+                return Response(
+                    dict(
+                        error=str(ex), detail='Collection version  \'%s\' already exist. ' % serializer.data.get('id')
+                    ),
+                    status=status.HTTP_409_CONFLICT
+                )
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        if self.released_filter is not None:
+            queryset = queryset.filter(released=self.released_filter)
+        return queryset.order_by('-created_at')
 
 
 class CollectionVersionRetrieveUpdateDestroyView(CollectionBaseView):

@@ -237,7 +237,6 @@ class ConceptDictionaryCreateMixin(ConceptDictionaryMixin):
                 headers = self.get_success_headers(serializer.data)
                 serializer = self.get_detail_serializer(instance)
                 return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
-
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     @staticmethod

@@ -128,6 +128,8 @@ class SourceDetailSerializer(SourceCreateOrUpdateSerializer):
     created_on = DateTimeField(source='created_at')
     updated_on = DateTimeField(source='updated_at')
     supported_locales = ListField(required=False, allow_empty=True)
+    created_by = CharField(source='created_by.username', read_only=True)
+    updated_by = DateTimeField(source='updated_by.username', read_only=True)
 
     class Meta:
         model = Source
@@ -152,6 +154,8 @@ class SourceVersionDetailSerializer(SourceCreateOrUpdateSerializer):
     versions = IntegerField(source='num_versions')
     created_on = DateTimeField(source='created_at')
     updated_on = DateTimeField(source='updated_at')
+    created_by = CharField(source='created_by.username', read_only=True)
+    updated_by = DateTimeField(source='updated_by.username', read_only=True)
     supported_locales = ListField(required=False, allow_empty=True)
 
     class Meta:

@@ -59,5 +59,8 @@ class UserProfile(AbstractUser, BaseModel, SourceContainerMixin):
         Token.objects.filter(user=self).delete()
         Token.objects.create(user=self)
 
+    def __str__(self):
+        return str(self.mnemonic)
+
 
 admin.site.register(UserProfile)

@@ -50,3 +50,6 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         obj = self.get_object()
         obj.soft_delete()
         return response.Response(status=status.HTTP_204_NO_CONTENT)
+
+    def get_host_url(self):
+        return self.request.META['wsgi.url_scheme'] + '://' + self.request.get_host()

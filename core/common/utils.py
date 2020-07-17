@@ -122,8 +122,8 @@ def get_kwargs_for_view(view_name):
     return list(set(flatten([p[0][0][1] for p in patterns])))
 
 
-def parse_updated_since_param(request):
-    updated_since = request.query_params.get(UPDATED_SINCE_PARAM)
+def parse_updated_since_param(params):
+    updated_since = params.get(UPDATED_SINCE_PARAM)
     if updated_since:
         try:
             return parser.parse(updated_since)

@@ -22,5 +22,5 @@ urlpatterns = [
         name='organization-member-detail'
     ),
     re_path(r'^(?P<org>' + NAMESPACE_PATTERN + ')/sources/', include('core.sources.urls')),
-    re_path(r'^(?P<user>' + NAMESPACE_PATTERN + ')/collections/', include('core.collections.urls')),
+    re_path(r'^(?P<org>' + NAMESPACE_PATTERN + ')/collections/', include('core.collections.urls')),
 ]
