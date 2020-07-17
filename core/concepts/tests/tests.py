@@ -22,10 +22,11 @@ class LocalizedTextTest(OCLTestCase):
         saved_locale = LocalizedTextFactory()
         cloned_locale = saved_locale.clone()
         self.assertEqual(
-            omit(saved_locale.__dict__, ['_state', 'id', 'created_at']),
-            omit(cloned_locale.clone().__dict__, ['_state', 'id', 'created_at'])
+            omit(saved_locale.__dict__, ['_state', 'id', 'created_at', 'internal_reference_id']),
+            omit(cloned_locale.__dict__, ['_state', 'id', 'created_at', 'internal_reference_id'])
         )
-        self.assertIsNone(cloned_locale.id)
+        self.assertNotEqual(saved_locale.id, cloned_locale.id)
+        self.assertIsNone(cloned_locale.internal_reference_id)
 
 
 class ConceptTest(OCLTestCase):

@@ -25,6 +25,7 @@ class BaseModel(models.Model):
         abstract = True
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    internal_reference_id = models.CharField(max_length=255, null=True, blank=True)
     public_access = models.CharField(
         max_length=16, choices=ACCESS_TYPE_CHOICES, default=DEFAULT_ACCESS_TYPE, blank=True
     )
@@ -52,6 +53,8 @@ class BaseModel(models.Model):
     is_being_saved = False
 
     def save(self, force_insert=False, force_update=False, using=None, update_fields=None):
+        if not self.internal_reference_id and self.id:
+            self.internal_reference_id = str(self.id)
         self.is_being_saved = True
         self.encode_extras()
         super().save(force_insert, force_update, using, update_fields)

@@ -1,4 +1,5 @@
 import json
+import uuid
 
 from django.core.exceptions import ValidationError
 from django.db import models
@@ -341,6 +342,8 @@ class CollectionReference(models.Model):
     mappings = None
     original_expression = None
 
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    internal_reference_id = models.CharField(max_length=255, null=True, blank=True)
     expression = models.TextField()
     collection = models.ForeignKey(Collection, related_name='references', on_delete=models.CASCADE)
 
@@ -396,6 +399,11 @@ class CollectionReference(models.Model):
             raise ValidationError(dict(detail=[EXPRESSION_INVALID]))
 
         self.create_entities_from_expressions()
+
+    def save(self, force_insert=False, force_update=False, using=None, update_fields=None):
+        if not self.internal_reference_id and self.id:
+            self.internal_reference_id = str(self.id)
+        super().save(force_insert, force_update, using, update_fields)
 
     def create_entities_from_expressions(self):
         self.concepts = self.get_concepts()

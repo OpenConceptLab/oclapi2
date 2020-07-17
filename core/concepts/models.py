@@ -1,3 +1,4 @@
+import uuid
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -17,12 +18,19 @@ class LocalizedText(models.Model):
     class Meta:
         db_table = 'localized_texts'
 
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    internal_reference_id = models.CharField(max_length=255, null=True, blank=True)
     external_id = models.TextField(null=True, blank=True)
     name = models.TextField()
     type = models.TextField(null=True, blank=True)
     locale = models.TextField()
     locale_preferred = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
+
+    def save(self, force_insert=False, force_update=False, using=None, update_fields=None):
+        if not self.internal_reference_id and self.id:
+            self.internal_reference_id = str(self.id)
+        super().save(force_insert, force_update, using, update_fields)
 
     def clone(self):
         return LocalizedText(
@@ -325,11 +333,9 @@ class Concept(ConceptValidationMixin, VersionedModel):  # pylint: disable=too-ma
         descriptions = get(self, 'cloned_descriptions', [])
 
         for name in names:
-            if not name.id:
-                name.save()
+            name.save()
         for desc in descriptions:
-            if not desc.id:
-                desc.save()
+            desc.save()
 
         self.names.set(names)
         self.descriptions.set(descriptions)
