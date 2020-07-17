@@ -1,5 +1,6 @@
 import json
 import uuid
+from django.utils import timezone
 
 from django.core.exceptions import ValidationError
 from django.db import models
@@ -346,6 +347,9 @@ class CollectionReference(models.Model):
     internal_reference_id = models.CharField(max_length=255, null=True, blank=True)
     expression = models.TextField()
     collection = models.ForeignKey(Collection, related_name='references', on_delete=models.CASCADE)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    last_resolved_at = models.DateTimeField(default=timezone.now)
 
     @staticmethod
     def get_concept_head_from_expression(expression):  # should it use __get_concepts?
