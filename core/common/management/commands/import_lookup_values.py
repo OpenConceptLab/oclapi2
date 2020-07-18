@@ -79,7 +79,7 @@ class Command(BaseCommand):
         for line in lines:
             data = json.loads(line)
             mnemonic = data.pop('id', None)
-            if not Concept.objects.filter(parent=source, mnemonic=mnemonic, version=HEAD).exists():
+            if not Concept.objects.filter(parent=source, mnemonic=mnemonic, is_latest_version=True).exists():
                 data['mnemonic'] = mnemonic
                 data['name'] = mnemonic
                 data['parent'] = source

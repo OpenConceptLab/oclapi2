@@ -1,16 +1,16 @@
 import json
 import uuid
-from django.utils import timezone
 
 from django.core.exceptions import ValidationError
-from django.db import models
+from django.db import models, transaction
 from django.db.models import UniqueConstraint
+from django.utils import timezone
 from pydash import compact
 from rest_framework.test import APIRequestFactory
 
 from core.collections.constants import (
     COLLECTION_TYPE, EXPRESSION_INVALID, EXPRESSION_RESOURCE_URI_PARTS_COUNT,
-    EXPRESSION_RESOURCE_VERSION_URI_PARTS_COUNT, CONCEPTS_EXPRESSIONS,
+    CONCEPTS_EXPRESSIONS,
     MAPPINGS_EXPRESSIONS,
     REFERENCE_ALREADY_EXISTS, CONCEPT_FULLY_SPECIFIED_NAME_UNIQUE_PER_COLLECTION_AND_LOCALE,
     CONCEPT_PREFERRED_NAME_UNIQUE_PER_COLLECTION_AND_LOCALE, ALL_SYMBOL)
@@ -19,7 +19,7 @@ from core.common.constants import (
     DEFAULT_REPOSITORY_TYPE, CUSTOM_VALIDATION_SCHEMA_OPENMRS, ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT
 )
 from core.common.models import ConceptContainerModel
-from core.common.utils import reverse_resource
+from core.common.utils import reverse_resource, is_valid_uri
 from core.concepts.models import Concept
 from core.concepts.views import ConceptListView
 from core.mappings.models import Mapping
@@ -49,6 +49,7 @@ class Collection(ConceptContainerModel):
     repository_type = models.TextField(default=DEFAULT_REPOSITORY_TYPE, blank=True)
     custom_resources_linked_source = models.TextField(blank=True)
     concepts = models.ManyToManyField('concepts.Concept', blank=True)
+    references = models.ManyToManyField('collections.CollectionReference', blank=True, related_name='collections')
 
     @classmethod
     def get_base_queryset(cls, params):
@@ -109,6 +110,7 @@ class Collection(ConceptContainerModel):
         return concepts
 
     def fill_data_from_reference(self, reference):
+        self.references.add(reference)
         self.concepts.add(*reference.concepts)
         self.save()  # update counts
 
@@ -177,6 +179,7 @@ class Collection(ConceptContainerModel):
             host_url=host_url, uri=data.get('uri'), child_type=child_type, search_term=data.get('search_term', '')
         )
 
+    @transaction.atomic
     def add_expressions(self, data, host_url, user, cascade_mappings=False):
         expressions = data.get('expressions', [])
         concept_expressions = data.get('concepts', [])
@@ -194,7 +197,7 @@ class Collection(ConceptContainerModel):
         )
         if cascade_mappings:
             all_related_mappings = self.get_all_related_mappings(expressions)
-            expressions = expressions.union(all_related_mappings)
+            expressions += all_related_mappings
 
         return self.add_references_in_bulk(expressions, user)
 
@@ -204,7 +207,7 @@ class Collection(ConceptContainerModel):
 
         new_expressions = set(expressions)
         new_versionless_expressions = {drop_version(expression): expression for expression in new_expressions}
-        for reference in collection_version.references:
+        for reference in collection_version.references.all():
             existing_versionless_expression = reference.without_version
             if existing_versionless_expression in new_versionless_expressions:
                 existing_expression = new_versionless_expressions[existing_versionless_expression]
@@ -212,15 +215,19 @@ class Collection(ConceptContainerModel):
                 errors[existing_expression] = [REFERENCE_ALREADY_EXISTS]
 
         added_references = list()
+        print("****2", new_expressions)
         for expression in new_expressions:
             ref = CollectionReference(expression=expression)
             try:
                 ref.clean()
+                ref.save()
             except Exception as ex:
+                print("*****2.5", ex)
                 errors[expression] = ex.messages if hasattr(ex, 'messages') else ex
                 continue
 
             added = False
+            print("*****3", ref.concepts)
             if ref.concepts:
                 for concept in ref.concepts:
                     if self.custom_validation_schema == CUSTOM_VALIDATION_SCHEMA_OPENMRS:
@@ -259,7 +266,7 @@ class Collection(ConceptContainerModel):
         errors = {}
 
         for expression in expressions:
-            reference = CollectionReference(expression=expression, collection=self)
+            reference = CollectionReference(expression=expression)
             try:
                 self.validate(reference)
                 reference.save()
@@ -293,7 +300,7 @@ class Collection(ConceptContainerModel):
         head = self.head
         if head:
             references = CollectionReference.objects.bulk_create(
-                [CollectionReference(expression=ref.expression, collection=self) for ref in head.references.all()]
+                [CollectionReference(expression=ref.expression) for ref in head.references.all()]
             )
             self.references.set(references)
 
@@ -337,7 +344,6 @@ class Collection(ConceptContainerModel):
 class CollectionReference(models.Model):
     class Meta:
         db_table = 'collection_references'
-        unique_together = ('expression', 'collection')
 
     concepts = None
     mappings = None
@@ -346,7 +352,6 @@ class CollectionReference(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     internal_reference_id = models.CharField(max_length=255, null=True, blank=True)
     expression = models.TextField()
-    collection = models.ForeignKey(Collection, related_name='references', on_delete=models.CASCADE)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     last_resolved_at = models.DateTimeField(default=timezone.now)
@@ -375,9 +380,7 @@ class CollectionReference(models.Model):
 
     @property
     def is_valid_expression(self):
-        return isinstance(self.expression, str) and len(compact(self.__expression_parts)) in [
-            EXPRESSION_RESOURCE_URI_PARTS_COUNT, EXPRESSION_RESOURCE_VERSION_URI_PARTS_COUNT
-        ]
+        return is_valid_uri(self.expression)
 
     @property
     def reference_type(self):

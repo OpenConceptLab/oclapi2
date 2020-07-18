@@ -101,12 +101,14 @@ class ConceptTest(OCLTestCase):
 
         self.assertEqual(concept.errors, {})
         self.assertIsNotNone(concept.id)
-        self.assertEqual(concept.version, HEAD)
+        self.assertEqual(concept.version, str(concept.id))
         self.assertEqual(source.concepts_set.count(), 1)
         self.assertEqual(source.concepts.count(), 1)
         self.assertEqual(
             concept.uri,
-            '/orgs/{}/sources/{}/concepts/{}/'.format(source.organization.mnemonic, source.mnemonic, concept.mnemonic)
+            '/orgs/{}/sources/{}/concepts/{}/{}/'.format(
+                source.organization.mnemonic, source.mnemonic, concept.mnemonic, concept.id
+            )
         )
 
     @patch('core.concepts.models.LocalizedText.clone')
@@ -174,10 +176,13 @@ class ConceptTest(OCLTestCase):
         self.assertEqual(source_head.concepts.first().id, persisted_concept.id)
         self.assertEqual(
             persisted_concept.uri,
-            '/orgs/{}/sources/{}/{}/concepts/{}/'.format(
+            '/orgs/{}/sources/{}/{}/concepts/{}/{}/'.format(
                 source_version0.organization.mnemonic, source_version0.mnemonic, source_version0.version,
-                persisted_concept.mnemonic
+                persisted_concept.mnemonic, persisted_concept.version
             )
+        )
+        self.assertEqual(
+            persisted_concept.version_url, persisted_concept.uri
         )
 
     def test_retire(self):

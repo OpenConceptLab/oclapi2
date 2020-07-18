@@ -198,6 +198,7 @@ class CollectionReferencesView(
         return Response({'message': 'ok!'}, status=status.HTTP_200_OK)
 
     def update(self, request, *args, **kwargs):  # pylint: disable=too-many-locals,unused-argument # Fixme: Sny
+        print("*******", request.data)
         collection = self.get_object()
 
         cascade_mappings_flag = request.query_params.get('cascade', 'none')

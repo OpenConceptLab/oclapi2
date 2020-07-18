@@ -89,6 +89,7 @@ class ConceptListSerializer(ModelSerializer):
     owner = CharField(source='owner_name')
     update_comment = CharField(source='comment')
     locale = SerializerMethodField()
+    url = CharField(source='version_url', read_only=True)
 
     class Meta:
         model = Concept
@@ -104,6 +105,7 @@ class ConceptListSerializer(ModelSerializer):
 
 
 class ConceptDetailSerializer(ModelSerializer):
+    version = CharField(read_only=True)
     type = CharField(source='versioned_resource_type', read_only=True)
     id = CharField(source='mnemonic', required=True)
     source = CharField(source='parent_resource', read_only=True)
@@ -131,7 +133,7 @@ class ConceptDetailSerializer(ModelSerializer):
             'id', 'external_id', 'concept_class', 'datatype', 'url', 'retired', 'source',
             'owner', 'owner_type', 'owner_url', 'display_name', 'display_locale', 'names', 'descriptions',
             'created_on', 'updated_on', 'versions_url', 'version', 'extras', 'parent_id', 'name', 'type',
-            'update_comment',
+            'update_comment', 'version_url',
         )
 
     def create(self, validated_data):
@@ -187,5 +189,5 @@ class ConceptVersionDetailSerializer(ModelSerializer):
             'type', 'uuid', 'id', 'external_id', 'concept_class', 'datatype', 'display_name', 'display_locale',
             'names', 'descriptions', 'extras', 'retired', 'source', 'source_url', 'owner', 'owner_name', 'owner_url',
             'version', 'created_on', 'updated_on', 'version_created_on', 'version_created_by', 'extras',
-            'is_latest_version', 'locale', 'url', 'owner_type',
+            'is_latest_version', 'locale', 'url', 'owner_type', 'version_url',
         )

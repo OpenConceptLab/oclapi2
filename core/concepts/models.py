@@ -2,11 +2,10 @@ import uuid
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
-from django.db import models, IntegrityError
-from django.db.models import F
+from django.db import models, IntegrityError, transaction
 from pydash import get, compact
 
-from core.common.constants import TEMP, HEAD, ISO_639_1, INCLUDE_RETIRED_PARAM, ACCESS_TYPE_NONE
+from core.common.constants import TEMP, ISO_639_1, INCLUDE_RETIRED_PARAM, ACCESS_TYPE_NONE
 from core.common.models import VersionedModel
 from core.common.utils import reverse_resource, parse_updated_since_param
 from core.concepts.constants import CONCEPT_TYPE, LOCALES_FULLY_SPECIFIED, LOCALES_SHORT, LOCALES_SEARCH_INDEX_TERM, \
@@ -117,6 +116,18 @@ class Concept(ConceptValidationMixin, VersionedModel):  # pylint: disable=too-ma
     @staticmethod
     def get_version_url_kwarg():
         return 'concept_version'
+
+    @property
+    def version_url(self):
+        return self.uri
+
+    @property
+    def head(self):
+        return self.get_latest_version()
+
+    @property
+    def is_head(self):
+        return self.is_latest_version
 
     @property
     def owner(self):
@@ -249,6 +260,10 @@ class Concept(ConceptValidationMixin, VersionedModel):  # pylint: disable=too-ma
 
         return unsaved_names
 
+    def calculate_uri(self):
+        uri = super().calculate_uri()
+        return "{}{}/".format(uri, self.version)
+
     @classmethod
     def get_base_queryset(cls, params):
         queryset = cls.objects.filter(is_active=True)
@@ -360,7 +375,8 @@ class Concept(ConceptValidationMixin, VersionedModel):  # pylint: disable=too-ma
                 desc, 'description'
             ) for desc in data.pop('descriptions', [])
         ]
-        concept = Concept(**{**data, 'version': HEAD})
+        concept = Concept(**data)
+        concept.version = concept.id
         if user:
             concept.created_by = concept.updated_by = user
         concept.errors = dict()
@@ -388,6 +404,7 @@ class Concept(ConceptValidationMixin, VersionedModel):  # pylint: disable=too-ma
         return concept
 
     @classmethod
+    @transaction.atomic
     def persist_clone(cls, obj, user=None, **kwargs):
         errors = dict()
         if not user:
@@ -399,18 +416,14 @@ class Concept(ConceptValidationMixin, VersionedModel):  # pylint: disable=too-ma
         persisted = False
         errored_action = 'saving new concept version'
         latest_versions = None
-        head_versions = None
         try:
+            obj.is_latest_version = True
+            obj.version = obj.id
             obj.save(**kwargs)
             obj.set_locales()
             obj.clean()  # clean here to validate locales that can only be saved after obj is saved
-            latest_versions = obj.versions.filter(is_latest_version=True)
+            latest_versions = obj.versions.exclude(id=obj.id).filter(is_latest_version=True)
             latest_versions.update(is_latest_version=False)
-            head_versions = obj.versions.filter(version=HEAD)
-            head_versions.update(version=F('id'))
-            obj.is_latest_version = True
-            obj.version = HEAD
-            obj.save()
             obj.sources.set(compact([parent, parent_head]))
 
             # to update counts
@@ -426,8 +439,6 @@ class Concept(ConceptValidationMixin, VersionedModel):  # pylint: disable=too-ma
                 obj.sources.remove(parent_head)
                 if latest_versions:
                     latest_versions.update(is_latest_version=True)
-                if head_versions:
-                    head_versions.update(version=HEAD)
                 if obj.id:
                     obj.delete()
                 errors['non_field_errors'] = ['An error occurred while %s.' % errored_action]

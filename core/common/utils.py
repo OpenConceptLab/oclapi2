@@ -4,7 +4,7 @@ import zipfile
 from urllib import parse
 
 from dateutil import parser
-from django.urls import NoReverseMatch, reverse, get_resolver
+from django.urls import NoReverseMatch, reverse, get_resolver, resolve, Resolver404
 from djqscsv import csv_file_for
 from pydash import flatten
 
@@ -148,3 +148,13 @@ def get_query_params_from_url_string(url):
         return dict(parse.parse_qsl(parse.urlsplit(url).query))
     except:  # pylint: disable=bare-except
         return dict()
+
+
+def is_valid_uri(uri):
+    try:
+        resolve(uri)
+        return True
+    except Resolver404:
+        pass
+
+    return False

@@ -1,6 +1,6 @@
 from django.core.exceptions import ValidationError
 
-from core.common.constants import HEAD, LOOKUP_CONCEPT_CLASSES
+from core.common.constants import LOOKUP_CONCEPT_CLASSES
 from core.concepts.constants import (
     OPENMRS_MUST_HAVE_EXACTLY_ONE_PREFERRED_NAME,
     OPENMRS_AT_LEAST_ONE_FULLY_SPECIFIED_NAME, OPENMRS_PREFERRED_NAME_UNIQUE_PER_SOURCE_LOCALE,
@@ -85,7 +85,7 @@ class OpenMRSConceptValidator(BaseConceptValidator):
         return not self.repo.concepts_set.exclude(
             id=self_id
         ).exclude(names__type__in=LOCALES_SHORT).filter(
-            is_active=True, retired=False, version=HEAD, names__locale=name.locale, names__name=name.name
+            is_active=True, retired=False, is_latest_version=True, names__locale=name.locale, names__name=name.name
         ).exists()
 
     @staticmethod

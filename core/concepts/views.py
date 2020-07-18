@@ -102,7 +102,11 @@ class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
         return ConceptListSerializer
 
     def get_queryset(self):
-        return super().get_queryset().filter(version=HEAD).select_related(
+        is_latest_version = 'collection' not in self.kwargs
+        queryset = super().get_queryset()
+        if is_latest_version:
+            queryset = queryset.filter(is_latest_version=True)
+        return queryset.select_related(
             'parent__organization', 'parent__user',
         ).prefetch_related('names')
 
@@ -121,7 +125,7 @@ class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
     def post(self, request, **kwargs):  # pylint: disable=unused-argument
         self.set_parent_resource()
         serializer = self.get_serializer(data={
-            **request.data, 'version': HEAD, 'parent_id': self.parent_resource.id, 'name': request.data.get('id', None)
+            **request.data, 'parent_id': self.parent_resource.id, 'name': request.data.get('id', None)
         })
         if serializer.is_valid():
             self.object = serializer.save()
@@ -136,7 +140,7 @@ class ConceptRetrieveUpdateDestroyView(ConceptBaseView, RetrieveAPIView, UpdateA
     serializer_class = ConceptDetailSerializer
 
     def get_object(self, queryset=None):
-        return get_object_or_404(self.get_queryset(), version=HEAD)
+        return get_object_or_404(self.get_queryset(), is_latest_version=True)
 
     def get_permissions(self):
         if self.request.method in ['GET']:
@@ -159,7 +163,7 @@ class ConceptRetrieveUpdateDestroyView(ConceptBaseView, RetrieveAPIView, UpdateA
                 {'non_field_errors': 'Parent version is not the latest. Cannot update concept.'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        self.object = self.object.get_latest_version().clone()
+        self.object = self.object.clone()
         serializer = self.get_serializer(self.object, data=request.data, partial=partial)
         success_status_code = status.HTTP_200_OK
 
@@ -331,7 +335,7 @@ class ConceptDescriptionRetrieveUpdateDestroyView(ConceptLabelRetrieveUpdateDest
 
 class ConceptExtrasBaseView(ConceptBaseView):
     def get_object(self, queryset=None):
-        return self.get_queryset().filter(version=HEAD).first()
+        return self.get_queryset().filter(is_latest_version=True).first()
 
 
 class ConceptExtrasView(ConceptExtrasBaseView, ListAPIView):

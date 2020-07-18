@@ -92,7 +92,6 @@ class CollectionReferenceTest(OCLTestCase):
             ex.exception.message_dict,
             {
                 'expression': ['This field cannot be blank.'],
-                'collection': ['This field cannot be null.'],
                 'detail': ['Expression specified is not valid.']
             }
         )
@@ -110,11 +109,10 @@ class CollectionReferenceTest(OCLTestCase):
         self.assertEqual(reference.reference_type, 'concepts')
 
     def test_reference_as_concept_version(self):
-        collection = CollectionFactory()
         concept = ConceptFactory()
         expression = concept.uri
 
-        reference = CollectionReference(expression=expression, collection=collection)
+        reference = CollectionReference(expression=expression)
         reference.full_clean()
 
         self.assertEqual(len(reference.concepts), 1)
@@ -140,7 +138,7 @@ class CollectionReferenceTest(OCLTestCase):
         self.assertEqual(concepts.first(), concept1)
 
         concept2 = ConceptFactory(parent=concept1.parent, version='v1', mnemonic=concept1.mnemonic)
-        reference.expression = concept1.uri + 'versions/'
+        reference.expression = drop_version(concept1.uri) + 'versions/'
 
         concepts = reference.get_concepts().order_by('created_at')
 
@@ -183,7 +181,7 @@ class CollectionUtilsTest(OCLTestCase):
         concept_v1 = ConceptFactory(parent=concept_head.parent, version='v1', mnemonic=concept_head.mnemonic)
 
         self.assertTrue(is_version_specified(concept_v1.uri))
-        self.assertFalse(is_version_specified(concept_head.uri))
+        self.assertTrue(is_version_specified(concept_head.uri))
 
     def test_get_concept_by_expression(self):
         concept_head = ConceptFactory()
