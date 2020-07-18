@@ -129,6 +129,8 @@ class CollectionDetailSerializer(CollectionCreateOrUpdateSerializer):
     created_on = DateTimeField(source='created_at')
     updated_on = DateTimeField(source='updated_at')
     supported_locales = ListField(required=False, allow_empty=True)
+    created_by = CharField(read_only=True, source='created_by.username')
+    updated_by = CharField(read_only=True, source='updated_by.username')
 
     class Meta:
         model = Collection
