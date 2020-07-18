@@ -215,19 +215,16 @@ class Collection(ConceptContainerModel):
                 errors[existing_expression] = [REFERENCE_ALREADY_EXISTS]
 
         added_references = list()
-        print("****2", new_expressions)
         for expression in new_expressions:
             ref = CollectionReference(expression=expression)
             try:
                 ref.clean()
                 ref.save()
             except Exception as ex:
-                print("*****2.5", ex)
                 errors[expression] = ex.messages if hasattr(ex, 'messages') else ex
                 continue
 
             added = False
-            print("*****3", ref.concepts)
             if ref.concepts:
                 for concept in ref.concepts:
                     if self.custom_validation_schema == CUSTOM_VALIDATION_SCHEMA_OPENMRS:
