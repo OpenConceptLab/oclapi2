@@ -15,6 +15,7 @@ class SourceListSerializer(ModelSerializer):
     owner = CharField(source='parent_resource')
     owner_type = CharField(source='parent_resource_type')
     owner_url = CharField(source='parent_url')
+    id = CharField(source='version')
 
     class Meta:
         model = Source

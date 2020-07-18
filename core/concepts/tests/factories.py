@@ -26,7 +26,6 @@ class ConceptFactory(factory.django.DjangoModelFactory):
     parent = SubFactory(SourceFactory)
     concept_class = "Diagnosis"
     datatype = "None"
-    is_latest_version = True
 
     @factory.post_generation
     def sources(self, create, extracted):

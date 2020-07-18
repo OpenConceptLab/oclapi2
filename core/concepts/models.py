@@ -469,3 +469,18 @@ class Concept(ConceptValidationMixin, VersionedModel):  # pylint: disable=too-ma
         return []  # TODO: remove once mapping model is done
         # from core.mappings.models import Mapping
         # return Mapping.objects.filter(parent=self.parent, from_concept=self)
+
+    @staticmethod
+    def get_latest_versions_for_queryset(concepts_qs):
+        """Takes any concepts queryset and returns queryset of latest_version of each of those concepts"""
+
+        if concepts_qs is None or not concepts_qs.exists():
+            return Concept.objects.none()
+
+        criteria_fields = list(concepts_qs.values('parent_id', 'mnemonic'))
+        criterion = [models.Q(**attrs, is_latest_version=True) for attrs in criteria_fields]
+        query = criterion.pop()
+        for criteria in criterion:
+            query |= criteria
+
+        return Concept.objects.filter(query)

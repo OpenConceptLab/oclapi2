@@ -198,7 +198,6 @@ class CollectionReferencesView(
         return Response({'message': 'ok!'}, status=status.HTTP_200_OK)
 
     def update(self, request, *args, **kwargs):  # pylint: disable=too-many-locals,unused-argument # Fixme: Sny
-        print("*******", request.data)
         collection = self.get_object()
 
         cascade_mappings_flag = request.query_params.get('cascade', 'none')
@@ -294,8 +293,9 @@ class CollectionReferencesView(
 
         for expression in expressions:
             if is_concept(expression):
-                concept = CollectionReference.get_concept_head_from_expression(expression)
-                related_mappings += concept.get_unidirectional_mappings()
+                concepts = CollectionReference.get_concept_heads_from_expression(expression)
+                for concept in concepts:
+                    related_mappings += concept.get_unidirectional_mappings()
 
         return self.get_version_information_of_related_mappings(instance, related_mappings)
 

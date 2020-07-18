@@ -357,13 +357,8 @@ class CollectionReference(models.Model):
     last_resolved_at = models.DateTimeField(default=timezone.now)
 
     @staticmethod
-    def get_concept_head_from_expression(expression):  # should it use __get_concepts?
-        """Returns head"""
-        concept_version = Concept.objects.filter(uri=expression).first()
-        if concept_version:
-            return concept_version.head
-
-        return None
+    def get_concept_heads_from_expression(expression):
+        return Concept.get_latest_versions_for_queryset(concepts_for(expression))
 
     @staticmethod
     def diff(ctx, _from):

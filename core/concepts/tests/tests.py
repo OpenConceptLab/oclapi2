@@ -251,6 +251,65 @@ class ConceptTest(OCLTestCase):
         self.assertEqual(source.public_access, ACCESS_TYPE_VIEW)
         self.assertEqual(source.public_access, concept.public_access)
 
+    def test_get_latest_versions_for_queryset(self):
+        self.assertEqual(Concept.get_latest_versions_for_queryset(Concept.objects.none()).count(), 0)
+
+        source1 = SourceFactory()
+
+        concept1_latest = ConceptFactory(parent=source1, mnemonic='common-name-1')
+        ConceptFactory(version='v1', parent=source1, is_latest_version=False, mnemonic=concept1_latest.mnemonic)
+
+        concept2_latest = ConceptFactory(parent=source1)
+        ConceptFactory(version='v1', parent=source1, is_latest_version=False, mnemonic=concept2_latest.mnemonic)
+
+        concept3_latest = ConceptFactory(parent=source1, mnemonic='common-name-2')
+        ConceptFactory(version='v1', parent=source1, is_latest_version=False, mnemonic=concept3_latest.mnemonic)
+
+        source2 = SourceFactory()
+
+        concept4_latest = ConceptFactory(parent=source2, mnemonic='common-name-1')
+        ConceptFactory(version='v1', parent=source2, is_latest_version=False, mnemonic=concept4_latest.mnemonic)
+
+        concept5_latest = ConceptFactory(parent=source2)
+        ConceptFactory(version='v1', parent=source2, is_latest_version=False, mnemonic=concept5_latest.mnemonic)
+
+        concept6_latest = ConceptFactory(parent=source2, mnemonic='common-name-2')
+        ConceptFactory(version='v1', parent=source2, is_latest_version=False, mnemonic=concept6_latest.mnemonic)
+
+        latest_versions = Concept.get_latest_versions_for_queryset(Concept.objects.filter(parent=source1))
+
+        self.assertEqual(latest_versions.count(), 3)
+        self.assertEqual(
+            list(latest_versions.order_by('created_at')),
+            [concept1_latest, concept2_latest, concept3_latest]
+        )
+
+        latest_versions = Concept.get_latest_versions_for_queryset(Concept.objects.filter(parent=source2))
+
+        self.assertEqual(latest_versions.count(), 3)
+        self.assertEqual(
+            list(latest_versions.order_by('created_at')),
+            [concept4_latest, concept5_latest, concept6_latest]
+        )
+
+        latest_versions = Concept.get_latest_versions_for_queryset(Concept.objects.filter(mnemonic='common-name-1'))
+
+        self.assertEqual(latest_versions.count(), 2)
+        self.assertEqual(
+            list(latest_versions.order_by('created_at')),
+            [concept1_latest, concept4_latest]
+        )
+
+        latest_versions = Concept.get_latest_versions_for_queryset(
+            Concept.objects.filter(mnemonic='common-name-2', version='v1')
+        )
+
+        self.assertEqual(latest_versions.count(), 2)
+        self.assertEqual(
+            list(latest_versions.order_by('created_at')),
+            [concept3_latest, concept6_latest]
+        )
+
 
 class OpenMRSConceptValidatorTest(OCLTestCase):
     def setUp(self):
