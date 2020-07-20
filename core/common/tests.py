@@ -12,6 +12,7 @@ from core.collections.models import Collection
 from core.common.constants import HEAD, OCL_ORG_ID, SUPER_ADMIN_USER_ID
 from core.common.utils import compact_dict_by_values
 from core.concepts.models import Concept, LocalizedText
+from core.mappings.models import Mapping
 from core.orgs.models import Organization
 from core.sources.models import Source
 from core.users.models import UserProfile
@@ -30,6 +31,7 @@ class OCLTestCase(TestCase):
 
     def tearDown(self):
         Collection.objects.all().delete()
+        Mapping.objects.all().delete()
         Concept.objects.all().delete()
         LocalizedText.objects.all().delete()
         Source.objects.all().delete()

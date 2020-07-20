@@ -106,7 +106,7 @@ class UserProfileTest(OCLTestCase):
         self.assertTrue(collection.is_active)
 
     def test_internal_reference_id(self):
-        user = UserProfileFactory.build()
+        user = UserProfileFactory.build(id=123)
 
         self.assertIsNotNone(user.id)
         self.assertIsNone(user.internal_reference_id)

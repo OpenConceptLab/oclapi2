@@ -234,10 +234,8 @@ class SourceTest(OCLTestCase):
     def test_child_count_updates(self):
         source = SourceFactory(version=HEAD)
         self.assertEqual(source.active_concepts, 0)
-        self.assertIsNone(source.last_concept_update)
 
         concept = ConceptFactory(sources=[source], parent=source)
-
         source.save()
 
         self.assertEqual(source.active_concepts, 1)

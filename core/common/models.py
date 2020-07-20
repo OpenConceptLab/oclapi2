@@ -1,5 +1,3 @@
-import uuid
-
 from django.contrib.postgres.fields import JSONField, ArrayField
 from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator
@@ -24,7 +22,7 @@ class BaseModel(models.Model):
     class Meta:
         abstract = True
 
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    id = models.BigAutoField(primary_key=True)
     internal_reference_id = models.CharField(max_length=255, null=True, blank=True)
     public_access = models.CharField(
         max_length=16, choices=ACCESS_TYPE_CHOICES, default=DEFAULT_ACCESS_TYPE, blank=True
@@ -158,6 +156,7 @@ class BaseResourceModel(BaseModel):
     mnemonic = models.CharField(
         max_length=255, validators=[RegexValidator(regex=NAMESPACE_REGEX)]
     )
+    mnemonic_attr = 'mnemonic'
 
     class Meta:
         abstract = True
@@ -193,7 +192,7 @@ class VersionedModel(BaseResourceModel):
 
     @property
     def versions(self):
-        return self.__class__.objects.filter(mnemonic=self.mnemonic).order_by('-created_at')
+        return self.__class__.objects.filter(**{self.mnemonic_attr: self.mnemonic}).order_by('-created_at')
 
     @property
     def active_versions(self):
@@ -218,7 +217,7 @@ class VersionedModel(BaseResourceModel):
 
     @classmethod
     def get_version(cls, mnemonic, version=HEAD):
-        return cls.objects.filter(mnemonic=mnemonic, version=version).first()
+        return cls.objects.filter(**{cls.mnemonic_attr: mnemonic}, version=version).first()
 
     def get_latest_version(self):
         return self.active_versions.filter(is_latest_version=True).order_by('-created_at').first()
@@ -458,9 +457,11 @@ class ConceptContainerModel(VersionedModel):
 
     def update_active_counts(self):
         self.active_concepts = self.concepts.filter(retired=False).count()
+        self.active_mappings = self.mappings.filter(retired=False).count()
 
     def update_last_updates(self):
         self.last_concept_update = self.__get_last_concept_updated_at()
+        self.last_mapping_update = self.__get_last_mapping_updated_at()
         self.last_child_update = self.__get_last_child_updated_at()
 
     def __get_last_concept_updated_at(self):
@@ -468,6 +469,13 @@ class ConceptContainerModel(VersionedModel):
         if not concepts.exists():
             return None
         agg = concepts.aggregate(Max('updated_at'))
+        return agg.get('updated_at__max')
+
+    def __get_last_mapping_updated_at(self):
+        mappings = self.mappings
+        if not mappings.exists():
+            return None
+        agg = mappings.aggregate(Max('updated_at'))
         return agg.get('updated_at__max')
 
     def __get_last_child_updated_at(self):

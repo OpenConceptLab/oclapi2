@@ -1,11 +1,10 @@
-import uuid
-
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models, IntegrityError, transaction
 from pydash import get, compact
 
 from core.common.constants import TEMP, ISO_639_1, INCLUDE_RETIRED_PARAM, ACCESS_TYPE_NONE
+from core.common.mixins import SourceChildMixin
 from core.common.models import VersionedModel
 from core.common.utils import reverse_resource, parse_updated_since_param
 from core.concepts.constants import CONCEPT_TYPE, LOCALES_FULLY_SPECIFIED, LOCALES_SHORT, LOCALES_SEARCH_INDEX_TERM, \
@@ -17,7 +16,7 @@ class LocalizedText(models.Model):
     class Meta:
         db_table = 'localized_texts'
 
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    id = models.BigAutoField(primary_key=True)
     internal_reference_id = models.CharField(max_length=255, null=True, blank=True)
     external_id = models.TextField(null=True, blank=True)
     name = models.TextField()
@@ -89,7 +88,7 @@ class LocalizedText(models.Model):
         return self.type in LOCALES_SEARCH_INDEX_TERM
 
 
-class Concept(ConceptValidationMixin, VersionedModel):  # pylint: disable=too-many-public-methods
+class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pylint: disable=too-many-public-methods
     class Meta:
         db_table = 'concepts'
         unique_together = ('mnemonic', 'version', 'parent')
@@ -106,7 +105,7 @@ class Concept(ConceptValidationMixin, VersionedModel):  # pylint: disable=too-ma
     OBJECT_TYPE = CONCEPT_TYPE
 
     @property
-    def concept(self):
+    def concept(self):  # for url kwargs
         return self.mnemonic
 
     @staticmethod
@@ -116,38 +115,6 @@ class Concept(ConceptValidationMixin, VersionedModel):  # pylint: disable=too-ma
     @staticmethod
     def get_version_url_kwarg():
         return 'concept_version'
-
-    @property
-    def version_url(self):
-        return self.uri
-
-    @property
-    def head(self):
-        return self.get_latest_version()
-
-    @property
-    def is_head(self):
-        return self.is_latest_version
-
-    @property
-    def owner(self):
-        return self.parent.parent
-
-    @property
-    def owner_name(self):
-        return str(self.owner)
-
-    @property
-    def owner_type(self):
-        return self.owner.resource_type
-
-    @property
-    def owner_url(self):
-        return self.owner.url
-
-    @property
-    def parent_resource(self):
-        return self.parent.mnemonic
 
     @property
     def display_name(self):
@@ -259,10 +226,6 @@ class Concept(ConceptValidationMixin, VersionedModel):  # pylint: disable=too-ma
             return compact([*list(self.names.all()), *unsaved_names])
 
         return unsaved_names
-
-    def calculate_uri(self):
-        uri = super().calculate_uri()
-        return "{}{}/".format(uri, self.version)
 
     @classmethod
     def get_base_queryset(cls, params):
@@ -376,7 +339,7 @@ class Concept(ConceptValidationMixin, VersionedModel):  # pylint: disable=too-ma
             ) for desc in data.pop('descriptions', [])
         ]
         concept = Concept(**data)
-        concept.version = concept.id
+        concept.version = TEMP
         if user:
             concept.created_by = concept.updated_by = user
         concept.errors = dict()
@@ -386,20 +349,21 @@ class Concept(ConceptValidationMixin, VersionedModel):  # pylint: disable=too-ma
             concept.cloned_descriptions = descriptions
             concept.full_clean()
             concept.save()
-        except ValidationError as ex:
-            concept.errors.update(ex.message_dict)
-        except IntegrityError as ex:
-            concept.errors.update(dict(__all__=ex.args))
+            concept.version = str(concept.id)
+            concept.save()
 
-        if concept.id:
             concept.set_locales()
+
             parent_resource = concept.parent
             parent_resource_head = parent_resource.head
             concept.sources.set([parent_resource, parent_resource_head])
 
-            # to update counts
             parent_resource.save()
             parent_resource_head.save()
+        except ValidationError as ex:
+            concept.errors.update(ex.message_dict)
+        except IntegrityError as ex:
+            concept.errors.update(dict(__all__=ex.args))
 
         return concept
 
@@ -411,6 +375,7 @@ class Concept(ConceptValidationMixin, VersionedModel):  # pylint: disable=too-ma
             errors['version_created_by'] = 'Must specify which user is attempting to create a new concept version.'
             return errors
         obj.created_by = user
+        obj.version = TEMP
         parent = obj.parent
         parent_head = parent.head
         persisted = False
@@ -418,8 +383,9 @@ class Concept(ConceptValidationMixin, VersionedModel):  # pylint: disable=too-ma
         latest_versions = None
         try:
             obj.is_latest_version = True
-            obj.version = obj.id
             obj.save(**kwargs)
+            obj.version = str(obj.id)
+            obj.save()
             obj.set_locales()
             obj.clean()  # clean here to validate locales that can only be saved after obj is saved
             latest_versions = obj.versions.exclude(id=obj.id).filter(is_latest_version=True)
@@ -464,11 +430,8 @@ class Concept(ConceptValidationMixin, VersionedModel):  # pylint: disable=too-ma
         new_version.comment = comment
         return Concept.persist_clone(new_version, user)
 
-    @staticmethod
-    def get_unidirectional_mappings():  # make it use django relations related_names
-        return []  # TODO: remove once mapping model is done
-        # from core.mappings.models import Mapping
-        # return Mapping.objects.filter(parent=self.parent, from_concept=self)
+    def get_unidirectional_mappings(self):
+        return self.mappings_from.filter(parent=self.parent)
 
     @staticmethod
     def get_latest_versions_for_queryset(concepts_qs):

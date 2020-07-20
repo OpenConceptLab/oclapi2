@@ -16,6 +16,7 @@ urlpatterns = [
         name='source-version-list'
     ),
     re_path(r"^(?P<source>{pattern})/concepts/".format(pattern=NAMESPACE_PATTERN), include('core.concepts.urls')),
+    re_path(r"^(?P<source>{pattern})/mappings/".format(pattern=NAMESPACE_PATTERN), include('core.mappings.urls')),
     re_path(
         r"^(?P<source>{pattern})/extras/$".format(pattern=NAMESPACE_PATTERN),
         views.SourceExtrasView.as_view(),
@@ -48,5 +49,11 @@ urlpatterns = [
             pattern=NAMESPACE_PATTERN
         ),
         include('core.concepts.urls')
+    ),
+    re_path(
+        r"^(?P<source>{pattern})/(?P<version>{pattern})/mappings/".format(
+            pattern=NAMESPACE_PATTERN
+        ),
+        include('core.mappings.urls')
     ),
 ]

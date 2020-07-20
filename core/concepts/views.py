@@ -7,8 +7,7 @@ from rest_framework.generics import RetrieveAPIView, DestroyAPIView, ListCreateA
 from rest_framework.mixins import CreateModelMixin
 from rest_framework.response import Response
 
-from core.common.constants import HEAD, INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_MAPPINGS_PARAM, INCLUDE_RETIRED_PARAM, \
-    UPDATED_SINCE_PARAM, LIMIT_PARAM
+from core.common.constants import HEAD, INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_MAPPINGS_PARAM, LIMIT_PARAM
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryMixin
 from core.common.utils import compact_dict_by_values
 from core.common.views import BaseAPIView
@@ -30,25 +29,11 @@ class ConceptBaseView(BaseAPIView):
         return ConceptDetailSerializer(obj, data, files, partial)
 
     def get_filter_params(self):
-        params = dict()
-        params['user'] = self.request.query_params.get('user', None) or self.kwargs.get('user', None)
-        params['org'] = self.request.query_params.get('org', None) or self.kwargs.get('org', None)
-        params['collection'] = self.request.query_params.get('collection', None) or self.kwargs.get('collection', None)
-        params['source'] = self.request.query_params.get('source', None) or self.kwargs.get('source', None)
-        params['version'] = self.request.query_params.get('version', None) or self.kwargs.get('version', None)
-        params['concept'] = self.request.query_params.get('concept', None) or self.kwargs.get('concept', None)
-        params['concept_version'] = self.request.query_params.get(
-            'concept_version', None
-        ) or self.kwargs.get('concept_version', None)
-        params['is_latest'] = 'is_latest' in self.kwargs
-        params[INCLUDE_RETIRED_PARAM] = self.request.query_params.get(
-            INCLUDE_RETIRED_PARAM, None
-        ) or self.kwargs.get(INCLUDE_RETIRED_PARAM, None)
-        params[UPDATED_SINCE_PARAM] = self.request.query_params.get(
-            UPDATED_SINCE_PARAM, None
-        ) or self.kwargs.get(UPDATED_SINCE_PARAM, None)
+        kwargs = self.kwargs.copy()
+        query_params = self.request.query_params.copy()
+        query_params.update(kwargs)
 
-        return compact_dict_by_values(params)
+        return compact_dict_by_values(query_params.update(kwargs))
 
     def get_queryset(self):
         return Concept.get_base_queryset(self.get_filter_params())

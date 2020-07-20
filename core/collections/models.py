@@ -1,5 +1,4 @@
 import json
-import uuid
 
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
@@ -23,7 +22,7 @@ from core.common.utils import reverse_resource, is_valid_uri
 from core.concepts.models import Concept
 from core.concepts.views import ConceptListView
 from core.mappings.models import Mapping
-from core.mappings.view import MappingListView
+from core.mappings.views import MappingListView
 
 
 class Collection(ConceptContainerModel):
@@ -49,6 +48,7 @@ class Collection(ConceptContainerModel):
     repository_type = models.TextField(default=DEFAULT_REPOSITORY_TYPE, blank=True)
     custom_resources_linked_source = models.TextField(blank=True)
     concepts = models.ManyToManyField('concepts.Concept', blank=True)
+    mappings = models.ManyToManyField('mappings.Mapping', blank=True)
     references = models.ManyToManyField('collections.CollectionReference', blank=True, related_name='collections')
 
     @classmethod
@@ -346,7 +346,7 @@ class CollectionReference(models.Model):
     mappings = None
     original_expression = None
 
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    id = models.BigAutoField(primary_key=True)
     internal_reference_id = models.CharField(max_length=255, null=True, blank=True)
     expression = models.TextField()
     created_at = models.DateTimeField(auto_now_add=True)

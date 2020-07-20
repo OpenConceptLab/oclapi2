@@ -1,6 +1,6 @@
 from django.db.models import Q
 from django.urls import resolve, reverse
-from pydash import compact
+from pydash import compact, get
 from rest_framework import status
 from rest_framework.mixins import ListModelMixin, CreateModelMixin
 from rest_framework.response import Response
@@ -284,3 +284,47 @@ class SourceContainerMixin:
     @property
     def sources_url(self):
         return reverse('source-list', kwargs={self.get_url_kwarg(): self.mnemonic})
+
+
+class SourceChildMixin:
+    @property
+    def version_url(self):
+        return self.uri
+
+    @property
+    def head(self):
+        return self.get_latest_version()
+
+    @property
+    def is_head(self):
+        return self.is_latest_version
+
+    def calculate_uri(self):
+        return "{}{}/".format(super().calculate_uri(), self.version)
+
+    @property
+    def owner(self):
+        return get(self, 'parent.parent')
+
+    @property
+    def owner_name(self):
+        return str(self.owner or '')
+
+    @property
+    def owner_type(self):
+        return get(self.owner, 'resource_type')
+
+    @property
+    def owner_url(self):
+        return get(self.owner, 'url')
+
+    @property
+    def parent_resource(self):
+        return get(self.parent, 'mnemonic')
+
+    def __update_retire(self, retired, comment, user):
+        latest_version = self.get_latest_version()
+        new_version = latest_version.clone()
+        new_version.retired = retired
+        new_version.comment = comment
+        return self.__class__.persist_clone(new_version, user)
