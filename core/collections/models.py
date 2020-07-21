@@ -13,7 +13,7 @@ from core.collections.constants import (
     MAPPINGS_EXPRESSIONS,
     REFERENCE_ALREADY_EXISTS, CONCEPT_FULLY_SPECIFIED_NAME_UNIQUE_PER_COLLECTION_AND_LOCALE,
     CONCEPT_PREFERRED_NAME_UNIQUE_PER_COLLECTION_AND_LOCALE, ALL_SYMBOL)
-from core.collections.utils import is_concept, is_mapping, concepts_for, drop_version
+from core.collections.utils import is_concept, is_mapping, drop_version
 from core.common.constants import (
     DEFAULT_REPOSITORY_TYPE, CUSTOM_VALIDATION_SCHEMA_OPENMRS, ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT
 )
@@ -301,16 +301,27 @@ class Collection(ConceptContainerModel):
         return False
 
     def delete_references(self, expressions):
-        concepts = Concept.objects.none()
         head = self.head
-        for expression in expressions:
-            concepts |= concepts_for(expression)
-
+        concepts, mappings = self.__get_children_from_expressions(expressions)
         concept_ids = concepts.distinct('id').values_list('id', flat=True)
+        mapping_ids = mappings.distinct('id').values_list('id', flat=True)
         head.concepts.set(head.concepts.exclude(id__in=concept_ids))
+        head.mappings.set(head.mappings.exclude(id__in=mapping_ids))
         head.references.set(head.references.exclude(expression__in=expressions))
 
-        return [list(concept_ids), []]
+        return [list(concept_ids), list(mapping_ids)]
+
+    @staticmethod
+    def __get_children_from_expressions(expressions):
+        concepts = Concept.objects.none()
+        mappings = Mapping.objects.none()
+        for expression in expressions:
+            if is_concept(expression):
+                concepts |= Concept.from_uri_queryset(expression)
+            if is_mapping(expression):
+                mappings |= Mapping.from_uri_queryset(expression)
+
+        return concepts, mappings
 
     def get_all_related_mappings(self, expressions):
         all_related_mappings = []
@@ -350,7 +361,7 @@ class CollectionReference(models.Model):
 
     @staticmethod
     def get_concept_heads_from_expression(expression):
-        return Concept.get_latest_versions_for_queryset(concepts_for(expression))
+        return Concept.get_latest_versions_for_queryset(Concept.from_uri_queryset(expression))
 
     @staticmethod
     def diff(ctx, _from):
@@ -384,7 +395,10 @@ class CollectionReference(models.Model):
         return self.expression.split('/')
 
     def get_concepts(self):
-        return concepts_for(self.expression)
+        return Concept.from_uri_queryset(self.expression)
+
+    def get_mappings(self):
+        return Mapping.from_uri_queryset(self.expression)
 
     def clean(self):
         self.original_expression = str(self.expression)
@@ -400,11 +414,13 @@ class CollectionReference(models.Model):
         super().save(force_insert, force_update, using, update_fields)
 
     def create_entities_from_expressions(self):
-        self.concepts = self.get_concepts()
-        if not self.concepts:
-            self.mappings = Mapping.objects.filter(uri=self.expression)
-            if not self.mappings:
-                raise ValidationError({'detail': ['Expression specified is not valid.']})
+        if is_concept(self.expression):
+            self.concepts = self.get_concepts()
+        elif is_mapping(self.expression):
+            self.mappings = self.get_mappings()
+
+        if (not self.concepts or not self.concepts.exists()) and (not self.mappings or not self.mappings.exists()):
+            raise ValidationError({'detail': ['Expression specified is not valid.']})
 
     def get_related_mappings(self, exclude_mapping_uris):
         mappings = []

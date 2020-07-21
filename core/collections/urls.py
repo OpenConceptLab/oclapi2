@@ -16,6 +16,7 @@ urlpatterns = [
         name='collection-version-list'
     ),
     re_path(r"^(?P<collection>{pattern})/concepts/".format(pattern=NAMESPACE_PATTERN), include('core.concepts.urls')),
+    re_path(r"^(?P<collection>{pattern})/mappings/".format(pattern=NAMESPACE_PATTERN), include('core.mappings.urls')),
     re_path(
         r'^(?P<collection>{pattern})/references/$'.format(pattern=NAMESPACE_PATTERN),
         views.CollectionReferencesView.as_view(),
@@ -31,5 +32,11 @@ urlpatterns = [
             pattern=NAMESPACE_PATTERN
         ),
         include('core.concepts.urls')
+    ),
+    re_path(
+        r"^(?P<collection>{pattern})/(?P<version>{pattern})/mappings/".format(
+            pattern=NAMESPACE_PATTERN
+        ),
+        include('core.mappings.urls')
     ),
 ]

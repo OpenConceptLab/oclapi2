@@ -7,7 +7,7 @@ from rest_framework.response import Response
 
 from core.common.constants import HEAD, ACCESS_TYPE_EDIT, ACCESS_TYPE_VIEW, ACCESS_TYPE_NONE
 from core.common.permissions import HasPrivateAccess, HasOwnership
-from .utils import write_csv_to_s3, get_csv_from_s3
+from .utils import write_csv_to_s3, get_csv_from_s3, get_query_params_from_url_string
 
 
 class ListWithHeadersMixin(ListModelMixin):
@@ -328,3 +328,17 @@ class SourceChildMixin:
         new_version.retired = retired
         new_version.comment = comment
         return self.__class__.persist_clone(new_version, user)
+
+    @classmethod
+    def from_uri_queryset(cls, uri):
+        queryset = cls.objects.none()
+
+        try:
+            kwargs = get(resolve(uri), 'kwargs', dict())
+            query_params = get_query_params_from_url_string(uri)  # parsing query parameters
+            kwargs.update(query_params)
+            queryset = cls.get_base_queryset(kwargs)
+        except:  # pylint: disable=bare-except
+            pass
+
+        return queryset

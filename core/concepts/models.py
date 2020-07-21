@@ -433,6 +433,11 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     def get_unidirectional_mappings(self):
         return self.mappings_from.filter(parent=self.parent)
 
+    def get_bidirectional_mappings(self):
+        queryset = self.get_unidirectional_mappings() | self.mappings_to.filter(parent=self.parent)
+
+        return queryset.distinct()
+
     @staticmethod
     def get_latest_versions_for_queryset(concepts_qs):
         """Takes any concepts queryset and returns queryset of latest_version of each of those concepts"""

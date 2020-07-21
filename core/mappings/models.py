@@ -65,15 +65,15 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
 
     @property
     def from_source_owner(self):
-        return self.from_source.owner_name
+        return str(self.from_source.parent)
 
     @property
     def from_source_owner_mnemonic(self):
-        return self.from_source.owner.mnemonic
+        return self.from_source.parent.mnemonic
 
     @property
     def from_source_owner_type(self):
-        return self.from_source.owner_type
+        return self.from_source.parent.resource_type
 
     @property
     def from_source_name(self):
@@ -135,6 +135,17 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
     def to_source_shorthand(self):
         return self.get_to_source() and "%s:%s" % (self.to_source_owner_mnemonic, self.to_source_name)
 
+    @property
+    def is_versioned_object(self):
+        return self.id == self.versioned_object_id
+
+    @property
+    def versioned_object_url(self):
+        if self.is_versioned_object:
+            return self.uri
+
+        return get(Mapping.objects.filter(id=self.versioned_object_id), '0.uri')
+
     def get_to_concept_name(self):
         if self.to_concept_name:
             return self.to_concept_name
@@ -186,7 +197,20 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
 
     @classmethod
     def persist_new(cls, data, user):
+        from core.concepts.models import Concept
+
+        from_concept_url = data.pop('from_concept_url', None)
+        to_concept_url = data.pop('to_concept_url', None)
+
         mapping = Mapping(**data, created_by=user, updated_by=user)
+
+        if from_concept_url:
+            mapping.from_concept = Concept.from_uri_queryset(from_concept_url).first()
+        if to_concept_url:
+            to_concept = Concept.from_uri_queryset(to_concept_url).first()
+            mapping.to_concept = to_concept
+            mapping.to_concept_code = to_concept.mnemonic
+            mapping.to_concept_name = to_concept.display_name
 
         mapping.version = TEMP
         mapping.errors = dict()

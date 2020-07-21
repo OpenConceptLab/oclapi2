@@ -3,7 +3,9 @@ from rest_framework.fields import CharField, DateTimeField, BooleanField, URLFie
     UUIDField
 from rest_framework.serializers import ModelSerializer
 
+from core.common.constants import INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_MAPPINGS_PARAM
 from core.concepts.models import Concept, LocalizedText
+from core.mappings.serializers import MappingDetailSerializer
 
 
 class LocalizedNameSerializer(ModelSerializer):
@@ -126,6 +128,14 @@ class ConceptDetailSerializer(ModelSerializer):
     owner_url = URLField(read_only=True)
     extras = JSONField(required=False)
     update_comment = CharField(required=False, source='comment')
+    mappings = SerializerMethodField()
+
+    def __init__(self, *args, **kwargs):
+        self.query_params = kwargs.get('context').get('request').query_params.dict()
+        self.include_indirect_mappings = self.query_params.get(INCLUDE_INVERSE_MAPPINGS_PARAM) == 'true'
+        self.include_direct_mappings = self.query_params.get(INCLUDE_MAPPINGS_PARAM) == 'true'
+
+        super().__init__(*args, **kwargs)
 
     class Meta:
         model = Concept
@@ -133,8 +143,16 @@ class ConceptDetailSerializer(ModelSerializer):
             'id', 'external_id', 'concept_class', 'datatype', 'url', 'retired', 'source',
             'owner', 'owner_type', 'owner_url', 'display_name', 'display_locale', 'names', 'descriptions',
             'created_on', 'updated_on', 'versions_url', 'version', 'extras', 'parent_id', 'name', 'type',
-            'update_comment', 'version_url',
+            'update_comment', 'version_url', 'mappings'
         )
+
+    def get_mappings(self, obj):
+        if self.include_direct_mappings:
+            return MappingDetailSerializer(obj.get_unidirectional_mappings(), many=True).data
+        if self.include_indirect_mappings:
+            return MappingDetailSerializer(obj.get_bidirectional_mappings(), many=True).data
+
+        return []
 
     def create(self, validated_data):
         concept = Concept.persist_new(data=validated_data, user=self.context.get('request').user)
