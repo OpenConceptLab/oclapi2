@@ -2,9 +2,10 @@ from django.core.exceptions import ValidationError
 from django.db import models, IntegrityError, transaction
 from pydash import get, compact
 
-from core.common.constants import TEMP
+from core.common.constants import TEMP, INCLUDE_RETIRED_PARAM
 from core.common.mixins import SourceChildMixin
 from core.common.models import VersionedModel
+from core.common.utils import parse_updated_since_param
 from core.mappings.constants import MAPPING_TYPE, MAPPING_IS_ALREADY_RETIRED, MAPPING_WAS_RETIRED, \
     MAPPING_IS_ALREADY_NOT_RETIRED, MAPPING_WAS_UNRETIRED
 from core.mappings.mixins import MappingValidationMixin
@@ -263,3 +264,41 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
             return {'__all__': MAPPING_IS_ALREADY_NOT_RETIRED}
 
         return self.__update_retire(False, comment or MAPPING_WAS_UNRETIRED, user)
+
+    @classmethod
+    def get_base_queryset(cls, params):
+        queryset = cls.objects.filter(is_active=True)
+        user = params.get('user', None)
+        org = params.get('org', None)
+        collection = params.get('collection', None)
+        source = params.get('source', None)
+        container_version = params.get('version', None)
+        mapping = params.get('mapping', None)
+        mapping_version = params.get('mapping_version', None)
+        is_latest = params.get('is_latest', None)
+        include_retired = params.get(INCLUDE_RETIRED_PARAM, False)
+        updated_since = parse_updated_since_param(params)
+        if user:
+            queryset = queryset.filter(parent__user__username=user)
+        if org:
+            queryset = queryset.filter(parent__organization__mnemonic=org)
+        if source:
+            queryset = queryset.filter(sources__mnemonic=source)
+        if collection:
+            queryset = queryset.filter(collection__mnemonic=collection)
+        if container_version and source:
+            queryset = queryset.filter(sources__version=container_version)
+        if container_version and collection:
+            queryset = queryset.filter(collection__version=container_version)
+        if mapping:
+            queryset = queryset.filter(versioned_object_id=mapping)
+        if mapping_version:
+            queryset = queryset.filter(version=mapping_version)
+        if is_latest:
+            queryset = queryset.filter(is_latest_version=True)
+        if not include_retired:
+            queryset = queryset.filter(retired=False)
+        if updated_since:
+            queryset = queryset.filter(updated_at__gte=updated_since)
+
+        return queryset.distinct()

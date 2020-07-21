@@ -4,6 +4,7 @@ from core.common.constants import NAMESPACE_PATTERN
 from . import views
 
 urlpatterns = [
+    re_path(r'^$', views.MappingListView.as_view(), name='mapping-list'),
     re_path(
         r"^(?P<mapping>{pattern})/$".format(pattern=NAMESPACE_PATTERN),
         views.MappingRetrieveUpdateDestroyView.as_view(),
