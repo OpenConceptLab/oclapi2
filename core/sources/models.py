@@ -67,8 +67,3 @@ class Source(ConceptContainerModel):
             return False
 
         return self.custom_validation_schema is not None and self.num_concepts > 0
-
-    def seed_concepts(self):
-        head = self.head
-        if head:
-            self.concepts.set(head.concepts.all())

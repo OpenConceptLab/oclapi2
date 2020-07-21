@@ -393,6 +393,7 @@ class ConceptContainerModel(VersionedModel):
         obj.update_version_data()
         obj.save(**kwargs)
         obj.seed_concepts()
+        obj.seed_mappings()
         from core.collections.models import Collection
         if isinstance(obj, Collection):
             obj.seed_references()
@@ -507,3 +508,13 @@ class ConceptContainerModel(VersionedModel):
             self.external_id = obj.external_id
             self.organization = obj.organization
             self.user = obj.user
+
+    def seed_concepts(self):
+        head = self.head
+        if head:
+            self.concepts.set(head.concepts.all())
+
+    def seed_mappings(self):
+        head = self.head
+        if head:
+            self.mappings.set(head.mappings.all())

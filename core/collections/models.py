@@ -288,11 +288,6 @@ class Collection(ConceptContainerModel):
             obj.fill_data_from_reference(col_reference)
         return errors
 
-    def seed_concepts(self):
-        head = self.head
-        if head:
-            self.concepts.set(head.concepts.all())
-
     def seed_references(self):
         head = self.head
         if head:
