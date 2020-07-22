@@ -9,17 +9,19 @@ from core.mappings.serializers import MappingDetailSerializer
 
 
 class LocalizedNameSerializer(ModelSerializer):
+    uuid = CharField(read_only=True, source='id')
     name_type = CharField(source='type')
     type = CharField(source='name_type', required=False, allow_null=True, allow_blank=True)
 
     class Meta:
         model = LocalizedText
         fields = (
-            'id', 'name', 'external_id', 'type', 'locale', 'locale_preferred', 'name_type',
+            'uuid', 'name', 'external_id', 'type', 'locale', 'locale_preferred', 'name_type',
         )
 
 
 class LocalizedDescriptionSerializer(ModelSerializer):
+    uuid = CharField(read_only=True, source='id')
     description = CharField(source='name')
     description_type = CharField(source='type')
     type = CharField(source='description_type', required=False, allow_null=True, allow_blank=True)
@@ -27,7 +29,7 @@ class LocalizedDescriptionSerializer(ModelSerializer):
     class Meta:
         model = LocalizedText
         fields = (
-            'id', 'description', 'external_id', 'type', 'locale', 'locale_preferred', 'description_type'
+            'uuid', 'description', 'external_id', 'type', 'locale', 'locale_preferred', 'description_type'
         )
 
 
@@ -60,7 +62,7 @@ class ConceptNameSerializer(ConceptLabelSerializer):
     name_type = CharField(required=False, source='type')
 
     class Meta:
-        models = LocalizedText
+        model = LocalizedText
         fields = (*ConceptLabelSerializer.Meta.fields, 'name', 'name_type')
 
     def to_representation(self, instance):
@@ -86,6 +88,7 @@ class ConceptDescriptionSerializer(ConceptLabelSerializer):
 
 
 class ConceptListSerializer(ModelSerializer):
+    uuid = CharField(source='id', read_only=True)
     id = CharField(source='mnemonic')
     source = CharField(source='parent_resource')
     owner = CharField(source='owner_name')
@@ -96,7 +99,7 @@ class ConceptListSerializer(ModelSerializer):
     class Meta:
         model = Concept
         fields = (
-            'id', 'external_id', 'concept_class', 'datatype', 'url', 'retired', 'source',
+            'uuid', 'id', 'external_id', 'concept_class', 'datatype', 'url', 'retired', 'source',
             'owner', 'owner_type', 'owner_url', 'display_name', 'display_locale', 'version', 'update_comment',
             'locale'
         )
@@ -107,6 +110,7 @@ class ConceptListSerializer(ModelSerializer):
 
 
 class ConceptDetailSerializer(ModelSerializer):
+    uuid = CharField(source='id', read_only=True)
     version = CharField(read_only=True)
     type = CharField(source='versioned_resource_type', read_only=True)
     id = CharField(source='mnemonic', required=True)
@@ -140,7 +144,7 @@ class ConceptDetailSerializer(ModelSerializer):
     class Meta:
         model = Concept
         fields = (
-            'id', 'external_id', 'concept_class', 'datatype', 'url', 'retired', 'source',
+            'uuid', 'id', 'external_id', 'concept_class', 'datatype', 'url', 'retired', 'source',
             'owner', 'owner_type', 'owner_url', 'display_name', 'display_locale', 'names', 'descriptions',
             'created_on', 'updated_on', 'versions_url', 'version', 'extras', 'parent_id', 'name', 'type',
             'update_comment', 'version_url', 'mappings'
