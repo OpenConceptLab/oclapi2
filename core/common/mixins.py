@@ -299,6 +299,8 @@ class SourceChildMixin:
 
     @property
     def version_url(self):
+        if self.is_versioned_object:
+            return self.get_latest_version().uri
         return self.uri
 
     @property
