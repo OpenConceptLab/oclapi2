@@ -10,4 +10,14 @@ urlpatterns = [
         views.MappingRetrieveUpdateDestroyView.as_view(),
         name='mapping-detail'
     ),
+    re_path(
+        r"^(?P<mapping>{pattern})/versions/$".format(pattern=NAMESPACE_PATTERN),
+        views.MappingVersionsView.as_view(),
+        name='mapping-version-list'
+    ),
+    re_path(
+        r'^(?P<mapping>{pattern})/(?P<mapping_version>{pattern})/$'.format(pattern=NAMESPACE_PATTERN),
+        views.MappingVersionRetrieveView.as_view(),
+        name='mapping-version-detail'
+    ),
 ]

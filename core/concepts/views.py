@@ -1,3 +1,4 @@
+from django.db.models import F
 from django.db.models.query import QuerySet
 from django.shortcuts import get_object_or_404
 from pydash import get
@@ -24,9 +25,8 @@ class ConceptBaseView(BaseAPIView):
     permission_classes = (CanViewParentDictionary,)
     queryset = Concept.objects.filter(is_active=True)
 
-    @staticmethod
-    def get_detail_serializer(obj, data=None, files=None, partial=False):
-        return ConceptDetailSerializer(obj, data, files, partial)
+    def get_detail_serializer(self, obj, data=None, files=None, partial=False):
+        return ConceptDetailSerializer(obj, data, files, partial, context=dict(request=self.request))
 
     def get_filter_params(self):
         kwargs = self.kwargs.copy()
@@ -115,7 +115,7 @@ class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
             self.object = serializer.save()
             if serializer.is_valid():
                 headers = self.get_success_headers(serializer.data)
-                serializer = ConceptDetailSerializer(self.object)
+                serializer = ConceptDetailSerializer(self.object, context=dict(request=request))
                 return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -124,7 +124,7 @@ class ConceptRetrieveUpdateDestroyView(ConceptBaseView, RetrieveAPIView, UpdateA
     serializer_class = ConceptDetailSerializer
 
     def get_object(self, queryset=None):
-        return get_object_or_404(self.get_queryset(), is_latest_version=True)
+        return get_object_or_404(self.get_queryset(), id=F('versioned_object_id'))
 
     def get_permissions(self):
         if self.request.method in ['GET']:
@@ -154,7 +154,7 @@ class ConceptRetrieveUpdateDestroyView(ConceptBaseView, RetrieveAPIView, UpdateA
         if serializer.is_valid():
             self.object = serializer.save()
             if serializer.is_valid():
-                serializer = ConceptDetailSerializer(self.object, context={'request': request})
+                serializer = ConceptDetailSerializer(self.object, context=dict(request=request))
                 return Response(serializer.data, status=success_status_code)
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -319,7 +319,7 @@ class ConceptDescriptionRetrieveUpdateDestroyView(ConceptLabelRetrieveUpdateDest
 
 class ConceptExtrasBaseView(ConceptBaseView):
     def get_object(self, queryset=None):
-        return self.get_queryset().filter(is_latest_version=True).first()
+        return self.get_queryset().filter(id=F('versioned_object_id')).first()
 
 
 class ConceptExtrasView(ConceptExtrasBaseView, ListAPIView):

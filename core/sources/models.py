@@ -1,8 +1,11 @@
 from django.db import models
 from django.db.models import UniqueConstraint
+from django.urls import resolve
+from pydash import get
 
+from core.common.constants import HEAD
 from core.common.models import ConceptContainerModel
-from core.common.utils import reverse_resource
+from core.common.utils import reverse_resource, get_query_params_from_url_string
 from core.concepts.models import LocalizedText
 from core.sources.constants import SOURCE_TYPE
 
@@ -26,6 +29,20 @@ class Source(ConceptContainerModel):
     source_type = models.TextField(blank=True, null=True)
 
     OBJECT_TYPE = SOURCE_TYPE
+
+    @classmethod
+    def head_from_uri(cls, uri):
+        queryset = cls.objects.none()
+
+        try:
+            kwargs = get(resolve(uri), 'kwargs', dict())
+            query_params = get_query_params_from_url_string(uri)  # parsing query parameters
+            kwargs.update(query_params)
+            queryset = cls.get_base_queryset(kwargs).filter(version=HEAD)
+        except:  # pylint: disable=bare-except
+            pass
+
+        return queryset
 
     @classmethod
     def get_base_queryset(cls, params):

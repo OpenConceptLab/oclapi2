@@ -1,3 +1,4 @@
+from django.db.models import F
 from django.shortcuts import get_object_or_404
 from rest_framework import status
 from rest_framework.generics import DestroyAPIView, UpdateAPIView, RetrieveAPIView
@@ -5,7 +6,7 @@ from rest_framework.mixins import CreateModelMixin
 from rest_framework.response import Response
 
 from core.common.constants import HEAD
-from core.common.mixins import ListWithHeadersMixin
+from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryMixin
 from core.common.utils import compact_dict_by_values
 from core.common.views import BaseAPIView
 from core.concepts.permissions import CanEditParentDictionary, CanViewParentDictionary
@@ -54,7 +55,7 @@ class MappingListView(MappingBaseView, ListWithHeadersMixin, CreateModelMixin):
         is_latest_version = 'collection' not in self.kwargs
         queryset = super().get_queryset()
         if is_latest_version:
-            queryset = queryset.filter(is_latest_version=True)
+            queryset = queryset.filter(id=F('versioned_object_id'))
         return queryset.select_related('parent__organization', 'parent__user')
 
     def get(self, request, *args, **kwargs):
@@ -87,7 +88,7 @@ class MappingRetrieveUpdateDestroyView(MappingBaseView, RetrieveAPIView, UpdateA
     serializer_class = MappingDetailSerializer
 
     def get_object(self, queryset=None):
-        return get_object_or_404(self.get_queryset(), is_latest_version=True)
+        return get_object_or_404(self.get_queryset(), id=F('versioned_object_id'))
 
     def get_permissions(self):
         if self.request.method in ['GET']:
@@ -136,3 +137,20 @@ class MappingRetrieveUpdateDestroyView(MappingBaseView, RetrieveAPIView, UpdateA
             return Response(errors, status=status.HTTP_400_BAD_REQUEST)
 
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class MappingVersionsView(MappingBaseView, ConceptDictionaryMixin, ListWithHeadersMixin):
+    serializer_class = MappingListSerializer
+    permission_classes = (CanViewParentDictionary,)
+
+    def get(self, request, *args, **kwargs):
+        self.serializer_class = MappingDetailSerializer if self.is_verbose(request) else MappingListSerializer
+        return self.list(request, *args, **kwargs)
+
+
+class MappingVersionRetrieveView(MappingBaseView, RetrieveAPIView):
+    serializer_class = MappingDetailSerializer
+    permission_classes = (CanViewParentDictionary,)
+
+    def get_object(self, queryset=None):
+        return self.get_queryset().first()

@@ -26,3 +26,11 @@ class MappingFactory(factory.django.DjangoModelFactory):
         if extracted:
             for source in extracted:
                 self.sources.add(source)
+
+    @factory.post_generation
+    def versioned_object_id(self, create, _):
+        if not create or self.versioned_object_id:
+            return
+
+        self.versioned_object = self
+        self.save()

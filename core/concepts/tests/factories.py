@@ -28,6 +28,14 @@ class ConceptFactory(factory.django.DjangoModelFactory):
     datatype = "None"
 
     @factory.post_generation
+    def versioned_object_id(self, create, _):
+        if not create or self.versioned_object_id:
+            return
+
+        self.versioned_object = self
+        self.save()
+
+    @factory.post_generation
     def sources(self, create, extracted):
         if not create:
             return

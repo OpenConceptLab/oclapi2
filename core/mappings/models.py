@@ -31,7 +31,9 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
     sources = models.ManyToManyField('sources.Source', related_name='mappings')
     external_id = models.TextField(null=True, blank=True)
     comment = models.TextField(null=True, blank=True)
-    versioned_object_id = models.BigIntegerField(null=True, blank=True)
+    versioned_object = models.ForeignKey(
+        'self', related_name='versions_set', null=True, blank=True, on_delete=models.CASCADE
+    )
     name = None
     full_name = None
     default_locale = None
@@ -42,6 +44,10 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
     mnemonic_attr = 'versioned_object_id'
 
     OBJECT_TYPE = MAPPING_TYPE
+    ALREADY_RETIRED = MAPPING_IS_ALREADY_RETIRED
+    ALREADY_NOT_RETIRED = MAPPING_IS_ALREADY_NOT_RETIRED
+    WAS_RETIRED = MAPPING_WAS_RETIRED
+    WAS_UNRETIRED = MAPPING_WAS_UNRETIRED
 
     @property
     def mnemonic(self):  # pylint: disable=function-redefined
@@ -136,15 +142,11 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         return self.get_to_source() and "%s:%s" % (self.to_source_owner_mnemonic, self.to_source_name)
 
     @property
-    def is_versioned_object(self):
-        return self.id == self.versioned_object_id
-
-    @property
     def versioned_object_url(self):
         if self.is_versioned_object:
             return self.uri
 
-        return get(Mapping.objects.filter(id=self.versioned_object_id), '0.uri')
+        return self.versioned_object.uri
 
     def get_to_concept_name(self):
         if self.to_concept_name:
@@ -207,10 +209,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         if from_concept_url:
             mapping.from_concept = Concept.from_uri_queryset(from_concept_url).first()
         if to_concept_url:
-            to_concept = Concept.from_uri_queryset(to_concept_url).first()
-            mapping.to_concept = to_concept
-            mapping.to_concept_code = to_concept.mnemonic
-            mapping.to_concept_name = to_concept.display_name
+            mapping.to_concept = Concept.from_uri_queryset(to_concept_url).first()
 
         mapping.version = TEMP
         mapping.errors = dict()
@@ -218,20 +217,32 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         try:
             mapping.full_clean()
             mapping.save()
-            mapping.version = str(mapping.id)
-            mapping.versioned_object_id = mapping.id
-            mapping.save()
-            parent = mapping.parent
-            parent_head = parent.head
-            mapping.sources.set([parent, parent.head])
-            parent.save()
-            parent_head.save()
+            if mapping.id:
+                mapping.version = str(mapping.id)
+                mapping.versioned_object_id = mapping.id
+                mapping.save()
+                parent = mapping.parent
+                parent_head = parent.head
+                mapping.sources.set([parent, parent.head])
+                parent.save()
+                parent_head.save()
         except ValidationError as ex:
             mapping.errors.update(ex.message_dict)
         except IntegrityError as ex:
             mapping.errors.update(dict(__all__=ex.args))
 
         return mapping
+
+    def update_versioned_object(self):
+        mapping = self.versioned_object
+        mapping.extras = self.extras
+        mapping.map_type = self.map_type
+        mapping.from_concept_id = self.from_concept_id
+        mapping.to_concept_id = self.to_concept_id
+        mapping.to_concept_code = self.to_concept_code
+        mapping.to_concept_name = self.to_concept_name
+        mapping.to_source_id = self.to_source_id
+        mapping.save()
 
     @classmethod
     @transaction.atomic
@@ -244,50 +255,44 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
             return errors
         obj.version = TEMP
         obj.created_by = user
+        obj.updated_by = user
         parent = obj.parent
         parent_head = parent.head
         persisted = False
         errored_action = 'saving new mapping version'
-        latest_versions = None
+        latest_version = None
         try:
             obj.is_latest_version = True
             obj.full_clean()
             obj.save(**kwargs)
-            obj.version = str(obj.id)
-            obj.save()
-            latest_versions = obj.versions.exclude(id=obj.id).filter(is_latest_version=True)
-            latest_versions.update(is_latest_version=False)
-            obj.sources.set(compact([parent, parent_head]))
+            if obj.id:
+                obj.version = str(obj.id)
+                obj.save()
+                obj.update_versioned_object()
+                versioned_object = obj.versioned_object
+                latest_version = versioned_object.versions.exclude(id=obj.id).filter(is_latest_version=True).first()
+                latest_version.is_latest_version = False
+                latest_version.save()
+                obj.sources.set(compact([parent, parent_head]))
 
-            # to update counts
-            parent.save()
-            parent_head.save()
+                # to update counts
+                parent.save()
+                parent_head.save()
 
-            persisted = True
+                persisted = True
         except ValidationError as err:
             errors.update(err.message_dict)
         finally:
             if not persisted:
-                obj.sources.remove(parent_head)
-                if latest_versions:
-                    latest_versions.update(is_latest_version=True)
                 if obj.id:
+                    obj.sources.remove(parent_head)
+                    if latest_version:
+                        latest_version.is_latest_version = True
+                        latest_version.save()
                     obj.delete()
                 errors['non_field_errors'] = ['An error occurred while %s.' % errored_action]
 
         return errors
-
-    def retire(self, user, comment=None):
-        if self.head.retired:
-            return {'__all__': MAPPING_IS_ALREADY_RETIRED}
-
-        return self.__update_retire(True, comment or MAPPING_WAS_RETIRED, user)
-
-    def unretire(self, user, comment=None):
-        if not self.head.retired:
-            return {'__all__': MAPPING_IS_ALREADY_NOT_RETIRED}
-
-        return self.__update_retire(False, comment or MAPPING_WAS_UNRETIRED, user)
 
     @classmethod
     def get_base_queryset(cls, params):

@@ -200,6 +200,14 @@ class ConceptVersionDetailSerializer(ModelSerializer):
     version_created_on = DateTimeField(source='created_at')
     version_created_by = CharField(source='created_by')
     locale = CharField(source='iso_639_1_locale')
+    mappings = SerializerMethodField()
+
+    def __init__(self, *args, **kwargs):
+        self.query_params = kwargs.get('context').get('request').query_params.dict()
+        self.include_indirect_mappings = self.query_params.get(INCLUDE_INVERSE_MAPPINGS_PARAM) == 'true'
+        self.include_direct_mappings = self.query_params.get(INCLUDE_MAPPINGS_PARAM) == 'true'
+
+        super().__init__(*args, **kwargs)
 
     class Meta:
         model = Concept
@@ -207,5 +215,13 @@ class ConceptVersionDetailSerializer(ModelSerializer):
             'type', 'uuid', 'id', 'external_id', 'concept_class', 'datatype', 'display_name', 'display_locale',
             'names', 'descriptions', 'extras', 'retired', 'source', 'source_url', 'owner', 'owner_name', 'owner_url',
             'version', 'created_on', 'updated_on', 'version_created_on', 'version_created_by', 'extras',
-            'is_latest_version', 'locale', 'url', 'owner_type', 'version_url',
+            'is_latest_version', 'locale', 'url', 'owner_type', 'version_url', 'mappings'
         )
+
+    def get_mappings(self, obj):
+        if self.include_direct_mappings:
+            return MappingDetailSerializer(obj.get_unidirectional_mappings(), many=True).data
+        if self.include_indirect_mappings:
+            return MappingDetailSerializer(obj.get_bidirectional_mappings(), many=True).data
+
+        return []

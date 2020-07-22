@@ -171,21 +171,27 @@ class CollectionUtilsTest(OCLTestCase):
 
     def test_drop_version(self):
         concept_head = ConceptFactory()
-        concept_v1 = ConceptFactory(parent=concept_head.parent, version='v1', mnemonic=concept_head.mnemonic)
+        concept_v1 = ConceptFactory(
+            parent=concept_head.parent, version='v1', mnemonic=concept_head.mnemonic, versioned_object=concept_head
+        )
 
         self.assertTrue('/v1/' in concept_v1.uri)
         self.assertTrue('/v1/' not in drop_version(concept_v1.uri))
 
     def test_is_version_specified(self):
         concept_head = ConceptFactory()
-        concept_v1 = ConceptFactory(parent=concept_head.parent, version='v1', mnemonic=concept_head.mnemonic)
+        concept_v1 = ConceptFactory(
+            parent=concept_head.parent, version='v1', mnemonic=concept_head.mnemonic, versioned_object=concept_head
+        )
 
         self.assertTrue(is_version_specified(concept_v1.uri))
-        self.assertTrue(is_version_specified(concept_head.uri))
+        self.assertFalse(is_version_specified(concept_head.uri))
 
     def test_get_concept_by_expression(self):
         concept_head = ConceptFactory()
-        concept_v1 = ConceptFactory(parent=concept_head.parent, version='v1', mnemonic=concept_head.mnemonic)
+        concept_v1 = ConceptFactory(
+            parent=concept_head.parent, version='v1', mnemonic=concept_head.mnemonic, versioned_object=concept_head
+        )
 
         self.assertEqual(get_concept_by_expression(concept_head.uri), concept_head)
         self.assertEqual(get_concept_by_expression(concept_v1.uri), concept_v1)

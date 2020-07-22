@@ -1,4 +1,4 @@
-from django.db.models import Q
+from django.db.models import Q, F
 from django.urls import resolve, reverse
 from pydash import compact, get
 from rest_framework import status
@@ -288,19 +288,33 @@ class SourceContainerMixin:
 
 class SourceChildMixin:
     @property
+    def versions(self):
+        if self.is_versioned_object:
+            self.versions_set.all()
+        return self.versioned_object.versions_set.all()
+
+    @property
+    def is_versioned_object(self):
+        return self.id == self.versioned_object_id
+
+    @property
     def version_url(self):
         return self.uri
 
     @property
     def head(self):
-        return self.get_latest_version()
+        return self.versioned_object
 
     @property
     def is_head(self):
-        return self.is_latest_version
+        return self.is_versioned_object
 
     def calculate_uri(self):
-        return "{}{}/".format(super().calculate_uri(), self.version)
+        uri = super().calculate_uri()
+        if not self.is_versioned_object and self.version not in uri:
+            return "{}{}/".format(uri, self.version)
+
+        return uri
 
     @property
     def owner(self):
@@ -322,6 +336,18 @@ class SourceChildMixin:
     def parent_resource(self):
         return get(self.parent, 'mnemonic')
 
+    def retire(self, user, comment=None):
+        if self.versioned_object.retired:
+            return {'__all__': self.ALREADY_RETIRED}
+
+        return self.__update_retire(True, comment or self.WAS_RETIRED, user)
+
+    def unretire(self, user, comment=None):
+        if not self.versioned_object.retired:
+            return {'__all__': self.ALREADY_NOT_RETIRED}
+
+        return self.__update_retire(False, comment or self.WAS_UNRETIRED, user)
+
     def __update_retire(self, retired, comment, user):
         latest_version = self.get_latest_version()
         new_version = latest_version.clone()
@@ -338,6 +364,8 @@ class SourceChildMixin:
             query_params = get_query_params_from_url_string(uri)  # parsing query parameters
             kwargs.update(query_params)
             queryset = cls.get_base_queryset(kwargs)
+            if '/versions/' not in uri:
+                queryset = queryset.filter(id=F('versioned_object_id'))
         except:  # pylint: disable=bare-except
             pass
 

@@ -56,8 +56,8 @@ class MappingTest(OCLTestCase):
         self.assertEqual(source.mappings.count(), 1)
         self.assertEqual(
             mapping.uri,
-            '/orgs/{}/sources/{}/mappings/{}/{}/'.format(
-                source.organization.mnemonic, source.mnemonic, mapping.mnemonic, mapping.id
+            '/orgs/{}/sources/{}/mappings/{}/'.format(
+                source.organization.mnemonic, source.mnemonic, mapping.mnemonic
             )
         )
 

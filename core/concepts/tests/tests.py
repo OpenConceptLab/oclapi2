@@ -106,8 +106,8 @@ class ConceptTest(OCLTestCase):
         self.assertEqual(source.concepts.count(), 1)
         self.assertEqual(
             concept.uri,
-            '/orgs/{}/sources/{}/concepts/{}/{}/'.format(
-                source.organization.mnemonic, source.mnemonic, concept.mnemonic, concept.id
+            '/orgs/{}/sources/{}/concepts/{}/'.format(
+                source.organization.mnemonic, source.mnemonic, concept.mnemonic
             )
         )
 
@@ -191,17 +191,23 @@ class ConceptTest(OCLTestCase):
             **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'c1', 'parent': source,
             'names': [LocalizedTextFactory.build(locale='en', name='English', locale_preferred=True)]
         })
-
-        self.assertEqual(concept.versions.count(), 1)
-        self.assertFalse(concept.retired)
-        self.assertTrue(concept.is_head)
-
-        concept.retire(concept.created_by, 'Forceful retirement')  # concept will become old/prev version
+        Concept.persist_clone(concept.clone(), concept.created_by)
+        concept_v1 = Concept.objects.order_by('-created_at').first()
         concept.refresh_from_db()
 
-        self.assertFalse(concept.is_head)
         self.assertEqual(concept.versions.count(), 2)
         self.assertFalse(concept.retired)
+        self.assertFalse(concept.is_latest_version)
+        self.assertTrue(concept.is_versioned_object)
+        self.assertTrue(concept_v1.is_latest_version)
+
+        concept_v1.retire(concept_v1.created_by, 'Forceful retirement')  # concept will become old/prev version
+        concept.refresh_from_db()
+        concept_v1.refresh_from_db()
+
+        self.assertFalse(concept_v1.is_latest_version)
+        self.assertEqual(concept.versions.count(), 3)
+        self.assertTrue(concept.retired)
         latest_version = concept.get_latest_version()
         self.assertTrue(latest_version.retired)
         self.assertEqual(latest_version.comment, 'Forceful retirement')
@@ -217,17 +223,23 @@ class ConceptTest(OCLTestCase):
             **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'c1', 'parent': source, 'retired': True,
             'names': [LocalizedTextFactory.build(locale='en', name='English', locale_preferred=True)]
         })
-
-        self.assertEqual(concept.versions.count(), 1)
-        self.assertTrue(concept.retired)
-        self.assertTrue(concept.is_head)
-
-        concept.unretire(concept.created_by, 'World needs you!')  # concept will become old/prev version
+        Concept.persist_clone(concept.clone(), concept.created_by)
+        concept_v1 = Concept.objects.order_by('-created_at').first()
         concept.refresh_from_db()
 
-        self.assertFalse(concept.is_head)
         self.assertEqual(concept.versions.count(), 2)
         self.assertTrue(concept.retired)
+        self.assertFalse(concept.is_latest_version)
+        self.assertTrue(concept.is_versioned_object)
+        self.assertTrue(concept_v1.is_latest_version)
+
+        concept_v1.unretire(concept.created_by, 'World needs you!')  # concept will become old/prev version
+        concept.refresh_from_db()
+        concept_v1.refresh_from_db()
+
+        self.assertFalse(concept_v1.is_latest_version)
+        self.assertEqual(concept.versions.count(), 3)
+        self.assertFalse(concept.retired)
         latest_version = concept.get_latest_version()
         self.assertFalse(latest_version.retired)
         self.assertEqual(latest_version.comment, 'World needs you!')

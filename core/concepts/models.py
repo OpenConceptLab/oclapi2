@@ -1,6 +1,7 @@
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models, IntegrityError, transaction
+from django.db.models import F
 from pydash import get, compact
 
 from core.common.constants import TEMP, ISO_639_1, INCLUDE_RETIRED_PARAM, ACCESS_TYPE_NONE
@@ -101,8 +102,15 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     comment = models.TextField(null=True, blank=True)
     parent = models.ForeignKey('sources.Source', related_name='concepts_set', on_delete=models.DO_NOTHING)
     sources = models.ManyToManyField('sources.Source', related_name='concepts')
+    versioned_object = models.ForeignKey(
+        'self', related_name='versions_set', null=True, blank=True, on_delete=models.CASCADE
+    )
 
     OBJECT_TYPE = CONCEPT_TYPE
+    ALREADY_RETIRED = CONCEPT_IS_ALREADY_RETIRED
+    ALREADY_NOT_RETIRED = CONCEPT_IS_ALREADY_NOT_RETIRED
+    WAS_RETIRED = CONCEPT_WAS_RETIRED
+    WAS_UNRETIRED = CONCEPT_WAS_UNRETIRED
 
     @property
     def concept(self):  # for url kwargs
@@ -286,6 +294,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             parent=self.parent,
             is_latest_version=self.is_latest_version,
             parent_id=self.parent_id,
+            versioned_object_id=self.versioned_object_id,
         )
         concept_version.cloned_names = self.__clone_name_locales()
         concept_version.cloned_descriptions = self.__clone_description_locales()
@@ -349,6 +358,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             concept.cloned_descriptions = descriptions
             concept.full_clean()
             concept.save()
+            concept.versioned_object_id = concept.id
             concept.version = str(concept.id)
             concept.save()
 
@@ -367,6 +377,16 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
         return concept
 
+    def update_versioned_object(self):
+        concept = self.versioned_object
+        concept.extras = self.extras
+        concept.names.set(self.names.all())
+        concept.descriptions.set(self.descriptions.all())
+        concept.concept_class = self.concept_class
+        concept.datatype = self.datatype
+        concept.retired = self.retired
+        concept.save()
+
     @classmethod
     @transaction.atomic
     def persist_clone(cls, obj, user=None, **kwargs):
@@ -375,26 +395,31 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             errors['version_created_by'] = 'Must specify which user is attempting to create a new concept version.'
             return errors
         obj.created_by = user
+        obj.updated_by = user
         obj.version = TEMP
         parent = obj.parent
         parent_head = parent.head
         persisted = False
         errored_action = 'saving new concept version'
-        latest_versions = None
+        latest_version = None
         try:
             obj.is_latest_version = True
             obj.save(**kwargs)
             obj.version = str(obj.id)
             obj.save()
-            obj.set_locales()
-            obj.clean()  # clean here to validate locales that can only be saved after obj is saved
-            latest_versions = obj.versions.exclude(id=obj.id).filter(is_latest_version=True)
-            latest_versions.update(is_latest_version=False)
-            obj.sources.set(compact([parent, parent_head]))
+            if obj.id:
+                obj.set_locales()
+                obj.clean()  # clean here to validate locales that can only be saved after obj is saved
+                obj.update_versioned_object()
+                versioned_object = obj.versioned_object
+                latest_version = versioned_object.versions.filter(is_latest_version=True).first()
+                latest_version.is_latest_version = False
+                latest_version.save()
+                obj.sources.set(compact([parent, parent_head]))
 
-            # to update counts
-            parent.save()
-            parent_head.save()
+                # to update counts
+                parent.save()
+                parent_head.save()
 
             persisted = True
         except ValidationError as err:
@@ -403,38 +428,23 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             if not persisted:
                 obj.remove_locales()
                 obj.sources.remove(parent_head)
-                if latest_versions:
-                    latest_versions.update(is_latest_version=True)
+                if latest_version:
+                    latest_version.is_latest_version = True
+                    latest_version.save()
                 if obj.id:
                     obj.delete()
                 errors['non_field_errors'] = ['An error occurred while %s.' % errored_action]
 
         return errors
 
-    def retire(self, user, comment=None):
-        if self.head.retired:
-            return {'__all__': CONCEPT_IS_ALREADY_RETIRED}
-
-        return self.__update_retire(True, comment or CONCEPT_WAS_RETIRED, user)
-
-    def unretire(self, user, comment=None):
-        if not self.head.retired:
-            return {'__all__': CONCEPT_IS_ALREADY_NOT_RETIRED}
-
-        return self.__update_retire(False, comment or CONCEPT_WAS_UNRETIRED, user)
-
-    def __update_retire(self, retired, comment, user):
-        latest_version = self.get_latest_version()
-        new_version = latest_version.clone()
-        new_version.retired = retired
-        new_version.comment = comment
-        return Concept.persist_clone(new_version, user)
-
     def get_unidirectional_mappings(self):
-        return self.mappings_from.filter(parent=self.parent)
+        return self.mappings_from.filter(parent=self.parent, id=F('versioned_object_id'))
+
+    def get_indirect_mappings(self):
+        return self.mappings_to.filter(parent=self.parent, id=F('versioned_object_id'))
 
     def get_bidirectional_mappings(self):
-        queryset = self.get_unidirectional_mappings() | self.mappings_to.filter(parent=self.parent)
+        queryset = self.get_unidirectional_mappings() | self.get_indirect_mappings()
 
         return queryset.distinct()
 
