@@ -325,10 +325,14 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         self.descriptions.all().delete()
 
     def __clone_name_locales(self):
-        return [name.clone() for name in self.names.all()]
+        return self.__clone_locales(self.names)
 
     def __clone_description_locales(self):
-        return [desc.clone() for desc in self.descriptions.all()]
+        return self.__clone_locales(self.descriptions)
+
+    @staticmethod
+    def __clone_locales(locales):
+        return [locale.clone() for locale in locales.all()]
 
     @classmethod
     def persist_new(cls, data, user=None):
