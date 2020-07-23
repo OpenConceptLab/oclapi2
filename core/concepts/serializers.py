@@ -97,6 +97,7 @@ class ConceptListSerializer(ModelSerializer):
     url = CharField(source='version_url', read_only=True)
     version_created_on = DateTimeField(source='created_at', read_only=True)
     version_created_by = DateTimeField(source='created_by.username', read_only=True)
+    mappings = SerializerMethodField()
 
     def __init__(self, *args, **kwargs):
         self.query_params = kwargs.get('context').get('request').query_params.dict()

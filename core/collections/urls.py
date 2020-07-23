@@ -16,6 +16,7 @@ urlpatterns = [
         views.CollectionVersionListView.as_view(),
         name='collection-version-list'
     ),
+    re_path(r'^(?P<collection>{pattern})/concepts/atom/$'.format(pattern=NAMESPACE_PATTERN), CollectionFeed()),
     re_path(r"^(?P<collection>{pattern})/concepts/".format(pattern=NAMESPACE_PATTERN), include('core.concepts.urls')),
     re_path(r"^(?P<collection>{pattern})/mappings/".format(pattern=NAMESPACE_PATTERN), include('core.mappings.urls')),
     re_path(
@@ -23,7 +24,6 @@ urlpatterns = [
         views.CollectionReferencesView.as_view(),
         name='collection-references'
     ),
-    re_path(r'^(?P<collection>{pattern})/concepts/atom/$'.format(pattern=NAMESPACE_PATTERN), CollectionFeed()),
     re_path(
         r'^(?P<collection>{pattern})/(?P<version>{pattern})/$'.format(pattern=NAMESPACE_PATTERN),
         views.CollectionVersionRetrieveUpdateDestroyView.as_view(),

@@ -14,7 +14,7 @@ class SourceFeed(ConceptContainerFeed):
 
     def item_description(self, item):
         item = item.get_latest_version()
-        return item.update_comment
+        return item.comment
 
     def item_link(self, item):
         return item.url

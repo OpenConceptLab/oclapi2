@@ -40,7 +40,7 @@ class ConceptContainerFeed(Feed, FeedFilterMixin):
         org_mnemonic = kwargs.get('org')
 
         if username:
-            self.user = UserProfile.objects.filter(mnemonic=username).first()
+            self.user = UserProfile.objects.filter(username=username).first()
         if org_mnemonic:
             self.org = Organization.objects.filter(mnemonic=org_mnemonic).first()
 
@@ -51,11 +51,9 @@ class ConceptContainerFeed(Feed, FeedFilterMixin):
         self.updated_since = request.GET.get('updated_since', None)
         self.limit = request.GET.get('limit', None)
 
-        parent = self.user or self.org
-        return get_object_or_404(self.model, mnemonic=mnemonic, parent=parent, version=HEAD)
+        return get_object_or_404(self.model, mnemonic=mnemonic, user=self.user, organization=self.org, version=HEAD)
 
-    @staticmethod
-    def title(obj):
+    def title(self, obj):  # pylint: disable=no-self-use
         return "Updates to %s" % obj.mnemonic
 
     def link(self, obj):
@@ -71,4 +69,4 @@ class ConceptContainerFeed(Feed, FeedFilterMixin):
         return item.display_name
 
     def item_link(self, item):
-        return reverse_resource(item, '{}-concept-detail'.format(self.entity_name.lower()))
+        return reverse_resource(item, 'concept-detail')
