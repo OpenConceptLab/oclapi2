@@ -1,5 +1,6 @@
 from django.urls import re_path, include
 
+from core.collections.feeds import CollectionFeed
 from core.common.constants import NAMESPACE_PATTERN
 from . import views
 
@@ -22,6 +23,7 @@ urlpatterns = [
         views.CollectionReferencesView.as_view(),
         name='collection-references'
     ),
+    re_path(r'^(?P<collection>{pattern})/concepts/atom/$'.format(pattern=NAMESPACE_PATTERN), CollectionFeed()),
     re_path(
         r'^(?P<collection>{pattern})/(?P<version>{pattern})/$'.format(pattern=NAMESPACE_PATTERN),
         views.CollectionVersionRetrieveUpdateDestroyView.as_view(),

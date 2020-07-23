@@ -1,6 +1,7 @@
 from django.urls import re_path, include
 
 from core.common.constants import NAMESPACE_PATTERN
+from core.sources.feeds import SourceFeed
 from . import views
 
 urlpatterns = [
@@ -10,6 +11,7 @@ urlpatterns = [
         views.SourceRetrieveUpdateDestroyView.as_view(),
         name='source-detail'
     ),
+    re_path(r'^(?P<source>{pattern})/atom/$'.format(pattern=NAMESPACE_PATTERN), SourceFeed()),
     re_path(
         r"^(?P<source>{pattern})/versions/$".format(pattern=NAMESPACE_PATTERN),
         views.SourceVersionListView.as_view(),
