@@ -16,6 +16,7 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import path, include
 import core.concepts.views as concept_views
+import core.mappings.views as mapping_views
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -24,4 +25,5 @@ urlpatterns = [
     path('sources/', include('core.sources.urls')),
     path('collections/', include('core.collections.urls')),
     path('concepts/', concept_views.ConceptVersionListAllView.as_view(), name='all-concepts'),
+    path('mappings/', mapping_views.MappingVersionListAllView.as_view(), name='all-mappings'),
 ]

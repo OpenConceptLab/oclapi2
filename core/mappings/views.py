@@ -5,7 +5,7 @@ from rest_framework.generics import DestroyAPIView, UpdateAPIView, RetrieveAPIVi
 from rest_framework.mixins import CreateModelMixin
 from rest_framework.response import Response
 
-from core.common.constants import HEAD
+from core.common.constants import HEAD, LIMIT_PARAM
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryMixin
 from core.common.utils import compact_dict_by_values
 from core.common.views import BaseAPIView
@@ -154,3 +154,25 @@ class MappingVersionRetrieveView(MappingBaseView, RetrieveAPIView):
 
     def get_object(self, queryset=None):
         return self.get_queryset().first()
+
+
+class MappingVersionListAllView(MappingBaseView, ListWithHeadersMixin):
+    permission_classes = (CanViewParentDictionary,)
+
+    def get_serializer_class(self):
+        if self.is_verbose(self.request):
+            return MappingDetailSerializer
+
+        return MappingListSerializer
+
+    def get_queryset(self):
+        queryset = Mapping.global_listing_queryset(
+            self.get_filter_params(), self.request.user
+        ).select_related(
+            'parent__organization', 'parent__user',
+        )
+        limit = int(self.request.query_params.get(LIMIT_PARAM, 25))
+        return queryset[0:limit]
+
+    def get(self, request, *args, **kwargs):
+        return self.list(request, *args, **kwargs)

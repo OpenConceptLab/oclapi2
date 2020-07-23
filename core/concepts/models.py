@@ -4,7 +4,7 @@ from django.db import models, IntegrityError, transaction
 from django.db.models import F
 from pydash import get, compact
 
-from core.common.constants import TEMP, ISO_639_1, INCLUDE_RETIRED_PARAM, ACCESS_TYPE_NONE
+from core.common.constants import TEMP, ISO_639_1, INCLUDE_RETIRED_PARAM
 from core.common.mixins import SourceChildMixin
 from core.common.models import VersionedModel
 from core.common.utils import reverse_resource, parse_updated_since_param
@@ -272,13 +272,6 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             queryset = queryset.filter(updated_at__gte=updated_since)
 
         return queryset.distinct()
-
-    @classmethod
-    def global_listing_queryset(cls, params, user):
-        queryset = cls.get_base_queryset(params)
-        if not user.is_staff:
-            queryset = queryset.exclude(public_access=ACCESS_TYPE_NONE)
-        return queryset
 
     def clone(self):
         concept_version = Concept(

@@ -372,3 +372,10 @@ class SourceChildMixin:
             pass
 
         return queryset
+
+    @classmethod
+    def global_listing_queryset(cls, params, user):
+        queryset = cls.get_base_queryset(params).filter(is_latest_version=True, is_active=True)
+        if not user.is_staff:
+            queryset = queryset.exclude(public_access=ACCESS_TYPE_NONE)
+        return queryset

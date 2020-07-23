@@ -8,7 +8,7 @@ from rest_framework.generics import RetrieveAPIView, DestroyAPIView, ListCreateA
 from rest_framework.mixins import CreateModelMixin
 from rest_framework.response import Response
 
-from core.common.constants import HEAD, INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_MAPPINGS_PARAM, LIMIT_PARAM
+from core.common.constants import HEAD, LIMIT_PARAM
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryMixin
 from core.common.utils import compact_dict_by_values
 from core.common.views import BaseAPIView
@@ -46,16 +46,6 @@ class ConceptVersionListAllView(ConceptBaseView, ListWithHeadersMixin):
             return ConceptDetailSerializer
 
         return ConceptListSerializer
-
-    def get_serializer_context(self):
-        context = {'request': self.request}
-        if self.is_verbose(self.request):
-            context.update({'verbose': True})
-        if self.request.GET.get(INCLUDE_INVERSE_MAPPINGS_PARAM):
-            context.update({'include_indirect_mappings': True})
-        if self.request.GET.get(INCLUDE_MAPPINGS_PARAM):
-            context.update({'include_direct_mappings': True})
-        return context
 
     def get_queryset(self):
         queryset = Concept.global_listing_queryset(

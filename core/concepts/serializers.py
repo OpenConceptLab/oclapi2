@@ -98,17 +98,32 @@ class ConceptListSerializer(ModelSerializer):
     version_created_on = DateTimeField(source='created_at', read_only=True)
     version_created_by = DateTimeField(source='created_by.username', read_only=True)
 
+    def __init__(self, *args, **kwargs):
+        self.query_params = kwargs.get('context').get('request').query_params.dict()
+        self.include_indirect_mappings = self.query_params.get(INCLUDE_INVERSE_MAPPINGS_PARAM) == 'true'
+        self.include_direct_mappings = self.query_params.get(INCLUDE_MAPPINGS_PARAM) == 'true'
+
+        super().__init__(*args, **kwargs)
+
     class Meta:
         model = Concept
         fields = (
             'uuid', 'id', 'external_id', 'concept_class', 'datatype', 'url', 'retired', 'source',
             'owner', 'owner_type', 'owner_url', 'display_name', 'display_locale', 'version', 'update_comment',
-            'locale', 'version_created_by', 'version_created_on'
+            'locale', 'version_created_by', 'version_created_on', 'mappings',
         )
 
     @staticmethod
     def get_locale(obj):
         return obj.iso_639_1_locale
+
+    def get_mappings(self, obj):
+        if self.include_direct_mappings:
+            return MappingDetailSerializer(obj.get_unidirectional_mappings(), many=True).data
+        if self.include_indirect_mappings:
+            return MappingDetailSerializer(obj.get_bidirectional_mappings(), many=True).data
+
+        return []
 
 
 class ConceptDetailSerializer(ModelSerializer):
