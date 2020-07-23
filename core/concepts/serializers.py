@@ -95,13 +95,15 @@ class ConceptListSerializer(ModelSerializer):
     update_comment = CharField(source='comment')
     locale = SerializerMethodField()
     url = CharField(source='version_url', read_only=True)
+    version_created_on = DateTimeField(source='created_at', read_only=True)
+    version_created_by = DateTimeField(source='created_by.username', read_only=True)
 
     class Meta:
         model = Concept
         fields = (
             'uuid', 'id', 'external_id', 'concept_class', 'datatype', 'url', 'retired', 'source',
             'owner', 'owner_type', 'owner_url', 'display_name', 'display_locale', 'version', 'update_comment',
-            'locale'
+            'locale', 'version_created_by', 'version_created_on'
         )
 
     @staticmethod
