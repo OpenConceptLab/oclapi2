@@ -30,6 +30,23 @@ urlpatterns = [
         name='collection-version-detail'
     ),
     re_path(
+        r"^(?P<collection>{pattern})/extras/(?P<extra>{pattern})/$".format(pattern=NAMESPACE_PATTERN),
+        views.CollectionExtraRetrieveUpdateDestroyView.as_view(),
+        name='collection-extra'
+    ),
+    re_path(
+        r"^(?P<collection>{pattern})/(?P<version>{pattern})/extras/$".format(pattern=NAMESPACE_PATTERN),
+        views.CollectionExtrasView.as_view(),
+        name='collectionversion-extras'
+    ),
+    re_path(
+        r"^(?P<collection>{pattern})/(?P<version>{pattern})/extras/(?P<extra>{pattern})/$".format(
+            pattern=NAMESPACE_PATTERN
+        ),
+        views.CollectionExtraRetrieveUpdateDestroyView.as_view(),
+        name='collectionversion-extra'
+    ),
+    re_path(
         r"^(?P<collection>{pattern})/(?P<version>{pattern})/concepts/".format(
             pattern=NAMESPACE_PATTERN
         ),

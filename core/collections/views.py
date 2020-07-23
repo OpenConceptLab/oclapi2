@@ -1,7 +1,10 @@
+from django.core.exceptions import ValidationError
 from django.db import IntegrityError
 from django.http import Http404
+from pydash import get
 from rest_framework import status, mixins
-from rest_framework.generics import RetrieveAPIView, DestroyAPIView
+from rest_framework.generics import RetrieveAPIView, DestroyAPIView, UpdateAPIView, ListAPIView, \
+    RetrieveUpdateDestroyAPIView
 from rest_framework.response import Response
 
 from core.collections.constants import INCLUDE_REFERENCES_PARAM, HEAD_OF_CONCEPT_ADDED_TO_COLLECTION, \
@@ -12,7 +15,7 @@ from core.collections.serializers import CollectionDetailSerializer, CollectionL
 from core.collections.utils import is_concept, is_version_specified
 from core.common.constants import HEAD, RELEASED_PARAM, PROCESSING_PARAM
 from core.common.mixins import ConceptDictionaryCreateMixin, ListWithHeadersMixin, ConceptDictionaryUpdateMixin
-from core.common.permissions import CanViewConceptDictionary, CanEditConceptDictionary
+from core.common.permissions import CanViewConceptDictionary, CanEditConceptDictionary, HasAccessToVersionedObject
 from core.common.utils import compact_dict_by_values, parse_boolean_query_param
 from core.common.views import BaseAPIView
 
@@ -359,5 +362,89 @@ class CollectionVersionListView(CollectionVersionBaseView, mixins.CreateModelMix
         return queryset.order_by('-created_at')
 
 
-class CollectionVersionRetrieveUpdateDestroyView(CollectionBaseView):
-    pass
+class CollectionVersionRetrieveUpdateDestroyView(CollectionBaseView, RetrieveAPIView, UpdateAPIView):
+    permission_classes = (HasAccessToVersionedObject,)
+    serializer_class = CollectionDetailSerializer
+
+    def get_object(self, queryset=None):
+        return self.get_queryset().first()
+
+    def update(self, request, *args, **kwargs):
+        self.object = self.get_object()
+        head = self.object.head
+        if not head:
+            return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
+
+        serializer = self.get_serializer(self.object, data=request.data, partial=True)
+
+        if serializer.is_valid():
+            self.object = serializer.save(force_update=True)
+            if serializer.is_valid():
+                serializer = CollectionDetailSerializer(self.object, context={'request': request})
+                return Response(serializer.data, status=status.HTTP_200_OK)
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def delete(self, _, **kwargs):  # pylint: disable=unused-argument
+        instance = self.get_object()
+
+        try:
+            instance.delete()
+        except ValidationError as ex:
+            return Response(ex.message_dict, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class CollectionExtrasBaseView(CollectionBaseView):
+    def get_object(self, queryset=None):
+        return self.get_queryset().filter(version=HEAD).first()
+
+
+class CollectionExtrasView(CollectionExtrasBaseView, ListAPIView):
+    def list(self, request, *args, **kwargs):
+        return Response(get(self.get_object(), 'extras', {}))
+
+
+class CollectionExtraRetrieveUpdateDestroyView(CollectionExtrasBaseView, RetrieveUpdateDestroyAPIView):
+    def retrieve(self, request, *args, **kwargs):
+        key = kwargs.get('extra')
+        instance = self.get_object()
+        extras = get(instance, 'extras', {})
+        if key in extras:
+            return Response({key: extras[key]})
+
+        return Response(dict(detail='Not found.'), status=status.HTTP_404_NOT_FOUND)
+
+    def update(self, request, **kwargs):
+        key = kwargs.get('extra')
+        value = request.data.get(key)
+        if not value:
+            return Response(['Must specify %s param in body.' % key], status=status.HTTP_400_BAD_REQUEST)
+
+        instance = self.get_object()
+        instance.extras = get(instance, 'extras', {})
+        instance.extras[key] = value
+        instance.comment = 'Updated extras: %s=%s.' % (key, value)
+        head = instance.get_head()
+        head.extras = get(head, 'extras', {})
+        head.extras.update(instance.extras)
+        instance.save()
+        head.save()
+        return Response({key: value})
+
+    def delete(self, request, *args, **kwargs):
+        key = kwargs.get('extra')
+        instance = self.get_object()
+        instance.extras = get(instance, 'extras', {})
+        if key in instance.extras:
+            del instance.extras[key]
+            instance.comment = 'Deleted extra %s.' % key
+            head = instance.get_head()
+            head.extras = get(head, 'extras', {})
+            del head.extras[key]
+            instance.save()
+            head.save()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+
+        return Response(dict(detail='Not found.'), status=status.HTTP_404_NOT_FOUND)
