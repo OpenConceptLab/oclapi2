@@ -2,7 +2,8 @@ from django.contrib.postgres.fields import JSONField, ArrayField
 from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator
 from django.db import models, IntegrityError
-from django.db.models import Max
+from django.db.models import Max, Value
+from django.db.models.expressions import CombinedExpression, F
 from django.utils import timezone
 from pydash import get
 
@@ -252,6 +253,7 @@ class ConceptContainerModel(VersionedModel):
     last_concept_update = models.DateTimeField(default=timezone.now, null=True, blank=True)
     last_mapping_update = models.DateTimeField(default=timezone.now, null=True, blank=True)
     last_child_update = models.DateTimeField(default=timezone.now)
+    _background_process_ids = ArrayField(models.IntegerField(), default=list, null=True, blank=True)
 
     class Meta:
         abstract = True
@@ -518,3 +520,23 @@ class ConceptContainerModel(VersionedModel):
         head = self.head
         if head:
             self.mappings.set(head.mappings.all())
+
+    def add_processing(self, process_id):
+        if self.id:
+            self.__class__.objects.filter(id=self.id).update(
+                _background_process_ids=CombinedExpression(F('_background_process_ids'), '||', Value([process_id]))
+            )
+        self._background_process_ids.append(process_id)
+
+    def remove_processing(self, process_id):
+        if self.id:
+            self._background_process_ids.remove(process_id)
+            self.save(update_fields=['_background_process_ids'])
+
+    def clear_processing(self):
+        self._background_process_ids = list()
+        self.save(update_fields=['_background_process_ids'])
+
+    @staticmethod
+    def clear_all_processing(klass):
+        klass.objects.all().update(_background_process_ids=set())
