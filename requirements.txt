@@ -13,3 +13,9 @@ six
 python-dateutil
 requests
 factory_boy
+celery
+celery_once==0.1.4
+flower
+redis>=2.10.5
+celery[redis]==3.1.17
+kombu

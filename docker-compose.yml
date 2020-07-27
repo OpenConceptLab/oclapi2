@@ -12,6 +12,14 @@ services:
     environment:
       - POSTGRES_PASSWORD=password
       - POSTGRES_HOST_AUTH_METHOD=trust
+  redis:
+    image: redis:latest
+    container_name: redis
+    restart: always
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: "exit 0"
   api:
     build: .
     container_name: oclapi2
@@ -23,6 +31,7 @@ services:
       - "8000:8000"
     depends_on:
       - db
+      - redis
     environment:
       - REDIS_HOST=redis
       - DB_HOST=db
@@ -33,5 +42,39 @@ services:
       - AWS_ACCESS_KEY_ID
       - AWS_SECRET_ACCESS_KEY
       - AWS_STORAGE_BUCKET_NAME
+  celery:
+    build: .
+    container_name: celery
+    command: sh -c ./start_celery_worker.sh
+    links:
+      - db
+      - redis
+    restart: always
+    volumes:
+      - .:/code
+    depends_on:
+      - redis
+    environment:
+      - REDIS_HOST=redis
+      - DB_HOST=db
+      - ENV=dev
+  flower:
+    build: .
+    container_name: flower
+    command: sh -c ./start_flower.sh
+    volumes:
+      - .:/code
+    ports:
+      - "5555:5555"
+    depends_on:
+      - celery
+    links:
+      - redis
+    environment:
+      - C_FORCE_ROOT=1
+      - SECRET_KEY
+    restart: always
+    healthcheck:
+      test: "exit 0"
 volumes:
   postgres-data:

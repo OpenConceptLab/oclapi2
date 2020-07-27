@@ -13,6 +13,8 @@ https://docs.djangoproject.com/en/3.0/ref/settings/
 import os
 
 # Build paths inside the project like this: os.path.join(BASE_DIR, ...)
+from kombu import Queue, Exchange
+
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # Quick-start development settings - unsuitable for production
@@ -195,3 +197,37 @@ AWS_ACCESS_KEY_ID = os.environ.get('AWS_ACCESS_KEY_ID', '')
 AWS_SECRET_ACCESS_KEY = os.environ.get('AWS_SECRET_ACCESS_KEY', '')
 AWS_STORAGE_BUCKET_NAME = os.environ.get('AWS_STORAGE_BUCKET_NAME', 'ocl-api-dev')
 DISABLE_VALIDATION = os.environ.get('DISABLE_VALIDATION', False)
+
+#celery/redis
+REDIS_PORT = 6379
+REDIS_DB = 0
+REDIS_HOST = os.environ.get('REDIS_HOST', 'redis')
+
+CELERY_DEFAULT_QUEUE = 'default'
+CELERY_QUEUES = (
+    Queue('default', Exchange('default'), routing_key='default'),
+)
+CELERY_ENABLE_UTC = True
+CELERY_TIMEZONE = "UTC"
+# Sensible settings for celery
+CELERY_ALWAYS_EAGER = False
+CELERY_ACKS_LATE = True
+CELERY_TASK_PUBLISH_RETRY = True
+CELERY_DISABLE_RATE_LIMITS = False
+CELERY_IGNORE_RESULT = False
+CELERY_SEND_TASK_ERROR_EMAILS = False
+CELERY_RESULT_BACKEND = 'redis://%s:%d/%d' % (REDIS_HOST, REDIS_PORT, REDIS_DB)
+CELERY_BROKER_URL = CELERY_RESULT_BACKEND
+CELERY_REDIS_MAX_CONNECTIONS = 1
+CELERY_TASK_SERIALIZER = "json"
+CELERY_ACCEPT_CONTENT = ['application/json']
+CELERYD_HIJACK_ROOT_LOGGER = False
+CELERYD_PREFETCH_MULTIPLIER = 1
+CELERYD_MAX_TASKS_PER_CHILD = 1000
+BROKER_URL = CELERY_RESULT_BACKEND
+CELERY_ROUTES = {
+    'tasks.bulk_import': {'queue': 'bulk_import'},
+    'tasks.bulk_priority_import': {'queue': 'bulk_priority_import'}
+}
+CELERY_TASK_RESULT_EXPIRES = 259200  # 72 hours
+CELERY_TRACK_STARTED = True
