@@ -18,6 +18,7 @@ from core.common.mixins import ConceptDictionaryCreateMixin, ListWithHeadersMixi
 from core.common.permissions import CanViewConceptDictionary, CanEditConceptDictionary, HasAccessToVersionedObject
 from core.common.utils import compact_dict_by_values, parse_boolean_query_param
 from core.common.views import BaseAPIView
+from core.common.tasks import add_references
 
 
 class CollectionBaseView(BaseAPIView):
@@ -209,6 +210,12 @@ class CollectionReferencesView(
         mapping_expressions = data.get('mappings', [])
         expressions = data.get('expressions', [])
         cascade_mappings = self.cascade_mapping_resolver(cascade_mappings_flag)
+
+        adding_all = mapping_expressions == '*' or concept_expressions == '*'
+
+        if adding_all:
+            add_references.delay(self.request.user, data, collection, self.get_host_url(), cascade_mappings)
+            return Response([], status=status.HTTP_202_ACCEPTED)
 
         (added_references, errors) = collection.add_expressions(
             data, self.get_host_url(), request.user, cascade_mappings

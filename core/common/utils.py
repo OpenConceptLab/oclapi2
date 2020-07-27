@@ -1,3 +1,4 @@
+import json
 import os
 import tempfile
 import zipfile
@@ -7,6 +8,7 @@ from dateutil import parser
 from django.urls import NoReverseMatch, reverse, get_resolver, resolve, Resolver404
 from djqscsv import csv_file_for
 from pydash import flatten
+from rest_framework.utils import encoders
 
 from core.common.constants import UPDATED_SINCE_PARAM
 from core.common.services import S3
@@ -158,3 +160,101 @@ def is_valid_uri(uri):
         pass
 
     return False
+
+
+def get_class(kls):
+    parts = kls.split('.')
+    module = ".".join(parts[:-1])
+    _module = __import__(module)
+    for comp in parts[1:]:
+        _module = getattr(_module, comp)
+    return _module
+
+
+def write_export_file(
+        version, resource_type, resource_serializer_type, logger
+):  # pylint: disable=too-many-statements,too-many-locals
+    cwd = cd_temp()
+    logger.info('Writing export file to tmp directory: %s' % cwd)
+
+    logger.info('Found %s version %s.  Looking up resource...' % (resource_type, version.version))
+    resource = version.versioned_object
+    logger.info('Found %s %s.  Serializing attributes...' % (resource_type, resource.mnemonic))
+
+    resource_serializer = get_class(resource_serializer_type)(version)
+    data = resource_serializer.data
+    resource_string = json.dumps(data, cls=encoders.JSONEncoder)
+    logger.info('Done serializing attributes.')
+
+    batch_size = 1000
+    concepts_qs = version.concepts
+    mappings_qs = version.concepts
+    if resource_type != 'collection':
+        concepts_qs = concepts_qs.filter(is_active=True)
+        mappings_qs = mappings_qs.filter(is_active=True)
+
+    total_concepts = concepts_qs.count()
+    total_mappings = mappings_qs.count()
+
+    with open('export.json', 'wb') as out:
+        out.write('%s, "concepts": [' % resource_string[:-1])
+
+    if total_concepts:
+        logger.info(
+            '%s has %d concepts. Getting them in batches of %d...' % (resource_type.title(), total_concepts, batch_size)
+        )
+        concept_serializer_class = get_class('concepts.serializers.ConceptVersionDetailSerializer')
+        for start in range(0, total_concepts, batch_size):
+            end = min(start + batch_size, total_concepts)
+            logger.info('Serializing concepts %d - %d...' % (start+1, end))
+            concept_versions = concepts_qs.all()[start:end]
+            concept_serializer = concept_serializer_class(concept_versions, many=True)
+            concept_data = concept_serializer.data
+            concept_string = json.dumps(concept_data, cls=encoders.JSONEncoder)
+            concept_string = concept_string[1:-1]
+            with open('export.json', 'ab') as out:
+                out.write(concept_string)
+                if end != total_concepts:
+                    out.write(', ')
+        logger.info('Done serializing concepts.')
+    else:
+        logger.info('%s has no concepts to serialize.' % (resource_type.title()))
+
+    with open('export.json', 'ab') as out:
+        out.write('], "mappings": [')
+
+    if total_mappings:
+        logger.info(
+            '%s has %d mappings. Getting them in batches of %d...' % (resource_type.title(), total_mappings, batch_size)
+        )
+        mapping_serializer_class = get_class('mappings.serializers.MappingDetailSerializer')
+        for start in range(0, total_mappings, batch_size):
+            end = min(start + batch_size, total_mappings)
+            logger.info('Serializing mappings %d - %d...' % (start+1, end))
+            mappings = mappings_qs.all()[start:end]
+            mapping_serializer = mapping_serializer_class(mappings, many=True)
+            mapping_data = mapping_serializer.data
+            mapping_string = json.dumps(mapping_data, cls=encoders.JSONEncoder)
+            mapping_string = mapping_string[1:-1]
+            with open('export.json', 'ab') as out:
+                out.write(mapping_string)
+                if end != total_mappings:
+                    out.write(', ')
+        logger.info('Done serializing mappings.')
+    else:
+        logger.info('%s has no mappings to serialize.' % (resource_type.title()))
+
+    with open('export.json', 'ab') as out:
+        out.write(']}')
+
+    with zipfile.ZipFile('export.zip', 'w', zipfile.ZIP_DEFLATED) as _zip:
+        _zip.write('export.json')
+
+    file_path = os.path.abspath('export.zip')
+    logger.info(file_path)
+
+    logger.info('Done compressing.  Uploading...')
+    S3.upload_file(file_path)
+    uploaded_path = S3.url_for(file_path)
+    logger.info('Uploaded to %s.' % uploaded_path)
+    os.chdir(cwd)

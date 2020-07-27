@@ -16,6 +16,7 @@ from core.sources.models import Source
 from core.sources.serializers import (
     SourceDetailSerializer, SourceListSerializer, SourceCreateSerializer, SourceVersionDetailSerializer
 )
+from core.common.tasks import export_source
 
 
 class SourceBaseView(BaseAPIView):
@@ -150,7 +151,10 @@ class SourceVersionListView(SourceVersionBaseView, mixins.CreateModelMixin, List
                 instance = serializer.create_version(payload)
                 if serializer.is_valid():
                     serializer = SourceDetailSerializer(instance, context={'request': request})
-                    return Response(serializer.data, status=status.HTTP_201_CREATED)
+                    data = serializer.data
+                    version_id = data.get('uuid')
+                    export_source.delay(version_id)
+                    return Response(data, status=status.HTTP_201_CREATED)
             except IntegrityError as ex:
                 return Response(
                     dict(error=str(ex), detail='Source version  \'%s\' already exist. ' % serializer.data.get('id')),
