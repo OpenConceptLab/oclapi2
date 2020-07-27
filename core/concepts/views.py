@@ -31,8 +31,8 @@ class ConceptBaseView(BaseAPIView):
     def get_filter_params(self):
         kwargs = self.kwargs.copy()
         query_params = self.request.query_params.copy()
-        query_params.update(kwargs)
-        return compact_dict_by_values(query_params)
+        kwargs.update(query_params)
+        return compact_dict_by_values(kwargs)
 
     def get_queryset(self):
         return Concept.get_base_queryset(self.get_filter_params())

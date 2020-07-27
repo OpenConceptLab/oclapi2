@@ -287,3 +287,150 @@ class ConceptCreateUpdateDestroyViewTest(APITestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.data, {'__all__': 'Concept is already retired'})
+
+    def test_extras_get_200(self):
+        source = SourceFactory(organization=self.organization)
+        names = [LocalizedTextFactory()]
+        concept = ConceptFactory(parent=source, names=names, extras=dict(foo='bar'))
+        extras_url = "/orgs/{}/sources/{}/concepts/{}/extras/".format(
+            self.organization.mnemonic, source.mnemonic, concept.mnemonic
+        )
+
+        response = self.client.get(
+            extras_url,
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, dict(foo='bar'))
+
+    def test_extra_get_200(self):
+        source = SourceFactory(organization=self.organization)
+        names = [LocalizedTextFactory()]
+        concept = ConceptFactory(parent=source, names=names, extras=dict(foo='bar', tao='ching'))
+
+        def extra_url(extra):
+            return "/orgs/{}/sources/{}/concepts/{}/extras/{}/".format(
+                self.organization.mnemonic, source.mnemonic, concept.mnemonic, extra
+            )
+
+        response = self.client.get(
+            extra_url('tao'),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, dict(tao='ching'))
+
+        response = self.client.get(
+            extra_url('foo'),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, dict(foo='bar'))
+
+        response = self.client.get(
+            extra_url('bar'),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.data, dict(detail='Not found.'))
+
+    def test_extra_put_200(self):
+        source = SourceFactory(organization=self.organization)
+        names = [LocalizedTextFactory()]
+        concept = ConceptFactory(parent=source, names=names, extras=dict(foo='bar', tao='ching'))
+
+        def extra_url(extra):
+            return "/orgs/{}/sources/{}/concepts/{}/extras/{}/".format(
+                self.organization.mnemonic, source.mnemonic, concept.mnemonic, extra
+            )
+
+        response = self.client.put(
+            extra_url('tao'),
+            dict(tao='te-ching'),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+        concept.refresh_from_db()
+        self.assertTrue(concept.extras['tao'] == response.data['tao'] == 'te-ching')
+        self.assertEqual(concept.versions.count(), 2)
+
+        latest_version = concept.versions.order_by('-created_at').first()
+        self.assertEqual(latest_version.extras, dict(foo='bar', tao='te-ching'))
+        self.assertEqual(latest_version.comment, 'Updated extras: tao=te-ching.')
+
+    def test_extra_put_400(self):
+        source = SourceFactory(organization=self.organization)
+        names = [LocalizedTextFactory()]
+        concept = ConceptFactory(parent=source, names=names, extras=dict(foo='bar', tao='ching'))
+
+        def extra_url(extra):
+            return "/orgs/{}/sources/{}/concepts/{}/extras/{}/".format(
+                self.organization.mnemonic, source.mnemonic, concept.mnemonic, extra
+            )
+
+        response = self.client.put(
+            extra_url('tao'),
+            dict(tao=None),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data, ['Must specify tao param in body.'])
+        concept.refresh_from_db()
+        self.assertEqual(concept.extras, dict(foo='bar', tao='ching'))
+
+    def test_extra_delete_204(self):
+        source = SourceFactory(organization=self.organization)
+        names = [LocalizedTextFactory()]
+        concept = ConceptFactory(parent=source, names=names, extras=dict(foo='bar', tao='ching'))
+
+        def extra_url(extra):
+            return "/orgs/{}/sources/{}/concepts/{}/extras/{}/".format(
+                self.organization.mnemonic, source.mnemonic, concept.mnemonic, extra
+            )
+
+        response = self.client.delete(
+            extra_url('tao'),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 204)
+
+        concept.refresh_from_db()
+        self.assertFalse('tao' in concept.extras)
+        self.assertEqual(concept.versions.count(), 2)
+
+        latest_version = concept.versions.order_by('-created_at').first()
+        self.assertEqual(latest_version.extras, dict(foo='bar'))
+        self.assertEqual(latest_version.comment, 'Deleted extra tao.')
+
+    def test_extra_delete_404(self):
+        source = SourceFactory(organization=self.organization)
+        names = [LocalizedTextFactory()]
+        concept = ConceptFactory(parent=source, names=names, extras=dict(foo='bar', tao='ching'))
+
+        def extra_url(extra):
+            return "/orgs/{}/sources/{}/concepts/{}/extras/{}/".format(
+                self.organization.mnemonic, source.mnemonic, concept.mnemonic, extra
+            )
+
+        response = self.client.delete(
+            extra_url('bar'),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 404)
