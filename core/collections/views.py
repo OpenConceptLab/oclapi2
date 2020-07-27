@@ -1,3 +1,5 @@
+import logging
+
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError
 from django.http import Http404
@@ -15,10 +17,13 @@ from core.collections.serializers import CollectionDetailSerializer, CollectionL
 from core.collections.utils import is_concept, is_version_specified
 from core.common.constants import HEAD, RELEASED_PARAM, PROCESSING_PARAM
 from core.common.mixins import ConceptDictionaryCreateMixin, ListWithHeadersMixin, ConceptDictionaryUpdateMixin
-from core.common.permissions import CanViewConceptDictionary, CanEditConceptDictionary, HasAccessToVersionedObject
+from core.common.permissions import CanViewConceptDictionary, CanEditConceptDictionary, HasAccessToVersionedObject, \
+    HasOwnership
 from core.common.utils import compact_dict_by_values, parse_boolean_query_param
 from core.common.views import BaseAPIView
 from core.common.tasks import add_references
+
+logger = logging.getLogger('oclapi')
 
 
 class CollectionBaseView(BaseAPIView):
@@ -455,3 +460,28 @@ class CollectionExtraRetrieveUpdateDestroyView(CollectionExtrasBaseView, Retriev
             return Response(status=status.HTTP_204_NO_CONTENT)
 
         return Response(dict(detail='Not found.'), status=status.HTTP_404_NOT_FOUND)
+
+
+class CollectionVersionProcessingView(CollectionBaseView):
+    permission_classes = (CanViewConceptDictionary,)
+
+    def get_object(self, queryset=None):
+        return self.get_queryset().first()
+
+    def get(self, request, *args, **kwargs):  # pylint: disable=unused-argument
+        version = self.get_object()
+        logger.debug('Processing flag requested for collection version %s', version)
+
+        response = Response(status=200)
+        response.content = version.is_processing
+        return response
+
+    def post(self, request, *args, **kwargs):  # pylint: disable=unused-argument
+        self.permission_classes = (HasOwnership,)
+
+        version = self.get_object()
+        logger.debug('Processing flag clearance requested for collection version %s', version)
+
+        version.clear_processing()
+
+        return Response(status=200)

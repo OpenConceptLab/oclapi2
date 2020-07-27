@@ -58,4 +58,9 @@ urlpatterns = [
         ),
         include('core.mappings.urls')
     ),
+    re_path(
+        r'^(?P<source>{pattern})/(?P<version>{pattern})/processing/$'.format(pattern=NAMESPACE_PATTERN),
+        views.SourceVersionProcessingView.as_view(),
+        name='sourceversion-processing'
+    ),
 ]

@@ -1,3 +1,4 @@
+from celery.result import AsyncResult
 from django.contrib.postgres.fields import JSONField, ArrayField
 from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator
@@ -532,6 +533,17 @@ class ConceptContainerModel(VersionedModel):
         if self.id:
             self._background_process_ids.remove(process_id)
             self.save(update_fields=['_background_process_ids'])
+
+    @property
+    def is_processing(self):
+        if self._background_process_ids:
+            for process_id in self._background_process_ids:
+                res = AsyncResult(process_id)
+                if res.successful() or res.failed():
+                    self.remove_processing(process_id)
+                else:
+                    return True
+        return bool(self._background_process_ids)
 
     def clear_processing(self):
         self._background_process_ids = list()
