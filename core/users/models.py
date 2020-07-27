@@ -59,6 +59,12 @@ class UserProfile(AbstractUser, BaseModel, SourceContainerMixin):
         Token.objects.filter(user=self).delete()
         Token.objects.create(user=self)
 
+    def get_token(self):
+        token = Token.objects.filter(user_id=self.id).first()
+        if not token:
+            token = Token.objects.create(user=self)
+        return token.key
+
     def __str__(self):
         return str(self.mnemonic)
 
