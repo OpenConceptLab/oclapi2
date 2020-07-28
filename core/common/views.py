@@ -1,5 +1,5 @@
 from django.db import DatabaseError
-from django.http import Http404
+from django.http import Http404, HttpResponse
 from rest_framework import response, generics, status
 
 from core.common.mixins import PathWalkerMixin
@@ -53,3 +53,8 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
     def get_host_url(self):
         return self.request.META['wsgi.url_scheme'] + '://' + self.request.get_host()
+
+    def head(self, _):
+        res = HttpResponse()
+        res['num_found'] = self.get_queryset().count()
+        return res

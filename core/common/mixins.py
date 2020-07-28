@@ -56,7 +56,9 @@ class ListWithHeadersMixin(ListModelMixin):
                 results = serializer.data
                 return Response(results, headers=serializer.headers)
 
-        return Response(self.get_serializer(sorted_list, many=True).data)
+        response = Response(self.get_serializer(sorted_list, many=True).data)
+        response['num_found'] = len(sorted_list)
+        return response
 
     def get_object_ids(self):
         self.object_list.limit_iter = False
