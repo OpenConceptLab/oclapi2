@@ -1,5 +1,4 @@
 from django.db.models import F
-from django.db.models.query import QuerySet
 from django.shortcuts import get_object_or_404
 from pydash import get
 from rest_framework import status
@@ -276,9 +275,7 @@ class ConceptLabelRetrieveUpdateDestroyView(ConceptBaseView, RetrieveUpdateDestr
             resource_instance = self.get_resource_object()
             new_version = resource_instance.clone()
             subject_label_attr = "cloned_{}".format(self.parent_list_attribute)
-            labels = getattr(new_version, subject_label_attr, [])
-            if isinstance(labels, QuerySet):
-                labels = labels.exclude(id=instance.id)
+            labels = [name.clone() for name in resource_instance.names.exclude(id=instance.id)]
             setattr(new_version, subject_label_attr, labels)
             new_version.comment = 'Deleted %s in %s.' % (instance.name, self.parent_list_attribute)
             errors = Concept.persist_clone(new_version, request.user)

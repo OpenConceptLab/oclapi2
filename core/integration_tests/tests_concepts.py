@@ -1,4 +1,5 @@
 from django.core.management import call_command
+from mock import ANY
 from rest_framework.test import APITestCase
 
 from core.common.constants import OCL_ORG_ID, SUPER_ADMIN_USER_ID
@@ -20,6 +21,7 @@ class ConceptCreateUpdateDestroyViewTest(APITestCase):
         self.organization = Organization.objects.first()
         self.user = UserProfile.objects.filter(is_superuser=True).first()
         self.token = self.user.get_token()
+        self.source = SourceFactory(organization=self.organization)
         self.concepts_payload = {
             'datatype': 'Coded',
             'concept_class': 'Procedure',
@@ -42,8 +44,7 @@ class ConceptCreateUpdateDestroyViewTest(APITestCase):
         UserProfile.objects.exclude(id=SUPER_ADMIN_USER_ID).all().delete()
 
     def test_post_201(self):
-        source = SourceFactory(organization=self.organization)
-        concepts_url = "/orgs/{}/sources/{}/concepts/".format(self.organization.mnemonic, source.mnemonic)
+        concepts_url = "/orgs/{}/sources/{}/concepts/".format(self.organization.mnemonic, self.source.mnemonic)
 
         response = self.client.post(
             concepts_url,
@@ -93,7 +94,7 @@ class ConceptCreateUpdateDestroyViewTest(APITestCase):
         self.assertEqual(response.data['concept_class'], 'Procedure')
         self.assertEqual(response.data['url'], concept.uri)
         self.assertFalse(response.data['retired'])
-        self.assertEqual(response.data['source'], source.mnemonic)
+        self.assertEqual(response.data['source'], self.source.mnemonic)
         self.assertEqual(response.data['owner'], self.organization.mnemonic)
         self.assertEqual(response.data['owner_type'], "Organization")
         self.assertEqual(response.data['owner_url'], self.organization.uri)
@@ -102,15 +103,14 @@ class ConceptCreateUpdateDestroyViewTest(APITestCase):
         self.assertEqual(response.data['versions_url'], concept.uri + 'versions/')
         self.assertEqual(response.data['version'], str(concept.id))
         self.assertEqual(response.data['extras'], dict(foo='bar'))
-        self.assertEqual(response.data['parent_id'], str(source.id))
+        self.assertEqual(response.data['parent_id'], str(self.source.id))
         self.assertEqual(response.data['name'], 'c1')
         self.assertEqual(response.data['type'], 'Concept')
         self.assertEqual(response.data['version_url'], concept.uri)
         self.assertEqual(response.data['mappings'], [])
 
     def test_post_400(self):
-        source = SourceFactory(organization=self.organization)
-        concepts_url = "/orgs/{}/sources/{}/concepts/".format(self.organization.mnemonic, source.mnemonic)
+        concepts_url = "/orgs/{}/sources/{}/concepts/".format(self.organization.mnemonic, self.source.mnemonic)
 
         response = self.client.post(
             concepts_url,
@@ -126,10 +126,9 @@ class ConceptCreateUpdateDestroyViewTest(APITestCase):
         )
 
     def test_put_200(self):
-        source = SourceFactory(organization=self.organization)
-        concept = ConceptFactory(parent=source)
+        concept = ConceptFactory(parent=self.source)
         concepts_url = "/orgs/{}/sources/{}/concepts/{}/".format(
-            self.organization.mnemonic, source.mnemonic, concept.mnemonic
+            self.organization.mnemonic, self.source.mnemonic, concept.mnemonic
         )
 
         response = self.client.put(
@@ -182,7 +181,7 @@ class ConceptCreateUpdateDestroyViewTest(APITestCase):
         self.assertEqual(response.data['concept_class'], 'Procedure')
         self.assertEqual(response.data['url'], version.uri)
         self.assertFalse(response.data['retired'])
-        self.assertEqual(response.data['source'], source.mnemonic)
+        self.assertEqual(response.data['source'], self.source.mnemonic)
         self.assertEqual(response.data['owner'], self.organization.mnemonic)
         self.assertEqual(response.data['owner_type'], "Organization")
         self.assertEqual(response.data['owner_url'], self.organization.uri)
@@ -191,7 +190,7 @@ class ConceptCreateUpdateDestroyViewTest(APITestCase):
         self.assertEqual(response.data['versions_url'], concept.uri + 'versions/')
         self.assertEqual(response.data['version'], str(version.id))
         self.assertEqual(response.data['extras'], dict(foo='bar'))
-        self.assertEqual(response.data['parent_id'], str(source.id))
+        self.assertEqual(response.data['parent_id'], str(self.source.id))
         self.assertEqual(response.data['type'], 'Concept')
         self.assertEqual(response.data['version_url'], version.uri)
         self.assertEqual(response.data['mappings'], [])
@@ -199,10 +198,9 @@ class ConceptCreateUpdateDestroyViewTest(APITestCase):
         self.assertEqual(concept.datatype, "None")
 
     def test_put_400(self):
-        source = SourceFactory(organization=self.organization)
-        concept = ConceptFactory(parent=source)
+        concept = ConceptFactory(parent=self.source)
         concepts_url = "/orgs/{}/sources/{}/concepts/{}/".format(
-            self.organization.mnemonic, source.mnemonic, concept.mnemonic
+            self.organization.mnemonic, self.source.mnemonic, concept.mnemonic
         )
 
         response = self.client.put(
@@ -216,9 +214,8 @@ class ConceptCreateUpdateDestroyViewTest(APITestCase):
         self.assertEqual(list(response.data.keys()), ['concept_class'])
 
     def test_put_404(self):
-        source = SourceFactory(organization=self.organization)
         concepts_url = "/orgs/{}/sources/{}/concepts/foobar/".format(
-            self.organization.mnemonic, source.mnemonic
+            self.organization.mnemonic, self.source.mnemonic
         )
 
         response = self.client.put(
@@ -231,11 +228,10 @@ class ConceptCreateUpdateDestroyViewTest(APITestCase):
         self.assertEqual(response.status_code, 404)
 
     def test_delete_204(self):
-        source = SourceFactory(organization=self.organization)
         names = [LocalizedTextFactory()]
-        concept = ConceptFactory(parent=source, names=names)
+        concept = ConceptFactory(parent=self.source, names=names)
         concepts_url = "/orgs/{}/sources/{}/concepts/{}/".format(
-            self.organization.mnemonic, source.mnemonic, concept.mnemonic
+            self.organization.mnemonic, self.source.mnemonic, concept.mnemonic
         )
 
         response = self.client.delete(
@@ -256,9 +252,8 @@ class ConceptCreateUpdateDestroyViewTest(APITestCase):
         self.assertTrue(latest_version.comment, 'Deleting it')
 
     def test_delete_404(self):
-        source = SourceFactory(organization=self.organization)
         concepts_url = "/orgs/{}/sources/{}/concepts/foobar/".format(
-            self.organization.mnemonic, source.mnemonic
+            self.organization.mnemonic, self.source.mnemonic
         )
 
         response = self.client.delete(
@@ -271,11 +266,10 @@ class ConceptCreateUpdateDestroyViewTest(APITestCase):
         self.assertEqual(response.status_code, 404)
 
     def test_delete_400(self):
-        source = SourceFactory(organization=self.organization)
         names = [LocalizedTextFactory()]
-        concept = ConceptFactory(parent=source, names=names, retired=True)
+        concept = ConceptFactory(parent=self.source, names=names, retired=True)
         concepts_url = "/orgs/{}/sources/{}/concepts/{}/".format(
-            self.organization.mnemonic, source.mnemonic, concept.mnemonic
+            self.organization.mnemonic, self.source.mnemonic, concept.mnemonic
         )
 
         response = self.client.delete(
@@ -289,11 +283,10 @@ class ConceptCreateUpdateDestroyViewTest(APITestCase):
         self.assertEqual(response.data, {'__all__': 'Concept is already retired'})
 
     def test_extras_get_200(self):
-        source = SourceFactory(organization=self.organization)
         names = [LocalizedTextFactory()]
-        concept = ConceptFactory(parent=source, names=names, extras=dict(foo='bar'))
+        concept = ConceptFactory(parent=self.source, names=names, extras=dict(foo='bar'))
         extras_url = "/orgs/{}/sources/{}/concepts/{}/extras/".format(
-            self.organization.mnemonic, source.mnemonic, concept.mnemonic
+            self.organization.mnemonic, self.source.mnemonic, concept.mnemonic
         )
 
         response = self.client.get(
@@ -306,13 +299,12 @@ class ConceptCreateUpdateDestroyViewTest(APITestCase):
         self.assertEqual(response.data, dict(foo='bar'))
 
     def test_extra_get_200(self):
-        source = SourceFactory(organization=self.organization)
         names = [LocalizedTextFactory()]
-        concept = ConceptFactory(parent=source, names=names, extras=dict(foo='bar', tao='ching'))
+        concept = ConceptFactory(parent=self.source, names=names, extras=dict(foo='bar', tao='ching'))
 
         def extra_url(extra):
             return "/orgs/{}/sources/{}/concepts/{}/extras/{}/".format(
-                self.organization.mnemonic, source.mnemonic, concept.mnemonic, extra
+                self.organization.mnemonic, self.source.mnemonic, concept.mnemonic, extra
             )
 
         response = self.client.get(
@@ -343,13 +335,12 @@ class ConceptCreateUpdateDestroyViewTest(APITestCase):
         self.assertEqual(response.data, dict(detail='Not found.'))
 
     def test_extra_put_200(self):
-        source = SourceFactory(organization=self.organization)
         names = [LocalizedTextFactory()]
-        concept = ConceptFactory(parent=source, names=names, extras=dict(foo='bar', tao='ching'))
+        concept = ConceptFactory(parent=self.source, names=names, extras=dict(foo='bar', tao='ching'))
 
         def extra_url(extra):
             return "/orgs/{}/sources/{}/concepts/{}/extras/{}/".format(
-                self.organization.mnemonic, source.mnemonic, concept.mnemonic, extra
+                self.organization.mnemonic, self.source.mnemonic, concept.mnemonic, extra
             )
 
         response = self.client.put(
@@ -370,13 +361,12 @@ class ConceptCreateUpdateDestroyViewTest(APITestCase):
         self.assertEqual(latest_version.comment, 'Updated extras: tao=te-ching.')
 
     def test_extra_put_400(self):
-        source = SourceFactory(organization=self.organization)
         names = [LocalizedTextFactory()]
-        concept = ConceptFactory(parent=source, names=names, extras=dict(foo='bar', tao='ching'))
+        concept = ConceptFactory(parent=self.source, names=names, extras=dict(foo='bar', tao='ching'))
 
         def extra_url(extra):
             return "/orgs/{}/sources/{}/concepts/{}/extras/{}/".format(
-                self.organization.mnemonic, source.mnemonic, concept.mnemonic, extra
+                self.organization.mnemonic, self.source.mnemonic, concept.mnemonic, extra
             )
 
         response = self.client.put(
@@ -392,13 +382,12 @@ class ConceptCreateUpdateDestroyViewTest(APITestCase):
         self.assertEqual(concept.extras, dict(foo='bar', tao='ching'))
 
     def test_extra_delete_204(self):
-        source = SourceFactory(organization=self.organization)
         names = [LocalizedTextFactory()]
-        concept = ConceptFactory(parent=source, names=names, extras=dict(foo='bar', tao='ching'))
+        concept = ConceptFactory(parent=self.source, names=names, extras=dict(foo='bar', tao='ching'))
 
         def extra_url(extra):
             return "/orgs/{}/sources/{}/concepts/{}/extras/{}/".format(
-                self.organization.mnemonic, source.mnemonic, concept.mnemonic, extra
+                self.organization.mnemonic, self.source.mnemonic, concept.mnemonic, extra
             )
 
         response = self.client.delete(
@@ -418,13 +407,12 @@ class ConceptCreateUpdateDestroyViewTest(APITestCase):
         self.assertEqual(latest_version.comment, 'Deleted extra tao.')
 
     def test_extra_delete_404(self):
-        source = SourceFactory(organization=self.organization)
         names = [LocalizedTextFactory()]
-        concept = ConceptFactory(parent=source, names=names, extras=dict(foo='bar', tao='ching'))
+        concept = ConceptFactory(parent=self.source, names=names, extras=dict(foo='bar', tao='ching'))
 
         def extra_url(extra):
             return "/orgs/{}/sources/{}/concepts/{}/extras/{}/".format(
-                self.organization.mnemonic, source.mnemonic, concept.mnemonic, extra
+                self.organization.mnemonic, self.source.mnemonic, concept.mnemonic, extra
             )
 
         response = self.client.delete(
@@ -434,3 +422,102 @@ class ConceptCreateUpdateDestroyViewTest(APITestCase):
         )
 
         self.assertEqual(response.status_code, 404)
+
+    def test_names_get_200(self):
+        name = LocalizedTextFactory()
+        concept = ConceptFactory(parent=self.source, names=[name])
+
+        response = self.client.get(
+            "/orgs/{}/sources/{}/concepts/{}/names/".format(
+                self.organization.mnemonic, self.source.mnemonic, concept.mnemonic
+            ),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(
+            dict(response.data[0]),
+            {
+                "uuid": str(name.id),
+                "external_id": None,
+                "type": 'ConceptName',
+                "locale": name.locale,
+                "locale_preferred": False,
+                "name": name.name,
+                "name_type": "FULLY_SPECIFIED"
+            }
+        )
+
+    def test_names_post_201(self):
+        name = LocalizedTextFactory()
+        concept = ConceptFactory(parent=self.source, names=[name])
+
+        response = self.client.post(
+            "/orgs/{}/sources/{}/concepts/{}/names/".format(
+                self.organization.mnemonic, self.source.mnemonic, concept.mnemonic
+            ),
+            {
+                "type": 'ConceptName',
+                "locale": 'en',
+                "locale_preferred": False,
+                "name": 'foo',
+                "name_type": "Fully Specified"
+            },
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(
+            response.data,
+            {
+                "uuid": ANY,
+                "external_id": None,
+                "type": 'ConceptName',
+                "locale": 'en',
+                "locale_preferred": False,
+                "name": 'foo',
+                "name_type": "Fully Specified"
+            }
+        )
+        self.assertEqual(concept.names.count(), 2)
+
+    def test_names_post_400(self):
+        name = LocalizedTextFactory()
+        concept = ConceptFactory(parent=self.source, names=[name])
+
+        response = self.client.post(
+            "/orgs/{}/sources/{}/concepts/{}/names/".format(
+                self.organization.mnemonic, self.source.mnemonic, concept.mnemonic
+            ),
+            {
+                "type": 'ConceptName',
+                "name": name.name,
+                "name_type": "Fully Specified"
+            },
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(list(response.data.keys()), ['locale'])
+
+    def test_name_delete_204(self):
+        name1 = LocalizedTextFactory()
+        name2 = LocalizedTextFactory()
+        concept = ConceptFactory(parent=self.source, names=[name1, name2])
+        response = self.client.delete(
+            "/orgs/{}/sources/{}/concepts/{}/names/{}/".format(
+                self.organization.mnemonic, self.source.mnemonic, concept.mnemonic, name2.id
+            ),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(concept.versions.count(), 2)
+        self.assertEqual(concept.names.count(), 1)
+        self.assertEqual(concept.names.first().name, name1.name)
+
+        latest_version = concept.get_latest_version()
+        self.assertEqual(latest_version.names.count(), 1)
+        self.assertEqual(latest_version.names.first().name, name1.name)
+        self.assertEqual(latest_version.comment, 'Deleted {} in names.'.format(name2.name))
