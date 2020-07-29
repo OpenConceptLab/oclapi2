@@ -118,7 +118,7 @@ class SourceRetrieveUpdateDestroyView(SourceBaseView, ConceptDictionaryUpdateMix
         try:
             source.delete()
         except Exception as ex:
-            return Response({'detail': ex.message}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(ex.message_dict, status=status.HTTP_400_BAD_REQUEST)
 
         return Response({'detail': 'Successfully deleted source.'}, status=status.HTTP_204_NO_CONTENT)
 

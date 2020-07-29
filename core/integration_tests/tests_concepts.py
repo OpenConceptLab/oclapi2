@@ -22,7 +22,7 @@ class ConceptCreateUpdateDestroyViewTest(APITestCase):
         self.user = UserProfile.objects.filter(is_superuser=True).first()
         self.token = self.user.get_token()
         self.source = SourceFactory(organization=self.organization)
-        self.concepts_payload = {
+        self.concept_payload = {
             'datatype': 'Coded',
             'concept_class': 'Procedure',
             'extras': {'foo': 'bar'},
@@ -48,7 +48,7 @@ class ConceptCreateUpdateDestroyViewTest(APITestCase):
 
         response = self.client.post(
             concepts_url,
-            self.concepts_payload,
+            self.concept_payload,
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -114,7 +114,7 @@ class ConceptCreateUpdateDestroyViewTest(APITestCase):
 
         response = self.client.post(
             concepts_url,
-            {**self.concepts_payload.copy(), 'datatype': ''},
+            {**self.concept_payload.copy(), 'datatype': ''},
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -133,7 +133,7 @@ class ConceptCreateUpdateDestroyViewTest(APITestCase):
 
         response = self.client.put(
             concepts_url,
-            {**self.concepts_payload, 'datatype': 'None', 'update_comment': 'Updated datatype'},
+            {**self.concept_payload, 'datatype': 'None', 'update_comment': 'Updated datatype'},
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -205,7 +205,7 @@ class ConceptCreateUpdateDestroyViewTest(APITestCase):
 
         response = self.client.put(
             concepts_url,
-            {**self.concepts_payload, 'concept_class': '', 'update_comment': 'Updated concept_class'},
+            {**self.concept_payload, 'concept_class': '', 'update_comment': 'Updated concept_class'},
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -220,7 +220,7 @@ class ConceptCreateUpdateDestroyViewTest(APITestCase):
 
         response = self.client.put(
             concepts_url,
-            {**self.concepts_payload, 'concept_class': '', 'update_comment': 'Updated concept_class'},
+            {**self.concept_payload, 'concept_class': '', 'update_comment': 'Updated concept_class'},
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
