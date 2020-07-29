@@ -53,8 +53,9 @@ class S3:
         return result
 
     @classmethod
-    def upload_file(cls, file_path, headers=None):
-        return cls.upload(file_path, open(file_path, 'r').read(), headers)
+    def upload_file(cls, file_path, headers=None, binary=False):
+        read_directive = 'rb' if binary else 'r'
+        return cls.upload(file_path, open(file_path, read_directive).read(), headers)
 
     @classmethod
     def upload_public(cls, file_path, file_content):
