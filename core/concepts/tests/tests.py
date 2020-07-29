@@ -267,7 +267,6 @@ class ConceptTest(OCLTestCase):
         self.assertEqual(Concept.get_latest_versions_for_queryset(Concept.objects.none()).count(), 0)
 
         source1 = SourceFactory()
-
         concept1_latest = ConceptFactory(parent=source1, mnemonic='common-name-1')
         ConceptFactory(version='v1', parent=source1, is_latest_version=False, mnemonic=concept1_latest.mnemonic)
 

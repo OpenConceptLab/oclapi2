@@ -3,6 +3,7 @@ from mock import ANY
 from rest_framework.test import APITestCase
 
 from core.common.constants import OCL_ORG_ID, SUPER_ADMIN_USER_ID
+from core.common.tests import PauseElasticSearchIndex
 from core.concepts.models import Concept, LocalizedText
 from core.concepts.tests.factories import ConceptFactory, LocalizedTextFactory
 from core.orgs.models import Organization
@@ -11,7 +12,7 @@ from core.sources.tests.factories import SourceFactory
 from core.users.models import UserProfile
 
 
-class ConceptCreateUpdateDestroyViewTest(APITestCase):
+class ConceptCreateUpdateDestroyViewTest(APITestCase, PauseElasticSearchIndex):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()

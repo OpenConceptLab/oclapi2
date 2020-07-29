@@ -3,6 +3,7 @@ from unittest.mock import patch, Mock, mock_open
 import boto3
 from botocore.exceptions import ClientError
 from colour_runner.django_runner import ColourRunnerMixin
+from django.conf import settings
 from django.core.management import call_command
 from django.test import TestCase
 from django.test.runner import DiscoverRunner
@@ -23,7 +24,11 @@ class CustomTestRunner(ColourRunnerMixin, DiscoverRunner):
     pass
 
 
-class OCLTestCase(TestCase):
+class PauseElasticSearchIndex:
+    settings.ELASTICSEARCH_DSL_AUTOSYNC = False
+
+
+class OCLTestCase(TestCase, PauseElasticSearchIndex):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()

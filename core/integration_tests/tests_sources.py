@@ -2,13 +2,14 @@ from django.core.management import call_command
 from rest_framework.test import APITestCase
 
 from core.common.constants import OCL_ORG_ID, SUPER_ADMIN_USER_ID
+from core.common.tests import PauseElasticSearchIndex
 from core.orgs.models import Organization
 from core.sources.models import Source
 from core.sources.tests.factories import SourceFactory
 from core.users.models import UserProfile
 
 
-class SourceCreateUpdateDestroyViewTest(APITestCase):
+class SourceCreateUpdateDestroyViewTest(APITestCase, PauseElasticSearchIndex):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
