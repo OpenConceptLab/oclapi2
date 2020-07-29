@@ -254,7 +254,7 @@ class ConceptContainerModel(VersionedModel):
     last_concept_update = models.DateTimeField(default=timezone.now, null=True, blank=True)
     last_mapping_update = models.DateTimeField(default=timezone.now, null=True, blank=True)
     last_child_update = models.DateTimeField(default=timezone.now)
-    _background_process_ids = ArrayField(models.IntegerField(), default=list, null=True, blank=True)
+    _background_process_ids = ArrayField(models.CharField(max_length=255), default=list, null=True, blank=True)
 
     class Meta:
         abstract = True
@@ -525,7 +525,11 @@ class ConceptContainerModel(VersionedModel):
     def add_processing(self, process_id):
         if self.id:
             self.__class__.objects.filter(id=self.id).update(
-                _background_process_ids=CombinedExpression(F('_background_process_ids'), '||', Value([process_id]))
+                _background_process_ids=CombinedExpression(
+                    F('_background_process_ids'),
+                    '||',
+                    Value([process_id], ArrayField(models.CharField(max_length=255)))
+                )
             )
         self._background_process_ids.append(process_id)
 

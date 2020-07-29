@@ -225,9 +225,13 @@ class ConceptVersionDetailSerializer(ModelSerializer):
     mappings = SerializerMethodField()
 
     def __init__(self, *args, **kwargs):
-        self.query_params = kwargs.get('context').get('request').query_params.dict()
-        self.include_indirect_mappings = self.query_params.get(INCLUDE_INVERSE_MAPPINGS_PARAM) == 'true'
-        self.include_direct_mappings = self.query_params.get(INCLUDE_MAPPINGS_PARAM) == 'true'
+        context = kwargs.get('context')
+        self.include_indirect_mappings = False
+        self.include_direct_mappings = False
+        if context:
+            self.query_params = context.get('request').query_params.dict()
+            self.include_indirect_mappings = self.query_params.get(INCLUDE_INVERSE_MAPPINGS_PARAM) == 'true'
+            self.include_direct_mappings = self.query_params.get(INCLUDE_MAPPINGS_PARAM) == 'true'
 
         super().__init__(*args, **kwargs)
 

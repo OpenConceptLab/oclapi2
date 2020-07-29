@@ -178,7 +178,7 @@ def write_export_file(
     logger.info('Writing export file to tmp directory: %s' % cwd)
 
     logger.info('Found %s version %s.  Looking up resource...' % (resource_type, version.version))
-    resource = version.versioned_object
+    resource = version.head
     logger.info('Found %s %s.  Serializing attributes...' % (resource_type, resource.mnemonic))
 
     resource_serializer = get_class(resource_serializer_type)(version)
@@ -188,7 +188,7 @@ def write_export_file(
 
     batch_size = 1000
     concepts_qs = version.concepts
-    mappings_qs = version.concepts
+    mappings_qs = version.mappings
     if resource_type != 'collection':
         concepts_qs = concepts_qs.filter(is_active=True)
         mappings_qs = mappings_qs.filter(is_active=True)
@@ -196,14 +196,14 @@ def write_export_file(
     total_concepts = concepts_qs.count()
     total_mappings = mappings_qs.count()
 
-    with open('export.json', 'wb') as out:
+    with open('export.json', 'w') as out:
         out.write('%s, "concepts": [' % resource_string[:-1])
 
     if total_concepts:
         logger.info(
             '%s has %d concepts. Getting them in batches of %d...' % (resource_type.title(), total_concepts, batch_size)
         )
-        concept_serializer_class = get_class('concepts.serializers.ConceptVersionDetailSerializer')
+        concept_serializer_class = get_class('core.concepts.serializers.ConceptVersionDetailSerializer')
         for start in range(0, total_concepts, batch_size):
             end = min(start + batch_size, total_concepts)
             logger.info('Serializing concepts %d - %d...' % (start+1, end))
@@ -212,7 +212,7 @@ def write_export_file(
             concept_data = concept_serializer.data
             concept_string = json.dumps(concept_data, cls=encoders.JSONEncoder)
             concept_string = concept_string[1:-1]
-            with open('export.json', 'ab') as out:
+            with open('export.json', 'a') as out:
                 out.write(concept_string)
                 if end != total_concepts:
                     out.write(', ')
@@ -220,14 +220,14 @@ def write_export_file(
     else:
         logger.info('%s has no concepts to serialize.' % (resource_type.title()))
 
-    with open('export.json', 'ab') as out:
+    with open('export.json', 'a') as out:
         out.write('], "mappings": [')
 
     if total_mappings:
         logger.info(
             '%s has %d mappings. Getting them in batches of %d...' % (resource_type.title(), total_mappings, batch_size)
         )
-        mapping_serializer_class = get_class('mappings.serializers.MappingDetailSerializer')
+        mapping_serializer_class = get_class('core.mappings.serializers.MappingDetailSerializer')
         for start in range(0, total_mappings, batch_size):
             end = min(start + batch_size, total_mappings)
             logger.info('Serializing mappings %d - %d...' % (start+1, end))
@@ -236,7 +236,7 @@ def write_export_file(
             mapping_data = mapping_serializer.data
             mapping_string = json.dumps(mapping_data, cls=encoders.JSONEncoder)
             mapping_string = mapping_string[1:-1]
-            with open('export.json', 'ab') as out:
+            with open('export.json', 'a') as out:
                 out.write(mapping_string)
                 if end != total_mappings:
                     out.write(', ')
@@ -244,7 +244,7 @@ def write_export_file(
     else:
         logger.info('%s has no mappings to serialize.' % (resource_type.title()))
 
-    with open('export.json', 'ab') as out:
+    with open('export.json', 'a') as out:
         out.write(']}')
 
     with zipfile.ZipFile('export.zip', 'w', zipfile.ZIP_DEFLATED) as _zip:
@@ -254,7 +254,7 @@ def write_export_file(
     logger.info(file_path)
 
     logger.info('Done compressing.  Uploading...')
-    S3.upload_file(file_path)
+    S3.upload_file(file_path=file_path, binary=True)
     uploaded_path = S3.url_for(file_path)
     logger.info('Uploaded to %s.' % uploaded_path)
     os.chdir(cwd)
