@@ -19,3 +19,4 @@ flower
 redis>=2.10.5
 celery[redis]==3.1.17
 kombu
+django-elasticsearch-dsl

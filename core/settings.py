@@ -39,6 +39,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'rest_framework',
     'rest_framework.authtoken',
+    'django_elasticsearch_dsl',
     'corsheaders',
     'core.common.apps.CommonConfig',
     'core.users',
@@ -107,6 +108,12 @@ DATABASES = {
         'HOST': os.environ.get('DB_HOST', '127.0.0.1'),
         'PORT': os.environ.get('DB_PORT', 5432),
     }
+}
+
+ELASTICSEARCH_DSL = {
+    'default': {
+        'hosts': os.environ.get('ES_URL', 'host.docker.internal:9200')
+    },
 }
 
 LOGGING = {
