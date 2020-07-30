@@ -1,5 +1,6 @@
 from django.core.validators import RegexValidator
-from rest_framework.fields import CharField, IntegerField, DateTimeField, ChoiceField, JSONField, ListField
+from rest_framework.fields import CharField, IntegerField, DateTimeField, ChoiceField, JSONField, ListField, \
+    BooleanField
 from rest_framework.relations import PrimaryKeyRelatedField
 from rest_framework.serializers import ModelSerializer
 
@@ -158,6 +159,7 @@ class SourceVersionDetailSerializer(SourceCreateOrUpdateSerializer):
     created_by = CharField(source='created_by.username', read_only=True)
     updated_by = DateTimeField(source='updated_by.username', read_only=True)
     supported_locales = ListField(required=False, allow_empty=True)
+    is_processing = BooleanField(read_only=True)
 
     class Meta:
         model = Source
@@ -167,5 +169,5 @@ class SourceVersionDetailSerializer(SourceCreateOrUpdateSerializer):
             'custom_validation_schema', 'public_access', 'default_locale', 'supported_locales', 'website',
             'url', 'owner', 'owner_type', 'owner_url', 'versions',
             'created_on', 'updated_on', 'created_by', 'updated_by', 'extras', 'external_id', 'versions_url',
-            'version', 'concepts_url',
+            'version', 'concepts_url', 'is_processing'
         )

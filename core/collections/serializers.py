@@ -1,5 +1,6 @@
 from django.core.validators import RegexValidator
-from rest_framework.fields import CharField, ChoiceField, ListField, IntegerField, DateTimeField, JSONField
+from rest_framework.fields import CharField, ChoiceField, ListField, IntegerField, DateTimeField, JSONField, \
+    BooleanField
 from rest_framework.relations import PrimaryKeyRelatedField
 from rest_framework.serializers import ModelSerializer
 
@@ -156,6 +157,7 @@ class CollectionVersionDetailSerializer(CollectionCreateOrUpdateSerializer):
     created_on = DateTimeField(source='created_at')
     updated_on = DateTimeField(source='updated_at')
     supported_locales = ListField(required=False, allow_empty=True)
+    is_processing = BooleanField(read_only=True)
 
     class Meta:
         model = Collection
@@ -165,7 +167,7 @@ class CollectionVersionDetailSerializer(CollectionCreateOrUpdateSerializer):
             'custom_validation_schema', 'public_access', 'default_locale', 'supported_locales', 'website',
             'url', 'owner', 'owner_type', 'owner_url', 'versions',
             'created_on', 'updated_on', 'created_by', 'updated_by', 'extras', 'external_id', 'versions_url',
-            'version', 'concepts_url',
+            'version', 'concepts_url', 'is_processing'
         )
 
 
