@@ -169,8 +169,8 @@ class SourceTest(OCLTestCase):
         source = SourceFactory(version=HEAD)
         concept = ConceptFactory(mnemonic='concept1', parent=source)
 
-        self.assertEqual(source.concepts_set.count(), 1)  # parent-child
-        self.assertEqual(source.concepts.count(), 1)
+        self.assertEqual(source.concepts_set.count(), 2)  # parent-child
+        self.assertEqual(source.concepts.count(), 2)
         self.assertEqual(concept.sources.count(), 1)
         self.assertTrue(source.is_latest_version)
 
@@ -181,10 +181,10 @@ class SourceTest(OCLTestCase):
         source.refresh_from_db()
 
         self.assertFalse(source.is_latest_version)
-        self.assertEqual(source.concepts_set.count(), 1)  # parent-child
-        self.assertEqual(source.concepts.count(), 1)
+        self.assertEqual(source.concepts_set.count(), 2)  # parent-child
+        self.assertEqual(source.concepts.count(), 2)
         self.assertTrue(version1.is_latest_version)
-        self.assertEqual(version1.concepts.count(), 1)
+        self.assertEqual(version1.concepts.count(), 2)
         self.assertEqual(version1.concepts_set.count(), 0)  # no direct child
 
     def test_source_version_delete(self):
@@ -209,7 +209,7 @@ class SourceTest(OCLTestCase):
             version='v1',
         )
         self.assertTrue(source_versions.exists())
-        self.assertEqual(version1.concepts.count(), 1)
+        self.assertEqual(version1.concepts.count(), 2)
 
         version1.delete()
         source.refresh_from_db()

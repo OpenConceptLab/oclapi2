@@ -80,7 +80,7 @@ class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
         if is_latest_version:
             queryset = queryset.filter(is_latest_version=True)
         return queryset.select_related(
-            'parent__organization', 'parent__user',
+            'parent__organization', 'parent__user', 'created_by'
         ).prefetch_related('names')
 
     def get(self, request, *args, **kwargs):
@@ -150,11 +150,6 @@ class ConceptRetrieveUpdateDestroyView(ConceptBaseView, RetrieveAPIView, UpdateA
 
     def destroy(self, request, *args, **kwargs):
         concept = self.get_object()
-        if not concept:
-            return Response(
-                dict(non_field_errors='Could not find concept to retire'),
-                status=status.HTTP_404_NOT_FOUND
-            )
         comment = request.data.get('update_comment', None) or request.data.get('comment', None)
         errors = concept.retire(request.user, comment)
 
@@ -167,6 +162,9 @@ class ConceptRetrieveUpdateDestroyView(ConceptBaseView, RetrieveAPIView, UpdateA
 class ConceptVersionsView(ConceptBaseView, ConceptDictionaryMixin, ListWithHeadersMixin):
     serializer_class = ConceptListSerializer
     permission_classes = (CanViewParentDictionary,)
+
+    def get_queryset(self):
+        return super().get_queryset().exclude(id=F('versioned_object_id'))
 
     def get(self, request, *args, **kwargs):
         self.serializer_class = ConceptDetailSerializer if self.is_verbose(request) else ConceptListSerializer
@@ -306,7 +304,7 @@ class ConceptDescriptionRetrieveUpdateDestroyView(ConceptLabelRetrieveUpdateDest
 
 class ConceptExtrasBaseView(ConceptBaseView):
     def get_object(self, queryset=None):
-        return self.get_queryset().filter(id=F('versioned_object_id')).first()
+        return self.get_queryset().filter(is_latest_version=True).first()
 
 
 class ConceptExtrasView(ConceptExtrasBaseView, ListAPIView):

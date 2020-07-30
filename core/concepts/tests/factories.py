@@ -6,6 +6,22 @@ from core.concepts.models import Concept, LocalizedText
 from core.sources.tests.factories import SourceFactory
 
 
+def sync_latest_version(self):
+    latest_version = self.get_latest_version()
+    has_names = self.names.exists()
+    if not latest_version:
+        latest_version = self.clone()
+        latest_version.save()
+        self.is_latest_version = False
+        self.save()
+        latest_version.version = latest_version.id
+        latest_version.save()
+        latest_version.sources.add(latest_version.parent)
+    if latest_version and has_names and not latest_version.names.exists():
+        latest_version.cloned_names = [name.clone() for name in self.names.all()]
+        latest_version.set_locales()
+
+
 class LocalizedTextFactory(factory.django.DjangoModelFactory):
     class Meta:
         model = LocalizedText
@@ -33,7 +49,7 @@ class ConceptFactory(factory.django.DjangoModelFactory):
             return
 
         self.versioned_object = self
-        self.save()
+        sync_latest_version(self)
 
     @factory.post_generation
     def sources(self, create, extracted):
@@ -54,6 +70,7 @@ class ConceptFactory(factory.django.DjangoModelFactory):
         if extracted:
             for name in extracted:
                 self.names.add(name)
+            sync_latest_version(self)
 
     @factory.post_generation
     def descriptions(self, create, extracted):

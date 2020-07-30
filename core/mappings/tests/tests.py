@@ -52,8 +52,8 @@ class MappingTest(OCLTestCase):
         self.assertEqual(mapping.errors, {})
         self.assertIsNotNone(mapping.id)
         self.assertEqual(mapping.version, str(mapping.id))
-        self.assertEqual(source.mappings_set.count(), 1)
-        self.assertEqual(source.mappings.count(), 1)
+        self.assertEqual(source.mappings_set.count(), 2)
+        self.assertEqual(source.mappings.count(), 2)
         self.assertEqual(
             mapping.uri,
             '/orgs/{}/sources/{}/mappings/{}/'.format(

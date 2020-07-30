@@ -300,10 +300,21 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         version.version = version_label
         version.created_by_id = concept.created_by_id
         version.updated_by_id = concept.updated_by_id
-        version.parent = parent_version
+        if parent_version:
+            version.parent = parent_version
         version.released = False
 
         return version
+
+    @classmethod
+    def create_initial_version(cls, concept, **kwargs):
+        initial_version = cls.version_for_concept(concept, TEMP)
+        initial_version.save(**kwargs)
+        initial_version.version = initial_version.id
+        initial_version.released = True
+        initial_version.is_latest_version = True
+        initial_version.save()
+        return initial_version
 
     def set_locales(self):
         if not self.id:
@@ -357,12 +368,15 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             concept.save()
             concept.versioned_object_id = concept.id
             concept.version = str(concept.id)
+            concept.is_latest_version = False
             concept.save()
-
             concept.set_locales()
+            initial_version = cls.create_initial_version(concept)
+            initial_version.set_locales()
 
             parent_resource = concept.parent
             parent_resource_head = parent_resource.head
+            initial_version.sources.set([parent_resource, parent_resource_head])
             concept.sources.set([parent_resource, parent_resource_head])
 
             parent_resource.save()
@@ -409,7 +423,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                 obj.clean()  # clean here to validate locales that can only be saved after obj is saved
                 obj.update_versioned_object()
                 versioned_object = obj.versioned_object
-                latest_version = versioned_object.versions.filter(is_latest_version=True).first()
+                latest_version = versioned_object.versions.exclude(id=obj.id).filter(is_latest_version=True).first()
                 latest_version.is_latest_version = False
                 latest_version.save()
                 obj.sources.set(compact([parent, parent_head]))
@@ -423,12 +437,12 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             errors.update(err.message_dict)
         finally:
             if not persisted:
-                obj.remove_locales()
-                obj.sources.remove(parent_head)
                 if latest_version:
                     latest_version.is_latest_version = True
                     latest_version.save()
                 if obj.id:
+                    obj.remove_locales()
+                    obj.sources.remove(parent_head)
                     obj.delete()
                 errors['non_field_errors'] = ['An error occurred while %s.' % errored_action]
 

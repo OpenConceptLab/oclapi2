@@ -55,8 +55,11 @@ class MappingListView(MappingBaseView, ListWithHeadersMixin, CreateModelMixin):
         is_latest_version = 'collection' not in self.kwargs
         queryset = super().get_queryset()
         if is_latest_version:
-            queryset = queryset.filter(id=F('versioned_object_id'))
-        return queryset.select_related('parent__organization', 'parent__user')
+            queryset = queryset.filter(is_latest_version=True)
+        return queryset.select_related(
+            'parent__organization', 'parent__user', 'from_concept__parent', 'to_concept__parent', 'to_source',
+            'versioned_object',
+        )
 
     def get(self, request, *args, **kwargs):
         return self.list(request, *args, **kwargs)
@@ -88,7 +91,7 @@ class MappingRetrieveUpdateDestroyView(MappingBaseView, RetrieveAPIView, UpdateA
     serializer_class = MappingDetailSerializer
 
     def get_object(self, queryset=None):
-        return get_object_or_404(self.get_queryset(), id=F('versioned_object_id'))
+        return get_object_or_404(self.get_queryset(), is_latest_version=True)
 
     def get_permissions(self):
         if self.request.method in ['GET']:
@@ -142,6 +145,9 @@ class MappingRetrieveUpdateDestroyView(MappingBaseView, RetrieveAPIView, UpdateA
 class MappingVersionsView(MappingBaseView, ConceptDictionaryMixin, ListWithHeadersMixin):
     serializer_class = MappingListSerializer
     permission_classes = (CanViewParentDictionary,)
+
+    def get_queryset(self):
+        return super().get_queryset().exclude(id=F('versioned_object_id'))
 
     def get(self, request, *args, **kwargs):
         self.serializer_class = MappingDetailSerializer if self.is_verbose(request) else MappingListSerializer

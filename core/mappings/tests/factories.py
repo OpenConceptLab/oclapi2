@@ -7,6 +7,18 @@ from core.mappings.models import Mapping
 from core.sources.tests.factories import SourceFactory
 
 
+def sync_latest_version(self):
+    latest_version = self.get_latest_version()
+    if not latest_version:
+        latest_version = self.clone()
+        latest_version.save()
+        self.is_latest_version = False
+        self.save()
+        latest_version.version = latest_version.id
+        latest_version.save()
+        latest_version.sources.add(latest_version.parent)
+
+
 class MappingFactory(factory.django.DjangoModelFactory):
     class Meta:
         model = Mapping
@@ -34,3 +46,4 @@ class MappingFactory(factory.django.DjangoModelFactory):
 
         self.versioned_object = self
         self.save()
+        sync_latest_version(self)

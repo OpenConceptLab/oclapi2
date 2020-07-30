@@ -128,24 +128,23 @@ class CollectionReferenceTest(OCLTestCase):
         self.assertTrue(isinstance(unknown_expression_concepts, QuerySet))
         self.assertFalse(unknown_expression_concepts.exists())
 
-        concept1 = ConceptFactory()
-        reference.expression = concept1.uri
+        concept = ConceptFactory()
+        reference.expression = concept.uri
 
         concepts = reference.get_concepts()
 
         self.assertTrue(isinstance(concepts, QuerySet))
         self.assertEqual(concepts.count(), 1)
-        self.assertEqual(concepts.first(), concept1)
+        self.assertEqual(concepts.first(), concept)
 
-        concept2 = ConceptFactory(parent=concept1.parent, version='v1', mnemonic=concept1.mnemonic)
-        reference.expression = drop_version(concept1.uri) + 'versions/'
+        ConceptFactory(parent=concept.parent, version='v1', mnemonic=concept.mnemonic, versioned_object=concept)
+        reference.expression = drop_version(concept.uri) + 'versions/'
 
         concepts = reference.get_concepts().order_by('created_at')
 
         self.assertTrue(isinstance(concepts, QuerySet))
         self.assertEqual(concepts.count(), 2)
-        self.assertEqual(concepts.first(), concept1)
-        self.assertEqual(concepts.last(), concept2)
+        self.assertListEqual(list(concepts.all()), list(concept.versions.all()))
 
 
 class CollectionUtilsTest(OCLTestCase):

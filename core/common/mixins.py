@@ -292,8 +292,8 @@ class SourceChildMixin:
     @property
     def versions(self):
         if self.is_versioned_object:
-            self.versions_set.all()
-        return self.versioned_object.versions_set.all()
+            self.versions_set.exclude(id=F('versioned_object_id')).all()
+        return self.versioned_object.versions_set.exclude(id=F('versioned_object_id')).all()
 
     @property
     def is_versioned_object(self):
@@ -312,13 +312,6 @@ class SourceChildMixin:
     @property
     def is_head(self):
         return self.is_versioned_object
-
-    def calculate_uri(self):
-        uri = super().calculate_uri()
-        if not self.is_versioned_object and self.version not in uri:
-            return "{}{}/".format(uri, self.version)
-
-        return uri
 
     @property
     def owner(self):
@@ -368,7 +361,9 @@ class SourceChildMixin:
             query_params = get_query_params_from_url_string(uri)  # parsing query parameters
             kwargs.update(query_params)
             queryset = cls.get_base_queryset(kwargs)
-            if '/versions/' not in uri:
+            if '/versions/' in uri:
+                queryset = queryset.exclude(id=F('versioned_object_id'))
+            else:
                 queryset = queryset.filter(id=F('versioned_object_id'))
         except:  # pylint: disable=bare-except
             pass

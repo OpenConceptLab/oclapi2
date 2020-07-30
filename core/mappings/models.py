@@ -177,7 +177,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         return 'mapping_version'
 
     def clone(self, user=None):
-        return Mapping(
+        mapping = Mapping(
             version=TEMP,
             parent_id=self.parent_id,
             map_type=self.map_type,
@@ -190,12 +190,24 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
             released=self.released,
             is_latest_version=self.is_latest_version,
             extras=self.extras,
-            created_by=user,
-            updated_by=user,
             public_access=self.public_access,
             external_id=self.external_id,
             versioned_object_id=self.versioned_object_id
         )
+        if user:
+            mapping.created_by = mapping.updated_by = user
+
+        return mapping
+
+    @classmethod
+    def create_initial_version(cls, mapping, **kwargs):
+        initial_version = mapping.clone()
+        initial_version.save(**kwargs)
+        initial_version.version = initial_version.id
+        initial_version.released = False
+        initial_version.is_latest_version = True
+        initial_version.save()
+        return initial_version
 
     @classmethod
     def persist_new(cls, data, user):
@@ -218,12 +230,15 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
             mapping.full_clean()
             mapping.save()
             if mapping.id:
+                mapping.is_latest_version = False
                 mapping.version = str(mapping.id)
                 mapping.versioned_object_id = mapping.id
                 mapping.save()
+                initial_version = cls.create_initial_version(mapping)
                 parent = mapping.parent
                 parent_head = parent.head
-                mapping.sources.set([parent, parent.head])
+                initial_version.sources.set([parent, parent_head])
+                mapping.sources.set([parent, parent_head])
                 parent.save()
                 parent_head.save()
         except ValidationError as ex:
@@ -270,7 +285,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
                 obj.save()
                 obj.update_versioned_object()
                 versioned_object = obj.versioned_object
-                latest_version = versioned_object.versions.exclude(id=obj.id).filter(is_latest_version=True).first()
+                latest_version = versioned_object.get_latest_version()
                 latest_version.is_latest_version = False
                 latest_version.save()
                 obj.sources.set(compact([parent, parent_head]))

@@ -460,7 +460,7 @@ class ConceptContainerModel(VersionedModel):
         return failed_concept_validations
 
     def update_active_counts(self):
-        self.active_concepts = self.concepts.filter(retired=False).count()
+        self.active_concepts = self.concepts.filter(retired=False).exclude(id=F('versioned_object_id')).count()
         self.active_mappings = self.mappings.filter(retired=False).count()
 
     def update_last_updates(self):

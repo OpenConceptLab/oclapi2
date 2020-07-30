@@ -1,5 +1,4 @@
 import factory
-from mock import patch
 from pydash import omit
 
 from core.common.constants import CUSTOM_VALIDATION_SCHEMA_OPENMRS, HEAD, ACCESS_TYPE_EDIT, ACCESS_TYPE_VIEW
@@ -102,8 +101,8 @@ class ConceptTest(OCLTestCase):
         self.assertEqual(concept.errors, {})
         self.assertIsNotNone(concept.id)
         self.assertEqual(concept.version, str(concept.id))
-        self.assertEqual(source.concepts_set.count(), 1)
-        self.assertEqual(source.concepts.count(), 1)
+        self.assertEqual(source.concepts_set.count(), 2)
+        self.assertEqual(source.concepts.count(), 2)
         self.assertEqual(
             concept.uri,
             '/orgs/{}/sources/{}/concepts/{}/'.format(
@@ -111,8 +110,7 @@ class ConceptTest(OCLTestCase):
             )
         )
 
-    @patch('core.concepts.models.LocalizedText.clone')
-    def test_clone(self, locale_clone_mock):
+    def test_clone(self):
         es_locale = LocalizedTextFactory(locale='es', name='Not English')
         en_locale = LocalizedTextFactory(locale='en', name='English')
 
@@ -124,7 +122,6 @@ class ConceptTest(OCLTestCase):
         self.assertEqual(cloned_concept.parent, concept.parent)
         self.assertEqual(len(cloned_concept.cloned_names), concept.names.count())
         self.assertEqual(len(cloned_concept.cloned_descriptions), concept.descriptions.count())
-        self.assertEqual(locale_clone_mock.call_count, 3)
         self.assertTrue(cloned_concept.released)
 
     def test_version_for_concept(self):
@@ -263,29 +260,35 @@ class ConceptTest(OCLTestCase):
         self.assertEqual(source.public_access, ACCESS_TYPE_VIEW)
         self.assertEqual(source.public_access, concept.public_access)
 
-    def test_get_latest_versions_for_queryset(self):
+    def test_get_latest_versions_for_queryset(self):  # pylint: disable=too-many-locals
         self.assertEqual(Concept.get_latest_versions_for_queryset(Concept.objects.none()).count(), 0)
 
         source1 = SourceFactory()
-        concept1_latest = ConceptFactory(parent=source1, mnemonic='common-name-1')
-        ConceptFactory(version='v1', parent=source1, is_latest_version=False, mnemonic=concept1_latest.mnemonic)
+        concept1 = ConceptFactory(parent=source1, mnemonic='common-name-1')
+        concept1_latest = concept1.get_latest_version()
+        ConceptFactory(version='v1', parent=source1, is_latest_version=False, mnemonic=concept1.mnemonic)
 
-        concept2_latest = ConceptFactory(parent=source1)
-        ConceptFactory(version='v1', parent=source1, is_latest_version=False, mnemonic=concept2_latest.mnemonic)
+        concept2 = ConceptFactory(parent=source1)
+        concept2_latest = concept2.get_latest_version()
+        ConceptFactory(version='v1', parent=source1, is_latest_version=False, mnemonic=concept2.mnemonic)
 
-        concept3_latest = ConceptFactory(parent=source1, mnemonic='common-name-2')
-        ConceptFactory(version='v1', parent=source1, is_latest_version=False, mnemonic=concept3_latest.mnemonic)
+        concept3 = ConceptFactory(parent=source1, mnemonic='common-name-2')
+        concept3_latest = concept3.get_latest_version()
+        ConceptFactory(version='v1', parent=source1, is_latest_version=False, mnemonic=concept3.mnemonic)
 
         source2 = SourceFactory()
 
-        concept4_latest = ConceptFactory(parent=source2, mnemonic='common-name-1')
-        ConceptFactory(version='v1', parent=source2, is_latest_version=False, mnemonic=concept4_latest.mnemonic)
+        concept4 = ConceptFactory(parent=source2, mnemonic='common-name-1')
+        concept4_latest = concept4.get_latest_version()
+        ConceptFactory(version='v1', parent=source2, is_latest_version=False, mnemonic=concept4.mnemonic)
 
-        concept5_latest = ConceptFactory(parent=source2)
-        ConceptFactory(version='v1', parent=source2, is_latest_version=False, mnemonic=concept5_latest.mnemonic)
+        concept5 = ConceptFactory(parent=source2)
+        concept5_latest = concept5.get_latest_version()
+        ConceptFactory(version='v1', parent=source2, is_latest_version=False, mnemonic=concept5.mnemonic)
 
-        concept6_latest = ConceptFactory(parent=source2, mnemonic='common-name-2')
-        ConceptFactory(version='v1', parent=source2, is_latest_version=False, mnemonic=concept6_latest.mnemonic)
+        concept6 = ConceptFactory(parent=source2, mnemonic='common-name-2')
+        concept6_latest = concept6.get_latest_version()
+        ConceptFactory(version='v1', parent=source2, is_latest_version=False, mnemonic=concept6.mnemonic)
 
         latest_versions = Concept.get_latest_versions_for_queryset(Concept.objects.filter(parent=source1))
 

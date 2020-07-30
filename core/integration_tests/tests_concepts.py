@@ -85,10 +85,15 @@ class ConceptCreateUpdateDestroyViewTest(APITestCase, PauseElasticSearchIndex):
              'mappings']
         )
 
-        concept = Concept.objects.last()
+        concept = Concept.objects.first()
+        latest_version = Concept.objects.last()
+
+        self.assertFalse(latest_version.is_versioned_object)
+        self.assertTrue(latest_version.is_latest_version)
 
         self.assertTrue(concept.is_versioned_object)
-        self.assertTrue(concept.is_latest_version)
+        self.assertFalse(concept.is_latest_version)
+
         self.assertEqual(concept.versions.count(), 1)
         self.assertEqual(response.data['uuid'], str(concept.id))
         self.assertEqual(response.data['datatype'], 'Coded')
@@ -107,7 +112,7 @@ class ConceptCreateUpdateDestroyViewTest(APITestCase, PauseElasticSearchIndex):
         self.assertEqual(response.data['parent_id'], str(self.source.id))
         self.assertEqual(response.data['name'], 'c1')
         self.assertEqual(response.data['type'], 'Concept')
-        self.assertEqual(response.data['version_url'], concept.uri)
+        self.assertEqual(response.data['version_url'], latest_version.uri)
         self.assertEqual(response.data['mappings'], [])
 
     def test_post_400(self):
@@ -128,6 +133,7 @@ class ConceptCreateUpdateDestroyViewTest(APITestCase, PauseElasticSearchIndex):
 
     def test_put_200(self):
         concept = ConceptFactory(parent=self.source)
+        self.assertEqual(concept.versions.count(), 1)
         concepts_url = "/orgs/{}/sources/{}/concepts/{}/".format(
             self.organization.mnemonic, self.source.mnemonic, concept.mnemonic
         )
@@ -385,6 +391,7 @@ class ConceptCreateUpdateDestroyViewTest(APITestCase, PauseElasticSearchIndex):
     def test_extra_delete_204(self):
         names = [LocalizedTextFactory()]
         concept = ConceptFactory(parent=self.source, names=names, extras=dict(foo='bar', tao='ching'))
+        self.assertEqual(concept.versions.count(), 1)
 
         def extra_url(extra):
             return "/orgs/{}/sources/{}/concepts/{}/extras/{}/".format(
@@ -403,7 +410,7 @@ class ConceptCreateUpdateDestroyViewTest(APITestCase, PauseElasticSearchIndex):
         self.assertFalse('tao' in concept.extras)
         self.assertEqual(concept.versions.count(), 2)
 
-        latest_version = concept.versions.order_by('-created_at').first()
+        latest_version = concept.get_latest_version()
         self.assertEqual(latest_version.extras, dict(foo='bar'))
         self.assertEqual(latest_version.comment, 'Deleted extra tao.')
 
