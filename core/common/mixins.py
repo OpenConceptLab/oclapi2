@@ -1,4 +1,8 @@
+import logging
+
+from django.conf import settings
 from django.db.models import Q, F
+from django.http import HttpResponseForbidden
 from django.urls import resolve, reverse
 from pydash import compact, get
 from rest_framework import status
@@ -7,7 +11,10 @@ from rest_framework.response import Response
 
 from core.common.constants import HEAD, ACCESS_TYPE_EDIT, ACCESS_TYPE_VIEW, ACCESS_TYPE_NONE
 from core.common.permissions import HasPrivateAccess, HasOwnership
+from core.common.services import S3
 from .utils import write_csv_to_s3, get_csv_from_s3, get_query_params_from_url_string
+
+logger = logging.getLogger('oclapi')
 
 
 class ListWithHeadersMixin(ListModelMixin):
@@ -376,3 +383,64 @@ class SourceChildMixin:
         if not user.is_staff:
             queryset = queryset.exclude(public_access=ACCESS_TYPE_NONE)
         return queryset
+
+
+class ConceptContainerExportMixin:
+    def get(self, request, *args, **kwargs):  # pylint: disable=unused-argument
+        version = self.get_object()
+        logger.debug(
+            'Export requested for %s version %s - Requesting AWS-S3 key', self.entity.lower(), version.version
+        )
+        if version.is_head:
+            return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
+
+        key = version.export_path
+        url = S3.url_for(key)
+
+        if url:
+            logger.debug('   URL and Key retrieved for %s version %s', self.entity.lower(), version.version)
+        else:
+            logger.debug('   Key does not exist for %s version %s', self.entity.lower(), version.version)
+            return Response(status=status.HTTP_204_NO_CONTENT)
+
+        response = Response(status=status.HTTP_303_SEE_OTHER)
+        response['Location'] = url
+
+        # Set headers to ensure sure response is not cached by a client
+        response['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+        response['Pragma'] = 'no-cache'
+        response['Expires'] = '0'
+        response['Last-Updated'] = version.last_child_update.isoformat()
+        response['Last-Updated-Timezone'] = settings.TIME_ZONE_PLACE
+        return response
+
+    def post(self, request, *args, **kwargs):  # pylint: disable=unused-argument
+        version = self.get_object()
+
+        if version.is_head:
+            return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
+
+        logger.debug('%s Export requested for version %s (post)', self.entity, version.version)
+        status_code = status.HTTP_303_SEE_OTHER
+
+        if not version.has_export():
+            status_code = self.handle_export_version()
+            return Response(status=status_code)
+
+        response = Response(status=status_code)
+        response['URL'] = version.uri + 'export/'
+        return response
+
+    def delete(self, request, *args, **kwargs):  # pylint: disable=unused-argument
+        user = request.user
+        version = self.get_object()
+
+        permitted = user.is_staff or user.is_superuser or user.is_admin_for(version.head)
+
+        if not permitted:
+            return HttpResponseForbidden()
+        if version.has_export():
+            S3.remove(version.export_path)
+            return Response(status=status.HTTP_200_OK)
+
+        return Response(status=status.HTTP_204_NO_CONTENT)

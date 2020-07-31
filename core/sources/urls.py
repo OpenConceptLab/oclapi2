@@ -35,6 +35,10 @@ urlpatterns = [
         name='source-extra'
     ),
     re_path(
+        r'^(?P<source>{pattern})/(?P<version>{pattern})/export/$'.format(pattern=NAMESPACE_PATTERN),
+        views.SourceVersionExportView.as_view(), name='sourceversion-export'
+    ),
+    re_path(
         r"^(?P<source>{pattern})/(?P<version>{pattern})/extras/$".format(pattern=NAMESPACE_PATTERN),
         views.SourceExtrasView.as_view(),
         name='sourceversion-extras'

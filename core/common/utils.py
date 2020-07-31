@@ -252,9 +252,10 @@ def write_export_file(
 
     file_path = os.path.abspath('export.zip')
     logger.info(file_path)
-
     logger.info('Done compressing.  Uploading...')
-    S3.upload_file(file_path=file_path, binary=True)
-    uploaded_path = S3.url_for(file_path)
+
+    s3_key = version.export_path
+    S3.upload_file(key=s3_key, file_path=file_path, binary=True)
+    uploaded_path = S3.url_for(s3_key)
     logger.info('Uploaded to %s.' % uploaded_path)
     os.chdir(cwd)

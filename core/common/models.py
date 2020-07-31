@@ -8,6 +8,7 @@ from django.db.models.expressions import CombinedExpression, F
 from django.utils import timezone
 from pydash import get
 
+from core.common.services import S3
 from core.common.utils import reverse_resource, reverse_resource_version
 from core.settings import DEFAULT_LOCALE
 from .constants import (
@@ -556,3 +557,15 @@ class ConceptContainerModel(VersionedModel):
     @staticmethod
     def clear_all_processing(klass):
         klass.objects.all().update(_background_process_ids=set())
+
+    @property
+    def export_path(self):
+        last_update = self.last_child_update.strftime('%Y%m%d%H%M%S')
+        source = self.head
+        return "%s/%s_%s.%s.zip" % (source.owner_name, source.mnemonic, self.version, last_update)
+
+    def get_export_url(self):
+        return S3.url_for(self.export_path)
+
+    def has_export(self):
+        return bool(self.get_export_url())

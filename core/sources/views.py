@@ -1,5 +1,6 @@
 import logging
 
+from celery_once import AlreadyQueued
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError
 from pydash import get
@@ -10,7 +11,8 @@ from rest_framework.generics import (
 from rest_framework.response import Response
 
 from core.common.constants import HEAD, RELEASED_PARAM, PROCESSING_PARAM
-from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryCreateMixin, ConceptDictionaryUpdateMixin
+from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryCreateMixin, ConceptDictionaryUpdateMixin, \
+    ConceptContainerExportMixin
 from core.common.permissions import CanViewConceptDictionary, CanEditConceptDictionary, HasAccessToVersionedObject, \
     HasOwnership
 from core.common.tasks import export_source
@@ -285,4 +287,20 @@ class SourceVersionProcessingView(SourceBaseView):
 
         version.clear_processing()
 
-        return Response(status=200)
+        return Response(status=status.HTTP_200_OK)
+
+
+class SourceVersionExportView(SourceBaseView, ConceptContainerExportMixin):
+    entity = 'Source'
+    permission_classes = (CanViewConceptDictionary,)
+
+    def get_object(self, queryset=None):
+        return self.get_queryset().first()
+
+    def handle_export_version(self):
+        version = self.get_object()
+        try:
+            export_source.delay(version.id)
+            return status.HTTP_202_ACCEPTED
+        except AlreadyQueued:
+            return status.HTTP_409_CONFLICT

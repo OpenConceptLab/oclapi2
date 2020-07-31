@@ -223,7 +223,7 @@ class S3Test(TestCase):
         with patch("builtins.open", mock_open(read_data="file-content")) as mock_file:
             S3.upload = Mock(return_value=200)
             file_path = "path/to/file.ext"
-            res = S3.upload_file(file_path, {'header1': 'val1'})
+            res = S3.upload_file(key=file_path, headers={'header1': 'val1'})
             self.assertEqual(res, 200)
             S3.upload.assert_called_once_with(file_path, 'file-content', {'header1': 'val1'})
             mock_file.assert_called_once_with(file_path, 'r')

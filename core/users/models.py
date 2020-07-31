@@ -68,5 +68,15 @@ class UserProfile(AbstractUser, BaseModel, SourceContainerMixin):
     def __str__(self):
         return str(self.mnemonic)
 
+    def is_admin_for(self, concept_container):
+        parent = concept_container.parent
+
+        if parent == self:
+            return True
+        if self.organizations.filter(id=parent.id).exists():
+            return True
+
+        return False
+
 
 admin.site.register(UserProfile)

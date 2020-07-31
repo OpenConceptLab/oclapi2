@@ -1,5 +1,6 @@
 import logging
 
+from celery_once import AlreadyQueued
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError
 from django.http import Http404
@@ -16,12 +17,13 @@ from core.collections.serializers import CollectionDetailSerializer, CollectionL
     CollectionCreateSerializer, CollectionReferenceSerializer, CollectionVersionDetailSerializer
 from core.collections.utils import is_concept, is_version_specified
 from core.common.constants import HEAD, RELEASED_PARAM, PROCESSING_PARAM
-from core.common.mixins import ConceptDictionaryCreateMixin, ListWithHeadersMixin, ConceptDictionaryUpdateMixin
+from core.common.mixins import ConceptDictionaryCreateMixin, ListWithHeadersMixin, ConceptDictionaryUpdateMixin, \
+    ConceptContainerExportMixin
 from core.common.permissions import CanViewConceptDictionary, CanEditConceptDictionary, HasAccessToVersionedObject, \
     HasOwnership
+from core.common.tasks import add_references, export_collection
 from core.common.utils import compact_dict_by_values, parse_boolean_query_param
 from core.common.views import BaseAPIView
-from core.common.tasks import add_references
 
 logger = logging.getLogger('oclapi')
 
@@ -356,7 +358,10 @@ class CollectionVersionListView(CollectionVersionBaseView, mixins.CreateModelMix
                 instance = serializer.create_version(payload)
                 if serializer.is_valid():
                     serializer = CollectionDetailSerializer(instance, context={'request': request})
-                    return Response(serializer.data, status=status.HTTP_201_CREATED)
+                    data = serializer.data
+                    version_id = data.get('uuid')
+                    export_collection.delay(version_id)
+                    return Response(data, status=status.HTTP_201_CREATED)
             except IntegrityError as ex:
                 return Response(
                     dict(
@@ -485,3 +490,19 @@ class CollectionVersionProcessingView(CollectionBaseView):
         version.clear_processing()
 
         return Response(status=200)
+
+
+class CollectionVersionExportView(CollectionBaseView, ConceptContainerExportMixin):
+    entity = 'Collection'
+    permission_classes = (CanViewConceptDictionary,)
+
+    def get_object(self, queryset=None):
+        return self.get_queryset().first()
+
+    def handle_export_version(self):
+        version = self.get_object()
+        try:
+            export_collection.delay(version.id)
+            return status.HTTP_202_ACCEPTED
+        except AlreadyQueued:
+            return status.HTTP_409_CONFLICT

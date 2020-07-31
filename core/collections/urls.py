@@ -35,6 +35,10 @@ urlpatterns = [
         name='collection-extra'
     ),
     re_path(
+        r'^(?P<collection>{pattern})/(?P<version>{pattern})/export/$'.format(pattern=NAMESPACE_PATTERN),
+        views.CollectionVersionExportView.as_view(), name='collectionversion-export'
+    ),
+    re_path(
         r"^(?P<collection>{pattern})/(?P<version>{pattern})/extras/$".format(pattern=NAMESPACE_PATTERN),
         views.CollectionExtrasView.as_view(),
         name='collectionversion-extras'
