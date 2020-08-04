@@ -90,3 +90,25 @@ class HasAccessToVersionedObject(BasePermission):
         if request.user.is_authenticated:
             return request.user.organizations.filter(id=versioned_object.parent_id).exists()
         return False
+
+
+class CanViewConceptDictionaryVersion(HasAccessToVersionedObject):
+    """
+    The user can view this source
+    """
+
+    def has_object_permission(self, request, view, obj):
+        if obj.public_access in [ACCESS_TYPE_EDIT, ACCESS_TYPE_VIEW]:
+            return True
+        return super().has_object_permission(request, view, obj)
+
+
+class CanEditConceptDictionaryVersion(HasAccessToVersionedObject):
+    """
+    The request is authenticated as a user, and the user can edit this source
+    """
+
+    def has_object_permission(self, request, view, obj):
+        if request.user.is_authenticated() and ACCESS_TYPE_EDIT == obj.public_access:
+            return True
+        return super().has_object_permission(request, view, obj)

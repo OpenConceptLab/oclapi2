@@ -17,6 +17,11 @@ urlpatterns = [
         name='collection-version-list'
     ),
     re_path(r'^(?P<collection>{pattern})/concepts/atom/$'.format(pattern=NAMESPACE_PATTERN), CollectionFeed()),
+    re_path(
+        r'^(?P<collection>{pattern})/latest/$'.format(pattern=NAMESPACE_PATTERN),
+        views.CollectionLatestVersionRetrieveUpdateView.as_view(),
+        name='collectionversion-latest-detail'
+    ),
     re_path(r"^(?P<collection>{pattern})/concepts/".format(pattern=NAMESPACE_PATTERN), include('core.concepts.urls')),
     re_path(r"^(?P<collection>{pattern})/mappings/".format(pattern=NAMESPACE_PATTERN), include('core.mappings.urls')),
     re_path(

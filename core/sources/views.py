@@ -3,6 +3,7 @@ import logging
 from celery_once import AlreadyQueued
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError
+from django.shortcuts import get_object_or_404
 from pydash import get
 from rest_framework import status, mixins
 from rest_framework.generics import (
@@ -14,7 +15,7 @@ from core.common.constants import HEAD, RELEASED_PARAM, PROCESSING_PARAM
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryCreateMixin, ConceptDictionaryUpdateMixin, \
     ConceptContainerExportMixin
 from core.common.permissions import CanViewConceptDictionary, CanEditConceptDictionary, HasAccessToVersionedObject, \
-    HasOwnership
+    HasOwnership, CanViewConceptDictionaryVersion
 from core.common.tasks import export_source
 from core.common.utils import parse_boolean_query_param, compact_dict_by_values
 from core.common.views import BaseAPIView
@@ -177,7 +178,38 @@ class SourceVersionListView(SourceVersionBaseView, mixins.CreateModelMixin, List
         return queryset.order_by('-created_at')
 
 
-class SourceVersionRetrieveUpdateDestroyView(SourceBaseView, RetrieveAPIView, UpdateAPIView):
+class SourceLatestVersionRetrieveUpdateView(SourceVersionBaseView, RetrieveAPIView, UpdateAPIView):
+    serializer_class = SourceVersionDetailSerializer
+    permission_classes = (CanViewConceptDictionaryVersion,)
+
+    def get_filter_params(self, default_version_to_head=False):
+        params = super().get_filter_params(default_version_to_head)
+        params['is_latest'] = True
+        return params
+
+    def get_object(self, queryset=None):
+        obj = get_object_or_404(self.get_queryset(), released=True)
+        self.check_object_permissions(self.request, obj)
+        return obj
+
+    def update(self, request, *args, **kwargs):
+        self.object = self.get_object()
+        head = self.object.head
+        if not head:
+            return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
+
+        serializer = self.get_serializer(self.object, data=request.data, partial=True)
+
+        if serializer.is_valid():
+            self.object = serializer.save(force_update=True)
+            if serializer.is_valid():
+                serializer = SourceVersionDetailSerializer(self.object, context={'request': request})
+                return Response(serializer.data, status=status.HTTP_200_OK)
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class SourceVersionRetrieveUpdateDestroyView(SourceVersionBaseView, RetrieveAPIView, UpdateAPIView):
     permission_classes = (HasAccessToVersionedObject,)
     serializer_class = SourceDetailSerializer
 
