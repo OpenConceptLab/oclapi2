@@ -68,6 +68,11 @@ urlpatterns = [
         include('core.mappings.urls')
     ),
     re_path(
+        r'^(?P<collection>{pattern})/(?P<version>{pattern})/references/$'.format(pattern=NAMESPACE_PATTERN),
+        views.CollectionVersionReferencesView.as_view(),
+        name='collectionversion-references'
+    ),
+    re_path(
         r'^(?P<collection>{pattern})/(?P<version>{pattern})/processing/$'.format(pattern=NAMESPACE_PATTERN),
         views.CollectionVersionProcessingView.as_view(),
         name='collectionversion-processing'
