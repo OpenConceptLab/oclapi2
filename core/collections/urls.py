@@ -35,6 +35,11 @@ urlpatterns = [
         name='collection-version-detail'
     ),
     re_path(
+        r"^(?P<collection>{pattern})/extras/$".format(pattern=NAMESPACE_PATTERN),
+        views.CollectionExtrasView.as_view(),
+        name='collection-extras'
+    ),
+    re_path(
         r"^(?P<collection>{pattern})/extras/(?P<extra>{pattern})/$".format(pattern=NAMESPACE_PATTERN),
         views.CollectionExtraRetrieveUpdateDestroyView.as_view(),
         name='collection-extra'
