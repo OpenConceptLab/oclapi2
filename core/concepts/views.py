@@ -7,7 +7,7 @@ from rest_framework.generics import RetrieveAPIView, DestroyAPIView, ListCreateA
 from rest_framework.mixins import CreateModelMixin
 from rest_framework.response import Response
 
-from core.common.constants import HEAD, LIMIT_PARAM
+from core.common.constants import HEAD, LIMIT_PARAM, INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_RETIRED_PARAM
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryMixin
 from core.common.utils import compact_dict_by_values
 from core.common.views import BaseAPIView
@@ -15,6 +15,7 @@ from core.concepts.models import Concept, LocalizedText
 from core.concepts.permissions import CanViewParentDictionary, CanEditParentDictionary
 from core.concepts.serializers import ConceptDetailSerializer, ConceptListSerializer, ConceptDescriptionSerializer, \
     ConceptNameSerializer, ConceptVersionDetailSerializer
+from core.mappings.serializers import MappingListSerializer
 
 
 class ConceptBaseView(BaseAPIView):
@@ -169,6 +170,25 @@ class ConceptVersionsView(ConceptBaseView, ConceptDictionaryMixin, ListWithHeade
     def get(self, request, *args, **kwargs):
         self.serializer_class = ConceptDetailSerializer if self.is_verbose(request) else ConceptListSerializer
         return self.list(request, *args, **kwargs)
+
+
+class ConceptMappingsView(ConceptBaseView, ListAPIView):
+    serializer_class = MappingListSerializer
+    permission_classes = (CanViewParentDictionary,)
+
+    def get_queryset(self):
+        concept = super().get_queryset().first()
+        include_retired = self.request.query_params.get(INCLUDE_RETIRED_PARAM, False)
+        include_inverse_mappings = self.request.query_params.get(INCLUDE_INVERSE_MAPPINGS_PARAM, 'false') == 'true'
+        if include_inverse_mappings:
+            mappings_queryset = concept.get_bidirectional_mappings()
+        else:
+            mappings_queryset = concept.get_unidirectional_mappings()
+
+        if not include_retired:
+            mappings_queryset = mappings_queryset.exclude(retired=False)
+
+        return mappings_queryset
 
 
 class ConceptVersionRetrieveView(ConceptBaseView, RetrieveAPIView):
