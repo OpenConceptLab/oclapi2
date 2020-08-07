@@ -26,7 +26,7 @@ class Command(BaseCommand):
             ),
             dict(
                 source=sources['Locales'],
-                file=os.path.join(current_path, "../../../lookup_fixtures/Locales.json")
+                file=os.path.join(current_path, "../../../lookup_fixtures/locales.json")
             ),
             dict(
                 source=sources['Datatypes'],
