@@ -1,0 +1,36 @@
+version: '3'
+
+services:
+  db:
+    ports:
+      - 5432:5432
+    restart: "no"
+  redis:
+    ports:
+      - 6379:6379
+    restart: "no"
+  api:
+    build: .
+    ports:
+      - 8000:8000
+    volumes:
+      - .:/code
+    restart: "no"
+  celery:
+    build: .
+    volumes:
+      - .:/code
+    restart: "no"
+  flower:
+    build: .
+    volumes:
+      - .:/code
+    ports:
+      - 5555:5555
+    restart: "no"
+  es:
+    ports:
+      - 9200:9200
+    restart: "no"
+  es1:
+    restart: "no"

@@ -104,15 +104,15 @@ DATABASES = {
         'ENGINE': 'django.db.backends.postgresql',
         'NAME': os.environ.get('DB', 'postgres'),
         'USER': 'postgres',
-        'PASSWORD': os.environ.get('DB_PASSWORD', 'password'),
-        'HOST': os.environ.get('DB_HOST', '127.0.0.1'),
+        'PASSWORD': os.environ.get('DB_PASSWORD', 'Postgres123'),
+        'HOST': os.environ.get('DB_HOST', 'db'),
         'PORT': os.environ.get('DB_PORT', 5432),
     }
 }
 
 ELASTICSEARCH_DSL = {
     'default': {
-        'hosts': os.environ.get('ES_URL', 'host.docker.internal:9200')
+        'hosts': [os.environ.get('ES_HOST', 'es:9200'), 'es1:9200']
     },
 }
 
