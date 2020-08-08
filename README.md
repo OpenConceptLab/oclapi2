@@ -3,8 +3,9 @@ The new and improved OCL terminology service v2
 
 
 #### Dev Setup
-1. `docker-compose up -d`
-2. Go to localhost:7000 to benefit.
+1. `sysctl -w vm.max_map_count=262144` #required by Elasticsearch
+2. `docker-compose up -d`
+3. Go to http://localhost:8000 to benefit.
 
 #### Run Checks
 1. Pylint (pep8) --- `docker exec -it oclapi2 pylint -j2 core`
