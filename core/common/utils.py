@@ -126,7 +126,10 @@ def get_kwargs_for_view(view_name):
 
 
 def parse_updated_since_param(params):
-    updated_since = params.get(UPDATED_SINCE_PARAM)
+    return parse_updated_since(params.get(UPDATED_SINCE_PARAM))
+
+
+def parse_updated_since(updated_since):
     if updated_since:
         try:
             return parser.parse(updated_since)

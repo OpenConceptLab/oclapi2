@@ -5,35 +5,48 @@ from rest_framework.generics import DestroyAPIView, UpdateAPIView, RetrieveAPIVi
 from rest_framework.mixins import CreateModelMixin
 from rest_framework.response import Response
 
-from core.common.constants import HEAD, LIMIT_PARAM
+from core.common.constants import HEAD
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryMixin
-from core.common.utils import compact_dict_by_values
-from core.common.views import BaseAPIView
+from core.common.views import SourceChildCommonBaseView
 from core.concepts.permissions import CanEditParentDictionary, CanViewParentDictionary
+from core.mappings.documents import MappingDocument
 from core.mappings.models import Mapping
 from core.mappings.serializers import MappingDetailSerializer, MappingListSerializer
 
 
-class MappingBaseView(BaseAPIView):
+class MappingBaseView(SourceChildCommonBaseView):
     lookup_field = 'mapping'
-    pk_field = 'mnemonic'
     model = Mapping
-    permission_classes = (CanViewParentDictionary,)
     queryset = Mapping.objects.filter(is_active=True)
+    document_model = MappingDocument
+    es_fields = {
+        'lastUpdate': {'sortable': True, 'filterable': False, 'facet': False},
+        'concept': {'sortable': False, 'filterable': True, 'facet': False},
+        'fromConcept': {'sortable': False, 'filterable': True, 'facet': False},
+        'toConcept': {'sortable': False, 'filterable': True, 'facet': False},
+        'retired': {'sortable': False, 'filterable': True, 'facet': True},
+        'mapType': {'sortable': False, 'filterable': True, 'facet': True},
+        'source': {'sortable': False, 'filterable': True, 'facet': True},
+        'collection': {'sortable': False, 'filterable': True, 'facet': True},
+        'owner': {'sortable': False, 'filterable': True, 'facet': True},
+        'ownerType': {'sortable': False, 'filterable': True, 'facet': True},
+        'conceptSource': {'sortable': False, 'filterable': True, 'facet': True},
+        'fromConceptSource': {'sortable': False, 'filterable': True, 'facet': True},
+        'toConceptSource': {'sortable': False, 'filterable': True, 'facet': True},
+        'conceptOwner': {'sortable': False, 'filterable': True, 'facet': True},
+        'fromConceptOwner': {'sortable': False, 'filterable': True, 'facet': True},
+        'toConceptOwner': {'sortable': False, 'filterable': True, 'facet': True},
+        'conceptOwnerType': {'sortable': False, 'filterable': True, 'facet': True},
+        'fromConceptOwnerType': {'sortable': False, 'filterable': True, 'facet': True},
+        'toConceptOwnerType': {'sortable': False, 'filterable': True, 'facet': True},
+    }
 
     @staticmethod
     def get_detail_serializer(obj, data=None, files=None, partial=False):
         return MappingDetailSerializer(obj, data, files, partial)
 
-    def get_filter_params(self):
-        kwargs = self.kwargs.copy()
-        query_params = self.request.query_params.copy()
-        kwargs.update(query_params)
-
-        return compact_dict_by_values(kwargs)
-
     def get_queryset(self):
-        return Mapping.get_base_queryset(self.get_filter_params())
+        return Mapping.get_base_queryset(self.params)
 
 
 class MappingListView(MappingBaseView, ListWithHeadersMixin, CreateModelMixin):
@@ -172,13 +185,11 @@ class MappingVersionListAllView(MappingBaseView, ListWithHeadersMixin):
         return MappingListSerializer
 
     def get_queryset(self):
-        queryset = Mapping.global_listing_queryset(
+        return Mapping.global_listing_queryset(
             self.get_filter_params(), self.request.user
         ).select_related(
             'parent__organization', 'parent__user',
         )
-        limit = int(self.request.query_params.get(LIMIT_PARAM, 25))
-        return queryset[0:limit]
 
     def get(self, request, *args, **kwargs):
         return self.list(request, *args, **kwargs)
