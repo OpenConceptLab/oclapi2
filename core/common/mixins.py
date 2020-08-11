@@ -26,14 +26,16 @@ class ListWithHeadersMixin(ListModelMixin):
         return request.query_params.get(self.verbose_param, False)
 
     def list(self, request, *args, **kwargs):  # pylint:disable=too-many-locals
-        is_csv = request.query_params.get('csv', False)
-        search_string = request.query_params.get('type', None)
-        exact_match = request.query_params.get('exact_match', None)
+        query_params = request.query_params.dict()
+        is_csv = query_params.get('csv', False)
+        search_string = query_params.get('type', None)
+        exact_match = query_params.get('exact_match', None)
+        search_term = query_params.get('q', None)
         if not exact_match and is_csv:
-            pattern = request.query_params.get('q', None)
+            pattern = search_term
             if pattern:
-                request.query_params._mutable = True  # pylint: disable=protected-access
-                request.query_params['q'] = "*" + request.query_params['q'] + "*"
+                query_params._mutable = True  # pylint: disable=protected-access
+                query_params['q'] = "*" + search_term + "*"
 
         if is_csv and not search_string:
             return self.get_csv(request)
@@ -64,7 +66,7 @@ class ListWithHeadersMixin(ListModelMixin):
                 return Response(results, headers=serializer.headers)
 
         response = Response(self.get_serializer(sorted_list, many=True).data)
-        response['num_found'] = len(sorted_list)
+        response['num_found'] = get(self, 'total_count', len(sorted_list))
         return response
 
     def get_object_ids(self):

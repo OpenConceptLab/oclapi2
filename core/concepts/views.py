@@ -7,35 +7,46 @@ from rest_framework.generics import RetrieveAPIView, DestroyAPIView, ListCreateA
 from rest_framework.mixins import CreateModelMixin
 from rest_framework.response import Response
 
-from core.common.constants import HEAD, LIMIT_PARAM, INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_RETIRED_PARAM
+from core.common.constants import (
+    HEAD, INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_RETIRED_PARAM
+)
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryMixin
-from core.common.utils import compact_dict_by_values
-from core.common.views import BaseAPIView
+from core.common.views import SourceChildCommonBaseView
+from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept, LocalizedText
 from core.concepts.permissions import CanViewParentDictionary, CanEditParentDictionary
-from core.concepts.serializers import ConceptDetailSerializer, ConceptListSerializer, ConceptDescriptionSerializer, \
-    ConceptNameSerializer, ConceptVersionDetailSerializer
+from core.concepts.serializers import (
+    ConceptDetailSerializer, ConceptListSerializer, ConceptDescriptionSerializer, ConceptNameSerializer,
+    ConceptVersionDetailSerializer
+)
 from core.mappings.serializers import MappingListSerializer
 
 
-class ConceptBaseView(BaseAPIView):
+class ConceptBaseView(SourceChildCommonBaseView):
     lookup_field = 'concept'
-    pk_field = 'mnemonic'
     model = Concept
-    permission_classes = (CanViewParentDictionary,)
     queryset = Concept.objects.filter(is_active=True)
+    document_model = ConceptDocument
+    es_fields = {
+        'id': {'sortable': True, 'filterable': True},
+        'name': {'sortable': True, 'filterable': True},
+        'lastUpdate': {'sortable': True, 'filterable': False},
+        'is_latest_version': {'sortable': False, 'filterable': True},
+        'conceptClass': {'sortable': True, 'filterable': True, 'facet': True},
+        'datatype': {'sortable': True, 'filterable': True, 'facet': True},
+        'locale': {'sortable': False, 'filterable': True, 'facet': True},
+        'retired': {'sortable': False, 'filterable': True, 'facet': True},
+        'source': {'sortable': False, 'filterable': True, 'facet': True},
+        'collection': {'sortable': False, 'filterable': True, 'facet': True},
+        'owner': {'sortable': False, 'filterable': True, 'facet': True},
+        'ownerType': {'sortable': False, 'filterable': True, 'facet': True},
+    }
 
     def get_detail_serializer(self, obj, data=None, files=None, partial=False):
         return ConceptDetailSerializer(obj, data, files, partial, context=dict(request=self.request))
 
-    def get_filter_params(self):
-        kwargs = self.kwargs.copy()
-        query_params = self.request.query_params.copy()
-        kwargs.update(query_params)
-        return compact_dict_by_values(kwargs)
-
     def get_queryset(self):
-        return Concept.get_base_queryset(self.get_filter_params())
+        return Concept.get_base_queryset(self.params)
 
 
 class ConceptVersionListAllView(ConceptBaseView, ListWithHeadersMixin):
@@ -48,13 +59,11 @@ class ConceptVersionListAllView(ConceptBaseView, ListWithHeadersMixin):
         return ConceptListSerializer
 
     def get_queryset(self):
-        queryset = Concept.global_listing_queryset(
+        return Concept.global_listing_queryset(
             self.get_filter_params(), self.request.user
         ).select_related(
             'parent__organization', 'parent__user',
         ).prefetch_related('names', 'descriptions')
-        limit = int(self.request.query_params.get(LIMIT_PARAM, 25))
-        return queryset[0:limit]
 
     def get(self, request, *args, **kwargs):
         return self.list(request, *args, **kwargs)
@@ -80,6 +89,7 @@ class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
         queryset = super().get_queryset()
         if is_latest_version:
             queryset = queryset.filter(is_latest_version=True)
+
         return queryset.select_related(
             'parent__organization', 'parent__user', 'created_by'
         ).prefetch_related('names')
