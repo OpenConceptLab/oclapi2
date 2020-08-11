@@ -1,9 +1,11 @@
 import logging
 
 from django.conf import settings
+from django.core.paginator import Paginator
 from django.db.models import Q, F
 from django.http import HttpResponseForbidden
 from django.urls import resolve, reverse
+from django.utils.functional import cached_property
 from pydash import compact, get
 from rest_framework import status
 from rest_framework.mixins import ListModelMixin, CreateModelMixin
@@ -15,6 +17,56 @@ from core.common.services import S3
 from .utils import write_csv_to_s3, get_csv_from_s3, get_query_params_from_url_string
 
 logger = logging.getLogger('oclapi')
+
+
+class CustomPaginator:
+    def __init__(self, request, queryset, page_size):
+        self.request = request
+        self.queryset = queryset
+        self.page_size = page_size
+        self.page_number = int(request.GET.get('page', '1'))
+        self.paginator = Paginator(self.queryset, self.page_size)
+        self.page_object = self.paginator.get_page(self.page_number)
+
+    @property
+    def current_page_number(self):
+        return self.page_number
+
+    @property
+    def current_page_results(self):
+        return self.page_object.object_list
+
+    @cached_property
+    def total_count(self):
+        return self.queryset.count()
+
+    def __get_query_params(self):
+        return self.request.GET.copy()
+
+    def __get_full_url(self):
+        return self.request.build_absolute_uri('?')
+
+    def get_next_page_url(self):
+        query_params = self.__get_query_params()
+        query_params['page'] = str(self.current_page_number + 1)
+        return self.__get_full_url() + '?' + query_params.urlencode()
+
+    def get_previous_page_url(self):
+        query_params = self.__get_query_params()
+        query_params['page'] = str(self.current_page_number - 1)
+        return self.__get_full_url() + '?' + query_params.urlencode()
+
+    @property
+    def headers(self):
+        headers = dict(
+            num_found=self.queryset.count(), num_returned=len(self.current_page_results)
+        )
+        if self.page_object.has_next():
+            headers['next'] = self.get_next_page_url()
+        if self.page_object.has_previous():
+            headers['previous'] = self.get_previous_page_url()
+
+        return headers
 
 
 class ListWithHeadersMixin(ListModelMixin):
@@ -41,7 +93,7 @@ class ListWithHeadersMixin(ListModelMixin):
             return self.get_csv(request)
 
         if self.object_list is None:
-            self.object_list = self.filter_queryset(self.get_queryset())
+            self.object_list = self.filter_queryset(self.get_queryset()).order_by('-created_at')
 
         if is_csv and search_string:
             klass = type(self.object_list[0])
@@ -52,21 +104,28 @@ class ListWithHeadersMixin(ListModelMixin):
         meta = request._request.META  # pylint: disable=protected-access
 
         compress = meta.get('HTTP_COMPRESS', False)
-        return_all = False  # self.get_paginate_by() == 0
-        skip_pagination = compress or return_all
+        skip_pagination = compress or not self.limit
 
         # Switch between paginated or standard style responses
-        sorted_list = self.prepend_head(self.object_list) if len(self.object_list) > 0 else self.object_list
+        from core.collections.models import Collection
+        from core.sources.models import Source
+        if self.model in [Source, Collection]:
+            sorted_list = self.prepend_head(self.object_list) if len(self.object_list) > 0 else self.object_list
+        else:
+            sorted_list = self.object_list
 
+        headers = dict()
+        results = sorted_list
         if not skip_pagination:
-            page = self.paginate_queryset(sorted_list)
-            if page is not None:
-                serializer = self.get_pagination_serializer(page)
-                results = serializer.data
-                return Response(results, headers=serializer.headers)
+            paginator = CustomPaginator(request=request, queryset=sorted_list, page_size=self.limit)
+            headers = paginator.headers
+            results = paginator.current_page_results
 
-        response = Response(self.get_serializer(sorted_list, many=True).data)
-        response['num_found'] = get(self, 'total_count', len(sorted_list))
+        response = Response(self.get_serializer(results, many=True).data)
+        for key, value in headers.items():
+            response[key] = value
+        if not headers:
+            response['num_found'] = len(sorted_list)
         return response
 
     def get_object_ids(self):
