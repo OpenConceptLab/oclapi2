@@ -28,7 +28,6 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     is_searchable = False
     limit = LIST_DEFAULT_LIMIT
     default_filters = dict()
-    total_count = 0
 
     def initial(self, request, *args, **kwargs):
         super().initial(request, *args, **kwargs)
@@ -64,17 +63,14 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
     def head(self, _):
         res = HttpResponse()
-        res['num_found'] = get(self, 'total_count', self.filter_queryset(self.get_queryset()).count())
+        res['num_found'] = self.filter_queryset(self.get_queryset()).count()
         return res
 
     def filter_queryset(self, queryset):
         if self.is_searchable and self.should_perform_es_search():
-            _queryset = self.get_search_results_qs().filter(id__in=queryset.values_list('id'))
-        else:
-            _queryset = super().filter_queryset(queryset)
+            return self.get_search_results_qs().filter(id__in=queryset.values_list('id'))
 
-        self.total_count = _queryset.count()
-        return _queryset[0:self.limit]
+        return super().filter_queryset(queryset)
 
     def get_searchable_fields(self):
         return [field for field, config in get(self, 'es_fields', dict()).items() if config.get('filterable', False)]
