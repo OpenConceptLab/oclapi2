@@ -104,7 +104,8 @@ class ListWithHeadersMixin(ListModelMixin):
         meta = request._request.META  # pylint: disable=protected-access
 
         compress = meta.get('HTTP_COMPRESS', False)
-        skip_pagination = compress or not self.limit
+        return_all = not self.limit or int(self.limit) == 0
+        skip_pagination = compress or return_all
 
         # Switch between paginated or standard style responses
         from core.collections.models import Collection
