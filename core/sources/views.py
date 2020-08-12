@@ -19,6 +19,7 @@ from core.common.permissions import CanViewConceptDictionary, CanEditConceptDict
 from core.common.tasks import export_source
 from core.common.utils import parse_boolean_query_param, compact_dict_by_values
 from core.common.views import BaseAPIView
+from core.sources.documents import SourceDocument
 from core.sources.models import Source
 from core.sources.serializers import (
     SourceDetailSerializer, SourceListSerializer, SourceCreateSerializer, SourceVersionDetailSerializer
@@ -62,6 +63,17 @@ class SourceVersionBaseView(SourceBaseView):
 
 class SourceListView(SourceBaseView, ConceptDictionaryCreateMixin, ListWithHeadersMixin):
     serializer_class = SourceListSerializer
+    is_searchable = True
+    es_fields = {
+        'sourceType': {'sortable': False, 'filterable': True, 'facet': True},
+        'name': {'sortable': True, 'filterable': True},
+        'lastUpdate': {'sortable': True, 'filterable': True},
+        'locale': {'sortable': False, 'filterable': True, 'facet': True},
+        'owner': {'sortable': False, 'filterable': True, 'facet': True},
+        'ownerType': {'sortable': False, 'filterable': True, 'facet': True},
+        'customValidationSchema': {'sortable': False, 'filterable': True},
+    }
+    document_model = SourceDocument
 
     def get_serializer_class(self):
         if self.request.method == 'GET':

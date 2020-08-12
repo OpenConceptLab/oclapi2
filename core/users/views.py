@@ -6,6 +6,7 @@ from rest_framework.response import Response
 from core.common.mixins import ListWithHeadersMixin
 from core.common.views import BaseAPIView
 from core.orgs.models import Organization
+from core.users.documents import UserProfileDocument
 from core.users.serializers import UserDetailSerializer, UserCreateSerializer, UserListSerializer
 from .models import UserProfile
 
@@ -16,6 +17,14 @@ class UserBaseView(BaseAPIView):
     model = UserProfile
     queryset = UserProfile.objects.filter(is_active=True)
     user_is_self = False
+    es_fields = {
+        'username': {'sortable': True, 'filterable': True},
+        'dateJoined': {'sortable': True, 'default': 'asc', 'filterable': True},
+        'company': {'sortable': False, 'filterable': True},
+        'location': {'sortable': False, 'filterable': True},
+    }
+    document_model = UserProfileDocument
+    is_searchable = True
 
 
 class UserListView(UserBaseView,

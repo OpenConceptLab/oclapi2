@@ -27,7 +27,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     user_is_self = False
     is_searchable = False
     limit = LIST_DEFAULT_LIMIT
-    default_filters = dict()
+    default_filters = dict(is_active=True)
 
     def initial(self, request, *args, **kwargs):
         super().initial(request, *args, **kwargs)
@@ -35,6 +35,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
     def initialize(self, request, path_info_segment, **kwargs):  # pylint: disable=unused-argument
         self.user_is_self = kwargs.pop('user_is_self', False)
+        self.limit = request.query_params.dict().get(LIMIT_PARAM, LIST_DEFAULT_LIMIT)
 
     def get_object(self, queryset=None):  # pylint: disable=arguments-differ
         # Determine the base queryset to use.
