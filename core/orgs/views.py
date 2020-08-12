@@ -11,6 +11,7 @@ from core.common.constants import ACCESS_TYPE_NONE
 from core.common.mixins import ListWithHeadersMixin
 from core.common.permissions import IsSuperuser
 from core.common.views import BaseAPIView
+from core.orgs.documents import OrganizationDocument
 from core.orgs.models import Organization
 from core.orgs.serializers import OrganizationDetailSerializer, OrganizationListSerializer, OrganizationCreateSerializer
 from core.sources.views import SourceListView
@@ -23,6 +24,14 @@ class OrganizationListView(BaseAPIView,
                            mixins.CreateModelMixin):
     model = Organization
     queryset = Organization.objects.filter(is_active=True)
+    es_fields = {
+        'name': {'sortable': True, 'filterable': True},
+        'last_update': {'sortable': True, 'default': 'desc', 'filterable': True},
+        'company': {'sortable': False, 'filterable': True},
+        'location': {'sortable': False, 'filterable': True},
+    }
+    document_model = OrganizationDocument
+    is_searchable = True
 
     def get_serializer_class(self):
         if self.request.method == 'GET':

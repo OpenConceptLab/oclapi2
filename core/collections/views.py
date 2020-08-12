@@ -13,6 +13,7 @@ from rest_framework.response import Response
 
 from core.collections.constants import INCLUDE_REFERENCES_PARAM, HEAD_OF_CONCEPT_ADDED_TO_COLLECTION, \
     HEAD_OF_MAPPING_ADDED_TO_COLLECTION, CONCEPT_ADDED_TO_COLLECTION_FMT, MAPPING_ADDED_TO_COLLECTION_FMT
+from core.collections.documents import CollectionDocument
 from core.collections.models import Collection, CollectionReference
 from core.collections.serializers import CollectionDetailSerializer, CollectionListSerializer, \
     CollectionCreateSerializer, CollectionReferenceSerializer, CollectionVersionDetailSerializer
@@ -88,6 +89,17 @@ class CollectionVersionBaseView(CollectionBaseView):
 
 class CollectionListView(CollectionBaseView, ConceptDictionaryCreateMixin, ListWithHeadersMixin):
     serializer_class = CollectionListSerializer
+    is_searchable = True
+    es_fields = {
+        'collection_type': {'sortable': False, 'filterable': True, 'facet': True},
+        'name': {'sortable': True, 'filterable': True},
+        'lastUpdate': {'sortable': True, 'filterable': True},
+        'locale': {'sortable': False, 'filterable': True, 'facet': True},
+        'owner': {'sortable': False, 'filterable': True, 'facet': True},
+        'ownerType': {'sortable': False, 'filterable': True, 'facet': True},
+        'customValidationSchema': {'sortable': False, 'filterable': True},
+    }
+    document_model = CollectionDocument
 
     def get_serializer_class(self):
         if self.request.method == 'GET':
