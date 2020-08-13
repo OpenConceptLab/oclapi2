@@ -12,7 +12,7 @@ class SourceDocument(Document):
         settings = {'number_of_shards': 1, 'number_of_replicas': 0}
 
     locale = fields.ListField(fields.TextField())
-    lastUpdate = fields.DateField(attr='updated_at')
+    last_update = fields.DateField(attr='updated_at')
     sourceType = fields.TextField(attr='source_type')
     owner = fields.TextField(attr='parent_resource')
     owner_type = fields.TextField(attr='parent_resource_type')

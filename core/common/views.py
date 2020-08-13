@@ -28,6 +28,9 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     is_searchable = False
     limit = LIST_DEFAULT_LIMIT
     default_filters = dict(is_active=True)
+    sort_asc_param = 'sortAsc'
+    sort_desc_param = 'sortDesc'
+    default_qs_sort_attr = '-updated_at'
 
     def initial(self, request, *args, **kwargs):
         super().initial(request, *args, **kwargs)
@@ -71,7 +74,37 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         if self.is_searchable and self.should_perform_es_search():
             return self.get_search_results_qs().filter(id__in=queryset.values_list('id'))
 
-        return super().filter_queryset(queryset)
+        return super().filter_queryset(queryset).order_by(self.default_qs_sort_attr)
+
+    def get_sort_and_desc(self):
+        query_params = self.request.query_params.dict()
+
+        sort_field = query_params.get(self.sort_desc_param)
+        if sort_field is not None:
+            return sort_field, True
+
+        sort_field = query_params.get(self.sort_asc_param)
+        if sort_field is not None:
+            return sort_field, False
+
+        return None, None
+
+    def is_valid_sort(self, field):
+        if not self.es_fields:
+            return False
+        if field in self.es_fields:
+            attrs = self.es_fields[field]
+            return attrs.get('sortable', False)
+
+        return False
+
+    def get_default_sort(self):
+        for field in self.es_fields:
+            attrs = self.es_fields[field]
+            if 'sortable' in attrs and 'default' in attrs:
+                prefix = '-' if attrs['default'] == 'desc' else ''
+                return prefix + field
+        return None
 
     def get_searchable_fields(self):
         return [field for field, config in get(self, 'es_fields', dict()).items() if config.get('filterable', False)]
@@ -81,6 +114,15 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
     def get_wildcard_search_string(self):
         return "*{}*".format(self.get_search_string())
+
+    def get_sort_attr(self):
+        sort_field, desc = self.get_sort_and_desc()
+        if sort_field and self.is_valid_sort(sort_field):
+            if desc:
+                sort_field = '-' + sort_field
+            return sort_field
+
+        return self.get_default_sort()
 
     def get_search_results(self):
         results = None
@@ -92,6 +134,10 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             results = results.filter(
                 "query_string", query=self.get_wildcard_search_string(), fields=self.get_searchable_fields()
             )[0:ES_RESULTS_MAX_LIMIT]
+
+            sort_field = self.get_sort_attr()
+            if sort_field:
+                results = results.sort(sort_field)
 
         return results
 
@@ -106,7 +152,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
     def should_perform_es_search(self):
         return bool(
-            self.request.query_params.get(SEARCH_PARAM, None) and
+            SEARCH_PARAM in self.request.query_params and
             self.document_model and
             self.get_searchable_fields()
         )

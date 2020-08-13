@@ -25,6 +25,7 @@ class UserBaseView(BaseAPIView):
     }
     document_model = UserProfileDocument
     is_searchable = True
+    default_qs_sort_attr = '-created_at'
 
 
 class UserListView(UserBaseView,

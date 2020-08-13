@@ -20,7 +20,7 @@ class MappingBaseView(SourceChildCommonBaseView):
     queryset = Mapping.objects.filter(is_active=True)
     document_model = MappingDocument
     es_fields = {
-        'lastUpdate': {'sortable': True, 'filterable': False, 'facet': False},
+        'last_update': {'sortable': True, 'filterable': False, 'facet': False, 'default': 'desc'},
         'concept': {'sortable': False, 'filterable': True, 'facet': False},
         'fromConcept': {'sortable': False, 'filterable': True, 'facet': False},
         'toConcept': {'sortable': False, 'filterable': True, 'facet': False},

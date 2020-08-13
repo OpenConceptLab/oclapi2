@@ -67,7 +67,7 @@ class SourceListView(SourceBaseView, ConceptDictionaryCreateMixin, ListWithHeade
     es_fields = {
         'sourceType': {'sortable': False, 'filterable': True, 'facet': True},
         'name': {'sortable': True, 'filterable': True},
-        'lastUpdate': {'sortable': True, 'filterable': True},
+        'last_update': {'sortable': True, 'filterable': True, 'default': 'desc'},
         'locale': {'sortable': False, 'filterable': True, 'facet': True},
         'owner': {'sortable': False, 'filterable': True, 'facet': True},
         'ownerType': {'sortable': False, 'filterable': True, 'facet': True},

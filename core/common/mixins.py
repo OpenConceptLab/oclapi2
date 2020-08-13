@@ -93,7 +93,7 @@ class ListWithHeadersMixin(ListModelMixin):
             return self.get_csv(request)
 
         if self.object_list is None:
-            self.object_list = self.filter_queryset(self.get_queryset()).order_by('-created_at')
+            self.object_list = self.filter_queryset(self.get_queryset())
 
         if is_csv and search_string:
             klass = type(self.object_list[0])
