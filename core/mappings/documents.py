@@ -16,7 +16,7 @@ class MappingDocument(Document):
             'external_id', 'retired', 'is_latest_version', 'is_active'
         ]
 
-    lastUpdate = fields.DateField(attr='updated_at')
+    last_update = fields.DateField(attr='updated_at')
     mapType = fields.TextField(attr='map_type')
     source = fields.TextField(attr='source')
     ownerType = fields.TextField(attr='owner_type')

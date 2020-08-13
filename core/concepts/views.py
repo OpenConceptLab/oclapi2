@@ -30,7 +30,7 @@ class ConceptBaseView(SourceChildCommonBaseView):
     es_fields = {
         'id': {'sortable': True, 'filterable': True},
         'name': {'sortable': True, 'filterable': True},
-        'lastUpdate': {'sortable': True, 'filterable': False},
+        'last_update': {'sortable': True, 'filterable': False, 'default': 'desc'},
         'is_latest_version': {'sortable': False, 'filterable': True},
         'conceptClass': {'sortable': True, 'filterable': True, 'facet': True},
         'datatype': {'sortable': True, 'filterable': True, 'facet': True},
@@ -212,6 +212,7 @@ class ConceptVersionRetrieveView(ConceptBaseView, RetrieveAPIView):
 class ConceptLabelListCreateView(ConceptBaseView, ListWithHeadersMixin, ListCreateAPIView):
     model = LocalizedText
     parent_list_attribute = None
+    default_qs_sort_attr = '-created_at'
 
     def get_permissions(self):
         if self.request.method in ['GET', 'HEAD']:
@@ -255,6 +256,7 @@ class ConceptLabelRetrieveUpdateDestroyView(ConceptBaseView, RetrieveUpdateDestr
     model = LocalizedText
     parent_list_attribute = None
     permission_classes = (CanEditParentDictionary,)
+    default_qs_sort_attr = '-created_at'
 
     def get_permissions(self):
         if self.request.method in ['GET', 'HEAD']:
@@ -333,6 +335,8 @@ class ConceptDescriptionRetrieveUpdateDestroyView(ConceptLabelRetrieveUpdateDest
 
 
 class ConceptExtrasBaseView(ConceptBaseView):
+    default_qs_sort_attr = '-created_at'
+
     def get_object(self, queryset=None):
         return self.get_queryset().filter(is_latest_version=True).first()
 

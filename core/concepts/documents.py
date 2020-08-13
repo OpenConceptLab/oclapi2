@@ -12,8 +12,11 @@ class ConceptDocument(Document):
         settings = {'number_of_shards': 1, 'number_of_replicas': 0}
 
     id = fields.TextField(attr='mnemonic')
-    name = fields.KeywordField(attr='display_name')
-    lastUpdate = fields.DateField(attr='updated_at')
+    name = fields.KeywordField(
+        attr='display_name',
+        normalizer="lowercase",
+    )
+    last_update = fields.DateField(attr='updated_at')
     conceptClass = fields.TextField(attr='concept_class')
     locale = fields.ListField(fields.TextField())
     source = fields.TextField(attr='parent_resource')
