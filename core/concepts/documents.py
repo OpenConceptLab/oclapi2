@@ -17,11 +17,10 @@ class ConceptDocument(Document):
         normalizer="lowercase",
     )
     last_update = fields.DateField(attr='updated_at')
-    conceptClass = fields.TextField(attr='concept_class')
     locale = fields.ListField(fields.TextField())
     source = fields.TextField(attr='parent_resource')
     owner = fields.TextField(attr='owner_name')
-    ownerType = fields.TextField(attr='owner_type')
+    owner_type = fields.TextField(attr='owner_type')
     source_version = fields.ListField(fields.IntegerField())
     collection_version = fields.ListField(fields.IntegerField())
     collection = fields.ListField(fields.IntegerField())
@@ -34,7 +33,8 @@ class ConceptDocument(Document):
             'version',
             'is_latest_version',
             'retired',
-            'is_active'
+            'is_active',
+            'concept_class'
         ]
 
     @staticmethod

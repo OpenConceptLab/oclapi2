@@ -19,7 +19,7 @@ class UserBaseView(BaseAPIView):
     user_is_self = False
     es_fields = {
         'username': {'sortable': True, 'filterable': True},
-        'dateJoined': {'sortable': True, 'default': 'asc', 'filterable': True},
+        'date_joined': {'sortable': True, 'default': 'asc', 'filterable': True},
         'company': {'sortable': False, 'filterable': True},
         'location': {'sortable': False, 'filterable': True},
     }

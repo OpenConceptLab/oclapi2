@@ -16,7 +16,6 @@ class CollectionDocument(Document):
     owner = fields.TextField(attr='parent_resource')
     owner_type = fields.TextField(attr='parent_resource_type')
     public_can_view = fields.TextField(attr='public_can_view')
-    customValidationSchema = fields.TextField(attr='custom_validation_schema')
 
     class Django:
         model = Collection
@@ -25,6 +24,7 @@ class CollectionDocument(Document):
             'full_name',
             'is_active',
             'collection_type',
+            'custom_validation_schema',
         ]
 
     @staticmethod
