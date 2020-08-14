@@ -32,14 +32,14 @@ class ConceptBaseView(SourceChildCommonBaseView):
         'name': {'sortable': True, 'filterable': True},
         'last_update': {'sortable': True, 'filterable': False, 'default': 'desc'},
         'is_latest_version': {'sortable': False, 'filterable': True},
-        'conceptClass': {'sortable': True, 'filterable': True, 'facet': True},
+        'concept_class': {'sortable': True, 'filterable': True, 'facet': True},
         'datatype': {'sortable': True, 'filterable': True, 'facet': True},
         'locale': {'sortable': False, 'filterable': True, 'facet': True},
         'retired': {'sortable': False, 'filterable': True, 'facet': True},
         'source': {'sortable': False, 'filterable': True, 'facet': True},
         'collection': {'sortable': False, 'filterable': True, 'facet': True},
         'owner': {'sortable': False, 'filterable': True, 'facet': True},
-        'ownerType': {'sortable': False, 'filterable': True, 'facet': True},
+        'owner_type': {'sortable': False, 'filterable': True, 'facet': True},
     }
 
     def get_detail_serializer(self, obj, data=None, files=None, partial=False):
