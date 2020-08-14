@@ -31,6 +31,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     sort_asc_param = 'sortAsc'
     sort_desc_param = 'sortDesc'
     default_qs_sort_attr = '-updated_at'
+    best_match = 'best_match'
 
     def initial(self, request, *args, **kwargs):
         super().initial(request, *args, **kwargs)
@@ -90,7 +91,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         return None, None
 
     def is_valid_sort(self, field):
-        if not self.es_fields:
+        if not self.es_fields or not field:
             return False
         if field in self.es_fields:
             attrs = self.es_fields[field]
@@ -117,10 +118,13 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
     def get_sort_attr(self):
         sort_field, desc = self.get_sort_and_desc()
-        if sort_field and self.is_valid_sort(sort_field):
+        if self.is_valid_sort(sort_field):
             if desc:
                 sort_field = '-' + sort_field
             return sort_field
+
+        if sort_field == self.best_match:
+            return dict(_score=dict(order="desc" if desc else "asc"))
 
         return self.get_default_sort()
 
