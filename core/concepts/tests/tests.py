@@ -33,13 +33,60 @@ class ConceptTest(OCLTestCase):
         self.assertTrue(Concept().is_versioned)
 
     def test_display_name(self):
-        concept = ConceptFactory(names=())
-        self.assertIsNone(concept.display_name)
+        source = SourceFactory(default_locale='fr', supported_locales=['fr', 'ti'])
+        ch_locale = LocalizedTextFactory(locale_preferred=True, locale='ch')
+        en_locale = LocalizedTextFactory(locale_preferred=True, locale='en')
+        concept = ConceptFactory(names=[ch_locale, en_locale], parent=source)
 
-        preferred_locale = LocalizedTextFactory(locale_preferred=True)
-        concept.names.add(preferred_locale)
+        self.assertEqual(concept.display_name, en_locale.name)  # locale preferred order by created at desc
 
-        self.assertEqual(concept.display_name, preferred_locale.name)
+        source.supported_locales = ['fr', 'ti', 'ch']
+        source.save()
+        self.assertEqual(concept.display_name, ch_locale.name)  # locale preferred parent's supported locale
+
+        # taking scenarios for ciel 1366 concept
+        concept = ConceptFactory(
+            parent=source,
+            names=[
+                LocalizedTextFactory(locale_preferred=True, locale='en', name='MALARIA SMEAR, QUALITATIVE'),
+                LocalizedTextFactory(type='SHORT', locale_preferred=False, locale='en', name='malaria sm, qual'),
+                LocalizedTextFactory(locale_preferred=False, locale='en', name='Jungle fever smear'),
+                LocalizedTextFactory(locale_preferred=True, locale='fr', name='FROTTIS POUR DÉTECTER PALUDISME'),
+                LocalizedTextFactory(locale_preferred=False, locale='ht', name='tès MALARYA , kalitatif'),
+                LocalizedTextFactory(locale_preferred=False, locale='es', name='frotis de malaria (cualitativo)'),
+                LocalizedTextFactory(locale_preferred=False, locale='es', name='Frotis de paludismo'),
+            ]
+        )
+
+        source.default_locale = 'en'
+        source.supported_locales = ['en']
+        source.save()
+        self.assertEqual(concept.display_name, 'MALARIA SMEAR, QUALITATIVE')
+
+        source.default_locale = 'fr'
+        source.supported_locales = ['fr', 'en']
+        source.save()
+        self.assertEqual(concept.display_name, 'FROTTIS POUR DÉTECTER PALUDISME')
+
+        source.default_locale = 'es'
+        source.supported_locales = ['es']
+        source.save()
+        self.assertEqual(concept.display_name, 'Frotis de paludismo')
+
+        source.default_locale = 'ht'
+        source.supported_locales = ['ht', 'en']
+        source.save()
+        self.assertEqual(concept.display_name, 'tès MALARYA , kalitatif')
+
+        source.default_locale = 'ti'
+        source.supported_locales = ['ti']
+        source.save()
+        self.assertEqual(concept.display_name, 'MALARIA SMEAR, QUALITATIVE')  # system default locale = en
+
+        source.default_locale = 'ti'
+        source.supported_locales = ['ti', 'en']
+        source.save()
+        self.assertEqual(concept.display_name, 'MALARIA SMEAR, QUALITATIVE')
 
     def test_display_locale(self):
         preferred_locale = LocalizedTextFactory(locale_preferred=True)
