@@ -134,8 +134,41 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
     @property
     def preferred_locale(self):
-        return get(self.__names_qs(dict(locale_preferred=True), 'created_at', 'desc'), '0') or \
-               get(self.__names_qs(dict(), 'created_at', 'desc'), '0')
+        return self.__get_parent_default_locale_name() or self.__get_parent_supported_locale_name() or \
+               self.__get_system_default_locale() or self.__get_preferred_locale() or self.__get_last_created_locale()
+
+    def __get_system_default_locale(self):
+        system_default_locale = settings.DEFAULT_LOCALE
+
+        return get(
+            self.__names_qs(dict(locale=system_default_locale, locale_preferred=True), 'created_at', 'desc'), '0'
+        ) or get(
+            self.__names_qs(dict(locale=system_default_locale), 'created_at', 'desc'), '0'
+        )
+
+    def __get_parent_default_locale_name(self):
+        parent_default_locale = self.parent.default_locale
+        return get(
+            self.__names_qs(dict(locale=parent_default_locale, locale_preferred=True), 'created_at', 'desc'), '0'
+        ) or get(
+            self.__names_qs(dict(locale=parent_default_locale), 'created_at', 'desc'), '0'
+        )
+
+    def __get_parent_supported_locale_name(self):
+        parent_supported_locales = self.parent.supported_locales
+        return get(
+            self.__names_qs(dict(locale__in=parent_supported_locales, locale_preferred=True), 'created_at', 'desc'), '0'
+        ) or get(
+            self.__names_qs(dict(locale__in=parent_supported_locales), 'created_at', 'desc'), '0'
+        )
+
+    def __get_last_created_locale(self):
+        return get(self.__names_qs(dict(), 'created_at', 'desc'), '0')
+
+    def __get_preferred_locale(self):
+        return get(
+            self.__names_qs(dict(locale_preferred=True), 'created_at', 'desc'), '0'
+        )
 
     def __names_qs(self, filters, order_by=None, order='desc'):
         if getattr(self, '_prefetched_objects_cache', None) and \
