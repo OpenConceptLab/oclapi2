@@ -529,3 +529,52 @@ class ConceptCreateUpdateDestroyViewTest(APITestCase, PauseElasticSearchIndex):
         self.assertEqual(latest_version.names.count(), 1)
         self.assertEqual(latest_version.names.first().name, name1.name)
         self.assertEqual(latest_version.comment, 'Deleted {} in names.'.format(name2.name))
+
+    def test_get_200(self):
+        concept1 = ConceptFactory(parent=self.source, mnemonic='conceptA')
+        concept2 = ConceptFactory(parent=self.source, mnemonic='conceptB')
+
+        response = self.client.get(
+            "/concepts/",
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 2)
+        self.assertEqual(
+            [response.data[0]['id'], response.data[1]['id']],
+            [concept2.mnemonic, concept1.mnemonic]
+        )
+        self.assertEqual(response['num_found'], '2')
+        self.assertEqual(response['num_returned'], '2')
+        self.assertFalse(response.has_header('previous'))
+        self.assertFalse(response.has_header('next'))
+
+        response = self.client.get(
+            "/concepts/?limit=1",
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['id'], concept2.mnemonic)
+        self.assertEqual(response['num_found'], '2')
+        self.assertEqual(response['num_returned'], '1')
+        self.assertTrue('/concepts/?limit=1&page=2' in response['next'])
+        self.assertFalse(response.has_header('previous'))
+
+        response = self.client.get(
+            "/concepts/?page=2&limit=1",
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['id'], concept1.mnemonic)
+        self.assertEqual(response['num_found'], '2')
+        self.assertEqual(response['num_returned'], '1')
+        self.assertTrue('/concepts/?page=1&limit=1' in response['previous'])
+        self.assertFalse(response.has_header('next'))
