@@ -28,7 +28,7 @@ class Organization(BaseResourceModel, SourceContainerMixin):
 
     @property
     def members(self):
-        return self.userprofile_set
+        return self.users
 
     @property
     def num_members(self):

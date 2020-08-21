@@ -52,9 +52,9 @@ class UserListView(UserBaseView,
             organization = Organization.objects.get(mnemonic=org)
             if not organization.public_can_view:
                 if not request.user.is_staff:
-                    if not organization.userprofile_set.filter(id=request.user.id).exists():
+                    if not organization.users.filter(id=request.user.id).exists():
                         return Response(status=status.HTTP_403_FORBIDDEN)
-            self.queryset = organization.userprofile_set.all()
+            self.queryset = organization.users.all()
         return self.list(request, *args, **kwargs)
 
     def post(self, request, *args, **kwargs):
