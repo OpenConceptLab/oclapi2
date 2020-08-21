@@ -135,8 +135,8 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     def get_exact_search_criterion(self):
         search_str = self.get_search_string()
 
-        def get_query(field):
-            return Q('match', **{field: search_str})
+        def get_query(attr):
+            return Q('match', **{attr: search_str})
 
         exact_search_fields = self.get_exact_search_fields()
         criterion = get_query(exact_search_fields.pop())
