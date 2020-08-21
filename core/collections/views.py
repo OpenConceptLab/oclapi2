@@ -476,11 +476,15 @@ class CollectionExtrasBaseView(CollectionBaseView):
 
 
 class CollectionExtrasView(CollectionExtrasBaseView, ListAPIView):
+    serializer_class = CollectionDetailSerializer
+
     def list(self, request, *args, **kwargs):
         return Response(get(self.get_object(), 'extras', {}))
 
 
 class CollectionExtraRetrieveUpdateDestroyView(CollectionExtrasBaseView, RetrieveUpdateDestroyAPIView):
+    serializer_class = CollectionDetailSerializer
+
     def retrieve(self, request, *args, **kwargs):
         key = kwargs.get('extra')
         instance = self.get_object()
@@ -526,6 +530,7 @@ class CollectionExtraRetrieveUpdateDestroyView(CollectionExtrasBaseView, Retriev
 
 class CollectionVersionProcessingView(CollectionBaseView):
     permission_classes = (CanViewConceptDictionary,)
+    serializer_class = CollectionVersionDetailSerializer
 
     def get_object(self, queryset=None):
         return self.get_queryset().first()
@@ -552,6 +557,7 @@ class CollectionVersionProcessingView(CollectionBaseView):
 class CollectionVersionExportView(CollectionBaseView, ConceptContainerExportMixin):
     entity = 'Collection'
     permission_classes = (CanViewConceptDictionary,)
+    serializer_class = CollectionVersionDetailSerializer
 
     def get_object(self, queryset=None):
         return self.get_queryset().first()

@@ -87,6 +87,7 @@ class UserDetailView(UserBaseView, RetrieveAPIView, DestroyAPIView, mixins.Updat
 class UserReactivateView(UserBaseView, UpdateAPIView):
     permission_classes = (IsAdminUser, )
     queryset = UserProfile.objects.filter(is_active=False)
+    serializer_class = UserDetailSerializer
 
     def update(self, request, *args, **kwargs):
         profile = self.get_object()

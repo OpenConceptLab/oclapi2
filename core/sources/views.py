@@ -261,11 +261,15 @@ class SourceExtrasBaseView(SourceBaseView):
 
 
 class SourceExtrasView(SourceExtrasBaseView, ListAPIView):
+    serializer_class = SourceDetailSerializer
+
     def list(self, request, *args, **kwargs):
         return Response(get(self.get_object(), 'extras', {}))
 
 
 class SourceExtraRetrieveUpdateDestroyView(SourceExtrasBaseView, RetrieveUpdateDestroyAPIView):
+    serializer_class = SourceDetailSerializer
+
     def retrieve(self, request, *args, **kwargs):
         key = kwargs.get('extra')
         instance = self.get_object()
@@ -311,6 +315,7 @@ class SourceExtraRetrieveUpdateDestroyView(SourceExtrasBaseView, RetrieveUpdateD
 
 class SourceVersionProcessingView(SourceBaseView):
     permission_classes = (CanViewConceptDictionary,)
+    serializer_class = SourceVersionDetailSerializer
 
     def get_object(self, queryset=None):
         return self.get_queryset().first()
@@ -337,6 +342,7 @@ class SourceVersionProcessingView(SourceBaseView):
 class SourceVersionExportView(SourceBaseView, ConceptContainerExportMixin):
     entity = 'Source'
     permission_classes = (CanViewConceptDictionary,)
+    serializer_class = SourceVersionDetailSerializer
 
     def get_object(self, queryset=None):
         return self.get_queryset().first()

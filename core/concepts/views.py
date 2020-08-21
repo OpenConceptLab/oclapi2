@@ -343,12 +343,15 @@ class ConceptExtrasBaseView(ConceptBaseView):
 
 class ConceptExtrasView(ConceptExtrasBaseView, ListAPIView):
     permission_classes = (CanViewParentDictionary,)
+    serializer_class = ConceptDetailSerializer
 
     def list(self, request, *args, **kwargs):
         return Response(get(self.get_object(), 'extras', {}))
 
 
 class ConceptExtraRetrieveUpdateDestroyView(ConceptExtrasBaseView, RetrieveUpdateDestroyAPIView):
+    serializer_class = ConceptDetailSerializer
+
     def get_permissions(self):
         if self.request.method in ['GET', 'HEAD']:
             return [CanViewParentDictionary()]
