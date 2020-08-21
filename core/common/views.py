@@ -1,5 +1,6 @@
 from django.db import DatabaseError
 from django.http import Http404, HttpResponse
+from elasticsearch_dsl import Q
 from pydash import get
 from rest_framework import response, generics, status
 
@@ -31,6 +32,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     sort_asc_param = 'sortAsc'
     sort_desc_param = 'sortDesc'
     default_qs_sort_attr = '-updated_at'
+    exact_match = 'exact_match'
 
     def initial(self, request, *args, **kwargs):
         super().initial(request, *args, **kwargs)
@@ -98,6 +100,9 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
         return False
 
+    def is_exact_match_on(self):
+        return self.request.query_params.dict().get(self.exact_match, None) == 'on'
+
     def get_default_sort(self):
         for field in self.es_fields:
             attrs = self.es_fields[field]
@@ -108,6 +113,9 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
     def get_searchable_fields(self):
         return [field for field, config in get(self, 'es_fields', dict()).items() if config.get('filterable', False)]
+
+    def get_exact_search_fields(self):
+        return [field for field, config in get(self, 'es_fields', dict()).items() if config.get('exact', False)]
 
     def get_search_string(self):
         return self.request.query_params.dict().get(SEARCH_PARAM, '')
@@ -124,6 +132,19 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
         return dict(_score=dict(order="desc"))
 
+    def get_exact_search_criterion(self):
+        search_str = self.get_search_string()
+
+        def get_query(field):
+            return Q('match', **{field: search_str})
+
+        exact_search_fields = self.get_exact_search_fields()
+        criterion = get_query(exact_search_fields.pop())
+        for field in exact_search_fields:
+            criterion |= get_query(field)
+
+        return criterion
+
     def get_search_results(self):
         results = None
 
@@ -131,9 +152,14 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             results = self.document_model.search()
             for field, value in self.default_filters.items():
                 results = results.filter("match", **{field: value})
-            results = results.filter(
-                "query_string", query=self.get_wildcard_search_string(), fields=self.get_searchable_fields()
-            )[0:ES_RESULTS_MAX_LIMIT]
+
+            if self.is_exact_match_on():
+                results = results.query(self.get_exact_search_criterion())
+            else:
+                results = results.filter(
+                    "query_string", query=self.get_wildcard_search_string(), fields=self.get_searchable_fields()
+                )
+            results = results[0:ES_RESULTS_MAX_LIMIT]
 
             sort_field = self.get_sort_attr()
             if sort_field:
