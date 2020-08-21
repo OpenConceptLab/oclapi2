@@ -4,6 +4,8 @@ services:
   db:
     image: postgres:12.3-alpine
     restart: "always"
+    ports:
+      - "5432:5432"
     environment:
       - POSTGRES_PASSWORD=${DB_PASSWORD-Postgres123}
     healthcheck:
