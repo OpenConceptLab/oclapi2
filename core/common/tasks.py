@@ -1,5 +1,8 @@
 from celery.utils.log import get_task_logger
 from celery_once import QueueOnce
+from django.apps import apps
+from django.core.management import call_command
+from django_elasticsearch_dsl.registries import registry
 
 from core.celery import app
 from core.common.utils import write_export_file
@@ -59,3 +62,39 @@ def add_references(
     head.remove_processing(self.request.id)
 
     return added_references, errors
+
+
+def __handle_save(instance):
+    registry.update(instance)
+    registry.update_related(instance)
+
+
+def __handle_pre_delete(instance):
+    registry.delete_related(instance)
+
+
+@app.task
+def handle_save(app_name, model_name, instance_id):
+    __handle_save(apps.get_model(app_name, model_name).objects.get(id=instance_id))
+
+
+@app.task
+def handle_m2m_changed(app_name, model_name, instance_id, action):
+    instance = apps.get_model(app_name, model_name).objects.get(id=instance_id)
+    if action in ('post_add', 'post_remove', 'post_clear'):
+        __handle_save(instance)
+    elif action in ('pre_remove', 'pre_clear'):
+        __handle_pre_delete(instance)
+
+
+@app.task
+def handle_pre_delete(app_name, model_name, instance_id):
+    __handle_pre_delete(apps.get_model(app_name, model_name).objects.get(id=instance_id))
+
+
+@app.task
+def populate_indexes(app_names=None):  # app_names has to be an iterable of strings
+    if app_names:
+        call_command('search_index', '--populate', '-f', '--models', *app_names, '--parallel')
+    else:
+        call_command('search_index', '--populate', '-f', '--parallel')
