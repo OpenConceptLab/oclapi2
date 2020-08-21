@@ -1,9 +1,11 @@
 import json
 import os
 
+from django.conf import settings
 from django.core.management import BaseCommand
 
 from core.common.constants import HEAD
+from core.common.tasks import populate_indexes
 from core.concepts.models import Concept
 from core.orgs.models import Organization
 from core.sources.models import Source
@@ -14,41 +16,49 @@ class Command(BaseCommand):
     help = 'import lookup values'
 
     def handle(self, *args, **options):
-        user = UserProfile.objects.filter(username='ocladmin').get()
-        org = Organization.objects.get(mnemonic='OCL')
-        sources = self.create_sources(org, user)
+        settings.ELASTICSEARCH_DSL_AUTO_REFRESH = False
+        settings.ELASTICSEARCH_DSL_AUTOSYNC = False
+        settings.ES_SYNC = False
+        try:
+            user = UserProfile.objects.filter(username='ocladmin').get()
+            org = Organization.objects.get(mnemonic='OCL')
+            sources = self.create_sources(org, user)
 
-        current_path = os.path.dirname(__file__)
-        importer_confs = [
-            dict(
-                source=sources['Classes'],
-                file=os.path.join(current_path, "../../../lookup_fixtures/concept_classes.json")
-            ),
-            dict(
-                source=sources['Locales'],
-                file=os.path.join(current_path, "../../../lookup_fixtures/locales.json")
-            ),
-            dict(
-                source=sources['Datatypes'],
-                file=os.path.join(current_path, "../../../lookup_fixtures/datatypes_fixed.json")
-            ),
-            dict(
-                source=sources['NameTypes'],
-                file=os.path.join(current_path, "../../../lookup_fixtures/nametypes_fixed.json")
-            ),
-            dict(
-                source=sources['DescriptionTypes'],
-                file=os.path.join(current_path, "../../../lookup_fixtures/description_types.json")
-            ),
-            dict(
-                source=sources['MapTypes'],
-                file=os.path.join(current_path, "../../../lookup_fixtures/maptypes_fixed.json")
-            ),
-        ]
+            current_path = os.path.dirname(__file__)
+            importer_confs = [
+                dict(
+                    source=sources['Classes'],
+                    file=os.path.join(current_path, "../../../lookup_fixtures/concept_classes.json")
+                ),
+                dict(
+                    source=sources['Locales'],
+                    file=os.path.join(current_path, "../../../lookup_fixtures/locales.json")
+                ),
+                dict(
+                    source=sources['Datatypes'],
+                    file=os.path.join(current_path, "../../../lookup_fixtures/datatypes_fixed.json")
+                ),
+                dict(
+                    source=sources['NameTypes'],
+                    file=os.path.join(current_path, "../../../lookup_fixtures/nametypes_fixed.json")
+                ),
+                dict(
+                    source=sources['DescriptionTypes'],
+                    file=os.path.join(current_path, "../../../lookup_fixtures/description_types.json")
+                ),
+                dict(
+                    source=sources['MapTypes'],
+                    file=os.path.join(current_path, "../../../lookup_fixtures/maptypes_fixed.json")
+                ),
+            ]
 
-        for conf in importer_confs:
-            source = conf['source']
-            self.create_concepts(source, conf['file'], user)
+            for conf in importer_confs:
+                source = conf['source']
+                self.create_concepts(source, conf['file'], user)
+        except:  # pylint: disable=bare-except
+            pass
+        finally:
+            populate_indexes.delay(['sources', 'concepts'])
 
     @staticmethod
     def create_sources(org, user):
@@ -83,6 +93,4 @@ class Command(BaseCommand):
                 data['mnemonic'] = mnemonic
                 data['name'] = mnemonic
                 data['parent'] = source
-                Concept.persist_new(data, user)
-
-
+                Concept.persist_new(data, user, False)

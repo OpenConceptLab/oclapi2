@@ -379,7 +379,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         return [locale.clone() for locale in locales.all()]
 
     @classmethod
-    def persist_new(cls, data, user=None):
+    def persist_new(cls, data, user=None, create_initial_version=True):
         names = [
             name if isinstance(name, LocalizedText) else LocalizedText.build(name) for name in data.pop('names', [])
         ]
@@ -401,15 +401,17 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             concept.save()
             concept.versioned_object_id = concept.id
             concept.version = str(concept.id)
-            concept.is_latest_version = False
+            concept.is_latest_version = not create_initial_version
             concept.save()
             concept.set_locales()
-            initial_version = cls.create_initial_version(concept)
-            initial_version.set_locales()
-
             parent_resource = concept.parent
             parent_resource_head = parent_resource.head
-            initial_version.sources.set([parent_resource, parent_resource_head])
+
+            if create_initial_version:
+                initial_version = cls.create_initial_version(concept)
+                initial_version.set_locales()
+                initial_version.sources.set([parent_resource, parent_resource_head])
+
             concept.sources.set([parent_resource, parent_resource_head])
 
             parent_resource.save()
