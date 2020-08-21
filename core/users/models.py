@@ -15,7 +15,7 @@ class UserProfile(AbstractUser, BaseModel, SourceContainerMixin):
         swappable = 'AUTH_USER_MODEL'
 
     OBJECT_TYPE = USER_OBJECT_TYPE
-    organizations = models.ManyToManyField('orgs.Organization')
+    organizations = models.ManyToManyField('orgs.Organization', related_name='users')
     company = models.TextField(null=True, blank=True)
     location = models.TextField(null=True, blank=True)
     preferred_locale = models.TextField(null=True, blank=True)
