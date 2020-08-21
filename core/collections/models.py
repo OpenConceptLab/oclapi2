@@ -47,8 +47,8 @@ class Collection(ConceptContainerModel):
     preferred_source = models.TextField(blank=True)
     repository_type = models.TextField(default=DEFAULT_REPOSITORY_TYPE, blank=True)
     custom_resources_linked_source = models.TextField(blank=True)
-    concepts = models.ManyToManyField('concepts.Concept', blank=True, related_name='collections')
-    mappings = models.ManyToManyField('mappings.Mapping', blank=True, related_name='collections')
+    concepts = models.ManyToManyField('concepts.Concept', blank=True, related_name='collection_set')
+    mappings = models.ManyToManyField('mappings.Mapping', blank=True, related_name='collection_set')
     references = models.ManyToManyField('collections.CollectionReference', blank=True, related_name='collections')
 
     @classmethod
