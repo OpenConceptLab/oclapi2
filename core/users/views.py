@@ -18,10 +18,10 @@ class UserBaseView(BaseAPIView):
     queryset = UserProfile.objects.filter(is_active=True)
     user_is_self = False
     es_fields = {
-        'username': {'sortable': True, 'filterable': True},
+        'username': {'sortable': True, 'filterable': True, 'exact': True},
         'date_joined': {'sortable': True, 'default': 'asc', 'filterable': True},
-        'company': {'sortable': False, 'filterable': True},
-        'location': {'sortable': False, 'filterable': True},
+        'company': {'sortable': False, 'filterable': True, 'exact': True},
+        'location': {'sortable': False, 'filterable': True, 'exact': True},
     }
     document_model = UserProfileDocument
     is_searchable = True

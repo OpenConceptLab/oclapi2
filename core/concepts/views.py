@@ -29,17 +29,17 @@ class ConceptBaseView(SourceChildCommonBaseView):
     document_model = ConceptDocument
     es_fields = {
         'id': {'sortable': True, 'filterable': True},
-        'name': {'sortable': True, 'filterable': True},
+        'name': {'sortable': True, 'filterable': True, 'exact': True},
         'last_update': {'sortable': True, 'filterable': False, 'default': 'desc'},
         'is_latest_version': {'sortable': False, 'filterable': True},
-        'concept_class': {'sortable': True, 'filterable': True, 'facet': True},
-        'datatype': {'sortable': True, 'filterable': True, 'facet': True},
-        'locale': {'sortable': False, 'filterable': True, 'facet': True},
+        'concept_class': {'sortable': True, 'filterable': True, 'facet': True, 'exact': True},
+        'datatype': {'sortable': True, 'filterable': True, 'facet': True, 'exact': True},
+        'locale': {'sortable': False, 'filterable': True, 'facet': True, 'exact': True},
         'retired': {'sortable': False, 'filterable': True, 'facet': True},
-        'source': {'sortable': False, 'filterable': True, 'facet': True},
+        'source': {'sortable': False, 'filterable': True, 'facet': True, 'exact': True},
         'collection': {'sortable': False, 'filterable': True, 'facet': True},
-        'owner': {'sortable': False, 'filterable': True, 'facet': True},
-        'owner_type': {'sortable': False, 'filterable': True, 'facet': True},
+        'owner': {'sortable': False, 'filterable': True, 'facet': True, 'exact': True},
+        'owner_type': {'sortable': False, 'filterable': True, 'facet': True, 'exact': True},
     }
 
     def get_detail_serializer(self, obj, data=None, files=None, partial=False):

@@ -25,10 +25,10 @@ class OrganizationListView(BaseAPIView,
     model = Organization
     queryset = Organization.objects.filter(is_active=True)
     es_fields = {
-        'name': {'sortable': True, 'filterable': True},
+        'name': {'sortable': True, 'filterable': True, 'exact': True},
         'last_update': {'sortable': True, 'default': 'desc', 'filterable': True},
-        'company': {'sortable': False, 'filterable': True},
-        'location': {'sortable': False, 'filterable': True},
+        'company': {'sortable': False, 'filterable': True, 'exact': True},
+        'location': {'sortable': False, 'filterable': True, 'exact': True},
     }
     document_model = OrganizationDocument
     is_searchable = True
