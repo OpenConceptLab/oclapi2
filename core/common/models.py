@@ -1,4 +1,5 @@
 from celery.result import AsyncResult
+from django.conf import settings
 from django.contrib.postgres.fields import JSONField, ArrayField
 from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator
@@ -6,6 +7,8 @@ from django.db import models, IntegrityError
 from django.db.models import Max, Value
 from django.db.models.expressions import CombinedExpression, F
 from django.utils import timezone
+from django_elasticsearch_dsl.registries import registry
+from django_elasticsearch_dsl.signals import RealTimeSignalProcessor
 from pydash import get
 
 from core.common.services import S3
@@ -15,6 +18,7 @@ from .constants import (
     ACCESS_TYPE_CHOICES, DEFAULT_ACCESS_TYPE, NAMESPACE_REGEX,
     ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT, SUPER_ADMIN_USER_ID,
     HEAD)
+from .tasks import handle_save, handle_m2m_changed
 
 
 class BaseModel(models.Model):
@@ -52,6 +56,14 @@ class BaseModel(models.Model):
     extras_have_been_encoded = False
     extras_have_been_decoded = False
     is_being_saved = False
+
+    @property
+    def model_name(self):
+        return self.__class__.__name__
+
+    @property
+    def app_name(self):
+        return self.__module__.split('.')[1]
 
     def save(self, force_insert=False, force_update=False, using=None, update_fields=None):
         if not self.internal_reference_id and self.id:
@@ -569,3 +581,13 @@ class ConceptContainerModel(VersionedModel):
 
     def has_export(self):
         return bool(self.get_export_url())
+
+
+class CelerySignalProcessor(RealTimeSignalProcessor):
+    def handle_save(self, sender, instance, **kwargs):
+        if settings.ES_SYNC and instance.__class__ in registry.get_models():
+            handle_save.delay(instance.app_name, instance.model_name, instance.id)
+
+    def handle_m2m_changed(self, sender, instance, action, **kwargs):
+        if settings.ES_SYNC and instance.__class__ in registry.get_models():
+            handle_m2m_changed.delay(instance.app_name, instance.model_name, instance.id, action)
