@@ -19,45 +19,45 @@ class Command(BaseCommand):
         settings.ELASTICSEARCH_DSL_AUTO_REFRESH = False
         settings.ELASTICSEARCH_DSL_AUTOSYNC = False
         settings.ES_SYNC = False
-        try:
-            user = UserProfile.objects.filter(username='ocladmin').get()
-            org = Organization.objects.get(mnemonic='OCL')
-            sources = self.create_sources(org, user)
+        user = UserProfile.objects.filter(username='ocladmin').get()
+        org = Organization.objects.get(mnemonic='OCL')
+        sources = self.create_sources(org, user)
+        created = False
 
-            current_path = os.path.dirname(__file__)
-            importer_confs = [
-                dict(
-                    source=sources['Classes'],
-                    file=os.path.join(current_path, "../../../lookup_fixtures/concept_classes.json")
-                ),
-                dict(
-                    source=sources['Locales'],
-                    file=os.path.join(current_path, "../../../lookup_fixtures/locales.json")
-                ),
-                dict(
-                    source=sources['Datatypes'],
-                    file=os.path.join(current_path, "../../../lookup_fixtures/datatypes_fixed.json")
-                ),
-                dict(
-                    source=sources['NameTypes'],
-                    file=os.path.join(current_path, "../../../lookup_fixtures/nametypes_fixed.json")
-                ),
-                dict(
-                    source=sources['DescriptionTypes'],
-                    file=os.path.join(current_path, "../../../lookup_fixtures/description_types.json")
-                ),
-                dict(
-                    source=sources['MapTypes'],
-                    file=os.path.join(current_path, "../../../lookup_fixtures/maptypes_fixed.json")
-                ),
-            ]
+        current_path = os.path.dirname(__file__)
+        importer_confs = [
+            dict(
+                source=sources['Classes'],
+                file=os.path.join(current_path, "../../../lookup_fixtures/concept_classes.json")
+            ),
+            dict(
+                source=sources['Locales'],
+                file=os.path.join(current_path, "../../../lookup_fixtures/locales.json")
+            ),
+            dict(
+                source=sources['Datatypes'],
+                file=os.path.join(current_path, "../../../lookup_fixtures/datatypes_fixed.json")
+            ),
+            dict(
+                source=sources['NameTypes'],
+                file=os.path.join(current_path, "../../../lookup_fixtures/nametypes_fixed.json")
+            ),
+            dict(
+                source=sources['DescriptionTypes'],
+                file=os.path.join(current_path, "../../../lookup_fixtures/description_types.json")
+            ),
+            dict(
+                source=sources['MapTypes'],
+                file=os.path.join(current_path, "../../../lookup_fixtures/maptypes_fixed.json")
+            ),
+        ]
 
-            for conf in importer_confs:
-                source = conf['source']
-                self.create_concepts(source, conf['file'], user)
-        except:  # pylint: disable=bare-except
-            pass
-        finally:
+        results = []
+        for conf in importer_confs:
+            source = conf['source']
+            results.append(self.create_concepts(source, conf['file'], user))
+
+        if any(results):
             populate_indexes.delay(['sources', 'concepts'])
 
     @staticmethod
@@ -94,3 +94,4 @@ class Command(BaseCommand):
                 data['name'] = mnemonic
                 data['parent'] = source
                 Concept.persist_new(data, user, False)
+                return True
