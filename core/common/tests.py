@@ -26,6 +26,7 @@ class CustomTestRunner(ColourRunnerMixin, DiscoverRunner):
 
 class PauseElasticSearchIndex:
     settings.ELASTICSEARCH_DSL_AUTOSYNC = False
+    settings.ES_SYNC = False
 
 
 class OCLTestCase(TestCase, PauseElasticSearchIndex):
