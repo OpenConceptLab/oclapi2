@@ -44,6 +44,10 @@ services:
     image: openconceptlab/oclapi2:${ENVIRONMENT-production}
     command: sh -c ./start_celery_worker.sh
     restart: "always"
+    depends_on:
+      - redis
+      - es
+      - es1
     healthcheck:
       test: "celery inspect ping -A core.celery"
   flower:
