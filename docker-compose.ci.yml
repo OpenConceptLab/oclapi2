@@ -4,7 +4,13 @@ services:
     build: .
     environment:
       - ENVIRONMENT=ci
+    volumes:
+      - .:/code
   celery:
     build: .
+    volumes:
+      - .:/code
   flower:
     build: .
+    volumes:
+      - .:/code
