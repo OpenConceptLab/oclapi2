@@ -89,6 +89,8 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'core.middlewares.middlewares.FixMalformedLimitParamMiddleware',
+    'core.middlewares.middlewares.RequestLogMiddleware',
 ]
 
 ROOT_URLCONF = 'core.urls'
