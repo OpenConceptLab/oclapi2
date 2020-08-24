@@ -82,8 +82,12 @@ class MappingListView(MappingBaseView, ListWithHeadersMixin, CreateModelMixin):
         source = self.kwargs.pop('source', None)
         source_version = self.kwargs.pop('version', HEAD)
         parent_resource = None
+        if 'org' in self.kwargs:
+            filters = dict(organization__mnemonic=self.kwargs['org'])
+        else:
+            filters = dict(user__username=self.kwargs['user'])
         if source:
-            parent_resource = Source.get_version(source, source_version)
+            parent_resource = Source.get_version(source, source_version, filters)
         self.kwargs['parent_resource'] = self.parent_resource = parent_resource
 
     def post(self, request, **kwargs):  # pylint: disable=unused-argument

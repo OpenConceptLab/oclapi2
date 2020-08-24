@@ -41,7 +41,7 @@ class OrganizationCreateSerializer(serializers.ModelSerializer):
         mnemonic = validated_data.get('mnemonic', None)
         if Organization.objects.filter(mnemonic=mnemonic).exists():
             self._errors['mnemonic'] = 'Organization with mnemonic %s already exists.' % mnemonic
-            return None
+            return Organization()
         organization = Organization(name=validated_data.get('name'), mnemonic=mnemonic)
         organization.created_by = user
         organization.updated_by = user
@@ -54,7 +54,8 @@ class OrganizationCreateSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         organization = self.prepare_object(validated_data)
-        organization.save()
+        if not self._errors:
+            organization.save()
         return organization
 
 
