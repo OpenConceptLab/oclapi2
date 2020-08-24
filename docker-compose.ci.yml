@@ -1,10 +1,10 @@
 version: '3'
 services:
   api:
-    image: ${OCLAPI_IMAGE_ID}
+    build: .
     environment:
-      - ENVIRONMENT=local
+      - ENVIRONMENT=ci
   celery:
-    image: ${OCLAPI_IMAGE_ID}
+    build: .
   flower:
-    image: ${OCLAPI_IMAGE_ID}
+    build: .
