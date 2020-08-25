@@ -5,6 +5,7 @@ import zipfile
 from urllib import parse
 
 from dateutil import parser
+from django.conf import settings
 from django.urls import NoReverseMatch, reverse, get_resolver, resolve, Resolver404
 from djqscsv import csv_file_for
 from pydash import flatten
@@ -262,3 +263,10 @@ def write_export_file(
     uploaded_path = S3.url_for(s3_key)
     logger.info('Uploaded to %s.' % uploaded_path)
     os.chdir(cwd)
+
+
+def get_base_url():
+    if settings.ENV == 'development':
+        return "http://localhost:8000"
+
+    return "https://api.{}2.openconceptlab.org".format(settings.ENV.lower())
