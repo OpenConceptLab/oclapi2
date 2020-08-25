@@ -16,6 +16,8 @@ services:
     volumes:
       - .:/code
     restart: "no"
+    environment:
+      - ENVIRONMENT=development
   celery:
     build: .
     volumes:
