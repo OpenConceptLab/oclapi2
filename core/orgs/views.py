@@ -113,7 +113,8 @@ class OrganizationDetailView(OrganizationBaseView, mixins.UpdateModelMixin, mixi
     def put(self, request, *args, **kwargs):
         return self.partial_update(request, *args, **kwargs)
 
-    def post(self, request, *args, **kwargs):
+    # TODO: should not be needed
+    def post(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         serializer = self.get_serializer(data=request.data)
 
         if serializer.is_valid():
