@@ -223,7 +223,7 @@ class SourceLatestVersionRetrieveUpdateView(SourceVersionBaseView, RetrieveAPIVi
 
 class SourceVersionRetrieveUpdateDestroyView(SourceVersionBaseView, RetrieveAPIView, UpdateAPIView):
     permission_classes = (HasAccessToVersionedObject,)
-    serializer_class = SourceDetailSerializer
+    serializer_class = SourceVersionDetailSerializer
 
     def get_object(self, queryset=None):
         return self.get_queryset().first()
@@ -234,6 +234,9 @@ class SourceVersionRetrieveUpdateDestroyView(SourceVersionBaseView, RetrieveAPIV
         if not head:
             return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
 
+        external_id = get(request.data, 'version_external_id')
+        if external_id:
+            request.data['external_id'] = external_id
         serializer = self.get_serializer(self.object, data=request.data, partial=True)
 
         if serializer.is_valid():

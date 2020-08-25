@@ -61,6 +61,7 @@ class SourceCreateOrUpdateSerializer(ModelSerializer):
         source.organization_id = validated_data.get('organization_id', source.organization_id)
         source.user = validated_data.get('user', source.user)
         source.organization = validated_data.get('organization', source.organization)
+        source.released = validated_data.get('released', source.released)
         return source
 
     def update(self, instance, validated_data):
@@ -97,7 +98,7 @@ class SourceCreateSerializer(SourceCreateOrUpdateSerializer):
     updated_on = DateTimeField(source='updated_at', read_only=True)
     created_by = CharField(source='owner', read_only=True)
     updated_by = CharField(read_only=True)
-    extras = JSONField(required=False)
+    extras = JSONField(required=False, allow_null=True)
     external_id = CharField(required=False, allow_blank=True)
     user_id = PrimaryKeyRelatedField(required=False, queryset=UserProfile.objects.all(), allow_null=True)
     organization_id = PrimaryKeyRelatedField(required=False, queryset=Organization.objects.all(), allow_null=True)
@@ -160,6 +161,7 @@ class SourceVersionDetailSerializer(SourceCreateOrUpdateSerializer):
     updated_by = DateTimeField(source='updated_by.username', read_only=True)
     supported_locales = ListField(required=False, allow_empty=True)
     is_processing = BooleanField(read_only=True)
+    released = BooleanField(default=False)
 
     class Meta:
         model = Source
@@ -169,5 +171,5 @@ class SourceVersionDetailSerializer(SourceCreateOrUpdateSerializer):
             'custom_validation_schema', 'public_access', 'default_locale', 'supported_locales', 'website',
             'url', 'owner', 'owner_type', 'owner_url', 'versions',
             'created_on', 'updated_on', 'created_by', 'updated_by', 'extras', 'external_id', 'versions_url',
-            'version', 'concepts_url', 'is_processing'
+            'version', 'concepts_url', 'is_processing', 'released',
         )

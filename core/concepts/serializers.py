@@ -148,7 +148,7 @@ class ConceptDetailSerializer(ModelSerializer):
     url = URLField(read_only=True)
     owner_type = CharField(read_only=True)
     owner_url = URLField(read_only=True)
-    extras = JSONField(required=False)
+    extras = JSONField(required=False, allow_null=True)
     update_comment = CharField(required=False, source='comment')
     mappings = SerializerMethodField()
 

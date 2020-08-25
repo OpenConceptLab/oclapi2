@@ -67,7 +67,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     def get_host_url(self):
         return self.request.META['wsgi.url_scheme'] + '://' + self.request.get_host()
 
-    def head(self, _):
+    def head(self, request, **kwargs):
         res = HttpResponse()
         res['num_found'] = self.filter_queryset(self.get_queryset()).count()
         return res
