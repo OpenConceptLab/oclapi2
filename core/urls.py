@@ -25,9 +25,9 @@ import core.concepts.views as concept_views
 import core.mappings.views as mapping_views
 
 if settings.ENV == 'development':
-    base_url = "http://localhost:8000"
+    BASE_URL = "http://localhost:8000"
 else:
-    base_url = "https://api.{}".format(settings.ENV.lower())
+    BASE_URL = "https://api.{}".format(settings.ENV.lower())
 
 
 SchemaView = get_schema_view(
@@ -38,7 +38,7 @@ SchemaView = get_schema_view(
     ),
     public=True,
     permission_classes=(permissions.AllowAny,),
-    url=base_url
+    url=BASE_URL
 )
 
 urlpatterns = [
