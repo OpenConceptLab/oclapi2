@@ -27,7 +27,7 @@ import core.mappings.views as mapping_views
 if settings.ENV == 'development':
     BASE_URL = "http://localhost:8000"
 else:
-    BASE_URL = "https://api.{}".format(settings.ENV.lower())
+    BASE_URL = "https://api.{}2.openconceptlab.org".format(settings.ENV.lower())
 
 
 SchemaView = get_schema_view(
