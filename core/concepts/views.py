@@ -1,5 +1,6 @@
 from django.db.models import F
 from django.shortcuts import get_object_or_404
+from drf_yasg.utils import swagger_auto_schema
 from pydash import get
 from rest_framework import status
 from rest_framework.generics import RetrieveAPIView, DestroyAPIView, ListCreateAPIView, RetrieveUpdateDestroyAPIView, \
@@ -11,6 +12,9 @@ from core.common.constants import (
     HEAD, INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_RETIRED_PARAM
 )
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryMixin
+from core.common.params import (
+    q_param, limit_param, sort_desc_param, page_param, exact_match_param, sort_asc_param, verbose_param
+)
 from core.common.views import SourceChildCommonBaseView
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept, LocalizedText
@@ -65,6 +69,11 @@ class ConceptVersionListAllView(ConceptBaseView, ListWithHeadersMixin):
             'parent__organization', 'parent__user',
         ).prefetch_related('names', 'descriptions')
 
+    @swagger_auto_schema(
+        manual_parameters=[
+            q_param, limit_param, sort_desc_param, sort_asc_param, exact_match_param, page_param, verbose_param
+        ]
+    )
     def get(self, request, *args, **kwargs):
         return self.list(request, *args, **kwargs)
 
