@@ -1,5 +1,6 @@
 from django.db.models import F
 from django.shortcuts import get_object_or_404
+from drf_yasg.utils import swagger_auto_schema
 from rest_framework import status
 from rest_framework.generics import DestroyAPIView, UpdateAPIView, RetrieveAPIView
 from rest_framework.mixins import CreateModelMixin
@@ -7,6 +8,9 @@ from rest_framework.response import Response
 
 from core.common.constants import HEAD
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryMixin
+from core.common.params import (
+    q_param, limit_param, sort_desc_param, page_param, exact_match_param, sort_asc_param, verbose_param
+)
 from core.common.views import SourceChildCommonBaseView
 from core.concepts.permissions import CanEditParentDictionary, CanViewParentDictionary
 from core.mappings.documents import MappingDocument
@@ -195,5 +199,10 @@ class MappingVersionListAllView(MappingBaseView, ListWithHeadersMixin):
             'parent__organization', 'parent__user',
         )
 
+    @swagger_auto_schema(
+        manual_parameters=[
+            q_param, limit_param, sort_desc_param, sort_asc_param, exact_match_param, page_param, verbose_param
+        ]
+    )
     def get(self, request, *args, **kwargs):
         return self.list(request, *args, **kwargs)
