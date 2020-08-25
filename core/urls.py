@@ -22,6 +22,13 @@ from rest_framework import permissions
 
 import core.concepts.views as concept_views
 import core.mappings.views as mapping_views
+from django.conf import settings
+
+if settings.ENV == 'development':
+    base_url = "http://localhost:8000"
+else:
+    base_url = "https://api.{}".format(settings.ENV.lower())
+
 
 SchemaView = get_schema_view(
     openapi.Info(
@@ -31,7 +38,9 @@ SchemaView = get_schema_view(
     ),
     public=True,
     permission_classes=(permissions.AllowAny,),
+    url=base_url
 )
+
 urlpatterns = [
     url(r'^swagger(?P<format>\.json|\.yaml)$', SchemaView.without_ui(cache_timeout=0), name='schema-json'),
     url(r'^swagger/$', SchemaView.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui'),
