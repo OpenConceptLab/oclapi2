@@ -38,7 +38,7 @@ class MappingListSerializer(ModelSerializer):
 class MappingDetailSerializer(MappingListSerializer):
     type = CharField(source='resource_type', read_only=True)
     uuid = CharField(source='id', read_only=True)
-    extras = JSONField(required=False)
+    extras = JSONField(required=False, allow_null=True)
     created_by = CharField(source='created_by.username', read_only=True)
     updated_by = CharField(source='created_by.username', read_only=True)
     parent_id = IntegerField(required=True)

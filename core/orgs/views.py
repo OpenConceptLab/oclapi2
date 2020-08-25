@@ -94,9 +94,14 @@ class OrganizationBaseView(BaseAPIView, RetrieveAPIView, DestroyAPIView):
     queryset = Organization.objects.filter(is_active=True)
 
 
-class OrganizationDetailView(mixins.UpdateModelMixin, OrganizationBaseView):
-    serializer_class = OrganizationDetailSerializer
+class OrganizationDetailView(OrganizationBaseView, mixins.UpdateModelMixin, mixins.CreateModelMixin):
     queryset = Organization.objects.filter(is_active=True)
+
+    def get_serializer_class(self):
+        if self.request.method == 'POST':
+            return OrganizationCreateSerializer
+
+        return OrganizationDetailSerializer
 
     def initial(self, request, *args, **kwargs):
         if request.method == 'DELETE':
@@ -107,6 +112,19 @@ class OrganizationDetailView(mixins.UpdateModelMixin, OrganizationBaseView):
 
     def put(self, request, *args, **kwargs):
         return self.partial_update(request, *args, **kwargs)
+
+    def post(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+
+        if serializer.is_valid():
+            instance = serializer.save(force_insert=True)
+            if serializer.is_valid():
+                request.user.organizations.add(instance)
+                headers = self.get_success_headers(serializer.data)
+                serializer = OrganizationDetailSerializer(instance, context={'request': request})
+                return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     def destroy(self, request, *args, **kwargs):
         obj = self.get_object()

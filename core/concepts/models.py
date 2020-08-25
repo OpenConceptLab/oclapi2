@@ -294,7 +294,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         if container_version and collection:
             queryset = queryset.filter(collection__version=container_version)
         if concept:
-            queryset = queryset.filter(mnemonic=concept)
+            queryset = queryset.filter(mnemonic__iexact=concept)
         if concept_version:
             queryset = queryset.filter(version=concept_version)
         if is_latest:
@@ -378,6 +378,9 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     def __clone_locales(locales):
         return [locale.clone() for locale in locales.all()]
 
+    def is_existing_in_parent(self):
+        return self.parent.concepts_set.filter(mnemonic__iexact=self.mnemonic).exists()
+
     @classmethod
     def persist_new(cls, data, user=None, create_initial_version=True):
         names = [
@@ -393,6 +396,13 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         if user:
             concept.created_by = concept.updated_by = user
         concept.errors = dict()
+        if concept.is_existing_in_parent():
+            concept.errors = dict(
+                mnemonic="Concept with mnemonic {} already exists for {}".format(
+                    concept.mnemonic, concept.parent.mnemonic
+                )
+            )
+            return concept
 
         try:
             concept.cloned_names = names

@@ -97,7 +97,7 @@ class CollectionCreateSerializer(CollectionCreateOrUpdateSerializer):
     updated_on = DateTimeField(source='updated_at', read_only=True)
     created_by = CharField(source='owner', read_only=True)
     updated_by = CharField(read_only=True)
-    extras = JSONField(required=False)
+    extras = JSONField(required=False, allow_null=True)
     external_id = CharField(required=False, allow_blank=True)
     user_id = PrimaryKeyRelatedField(required=False, queryset=UserProfile.objects.all(), allow_null=True)
     organization_id = PrimaryKeyRelatedField(required=False, queryset=Organization.objects.all(), allow_null=True)
