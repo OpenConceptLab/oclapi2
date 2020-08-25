@@ -98,3 +98,15 @@ def populate_indexes(app_names=None):  # app_names has to be an iterable of stri
         call_command('search_index', '--populate', '-f', '--models', *app_names, '--parallel')
     else:
         call_command('search_index', '--populate', '-f', '--parallel')
+
+
+@app.task(base=QueueOnce)
+def bulk_import(to_import, username, update_if_exists):
+    from core.importers.models import BulkImport
+    return BulkImport(content=to_import, username=username, update_if_exists=update_if_exists).run()
+
+
+@app.task(base=QueueOnce)
+def bulk_priority_import(to_import, username, update_if_exists):
+    from core.importers.models import BulkImport
+    return BulkImport(content=to_import, username=username, update_if_exists=update_if_exists).run()

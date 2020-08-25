@@ -13,7 +13,6 @@ Including another URLconf
     1. Import the include() function: from django.urls import include, path
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
-from django.conf import settings
 from django.conf.urls import url
 from django.contrib import admin
 from django.urls import path, include
@@ -23,12 +22,7 @@ from rest_framework import permissions
 
 import core.concepts.views as concept_views
 import core.mappings.views as mapping_views
-
-if settings.ENV == 'development':
-    BASE_URL = "http://localhost:8000"
-else:
-    BASE_URL = "https://api.{}2.openconceptlab.org".format(settings.ENV.lower())
-
+from core.common.utils import get_base_url
 
 SchemaView = get_schema_view(
     openapi.Info(
@@ -38,7 +32,7 @@ SchemaView = get_schema_view(
     ),
     public=True,
     permission_classes=(permissions.AllowAny,),
-    url=BASE_URL
+    url=get_base_url()
 )
 
 urlpatterns = [
@@ -52,4 +46,5 @@ urlpatterns = [
     path('collections/', include('core.collections.urls')),
     path('concepts/', concept_views.ConceptVersionListAllView.as_view(), name='all-concepts'),
     path('mappings/', mapping_views.MappingVersionListAllView.as_view(), name='all-mappings'),
+    path('importers/', include('core.importers.urls')),
 ]
