@@ -3,7 +3,6 @@ from rest_framework.authtoken.views import obtain_auth_token
 
 from core.common.constants import NAMESPACE_PATTERN
 from core.orgs import views as org_views
-from core.users.models import UserProfile
 from . import views
 
 urlpatterns = [
@@ -22,7 +21,6 @@ urlpatterns = [
     re_path(
         r'^(?P<user>' + NAMESPACE_PATTERN + ')/orgs/$',
         org_views.OrganizationListView.as_view(),
-        {'related_object_type': UserProfile, 'related_object_kwarg': 'user'},
         name='userprofile-orgs'
     ),
     re_path(
