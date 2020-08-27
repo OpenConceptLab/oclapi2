@@ -1,6 +1,6 @@
 from rest_framework import mixins, status
 from rest_framework.generics import RetrieveAPIView, UpdateAPIView, DestroyAPIView
-from rest_framework.permissions import IsAdminUser
+from rest_framework.permissions import IsAdminUser, IsAuthenticated
 from rest_framework.response import Response
 
 from core.common.mixins import ListWithHeadersMixin
@@ -45,15 +45,21 @@ class UserListView(UserBaseView,
             return [IsAdminUser()]
         return []
 
+    def can_view(self, organization):
+        user = self.request.user
+        return organization.public_can_view or user.is_staff or organization.is_member(user)
+
     def get(self, request, *args, **kwargs):
         self.serializer_class = UserDetailSerializer if self.is_verbose(request) else UserListSerializer
         org = kwargs.pop('org', None)
         if org:
-            organization = Organization.objects.get(mnemonic=org)
-            if not organization.public_can_view:
-                if not request.user.is_staff:
-                    if not organization.users.filter(id=request.user.id).exists():
-                        return Response(status=status.HTTP_403_FORBIDDEN)
+            organization = Organization.objects.filter(mnemonic=org).first()
+            if not organization:
+                return Response(status=status.HTTP_404_NOT_FOUND)
+
+            if not self.can_view(organization):
+                return Response(status=status.HTTP_403_FORBIDDEN)
+
             self.queryset = organization.users.all()
         return self.list(request, *args, **kwargs)
 
@@ -65,10 +71,16 @@ class UserListView(UserBaseView,
 class UserDetailView(UserBaseView, RetrieveAPIView, DestroyAPIView, mixins.UpdateModelMixin):
     serializer_class = UserDetailSerializer
 
+    def get_permissions(self):
+        if self.request.method == 'DELETE':
+            return [IsAdminUser()]
+
+        return [IsAuthenticated()]
+
     def get_object(self, queryset=None):
-        if self.user_is_self:
-            return self.request.user
-        return super().get_object(queryset)
+        instance = super().get_object(queryset)
+        self.user_is_self = self.request.user.username == instance.username
+        return instance
 
     def put(self, request, *args, **kwargs):
         obj = self.get_object()
@@ -77,9 +89,9 @@ class UserDetailView(UserBaseView, RetrieveAPIView, DestroyAPIView, mixins.Updat
         return self.partial_update(request, *args, **kwargs)
 
     def delete(self, request, *args, **kwargs):
+        obj = self.get_object()
         if self.user_is_self:
             return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
-        obj = self.get_object()
         obj.soft_delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 

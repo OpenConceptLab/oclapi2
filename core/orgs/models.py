@@ -34,8 +34,8 @@ class Organization(BaseResourceModel, SourceContainerMixin):
     def num_members(self):
         return self.members.count()
 
-    def is_member(self, userprofile):
-        return userprofile and self.members.filter(id=userprofile.id).exists()
+    def is_member(self, user_profile):
+        return user_profile and self.members.filter(id=user_profile.id).exists()
 
     @staticmethod
     def get_url_kwarg():
