@@ -27,10 +27,6 @@ class Organization(BaseResourceModel, SourceContainerMixin):
         return self.mnemonic
 
     @property
-    def members(self):
-        return self.users
-
-    @property
     def num_members(self):
         return self.members.count()
 
@@ -43,7 +39,7 @@ class Organization(BaseResourceModel, SourceContainerMixin):
 
     @classmethod
     def get_by_username(cls, username):
-        return cls.objects.filter(users__username=username)
+        return cls.objects.filter(members__username=username)
 
     @classmethod
     def get_public(cls):
