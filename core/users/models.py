@@ -57,20 +57,21 @@ class UserProfile(AbstractUser, BaseModel, SourceContainerMixin):
 
     def refresh_token(self):
         Token.objects.filter(user=self).delete()
-        Token.objects.create(user=self)
+        self.__create_token()
 
     def get_token(self):
-        token = Token.objects.filter(user_id=self.id).first()
-        if not token:
-            token = Token.objects.create(user=self)
+        token = Token.objects.filter(user_id=self.id).first() or self.__create_token()
         return token.key
-
-    def __str__(self):
-        return str(self.mnemonic)
 
     def is_admin_for(self, concept_container):
         parent_id = concept_container.parent_id
         return parent_id == self.id or self.organizations.filter(id=parent_id).exists()
+
+    def __create_token(self):
+        return Token.objects.create(user=self)
+
+    def __str__(self):
+        return str(self.mnemonic)
 
 
 admin.site.register(UserProfile)
