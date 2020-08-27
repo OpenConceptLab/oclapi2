@@ -15,7 +15,7 @@ class UserProfile(AbstractUser, BaseModel, SourceContainerMixin):
         swappable = 'AUTH_USER_MODEL'
 
     OBJECT_TYPE = USER_OBJECT_TYPE
-    organizations = models.ManyToManyField('orgs.Organization', related_name='users')
+    organizations = models.ManyToManyField('orgs.Organization', related_name='members')
     company = models.TextField(null=True, blank=True)
     location = models.TextField(null=True, blank=True)
     preferred_locale = models.TextField(null=True, blank=True)
@@ -69,14 +69,8 @@ class UserProfile(AbstractUser, BaseModel, SourceContainerMixin):
         return str(self.mnemonic)
 
     def is_admin_for(self, concept_container):
-        parent = concept_container.parent
-
-        if parent == self:
-            return True
-        if self.organizations.filter(id=parent.id).exists():
-            return True
-
-        return False
+        parent_id = concept_container.parent_id
+        return parent_id == self.id or self.organizations.filter(id=parent_id).exists()
 
 
 admin.site.register(UserProfile)

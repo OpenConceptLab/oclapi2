@@ -60,7 +60,7 @@ class UserListView(UserBaseView,
             if not self.can_view(organization):
                 return Response(status=status.HTTP_403_FORBIDDEN)
 
-            self.queryset = organization.users.all()
+            self.queryset = organization.members.all()
         return self.list(request, *args, **kwargs)
 
     def post(self, request, *args, **kwargs):
