@@ -1,6 +1,6 @@
 from rest_framework import mixins, status, generics
 from rest_framework.generics import RetrieveAPIView, DestroyAPIView
-from rest_framework.permissions import IsAuthenticated, AllowAny
+from rest_framework.permissions import IsAuthenticated, IsAuthenticatedOrReadOnly
 from rest_framework.response import Response
 
 from core.collections.views import CollectionListView
@@ -28,12 +28,7 @@ class OrganizationListView(BaseAPIView,
     }
     document_model = OrganizationDocument
     is_searchable = True
-
-    def get_permissions(self):
-        if self.request.method == 'GET':
-            return [AllowAny(), ]
-
-        return [IsAuthenticated(), ]
+    permission_classes = (IsAuthenticatedOrReadOnly, )
 
     def get_queryset(self):
         username = self.kwargs.get('user')
@@ -54,11 +49,6 @@ class OrganizationListView(BaseAPIView,
             return OrganizationCreateSerializer
 
         return OrganizationListSerializer
-
-    def initial(self, request, *args, **kwargs):
-        if request.method == 'POST':
-            self.permission_classes = (IsAuthenticated, )  # fixme
-        super().initial(request, *args, **kwargs)
 
     def get(self, request, *args, **kwargs):
         return self.list(request, *args, **kwargs)
