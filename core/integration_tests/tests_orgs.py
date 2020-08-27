@@ -1,3 +1,4 @@
+from django.core.management import call_command
 from rest_framework.test import APITestCase
 
 from core.common.constants import ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT, OCL_ORG_ID, SUPER_ADMIN_USER_ID
@@ -9,6 +10,11 @@ from core.users.tests.factories import UserProfileFactory
 
 
 class OrganizationListViewTest(APITestCase, PauseElasticSearchIndex):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        call_command("loaddata", "core/fixtures/base_entities.yaml")
+
     def setUp(self):
         super().setUp()
         self.superuser = UserProfile.objects.get(is_superuser=True)
