@@ -25,7 +25,7 @@ class BulkImport:
         self.update_if_exists = update_if_exists
         self.populate_input_list()
         self.set_user()
-        self.prepare_importer()
+        self.initialize_importer()
 
     def populate_input_list(self):
         for line in self.content.splitlines():
@@ -34,7 +34,7 @@ class BulkImport:
     def set_user(self):
         self.user = UserProfile.objects.get(username=self.username)
 
-    def prepare_importer(self):
+    def initialize_importer(self):
         self.importer = OclFlexImporter(
             input_list=self.input_list,
             api_url_root=get_base_url(),
