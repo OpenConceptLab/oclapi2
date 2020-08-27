@@ -8,6 +8,7 @@ from django.core.management import call_command
 from django.test import TestCase
 from django.test.runner import DiscoverRunner
 from moto import mock_s3
+from rest_framework.test import APITestCase
 
 from core.collections.models import Collection
 from core.common.constants import HEAD, OCL_ORG_ID, SUPER_ADMIN_USER_ID
@@ -20,6 +21,16 @@ from core.users.models import UserProfile
 from .services import S3
 
 
+def delete_all():
+    Collection.objects.all().delete()
+    Mapping.objects.all().delete()
+    Concept.objects.all().delete()
+    LocalizedText.objects.all().delete()
+    Source.objects.all().delete()
+    Organization.objects.exclude(id=OCL_ORG_ID).all().delete()
+    UserProfile.objects.exclude(id=SUPER_ADMIN_USER_ID).all().delete()
+
+
 class CustomTestRunner(ColourRunnerMixin, DiscoverRunner):
     pass
 
@@ -29,6 +40,17 @@ class PauseElasticSearchIndex:
     settings.ES_SYNC = False
 
 
+class OCLAPITestCase(APITestCase, PauseElasticSearchIndex):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        call_command("loaddata", "core/fixtures/base_entities.yaml")
+
+    def tearDown(self):
+        super().tearDown()
+        delete_all()
+
+
 class OCLTestCase(TestCase, PauseElasticSearchIndex):
     @classmethod
     def setUpClass(cls):
@@ -36,13 +58,8 @@ class OCLTestCase(TestCase, PauseElasticSearchIndex):
         call_command("loaddata", "core/fixtures/base_entities.yaml")
 
     def tearDown(self):
-        Collection.objects.all().delete()
-        Mapping.objects.all().delete()
-        Concept.objects.all().delete()
-        LocalizedText.objects.all().delete()
-        Source.objects.all().delete()
-        Organization.objects.exclude(id=OCL_ORG_ID).all().delete()
-        UserProfile.objects.exclude(id=SUPER_ADMIN_USER_ID).all().delete()
+        super().tearDown()
+        delete_all()
 
     @staticmethod
     def create_lookup_concept_classes(user=None, org=None):

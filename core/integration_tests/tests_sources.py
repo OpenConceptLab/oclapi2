@@ -1,20 +1,11 @@
-from django.core.management import call_command
-from rest_framework.test import APITestCase
-
-from core.common.constants import OCL_ORG_ID, SUPER_ADMIN_USER_ID
-from core.common.tests import PauseElasticSearchIndex
+from core.common.tests import OCLAPITestCase
 from core.orgs.models import Organization
 from core.sources.models import Source
 from core.sources.tests.factories import SourceFactory
 from core.users.models import UserProfile
 
 
-class SourceCreateUpdateDestroyViewTest(APITestCase, PauseElasticSearchIndex):
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        call_command("loaddata", "core/fixtures/base_entities.yaml")
-
+class SourceCreateUpdateDestroyViewTest(OCLAPITestCase):
     def setUp(self):
         self.organization = Organization.objects.first()
         self.user = UserProfile.objects.filter(is_superuser=True).first()
@@ -24,11 +15,6 @@ class SourceCreateUpdateDestroyViewTest(APITestCase, PauseElasticSearchIndex):
             'short_code': 's2', 'description': '', 'source_type': '', 'full_name': 'source 2', 'public_access': 'View',
             'external_id': '', 'id': 's2', 'supported_locales': 'af,am'
         }
-
-    def tearDown(self):
-        Source.objects.all().delete()
-        Organization.objects.exclude(id=OCL_ORG_ID).all().delete()
-        UserProfile.objects.exclude(id=SUPER_ADMIN_USER_ID).all().delete()
 
     def test_post_201(self):
         sources_url = "/orgs/{}/sources/".format(self.organization.mnemonic)

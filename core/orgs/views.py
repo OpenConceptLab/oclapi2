@@ -131,7 +131,9 @@ class OrganizationMemberView(generics.GenericAPIView):
 
     def initial(self, request, *args, **kwargs):
         org_id = kwargs.pop('org')
-        self.organization = Organization.objects.get(mnemonic=org_id)
+        self.organization = Organization.objects.filter(mnemonic=org_id).first()
+        if not self.organization:
+            return
         username = kwargs.pop('user')
         try:
             self.userprofile = UserProfile.objects.get(username=username)
@@ -147,6 +149,8 @@ class OrganizationMemberView(generics.GenericAPIView):
 
     def get(self, request, *args, **kwargs):
         self.initial(request, *args, **kwargs)
+        if not self.organization:
+            return Response(status=status.HTTP_404_NOT_FOUND)
         if not self.user_in_org and not request.user.is_staff:
             return Response(status=status.HTTP_403_FORBIDDEN)
         if self.user_in_org:
@@ -154,7 +158,7 @@ class OrganizationMemberView(generics.GenericAPIView):
         return Response(status=status.HTTP_404_NOT_FOUND)
 
     def put(self, request, **kwargs):  # pylint: disable=unused-argument
-        if not request.user.is_staff and not self.user_in_org:
+        if not request.user.is_staff:
             return Response(status=status.HTTP_403_FORBIDDEN)
         if not self.userprofile:
             return Response(status=status.HTTP_404_NOT_FOUND)
@@ -163,7 +167,7 @@ class OrganizationMemberView(generics.GenericAPIView):
 
         return Response(status=status.HTTP_204_NO_CONTENT)
 
-    def delete(self, request):
+    def delete(self, request, **kwargs):  # pylint: disable=unused-argument
         if not request.user.is_staff and not self.user_in_org:
             return Response(status=status.HTTP_403_FORBIDDEN)
 

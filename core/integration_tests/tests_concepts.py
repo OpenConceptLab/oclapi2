@@ -1,23 +1,14 @@
-from django.core.management import call_command
 from mock import ANY
-from rest_framework.test import APITestCase
 
-from core.common.constants import OCL_ORG_ID, SUPER_ADMIN_USER_ID
-from core.common.tests import PauseElasticSearchIndex
-from core.concepts.models import Concept, LocalizedText
+from core.common.tests import OCLAPITestCase
+from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory, LocalizedTextFactory
 from core.orgs.models import Organization
-from core.sources.models import Source
 from core.sources.tests.factories import SourceFactory
 from core.users.models import UserProfile
 
 
-class ConceptCreateUpdateDestroyViewTest(APITestCase, PauseElasticSearchIndex):
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        call_command("loaddata", "core/fixtures/base_entities.yaml")
-
+class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
     def setUp(self):
         self.organization = Organization.objects.first()
         self.user = UserProfile.objects.filter(is_superuser=True).first()
@@ -36,13 +27,6 @@ class ConceptCreateUpdateDestroyViewTest(APITestCase, PauseElasticSearchIndex):
                 'locale': 'ab', 'locale_preferred': True, 'name': 'c1 name', 'name_type': 'Fully Specified'
             }]
         }
-
-    def tearDown(self):
-        Concept.objects.all().delete()
-        LocalizedText.objects.all().delete()
-        Source.objects.all().delete()
-        Organization.objects.exclude(id=OCL_ORG_ID).all().delete()
-        UserProfile.objects.exclude(id=SUPER_ADMIN_USER_ID).all().delete()
 
     def test_post_201(self):
         concepts_url = "/orgs/{}/sources/{}/concepts/".format(self.organization.mnemonic, self.source.mnemonic)
