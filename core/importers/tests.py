@@ -142,4 +142,3 @@ class BulkImportViewTest(OCLAPITestCase):
         bulk_import_mock.apply_async.assert_called_once_with(
             (b'"some-data"', random_user.username, True), task_id=ANY
         )
-
