@@ -1,20 +1,14 @@
-from django.core.management import call_command
-from rest_framework.test import APITestCase
+from rest_framework.exceptions import ErrorDetail
 
 from core.common.constants import ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT, OCL_ORG_ID, SUPER_ADMIN_USER_ID
-from core.common.tests import PauseElasticSearchIndex
+from core.common.tests import OCLAPITestCase
 from core.orgs.models import Organization
 from core.orgs.tests.factories import OrganizationFactory
 from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
 
 
-class OrganizationListViewTest(APITestCase, PauseElasticSearchIndex):
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        call_command("loaddata", "core/fixtures/base_entities.yaml")
-
+class OrganizationListViewTest(OCLAPITestCase):
     def setUp(self):
         super().setUp()
         self.superuser = UserProfile.objects.get(is_superuser=True)
@@ -26,10 +20,6 @@ class OrganizationListViewTest(APITestCase, PauseElasticSearchIndex):
         self.user_org_private = OrganizationFactory(mnemonic='user-private-org', public_access=ACCESS_TYPE_NONE)
         self.user.organizations.set([self.user_org_private, self.user_org_public])
         self.token = self.user.get_token()
-
-    def tearDown(self):
-        Organization.objects.exclude(id=OCL_ORG_ID).all().delete()
-        UserProfile.objects.exclude(id=SUPER_ADMIN_USER_ID).all().delete()
 
     def test_get_200_anonymous_user(self):
         response = self.client.get('/orgs/', format='json')
@@ -119,3 +109,198 @@ class OrganizationListViewTest(APITestCase, PauseElasticSearchIndex):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 0)
+
+    def test_post_201(self):
+        response = self.client.post(
+            '/orgs/',
+            dict(id='test-org-1', name='Test Org 1'),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data['id'], 'test-org-1')
+        self.assertEqual(response.data['name'], 'Test Org 1')
+        self.assertIsNotNone(response.data['uuid'])
+        self.assertTrue(self.user.organizations.filter(mnemonic='test-org-1').exists())
+
+    def test_post_400(self):
+        response = self.client.post(
+            '/orgs/',
+            dict(id='test-org-1'),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data, dict(name=[ErrorDetail(string='This field is required.', code='required')]))
+        self.assertFalse(self.user.organizations.filter(mnemonic='test-org-1').exists())
+
+    def test_post_405(self):
+        response = self.client.post(
+            '/users/{}/orgs/'.format(self.user.username),
+            dict(id='test-org-1', name='Test Org 1'),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 405)
+        self.assertIsNone(response.data)
+
+
+class OrganizationDetailViewTest(OCLAPITestCase):
+    def setUp(self):
+        self.org = OrganizationFactory(name='Stark Enterprises')
+        self.user = UserProfileFactory(organizations=[self.org])
+        self.superuser = UserProfile.objects.get(is_superuser=True)
+        self.token = self.user.get_token()
+
+    def test_get_200(self):
+        response = self.client.get(
+            '/orgs/{}/'.format(self.org.mnemonic),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['uuid'], str(self.org.id))
+        self.assertEqual(response.data['id'], self.org.mnemonic)
+        self.assertEqual(response.data['name'], 'Stark Enterprises')
+
+    def test_get_404(self):
+        response = self.client.get(
+            '/orgs/foobar/',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_put_200(self):
+        response = self.client.put(
+            '/orgs/{}/'.format(self.org.mnemonic),
+            dict(name='Wayne Corporation'),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['uuid'], str(self.org.id))
+        self.assertEqual(response.data['id'], self.org.mnemonic)
+        self.assertEqual(response.data['name'], 'Wayne Corporation')
+
+    def test_delete_403(self):
+        response = self.client.delete(
+            '/orgs/{}/'.format(self.org.mnemonic),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_delete_204(self):
+        response = self.client.delete(
+            '/orgs/{}/'.format(self.org.mnemonic),
+            HTTP_AUTHORIZATION='Token ' + self.superuser.get_token(),
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(Organization.objects.filter(id=self.org.id).exists())
+        self.assertTrue(UserProfile.objects.filter(id=self.user.id).exists())
+
+
+class OrganizationMemberViewTest(OCLAPITestCase):
+    def setUp(self):
+        self.org = OrganizationFactory(name='Stark Enterprises')
+        self.user = UserProfileFactory(organizations=[self.org])
+        self.superuser = UserProfile.objects.get(is_superuser=True)
+        self.token = self.user.get_token()
+
+    def test_get_204(self):
+        response = self.client.get(
+            '/orgs/{}/members/{}/'.format(self.org.mnemonic, self.user.username),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 204)
+
+    def test_get_403(self):
+        random_user = UserProfileFactory()
+        response = self.client.get(
+            '/orgs/{}/members/{}/'.format(self.org.mnemonic, random_user.username),
+            HTTP_AUTHORIZATION='Token ' + random_user.get_token(),
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_get_404(self):
+        response = self.client.get(
+            '/orgs/foobar/members/{}/'.format(self.user.username),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_put_200(self):
+        self.assertEqual(self.user.organizations.count(), 1)
+
+        new_org = OrganizationFactory()
+        response = self.client.put(
+            '/orgs/{}/members/{}/'.format(new_org.mnemonic, self.user.username),
+            HTTP_AUTHORIZATION='Token ' + self.superuser.get_token(),
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(self.user.organizations.count(), 2)
+
+    def test_put_403(self):
+        self.assertEqual(self.user.organizations.count(), 1)
+
+        new_org = OrganizationFactory()
+        response = self.client.put(
+            '/orgs/{}/members/{}/'.format(new_org.mnemonic, self.user.username),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(self.user.organizations.count(), 1)
+
+    def test_put_404(self):
+        new_org = OrganizationFactory()
+        response = self.client.put(
+            '/orgs/{}/members/foobar/'.format(new_org.mnemonic),
+            HTTP_AUTHORIZATION='Token ' + self.superuser.get_token(),
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_delete_403(self):
+        self.assertEqual(self.user.organizations.count(), 1)
+        random_user = UserProfileFactory()
+        response = self.client.delete(
+            '/orgs/{}/members/{}/'.format(self.org.mnemonic, random_user.username),
+            HTTP_AUTHORIZATION='Token ' + random_user.get_token(),
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(self.user.organizations.count(), 1)
+
+    def test_delete_204(self):
+        self.assertEqual(self.user.organizations.count(), 1)
+
+        response = self.client.delete(
+            '/orgs/{}/members/{}/'.format(self.org.mnemonic, self.user.username),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(self.user.organizations.count(), 0)
