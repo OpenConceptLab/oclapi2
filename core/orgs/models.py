@@ -2,7 +2,7 @@ from django.contrib import admin
 from django.core.validators import RegexValidator
 from django.db import models
 
-from core.common.constants import NAMESPACE_REGEX
+from core.common.constants import NAMESPACE_REGEX, ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT
 from core.common.mixins import SourceContainerMixin
 from core.common.models import BaseResourceModel
 from core.orgs.constants import ORG_OBJECT_TYPE
@@ -40,6 +40,14 @@ class Organization(BaseResourceModel, SourceContainerMixin):
     @staticmethod
     def get_url_kwarg():
         return 'org'
+
+    @classmethod
+    def get_by_username(cls, username):
+        return cls.objects.filter(users__username=username)
+
+    @classmethod
+    def get_public(cls):
+        return cls.objects.filter(public_access__in=[ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT])
 
 
 admin.site.register(Organization)

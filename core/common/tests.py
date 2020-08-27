@@ -229,7 +229,6 @@ class S3Test(TestCase):
             S3.upload.assert_called_once_with(file_path, 'file-content', {'header1': 'val1'})
             mock_file.assert_called_once_with(file_path, 'r')
 
-
     @mock_s3
     def test_remove(self):
         _conn = boto3.resource('s3', region_name='us-east-1')
