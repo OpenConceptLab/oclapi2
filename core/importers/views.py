@@ -27,7 +27,8 @@ class BulkImportView(APIView):
 
     @swagger_auto_schema(manual_parameters=[update_if_exists_param])
     def post(self, request):
-        username = self.request.user.username
+        user = self.request.user
+        username = user.username
         update_if_exists = request.GET.get('update_if_exists', 'true')
         if update_if_exists not in ['true', 'false']:
             return Response(
@@ -37,7 +38,7 @@ class BulkImportView(APIView):
         update_if_exists = update_if_exists == 'true'
 
         task_id = str(uuid.uuid4()) + '-' + username
-        if username in ['root', 'ocladmin']:
+        if user.is_staff:
             task = bulk_priority_import.apply_async((request.body, username, update_if_exists), task_id=task_id)
         else:
             task = bulk_import.apply_async((request.body, username, update_if_exists), task_id=task_id)
