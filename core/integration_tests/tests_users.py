@@ -103,6 +103,17 @@ class UserListViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 201)
         self.assertIsNotNone(response.data['uuid'])
+        self.assertIsNotNone(response.data['token'])
+
+        response = self.client.post(
+            '/users/',
+            dict(username='charles', name='Charles Dickens', password='scrooge', email='charles@fiction.com'),
+            HTTP_AUTHORIZATION='Token ' + self.superuser.get_token(),
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertIsNotNone(response.data['token'])
 
         response = self.client.post(
             '/users/login/',
