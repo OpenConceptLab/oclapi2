@@ -34,6 +34,7 @@ class UserCreateSerializer(serializers.ModelSerializer):
     updated_by = serializers.CharField(read_only=True)
     url = serializers.CharField(read_only=True)
     extras = serializers.JSONField(required=False, allow_null=True)
+    token = serializers.CharField(required=False, read_only=True)
 
     class Meta:
         model = UserProfile
@@ -41,7 +42,7 @@ class UserCreateSerializer(serializers.ModelSerializer):
         fields = (
             'type', 'uuid', 'username', 'name', 'email', 'company', 'location', 'preferred_locale', 'orgs',
             'public_collections', 'public_sources', 'created_on', 'updated_on', 'created_by', 'updated_by',
-            'url', 'extras', 'password', 'hashed_password'
+            'url', 'extras', 'password', 'hashed_password', 'token'
         )
 
     def create(self, validated_data):
@@ -50,7 +51,9 @@ class UserCreateSerializer(serializers.ModelSerializer):
         existing_profile = UserProfile.objects.filter(username=username)
         if existing_profile.exists():
             self._errors['username'] = 'User with username %s already exists.' % username
-            return existing_profile.first()
+            profile = existing_profile.first()
+            profile.token = profile.get_token()
+            return profile
         email = validated_data.get('email')
         profile = UserProfile(first_name=validated_data.get('name'), username=username, email=email)
         profile.created_by = request_user
@@ -61,6 +64,7 @@ class UserCreateSerializer(serializers.ModelSerializer):
         profile.extras = validated_data.get('extras', None)
         profile.save()
         profile.update_password(validated_data.get('password', None), validated_data.get('hashed_password', None))
+        profile.token = profile.get_token()
         return profile
 
 

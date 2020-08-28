@@ -1,3 +1,4 @@
+from pydash import get
 from rest_framework import mixins, status
 from rest_framework.generics import RetrieveAPIView, UpdateAPIView, DestroyAPIView
 from rest_framework.permissions import IsAdminUser, IsAuthenticated
@@ -63,9 +64,19 @@ class UserListView(UserBaseView,
             self.queryset = organization.members.all()
         return self.list(request, *args, **kwargs)
 
-    def post(self, request, *args, **kwargs):
-        self.serializer_class = UserCreateSerializer
-        return self.create(request, *args, **kwargs)
+    def post(self, request, *args, **kwargs):  # pylint: disable=unused-argument
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        headers = self.get_success_headers(serializer.data)
+
+        data = serializer.data.copy()
+        if 'username' in serializer._errors and 'token' not in data and get(  # pylint: disable=protected-access
+                serializer, 'instance.token'
+        ):
+            data['token'] = serializer.instance.token  # for ocl_web
+
+        return Response(data, status=status.HTTP_201_CREATED, headers=headers)
 
 
 class UserDetailView(UserBaseView, RetrieveAPIView, DestroyAPIView, mixins.UpdateModelMixin):
