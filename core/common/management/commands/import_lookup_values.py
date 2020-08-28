@@ -22,7 +22,6 @@ class Command(BaseCommand):
         user = UserProfile.objects.filter(username='ocladmin').get()
         org = Organization.objects.get(mnemonic='OCL')
         sources = self.create_sources(org, user)
-        created = False
 
         current_path = os.path.dirname(__file__)
         importer_confs = [
@@ -86,6 +85,7 @@ class Command(BaseCommand):
     def create_concepts(source, file, user):
         file = open(file, 'r')
         lines = file.readlines()
+        created = False
         for line in lines:
             data = json.loads(line)
             mnemonic = data.pop('id', None)
@@ -94,4 +94,6 @@ class Command(BaseCommand):
                 data['name'] = mnemonic
                 data['parent'] = source
                 Concept.persist_new(data, user, False)
-                return True
+                if not created:
+                    created = True
+        return created
