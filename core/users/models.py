@@ -56,12 +56,16 @@ class UserProfile(AbstractUser, BaseModel, SourceContainerMixin):
         self.refresh_token()
 
     def refresh_token(self):
-        Token.objects.filter(user=self).delete()
+        self.__delete_token()
         self.__create_token()
 
     def get_token(self):
         token = Token.objects.filter(user_id=self.id).first() or self.__create_token()
         return token.key
+
+    def set_token(self, token):
+        self.__delete_token()
+        Token.objects.create(user=self, key=token)
 
     def is_admin_for(self, concept_container):
         parent_id = concept_container.parent_id
@@ -69,6 +73,9 @@ class UserProfile(AbstractUser, BaseModel, SourceContainerMixin):
 
     def __create_token(self):
         return Token.objects.create(user=self)
+
+    def __delete_token(self):
+        return Token.objects.filter(user=self).delete()
 
     def __str__(self):
         return str(self.mnemonic)

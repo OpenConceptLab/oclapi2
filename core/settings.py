@@ -224,6 +224,9 @@ AWS_SECRET_ACCESS_KEY = os.environ.get('AWS_SECRET_ACCESS_KEY', '')
 AWS_STORAGE_BUCKET_NAME = os.environ.get('AWS_STORAGE_BUCKET_NAME', 'ocl-api-dev')
 DISABLE_VALIDATION = os.environ.get('DISABLE_VALIDATION', False)
 API_SUPERUSER_PASSWORD = os.environ.get('API_SUPERUSER_PASSWORD', 'OclAdm1n@123') # password for ocladmin superuser
+API_SUPERUSER_TOKEN = os.environ.get(
+    'API_SUPERUSER_TOKEN', '891b4b17feab99f3ff7e5b5d04ccc5da7aa96da6'
+)
 
 #celery/redis
 REDIS_PORT = 6379
