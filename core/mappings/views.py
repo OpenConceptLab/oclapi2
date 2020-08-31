@@ -164,14 +164,15 @@ class MappingRetrieveUpdateDestroyView(MappingBaseView, RetrieveAPIView, UpdateA
 
 
 class MappingVersionsView(MappingBaseView, ConceptDictionaryMixin, ListWithHeadersMixin):
-    serializer_class = MappingListSerializer
     permission_classes = (CanViewParentDictionary,)
 
     def get_queryset(self):
         return super().get_queryset().exclude(id=F('versioned_object_id'))
 
+    def get_serializer_class(self):
+        return MappingDetailSerializer if self.is_verbose(self.request) else MappingListSerializer
+
     def get(self, request, *args, **kwargs):
-        self.serializer_class = MappingDetailSerializer if self.is_verbose(request) else MappingListSerializer
         return self.list(request, *args, **kwargs)
 
 

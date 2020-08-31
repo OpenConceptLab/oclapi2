@@ -529,8 +529,13 @@ class CollectionExtraRetrieveUpdateDestroyView(CollectionExtrasBaseView, Retriev
 
 
 class CollectionVersionProcessingView(CollectionBaseView):
-    permission_classes = (CanViewConceptDictionary,)
     serializer_class = CollectionVersionDetailSerializer
+
+    def get_permissions(self):
+        if self.request.method == 'POST':
+            return [HasOwnership(), ]
+
+        return [CanViewConceptDictionary(), ]
 
     def get_object(self, queryset=None):
         return self.get_queryset().first()
@@ -544,8 +549,6 @@ class CollectionVersionProcessingView(CollectionBaseView):
         return response
 
     def post(self, request, *args, **kwargs):  # pylint: disable=unused-argument
-        self.permission_classes = (HasOwnership,)
-
         version = self.get_object()
         logger.debug('Processing flag clearance requested for collection version %s', version)
 
