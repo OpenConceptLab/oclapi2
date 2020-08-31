@@ -9,6 +9,7 @@ from pydash import get
 from rest_framework import status, mixins
 from rest_framework.generics import RetrieveAPIView, DestroyAPIView, UpdateAPIView, ListAPIView, \
     RetrieveUpdateDestroyAPIView
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from core.collections.constants import INCLUDE_REFERENCES_PARAM, HEAD_OF_CONCEPT_ADDED_TO_COLLECTION, \
@@ -142,9 +143,7 @@ class CollectionListView(CollectionBaseView, ConceptDictionaryCreateMixin, ListW
         return values
 
 
-class CollectionRetrieveUpdateDestroyView(
-        CollectionBaseView, ConceptDictionaryUpdateMixin, RetrieveAPIView, DestroyAPIView
-):
+class CollectionRetrieveUpdateDestroyView(CollectionBaseView, ConceptDictionaryUpdateMixin):
     serializer_class = CollectionDetailSerializer
 
     def get_object(self, queryset=None):
@@ -154,16 +153,25 @@ class CollectionRetrieveUpdateDestroyView(
         if self.request.method in ['GET', 'HEAD']:
             return [CanViewConceptDictionary()]
 
-        return [CanEditConceptDictionary()]
+        return [IsAuthenticated(), CanEditConceptDictionary()]
 
-    def destroy(self, request, *args, **kwargs):
+    def delete(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         collection = self.get_object()
         try:
             collection.delete()
         except Exception as ex:
-            return Response({'detail': ex.message}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'detail': get(ex, 'messages', ['Could not delete'])}, status=status.HTTP_400_BAD_REQUEST)
 
         return Response({'detail': 'Successfully deleted collection.'}, status=status.HTTP_204_NO_CONTENT)
+
+    def get(self, request, *args, **kwargs):  # pylint: disable=unused-argument
+        instance = self.get_object()
+
+        if not instance:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+
+        serializer = self.get_serializer(instance)
+        return Response(serializer.data)
 
 
 class CollectionReferencesView(
