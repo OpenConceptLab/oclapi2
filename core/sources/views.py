@@ -7,7 +7,7 @@ from django.shortcuts import get_object_or_404
 from pydash import get
 from rest_framework import status, mixins
 from rest_framework.generics import (
-    DestroyAPIView, RetrieveAPIView, ListAPIView, RetrieveUpdateDestroyAPIView, UpdateAPIView
+    RetrieveAPIView, ListAPIView, RetrieveUpdateDestroyAPIView, UpdateAPIView
 )
 from rest_framework.response import Response
 
@@ -116,7 +116,7 @@ class SourceListView(SourceBaseView, ConceptDictionaryCreateMixin, ListWithHeade
         return values
 
 
-class SourceRetrieveUpdateDestroyView(SourceBaseView, ConceptDictionaryUpdateMixin, RetrieveAPIView, DestroyAPIView):
+class SourceRetrieveUpdateDestroyView(SourceBaseView, ConceptDictionaryUpdateMixin):
     serializer_class = SourceDetailSerializer
 
     def get_object(self, queryset=None):
@@ -128,14 +128,23 @@ class SourceRetrieveUpdateDestroyView(SourceBaseView, ConceptDictionaryUpdateMix
 
         return [CanEditConceptDictionary()]
 
-    def destroy(self, request, *args, **kwargs):
+    def delete(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         source = self.get_object()
         try:
             source.delete()
         except Exception as ex:
-            return Response(ex.message_dict, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'detail': get(ex, 'messages', ['Could not delete'])}, status=status.HTTP_400_BAD_REQUEST)
 
         return Response({'detail': 'Successfully deleted source.'}, status=status.HTTP_204_NO_CONTENT)
+
+    def get(self, request, *args, **kwargs):  # pylint: disable=unused-argument
+        instance = self.get_object()
+
+        if not instance:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+
+        serializer = self.get_serializer(instance)
+        return Response(serializer.data)
 
 
 class SourceVersionListView(SourceVersionBaseView, mixins.CreateModelMixin, ListWithHeadersMixin):
