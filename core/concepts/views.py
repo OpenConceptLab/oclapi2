@@ -184,14 +184,15 @@ class ConceptRetrieveUpdateDestroyView(ConceptBaseView, RetrieveAPIView, UpdateA
 
 
 class ConceptVersionsView(ConceptBaseView, ConceptDictionaryMixin, ListWithHeadersMixin):
-    serializer_class = ConceptListSerializer
     permission_classes = (CanViewParentDictionary,)
 
     def get_queryset(self):
         return super().get_queryset().exclude(id=F('versioned_object_id'))
 
+    def get_serializer_class(self):
+        return ConceptDetailSerializer if self.is_verbose(self.request) else ConceptListSerializer
+
     def get(self, request, *args, **kwargs):
-        self.serializer_class = ConceptDetailSerializer if self.is_verbose(request) else ConceptListSerializer
         return self.list(request, *args, **kwargs)
 
 

@@ -51,7 +51,6 @@ class UserListView(UserBaseView,
         return organization.public_can_view or user.is_staff or organization.is_member(user)
 
     def get(self, request, *args, **kwargs):
-        self.serializer_class = UserDetailSerializer if self.is_verbose(request) else UserListSerializer
         org = kwargs.pop('org', None)
         if org:
             organization = Organization.objects.filter(mnemonic=org).first()

@@ -83,18 +83,17 @@ class OrganizationBaseView(BaseAPIView, RetrieveAPIView, DestroyAPIView):
 class OrganizationDetailView(OrganizationBaseView, mixins.UpdateModelMixin, mixins.CreateModelMixin):
     queryset = Organization.objects.filter(is_active=True)
 
+    def get_permissions(self):
+        if self.request.method == 'DELETE':
+            return [IsSuperuser(), ]
+
+        return [IsAuthenticated(), ]
+
     def get_serializer_class(self):
         if self.request.method == 'POST':
             return OrganizationCreateSerializer
 
         return OrganizationDetailSerializer
-
-    def initial(self, request, *args, **kwargs):
-        if request.method == 'DELETE':
-            self.permission_classes = (IsSuperuser, )
-        if request.method == 'POST':
-            self.permission_classes = (IsAuthenticated, )  # fixme
-        super().initial(request, *args, **kwargs)
 
     def put(self, request, *args, **kwargs):
         return self.partial_update(request, *args, **kwargs)

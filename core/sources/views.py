@@ -317,8 +317,13 @@ class SourceExtraRetrieveUpdateDestroyView(SourceExtrasBaseView, RetrieveUpdateD
 
 
 class SourceVersionProcessingView(SourceBaseView):
-    permission_classes = (CanViewConceptDictionary,)
     serializer_class = SourceVersionDetailSerializer
+
+    def get_permissions(self):
+        if self.request.method == 'POST':
+            return [HasOwnership(), ]
+
+        return [CanViewConceptDictionary(), ]
 
     def get_object(self, queryset=None):
         return self.get_queryset().first()
@@ -332,8 +337,6 @@ class SourceVersionProcessingView(SourceBaseView):
         return response
 
     def post(self, request, *args, **kwargs):  # pylint: disable=unused-argument
-        self.permission_classes = (HasOwnership,)
-
         version = self.get_object()
         logger.debug('Processing flag clearance requested for source version %s', version)
 
