@@ -329,11 +329,11 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         if source:
             queryset = queryset.filter(sources__mnemonic=source)
         if collection:
-            queryset = queryset.filter(collection__mnemonic=collection)
+            queryset = queryset.filter(collection_set__mnemonic=collection)
         if container_version and source:
             queryset = queryset.filter(sources__version=container_version)
         if container_version and collection:
-            queryset = queryset.filter(collection__version=container_version)
+            queryset = queryset.filter(collection_set__version=container_version)
         if mapping:
             queryset = queryset.filter(versioned_object_id=mapping)
         if mapping_version:

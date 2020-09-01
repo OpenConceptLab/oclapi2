@@ -288,11 +288,11 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         if source:
             queryset = queryset.filter(sources__mnemonic=source)
         if collection:
-            queryset = queryset.filter(collection__mnemonic=collection)
+            queryset = queryset.filter(collection_set__mnemonic=collection)
         if container_version and source:
             queryset = queryset.filter(sources__version=container_version)
         if container_version and collection:
-            queryset = queryset.filter(collection__version=container_version)
+            queryset = queryset.filter(collection_set__version=container_version)
         if concept:
             queryset = queryset.filter(mnemonic__iexact=concept)
         if concept_version:
