@@ -430,10 +430,6 @@ class SourceChildMixin:
             query_params = get_query_params_from_url_string(uri)  # parsing query parameters
             kwargs.update(query_params)
             queryset = cls.get_base_queryset(kwargs)
-            if '/versions/' in uri:
-                queryset = queryset.exclude(id=F('versioned_object_id'))
-            else:
-                queryset = queryset.filter(id=F('versioned_object_id'))
         except:  # pylint: disable=bare-except
             pass
 
