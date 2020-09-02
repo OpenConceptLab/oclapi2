@@ -36,6 +36,21 @@ class CollectionListViewTest(OCLAPITestCase):
         self.assertEqual(response.data[0]['id'], 'coll1')
         self.assertEqual(response.data[0]['url'], coll.uri)
 
+        concept = ConceptFactory()
+        reference = CollectionReference(expression=concept.uri)
+        reference.full_clean()
+        reference.save()
+        coll.references.add(reference)
+        coll.concepts.set(reference.concepts)
+
+        response = self.client.get(
+            '/orgs/{}/collections/?contains={}&includeReferences=true'.format(coll.parent.mnemonic, concept.uri),
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+
     def test_post_201(self):
         org = OrganizationFactory(mnemonic='org')
         user = UserProfileFactory(organizations=[org], username='user')
@@ -275,6 +290,24 @@ class CollectionReferencesViewTest(OCLAPITestCase):
         self.assertEqual(len(response.data), 1)
         self.assertEqual(response.data[0]['expression'], self.concept.uri)
         self.assertEqual(response.data[0]['reference_type'], 'concepts')
+
+        response = self.client.get(
+            '/collections/coll/references/?q={}&search_sort=desc'.format(self.concept.uri),
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['expression'], self.concept.uri)
+        self.assertEqual(response.data[0]['reference_type'], 'concepts')
+
+        response = self.client.get(
+            '/collections/coll/references/?q=/concepts/&search_sort=desc',
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 0)
 
     def test_delete_400(self):
         response = self.client.delete(
@@ -750,3 +783,52 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 409)
         s3_url_for_mock.assert_called_once_with("username/coll_v1.20200101100000.zip")
         export_collection_mock.delay.assert_called_once_with(self.collection_v1.id)
+
+
+class CollectionVersionListViewTest(OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.user = UserProfileFactory()
+        self.token = self.user.get_token()
+        self.collection = CollectionFactory(mnemonic='coll', user=self.user, organization=None)
+        self.concept = ConceptFactory()
+        self.reference = CollectionReference(expression=self.concept.uri)
+        self.reference.full_clean()
+        self.reference.save()
+        self.collection.references.add(self.reference)
+        self.collection.concepts.set(self.reference.concepts)
+        self.assertEqual(self.collection.references.count(), 1)
+        self.assertEqual(self.collection.concepts.count(), 1)
+
+    def test_get_200(self):
+        response = self.client.get(
+            '/collections/coll/versions/?verbose=true',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['version'], 'HEAD')
+
+    @patch('core.collections.views.export_collection')
+    def test_post_201(self, export_collection_mock):
+        export_collection_mock.delay = Mock()
+        response = self.client.post(
+            '/collections/coll/versions/',
+            dict(id='v1', description='version1'),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data['version'], 'v1')
+        self.assertEqual(self.collection.versions.count(), 2)
+
+        last_created_version = self.collection.versions.order_by('created_at').last()
+        self.assertEqual(last_created_version.version, 'v1')
+        self.assertEqual(last_created_version.description, 'version1')
+        self.assertEqual(last_created_version.concepts.count(), 1)
+        self.assertEqual(last_created_version.references.count(), 1)
+        self.assertEqual(last_created_version, self.collection.get_latest_version())
+        export_collection_mock.delay.assert_called_once_with(str(last_created_version.id))

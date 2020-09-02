@@ -67,7 +67,7 @@ class UserProfile(AbstractUser, BaseModel, SourceContainerMixin):
         self.__delete_token()
         Token.objects.create(user=self, key=token)
 
-    def is_admin_for(self, concept_container):
+    def is_admin_for(self, concept_container):  # pragma: no cover
         parent_id = concept_container.parent_id
         return parent_id == self.id or self.organizations.filter(id=parent_id).exists()
 

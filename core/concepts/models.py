@@ -66,16 +66,6 @@ class LocalizedText(models.Model):
             }
         )
 
-    @staticmethod
-    def get_filter_criteria_for_attribute(attribute):
-        if attribute == 'is_fully_specified':
-            return dict(type__in=LOCALES_FULLY_SPECIFIED)
-        if attribute == 'is_short':
-            return dict(type__in=LOCALES_SHORT)
-        if attribute == 'is_search_index_term':
-            return dict(type__in=LOCALES_SEARCH_INDEX_TERM)
-        return {attribute: True}
-
     @property
     def is_fully_specified(self):
         return self.type in LOCALES_FULLY_SPECIFIED
@@ -114,7 +104,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
     @property
     def concept(self):  # for url kwargs
-        return self.mnemonic
+        return self.mnemonic # pragma: no cover
 
     @staticmethod
     def get_resource_url_kwarg():
@@ -231,24 +221,6 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         return reverse_resource(self, 'concept-version-list')
 
     @property
-    def fully_specified_names(self):
-        return self.names.filter(
-            **LocalizedText.get_filter_criteria_for_attribute('is_fully_specified')
-        )
-
-    @property
-    def short_names(self):
-        return self.names.filter(
-            **LocalizedText.get_filter_criteria_for_attribute('is_short')
-        )
-
-    @property
-    def non_short_names(self):
-        return self.names.exclude(
-            **LocalizedText.get_filter_criteria_for_attribute('is_short')
-        )
-
-    @property
     def all_names(self):
         return list(self.names.values_list('name', flat=True))
 
@@ -351,7 +323,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
     def set_locales(self):
         if not self.id:
-            return
+            return  # pragma: no cover
 
         names = get(self, 'cloned_names', [])
         descriptions = get(self, 'cloned_descriptions', [])

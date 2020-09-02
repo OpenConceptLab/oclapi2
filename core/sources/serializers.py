@@ -52,7 +52,7 @@ class SourceCreateOrUpdateSerializer(ModelSerializer):
         if not supported_locales:
             supported_locales = source.supported_locales
         if supported_locales and isinstance(supported_locales, str):
-            supported_locales = supported_locales.split(',')
+            supported_locales = supported_locales.split(',')   # pragma: no cover
 
         source.supported_locales = supported_locales
         source.extras = validated_data.get('extras', source.extras)

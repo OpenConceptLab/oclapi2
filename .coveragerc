@@ -1,0 +1,17 @@
+[run]
+omit =
+    core/settings.py
+    flowerconfig.py
+    core/asgi.py
+    core/celery.py
+    core/wsgi.py
+    */management/commands/*
+    */migrations/*
+    */factories.py
+    */documents.py
+    */feeds.py
+    *test*
+    core/middlewares/*
+    *.css
+    *.html
+concurrency=multiprocessing

@@ -4,12 +4,10 @@ from django.core.exceptions import ValidationError
 from django.db import models, transaction
 from django.db.models import UniqueConstraint
 from django.utils import timezone
-from pydash import compact
 from rest_framework.test import APIRequestFactory
 
 from core.collections.constants import (
-    COLLECTION_TYPE, EXPRESSION_INVALID, EXPRESSION_RESOURCE_URI_PARTS_COUNT,
-    CONCEPTS_EXPRESSIONS,
+    COLLECTION_TYPE, EXPRESSION_INVALID, CONCEPTS_EXPRESSIONS,
     MAPPINGS_EXPRESSIONS,
     REFERENCE_ALREADY_EXISTS, CONCEPT_FULLY_SPECIFIED_NAME_UNIQUE_PER_COLLECTION_AND_LOCALE,
     CONCEPT_PREFERRED_NAME_UNIQUE_PER_COLLECTION_AND_LOCALE, ALL_SYMBOL)
@@ -19,6 +17,7 @@ from core.common.constants import (
 )
 from core.common.models import ConceptContainerModel
 from core.common.utils import reverse_resource, is_valid_uri
+from core.concepts.constants import LOCALES_FULLY_SPECIFIED
 from core.concepts.models import Concept
 from core.concepts.views import ConceptListView
 from core.mappings.models import Mapping
@@ -93,15 +92,11 @@ class Collection(ConceptContainerModel):
         self.concepts.add(concept)
 
     def add_mapping(self, mapping):
-        self.mappings.add(mapping)
-
-    def get_concepts_count(self):
-        return self.concepts.count()
+        self.mappings.add(mapping)  # pragma: no cover
 
     def get_concepts(self, start=None, end=None):
         """ Use for efficient iteration over paginated concepts. Note that any filter will be applied only to concepts
         from the given range. If you need to filter on all concepts, use get_concepts() without args.
-        In order to get the total concepts count, please use get_concepts_count().
         """
         concepts = self.concepts.all()
         if start and end:
@@ -114,22 +109,18 @@ class Collection(ConceptContainerModel):
         self.concepts.add(*reference.concepts)
         self.save()  # update counts
 
-    def current_references(self):
-        return list(self.references.values_list('expression', flat=True))
-
     def validate(self, reference):
         reference.full_clean()
-
         if reference.without_version in [reference.without_version for reference in self.references.all()]:
             raise ValidationError({reference.expression: [REFERENCE_ALREADY_EXISTS]})
 
         if self.custom_validation_schema == CUSTOM_VALIDATION_SCHEMA_OPENMRS:
             if reference.concepts and reference.concepts.count() == 0:
-                return
+                return  # pragma: no cover
 
             concept = reference.concepts[0]
             self.check_concept_uniqueness_in_collection_and_locale_by_name_attribute(
-                concept, attribute='is_fully_specified', value=True,
+                concept, attribute='type__in', value=LOCALES_FULLY_SPECIFIED,
                 error_message=CONCEPT_FULLY_SPECIFIED_NAME_UNIQUE_PER_COLLECTION_AND_LOCALE
             )
             self.check_concept_uniqueness_in_collection_and_locale_by_name_attribute(
@@ -373,10 +364,6 @@ class CollectionReference(models.Model):
         return drop_version(self.expression)
 
     @property
-    def is_resource_expression(self):
-        return len(compact(self.__expression_parts)) == EXPRESSION_RESOURCE_URI_PARTS_COUNT
-
-    @property
     def is_valid_expression(self):
         return is_valid_uri(self.expression)
 
@@ -389,10 +376,6 @@ class CollectionReference(models.Model):
             reference = MAPPINGS_EXPRESSIONS
 
         return reference
-
-    @property
-    def __expression_parts(self):
-        return self.expression.split('/')
 
     def get_concepts(self):
         return Concept.from_uri_queryset(self.expression)

@@ -5,6 +5,7 @@ from core.collections.models import CollectionReference, Collection
 from core.collections.tests.factories import CollectionFactory
 from core.collections.utils import is_mapping, is_concept, drop_version, is_version_specified, \
     get_concept_by_expression
+from core.common.constants import CUSTOM_VALIDATION_SCHEMA_OPENMRS
 from core.common.tests import OCLTestCase
 from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory
@@ -12,6 +13,10 @@ from core.sources.tests.factories import SourceFactory
 
 
 class CollectionTest(OCLTestCase):
+    def test_collection(self):
+        self.assertEqual(Collection(mnemonic='coll').collection, 'coll')
+        self.assertEqual(Collection().collection, '')
+
     def test_is_versioned(self):
         self.assertTrue(Collection().is_versioned)
 
@@ -31,6 +36,50 @@ class CollectionTest(OCLTestCase):
         self.assertEqual(collection.references.count(), 1)
         self.assertEqual(collection.references.first().expression, concept_expression)
         self.assertEqual(collection.concepts.first(), concept.get_latest_version())
+
+        result = collection.add_references([concept_expression])
+        self.assertEqual(
+            result, {concept_expression: ['Concept or Mapping reference name must be unique in a collection.']}
+        )
+        self.assertEqual(collection.concepts.count(), 1)
+        self.assertEqual(collection.references.count(), 1)
+
+    def test_add_references_openmrs_schema(self):
+        collection = CollectionFactory(custom_validation_schema=CUSTOM_VALIDATION_SCHEMA_OPENMRS)
+
+        self.assertEqual(collection.concepts.count(), 0)
+        self.assertEqual(collection.references.count(), 0)
+
+        source = SourceFactory()
+        concept = ConceptFactory(parent=source, sources=[source])
+        concept_expression = concept.uri
+
+        collection.add_references([concept_expression])
+
+        self.assertEqual(collection.concepts.count(), 1)
+        self.assertEqual(collection.references.count(), 1)
+        self.assertEqual(collection.references.first().expression, concept_expression)
+        self.assertEqual(collection.concepts.first(), concept.get_latest_version())
+
+        concept2 = ConceptFactory(parent=source, sources=[source])
+        collection.add_references([concept2.uri])
+
+        self.assertEqual(collection.concepts.count(), 2)
+        self.assertEqual(collection.references.count(), 2)
+
+    def test_get_concepts(self):
+        collection = CollectionFactory()
+        source = SourceFactory()
+        concept = ConceptFactory(parent=source, sources=[source])
+        concept_expression = concept.uri
+        collection.add_references([concept_expression])
+
+        concepts = collection.get_concepts()
+
+        self.assertEqual(concepts.count(), 1)
+        self.assertEqual(concepts.first(), concept.get_latest_version())
+        self.assertEqual(collection.get_concepts(start=0, end=10).count(), 1)
+        self.assertEqual(collection.get_concepts(start=1, end=2).count(), 0)
 
     def test_seed_concepts(self):
         collection1 = CollectionFactory()

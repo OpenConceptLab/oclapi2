@@ -93,6 +93,16 @@ class UserListViewTest(OCLAPITestCase):
         self.assertEqual(len(response.data), 1)
         self.assertEqual(response.data[0]['username'], 'ocladmin')
 
+        response = self.client.get(
+            '/users/?verbose=true',
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['username'], 'ocladmin')
+        self.assertEqual(response.data[0]['email'], self.superuser.email)
+
     def test_post_201(self):
         response = self.client.post(
             '/users/',
