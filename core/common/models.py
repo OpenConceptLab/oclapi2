@@ -575,8 +575,8 @@ class ConceptContainerModel(VersionedModel):
     @property
     def export_path(self):
         last_update = self.last_child_update.strftime('%Y%m%d%H%M%S')
-        source = self.head
-        return "%s/%s_%s.%s.zip" % (source.owner_name, source.mnemonic, self.version, last_update)
+        head = self.head
+        return "%s/%s_%s.%s.zip" % (head.parent_resource, head.mnemonic, self.version, last_update)
 
     def get_export_url(self):
         return S3.url_for(self.export_path)
