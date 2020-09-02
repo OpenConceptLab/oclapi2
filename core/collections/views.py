@@ -103,8 +103,8 @@ class CollectionListView(CollectionBaseView, ConceptDictionaryCreateMixin, ListW
     document_model = CollectionDocument
 
     def get_serializer_class(self):
-        if self.request.method == 'GET':
-            return CollectionDetailSerializer if self.is_verbose(self.request) else CollectionListSerializer
+        if self.request.method == 'GET' and self.is_verbose(self.request):
+            return CollectionDetailSerializer
         if self.request.method == 'POST':
             return CollectionCreateSerializer
 
@@ -276,7 +276,7 @@ class CollectionReferencesView(
 
         references = list(filter(lambda expr: expr.startswith(expression), added_expressions))
         if len(references) < 1:
-            return None
+            return None  # pragma: no cover
 
         return {
             'added': True,
@@ -369,7 +369,7 @@ class CollectionVersionListView(CollectionVersionBaseView, mixins.CreateModelMix
         if self.request.method == 'POST':
             return CollectionCreateSerializer
 
-        return CollectionListSerializer
+        return CollectionListSerializer  # pragma: no cover
 
     def get(self, request, *args, **kwargs):
         self.released_filter = parse_boolean_query_param(request, RELEASED_PARAM, self.released_filter)
@@ -431,7 +431,7 @@ class CollectionLatestVersionRetrieveUpdateView(CollectionVersionBaseView, Retri
         self.object = self.get_object()
         head = self.object.head
         if not head:
-            return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
+            return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)  # pragma: no cover
 
         serializer = self.get_serializer(self.object, data=request.data, partial=True)
 
@@ -459,7 +459,7 @@ class CollectionVersionRetrieveUpdateDestroyView(CollectionBaseView, RetrieveAPI
         self.object = self.get_object()
         head = self.object.head
         if not head:
-            return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
+            return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)  # pragma: no cover
 
         serializer = self.get_serializer(self.object, data=request.data, partial=True)
 

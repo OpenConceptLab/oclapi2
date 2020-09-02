@@ -6,7 +6,7 @@ from core.concepts.validators import BasicConceptValidator, ValidatorSpecifier
 class ConceptValidationMixin:
     def clean(self):
         if settings.DISABLE_VALIDATION:
-            return
+            return  # pragma: no cover
 
         validators = [BasicConceptValidator()]
 

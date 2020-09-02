@@ -59,7 +59,7 @@ class Source(ConceptContainerModel):
 
     @property
     def source(self):
-        return self.mnemonic
+        return self.mnemonic  # pragma: no cover
 
     @property
     def versions_url(self):
@@ -83,4 +83,4 @@ class Source(ConceptContainerModel):
         if origin_source.custom_validation_schema == self.custom_validation_schema:
             return False
 
-        return self.custom_validation_schema is not None and self.num_concepts > 0
+        return self.custom_validation_schema is not None and self.num_concepts > 0  # pragma: no cover

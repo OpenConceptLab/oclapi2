@@ -1,4 +1,5 @@
 from mock import Mock, patch
+from rest_framework.authtoken.models import Token
 
 from core.collections.tests.factories import CollectionFactory
 from core.common.constants import ACCESS_TYPE_NONE, HEAD, OCL_ORG_ID
@@ -115,3 +116,38 @@ class UserProfileTest(OCLTestCase):
 
         self.assertIsNotNone(user.id)
         self.assertEqual(user.internal_reference_id, str(user.id))
+
+    def test_update_password(self):
+        user = UserProfileFactory()
+        user.set_password('password')
+        user.save()
+
+        user.update_password()
+        self.assertTrue(user.check_password('password'))
+
+        user.update_password(password='newpassword')
+        self.assertFalse(user.check_password('password'))
+        self.assertTrue(user.check_password('newpassword'))
+
+        user.update_password(hashed_password='hashedpassword')
+        self.assertFalse(user.check_password('password'))
+        self.assertEqual(user.password, 'hashedpassword')
+
+    def test_get_token(self):
+        user = UserProfileFactory()
+
+        self.assertFalse(Token.objects.filter(user=user).exists())
+
+        token = user.get_token()
+
+        self.assertIsNotNone(token)
+        self.assertEqual(user.auth_token.key, token)
+        self.assertEqual(user.get_token(), token)
+
+    def test_set_token(self):
+        user = UserProfileFactory()
+
+        self.assertFalse(Token.objects.filter(user=user).exists())
+
+        user.set_token('token')
+        self.assertEqual(user.auth_token.key, 'token')

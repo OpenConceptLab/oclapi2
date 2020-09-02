@@ -7,6 +7,7 @@ from core.users.tests.factories import UserProfileFactory
 
 class BulkImportViewTest(OCLAPITestCase):
     def setUp(self):
+        super().setUp()
         self.superuser = UserProfile.objects.get(username='ocladmin')
         self.token = self.superuser.get_token()
 
@@ -19,6 +20,17 @@ class BulkImportViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.data, dict(exception='Required task id'))
+
+    def test_get_403(self):
+        user = UserProfileFactory()
+        task_id = '1' * 36 + '-ocladmin'
+        response = self.client.get(
+            '/importers/bulk-import/?task={}'.format(task_id),
+            HTTP_AUTHORIZATION='Token ' + user.get_token(),
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 403)
 
     @patch('core.importers.views.AsyncResult')
     def test_get_task_success(self, async_result_klass_mock):

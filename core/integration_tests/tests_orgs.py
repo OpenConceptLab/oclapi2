@@ -47,7 +47,7 @@ class OrganizationListViewTest(OCLAPITestCase):
 
         random_user = UserProfileFactory()
         response = self.client.get(
-            '/orgs/',
+            '/orgs/?verbose=true',
             HTTP_AUTHORIZATION='Token ' + random_user.get_token(),
             format='json'
         )
@@ -111,6 +111,16 @@ class OrganizationListViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.data, dict(name=[ErrorDetail(string='This field is required.', code='required')]))
         self.assertFalse(self.user.organizations.filter(mnemonic='test-org-1').exists())
+
+        response = self.client.post(
+            '/orgs/',
+            dict(id='OCL', name='another ocl'),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data, dict(mnemonic='Organization with mnemonic OCL already exists.'))
 
 
 class OrganizationDetailViewTest(OCLAPITestCase):

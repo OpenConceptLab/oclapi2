@@ -371,9 +371,17 @@ class ConceptTest(OCLTestCase):
             [concept3_latest, concept6_latest]
         )
 
+    def test_custom_validation_schema(self):
+        from core.sources.models import Source
+        self.assertEqual(
+            Concept(parent=Source(custom_validation_schema='foobar')).custom_validation_schema,
+            'foobar'
+        )
+
 
 class OpenMRSConceptValidatorTest(OCLTestCase):
     def setUp(self):
+        super().setUp()
         self.create_lookup_concept_classes()
 
     def test_concept_class_is_valid_attribute_negative(self):
@@ -689,6 +697,10 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
 
 
 class ValidatorSpecifierTest(OCLTestCase):
+    def setUp(self):
+        super().setUp()
+        self.create_lookup_concept_classes()
+
     def test_specifier_should_initialize_openmrs_validator_with_reference_values(self):
         source = SourceFactory(custom_validation_schema=CUSTOM_VALIDATION_SCHEMA_OPENMRS, version=HEAD)
         expected_reference_values = {

@@ -10,7 +10,7 @@ from .constants import BASIC_DESCRIPTION_CANNOT_BE_EMPTY, BASIC_NAMES_CANNOT_BE_
 
 def message_with_name_details(message, name):
     if name is None:
-        return message
+        return message  # pragma: no cover
 
     name_str = name.name or NA
     locale = name.locale or NA
@@ -75,10 +75,10 @@ class BaseConceptValidator:
         self.validate_source_based(concept)
 
     def validate_concept_based(self, concept):
-        pass
+        pass  # pragma: no cover
 
     def validate_source_based(self, concept):
-        pass
+        pass  # pragma: no cover
 
 
 class BasicConceptValidator(BaseConceptValidator):
@@ -94,7 +94,7 @@ class BasicConceptValidator(BaseConceptValidator):
         if concept.saved_unsaved_names:
             return
 
-        raise ValidationError({'names': [BASIC_NAMES_CANNOT_BE_EMPTY]})
+        raise ValidationError({'names': [BASIC_NAMES_CANNOT_BE_EMPTY]})  # pragma: no cover
 
     @staticmethod
     def description_cannot_be_null(concept):
@@ -105,4 +105,4 @@ class BasicConceptValidator(BaseConceptValidator):
         empty_descriptions = list(filter(lambda description: not description.name, descriptions))
 
         if empty_descriptions:
-            raise ValidationError({'descriptions': [BASIC_DESCRIPTION_CANNOT_BE_EMPTY]})
+            raise ValidationError({'descriptions': [BASIC_DESCRIPTION_CANNOT_BE_EMPTY]})  # pragma: no cover
