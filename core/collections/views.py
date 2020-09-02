@@ -227,7 +227,7 @@ class CollectionReferencesView(
             expressions += self.get_related_mappings_with_version_information(instance, expressions)
 
         instance.delete_references(expressions)
-        return Response({'message': 'ok!'}, status=status.HTTP_200_OK)
+        return Response({'message': 'ok!'}, status=status.HTTP_204_NO_CONTENT)
 
     def update(self, request, *args, **kwargs):  # pylint: disable=too-many-locals,unused-argument # Fixme: Sny
         collection = self.get_object()
@@ -446,10 +446,14 @@ class CollectionLatestVersionRetrieveUpdateView(CollectionVersionBaseView, Retri
 
 class CollectionVersionRetrieveUpdateDestroyView(CollectionBaseView, RetrieveAPIView, UpdateAPIView):
     permission_classes = (HasAccessToVersionedObject,)
-    serializer_class = CollectionDetailSerializer
+    serializer_class = CollectionVersionDetailSerializer
 
     def get_object(self, queryset=None):
-        return self.get_queryset().first()
+        instance = self.get_queryset().first()
+        if not instance:
+            raise Http404()
+
+        return instance
 
     def update(self, request, *args, **kwargs):
         self.object = self.get_object()
@@ -462,7 +466,7 @@ class CollectionVersionRetrieveUpdateDestroyView(CollectionBaseView, RetrieveAPI
         if serializer.is_valid():
             self.object = serializer.save(force_update=True)
             if serializer.is_valid():
-                serializer = CollectionDetailSerializer(self.object, context={'request': request})
+                serializer = CollectionVersionDetailSerializer(self.object, context={'request': request})
                 return Response(serializer.data, status=status.HTTP_200_OK)
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -480,7 +484,7 @@ class CollectionVersionRetrieveUpdateDestroyView(CollectionBaseView, RetrieveAPI
 
 class CollectionExtrasBaseView(CollectionBaseView):
     def get_object(self, queryset=None):
-        return self.get_queryset().filter(version=HEAD).first()
+        return get_object_or_404(self.get_queryset(), version=HEAD)
 
 
 class CollectionExtrasView(CollectionExtrasBaseView, ListAPIView):
@@ -546,7 +550,7 @@ class CollectionVersionProcessingView(CollectionBaseView):
         return [CanViewConceptDictionary(), ]
 
     def get_object(self, queryset=None):
-        return self.get_queryset().first()
+        return get_object_or_404(self.get_queryset())
 
     def get(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         version = self.get_object()
@@ -571,7 +575,12 @@ class CollectionVersionExportView(CollectionBaseView, ConceptContainerExportMixi
     serializer_class = CollectionVersionDetailSerializer
 
     def get_object(self, queryset=None):
-        return self.get_queryset().first()
+        instance = self.get_queryset().first()
+
+        if not instance:
+            raise Http404()
+
+        return instance
 
     def handle_export_version(self):
         version = self.get_object()

@@ -1,7 +1,11 @@
+from celery_once import AlreadyQueued
+from mock import patch, Mock
 from rest_framework.exceptions import ErrorDetail
 
+from core.collections.models import CollectionReference, Collection
 from core.collections.tests.factories import CollectionFactory
 from core.common.tests import OCLAPITestCase
+from core.concepts.tests.factories import ConceptFactory
 from core.orgs.tests.factories import OrganizationFactory
 from core.users.tests.factories import UserProfileFactory
 
@@ -236,3 +240,513 @@ class CollectionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.data, dict(name=[ErrorDetail(string='This field may not be blank.', code='blank')]))
+
+
+class CollectionReferencesViewTest(OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.user = UserProfileFactory()
+        self.token = self.user.get_token()
+        self.collection = CollectionFactory(mnemonic='coll', user=self.user, organization=None)
+        self.concept = ConceptFactory()
+        self.reference = CollectionReference(expression=self.concept.uri)
+        self.reference.full_clean()
+        self.reference.save()
+        self.collection.references.add(self.reference)
+        self.collection.concepts.set(self.reference.concepts)
+        self.assertEqual(self.collection.references.count(), 1)
+        self.assertEqual(self.collection.concepts.count(), 1)
+
+    def test_get_404(self):
+        response = self.client.get(
+            '/collections/foobar/references/',
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_get_200(self):
+        response = self.client.get(
+            '/collections/coll/references/',
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['expression'], self.concept.uri)
+        self.assertEqual(response.data[0]['reference_type'], 'concepts')
+
+    def test_delete_400(self):
+        response = self.client.delete(
+            '/collections/coll/references/',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_delete_204_random(self):
+        response = self.client.delete(
+            '/collections/coll/references/',
+            dict(expressions=['/foo/']),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(self.collection.references.count(), 1)
+        self.assertEqual(self.collection.concepts.count(), 1)
+
+    def test_delete_204_all_expressions(self):
+        response = self.client.delete(
+            '/collections/coll/references/',
+            dict(expressions='*'),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(self.collection.references.count(), 0)
+        self.assertEqual(self.collection.concepts.count(), 0)
+
+    def test_delete_204_specific_expression(self):
+        response = self.client.delete(
+            '/collections/coll/references/',
+            dict(expressions=[self.concept.uri]),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(self.collection.references.count(), 0)
+        self.assertEqual(self.collection.concepts.count(), 0)
+
+    @patch('core.collections.views.add_references')
+    def test_put_202_all(self, add_references_mock):
+        add_references_mock.delay = Mock()
+
+        response = self.client.put(
+            '/collections/coll/references/',
+            dict(data=dict(concepts='*')),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.data, [])
+        add_references_mock.delay.assert_called_once_with(
+            self.user, dict(concepts='*'), self.collection, 'http://testserver', False
+        )
+
+    def test_put_200_specific_expression(self):
+        response = self.client.put(
+            '/collections/coll/references/',
+            dict(data=dict(concepts=[self.concept.uri])),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data,
+            [
+                dict(
+                    added=False, expression=self.concept.uri,
+                    message=['Concept or Mapping reference name must be unique in a collection.']
+                )
+            ]
+        )
+
+        concept2 = ConceptFactory()
+        response = self.client.put(
+            '/collections/coll/references/',
+            dict(data=dict(concepts=[concept2.uri])),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.collection.references.count(), 2)
+        self.assertEqual(self.collection.concepts.count(), 2)
+        self.assertTrue(self.collection.references.filter(expression=concept2.uri).exists())
+        self.assertEqual(
+            response.data,
+            [
+                dict(
+                    added=True, expression=concept2.uri,
+                    message='Added the latest versions of concept to the collection. Future updates will not be added'
+                            ' automatically.'
+                )
+            ]
+        )
+
+
+class CollectionVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.user = UserProfileFactory()
+        self.token = self.user.get_token()
+        self.collection = CollectionFactory(mnemonic='coll', user=self.user, organization=None)
+        self.collection_v1 = CollectionFactory(version='v1', mnemonic='coll', user=self.user, organization=None)
+
+    def test_get_200(self):
+        response = self.client.get(
+            '/collections/coll/v1/',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['uuid'], str(self.collection_v1.id))
+        self.assertEqual(response.data['id'], 'v1')
+        self.assertEqual(response.data['short_code'], 'coll')
+
+    def test_get_404(self):
+        response = self.client.get(
+            '/collections/coll/v2/',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_put_200(self):
+        self.assertEqual(self.collection.versions.count(), 2)
+        self.assertIsNone(self.collection_v1.external_id)
+
+        external_id = 'EXT-123'
+        response = self.client.put(
+            '/collections/coll/v1/',
+            dict(external_id=external_id),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['uuid'], str(self.collection_v1.id))
+        self.assertEqual(response.data['id'], 'v1')
+        self.assertEqual(response.data['short_code'], 'coll')
+        self.assertEqual(response.data['external_id'], external_id)
+        self.collection_v1.refresh_from_db()
+        self.assertEqual(self.collection_v1.external_id, external_id)
+        self.assertEqual(self.collection.versions.count(), 2)
+
+    def test_put_400(self):
+        response = self.client.put(
+            '/collections/coll/v1/',
+            dict(version=None),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data, {'version': [ErrorDetail(string='This field may not be null.', code='null')]})
+
+    def test_delete(self):
+        response = self.client.delete(
+            '/collections/coll/v1/',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(self.collection.versions.count(), 1)
+        self.assertTrue(self.collection.versions.first().is_latest_version)
+
+        response = self.client.delete(
+            '/collections/coll/{}/'.format(self.collection.version),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data, {'detail': ['Cannot delete only version.']})
+        self.assertEqual(self.collection.versions.count(), 1)
+        self.assertTrue(self.collection.versions.first().is_latest_version)
+
+
+class CollectionLatestVersionRetrieveUpdateViewTest(OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.user = UserProfileFactory()
+        self.token = self.user.get_token()
+        self.collection = CollectionFactory(mnemonic='coll', user=self.user, organization=None)
+        self.collection_v1 = CollectionFactory(version='v1', mnemonic='coll', user=self.user, organization=None)
+
+    def test_get_404(self):
+        response = self.client.get(
+            '/collections/coll/latest/',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_get_200(self):
+        self.collection_v1.released = True
+        self.collection_v1.save()
+
+        response = self.client.get(
+            '/collections/coll/latest/',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['uuid'], str(self.collection_v1.id))
+        self.assertEqual(response.data['id'], 'v1')
+        self.assertEqual(response.data['short_code'], 'coll')
+
+    def test_put_200(self):
+        self.collection_v1.released = True
+        self.collection_v1.save()
+        self.assertEqual(self.collection.versions.count(), 2)
+        self.assertIsNone(self.collection_v1.external_id)
+
+        external_id = 'EXT-123'
+        response = self.client.put(
+            '/collections/coll/latest/',
+            dict(external_id=external_id),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['uuid'], str(self.collection_v1.id))
+        self.assertEqual(response.data['id'], 'v1')
+        self.assertEqual(response.data['short_code'], 'coll')
+        self.assertEqual(response.data['external_id'], external_id)
+        self.collection_v1.refresh_from_db()
+        self.assertEqual(self.collection_v1.external_id, external_id)
+        self.assertEqual(self.collection.versions.count(), 2)
+
+    def test_put_400(self):
+        self.collection_v1.released = True
+        self.collection_v1.save()
+
+        response = self.client.put(
+            '/collections/coll/latest/',
+            dict(version=None),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data, {'version': [ErrorDetail(string='This field may not be null.', code='null')]})
+
+
+class CollectionExtrasViewTest(OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.user = UserProfileFactory()
+        self.token = self.user.get_token()
+        self.extras = dict(foo='bar', tao='ching')
+        self.collection = CollectionFactory(
+            mnemonic='coll', user=self.user, organization=None, extras=self.extras
+        )
+
+    def test_get_200(self):
+        response = self.client.get(
+            '/collections/coll/extras/',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, self.extras)
+
+    def test_get_404(self):
+        response = self.client.get(
+            '/collections/foobar/extras/',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+        self.assertEqual(response.status_code, 404)
+
+
+class CollectionExtraRetrieveUpdateDestroyViewTest(OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.user = UserProfileFactory()
+        self.token = self.user.get_token()
+        self.extras = dict(foo='bar', tao='ching')
+        self.collection = CollectionFactory(
+            mnemonic='coll', user=self.user, organization=None, extras=self.extras
+        )
+
+    def test_get_200(self):
+        response = self.client.get(
+            '/collections/coll/extras/foo/',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, dict(foo='bar'))
+
+    def test_get_404(self):
+        response = self.client.get(
+            '/collections/coll/extras/bar/',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_put_200(self):
+        response = self.client.put(
+            '/collections/coll/extras/foo/',
+            dict(foo='barbar'),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, dict(foo='barbar'))
+        self.collection.refresh_from_db()
+        self.assertEqual(self.collection.extras['foo'], 'barbar')
+
+    def test_put_400(self):
+        response = self.client.put(
+            '/collections/coll/extras/foo/',
+            dict(foo=None),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data, ['Must specify foo param in body.'])
+        self.collection.refresh_from_db()
+        self.assertEqual(self.collection.extras, self.extras)
+
+    def test_delete_204(self):
+        response = self.client.delete(
+            '/collections/coll/extras/foo/',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+        self.assertEqual(response.status_code, 204)
+        self.collection.refresh_from_db()
+        self.assertEqual(self.collection.extras, dict(tao='ching'))
+
+    def test_delete_404(self):
+        response = self.client.delete(
+            '/collections/coll/extras/bar/',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+        self.assertEqual(response.status_code, 404)
+
+
+class CollectionVersionExportViewTest(OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.user = UserProfileFactory(username='username')
+        self.token = self.user.get_token()
+        self.collection = CollectionFactory(mnemonic='coll', user=self.user, organization=None)
+        self.collection_v1 = CollectionFactory(version='v1', mnemonic='coll', user=self.user, organization=None)
+
+    def test_get_404(self):
+        response = self.client.get(
+            '/collections/coll/v2/export/',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+    @patch('core.common.services.S3.url_for')
+    def test_get_204(self, s3_url_for_mock):
+        Collection.objects.filter(id=self.collection_v1.id).update(last_child_update='2020-01-01 10:00:00')
+
+        s3_url_for_mock.return_value = None
+
+        response = self.client.get(
+            '/collections/coll/v1/export/',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 204)
+        s3_url_for_mock.assert_called_once_with("username/coll_v1.20200101100000.zip")
+
+    @patch('core.common.services.S3.url_for')
+    def test_get_303(self, s3_url_for_mock):
+        Collection.objects.filter(id=self.collection_v1.id).update(last_child_update='2020-01-01 10:00:00')
+
+        s3_url = 'https://s3/username/coll_v1.20200101100000.zip'
+        s3_url_for_mock.return_value = s3_url
+
+        response = self.client.get(
+            '/collections/coll/v1/export/',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 303)
+        self.assertEqual(response['Location'], s3_url)
+        self.assertEqual(response['Last-Updated'], '2020-01-01T10:00:00+00:00')
+        self.assertEqual(response['Last-Updated-Timezone'], 'America/New_York')
+        s3_url_for_mock.assert_called_once_with("username/coll_v1.20200101100000.zip")
+
+    def test_get_405(self):
+        response = self.client.get(
+            '/collections/coll/HEAD/export/',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 405)
+
+    def test_post_405(self):
+        response = self.client.post(
+            '/collections/coll/HEAD/export/',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 405)
+
+    @patch('core.common.services.S3.url_for')
+    def test_post_303(self, s3_url_for_mock):
+        Collection.objects.filter(id=self.collection_v1.id).update(last_child_update='2020-01-01 10:00:00')
+        s3_url = 'https://s3/username/coll_v1.20200101100000.zip'
+        s3_url_for_mock.return_value = s3_url
+        response = self.client.post(
+            '/collections/coll/v1/export/',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 303)
+        self.assertEqual(response['URL'], self.collection_v1.uri + 'export/')
+        s3_url_for_mock.assert_called_once_with("username/coll_v1.20200101100000.zip")
+
+    @patch('core.collections.views.export_collection')
+    @patch('core.common.services.S3.url_for')
+    def test_post_202(self, s3_url_for_mock, export_collection_mock):
+        Collection.objects.filter(id=self.collection_v1.id).update(last_child_update='2020-01-01 10:00:00')
+
+        s3_url_for_mock.return_value = None
+        export_collection_mock.delay = Mock()
+        response = self.client.post(
+            '/collections/coll/v1/export/',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 202)
+        s3_url_for_mock.assert_called_once_with("username/coll_v1.20200101100000.zip")
+        export_collection_mock.delay.assert_called_once_with(self.collection_v1.id)
+
+    @patch('core.collections.views.export_collection')
+    @patch('core.common.services.S3.url_for')
+    def test_post_409(self, s3_url_for_mock, export_collection_mock):
+        Collection.objects.filter(id=self.collection_v1.id).update(last_child_update='2020-01-01 10:00:00')
+
+        s3_url_for_mock.return_value = None
+        export_collection_mock.delay.side_effect = AlreadyQueued('already-queued')
+        response = self.client.post(
+            '/collections/coll/v1/export/',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 409)
+        s3_url_for_mock.assert_called_once_with("username/coll_v1.20200101100000.zip")
+        export_collection_mock.delay.assert_called_once_with(self.collection_v1.id)

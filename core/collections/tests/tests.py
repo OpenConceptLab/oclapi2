@@ -30,7 +30,7 @@ class CollectionTest(OCLTestCase):
         self.assertEqual(collection.concepts.count(), 1)
         self.assertEqual(collection.references.count(), 1)
         self.assertEqual(collection.references.first().expression, concept_expression)
-        self.assertEqual(collection.concepts.first(), concept)
+        self.assertEqual(collection.concepts.first(), concept.get_latest_version())
 
     def test_seed_concepts(self):
         collection1 = CollectionFactory()
@@ -117,7 +117,7 @@ class CollectionReferenceTest(OCLTestCase):
 
         self.assertEqual(len(reference.concepts), 1)
         self.assertTrue(isinstance(reference.concepts[0], Concept))
-        self.assertEqual(reference.concepts[0].id, concept.id)
+        self.assertEqual(reference.concepts[0].id, concept.get_latest_version().id)
 
     def test_get_concepts(self):
         reference = CollectionReference()
@@ -135,7 +135,7 @@ class CollectionReferenceTest(OCLTestCase):
 
         self.assertTrue(isinstance(concepts, QuerySet))
         self.assertEqual(concepts.count(), 1)
-        self.assertEqual(concepts.first(), concept)
+        self.assertEqual(concepts.first(), concept.get_latest_version())
 
         ConceptFactory(parent=concept.parent, version='v1', mnemonic=concept.mnemonic, versioned_object=concept)
         reference.expression = drop_version(concept.uri) + 'versions/'

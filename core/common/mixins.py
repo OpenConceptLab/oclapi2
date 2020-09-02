@@ -430,6 +430,8 @@ class SourceChildMixin:
             query_params = get_query_params_from_url_string(uri)  # parsing query parameters
             kwargs.update(query_params)
             queryset = cls.get_base_queryset(kwargs)
+            if queryset.count() > 1 and 'version' not in kwargs and ('concept' in kwargs or 'mapping' in kwargs):
+                queryset = queryset.filter(is_latest_version=True)
         except:  # pylint: disable=bare-except
             pass
 
