@@ -23,6 +23,7 @@ from rest_framework import permissions
 import core.concepts.views as concept_views
 import core.mappings.views as mapping_views
 from core.common.utils import get_base_url
+from core.importers.views import BulkImportView
 
 SchemaView = get_schema_view(
     openapi.Info(
@@ -47,4 +48,5 @@ urlpatterns = [
     path('concepts/', concept_views.ConceptVersionListAllView.as_view(), name='all-concepts'),
     path('mappings/', mapping_views.MappingVersionListAllView.as_view(), name='all-mappings'),
     path('importers/', include('core.importers.urls')),
+    url('manage/bulkimport/', BulkImportView.as_view(), name='bulk-import')  # just for ocldev
 ]
