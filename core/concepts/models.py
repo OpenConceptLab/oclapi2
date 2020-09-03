@@ -416,8 +416,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         concept.save()
 
     @classmethod
-    @transaction.atomic
-    def persist_clone(cls, obj, user=None, **kwargs):
+    def persist_clone(cls, obj, user=None, **kwargs):  # pylint: disable=too-many-statements
         errors = dict()
         if not user:
             errors['version_created_by'] = 'Must specify which user is attempting to create a new concept version.'
@@ -431,28 +430,42 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         errored_action = 'saving new concept version'
         latest_version = None
         try:
-            obj.is_latest_version = True
-            obj.save(**kwargs)
-            obj.version = str(obj.id)
-            obj.save()
-            if obj.id:
-                obj.set_locales()
-                obj.clean()  # clean here to validate locales that can only be saved after obj is saved
-                obj.update_versioned_object()
-                versioned_object = obj.versioned_object
-                latest_version = versioned_object.versions.exclude(id=obj.id).filter(is_latest_version=True).first()
-                latest_version.is_latest_version = False
-                latest_version.save()
-                obj.sources.set(compact([parent, parent_head]))
+            with transaction.atomic():
+                cls.pause_indexing()
 
-                # to update counts
-                parent.save()
-                parent_head.save()
+                obj.is_latest_version = True
+                obj.save(**kwargs)
+                obj.version = str(obj.id)
+                obj.save()
+                if obj.id:
+                    obj.set_locales()
+                    obj.clean()  # clean here to validate locales that can only be saved after obj is saved
+                    obj.update_versioned_object()
+                    versioned_object = obj.versioned_object
+                    latest_version = versioned_object.versions.exclude(id=obj.id).filter(is_latest_version=True).first()
+                    latest_version.is_latest_version = False
+                    latest_version.save()
+                    obj.sources.set(compact([parent, parent_head]))
 
-            persisted = True
+                    # to update counts
+                    parent.save()
+                    parent_head.save()
+
+                    persisted = True
+                    cls.resume_indexing()
+
+                    def index_all():
+                        parent.save()
+                        parent_head.save()
+                        latest_version.save()
+                        obj.save()
+
+                    transaction.on_commit(index_all)
+
         except ValidationError as err:
             errors.update(err.message_dict)
         finally:
+            cls.resume_indexing()
             if not persisted:
                 if latest_version:
                     latest_version.is_latest_version = True

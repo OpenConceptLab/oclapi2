@@ -161,6 +161,21 @@ class BaseModel(models.Model):
 
         return "{}-detail".format(entity_name)
 
+    @classmethod
+    def pause_indexing(cls):
+        cls.toggle_indexing(False)
+
+    @classmethod
+    def resume_indexing(cls):
+        if not get(settings, 'TEST_MODE', False):
+            cls.toggle_indexing(True)
+
+    @staticmethod
+    def toggle_indexing(state=True):
+        settings.ELASTICSEARCH_DSL_AUTO_REFRESH = state
+        settings.ELASTICSEARCH_DSL_AUTOSYNC = state
+        settings.ES_SYNC = state
+
 
 class BaseResourceModel(BaseModel):
     """

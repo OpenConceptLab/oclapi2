@@ -260,7 +260,6 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         mapping.save()
 
     @classmethod
-    @transaction.atomic
     def persist_clone(cls, obj, user=None, **kwargs):
         errors = dict()
         if not user:
@@ -277,27 +276,39 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         errored_action = 'saving new mapping version'
         latest_version = None
         try:
-            obj.is_latest_version = True
-            obj.full_clean()
-            obj.save(**kwargs)
-            if obj.id:
-                obj.version = str(obj.id)
-                obj.save()
-                obj.update_versioned_object()
-                versioned_object = obj.versioned_object
-                latest_version = versioned_object.get_latest_version()
-                latest_version.is_latest_version = False
-                latest_version.save()
-                obj.sources.set(compact([parent, parent_head]))
+            with transaction.atomic():
+                cls.pause_indexing()
+                obj.is_latest_version = True
+                obj.full_clean()
+                obj.save(**kwargs)
+                if obj.id:
+                    obj.version = str(obj.id)
+                    obj.save()
+                    obj.update_versioned_object()
+                    versioned_object = obj.versioned_object
+                    latest_version = versioned_object.get_latest_version()
+                    latest_version.is_latest_version = False
+                    latest_version.save()
+                    obj.sources.set(compact([parent, parent_head]))
 
-                # to update counts
-                parent.save()
-                parent_head.save()
+                    # to update counts
+                    parent.save()
+                    parent_head.save()
 
-                persisted = True
+                    persisted = True
+                    cls.resume_indexing()
+
+                    def index_all():
+                        parent.save()
+                        parent_head.save()
+                        latest_version.save()
+                        obj.save()
+
+                    transaction.on_commit(index_all)
         except ValidationError as err:
             errors.update(err.message_dict)
         finally:
+            cls.resume_indexing()
             if not persisted:
                 if obj.id:
                     obj.sources.remove(parent_head)

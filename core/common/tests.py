@@ -36,6 +36,7 @@ class CustomTestRunner(ColourRunnerMixin, DiscoverRunner):
 
 
 class PauseElasticSearchIndex:
+    settings.TEST_MODE = True
     settings.ELASTICSEARCH_DSL_AUTOSYNC = False
     settings.ES_SYNC = False
 
