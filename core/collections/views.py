@@ -16,6 +16,7 @@ from core.collections.constants import INCLUDE_REFERENCES_PARAM, HEAD_OF_CONCEPT
     HEAD_OF_MAPPING_ADDED_TO_COLLECTION, CONCEPT_ADDED_TO_COLLECTION_FMT, MAPPING_ADDED_TO_COLLECTION_FMT
 from core.collections.documents import CollectionDocument
 from core.collections.models import Collection, CollectionReference
+from core.collections.search import CollectionSearch
 from core.collections.serializers import CollectionDetailSerializer, CollectionListSerializer, \
     CollectionCreateSerializer, CollectionReferenceSerializer, CollectionVersionDetailSerializer
 from core.collections.utils import is_concept, is_version_specified
@@ -101,6 +102,7 @@ class CollectionListView(CollectionBaseView, ConceptDictionaryCreateMixin, ListW
         'custom_validation_schema': {'sortable': False, 'filterable': True},
     }
     document_model = CollectionDocument
+    facet_class = CollectionSearch
 
     def get_serializer_class(self):
         if self.request.method == 'GET' and self.is_verbose(self.request):

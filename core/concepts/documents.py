@@ -12,29 +12,26 @@ class ConceptDocument(Document):
         settings = {'number_of_shards': 1, 'number_of_replicas': 0}
 
     id = fields.TextField(attr='mnemonic')
-    name = fields.KeywordField(
-        attr='display_name',
-        normalizer="lowercase",
-    )
+    name = fields.KeywordField(attr='display_name', normalizer="lowercase")
     last_update = fields.DateField(attr='updated_at')
-    locale = fields.ListField(fields.TextField())
-    source = fields.TextField(attr='parent_resource')
-    owner = fields.TextField(attr='owner_name')
-    owner_type = fields.TextField(attr='owner_type')
+    locale = fields.ListField(fields.KeywordField(attr='display_name'))
+    source = fields.KeywordField(attr='parent_resource')
+    owner = fields.KeywordField(attr='owner_name')
+    owner_type = fields.KeywordField(attr='owner_type')
     source_version = fields.ListField(fields.IntegerField())
     collection_version = fields.ListField(fields.IntegerField())
     collection = fields.ListField(fields.IntegerField())
     public_can_view = fields.BooleanField(attr='public_can_view')
+    datatype = fields.KeywordField(attr='datatype')
+    concept_class = fields.KeywordField(attr='concept_class')
+    retired = fields.KeywordField(attr='retired')
+    is_active = fields.KeywordField(attr='is_active')
+    is_latest_version = fields.KeywordField(attr='is_latest_version')
 
     class Django:
         model = Concept
         fields = [
-            'datatype',
             'version',
-            'is_latest_version',
-            'retired',
-            'is_active',
-            'concept_class'
         ]
 
     @staticmethod

@@ -1,6 +1,7 @@
 from django_elasticsearch_dsl import Document, fields
 from django_elasticsearch_dsl.registries import registry
 
+from core.common.constants import HEAD
 from core.mappings.models import Mapping
 
 
@@ -13,16 +14,33 @@ class MappingDocument(Document):
     class Django:
         model = Mapping
         fields = [
-            'external_id', 'retired', 'is_latest_version', 'is_active', 'map_type',
+            'external_id'
         ]
 
     last_update = fields.DateField(attr='updated_at')
-    source = fields.TextField(attr='source')
-    owner_type = fields.TextField(attr='owner_type')
-    from_concept = fields.ListField(fields.TextField())
-    to_concept = fields.ListField(fields.TextField())
-    concept = fields.ListField(fields.TextField())
-    owner = fields.TextField(attr='owner_name')
+    owner = fields.KeywordField(attr='owner_name')
+    owner_type = fields.KeywordField(attr='owner_type')
+    source = fields.KeywordField(attr='source')
+    retired = fields.KeywordField(attr='retired')
+    is_active = fields.KeywordField(attr='is_active')
+    is_latest_version = fields.KeywordField(attr='is_latest_version')
+    map_type = fields.KeywordField(attr='map_type')
+    from_concept = fields.ListField(fields.KeywordField())
+    to_concept = fields.ListField(fields.KeywordField())
+    concept = fields.ListField(fields.KeywordField())
+    concept_source = fields.ListField(fields.KeywordField())
+    concept_owner = fields.ListField(fields.KeywordField())
+    from_concept_owner = fields.KeywordField(attr='from_source_owner')
+    to_concept_owner = fields.KeywordField(attr='to_source_owner')
+    concept_owner_type = fields.ListField(fields.KeywordField(attr='to_source_owner'))
+    from_concept_owner_type = fields.KeywordField(attr='from_source_owner_type')
+    to_concept_owner_type = fields.KeywordField(attr='to_source_owner_type')
+    from_concept_source = fields.KeywordField(attr='from_source_name')
+    to_concept_source = fields.KeywordField(attr='to_source_name')
+    source_version = fields.ListField(fields.IntegerField())
+    collection_version = fields.ListField(fields.IntegerField())
+    collection = fields.ListField(fields.IntegerField())
+    public_can_view = fields.BooleanField(attr='public_can_view')
 
     @staticmethod
     def prepare_from_concept(instance):
@@ -34,3 +52,33 @@ class MappingDocument(Document):
 
     def prepare_concept(self, instance):
         return self.prepare_from_concept(instance) + self.prepare_to_concept(instance)
+
+    @staticmethod
+    def prepare_concept_source(instance):
+        return [instance.from_source_name, instance.to_source_name]
+
+    @staticmethod
+    def prepare_concept_owner(instance):
+        return [instance.from_source_owner, instance.to_source_owner]
+
+    @staticmethod
+    def prepare_concept_owner_type(instance):
+        return [instance.from_source_owner_type, instance.to_source_owner_type]
+
+    @staticmethod
+    def prepare_source_version(instance):
+        return list(instance.sources.values_list('id', flat=True))
+
+    @staticmethod
+    def prepare_collection_version(instance):
+        return list(instance.collection_set.values_list('id', flat=True))
+
+    @staticmethod
+    def prepare_collection(instance):
+        from core.collections.models import Collection
+        return list(
+            Collection.objects.filter(
+                version=HEAD,
+                mnemonic__in=instance.collection_set.values_list('mnemonic', flat=True)
+            ).distinct('id').values_list('id', flat=True)
+        )

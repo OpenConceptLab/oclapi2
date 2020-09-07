@@ -6,8 +6,10 @@ from rest_framework import response, generics, status
 
 from core.common.constants import SEARCH_PARAM, ES_RESULTS_MAX_LIMIT, LIST_DEFAULT_LIMIT, CSV_DEFAULT_LIMIT, LIMIT_PARAM
 from core.common.mixins import PathWalkerMixin
-from core.common.utils import compact_dict_by_values
+from core.common.utils import compact_dict_by_values, to_snake_case
 from core.concepts.permissions import CanViewParentDictionary
+from core.orgs.constants import ORG_OBJECT_TYPE
+from core.users.constants import USER_OBJECT_TYPE
 
 
 def get_object_or_404(queryset, **filter_kwargs):
@@ -33,6 +35,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     sort_desc_param = 'sortDesc'
     default_qs_sort_attr = '-updated_at'
     exact_match = 'exact_match'
+    facet_class = None
 
     def initial(self, request, *args, **kwargs):
         super().initial(request, *args, **kwargs)
@@ -145,6 +148,63 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
         return criterion
 
+    def get_faceted_criterion(self):
+        filters = self.get_faceted_filters()
+
+        def get_query(attr, val):
+            vals = val.split(',')
+            criteria = Q('match', **{attr: vals.pop()})
+            for _val in vals:
+                criteria |= Q('match', **{attr: _val})
+            return criteria
+
+        if filters:
+            first_filter = filters.popitem()
+            criterion = get_query(first_filter[0], first_filter[1])
+            for field, value in filters.items():
+                criterion &= get_query(field, value)
+
+            return criterion
+
+    def get_faceted_filters(self):
+        faceted_filters = dict()
+        faceted_fields = self.get_faceted_fields()
+        query_params = {to_snake_case(k): v for k, v in self.request.query_params.dict().items()}
+        for field in faceted_fields:
+            if field in query_params:
+                faceted_filters[field] = query_params[field]
+        return faceted_filters
+
+    def get_faceted_fields(self):
+        return [field for field, config in get(self, 'es_fields', dict()).items() if config.get('facet', False)]
+
+    def get_facet_filters_from_kwargs(self):
+        kwargs = self.kwargs
+        filters = dict()
+        if 'user' in kwargs:
+            filters['ownerType'] = USER_OBJECT_TYPE
+            filters['owner'] = kwargs['user']
+        if 'org' in kwargs:
+            filters['ownerType'] = ORG_OBJECT_TYPE
+            filters['owner'] = kwargs['org']
+        if 'source' in kwargs:
+            filters['source'] = kwargs['source']
+        if 'collection' in kwargs:
+            filters['collection'] = kwargs['collection']
+
+        return filters
+
+    def get_facets(self):
+        facets = dict()
+        if self.should_include_facets() and self.facet_class:
+            filters = {**self.default_filters, **self.get_facet_filters_from_kwargs()}
+            searcher = self.facet_class(  # pylint: disable=not-callable
+                self.get_search_string(), filters=filters, exact_match=self.is_exact_match_on()
+            )
+            facets = searcher.execute().facets.to_dict()
+
+        return facets
+
     def get_search_results(self):
         results = None
 
@@ -152,6 +212,10 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             results = self.document_model.search()
             for field, value in self.default_filters.items():
                 results = results.filter("match", **{field: value})
+
+            faceted_criterion = self.get_faceted_criterion()
+            if faceted_criterion:
+                results = results.query(faceted_criterion)
 
             if self.is_exact_match_on():
                 results = results.query(self.get_exact_search_criterion())
