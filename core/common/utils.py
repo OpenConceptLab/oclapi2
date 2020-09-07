@@ -270,3 +270,8 @@ def get_base_url():
         return "http://localhost:8000"
 
     return "https://api.{}2.openconceptlab.org".format(settings.ENV.lower())
+
+
+def to_snake_case(string):
+    # from https://www.geeksforgeeks.org/python-program-to-convert-camel-case-string-to-snake-case/
+    return ''.join(['_' + i.lower() if i.isupper() else i for i in string]).lstrip('_')

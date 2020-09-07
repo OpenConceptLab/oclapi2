@@ -11,19 +11,19 @@ class CollectionDocument(Document):
         name = 'collections'
         settings = {'number_of_shards': 1, 'number_of_replicas': 0}
 
-    locale = fields.ListField(fields.TextField())
     last_update = fields.DateField(attr='updated_at')
-    owner = fields.TextField(attr='parent_resource')
-    owner_type = fields.TextField(attr='parent_resource_type')
     public_can_view = fields.TextField(attr='public_can_view')
+    locale = fields.ListField(fields.KeywordField())
+    owner = fields.KeywordField(attr='parent_resource')
+    owner_type = fields.KeywordField(attr='parent_resource_type')
+    collection_type = fields.KeywordField(attr='collection_type')
+    is_active = fields.KeywordField(attr='is_active')
 
     class Django:
         model = Collection
         fields = [
             'name',
             'full_name',
-            'is_active',
-            'collection_type',
             'custom_validation_schema',
         ]
 

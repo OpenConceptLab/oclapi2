@@ -21,6 +21,7 @@ from core.common.utils import parse_boolean_query_param, compact_dict_by_values
 from core.common.views import BaseAPIView
 from core.sources.documents import SourceDocument
 from core.sources.models import Source
+from core.sources.search import SourceSearch
 from core.sources.serializers import (
     SourceDetailSerializer, SourceListSerializer, SourceCreateSerializer, SourceVersionDetailSerializer
 )
@@ -74,6 +75,7 @@ class SourceListView(SourceBaseView, ConceptDictionaryCreateMixin, ListWithHeade
         'custom_validation_schema': {'sortable': False, 'filterable': True},
     }
     document_model = SourceDocument
+    facet_class = SourceSearch
 
     def get_serializer_class(self):
         if self.request.method == 'GET':

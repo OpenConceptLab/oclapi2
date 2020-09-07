@@ -19,6 +19,7 @@ from core.common.views import SourceChildCommonBaseView
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept, LocalizedText
 from core.concepts.permissions import CanViewParentDictionary, CanEditParentDictionary
+from core.concepts.search import ConceptSearch
 from core.concepts.serializers import (
     ConceptDetailSerializer, ConceptListSerializer, ConceptDescriptionSerializer, ConceptNameSerializer,
     ConceptVersionDetailSerializer
@@ -31,6 +32,7 @@ class ConceptBaseView(SourceChildCommonBaseView):
     model = Concept
     queryset = Concept.objects.filter(is_active=True)
     document_model = ConceptDocument
+    facet_class = ConceptSearch
     es_fields = {
         'id': {'sortable': True, 'filterable': True},
         'name': {'sortable': True, 'filterable': True, 'exact': True},

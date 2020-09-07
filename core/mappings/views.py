@@ -15,6 +15,7 @@ from core.common.views import SourceChildCommonBaseView
 from core.concepts.permissions import CanEditParentDictionary, CanViewParentDictionary
 from core.mappings.documents import MappingDocument
 from core.mappings.models import Mapping
+from core.mappings.search import MappingSearch
 from core.mappings.serializers import MappingDetailSerializer, MappingListSerializer
 
 
@@ -23,6 +24,7 @@ class MappingBaseView(SourceChildCommonBaseView):
     model = Mapping
     queryset = Mapping.objects.filter(is_active=True)
     document_model = MappingDocument
+    facet_class = MappingSearch
     es_fields = {
         'last_update': {'sortable': True, 'filterable': False, 'facet': False, 'default': 'desc'},
         'concept': {'sortable': False, 'filterable': True, 'facet': False, 'exact': True},
