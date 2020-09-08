@@ -8,8 +8,9 @@ from rest_framework.response import Response
 
 from core.common.constants import HEAD
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryMixin
-from core.common.params import (
-    q_param, limit_param, sort_desc_param, page_param, exact_match_param, sort_asc_param, verbose_param
+from core.common.swagger_parameters import (
+    q_param, limit_param, sort_desc_param, page_param, exact_match_param, sort_asc_param, verbose_param,
+    include_facets_header, updated_since_param, include_retired_param
 )
 from core.common.views import SourceChildCommonBaseView
 from core.concepts.permissions import CanEditParentDictionary, CanViewParentDictionary
@@ -203,7 +204,9 @@ class MappingVersionListAllView(MappingBaseView, ListWithHeadersMixin):
 
     @swagger_auto_schema(
         manual_parameters=[
-            q_param, limit_param, sort_desc_param, sort_asc_param, exact_match_param, page_param, verbose_param
+            q_param, limit_param, sort_desc_param, sort_asc_param, exact_match_param, page_param, verbose_param,
+            include_retired_param, updated_since_param,
+            include_facets_header
         ]
     )
     def get(self, request, *args, **kwargs):
