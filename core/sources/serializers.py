@@ -142,7 +142,7 @@ class SourceDetailSerializer(SourceCreateOrUpdateSerializer):
             'custom_validation_schema', 'public_access', 'default_locale', 'supported_locales', 'website',
             'url', 'owner', 'owner_type', 'owner_url', 'versions',
             'created_on', 'updated_on', 'created_by', 'updated_by', 'extras', 'external_id', 'versions_url',
-            'version', 'concepts_url',
+            'version', 'concepts_url', 'mappings_url',
         )
 
 
@@ -171,5 +171,5 @@ class SourceVersionDetailSerializer(SourceCreateOrUpdateSerializer):
             'custom_validation_schema', 'public_access', 'default_locale', 'supported_locales', 'website',
             'url', 'owner', 'owner_type', 'owner_url', 'versions',
             'created_on', 'updated_on', 'created_by', 'updated_by', 'extras', 'external_id', 'versions_url',
-            'version', 'concepts_url', 'is_processing', 'released',
+            'version', 'concepts_url', 'mappings_url', 'is_processing', 'released',
         )

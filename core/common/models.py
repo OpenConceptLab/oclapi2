@@ -313,6 +313,10 @@ class ConceptContainerModel(VersionedModel):
         return reverse_resource(self, 'concept-list')
 
     @property
+    def mappings_url(self):
+        return reverse_resource(self, 'mapping-list')
+
+    @property
     def parent(self):
         parent = None
         if self.organization_id:
