@@ -141,7 +141,7 @@ class CollectionDetailSerializer(CollectionCreateOrUpdateSerializer):
             'custom_validation_schema', 'public_access', 'default_locale', 'supported_locales', 'website',
             'url', 'owner', 'owner_type', 'owner_url', 'versions',
             'created_on', 'updated_on', 'created_by', 'updated_by', 'extras', 'external_id', 'versions_url',
-            'version', 'concepts_url',
+            'version', 'concepts_url', 'mappings_url'
         )
 
 
@@ -167,7 +167,7 @@ class CollectionVersionDetailSerializer(CollectionCreateOrUpdateSerializer):
             'custom_validation_schema', 'public_access', 'default_locale', 'supported_locales', 'website',
             'url', 'owner', 'owner_type', 'owner_url', 'versions',
             'created_on', 'updated_on', 'created_by', 'updated_by', 'extras', 'external_id', 'versions_url',
-            'version', 'concepts_url', 'is_processing'
+            'version', 'concepts_url', 'mappings_url', 'is_processing'
         )
 
 
