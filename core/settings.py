@@ -70,6 +70,7 @@ REST_FRAMEWORK = {
 }
 
 SWAGGER_SETTINGS = {
+    'PERSIST_AUTH': True,
     'SECURITY_DEFINITIONS': {
         'Basic': {
             'type': 'basic'
@@ -80,6 +81,11 @@ SWAGGER_SETTINGS = {
             'in': 'header'
         }
     }
+}
+
+REDOC_SETTINGS = {
+    'LAZY_RENDERING': True,
+    'NATIVE_SCROLLBARS': True,
 }
 
 MIDDLEWARE = [
