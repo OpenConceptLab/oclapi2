@@ -12,8 +12,9 @@ from core.common.constants import (
     HEAD, INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_RETIRED_PARAM
 )
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryMixin
-from core.common.params import (
-    q_param, limit_param, sort_desc_param, page_param, exact_match_param, sort_asc_param, verbose_param
+from core.common.swagger_parameters import (
+    q_param, limit_param, sort_desc_param, page_param, exact_match_param, sort_asc_param, verbose_param,
+    include_facets_header, updated_since_param, include_inverse_mappings_param, include_retired_param
 )
 from core.common.views import SourceChildCommonBaseView
 from core.concepts.documents import ConceptDocument
@@ -73,7 +74,9 @@ class ConceptVersionListAllView(ConceptBaseView, ListWithHeadersMixin):
 
     @swagger_auto_schema(
         manual_parameters=[
-            q_param, limit_param, sort_desc_param, sort_asc_param, exact_match_param, page_param, verbose_param
+            q_param, limit_param, sort_desc_param, sort_asc_param, exact_match_param, page_param, verbose_param,
+            include_retired_param, include_inverse_mappings_param, updated_since_param,
+            include_facets_header
         ]
     )
     def get(self, request, *args, **kwargs):
