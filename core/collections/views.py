@@ -115,7 +115,7 @@ class CollectionListView(CollectionBaseView, ConceptDictionaryCreateMixin, ListW
     def get(self, request, *args, **kwargs):
         return self.list(request, *args, **kwargs)
 
-    def get_csv_rows(self, queryset=None):
+    def get_csv_rows(self, queryset=None):  # pragma: no cover
         if not queryset:
             queryset = self.get_queryset()
 
@@ -351,7 +351,7 @@ class CollectionReferencesView(
 class CollectionVersionReferencesView(CollectionVersionBaseView, ListWithHeadersMixin):
     serializer_class = CollectionReferenceSerializer
 
-    def get(self, request, *args, **kwargs):
+    def get(self, request, *args, **kwargs):  # pragma: no cover
         query_params = self.request.query_params
         search_query = query_params.get('q', '')
         sort = query_params.get('search_sort', 'ASC')
@@ -398,7 +398,7 @@ class CollectionVersionListView(CollectionVersionBaseView, mixins.CreateModelMix
                     version_id = data.get('uuid')
                     export_collection.delay(version_id)
                     return Response(data, status=status.HTTP_201_CREATED)
-            except IntegrityError as ex:
+            except IntegrityError as ex:  # pragma: no cover
                 return Response(
                     dict(
                         error=str(ex), detail='Collection version  \'%s\' already exist. ' % serializer.data.get('id')
@@ -542,7 +542,7 @@ class CollectionExtraRetrieveUpdateDestroyView(CollectionExtrasBaseView, Retriev
         return Response(dict(detail='Not found.'), status=status.HTTP_404_NOT_FOUND)
 
 
-class CollectionVersionProcessingView(CollectionBaseView):
+class CollectionVersionProcessingView(CollectionBaseView):  # pragma: no cover
     serializer_class = CollectionVersionDetailSerializer
 
     def get_permissions(self):

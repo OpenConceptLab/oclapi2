@@ -4,9 +4,10 @@ from factory import Sequence, SubFactory
 from core.collections.models import Collection, CollectionReference
 from core.common.constants import ACCESS_TYPE_EDIT, HEAD
 from core.orgs.tests.factories import OrganizationFactory
+from core.users.tests.factories import UserProfileFactory
 
 
-class CollectionFactory(factory.django.DjangoModelFactory):
+class OrganizationCollectionFactory(factory.django.DjangoModelFactory):
     class Meta:
         model = Collection
 
@@ -19,6 +20,22 @@ class CollectionFactory(factory.django.DjangoModelFactory):
     website = 'www.collection.com'
     description = 'This is a test collection'
     organization = SubFactory(OrganizationFactory)
+    version = HEAD
+
+
+class UserCollectionFactory(factory.django.DjangoModelFactory):
+    class Meta:
+        model = Collection
+
+    mnemonic = Sequence("collection{}".format)
+    name = Sequence("collection{}".format)
+    collection_type = "Dictionary"
+    public_access = ACCESS_TYPE_EDIT
+    default_locale = "en"
+    supported_locales = ["en"]
+    website = 'www.collection.com'
+    description = 'This is a test collection'
+    user = SubFactory(UserProfileFactory)
     version = HEAD
 
 

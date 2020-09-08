@@ -3,7 +3,7 @@ from factory import Sequence, SubFactory
 
 from core.common.constants import HEAD
 from core.concepts.models import Concept, LocalizedText
-from core.sources.tests.factories import SourceFactory
+from core.sources.tests.factories import OrganizationSourceFactory
 
 
 def sync_latest_version(self):
@@ -39,7 +39,7 @@ class ConceptFactory(factory.django.DjangoModelFactory):
     mnemonic = Sequence("concept{}".format)
     name = Sequence("concept{}".format)
     version = HEAD
-    parent = SubFactory(SourceFactory)
+    parent = SubFactory(OrganizationSourceFactory)
     concept_class = "Diagnosis"
     datatype = "None"
 

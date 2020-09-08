@@ -9,6 +9,7 @@ omit =
     */migrations/*
     */factories.py
     */documents.py
+    */es_normalizers.py
     */feeds.py
     *test*
     core/middlewares/*

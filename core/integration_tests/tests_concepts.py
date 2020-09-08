@@ -4,7 +4,7 @@ from core.common.tests import OCLAPITestCase
 from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory, LocalizedTextFactory
 from core.orgs.models import Organization
-from core.sources.tests.factories import SourceFactory
+from core.sources.tests.factories import OrganizationSourceFactory
 from core.users.models import UserProfile
 
 
@@ -13,7 +13,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         self.organization = Organization.objects.first()
         self.user = UserProfile.objects.filter(is_superuser=True).first()
         self.token = self.user.get_token()
-        self.source = SourceFactory(organization=self.organization)
+        self.source = OrganizationSourceFactory(organization=self.organization)
         self.concept_payload = {
             'datatype': 'Coded',
             'concept_class': 'Procedure',

@@ -4,7 +4,7 @@ from factory import SubFactory
 from core.concepts.tests.factories import ConceptFactory
 from core.mappings.constants import SAME_AS
 from core.mappings.models import Mapping
-from core.sources.tests.factories import SourceFactory
+from core.sources.tests.factories import OrganizationSourceFactory
 
 
 def sync_latest_version(self):
@@ -23,7 +23,7 @@ class MappingFactory(factory.django.DjangoModelFactory):
     class Meta:
         model = Mapping
 
-    parent = SubFactory(SourceFactory)
+    parent = SubFactory(OrganizationSourceFactory)
     from_concept = SubFactory(ConceptFactory)
     to_concept = SubFactory(ConceptFactory)
     map_type = SAME_AS

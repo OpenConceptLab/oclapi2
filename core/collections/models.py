@@ -106,7 +106,10 @@ class Collection(ConceptContainerModel):
 
     def fill_data_from_reference(self, reference):
         self.references.add(reference)
-        self.concepts.add(*reference.concepts)
+        if reference.concepts:
+            self.concepts.add(*reference.concepts)
+        if reference.mappings:
+            self.mappings.add(*reference.mappings)
         self.save()  # update counts
 
     def validate(self, reference):
@@ -393,7 +396,7 @@ class CollectionReference(models.Model):
 
     def save(self, force_insert=False, force_update=False, using=None, update_fields=None):
         if not self.internal_reference_id and self.id:
-            self.internal_reference_id = str(self.id)
+            self.internal_reference_id = str(self.id)  # pragma: no cover
         super().save(force_insert, force_update, using, update_fields)
 
     def create_entities_from_expressions(self):
@@ -403,7 +406,7 @@ class CollectionReference(models.Model):
             self.mappings = self.get_mappings()
 
         if (not self.concepts or not self.concepts.exists()) and (not self.mappings or not self.mappings.exists()):
-            raise ValidationError({'detail': ['Expression specified is not valid.']})
+            raise ValidationError({'detail': ['Expression specified is not valid.']})  # pragma: no cover
 
     def get_related_mappings(self, exclude_mapping_uris):
         mappings = []

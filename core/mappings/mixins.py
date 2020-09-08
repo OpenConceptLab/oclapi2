@@ -26,9 +26,8 @@ class MappingValidationMixin:
             basic_errors.append(CANNOT_SPECIFY_BOTH_TO_CONCEPT_OR_TO_SOURCE)
         elif self.from_concept_id:
             from .models import Mapping
-            queryset = Mapping.objects.exclude(id=self.id).filter(
+            queryset = Mapping.objects.exclude(versioned_object_id=self.versioned_object_id).filter(
                 parent_id=self.parent_id, map_type=self.map_type, from_concept_id=self.from_concept_id,
-                version=self.version
             )
             if self.to_source_id:
                 if queryset.filter(

@@ -6,8 +6,8 @@ from core.common.tests import OCLTestCase
 from core.orgs.constants import ORG_OBJECT_TYPE
 from core.orgs.models import Organization
 from core.orgs.tests.factories import OrganizationFactory
-from core.sources.tests.factories import SourceFactory
-from core.collections.tests.factories import CollectionFactory
+from core.sources.tests.factories import OrganizationSourceFactory
+from core.collections.tests.factories import OrganizationCollectionFactory
 
 
 class OrganizationTest(OCLTestCase):
@@ -86,8 +86,8 @@ class OrganizationTest(OCLTestCase):
 
     def test_org_active_inactive_should_affect_children(self):
         org = OrganizationFactory(is_active=True)
-        source = SourceFactory(organization=org, is_active=True)
-        collection = CollectionFactory(organization=org, is_active=True)
+        source = OrganizationSourceFactory(organization=org, is_active=True)
+        collection = OrganizationCollectionFactory(organization=org, is_active=True)
 
         org.is_active = False
         org.save()
