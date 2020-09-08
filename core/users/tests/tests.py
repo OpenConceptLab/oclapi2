@@ -1,11 +1,11 @@
 from mock import Mock, patch
 from rest_framework.authtoken.models import Token
 
-from core.collections.tests.factories import CollectionFactory
+from core.collections.tests.factories import OrganizationCollectionFactory
 from core.common.constants import ACCESS_TYPE_NONE, HEAD, OCL_ORG_ID
 from core.common.tests import OCLTestCase
 from core.orgs.models import Organization
-from core.sources.tests.factories import SourceFactory
+from core.sources.tests.factories import OrganizationSourceFactory
 from core.users.constants import USER_OBJECT_TYPE
 from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
@@ -85,8 +85,8 @@ class UserProfileTest(OCLTestCase):
 
     def test_user_active_inactive_should_affect_children(self):
         user = UserProfileFactory(is_active=True)
-        source = SourceFactory(user=user, is_active=True)
-        collection = CollectionFactory(user=user, is_active=True)
+        source = OrganizationSourceFactory(user=user, is_active=True)
+        collection = OrganizationCollectionFactory(user=user, is_active=True)
 
         user.is_active = False
         user.save()

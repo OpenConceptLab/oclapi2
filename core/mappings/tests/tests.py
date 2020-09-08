@@ -7,7 +7,7 @@ from core.mappings.models import Mapping
 from core.mappings.tests.factories import MappingFactory
 from core.orgs.models import Organization
 from core.sources.models import Source
-from core.sources.tests.factories import SourceFactory
+from core.sources.tests.factories import OrganizationSourceFactory
 from core.users.models import UserProfile
 
 
@@ -41,7 +41,7 @@ class MappingTest(OCLTestCase):
         self.assertEqual(Mapping(parent=Source(user=user)).owner_type, 'User')
 
     def test_persist_new(self):
-        source = SourceFactory(version=HEAD)
+        source = OrganizationSourceFactory(version=HEAD)
         concept1 = ConceptFactory(parent=source)
         concept2 = ConceptFactory(parent=source)
         mapping = Mapping.persist_new({
@@ -62,8 +62,8 @@ class MappingTest(OCLTestCase):
         )
 
     def test_persist_clone(self):
-        source_head = SourceFactory(version=HEAD)
-        source_version0 = SourceFactory(
+        source_head = OrganizationSourceFactory(version=HEAD)
+        source_version0 = OrganizationSourceFactory(
             version='v0', mnemonic=source_head.mnemonic, organization=source_head.organization
         )
 

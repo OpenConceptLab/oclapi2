@@ -12,7 +12,7 @@ from rest_framework.test import APITestCase
 
 from core.collections.models import Collection
 from core.common.constants import HEAD, OCL_ORG_ID, SUPER_ADMIN_USER_ID
-from core.common.utils import compact_dict_by_values
+from core.common.utils import compact_dict_by_values, to_snake_case
 from core.concepts.models import Concept, LocalizedText
 from core.mappings.models import Mapping
 from core.orgs.models import Organization
@@ -64,20 +64,26 @@ class OCLTestCase(TestCase, PauseElasticSearchIndex):
 
     @staticmethod
     def create_lookup_concept_classes(user=None, org=None):
-        from core.sources.tests.factories import SourceFactory
+        from core.sources.tests.factories import OrganizationSourceFactory
         from core.concepts.tests.factories import LocalizedTextFactory, ConceptFactory
 
         org = org or Organization.objects.get(mnemonic='OCL')
         user = user or UserProfile.objects.get(username='ocladmin')
 
-        classes_source = SourceFactory(updated_by=user, organization=org, mnemonic="Classes", version=HEAD)
-        datatypes_source = SourceFactory(updated_by=user, organization=org, mnemonic="Datatypes", version=HEAD)
-        nametypes_source = SourceFactory(updated_by=user, organization=org, mnemonic="NameTypes", version=HEAD)
-        descriptiontypes_source = SourceFactory(
+        classes_source = OrganizationSourceFactory(updated_by=user, organization=org, mnemonic="Classes", version=HEAD)
+        datatypes_source = OrganizationSourceFactory(
+            updated_by=user, organization=org, mnemonic="Datatypes", version=HEAD
+        )
+        nametypes_source = OrganizationSourceFactory(
+            updated_by=user, organization=org, mnemonic="NameTypes", version=HEAD
+        )
+        descriptiontypes_source = OrganizationSourceFactory(
             updated_by=user, organization=org, mnemonic="DescriptionTypes", version=HEAD
         )
-        maptypes_source = SourceFactory(updated_by=user, organization=org, mnemonic="MapTypes", version=HEAD)
-        locales_source = SourceFactory(updated_by=user, organization=org, mnemonic="Locales", version=HEAD)
+        maptypes_source = OrganizationSourceFactory(
+            updated_by=user, organization=org, mnemonic="MapTypes", version=HEAD
+        )
+        locales_source = OrganizationSourceFactory(updated_by=user, organization=org, mnemonic="Locales", version=HEAD)
 
         ConceptFactory(
             version=HEAD, updated_by=user, parent=classes_source, concept_class="Concept Class",
@@ -320,3 +326,9 @@ class UtilsTest(OCLTestCase):
             compact_dict_by_values(dict(foo=2, bar='')),
             dict(foo=2)
         )
+
+    def test_to_snake_case(self):
+        self.assertEqual(to_snake_case(""), "")
+        self.assertEqual(to_snake_case("foobar"), "foobar")
+        self.assertEqual(to_snake_case("foo_bar"), "foo_bar")
+        self.assertEqual(to_snake_case("fooBar"), "foo_bar")

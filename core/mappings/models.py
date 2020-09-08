@@ -257,6 +257,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         mapping.to_concept_code = self.to_concept_code
         mapping.to_concept_name = self.to_concept_name
         mapping.to_source_id = self.to_source_id
+        mapping.retired = self.retired
         mapping.save()
 
     @classmethod
@@ -286,14 +287,10 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
                     obj.save()
                     obj.update_versioned_object()
                     versioned_object = obj.versioned_object
-                    latest_version = versioned_object.get_latest_version()
+                    latest_version = versioned_object.versions.exclude(id=obj.id).filter(is_latest_version=True).first()
                     latest_version.is_latest_version = False
                     latest_version.save()
                     obj.sources.set(compact([parent, parent_head]))
-
-                    # to update counts
-                    parent.save()
-                    parent_head.save()
 
                     persisted = True
                     cls.resume_indexing()
@@ -321,7 +318,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         return errors
 
     @classmethod
-    def get_base_queryset(cls, params):
+    def get_base_queryset(cls, params):  # pylint: disable=too-many-branches
         queryset = cls.objects.filter(is_active=True)
         user = params.get('user', None)
         org = params.get('org', None)
@@ -333,18 +330,24 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         is_latest = params.get('is_latest', None)
         include_retired = params.get(INCLUDE_RETIRED_PARAM, False)
         updated_since = parse_updated_since_param(params)
-        if user:
-            queryset = queryset.filter(parent__user__username=user)
-        if org:
-            queryset = queryset.filter(parent__organization__mnemonic=org)
-        if source:
-            queryset = queryset.filter(sources__mnemonic=source)
+
         if collection:
             queryset = queryset.filter(collection_set__mnemonic=collection)
-        if container_version and source:
-            queryset = queryset.filter(sources__version=container_version)
-        if container_version and collection:
-            queryset = queryset.filter(collection_set__version=container_version)
+            if user:
+                queryset = queryset.filter(collection_set__user__mnemonic=user)
+            if org:
+                queryset = queryset.filter(collection_set__organization__mnemonic=org)
+            if container_version:
+                queryset = queryset.filter(collection_set__version=container_version)
+        if source:
+            queryset = queryset.filter(sources__mnemonic=source)
+            if user:
+                queryset = queryset.filter(parent__user__username=user)
+            if org:
+                queryset = queryset.filter(parent__organization__mnemonic=org)
+            if container_version:
+                queryset = queryset.filter(sources__version=container_version)
+
         if mapping:
             queryset = queryset.filter(versioned_object_id=mapping)
         if mapping_version:

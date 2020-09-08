@@ -99,7 +99,7 @@ class MappingListView(MappingBaseView, ListWithHeadersMixin, CreateModelMixin):
     def post(self, request, **kwargs):  # pylint: disable=unused-argument
         self.set_parent_resource()
         serializer = self.get_serializer(data={
-            **request.data, 'parent_id': self.parent_resource.id
+            **request.data.dict(), 'parent_id': self.parent_resource.id
         })
         if serializer.is_valid():
             self.object = serializer.save()
@@ -144,7 +144,6 @@ class MappingRetrieveUpdateDestroyView(MappingBaseView, RetrieveAPIView, UpdateA
         if serializer.is_valid():
             self.object = serializer.save()
             if serializer.is_valid():
-                serializer = MappingDetailSerializer(self.object, context={'request': request})
                 return Response(serializer.data, status=success_status_code)
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -183,7 +182,7 @@ class MappingVersionRetrieveView(MappingBaseView, RetrieveAPIView):
     permission_classes = (CanViewParentDictionary,)
 
     def get_object(self, queryset=None):
-        return self.get_queryset().first()
+        return get_object_or_404(self.get_queryset())
 
 
 class MappingVersionListAllView(MappingBaseView, ListWithHeadersMixin):

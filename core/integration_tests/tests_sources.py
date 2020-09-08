@@ -1,7 +1,7 @@
 from core.common.tests import OCLAPITestCase
 from core.orgs.models import Organization
 from core.sources.models import Source
-from core.sources.tests.factories import SourceFactory
+from core.sources.tests.factories import OrganizationSourceFactory
 from core.users.models import UserProfile
 
 
@@ -33,7 +33,7 @@ class SourceCreateUpdateDestroyViewTest(OCLAPITestCase):
                 'type', 'uuid', 'id', 'short_code', 'name', 'full_name', 'description', 'source_type',
                 'custom_validation_schema', 'public_access', 'default_locale', 'supported_locales', 'website',
                 'url', 'owner', 'owner_type', 'owner_url', 'versions', 'created_on', 'updated_on', 'created_by',
-                'updated_by', 'extras', 'external_id', 'versions_url', 'version', 'concepts_url'
+                'updated_by', 'extras', 'external_id', 'versions_url', 'version', 'concepts_url', 'mappings_url'
             ]
         )
         source = Source.objects.last()
@@ -58,7 +58,7 @@ class SourceCreateUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(list(response.data.keys()), ['name'])
 
     def test_put_200(self):
-        source = SourceFactory(organization=self.organization)
+        source = OrganizationSourceFactory(organization=self.organization)
         self.assertTrue(source.is_head)
         self.assertEqual(source.versions.count(), 1)
 
@@ -78,7 +78,7 @@ class SourceCreateUpdateDestroyViewTest(OCLAPITestCase):
                 'type', 'uuid', 'id', 'short_code', 'name', 'full_name', 'description', 'source_type',
                 'custom_validation_schema', 'public_access', 'default_locale', 'supported_locales', 'website',
                 'url', 'owner', 'owner_type', 'owner_url', 'versions', 'created_on', 'updated_on', 'created_by',
-                'updated_by', 'extras', 'external_id', 'versions_url', 'version', 'concepts_url'
+                'updated_by', 'extras', 'external_id', 'versions_url', 'version', 'concepts_url', 'mappings_url'
             ]
         )
         source = Source.objects.last()
@@ -89,7 +89,7 @@ class SourceCreateUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.data['full_name'], 'Full name')
 
     def test_delete_400(self):
-        source = SourceFactory(organization=self.organization)
+        source = OrganizationSourceFactory(organization=self.organization)
         sources_url = "/orgs/{}/sources/{}/".format(
             self.organization.mnemonic, source.mnemonic
         )
@@ -104,8 +104,8 @@ class SourceCreateUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(source.versions.count(), 1)
 
     def test_version_delete_204(self):
-        source = SourceFactory(organization=self.organization)
-        source_v1 = SourceFactory(mnemonic=source.mnemonic, organization=source.organization, version='v1')
+        source = OrganizationSourceFactory(organization=self.organization)
+        source_v1 = OrganizationSourceFactory(mnemonic=source.mnemonic, organization=source.organization, version='v1')
         self.assertEqual(source.versions.count(), 2)
 
         sources_url = "/orgs/{}/sources/{}/{}/".format(

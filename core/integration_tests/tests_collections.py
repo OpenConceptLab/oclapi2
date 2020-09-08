@@ -3,16 +3,17 @@ from mock import patch, Mock
 from rest_framework.exceptions import ErrorDetail
 
 from core.collections.models import CollectionReference, Collection
-from core.collections.tests.factories import CollectionFactory
+from core.collections.tests.factories import OrganizationCollectionFactory, UserCollectionFactory
 from core.common.tests import OCLAPITestCase
 from core.concepts.tests.factories import ConceptFactory
+from core.mappings.tests.factories import MappingFactory
 from core.orgs.tests.factories import OrganizationFactory
 from core.users.tests.factories import UserProfileFactory
 
 
 class CollectionListViewTest(OCLAPITestCase):
     def test_get_200(self):
-        coll = CollectionFactory(mnemonic='coll1')
+        coll = OrganizationCollectionFactory(mnemonic='coll1')
 
         response = self.client.get(
             '/collections/',
@@ -26,7 +27,7 @@ class CollectionListViewTest(OCLAPITestCase):
         self.assertEqual(response.data[0]['url'], coll.uri)
 
         response = self.client.get(
-            '/orgs/{}/collections/'.format(coll.parent.mnemonic),
+            '/orgs/{}/collections/?verbose=true'.format(coll.parent.mnemonic),
             format='json'
         )
 
@@ -141,7 +142,7 @@ class CollectionListViewTest(OCLAPITestCase):
 
 class CollectionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
     def test_get_200(self):
-        coll = CollectionFactory(mnemonic='coll1')
+        coll = OrganizationCollectionFactory(mnemonic='coll1')
 
         response = self.client.get(
             '/collections/coll1/',
@@ -171,8 +172,8 @@ class CollectionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 404)
 
     def test_delete(self):
-        coll = CollectionFactory(mnemonic='coll1')
-        CollectionFactory(
+        coll = OrganizationCollectionFactory(mnemonic='coll1')
+        OrganizationCollectionFactory(
             version='v1', is_latest_version=True, mnemonic='coll1', organization=coll.organization
         )
         user = UserProfileFactory(organizations=[coll.organization])
@@ -198,7 +199,7 @@ class CollectionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(coll.versions.count(), 1)
 
     def test_put_401(self):
-        coll = CollectionFactory(mnemonic='coll1', name='Collection')
+        coll = OrganizationCollectionFactory(mnemonic='coll1', name='Collection')
         self.assertEqual(coll.versions.count(), 1)
 
         response = self.client.put(
@@ -210,7 +211,7 @@ class CollectionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 401)
 
     def test_put_405(self):
-        coll = CollectionFactory(mnemonic='coll1', name='Collection')
+        coll = OrganizationCollectionFactory(mnemonic='coll1', name='Collection')
         user = UserProfileFactory(organizations=[coll.organization])
         self.assertEqual(coll.versions.count(), 1)
 
@@ -224,7 +225,7 @@ class CollectionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 405)
 
     def test_put_200(self):
-        coll = CollectionFactory(mnemonic='coll1', name='Collection')
+        coll = OrganizationCollectionFactory(mnemonic='coll1', name='Collection')
         user = UserProfileFactory(organizations=[coll.organization])
         self.assertEqual(coll.versions.count(), 1)
 
@@ -242,7 +243,7 @@ class CollectionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(coll.versions.count(), 1)
 
     def test_put_400(self):
-        coll = CollectionFactory(mnemonic='coll1', name='Collection')
+        coll = OrganizationCollectionFactory(mnemonic='coll1', name='Collection')
         user = UserProfileFactory(organizations=[coll.organization])
         self.assertEqual(coll.versions.count(), 1)
 
@@ -262,7 +263,7 @@ class CollectionReferencesViewTest(OCLAPITestCase):
         super().setUp()
         self.user = UserProfileFactory()
         self.token = self.user.get_token()
-        self.collection = CollectionFactory(mnemonic='coll', user=self.user, organization=None)
+        self.collection = UserCollectionFactory(mnemonic='coll', user=self.user)
         self.concept = ConceptFactory()
         self.reference = CollectionReference(expression=self.concept.uri)
         self.reference.full_clean()
@@ -413,14 +414,39 @@ class CollectionReferencesViewTest(OCLAPITestCase):
             ]
         )
 
+        mapping = MappingFactory(from_concept=concept2, to_concept=self.concept, parent=self.concept.parent)
+
+        response = self.client.put(
+            '/collections/coll/references/',
+            dict(data=dict(mappings=[mapping.uri])),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.collection.references.count(), 3)
+        self.assertEqual(self.collection.concepts.count(), 2)
+        self.assertEqual(self.collection.mappings.count(), 1)
+        self.assertTrue(self.collection.references.filter(expression=mapping.uri).exists())
+        self.assertEqual(
+            response.data,
+            [
+                dict(
+                    added=True, expression=mapping.uri,
+                    message='Added the latest versions of mapping to the collection. Future updates will not be added'
+                            ' automatically.'
+                )
+            ]
+        )
+
 
 class CollectionVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
     def setUp(self):
         super().setUp()
         self.user = UserProfileFactory()
         self.token = self.user.get_token()
-        self.collection = CollectionFactory(mnemonic='coll', user=self.user, organization=None)
-        self.collection_v1 = CollectionFactory(version='v1', mnemonic='coll', user=self.user, organization=None)
+        self.collection = UserCollectionFactory(mnemonic='coll', user=self.user)
+        self.collection_v1 = UserCollectionFactory(version='v1', mnemonic='coll', user=self.user)
 
     def test_get_200(self):
         response = self.client.get(
@@ -503,8 +529,8 @@ class CollectionLatestVersionRetrieveUpdateViewTest(OCLAPITestCase):
         super().setUp()
         self.user = UserProfileFactory()
         self.token = self.user.get_token()
-        self.collection = CollectionFactory(mnemonic='coll', user=self.user, organization=None)
-        self.collection_v1 = CollectionFactory(version='v1', mnemonic='coll', user=self.user, organization=None)
+        self.collection = UserCollectionFactory(mnemonic='coll', user=self.user)
+        self.collection_v1 = UserCollectionFactory(version='v1', mnemonic='coll', user=self.user)
 
     def test_get_404(self):
         response = self.client.get(
@@ -574,9 +600,7 @@ class CollectionExtrasViewTest(OCLAPITestCase):
         self.user = UserProfileFactory()
         self.token = self.user.get_token()
         self.extras = dict(foo='bar', tao='ching')
-        self.collection = CollectionFactory(
-            mnemonic='coll', user=self.user, organization=None, extras=self.extras
-        )
+        self.collection = UserCollectionFactory(mnemonic='coll', user=self.user, extras=self.extras)
 
     def test_get_200(self):
         response = self.client.get(
@@ -602,9 +626,7 @@ class CollectionExtraRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.user = UserProfileFactory()
         self.token = self.user.get_token()
         self.extras = dict(foo='bar', tao='ching')
-        self.collection = CollectionFactory(
-            mnemonic='coll', user=self.user, organization=None, extras=self.extras
-        )
+        self.collection = UserCollectionFactory(mnemonic='coll', user=self.user, extras=self.extras)
 
     def test_get_200(self):
         response = self.client.get(
@@ -671,8 +693,8 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
         super().setUp()
         self.user = UserProfileFactory(username='username')
         self.token = self.user.get_token()
-        self.collection = CollectionFactory(mnemonic='coll', user=self.user, organization=None)
-        self.collection_v1 = CollectionFactory(version='v1', mnemonic='coll', user=self.user, organization=None)
+        self.collection = UserCollectionFactory(mnemonic='coll', user=self.user)
+        self.collection_v1 = UserCollectionFactory(version='v1', mnemonic='coll', user=self.user)
 
     def test_get_404(self):
         response = self.client.get(
@@ -790,7 +812,7 @@ class CollectionVersionListViewTest(OCLAPITestCase):
         super().setUp()
         self.user = UserProfileFactory()
         self.token = self.user.get_token()
-        self.collection = CollectionFactory(mnemonic='coll', user=self.user, organization=None)
+        self.collection = UserCollectionFactory(mnemonic='coll', user=self.user)
         self.concept = ConceptFactory()
         self.reference = CollectionReference(expression=self.concept.uri)
         self.reference.full_clean()
@@ -810,6 +832,20 @@ class CollectionVersionListViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 1)
         self.assertEqual(response.data[0]['version'], 'HEAD')
+
+        UserCollectionFactory(
+            mnemonic=self.collection.mnemonic, user=self.user, version='v1', released=True
+        )
+
+        response = self.client.get(
+            '/collections/coll/versions/?released=true',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['version'], 'v1')
 
     @patch('core.collections.views.export_collection')
     def test_post_201(self, export_collection_mock):

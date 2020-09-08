@@ -2,14 +2,15 @@ from django.core.exceptions import ValidationError
 from django.db.models import QuerySet
 
 from core.collections.models import CollectionReference, Collection
-from core.collections.tests.factories import CollectionFactory
+from core.collections.tests.factories import OrganizationCollectionFactory
 from core.collections.utils import is_mapping, is_concept, drop_version, is_version_specified, \
     get_concept_by_expression
 from core.common.constants import CUSTOM_VALIDATION_SCHEMA_OPENMRS
 from core.common.tests import OCLTestCase
 from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory
-from core.sources.tests.factories import SourceFactory
+from core.mappings.tests.factories import MappingFactory
+from core.sources.tests.factories import OrganizationSourceFactory
 
 
 class CollectionTest(OCLTestCase):
@@ -21,12 +22,12 @@ class CollectionTest(OCLTestCase):
         self.assertTrue(Collection().is_versioned)
 
     def test_add_references(self):
-        collection = CollectionFactory()
+        collection = OrganizationCollectionFactory()
 
         self.assertEqual(collection.concepts.count(), 0)
         self.assertEqual(collection.references.count(), 0)
 
-        source = SourceFactory()
+        source = OrganizationSourceFactory()
         concept = ConceptFactory(parent=source, sources=[source])
         concept_expression = concept.uri
 
@@ -45,12 +46,12 @@ class CollectionTest(OCLTestCase):
         self.assertEqual(collection.references.count(), 1)
 
     def test_add_references_openmrs_schema(self):
-        collection = CollectionFactory(custom_validation_schema=CUSTOM_VALIDATION_SCHEMA_OPENMRS)
+        collection = OrganizationCollectionFactory(custom_validation_schema=CUSTOM_VALIDATION_SCHEMA_OPENMRS)
 
         self.assertEqual(collection.concepts.count(), 0)
         self.assertEqual(collection.references.count(), 0)
 
-        source = SourceFactory()
+        source = OrganizationSourceFactory()
         concept = ConceptFactory(parent=source, sources=[source])
         concept_expression = concept.uri
 
@@ -67,9 +68,29 @@ class CollectionTest(OCLTestCase):
         self.assertEqual(collection.concepts.count(), 2)
         self.assertEqual(collection.references.count(), 2)
 
+    def test_delete_references(self):
+        collection = OrganizationCollectionFactory()
+        source = OrganizationSourceFactory()
+        concept1 = ConceptFactory(parent=source)
+        concept2 = ConceptFactory(parent=source)
+        mapping = MappingFactory(from_concept=concept1, to_concept=concept2, parent=source)
+        collection.add_references([concept1.uri, concept2.uri, mapping.uri])
+
+        self.assertEqual(collection.concepts.count(), 2)
+        self.assertEqual(collection.mappings.count(), 1)
+        self.assertEqual(collection.references.count(), 3)
+
+        collection.delete_references([concept2.uri, mapping.uri])
+
+        self.assertEqual(collection.concepts.count(), 1)
+        self.assertEqual(collection.mappings.count(), 0)
+        self.assertEqual(collection.references.count(), 1)
+        self.assertEqual(collection.concepts.first().uri, concept1.get_latest_version().uri)
+        self.assertEqual(collection.references.first().expression, concept1.uri)
+
     def test_get_concepts(self):
-        collection = CollectionFactory()
-        source = SourceFactory()
+        collection = OrganizationCollectionFactory()
+        source = OrganizationSourceFactory()
         concept = ConceptFactory(parent=source, sources=[source])
         concept_expression = concept.uri
         collection.add_references([concept_expression])
@@ -82,15 +103,15 @@ class CollectionTest(OCLTestCase):
         self.assertEqual(collection.get_concepts(start=1, end=2).count(), 0)
 
     def test_seed_concepts(self):
-        collection1 = CollectionFactory()
-        collection2 = CollectionFactory(
+        collection1 = OrganizationCollectionFactory()
+        collection2 = OrganizationCollectionFactory(
             version='v1', mnemonic=collection1.mnemonic, organization=collection1.organization
         )
 
         self.assertTrue(collection1.is_head)
         self.assertFalse(collection2.is_head)
 
-        source = SourceFactory()
+        source = OrganizationSourceFactory()
         concept = ConceptFactory(parent=source, sources=[source])
         concept_expression = concept.uri
 
@@ -105,15 +126,15 @@ class CollectionTest(OCLTestCase):
         self.assertEqual(collection2.concepts.count(), 1)
 
     def test_seed_references(self):
-        collection1 = CollectionFactory()
-        collection2 = CollectionFactory(
+        collection1 = OrganizationCollectionFactory()
+        collection2 = OrganizationCollectionFactory(
             version='v1', mnemonic=collection1.mnemonic, organization=collection1.organization
         )
 
         self.assertTrue(collection1.is_head)
         self.assertFalse(collection2.is_head)
 
-        source = SourceFactory()
+        source = OrganizationSourceFactory()
         concept = ConceptFactory(parent=source, sources=[source])
         concept_expression = concept.uri
 
@@ -156,6 +177,11 @@ class CollectionReferenceTest(OCLTestCase):
             expression='/parent/parent-mnemonic/sources/source-mnemonic/concepts/concept-mnemonic/'
         )
         self.assertEqual(reference.reference_type, 'concepts')
+
+        reference = CollectionReference(
+            expression='/parent/parent-mnemonic/sources/source-mnemonic/mappings/mapping-mnemonic/'
+        )
+        self.assertEqual(reference.reference_type, 'mappings')
 
     def test_reference_as_concept_version(self):
         concept = ConceptFactory()

@@ -169,7 +169,6 @@ class ConceptRetrieveUpdateDestroyView(ConceptBaseView, RetrieveAPIView, UpdateA
         if serializer.is_valid():
             self.object = serializer.save()
             if serializer.is_valid():
-                serializer = ConceptDetailSerializer(self.object, context=dict(request=request))
                 return Response(serializer.data, status=success_status_code)
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)

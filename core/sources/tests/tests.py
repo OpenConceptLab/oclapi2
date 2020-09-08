@@ -5,14 +5,14 @@ from core.common.constants import HEAD
 from core.common.tests import OCLTestCase
 from core.concepts.tests.factories import ConceptFactory
 from core.sources.models import Source
-from core.sources.tests.factories import SourceFactory
+from core.sources.tests.factories import OrganizationSourceFactory
 from core.users.tests.factories import UserProfileFactory
 
 
 class SourceTest(OCLTestCase):
     def setUp(self):
         super().setUp()
-        self.new_source = SourceFactory.build(organization=None)
+        self.new_source = OrganizationSourceFactory.build(organization=None)
         self.user = UserProfileFactory()
 
     def test_is_versioned(self):
@@ -93,8 +93,8 @@ class SourceTest(OCLTestCase):
         kwargs = {
             'parent_resource': self.user
         }
-        source1 = SourceFactory(organization=None, user=self.user, mnemonic='source-1', version=HEAD)
-        source2 = SourceFactory(organization=None, user=self.user, mnemonic='source-2', version=HEAD)
+        source1 = OrganizationSourceFactory(organization=None, user=self.user, mnemonic='source-1', version=HEAD)
+        source2 = OrganizationSourceFactory(organization=None, user=self.user, mnemonic='source-2', version=HEAD)
 
         source2.mnemonic = source1.mnemonic
 
@@ -104,7 +104,7 @@ class SourceTest(OCLTestCase):
         self.assertTrue('__all__' in errors)
 
     def test_source_version_create_positive(self):
-        source = SourceFactory()
+        source = OrganizationSourceFactory()
         self.assertEqual(source.num_versions, 1)
 
         source_version = Source(
@@ -132,9 +132,9 @@ class SourceTest(OCLTestCase):
         )
 
     def test_source_version_create_negative__same_version(self):
-        source = SourceFactory()
+        source = OrganizationSourceFactory()
         self.assertEqual(source.num_versions, 1)
-        SourceFactory(
+        OrganizationSourceFactory(
             name='version1', mnemonic=source.mnemonic, version='version1', organization=source.organization
         )
         self.assertEqual(source.num_versions, 2)
@@ -153,20 +153,20 @@ class SourceTest(OCLTestCase):
         self.assertEqual(source.num_versions, 2)
 
     def test_source_version_create_positive__same_version(self):
-        source = SourceFactory()
+        source = OrganizationSourceFactory()
         self.assertEqual(source.num_versions, 1)
-        SourceFactory(
+        OrganizationSourceFactory(
             name='version1', mnemonic=source.mnemonic, version='version1', organization=source.organization
         )
-        source2 = SourceFactory()
+        source2 = OrganizationSourceFactory()
         self.assertEqual(source2.num_versions, 1)
-        SourceFactory(
+        OrganizationSourceFactory(
             name='version1', mnemonic=source2.mnemonic, version='version1', organization=source2.organization
         )
         self.assertEqual(source2.num_versions, 2)
 
     def test_persist_new_version(self):
-        source = SourceFactory(version=HEAD)
+        source = OrganizationSourceFactory(version=HEAD)
         concept = ConceptFactory(mnemonic='concept1', parent=source)
 
         self.assertEqual(source.concepts_set.count(), 2)  # parent-child
@@ -174,7 +174,7 @@ class SourceTest(OCLTestCase):
         self.assertEqual(concept.sources.count(), 1)
         self.assertTrue(source.is_latest_version)
 
-        version1 = SourceFactory.build(
+        version1 = OrganizationSourceFactory.build(
             name='version1', version='v1', mnemonic=source.mnemonic, organization=source.organization
         )
         Source.persist_new_version(version1, source.created_by)
@@ -188,13 +188,13 @@ class SourceTest(OCLTestCase):
         self.assertEqual(version1.concepts_set.count(), 0)  # no direct child
 
     def test_source_version_delete(self):
-        source = SourceFactory(version=HEAD)
+        source = OrganizationSourceFactory(version=HEAD)
         concept = ConceptFactory(mnemonic='concept1', version=HEAD, sources=[source], parent=source)
 
         self.assertTrue(source.is_latest_version)
         self.assertEqual(concept.sources.count(), 1)
 
-        version1 = SourceFactory.build(
+        version1 = OrganizationSourceFactory.build(
             name='version1', version='v1', mnemonic=source.mnemonic, organization=source.organization
         )
         Source.persist_new_version(version1, source.created_by)
@@ -232,7 +232,7 @@ class SourceTest(OCLTestCase):
         )
 
     def test_child_count_updates(self):
-        source = SourceFactory(version=HEAD)
+        source = OrganizationSourceFactory(version=HEAD)
         self.assertEqual(source.active_concepts, 0)
 
         concept = ConceptFactory(sources=[source], parent=source)
@@ -243,7 +243,7 @@ class SourceTest(OCLTestCase):
         self.assertEqual(source.last_child_update, source.last_concept_update)
 
     def test_source_active_inactive_should_affect_children(self):
-        source = SourceFactory(is_active=True)
+        source = OrganizationSourceFactory(is_active=True)
         concept = ConceptFactory(parent=source, is_active=True)
 
         source.is_active = False
