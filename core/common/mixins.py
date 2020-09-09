@@ -3,7 +3,7 @@ import logging
 from django.conf import settings
 from django.core.paginator import Paginator
 from django.db.models import Q, F
-from django.http import HttpResponseForbidden
+from django.http import HttpResponseForbidden, Http404
 from django.urls import resolve, reverse
 from django.utils.functional import cached_property
 from pydash import compact, get
@@ -456,6 +456,14 @@ class SourceChildMixin:
 
 
 class ConceptContainerExportMixin:
+    def get_object(self, queryset=None):  # pylint: disable=unused-argument
+        instance = self.get_queryset().first()
+
+        if not instance:
+            raise Http404()
+
+        return instance
+
     def get(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         version = self.get_object()
         logger.debug(

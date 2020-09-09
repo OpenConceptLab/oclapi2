@@ -78,8 +78,8 @@ class SourceListView(SourceBaseView, ConceptDictionaryCreateMixin, ListWithHeade
     facet_class = SourceSearch
 
     def get_serializer_class(self):
-        if self.request.method == 'GET':
-            return SourceDetailSerializer if self.is_verbose(self.request) else SourceListSerializer
+        if self.request.method == 'GET' and self.is_verbose(self.request):
+            return SourceDetailSerializer
         if self.request.method == 'POST':
             return SourceCreateSerializer
 
@@ -88,7 +88,7 @@ class SourceListView(SourceBaseView, ConceptDictionaryCreateMixin, ListWithHeade
     def get(self, request, *args, **kwargs):
         return self.list(request, *args, **kwargs)
 
-    def get_csv_rows(self, queryset=None):
+    def get_csv_rows(self, queryset=None):  # pragma: no cover
         if not queryset:
             queryset = self.get_queryset()
 
@@ -154,8 +154,8 @@ class SourceVersionListView(SourceVersionBaseView, mixins.CreateModelMixin, List
     processing_filter = None
 
     def get_serializer_class(self):
-        if self.request.method in ['GET', 'HEAD']:
-            return SourceVersionDetailSerializer if self.is_verbose(self.request) else SourceListSerializer
+        if self.request.method in ['GET', 'HEAD'] and self.is_verbose(self.request):
+            return SourceVersionDetailSerializer
         if self.request.method == 'POST':
             return SourceCreateSerializer
 
@@ -171,10 +171,11 @@ class SourceVersionListView(SourceVersionBaseView, mixins.CreateModelMixin, List
 
     def create(self, request, *args, **kwargs):
         head_object = self.get_queryset().first()
+        version = request.data.pop('id', None)
         payload = {
             "mnemonic": head_object.mnemonic, "id": head_object.mnemonic, "name": head_object.name, **request.data,
             "organization_id": head_object.organization_id, "user_id": head_object.user_id,
-            'version': request.data.pop('id', None)
+            'version': version
         }
         serializer = self.get_serializer(data=payload)
         if serializer.is_valid():
@@ -188,7 +189,7 @@ class SourceVersionListView(SourceVersionBaseView, mixins.CreateModelMixin, List
                     return Response(data, status=status.HTTP_201_CREATED)
             except IntegrityError as ex:
                 return Response(
-                    dict(error=str(ex), detail='Source version  \'%s\' already exist. ' % serializer.data.get('id')),
+                    dict(error=str(ex), detail='Source version \'%s\' already exist.' % version),
                     status=status.HTTP_409_CONFLICT
                 )
 
@@ -197,7 +198,7 @@ class SourceVersionListView(SourceVersionBaseView, mixins.CreateModelMixin, List
     def get_queryset(self):
         queryset = super().get_queryset()
         if self.released_filter is not None:
-            queryset = queryset.filter(released=self.released_filter)
+            queryset = queryset.filter(released=self.released_filter)   # pragma: no cover
         return queryset.order_by('-created_at')
 
 
@@ -219,7 +220,7 @@ class SourceLatestVersionRetrieveUpdateView(SourceVersionBaseView, RetrieveAPIVi
         self.object = self.get_object()
         head = self.object.head
         if not head:
-            return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
+            return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)   # pragma: no cover
 
         serializer = self.get_serializer(self.object, data=request.data, partial=True)
 
@@ -243,11 +244,11 @@ class SourceVersionRetrieveUpdateDestroyView(SourceVersionBaseView, RetrieveAPIV
         self.object = self.get_object()
         head = self.object.head
         if not head:
-            return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
+            return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)   # pragma: no cover
 
         external_id = get(request.data, 'version_external_id')
         if external_id:
-            request.data['external_id'] = external_id
+            request.data['external_id'] = external_id   # pragma: no cover
         serializer = self.get_serializer(self.object, data=request.data, partial=True)
 
         if serializer.is_valid():
@@ -263,7 +264,7 @@ class SourceVersionRetrieveUpdateDestroyView(SourceVersionBaseView, RetrieveAPIV
 
         try:
             instance.delete()
-        except ValidationError as ex:
+        except ValidationError as ex:   # pragma: no cover
             return Response(ex.message_dict, status=status.HTTP_400_BAD_REQUEST)
 
         return Response(status=status.HTTP_204_NO_CONTENT)
@@ -327,7 +328,7 @@ class SourceExtraRetrieveUpdateDestroyView(SourceExtrasBaseView, RetrieveUpdateD
         return Response(dict(detail='Not found.'), status=status.HTTP_404_NOT_FOUND)
 
 
-class SourceVersionProcessingView(SourceBaseView):
+class SourceVersionProcessingView(SourceBaseView):   # pragma: no cover
     serializer_class = SourceVersionDetailSerializer
 
     def get_permissions(self):
@@ -360,9 +361,6 @@ class SourceVersionExportView(SourceBaseView, ConceptContainerExportMixin):
     entity = 'Source'
     permission_classes = (CanViewConceptDictionary,)
     serializer_class = SourceVersionDetailSerializer
-
-    def get_object(self, queryset=None):
-        return self.get_queryset().first()
 
     def handle_export_version(self):
         version = self.get_object()
