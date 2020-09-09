@@ -1,12 +1,19 @@
+from celery_once import AlreadyQueued
+from django.db import transaction
+from mock import patch, Mock
+from rest_framework.exceptions import ErrorDetail
+
 from core.common.tests import OCLAPITestCase
 from core.orgs.models import Organization
 from core.sources.models import Source
-from core.sources.tests.factories import OrganizationSourceFactory
+from core.sources.tests.factories import OrganizationSourceFactory, UserSourceFactory
 from core.users.models import UserProfile
+from core.users.tests.factories import UserProfileFactory
 
 
-class SourceCreateUpdateDestroyViewTest(OCLAPITestCase):
+class SourceListViewTest(OCLAPITestCase):
     def setUp(self):
+        super().setUp()
         self.organization = Organization.objects.first()
         self.user = UserProfile.objects.filter(is_superuser=True).first()
         self.token = self.user.get_token()
@@ -15,6 +22,29 @@ class SourceCreateUpdateDestroyViewTest(OCLAPITestCase):
             'short_code': 's2', 'description': '', 'source_type': '', 'full_name': 'source 2', 'public_access': 'View',
             'external_id': '', 'id': 's2', 'supported_locales': 'af,am'
         }
+
+    def test_get_200(self):
+        response = self.client.get(
+            self.organization.sources_url,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 0)
+
+        source = OrganizationSourceFactory(organization=self.organization)
+
+        response = self.client.get(
+            self.organization.sources_url + '?verbose=true',
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['short_code'], source.mnemonic)
+        self.assertEqual(response.data[0]['owner'], self.organization.mnemonic)
+        self.assertEqual(response.data[0]['owner_type'], 'Organization')
+        self.assertEqual(response.data[0]['owner_url'], self.organization.uri)
 
     def test_post_201(self):
         sources_url = "/orgs/{}/sources/".format(self.organization.mnemonic)
@@ -56,6 +86,33 @@ class SourceCreateUpdateDestroyViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(list(response.data.keys()), ['name'])
+
+
+class SourceCreateUpdateDestroyViewTest(OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.organization = Organization.objects.first()
+        self.user = UserProfile.objects.filter(is_superuser=True).first()
+        self.token = self.user.get_token()
+
+    def test_get(self):
+        response = self.client.get(
+            self.organization.sources_url + 'source1/',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+        self.assertEqual(response.status_code, 404)
+
+        source = OrganizationSourceFactory(organization=self.organization)
+        response = self.client.get(
+            source.uri,
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['uuid'], str(source.id))
+        self.assertEqual(response.data['short_code'], source.mnemonic)
 
     def test_put_200(self):
         source = OrganizationSourceFactory(organization=self.organization)
@@ -103,20 +160,400 @@ class SourceCreateUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.data, {'detail': ['Cannot delete only version.']})
         self.assertEqual(source.versions.count(), 1)
 
-    def test_version_delete_204(self):
-        source = OrganizationSourceFactory(organization=self.organization)
-        source_v1 = OrganizationSourceFactory(mnemonic=source.mnemonic, organization=source.organization, version='v1')
-        self.assertEqual(source.versions.count(), 2)
 
-        sources_url = "/orgs/{}/sources/{}/{}/".format(
-            self.organization.mnemonic, source.mnemonic, source_v1.version
+class SourceVersionListViewTest(OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.organization = Organization.objects.first()
+        self.user = UserProfile.objects.filter(is_superuser=True).first()
+        self.token = self.user.get_token()
+        self.source = OrganizationSourceFactory(organization=self.organization)
+
+    def test_get_200(self):
+        response = self.client.get(
+            '/orgs/{}/sources/{}/versions/'.format(self.organization.mnemonic, self.source.mnemonic),
+            format='json'
         )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['version'], 'HEAD')
+
+        response = self.client.get(
+            '/orgs/{}/sources/{}/versions/?verbose=true'.format(self.organization.mnemonic, self.source.mnemonic),
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['version'], 'HEAD')
+        self.assertEqual(response.data[0]['concepts_url'], self.source.concepts_url)
+
+    @patch('core.sources.views.export_source')
+    def test_post_201(self, export_source_mock):
+        response = self.client.post(
+            '/orgs/{}/sources/{}/versions/'.format(self.organization.mnemonic, self.source.mnemonic),
+            dict(id='v1', description='Version 1'),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertIsNotNone(response.data['uuid'])
+        self.assertEqual(response.data['version'], 'v1')
+        self.assertEqual(self.source.versions.count(), 2)
+        export_source_mock.delay.assert_called_once_with(response.data['uuid'])
+
+    def test_post_409(self):
+        OrganizationSourceFactory(version='v1', organization=self.organization, mnemonic=self.source.mnemonic)
+        with transaction.atomic():
+            response = self.client.post(
+                '/orgs/{}/sources/{}/versions/'.format(self.organization.mnemonic, self.source.mnemonic),
+                dict(id='v1', description='Version 1'),
+                HTTP_AUTHORIZATION='Token ' + self.token,
+                format='json'
+            )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.data['detail'], "Source version 'v1' already exist.")
+
+    @patch('core.sources.views.export_source')
+    def test_post_400(self, export_source_mock):
+        response = self.client.post(
+            '/orgs/{}/sources/{}/versions/'.format(self.organization.mnemonic, self.source.mnemonic),
+            dict(id=None, description='Version 1'),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data, {'version': [ErrorDetail(string='This field may not be null.', code='null')]})
+        export_source_mock.delay.assert_not_called()
+
+
+class SourceLatestVersionRetrieveUpdateViewTest(OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.organization = Organization.objects.first()
+        self.user = UserProfile.objects.filter(is_superuser=True).first()
+        self.token = self.user.get_token()
+        self.source = OrganizationSourceFactory(organization=self.organization)
+        self.latest_version = OrganizationSourceFactory(
+            mnemonic=self.source.mnemonic, is_latest_version=True, organization=self.organization, version='v1',
+            released=True
+        )
+
+    def test_get_200(self):
+        response = self.client.get(
+            '/orgs/{}/sources/{}/latest/'.format(self.organization.mnemonic, self.source.mnemonic),
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['id'], 'v1')
+        self.assertEqual(response.data['uuid'], str(self.latest_version.id))
+        self.assertEqual(response.data['short_code'], self.source.mnemonic)
+
+    def test_put_200(self):
+        self.assertIsNone(self.latest_version.external_id)
+
+        external_id = '123'
+        response = self.client.put(
+            '/orgs/{}/sources/{}/latest/'.format(self.organization.mnemonic, self.source.mnemonic),
+            dict(external_id=external_id),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['id'], 'v1')
+        self.assertEqual(response.data['uuid'], str(self.latest_version.id))
+        self.assertEqual(response.data['short_code'], self.source.mnemonic)
+        self.assertEqual(response.data['external_id'], external_id)
+
+        self.latest_version.refresh_from_db()
+        self.assertEqual(self.latest_version.external_id, external_id)
+
+    def test_put_400(self):
+        response = self.client.put(
+            '/orgs/{}/sources/{}/latest/'.format(self.organization.mnemonic, self.source.mnemonic),
+            dict(id=None),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data, {'id': [ErrorDetail(string='This field may not be null.', code='null')]})
+
+
+class SourceExtrasViewTest(OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.organization = Organization.objects.first()
+        self.user = UserProfile.objects.filter(is_superuser=True).first()
+        self.token = self.user.get_token()
+        self.extras = dict(foo='bar', tao='ching')
+        self.source = OrganizationSourceFactory(organization=self.organization, extras=self.extras)
+
+    def test_get_200(self):
+        response = self.client.get(self.source.uri + 'extras/', format='json')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, self.extras)
+
+
+class SourceVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.organization = Organization.objects.first()
+        self.user = UserProfile.objects.filter(is_superuser=True).first()
+        self.token = self.user.get_token()
+        self.source = OrganizationSourceFactory(organization=self.organization)
+        self.source_v1 = OrganizationSourceFactory(
+            mnemonic=self.source.mnemonic, organization=self.organization, version='v1',
+        )
+
+    def test_get_200(self):
+        response = self.client.get(
+            self.source_v1.uri,
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['version'], 'v1')
+
+    def test_put_200(self):
+        self.assertEqual(self.source.extras, dict())
+        self.assertEqual(self.source_v1.extras, dict())
+
+        extras = dict(foo='bar')
+        response = self.client.put(
+            self.source_v1.uri,
+            dict(extras=extras),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['extras'], extras)
+        self.source_v1.refresh_from_db()
+        self.assertEqual(self.source_v1.extras, extras)
+        self.assertEqual(self.source.extras, dict())
+
+    def test_put_400(self):
+        response = self.client.put(
+            self.source_v1.uri,
+            dict(id=None),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data, {'id': [ErrorDetail(string='This field may not be null.', code='null')]})
+
+    def test_version_delete_204(self):
+        self.assertEqual(self.source.versions.count(), 2)
+
         response = self.client.delete(
-            sources_url,
+            self.source_v1.uri,
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
 
         self.assertEqual(response.status_code, 204)
-        self.assertEqual(source.versions.count(), 1)
-        self.assertFalse(source.versions.filter(version='v1').exists())
+        self.assertEqual(self.source.versions.count(), 1)
+        self.assertFalse(self.source.versions.filter(version='v1').exists())
+
+
+class SourceExtraRetrieveUpdateDestroyViewTest(OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.organization = Organization.objects.first()
+        self.user = UserProfile.objects.filter(is_superuser=True).first()
+        self.token = self.user.get_token()
+        self.extras = dict(foo='bar', tao='ching')
+        self.source = OrganizationSourceFactory(organization=self.organization, extras=self.extras)
+
+    def test_get_200(self):
+        response = self.client.get(
+            self.source.uri + 'extras/foo/',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, dict(foo='bar'))
+
+    def test_get_404(self):
+        response = self.client.get(
+            self.source.uri + 'extras/bar/',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_put_200(self):
+        response = self.client.put(
+            self.source.uri + 'extras/foo/',
+            dict(foo='foobar'),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, dict(foo='foobar'))
+        self.source.refresh_from_db()
+        self.assertEqual(self.source.extras, dict(foo='foobar', tao='ching'))
+
+    def test_put_400(self):
+        response = self.client.put(
+            self.source.uri + 'extras/foo/',
+            dict(tao='te-ching'),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data, ['Must specify foo param in body.'])
+
+    def test_delete(self):
+        response = self.client.delete(
+            self.source.uri + 'extras/foo/',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 204)
+        self.source.refresh_from_db()
+        self.assertEqual(self.source.extras, dict(tao='ching'))
+
+        response = self.client.delete(
+            self.source.uri + 'extras/foo/',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.source.refresh_from_db()
+        self.assertEqual(self.source.extras, dict(tao='ching'))
+
+
+class SourceVersionExportViewTest(OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.user = UserProfileFactory(username='username')
+        self.token = self.user.get_token()
+        self.source = UserSourceFactory(mnemonic='source1', user=self.user)
+        self.source_v1 = UserSourceFactory(version='v1', mnemonic='source1', user=self.user)
+
+    def test_get_404(self):
+        response = self.client.get(
+            '/sources/source1/v2/export/',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+    @patch('core.common.services.S3.url_for')
+    def test_get_204(self, s3_url_for_mock):
+        Source.objects.filter(id=self.source_v1.id).update(last_child_update='2020-01-01 10:00:00')
+
+        s3_url_for_mock.return_value = None
+
+        response = self.client.get(
+            '/sources/source1/v1/export/',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 204)
+        s3_url_for_mock.assert_called_once_with("username/source1_v1.20200101100000.zip")
+
+    @patch('core.common.services.S3.url_for')
+    def test_get_303(self, s3_url_for_mock):
+        Source.objects.filter(id=self.source_v1.id).update(last_child_update='2020-01-01 10:00:00')
+
+        s3_url = 'https://s3/username/source1_v1.20200101100000.zip'
+        s3_url_for_mock.return_value = s3_url
+
+        response = self.client.get(
+            '/sources/source1/v1/export/',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 303)
+        self.assertEqual(response['Location'], s3_url)
+        self.assertEqual(response['Last-Updated'], '2020-01-01T10:00:00+00:00')
+        self.assertEqual(response['Last-Updated-Timezone'], 'America/New_York')
+        s3_url_for_mock.assert_called_once_with("username/source1_v1.20200101100000.zip")
+
+    def test_get_405(self):
+        response = self.client.get(
+            '/sources/source1/HEAD/export/',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 405)
+
+    def test_post_405(self):
+        response = self.client.post(
+            '/sources/source1/HEAD/export/',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 405)
+
+    @patch('core.common.services.S3.url_for')
+    def test_post_303(self, s3_url_for_mock):
+        Source.objects.filter(id=self.source_v1.id).update(last_child_update='2020-01-01 10:00:00')
+        s3_url = 'https://s3/username/source1_v1.20200101100000.zip'
+        s3_url_for_mock.return_value = s3_url
+        response = self.client.post(
+            '/sources/source1/v1/export/',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 303)
+        self.assertEqual(response['URL'], self.source_v1.uri + 'export/')
+        s3_url_for_mock.assert_called_once_with("username/source1_v1.20200101100000.zip")
+
+    @patch('core.sources.views.export_source')
+    @patch('core.common.services.S3.url_for')
+    def test_post_202(self, s3_url_for_mock, export_source_mock):
+        Source.objects.filter(id=self.source_v1.id).update(last_child_update='2020-01-01 10:00:00')
+
+        s3_url_for_mock.return_value = None
+        export_source_mock.delay = Mock()
+        response = self.client.post(
+            '/sources/source1/v1/export/',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 202)
+        s3_url_for_mock.assert_called_once_with("username/source1_v1.20200101100000.zip")
+        export_source_mock.delay.assert_called_once_with(self.source_v1.id)
+
+    @patch('core.sources.views.export_source')
+    @patch('core.common.services.S3.url_for')
+    def test_post_409(self, s3_url_for_mock, export_source_mock):
+        Source.objects.filter(id=self.source_v1.id).update(last_child_update='2020-01-01 10:00:00')
+
+        s3_url_for_mock.return_value = None
+        export_source_mock.delay.side_effect = AlreadyQueued('already-queued')
+        response = self.client.post(
+            '/sources/source1/v1/export/',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 409)
+        s3_url_for_mock.assert_called_once_with("username/source1_v1.20200101100000.zip")
+        export_source_mock.delay.assert_called_once_with(self.source_v1.id)

@@ -576,14 +576,6 @@ class CollectionVersionExportView(CollectionBaseView, ConceptContainerExportMixi
     permission_classes = (CanViewConceptDictionary,)
     serializer_class = CollectionVersionDetailSerializer
 
-    def get_object(self, queryset=None):
-        instance = self.get_queryset().first()
-
-        if not instance:
-            raise Http404()
-
-        return instance
-
     def handle_export_version(self):
         version = self.get_object()
         try:
