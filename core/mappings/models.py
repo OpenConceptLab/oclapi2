@@ -334,7 +334,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         if collection:
             queryset = queryset.filter(collection_set__mnemonic=collection)
             if user:
-                queryset = queryset.filter(collection_set__user__mnemonic=user)
+                queryset = queryset.filter(collection_set__user__username=user)
             if org:
                 queryset = queryset.filter(collection_set__organization__mnemonic=org)
             if container_version:

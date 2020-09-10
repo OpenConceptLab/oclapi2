@@ -103,6 +103,7 @@ class CollectionListView(CollectionBaseView, ConceptDictionaryCreateMixin, ListW
     }
     document_model = CollectionDocument
     facet_class = CollectionSearch
+    default_filters = dict(is_active=True, version=HEAD)
 
     def get_serializer_class(self):
         if self.request.method == 'GET' and self.is_verbose(self.request):

@@ -18,6 +18,7 @@ class SourceDocument(Document):
     public_can_view = fields.TextField(attr='public_can_view')
     source_type = fields.KeywordField(attr='source_type')
     is_active = fields.KeywordField(attr='is_active')
+    version = fields.KeywordField(attr='version')
 
     class Django:
         model = Source

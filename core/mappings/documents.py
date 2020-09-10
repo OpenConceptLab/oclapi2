@@ -39,7 +39,7 @@ class MappingDocument(Document):
     to_concept_source = fields.KeywordField(attr='to_source_name')
     source_version = fields.ListField(fields.IntegerField())
     collection_version = fields.ListField(fields.IntegerField())
-    collection = fields.ListField(fields.IntegerField())
+    collection = fields.ListField(fields.KeywordField())
     public_can_view = fields.BooleanField(attr='public_can_view')
 
     @staticmethod
