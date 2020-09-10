@@ -8,5 +8,6 @@ The new and improved OCL terminology service v2
 3. Go to http://localhost:8000/swagger/ to benefit.
 
 #### Run Checks
-1. Pylint (pep8) --- `docker exec -it oclapi2 pylint -j2 core`
-1. Tests --- `docker exec -it oclapi2  python manage.py test --keepdb -v3`
+1. Pylint (pep8) --- `docker exec -it oclapi2_api_1 pylint -j2 core`
+2. Coverage -- `docker exec -it oclapi2_api_1 bash coverage.sh`
+2. Tests --- `docker exec -it oclapi2_api_1  python manage.py test --keepdb -v3`
