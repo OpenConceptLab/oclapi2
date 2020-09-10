@@ -1,7 +1,10 @@
+from django.http import Http404
+from pydash import get
 from rest_framework import mixins, status, generics
-from rest_framework.generics import RetrieveAPIView, DestroyAPIView
+from rest_framework.generics import RetrieveAPIView, DestroyAPIView, RetrieveUpdateDestroyAPIView
 from rest_framework.permissions import IsAuthenticated, IsAuthenticatedOrReadOnly
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from core.collections.views import CollectionListView
 from core.common.mixins import ListWithHeadersMixin
@@ -185,3 +188,55 @@ class OrganizationCollectionListView(CollectionListView):  # pragma: no cover
     def get_queryset(self):
         user = UserProfile.objects.get(username=self.kwargs.get('user', None))
         return self.queryset.filter(organization__in=user.organizations.all())
+
+
+class OrganizationExtrasBaseView(APIView):
+    def get_object(self):
+        instance = Organization.objects.filter(is_active=True, mnemonic=self.kwargs['org']).first()
+
+        if not instance:
+            raise Http404()
+        return instance
+
+
+class OrganizationExtrasView(OrganizationExtrasBaseView):
+    serializer_class = OrganizationDetailSerializer
+
+    def get(self, request, org):  # pylint: disable=unused-argument
+        return Response(get(self.get_object(), 'extras', {}))
+
+
+class OrganizationExtraRetrieveUpdateDestroyView(OrganizationExtrasBaseView, RetrieveUpdateDestroyAPIView):
+    serializer_class = OrganizationDetailSerializer
+
+    def retrieve(self, request, *args, **kwargs):
+        key = kwargs.get('extra')
+        instance = self.get_object()
+        extras = get(instance, 'extras', {})
+        if key in extras:
+            return Response({key: extras[key]})
+
+        return Response(dict(detail='Not found.'), status=status.HTTP_404_NOT_FOUND)
+
+    def update(self, request, **kwargs):
+        key = kwargs.get('extra')
+        value = request.data.get(key)
+        if not value:
+            return Response(['Must specify %s param in body.' % key], status=status.HTTP_400_BAD_REQUEST)
+
+        instance = self.get_object()
+        instance.extras = get(instance, 'extras', {})
+        instance.extras[key] = value
+        instance.save()
+        return Response({key: value})
+
+    def delete(self, request, *args, **kwargs):
+        key = kwargs.get('extra')
+        instance = self.get_object()
+        instance.extras = get(instance, 'extras', {})
+        if key in instance.extras:
+            del instance.extras[key]
+            instance.save()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+
+        return Response(dict(detail='Not found.'), status=status.HTTP_404_NOT_FOUND)
