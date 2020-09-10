@@ -19,6 +19,7 @@ class UserProfile(AbstractUser, BaseModel, SourceContainerMixin):
     company = models.TextField(null=True, blank=True)
     location = models.TextField(null=True, blank=True)
     preferred_locale = models.TextField(null=True, blank=True)
+    website = models.TextField(null=True, blank=True)
 
     @property
     def user(self):
