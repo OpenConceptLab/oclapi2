@@ -63,19 +63,15 @@ class CollectionBaseView(BaseAPIView):
 
     def get_filter_params(self, default_version_to_head=True):
         query_params = self.request.query_params
-        params = dict()
 
         version = query_params.get('version', None) or self.kwargs.get('version', None)
         if not version and default_version_to_head:
             version = HEAD
-        params['version'] = version
-        params['user'] = query_params.get('user', None) or self.kwargs.get('user', None)
-        params['org'] = query_params.get('org', None) or self.kwargs.get('org', None)
-        params['collection'] = query_params.get('collection', None) or self.kwargs.get('collection', None)
-        params['is_latest'] = self.kwargs.get('is_latest', None)
-        params['contains'] = query_params.get('contains', None) or self.kwargs.get('contains', None)
-        params['include_references'] = self.should_include_references()
-        return params
+
+        return {
+            **query_params.copy(), **self.kwargs.copy(),
+            'version': version, 'include_references': self.should_include_references()
+        }
 
     def get_queryset(self):
         return Collection.get_base_queryset(compact_dict_by_values(self.get_filter_params()))
