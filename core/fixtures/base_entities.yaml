@@ -18,6 +18,7 @@
     first_name: OCL
     last_name: Admin
     company: OCL
+    website: 'openconceptlab.org'
     is_staff: true
     is_superuser: true
     organizations:

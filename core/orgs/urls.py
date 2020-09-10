@@ -12,9 +12,19 @@ urlpatterns = [
         name='organization-detail'
     ),
     re_path(
+        r'^(?P<org>' + NAMESPACE_PATTERN + ')/extras/$',
+        views.OrganizationExtrasView.as_view(),
+        name='organization-extras'
+    ),
+    re_path(
         r'^(?P<org>' + NAMESPACE_PATTERN + ')/members/$',
         UserListView.as_view(),
         name='organization-members'
+    ),
+    re_path(
+        r"^(?P<org>{pattern})/extras/(?P<extra>{pattern})/$".format(pattern=NAMESPACE_PATTERN),
+        views.OrganizationExtraRetrieveUpdateDestroyView.as_view(),
+        name='organization-extra'
     ),
     re_path(
         r'^(?P<org>' + NAMESPACE_PATTERN + ')/members/(?P<user>' + NAMESPACE_PATTERN + ')/$',

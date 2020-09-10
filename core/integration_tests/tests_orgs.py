@@ -321,3 +321,103 @@ class OrganizationMemberViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 204)
         self.assertEqual(self.user.organizations.count(), 0)
+
+
+class OrganizationExtrasViewTest(OCLAPITestCase):
+    def test_get_200(self):
+        org = OrganizationFactory(extras=dict())
+        user = UserProfileFactory(organizations=[org])
+        token = user.get_token()
+
+        response = self.client.get(
+            org.uri + 'extras/',
+            HTTP_AUTHORIZATION='Token ' + token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, dict())
+
+        org = OrganizationFactory(extras=dict(foo='bar'))
+
+        response = self.client.get(
+            org.uri + 'extras/',
+            HTTP_AUTHORIZATION='Token ' + token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, dict(foo='bar'))
+
+
+class OrganizationExtraRetrieveUpdateDestroyViewTest(OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.extras = dict(foo='bar', tao='ching')
+        self.organization = OrganizationFactory(extras=self.extras)
+        self.user = UserProfileFactory(organizations=[self.organization])
+        self.token = self.user.get_token()
+
+    def test_get_200(self):
+        response = self.client.get(
+            self.organization.uri + 'extras/foo/',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, dict(foo='bar'))
+
+    def test_get_404(self):
+        response = self.client.get(
+            self.organization.uri + 'extras/bar/',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_put_200(self):
+        response = self.client.put(
+            self.organization.uri + 'extras/foo/',
+            dict(foo='foobar'),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, dict(foo='foobar'))
+        self.organization.refresh_from_db()
+        self.assertEqual(self.organization.extras, dict(foo='foobar', tao='ching'))
+
+    def test_put_400(self):
+        response = self.client.put(
+            self.organization.uri + 'extras/foo/',
+            dict(tao='te-ching'),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data, ['Must specify foo param in body.'])
+
+    def test_delete(self):
+        response = self.client.delete(
+            self.organization.uri + 'extras/foo/',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 204)
+        self.organization.refresh_from_db()
+        self.assertEqual(self.organization.extras, dict(tao='ching'))
+
+        response = self.client.delete(
+            self.organization.uri + 'extras/foo/',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.organization.refresh_from_db()
+        self.assertEqual(self.organization.extras, dict(tao='ching'))
