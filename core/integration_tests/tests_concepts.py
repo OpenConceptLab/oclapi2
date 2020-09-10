@@ -6,6 +6,7 @@ from core.concepts.tests.factories import ConceptFactory, LocalizedTextFactory
 from core.orgs.models import Organization
 from core.sources.tests.factories import OrganizationSourceFactory
 from core.users.models import UserProfile
+from core.users.tests.factories import UserProfileFactory
 
 
 class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
@@ -562,3 +563,94 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response['num_returned'], '1')
         self.assertTrue('/concepts/?page=1&limit=1' in response['previous'])
         self.assertFalse(response.has_header('next'))
+
+
+class ConceptExtrasViewTest(OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.extras = dict(foo='bar', tao='ching')
+        self.concept = ConceptFactory(extras=self.extras)
+        self.user = UserProfileFactory(organizations=[self.concept.parent.organization])
+        self.token = self.user.get_token()
+
+    def test_get_200(self):
+        response = self.client.get(self.concept.uri + 'extras/', format='json')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, self.extras)
+
+
+class ConceptExtraRetrieveUpdateDestroyViewTest(OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.extras = dict(foo='bar', tao='ching')
+        self.concept = ConceptFactory(extras=self.extras, names=[LocalizedTextFactory()])
+        self.user = UserProfileFactory(organizations=[self.concept.parent.organization])
+        self.token = self.user.get_token()
+
+    def test_get_200(self):
+        response = self.client.get(self.concept.uri + 'extras/foo/', format='json')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, dict(foo='bar'))
+
+    def test_get_404(self):
+        response = self.client.get(self.concept.uri + 'extras/bar/', format='json')
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_put_200(self):
+        self.assertEqual(self.concept.versions.count(), 1)
+        self.assertEqual(self.concept.get_latest_version().extras, self.extras)
+        self.assertEqual(self.concept.extras, self.extras)
+
+        response = self.client.put(
+            self.concept.uri + 'extras/foo/',
+            dict(foo='foobar'),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, dict(foo='foobar'))
+        self.assertEqual(self.concept.versions.count(), 2)
+        self.assertEqual(self.concept.get_latest_version().extras, dict(foo='foobar', tao='ching'))
+        self.concept.refresh_from_db()
+        self.assertEqual(self.concept.extras, dict(foo='foobar', tao='ching'))
+
+    def test_put_400(self):
+        self.assertEqual(self.concept.versions.count(), 1)
+        self.assertEqual(self.concept.get_latest_version().extras, self.extras)
+        self.assertEqual(self.concept.extras, self.extras)
+
+        response = self.client.put(
+            self.concept.uri + 'extras/foo/',
+            dict(tao='foobar'),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data, ['Must specify foo param in body.'])
+        self.assertEqual(self.concept.versions.count(), 1)
+        self.assertEqual(self.concept.get_latest_version().extras, self.extras)
+        self.concept.refresh_from_db()
+        self.assertEqual(self.concept.extras, self.extras)
+
+    def test_delete_204(self):
+        self.assertEqual(self.concept.versions.count(), 1)
+        self.assertEqual(self.concept.get_latest_version().extras, self.extras)
+        self.assertEqual(self.concept.extras, self.extras)
+
+        response = self.client.delete(
+            self.concept.uri + 'extras/foo/',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(self.concept.versions.count(), 2)
+        self.assertEqual(self.concept.get_latest_version().extras, dict(tao='ching'))
+        self.assertEqual(self.concept.versions.first().extras, dict(foo='bar', tao='ching'))
+        self.concept.refresh_from_db()
+        self.assertEqual(self.concept.extras, dict(tao='ching'))

@@ -16,8 +16,30 @@ urlpatterns = [
         name='mapping-version-list'
     ),
     re_path(
+        r'^(?P<mapping>{pattern})/extras/$'.format(pattern=NAMESPACE_PATTERN),
+        views.MappingExtrasView.as_view(),
+        name='mapping-extras'
+    ),
+    re_path(
+        r'^(?P<mapping>{pattern})/extras/(?P<extra>{pattern})/$'.format(pattern=NAMESPACE_PATTERN),
+        views.MappingExtraRetrieveUpdateDestroyView.as_view(),
+        name='mapping-extra'
+    ),
+    re_path(
         r'^(?P<mapping>{pattern})/(?P<mapping_version>{pattern})/$'.format(pattern=NAMESPACE_PATTERN),
         views.MappingVersionRetrieveView.as_view(),
         name='mapping-version-detail'
+    ),
+    re_path(
+        r'^(?P<mapping>{pattern})/(?P<mapping_version>{pattern})/extras/$'.format(pattern=NAMESPACE_PATTERN),
+        views.MappingExtrasView.as_view(),
+        name='mapping-extras'
+    ),
+    re_path(
+        r'^(?P<mapping>{pattern})/(?P<mapping_version>{pattern})/extras/(?P<extra>{pattern})/$'.format(
+            pattern=NAMESPACE_PATTERN
+        ),
+        views.MappingExtraRetrieveUpdateDestroyView.as_view(),
+        name='mapping-extra'
     ),
 ]
