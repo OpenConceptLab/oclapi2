@@ -222,3 +222,94 @@ class MappingVersionRetrieveViewTest(OCLAPITestCase):
         response = self.client.get(self.mapping.url + '123/')
 
         self.assertEqual(response.status_code, 404)
+
+
+class MappingExtrasViewTest(OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.extras = dict(foo='bar', tao='ching')
+        self.concept = MappingFactory(extras=self.extras)
+        self.user = UserProfileFactory(organizations=[self.concept.parent.organization])
+        self.token = self.user.get_token()
+
+    def test_get_200(self):
+        response = self.client.get(self.concept.uri + 'extras/', format='json')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, self.extras)
+
+
+class MappingExtraRetrieveUpdateDestroyViewTest(OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.extras = dict(foo='bar', tao='ching')
+        self.mapping = MappingFactory(extras=self.extras)
+        self.user = UserProfileFactory(organizations=[self.mapping.parent.organization])
+        self.token = self.user.get_token()
+
+    def test_get_200(self):
+        response = self.client.get(self.mapping.uri + 'extras/foo/', format='json')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, dict(foo='bar'))
+
+    def test_get_404(self):
+        response = self.client.get(self.mapping.uri + 'extras/bar/', format='json')
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_put_200(self):
+        self.assertEqual(self.mapping.versions.count(), 1)
+        self.assertEqual(self.mapping.get_latest_version().extras, self.extras)
+        self.assertEqual(self.mapping.extras, self.extras)
+
+        response = self.client.put(
+            self.mapping.uri + 'extras/foo/',
+            dict(foo='foobar'),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, dict(foo='foobar'))
+        self.assertEqual(self.mapping.versions.count(), 2)
+        self.assertEqual(self.mapping.get_latest_version().extras, dict(foo='foobar', tao='ching'))
+        self.mapping.refresh_from_db()
+        self.assertEqual(self.mapping.extras, dict(foo='foobar', tao='ching'))
+
+    def test_put_400(self):
+        self.assertEqual(self.mapping.versions.count(), 1)
+        self.assertEqual(self.mapping.get_latest_version().extras, self.extras)
+        self.assertEqual(self.mapping.extras, self.extras)
+
+        response = self.client.put(
+            self.mapping.uri + 'extras/foo/',
+            dict(tao='foobar'),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data, ['Must specify foo param in body.'])
+        self.assertEqual(self.mapping.versions.count(), 1)
+        self.assertEqual(self.mapping.get_latest_version().extras, self.extras)
+        self.mapping.refresh_from_db()
+        self.assertEqual(self.mapping.extras, self.extras)
+
+    def test_delete_204(self):
+        self.assertEqual(self.mapping.versions.count(), 1)
+        self.assertEqual(self.mapping.get_latest_version().extras, self.extras)
+        self.assertEqual(self.mapping.extras, self.extras)
+
+        response = self.client.delete(
+            self.mapping.uri + 'extras/foo/',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(self.mapping.versions.count(), 2)
+        self.assertEqual(self.mapping.get_latest_version().extras, dict(tao='ching'))
+        self.assertEqual(self.mapping.versions.first().extras, dict(foo='bar', tao='ching'))
+        self.mapping.refresh_from_db()
+        self.assertEqual(self.mapping.extras, dict(tao='ching'))

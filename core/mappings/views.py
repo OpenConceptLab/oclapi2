@@ -1,8 +1,10 @@
 from django.db.models import F
 from django.shortcuts import get_object_or_404
 from drf_yasg.utils import swagger_auto_schema
+from pydash import get
 from rest_framework import status
-from rest_framework.generics import DestroyAPIView, UpdateAPIView, RetrieveAPIView
+from rest_framework.generics import DestroyAPIView, UpdateAPIView, RetrieveAPIView, ListAPIView, \
+    RetrieveUpdateDestroyAPIView
 from rest_framework.mixins import CreateModelMixin
 from rest_framework.response import Response
 
@@ -211,3 +213,65 @@ class MappingVersionListAllView(MappingBaseView, ListWithHeadersMixin):
     )
     def get(self, request, *args, **kwargs):
         return self.list(request, *args, **kwargs)
+
+
+class MappingExtrasBaseView(MappingBaseView):
+    default_qs_sort_attr = '-created_at'
+
+    def get_object(self, queryset=None):
+        return self.get_queryset().filter(is_latest_version=True).first()
+
+
+class MappingExtrasView(MappingExtrasBaseView, ListAPIView):
+    permission_classes = (CanViewParentDictionary,)
+    serializer_class = MappingDetailSerializer
+
+    def list(self, request, *args, **kwargs):
+        return Response(get(self.get_object(), 'extras', {}))
+
+
+class MappingExtraRetrieveUpdateDestroyView(MappingExtrasBaseView, RetrieveUpdateDestroyAPIView):
+    serializer_class = MappingDetailSerializer
+
+    def get_permissions(self):
+        if self.request.method in ['GET', 'HEAD']:
+            return [CanViewParentDictionary()]
+
+        return [CanEditParentDictionary()]
+
+    def retrieve(self, request, *args, **kwargs):
+        key = kwargs.get('extra')
+        instance = self.get_object()
+        extras = get(instance, 'extras', {})
+        if key in extras:
+            return Response({key: extras[key]})
+        return Response(dict(detail='Not found.'), status=status.HTTP_404_NOT_FOUND)
+
+    def update(self, request, **kwargs):
+        key = kwargs.get('extra')
+        value = request.data.get(key)
+        if not value:
+            return Response(
+                ['Must specify %s param in body.' % key],
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        new_version = self.get_object().clone()
+        new_version.extras[key] = value
+        new_version.comment = 'Updated extras: %s=%s.' % (key, value)
+        errors = Mapping.persist_clone(new_version, request.user)
+        if errors:
+            return Response(errors, status=status.HTTP_400_BAD_REQUEST)
+        return Response({key: value})
+
+    def delete(self, request, *args, **kwargs):
+        key = kwargs.get('extra')
+        new_version = self.get_object().clone()
+        if key in new_version.extras:
+            del new_version.extras[key]
+            new_version.comment = 'Deleted extra %s.' % key
+            errors = Mapping.persist_clone(new_version, request.user)
+            if errors:
+                return Response(errors, status=status.HTTP_400_BAD_REQUEST)
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        return Response(dict(detail='Not found.'), status=status.HTTP_404_NOT_FOUND)
