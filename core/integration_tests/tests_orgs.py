@@ -165,18 +165,30 @@ class OrganizationDetailViewTest(OCLAPITestCase):
         self.assertEqual(response.data['name'], 'Wayne Corporation')
 
     def test_delete_403(self):
+        stranger = UserProfileFactory()
         response = self.client.delete(
             '/orgs/{}/'.format(self.org.mnemonic),
-            HTTP_AUTHORIZATION='Token ' + self.token,
+            HTTP_AUTHORIZATION='Token ' + stranger.get_token(),
             format='json'
         )
 
         self.assertEqual(response.status_code, 403)
 
-    def test_delete_204(self):
+    def test_delete_204_by_superuser(self):
         response = self.client.delete(
             '/orgs/{}/'.format(self.org.mnemonic),
             HTTP_AUTHORIZATION='Token ' + self.superuser.get_token(),
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(Organization.objects.filter(id=self.org.id).exists())
+        self.assertTrue(UserProfile.objects.filter(id=self.user.id).exists())
+
+    def test_delete_204_by_owner(self):
+        response = self.client.delete(
+            '/orgs/{}/'.format(self.org.mnemonic),
+            HTTP_AUTHORIZATION='Token ' + self.user.get_token(),
             format='json'
         )
 

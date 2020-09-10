@@ -5,7 +5,7 @@ from rest_framework.response import Response
 
 from core.collections.views import CollectionListView
 from core.common.mixins import ListWithHeadersMixin
-from core.common.permissions import IsSuperuser
+from core.common.permissions import IsSuperuser, HasPrivateAccess
 from core.common.views import BaseAPIView
 from core.orgs.documents import OrganizationDocument
 from core.orgs.models import Organization
@@ -85,7 +85,7 @@ class OrganizationDetailView(OrganizationBaseView, mixins.UpdateModelMixin, mixi
 
     def get_permissions(self):
         if self.request.method == 'DELETE':
-            return [IsSuperuser(), ]
+            return [HasPrivateAccess(), ]
 
         return [IsAuthenticated(), ]
 
