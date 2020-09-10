@@ -17,15 +17,15 @@ class HasPrivateAccess(BasePermission):
     or belongs to an organization that is designated as the referenced object's owner.
     """
     def has_object_permission(self, request, view, obj):
-        if request.user.is_staff:
+        user = request.user
+        if user.is_staff:
             return True
-        if request.user.is_authenticated:
-            user = request.user
-            if hasattr(obj, 'parent') and user == obj.parent:
+        if user.is_authenticated:
+            if hasattr(obj, 'parent_id') and user == obj.parent:
                 return True
-            if user.organizations.filter(id=obj.id):
+            if user.organizations.filter(id=obj.id).exists():
                 return True
-            if hasattr(obj, 'parent_id') and user.organizations.filter(id=obj.parent_id):
+            if hasattr(obj, 'parent_id') and user.organizations.filter(id=obj.parent_id).exists():
                 return True
         return False
 
