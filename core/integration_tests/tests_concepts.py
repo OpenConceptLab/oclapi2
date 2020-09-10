@@ -100,6 +100,15 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.data['version_url'], latest_version.uri)
         self.assertEqual(response.data['mappings'], [])
 
+        response = self.client.post(
+            concepts_url,
+            self.concept_payload,
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data, dict(mnemonic='Concept ID must be unique within a source.'))
+
     def test_post_400(self):
         concepts_url = "/orgs/{}/sources/{}/concepts/".format(self.organization.mnemonic, self.source.mnemonic)
 
