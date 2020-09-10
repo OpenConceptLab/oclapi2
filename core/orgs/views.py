@@ -7,9 +7,11 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from core.collections.views import CollectionListView
+from core.common.constants import NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY
 from core.common.mixins import ListWithHeadersMixin
 from core.common.permissions import HasPrivateAccess
 from core.common.views import BaseAPIView
+from core.orgs.constants import DELETE_SUCCESS
 from core.orgs.documents import OrganizationDocument
 from core.orgs.models import Organization
 from core.orgs.serializers import OrganizationDetailSerializer, OrganizationListSerializer, OrganizationCreateSerializer
@@ -123,7 +125,7 @@ class OrganizationDetailView(OrganizationBaseView, mixins.UpdateModelMixin, mixi
         except Exception as ex:  # pragma: no cover
             return Response({'detail': ex.message}, status=status.HTTP_400_BAD_REQUEST)
 
-        return Response({'detail': 'Successfully deleted org.'}, status=status.HTTP_204_NO_CONTENT)
+        return Response({'detail': DELETE_SUCCESS}, status=status.HTTP_204_NO_CONTENT)
 
 
 class OrganizationMemberView(generics.GenericAPIView):
@@ -216,13 +218,13 @@ class OrganizationExtraRetrieveUpdateDestroyView(OrganizationExtrasBaseView, Ret
         if key in extras:
             return Response({key: extras[key]})
 
-        return Response(dict(detail='Not found.'), status=status.HTTP_404_NOT_FOUND)
+        return Response(dict(detail=NOT_FOUND), status=status.HTTP_404_NOT_FOUND)
 
     def update(self, request, **kwargs):
         key = kwargs.get('extra')
         value = request.data.get(key)
         if not value:
-            return Response(['Must specify %s param in body.' % key], status=status.HTTP_400_BAD_REQUEST)
+            return Response([MUST_SPECIFY_EXTRA_PARAM_IN_BODY.format(key)], status=status.HTTP_400_BAD_REQUEST)
 
         instance = self.get_object()
         instance.extras = get(instance, 'extras', {})
@@ -239,4 +241,4 @@ class OrganizationExtraRetrieveUpdateDestroyView(OrganizationExtrasBaseView, Ret
             instance.save()
             return Response(status=status.HTTP_204_NO_CONTENT)
 
-        return Response(dict(detail='Not found.'), status=status.HTTP_404_NOT_FOUND)
+        return Response(dict(detail=NOT_FOUND), status=status.HTTP_404_NOT_FOUND)

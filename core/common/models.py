@@ -17,7 +17,8 @@ from core.settings import DEFAULT_LOCALE
 from .constants import (
     ACCESS_TYPE_CHOICES, DEFAULT_ACCESS_TYPE, NAMESPACE_REGEX,
     ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT, SUPER_ADMIN_USER_ID,
-    HEAD)
+    HEAD, PERSIST_NEW_ERROR_MESSAGE, SOURCE_PARENT_CANNOT_BE_NONE, PARENT_RESOURCE_CANNOT_BE_NONE,
+    CREATOR_CANNOT_BE_NONE, CANNOT_DELETE_ONLY_VERSION)
 from .tasks import handle_save, handle_m2m_changed
 
 
@@ -360,7 +361,7 @@ class ConceptContainerModel(VersionedModel):
         if self.is_latest_version:
             prev_version = self.prev_version
             if not prev_version:
-                raise ValidationError(dict(detail='Cannot delete only version.'))
+                raise ValidationError(dict(detail=CANNOT_DELETE_ONLY_VERSION))
             prev_version.is_latest_version = True
             prev_version.save()
         super().delete(using=using, keep_parents=keep_parents)
@@ -389,12 +390,12 @@ class ConceptContainerModel(VersionedModel):
         errors = dict()
         parent_resource = kwargs.pop('parent_resource', None) or obj.parent
         if not parent_resource:
-            errors['parent'] = 'Parent resource cannot be None.'
+            errors['parent'] = PARENT_RESOURCE_CANNOT_BE_NONE
             return errors
         obj.set_parent(parent_resource)
         user = created_by
         if not user:
-            errors['created_by'] = 'Creator cannot be None.'
+            errors['created_by'] = CREATOR_CANNOT_BE_NONE
         if errors:
             return errors
 
@@ -416,7 +417,7 @@ class ConceptContainerModel(VersionedModel):
             errors.update({'__all__': ex.args})
         finally:
             if not persisted:
-                errors['non_field_errors'] = "An error occurred while trying to persist new %s." % cls.__name__
+                errors['non_field_errors'] = PERSIST_NEW_ERROR_MESSAGE.format(cls.__name__)
         return errors
 
     @classmethod
@@ -445,7 +446,7 @@ class ConceptContainerModel(VersionedModel):
         errors = dict()
         parent_resource = kwargs.pop('parent_resource', obj.parent)
         if not parent_resource:
-            errors['parent'] = 'Source parent cannot be None.'
+            errors['parent'] = SOURCE_PARENT_CANNOT_BE_NONE
 
         if obj.is_validation_necessary():
             failed_concept_validations = obj.validate_child_concepts() or []

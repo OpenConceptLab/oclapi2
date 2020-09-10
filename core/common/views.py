@@ -258,7 +258,7 @@ class SourceChildCommonBaseView(BaseAPIView):
     pk_field = 'mnemonic'
     permission_classes = (CanViewParentDictionary, )
     is_searchable = True
-    default_filters = {'is_active': True, 'is_latest_version': True}
+    default_filters = dict(is_active=True, is_latest_version=True)
 
     def initial(self, request, *args, **kwargs):
         super().initial(request, *args, **kwargs)

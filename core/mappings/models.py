@@ -7,7 +7,7 @@ from core.common.mixins import SourceChildMixin
 from core.common.models import VersionedModel
 from core.common.utils import parse_updated_since_param
 from core.mappings.constants import MAPPING_TYPE, MAPPING_IS_ALREADY_RETIRED, MAPPING_WAS_RETIRED, \
-    MAPPING_IS_ALREADY_NOT_RETIRED, MAPPING_WAS_UNRETIRED
+    MAPPING_IS_ALREADY_NOT_RETIRED, MAPPING_WAS_UNRETIRED, PERSIST_CLONE_ERROR, PERSIST_CLONE_SPECIFY_USER_ERROR
 from core.mappings.mixins import MappingValidationMixin
 
 
@@ -264,9 +264,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
     def persist_clone(cls, obj, user=None, **kwargs):
         errors = dict()
         if not user:
-            errors['version_created_by'] = "Must specify which user is attempting to create a new {} version.".format(
-                cls.get_resource_url_kwarg()
-            )
+            errors['version_created_by'] = PERSIST_CLONE_SPECIFY_USER_ERROR
             return errors
         obj.version = TEMP
         obj.created_by = user
@@ -274,7 +272,6 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         parent = obj.parent
         parent_head = parent.head
         persisted = False
-        errored_action = 'saving new mapping version'
         latest_version = None
         try:
             with transaction.atomic():
@@ -313,7 +310,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
                         latest_version.is_latest_version = True
                         latest_version.save()
                     obj.delete()
-                errors['non_field_errors'] = ['An error occurred while %s.' % errored_action]
+                errors['non_field_errors'] = [PERSIST_CLONE_ERROR]
 
         return errors
 

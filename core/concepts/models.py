@@ -9,7 +9,8 @@ from core.common.mixins import SourceChildMixin
 from core.common.models import VersionedModel
 from core.common.utils import reverse_resource, parse_updated_since_param
 from core.concepts.constants import CONCEPT_TYPE, LOCALES_FULLY_SPECIFIED, LOCALES_SHORT, LOCALES_SEARCH_INDEX_TERM, \
-    CONCEPT_WAS_RETIRED, CONCEPT_IS_ALREADY_RETIRED, CONCEPT_IS_ALREADY_NOT_RETIRED, CONCEPT_WAS_UNRETIRED
+    CONCEPT_WAS_RETIRED, CONCEPT_IS_ALREADY_RETIRED, CONCEPT_IS_ALREADY_NOT_RETIRED, CONCEPT_WAS_UNRETIRED, \
+    PERSIST_CLONE_ERROR, PERSIST_CLONE_SPECIFY_USER_ERROR, ALREADY_EXISTS
 from core.concepts.mixins import ConceptValidationMixin
 
 
@@ -375,11 +376,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             concept.created_by = concept.updated_by = user
         concept.errors = dict()
         if concept.is_existing_in_parent():
-            concept.errors = dict(
-                mnemonic="Concept with mnemonic {} already exists for {}".format(
-                    concept.mnemonic, concept.parent.mnemonic
-                )
-            )
+            concept.errors = dict(mnemonic=ALREADY_EXISTS.format(concept.mnemonic, concept.parent.mnemonic))
             return concept
 
         try:
@@ -425,7 +422,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     def persist_clone(cls, obj, user=None, **kwargs):  # pylint: disable=too-many-statements
         errors = dict()
         if not user:
-            errors['version_created_by'] = 'Must specify which user is attempting to create a new concept version.'
+            errors['version_created_by'] = PERSIST_CLONE_SPECIFY_USER_ERROR
             return errors
         obj.created_by = user
         obj.updated_by = user
@@ -433,7 +430,6 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         parent = obj.parent
         parent_head = parent.head
         persisted = False
-        errored_action = 'saving new concept version'
         latest_version = None
         try:
             with transaction.atomic():
@@ -476,7 +472,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                     obj.remove_locales()
                     obj.sources.remove(parent_head)
                     obj.delete()
-                errors['non_field_errors'] = ['An error occurred while %s.' % errored_action]
+                errors['non_field_errors'] = [PERSIST_CLONE_ERROR]
 
         return errors
 

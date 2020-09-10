@@ -406,7 +406,7 @@ class CollectionReference(models.Model):
             self.mappings = self.get_mappings()
 
         if (not self.concepts or not self.concepts.exists()) and (not self.mappings or not self.mappings.exists()):
-            raise ValidationError({'detail': ['Expression specified is not valid.']})  # pragma: no cover
+            raise ValidationError({'detail': [EXPRESSION_INVALID]})  # pragma: no cover
 
     def get_related_mappings(self, exclude_mapping_uris):
         mappings = []

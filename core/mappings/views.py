@@ -8,7 +8,7 @@ from rest_framework.generics import DestroyAPIView, UpdateAPIView, RetrieveAPIVi
 from rest_framework.mixins import CreateModelMixin
 from rest_framework.response import Response
 
-from core.common.constants import HEAD
+from core.common.constants import HEAD, NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryMixin
 from core.common.swagger_parameters import (
     q_param, limit_param, sort_desc_param, page_param, exact_match_param, sort_asc_param, verbose_param,
@@ -16,6 +16,8 @@ from core.common.swagger_parameters import (
 )
 from core.common.views import SourceChildCommonBaseView
 from core.concepts.permissions import CanEditParentDictionary, CanViewParentDictionary
+from core.mappings.constants import COULD_NOT_FIND_MAPPING_TO_RETIRE, COULD_NOT_FIND_MAPPING_TO_UPDATE, \
+    PARENT_VERSION_NOT_LATEST_CANNOT_UPDATE_MAPPING
 from core.mappings.documents import MappingDocument
 from core.mappings.models import Mapping
 from core.mappings.search import MappingSearch
@@ -130,14 +132,14 @@ class MappingRetrieveUpdateDestroyView(MappingBaseView, RetrieveAPIView, UpdateA
         partial = kwargs.pop('partial', True)
         if self.object is None:
             return Response(
-                {'non_field_errors': 'Could not find mapping to update'}, status=status.HTTP_404_NOT_FOUND
+                {'non_field_errors': COULD_NOT_FIND_MAPPING_TO_UPDATE}, status=status.HTTP_404_NOT_FOUND
             )
 
         self.parent_resource = self.object.parent
 
         if self.parent_resource != self.parent_resource.head:
             return Response(
-                {'non_field_errors': 'Parent version is not the latest. Cannot update mapping.'},
+                {'non_field_errors': PARENT_VERSION_NOT_LATEST_CANNOT_UPDATE_MAPPING},
                 status=status.HTTP_400_BAD_REQUEST
             )
         self.object = self.object.clone()
@@ -155,7 +157,7 @@ class MappingRetrieveUpdateDestroyView(MappingBaseView, RetrieveAPIView, UpdateA
         mapping = self.get_object()
         if not mapping:
             return Response(
-                dict(non_field_errors='Could not find mapping to retire'),
+                dict(non_field_errors=COULD_NOT_FIND_MAPPING_TO_RETIRE),
                 status=status.HTTP_404_NOT_FOUND
             )
         comment = request.data.get('update_comment', None) or request.data.get('comment', None)
@@ -245,16 +247,13 @@ class MappingExtraRetrieveUpdateDestroyView(MappingExtrasBaseView, RetrieveUpdat
         extras = get(instance, 'extras', {})
         if key in extras:
             return Response({key: extras[key]})
-        return Response(dict(detail='Not found.'), status=status.HTTP_404_NOT_FOUND)
+        return Response(dict(detail=NOT_FOUND), status=status.HTTP_404_NOT_FOUND)
 
     def update(self, request, **kwargs):
         key = kwargs.get('extra')
         value = request.data.get(key)
         if not value:
-            return Response(
-                ['Must specify %s param in body.' % key],
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            return Response([MUST_SPECIFY_EXTRA_PARAM_IN_BODY.format(key)], status=status.HTTP_400_BAD_REQUEST)
 
         new_version = self.get_object().clone()
         new_version.extras[key] = value
@@ -274,4 +273,4 @@ class MappingExtraRetrieveUpdateDestroyView(MappingExtrasBaseView, RetrieveUpdat
             if errors:
                 return Response(errors, status=status.HTTP_400_BAD_REQUEST)
             return Response(status=status.HTTP_204_NO_CONTENT)
-        return Response(dict(detail='Not found.'), status=status.HTTP_404_NOT_FOUND)
+        return Response(dict(detail=NOT_FOUND), status=status.HTTP_404_NOT_FOUND)
