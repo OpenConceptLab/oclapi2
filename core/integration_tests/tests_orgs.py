@@ -377,6 +377,14 @@ class OrganizationExtraRetrieveUpdateDestroyViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 404)
 
+        response = self.client.get(
+            '/orgs/org-foo/extras/bar/',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 404)
+
     def test_put_200(self):
         response = self.client.put(
             self.organization.uri + 'extras/foo/',
