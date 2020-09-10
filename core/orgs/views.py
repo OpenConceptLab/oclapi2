@@ -5,7 +5,7 @@ from rest_framework.response import Response
 
 from core.collections.views import CollectionListView
 from core.common.mixins import ListWithHeadersMixin
-from core.common.permissions import IsSuperuser, HasPrivateAccess
+from core.common.permissions import HasPrivateAccess
 from core.common.views import BaseAPIView
 from core.orgs.documents import OrganizationDocument
 from core.orgs.models import Organization
