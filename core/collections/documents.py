@@ -18,6 +18,7 @@ class CollectionDocument(Document):
     owner_type = fields.KeywordField(attr='parent_resource_type')
     collection_type = fields.KeywordField(attr='collection_type')
     is_active = fields.KeywordField(attr='is_active')
+    version = fields.KeywordField(attr='version')
 
     class Django:
         model = Collection

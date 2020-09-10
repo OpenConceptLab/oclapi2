@@ -12,7 +12,7 @@ class MappingSearch(CommonSearch):
         'source', 'owner', 'owner_type', 'is_latest_version', 'is_active',
         'concept_source', 'concept_owner', 'from_concept_owner',
         'to_concept_owner', 'concept_owner_type', 'from_concept_owner_type', 'to_concept_owner_type',
-        'from_concept_source', 'to_concept_source',
+        'from_concept_source', 'to_concept_source', 'collection',
     ]
 
     facets = {
@@ -31,6 +31,7 @@ class MappingSearch(CommonSearch):
         'mapType': TermsFacet(field='map_type'),
         'retired': TermsFacet(field='retired'),
         'source': TermsFacet(field='source'),
+        'collection': TermsFacet(field='collection'),
         'owner': TermsFacet(field='owner'),
         'ownerType': TermsFacet(field='owner_type'),
         'is_active': TermsFacet(field='is_active'),

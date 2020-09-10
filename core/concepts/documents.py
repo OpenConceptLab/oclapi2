@@ -20,7 +20,7 @@ class ConceptDocument(Document):
     owner_type = fields.KeywordField(attr='owner_type')
     source_version = fields.ListField(fields.IntegerField())
     collection_version = fields.ListField(fields.IntegerField())
-    collection = fields.ListField(fields.IntegerField())
+    collection = fields.ListField(fields.KeywordField())
     public_can_view = fields.BooleanField(attr='public_can_view')
     datatype = fields.KeywordField(attr='datatype')
     concept_class = fields.KeywordField(attr='concept_class')
