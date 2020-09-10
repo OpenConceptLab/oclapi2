@@ -376,7 +376,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             concept.created_by = concept.updated_by = user
         concept.errors = dict()
         if concept.is_existing_in_parent():
-            concept.errors = dict(mnemonic=ALREADY_EXISTS.format(concept.mnemonic, concept.parent.mnemonic))
+            concept.errors = dict(mnemonic=ALREADY_EXISTS)
             return concept
 
         try:
