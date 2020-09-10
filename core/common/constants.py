@@ -40,3 +40,12 @@ CSV_DEFAULT_LIMIT = 100
 SEARCH_PARAM = 'q'
 ES_RESULTS_MAX_LIMIT = 10000
 INCLUDE_FACETS = 'HTTP_INCLUDEFACETS'
+
+NOT_FOUND = 'Not found.'
+OK_MESSAGE = 'ok!'
+PERSIST_NEW_ERROR_MESSAGE = "An error occurred while trying to persist new {}."
+MUST_SPECIFY_EXTRA_PARAM_IN_BODY = 'Must specify {} param in body.'
+SOURCE_PARENT_CANNOT_BE_NONE = 'Source parent cannot be None.'
+PARENT_RESOURCE_CANNOT_BE_NONE = 'Parent resource cannot be None.'
+CREATOR_CANNOT_BE_NONE = 'Creator cannot be None.'
+CANNOT_DELETE_ONLY_VERSION = 'Cannot delete only version.'

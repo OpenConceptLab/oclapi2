@@ -11,7 +11,7 @@ from rest_framework.generics import (
 )
 from rest_framework.response import Response
 
-from core.common.constants import HEAD, RELEASED_PARAM, PROCESSING_PARAM
+from core.common.constants import HEAD, RELEASED_PARAM, PROCESSING_PARAM, NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryCreateMixin, ConceptDictionaryUpdateMixin, \
     ConceptContainerExportMixin
 from core.common.permissions import CanViewConceptDictionary, CanEditConceptDictionary, HasAccessToVersionedObject, \
@@ -19,6 +19,7 @@ from core.common.permissions import CanViewConceptDictionary, CanEditConceptDict
 from core.common.tasks import export_source
 from core.common.utils import parse_boolean_query_param, compact_dict_by_values
 from core.common.views import BaseAPIView
+from core.sources.constants import DELETE_FAILURE, DELETE_SUCCESS, VERSION_ALREADY_EXISTS
 from core.sources.documents import SourceDocument
 from core.sources.models import Source
 from core.sources.search import SourceSearch
@@ -41,7 +42,7 @@ class SourceBaseView(BaseAPIView):
         return SourceDetailSerializer(obj)
 
     def get_filter_params(self, default_version_to_head=True):
-        query_params = self.request.query_params
+        query_params = self.request.query_params.dict()
         version = query_params.get('version', None) or self.kwargs.get('version', None)
         if not version and default_version_to_head:
             version = HEAD
@@ -131,9 +132,9 @@ class SourceRetrieveUpdateDestroyView(SourceBaseView, ConceptDictionaryUpdateMix
         try:
             source.delete()
         except Exception as ex:
-            return Response({'detail': get(ex, 'messages', ['Could not delete'])}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'detail': get(ex, 'messages', [DELETE_FAILURE])}, status=status.HTTP_400_BAD_REQUEST)
 
-        return Response({'detail': 'Successfully deleted source.'}, status=status.HTTP_204_NO_CONTENT)
+        return Response({'detail': DELETE_SUCCESS}, status=status.HTTP_204_NO_CONTENT)
 
     def get(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         instance = self.get_object()
@@ -185,7 +186,7 @@ class SourceVersionListView(SourceVersionBaseView, mixins.CreateModelMixin, List
                     return Response(data, status=status.HTTP_201_CREATED)
             except IntegrityError as ex:
                 return Response(
-                    dict(error=str(ex), detail='Source version \'%s\' already exist.' % version),
+                    dict(error=str(ex), detail=VERSION_ALREADY_EXISTS.format(version)),
                     status=status.HTTP_409_CONFLICT
                 )
 
@@ -288,13 +289,13 @@ class SourceExtraRetrieveUpdateDestroyView(SourceExtrasBaseView, RetrieveUpdateD
         if key in extras:
             return Response({key: extras[key]})
 
-        return Response(dict(detail='Not found.'), status=status.HTTP_404_NOT_FOUND)
+        return Response(dict(detail=NOT_FOUND), status=status.HTTP_404_NOT_FOUND)
 
     def update(self, request, **kwargs):
         key = kwargs.get('extra')
         value = request.data.get(key)
         if not value:
-            return Response(['Must specify %s param in body.' % key], status=status.HTTP_400_BAD_REQUEST)
+            return Response([MUST_SPECIFY_EXTRA_PARAM_IN_BODY.format(key)], status=status.HTTP_400_BAD_REQUEST)
 
         instance = self.get_object()
         instance.extras = get(instance, 'extras', {})
@@ -321,7 +322,7 @@ class SourceExtraRetrieveUpdateDestroyView(SourceExtrasBaseView, RetrieveUpdateD
             head.save()
             return Response(status=status.HTTP_204_NO_CONTENT)
 
-        return Response(dict(detail='Not found.'), status=status.HTTP_404_NOT_FOUND)
+        return Response(dict(detail=NOT_FOUND), status=status.HTTP_404_NOT_FOUND)
 
 
 class SourceVersionProcessingView(SourceBaseView):   # pragma: no cover

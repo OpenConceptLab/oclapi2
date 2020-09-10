@@ -9,14 +9,15 @@ from rest_framework.mixins import CreateModelMixin
 from rest_framework.response import Response
 
 from core.common.constants import (
-    HEAD, INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_RETIRED_PARAM
-)
+    HEAD, INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_RETIRED_PARAM,
+    NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY)
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryMixin
 from core.common.swagger_parameters import (
     q_param, limit_param, sort_desc_param, page_param, exact_match_param, sort_asc_param, verbose_param,
     include_facets_header, updated_since_param, include_inverse_mappings_param, include_retired_param
 )
 from core.common.views import SourceChildCommonBaseView
+from core.concepts.constants import COULD_NOT_FIND_CONCEPT_TO_UPDATE, PARENT_VERSION_NOT_LATEST_CANNOT_UPDATE_CONCEPT
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept, LocalizedText
 from core.concepts.permissions import CanViewParentDictionary, CanEditParentDictionary
@@ -155,14 +156,14 @@ class ConceptRetrieveUpdateDestroyView(ConceptBaseView, RetrieveAPIView, UpdateA
         partial = kwargs.pop('partial', True)
         if self.object is None:
             return Response(
-                {'non_field_errors': 'Could not find concept to update'}, status=status.HTTP_404_NOT_FOUND
+                {'non_field_errors': COULD_NOT_FIND_CONCEPT_TO_UPDATE}, status=status.HTTP_404_NOT_FOUND
             )
 
         self.parent_resource = self.object.parent
 
         if self.parent_resource != self.parent_resource.head:
             return Response(
-                {'non_field_errors': 'Parent version is not the latest. Cannot update concept.'},
+                {'non_field_errors': PARENT_VERSION_NOT_LATEST_CANNOT_UPDATE_CONCEPT},
                 status=status.HTTP_400_BAD_REQUEST
             )
         self.object = self.object.clone()
@@ -382,16 +383,13 @@ class ConceptExtraRetrieveUpdateDestroyView(ConceptExtrasBaseView, RetrieveUpdat
         extras = get(instance, 'extras', {})
         if key in extras:
             return Response({key: extras[key]})
-        return Response(dict(detail='Not found.'), status=status.HTTP_404_NOT_FOUND)
+        return Response(dict(detail=NOT_FOUND), status=status.HTTP_404_NOT_FOUND)
 
     def update(self, request, **kwargs):
         key = kwargs.get('extra')
         value = request.data.get(key)
         if not value:
-            return Response(
-                ['Must specify %s param in body.' % key],
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            return Response([MUST_SPECIFY_EXTRA_PARAM_IN_BODY.format(key)], status=status.HTTP_400_BAD_REQUEST)
 
         new_version = self.get_object().clone()
         new_version.extras[key] = value
@@ -411,4 +409,4 @@ class ConceptExtraRetrieveUpdateDestroyView(ConceptExtrasBaseView, RetrieveUpdat
             if errors:
                 return Response(errors, status=status.HTTP_400_BAD_REQUEST)
             return Response(status=status.HTTP_204_NO_CONTENT)
-        return Response(dict(detail='Not found.'), status=status.HTTP_404_NOT_FOUND)
+        return Response(dict(detail=NOT_FOUND), status=status.HTTP_404_NOT_FOUND)

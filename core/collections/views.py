@@ -7,24 +7,36 @@ from django.http import Http404
 from django.shortcuts import get_object_or_404
 from pydash import get
 from rest_framework import status, mixins
-from rest_framework.generics import RetrieveAPIView, DestroyAPIView, UpdateAPIView, ListAPIView, \
-    RetrieveUpdateDestroyAPIView
+from rest_framework.generics import (
+    RetrieveAPIView, DestroyAPIView, UpdateAPIView, ListAPIView, RetrieveUpdateDestroyAPIView
+)
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from core.collections.constants import INCLUDE_REFERENCES_PARAM, HEAD_OF_CONCEPT_ADDED_TO_COLLECTION, \
-    HEAD_OF_MAPPING_ADDED_TO_COLLECTION, CONCEPT_ADDED_TO_COLLECTION_FMT, MAPPING_ADDED_TO_COLLECTION_FMT
+from core.collections.constants import (
+    INCLUDE_REFERENCES_PARAM, HEAD_OF_CONCEPT_ADDED_TO_COLLECTION,
+    HEAD_OF_MAPPING_ADDED_TO_COLLECTION, CONCEPT_ADDED_TO_COLLECTION_FMT, MAPPING_ADDED_TO_COLLECTION_FMT,
+    DELETE_FAILURE, DELETE_SUCCESS, NO_MATCH, VERSION_ALREADY_EXISTS
+)
 from core.collections.documents import CollectionDocument
 from core.collections.models import Collection, CollectionReference
 from core.collections.search import CollectionSearch
-from core.collections.serializers import CollectionDetailSerializer, CollectionListSerializer, \
+from core.collections.serializers import (
+    CollectionDetailSerializer, CollectionListSerializer,
     CollectionCreateSerializer, CollectionReferenceSerializer, CollectionVersionDetailSerializer
+)
 from core.collections.utils import is_concept, is_version_specified
-from core.common.constants import HEAD, RELEASED_PARAM, PROCESSING_PARAM
-from core.common.mixins import ConceptDictionaryCreateMixin, ListWithHeadersMixin, ConceptDictionaryUpdateMixin, \
+from core.common.constants import (
+    HEAD, RELEASED_PARAM, PROCESSING_PARAM, OK_MESSAGE, NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY
+)
+from core.common.mixins import (
+    ConceptDictionaryCreateMixin, ListWithHeadersMixin, ConceptDictionaryUpdateMixin,
     ConceptContainerExportMixin
-from core.common.permissions import CanViewConceptDictionary, CanEditConceptDictionary, HasAccessToVersionedObject, \
+)
+from core.common.permissions import (
+    CanViewConceptDictionary, CanEditConceptDictionary, HasAccessToVersionedObject,
     HasOwnership, CanViewConceptDictionaryVersion
+)
 from core.common.tasks import add_references, export_collection
 from core.common.utils import compact_dict_by_values, parse_boolean_query_param
 from core.common.views import BaseAPIView
@@ -62,7 +74,7 @@ class CollectionBaseView(BaseAPIView):
         return CollectionDetailSerializer(obj)
 
     def get_filter_params(self, default_version_to_head=True):
-        query_params = self.request.query_params
+        query_params = self.request.query_params.dict()
 
         version = query_params.get('version', None) or self.kwargs.get('version', None)
         if not version and default_version_to_head:
@@ -159,9 +171,9 @@ class CollectionRetrieveUpdateDestroyView(CollectionBaseView, ConceptDictionaryU
         try:
             collection.delete()
         except Exception as ex:
-            return Response({'detail': get(ex, 'messages', ['Could not delete'])}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'detail': get(ex, 'messages', [DELETE_FAILURE])}, status=status.HTTP_400_BAD_REQUEST)
 
-        return Response({'detail': 'Successfully deleted collection.'}, status=status.HTTP_204_NO_CONTENT)
+        return Response({'detail': DELETE_SUCCESS}, status=status.HTTP_204_NO_CONTENT)
 
     def get(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         instance = self.get_object()
@@ -188,7 +200,7 @@ class CollectionReferencesView(
         instance = super().get_queryset().filter(is_active=True).order_by('-created_at').first()
 
         if not instance:
-            raise Http404('No Collection matches the given query.')
+            raise Http404(NO_MATCH)
 
         return instance
 
@@ -226,7 +238,7 @@ class CollectionReferencesView(
             expressions += self.get_related_mappings_with_version_information(instance, expressions)
 
         instance.delete_references(expressions)
-        return Response({'message': 'ok!'}, status=status.HTTP_204_NO_CONTENT)
+        return Response({'message': OK_MESSAGE}, status=status.HTTP_204_NO_CONTENT)
 
     def update(self, request, *args, **kwargs):  # pylint: disable=too-many-locals,unused-argument # Fixme: Sny
         collection = self.get_object()
@@ -380,10 +392,11 @@ class CollectionVersionListView(CollectionVersionBaseView, mixins.CreateModelMix
 
     def create(self, request, *args, **kwargs):
         head_object = self.get_queryset().first()
+        version = request.data.pop('id', None)
         payload = {
             "mnemonic": head_object.mnemonic, "id": head_object.mnemonic, "name": head_object.name, **request.data,
             "organization_id": head_object.organization_id, "user_id": head_object.user_id,
-            'version': request.data.pop('id', None)
+            'version': version
         }
         serializer = self.get_serializer(data=payload)
         if serializer.is_valid():
@@ -398,7 +411,7 @@ class CollectionVersionListView(CollectionVersionBaseView, mixins.CreateModelMix
             except IntegrityError as ex:  # pragma: no cover
                 return Response(
                     dict(
-                        error=str(ex), detail='Collection version  \'%s\' already exist. ' % serializer.data.get('id')
+                        error=str(ex), detail=VERSION_ALREADY_EXISTS.format(version)
                     ),
                     status=status.HTTP_409_CONFLICT
                 )
@@ -503,13 +516,13 @@ class CollectionExtraRetrieveUpdateDestroyView(CollectionExtrasBaseView, Retriev
         if key in extras:
             return Response({key: extras[key]})
 
-        return Response(dict(detail='Not found.'), status=status.HTTP_404_NOT_FOUND)
+        return Response(dict(detail=NOT_FOUND), status=status.HTTP_404_NOT_FOUND)
 
     def update(self, request, **kwargs):
         key = kwargs.get('extra')
         value = request.data.get(key)
         if not value:
-            return Response(['Must specify %s param in body.' % key], status=status.HTTP_400_BAD_REQUEST)
+            return Response([MUST_SPECIFY_EXTRA_PARAM_IN_BODY.format(key)], status=status.HTTP_400_BAD_REQUEST)
 
         instance = self.get_object()
         instance.extras = get(instance, 'extras', {})
@@ -536,7 +549,7 @@ class CollectionExtraRetrieveUpdateDestroyView(CollectionExtrasBaseView, Retriev
             head.save()
             return Response(status=status.HTTP_204_NO_CONTENT)
 
-        return Response(dict(detail='Not found.'), status=status.HTTP_404_NOT_FOUND)
+        return Response(dict(detail=NOT_FOUND), status=status.HTTP_404_NOT_FOUND)
 
 
 class CollectionVersionProcessingView(CollectionBaseView):  # pragma: no cover
