@@ -1,4 +1,5 @@
 from django.db.models import F
+from django.http import QueryDict
 from django.shortcuts import get_object_or_404
 from drf_yasg.utils import swagger_auto_schema
 from pydash import get
@@ -103,14 +104,14 @@ class MappingListView(MappingBaseView, ListWithHeadersMixin, CreateModelMixin):
 
     def post(self, request, **kwargs):  # pylint: disable=unused-argument
         self.set_parent_resource()
+        data = request.data.dict() if isinstance(request.data, QueryDict) else request.data
         serializer = self.get_serializer(data={
-            **request.data.dict(), 'parent_id': self.parent_resource.id
+            **data, 'parent_id': self.parent_resource.id
         })
         if serializer.is_valid():
             self.object = serializer.save()
             if serializer.is_valid():
                 headers = self.get_success_headers(serializer.data)
-                serializer = MappingDetailSerializer(self.object)
                 return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 

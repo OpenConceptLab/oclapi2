@@ -123,7 +123,7 @@ class OrganizationDetailView(OrganizationBaseView, mixins.UpdateModelMixin, mixi
         try:
             obj.delete()
         except Exception as ex:  # pragma: no cover
-            return Response({'detail': ex.message}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'detail': ex.args}, status=status.HTTP_400_BAD_REQUEST)
 
         return Response({'detail': DELETE_SUCCESS}, status=status.HTTP_204_NO_CONTENT)
 

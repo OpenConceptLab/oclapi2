@@ -1,6 +1,5 @@
 import json
 
-from django.utils.text import compress_string
 from ocldev.oclfleximporter import OclFlexImporter
 
 from core.common.utils import get_base_url
@@ -9,7 +8,7 @@ from core.users.models import UserProfile
 
 class ImportResults:  # pragma: no cover
     def __init__(self, importer):
-        self.json = compress_string(importer.import_results.to_json())
+        self.json = json.loads(importer.import_results.to_json())
         self.detailed_summary = importer.import_results.get_detailed_summary()
         self.report = importer.import_results.display_report()
 
