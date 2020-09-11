@@ -21,4 +21,5 @@ __pycache__/*
 *.db
 src/*
 **/test*.py
+htmlcov/
 
