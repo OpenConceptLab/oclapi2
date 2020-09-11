@@ -25,7 +25,10 @@ update_if_exists_param = openapi.Parameter(
 class BulkImportView(APIView):
     permission_classes = (IsAuthenticated, )
 
-    @swagger_auto_schema(manual_parameters=[update_if_exists_param])
+    @swagger_auto_schema(
+        manual_parameters=[update_if_exists_param],
+        request_body=openapi.Schema(type=openapi.TYPE_OBJECT)
+    )
     def post(self, request):
         user = self.request.user
         username = user.username
@@ -38,10 +41,12 @@ class BulkImportView(APIView):
         update_if_exists = update_if_exists == 'true'
 
         task_id = str(uuid.uuid4()) + '-' + username
+
+        data = request.body.decode('utf-8') if isinstance(request.body, bytes) else request.body
         if user.is_staff:
-            task = bulk_priority_import.apply_async((request.body, username, update_if_exists), task_id=task_id)
+            task = bulk_priority_import.apply_async((data, username, update_if_exists), task_id=task_id)
         else:
-            task = bulk_import.apply_async((request.body, username, update_if_exists), task_id=task_id)
+            task = bulk_import.apply_async((data, username, update_if_exists), task_id=task_id)
 
         return Response(dict(task=task.id, state=task.state))
 
