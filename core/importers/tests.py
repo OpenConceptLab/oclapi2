@@ -133,7 +133,7 @@ class BulkImportViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data, dict(task='task-id', state='pending'))
         bulk_priority_import_mock.apply_async.assert_called_once_with(
-            (b'"some-data"', self.superuser.username, True), task_id=ANY
+            ('"some-data"', self.superuser.username, True), task_id=ANY
         )
 
     @patch('core.importers.views.bulk_import')
@@ -152,5 +152,5 @@ class BulkImportViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data, dict(task='task-id', state='pending'))
         bulk_import_mock.apply_async.assert_called_once_with(
-            (b'"some-data"', random_user.username, True), task_id=ANY
+            ('"some-data"', random_user.username, True), task_id=ANY
         )
