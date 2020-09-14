@@ -17,8 +17,9 @@ def export_source(self, version_id):
 
     version = Source.objects.filter(id=version_id).first()
 
-    if not version:
+    if not version:  # pragma: no cover
         logger.info('Not found source version %s', version_id)
+        return
 
     version.add_processing(self.request.id)
     try:
@@ -36,8 +37,9 @@ def export_collection(self, version_id):
 
     version = Collection.objects.filter(id=version_id).first()
 
-    if not version:
+    if not version:  # pragma: no cover
         logger.info('Not found collection version %s', version_id)
+        return
 
     version.add_processing(self.request.id)
     try:
