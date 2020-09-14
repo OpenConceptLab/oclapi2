@@ -28,7 +28,7 @@ class BulkImportTest(OCLTestCase):
 
         flex_importer_mock.assert_called_once_with(
             input_list=[{"foo": "bar"}, {"foobar": "foo"}],
-            api_url_root="http://localhost:8000",
+            api_url_root=ANY,
             api_token=user.get_token(),
             do_update_if_exists=True
         )
