@@ -169,10 +169,10 @@ class ConceptDetailSerializer(ModelSerializer):
         )
 
     def get_mappings(self, obj):
-        if self.include_direct_mappings:
-            return MappingDetailSerializer(obj.get_unidirectional_mappings(), many=True).data
         if self.include_indirect_mappings:
             return MappingDetailSerializer(obj.get_bidirectional_mappings(), many=True).data
+        if self.include_direct_mappings:
+            return MappingDetailSerializer(obj.get_unidirectional_mappings(), many=True).data
 
         return []
 
