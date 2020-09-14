@@ -41,6 +41,16 @@ class UserOrganizationListViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 0)
 
+    def test_head_200(self):
+        response = self.client.head(
+            '/users/{}/orgs/'.format(self.user.username),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response['num_found'], '2')
+
     def test_post_405(self):
         response = self.client.post(
             '/users/{}/orgs/'.format(self.user.username),
