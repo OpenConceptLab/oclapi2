@@ -37,7 +37,7 @@ class BulkImport:  # pragma: no cover
         self.importer = OclFlexImporter(
             input_list=self.input_list,
             api_url_root=get_base_url(),
-            api_token=self.user.auth_token.key,
+            api_token=self.user.get_token(),
             do_update_if_exists=self.update_if_exists
         )
 

@@ -8,6 +8,7 @@ from rest_framework.exceptions import ErrorDetail
 from core.collections.models import CollectionReference, Collection
 from core.collections.serializers import CollectionDetailSerializer
 from core.collections.tests.factories import OrganizationCollectionFactory, UserCollectionFactory
+from core.common.tasks import export_collection
 from core.common.tests import OCLAPITestCase
 from core.common.utils import get_latest_dir_in_path
 from core.concepts.serializers import ConceptVersionDetailSerializer
@@ -17,7 +18,6 @@ from core.mappings.tests.factories import MappingFactory
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.tests.factories import OrganizationSourceFactory
 from core.users.tests.factories import UserProfileFactory
-from core.common.tasks import export_collection
 
 
 class CollectionListViewTest(OCLAPITestCase):

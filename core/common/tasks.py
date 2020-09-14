@@ -57,11 +57,12 @@ def add_references(
     head = collection.get_head()
     head.add_processing(self.request.id)
 
-    (added_references, errors) = collection.add_expressions(
-        data, host_url, user, cascade_mappings
-    )
-
-    head.remove_processing(self.request.id)
+    try:
+        (added_references, errors) = collection.add_expressions(
+            data, host_url, user, cascade_mappings
+        )
+    finally:
+        head.remove_processing(self.request.id)
 
     return added_references, errors
 

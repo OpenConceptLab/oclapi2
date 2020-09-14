@@ -1,8 +1,38 @@
 from mock import patch, Mock, ANY
 
-from core.common.tests import OCLAPITestCase
+from core.common.tests import OCLAPITestCase, OCLTestCase
+from core.importers.models import BulkImport
 from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
+
+
+class BulkImportTest(OCLTestCase):
+    @patch('core.importers.models.OclFlexImporter')
+    def test_run(self, flex_importer_mock):
+        user = UserProfile.objects.get(username='ocladmin')
+        import_results = Mock(
+            to_json=Mock(return_value='{"all": "200"}'),
+            get_detailed_summary=Mock(return_value='summary'),
+            display_report=Mock(return_value='report')
+        )
+        flex_importer_instance_mock = Mock(process=Mock(return_value=None), import_results=import_results)
+        flex_importer_mock.return_value = flex_importer_instance_mock
+        content = '{"foo": "bar"}\n{"foobar": "foo"}'
+
+        bulk_import = BulkImport(content=content, username='ocladmin', update_if_exists=True)
+        bulk_import.run()
+
+        self.assertEqual(bulk_import.result.json, {"all": "200"})
+        self.assertEqual(bulk_import.result.detailed_summary, 'summary')
+        self.assertEqual(bulk_import.result.report, 'report')
+
+        flex_importer_mock.assert_called_once_with(
+            input_list=[{"foo": "bar"}, {"foobar": "foo"}],
+            api_url_root="http://localhost:8000",
+            api_token=user.get_token(),
+            do_update_if_exists=True
+        )
+        flex_importer_instance_mock.process.assert_called_once()
 
 
 class BulkImportViewTest(OCLAPITestCase):

@@ -7,8 +7,8 @@ omit =
     core/wsgi.py
     */management/commands/*
     */migrations/*
-    */factories.py
     */documents.py
+    core/common/search.py
     */es_normalizers.py
     */feeds.py
     *test*
