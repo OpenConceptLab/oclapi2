@@ -138,7 +138,7 @@ class ConceptDetailSerializer(ModelSerializer):
     created_on = DateTimeField(source='created_at', read_only=True)
     updated_on = DateTimeField(source='updated_at', read_only=True)
     names = LocalizedNameSerializer(many=True)
-    descriptions = LocalizedDescriptionSerializer(many=True)
+    descriptions = LocalizedDescriptionSerializer(many=True, allow_null=True)
     external_id = CharField(required=False, allow_blank=True)
     concept_class = CharField(required=True)
     datatype = CharField(required=True)

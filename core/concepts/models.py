@@ -363,12 +363,14 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     @classmethod
     def persist_new(cls, data, user=None, create_initial_version=True):
         names = [
-            name if isinstance(name, LocalizedText) else LocalizedText.build(name) for name in data.pop('names', [])
+            name if isinstance(name, LocalizedText) else LocalizedText.build(
+                name
+            ) for name in data.pop('names', []) or []
         ]
         descriptions = [
             desc if isinstance(desc, LocalizedText) else LocalizedText.build(
                 desc, 'description'
-            ) for desc in data.pop('descriptions', [])
+            ) for desc in data.pop('descriptions', []) or []
         ]
         concept = Concept(**data)
         concept.version = TEMP
