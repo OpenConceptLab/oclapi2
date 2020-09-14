@@ -15,6 +15,11 @@ from core.common.constants import UPDATED_SINCE_PARAM
 from core.common.services import S3
 
 
+def get_latest_dir_in_path(path):  # pragma: no cover
+    all_sub_dirs = [path + d for d in os.listdir(path) if os.path.isdir(path + d)]
+    return max(all_sub_dirs, key=os.path.getmtime)
+
+
 def cd_temp():  # pragma: no cover
     cwd = os.getcwd()
     tmpdir = tempfile.mkdtemp()
@@ -265,8 +270,8 @@ def write_export_file(
     os.chdir(cwd)
 
 
-def get_base_url():
-    if settings.ENV == 'development':  # pragma: no cover
+def get_base_url():  # pragma: no cover
+    if settings.ENV == 'development':
         return "http://localhost:8000"
 
     return "https://api.{}2.openconceptlab.org".format(settings.ENV.lower())

@@ -1,14 +1,23 @@
+import json
+import zipfile
+
 from celery_once import AlreadyQueued
-from mock import patch, Mock
+from mock import patch, Mock, ANY
 from rest_framework.exceptions import ErrorDetail
 
 from core.collections.models import CollectionReference, Collection
+from core.collections.serializers import CollectionDetailSerializer
 from core.collections.tests.factories import OrganizationCollectionFactory, UserCollectionFactory
 from core.common.tests import OCLAPITestCase
+from core.common.utils import get_latest_dir_in_path
+from core.concepts.serializers import ConceptVersionDetailSerializer
 from core.concepts.tests.factories import ConceptFactory
+from core.mappings.serializers import MappingDetailSerializer
 from core.mappings.tests.factories import MappingFactory
 from core.orgs.tests.factories import OrganizationFactory
+from core.sources.tests.factories import OrganizationSourceFactory
 from core.users.tests.factories import UserProfileFactory
+from core.common.tasks import export_collection
 
 
 class CollectionListViewTest(OCLAPITestCase):
@@ -868,3 +877,51 @@ class CollectionVersionListViewTest(OCLAPITestCase):
         self.assertEqual(last_created_version.references.count(), 1)
         self.assertEqual(last_created_version, self.collection.get_latest_version())
         export_collection_mock.delay.assert_called_once_with(str(last_created_version.id))
+
+
+class ExportCollectionTaskTest(OCLAPITestCase):
+    @patch('core.common.utils.S3')
+    def test_export_collection(self, s3_mock):  # pylint: disable=too-many-locals
+        s3_mock.url_for = Mock(return_value='https://s3-url')
+        s3_mock.upload_file = Mock()
+        source = OrganizationSourceFactory()
+        concept1 = ConceptFactory(parent=source)
+        concept2 = ConceptFactory(parent=source)
+        mapping = MappingFactory(from_concept=concept2, to_concept=concept1, parent=source)
+        collection = OrganizationCollectionFactory()
+        collection.add_references([concept1.uri, concept2.uri, mapping.uri])
+        collection.refresh_from_db()
+
+        export_collection(collection.id)  # pylint: disable=no-value-for-parameter
+
+        latest_temp_dir = get_latest_dir_in_path('/tmp/')
+        zipped_file = zipfile.ZipFile(latest_temp_dir + '/export.zip')
+        exported_data = json.loads(zipped_file.read('export.json').decode('utf-8'))
+
+        self.assertEqual(
+            exported_data, {**CollectionDetailSerializer(collection).data, 'concepts': ANY, 'mappings': ANY}
+        )
+
+        exported_concepts = exported_data['concepts']
+        expected_concepts = ConceptVersionDetailSerializer(
+            [concept2.get_latest_version(), concept1.get_latest_version()], many=True
+        ).data
+
+        self.assertEqual(len(exported_concepts), 2)
+        self.assertIn(expected_concepts[0], exported_concepts)
+        self.assertIn(expected_concepts[1], exported_concepts)
+
+        exported_mappings = exported_data['mappings']
+        expected_mappings = MappingDetailSerializer([mapping.get_latest_version()], many=True).data
+
+        self.assertEqual(len(exported_mappings), 1)
+        self.assertEqual(expected_mappings, exported_mappings)
+
+        s3_upload_key = collection.export_path
+        s3_mock.upload_file.assert_called_once_with(
+            key=s3_upload_key, file_path=latest_temp_dir + '/export.zip', binary=True
+        )
+        s3_mock.url_for.assert_called_once_with(s3_upload_key)
+
+        import shutil
+        shutil.rmtree(latest_temp_dir)
