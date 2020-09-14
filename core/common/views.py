@@ -1,5 +1,5 @@
-from django.db import DatabaseError
-from django.http import Http404, HttpResponse
+from django.http import HttpResponse
+from django.shortcuts import get_object_or_404
 from elasticsearch_dsl import Q
 from pydash import get
 from rest_framework import response, generics, status
@@ -10,13 +10,6 @@ from core.common.utils import compact_dict_by_values, to_snake_case
 from core.concepts.permissions import CanViewParentDictionary
 from core.orgs.constants import ORG_OBJECT_TYPE
 from core.users.constants import USER_OBJECT_TYPE
-
-
-def get_object_or_404(queryset, **filter_kwargs):
-    try:
-        return generics.get_object_or_404(queryset, **filter_kwargs)
-    except DatabaseError:
-        raise Http404
 
 
 class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):

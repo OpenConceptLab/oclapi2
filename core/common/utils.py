@@ -59,15 +59,6 @@ def get_csv_from_s3(filename, is_owner):  # pragma: no cover
     return S3.url_for(filename)
 
 
-# def get_owner_type(owner, resources_url):
-#     resources_url_part = getattr(owner, resources_url, '').split('/')[1]
-#     return 'user' if resources_url_part == 'users' else 'org'
-
-
-# def join_uris(resources):
-#     return ', '.join([resource.uri for resource in resources])
-
-
 def reverse_resource(resource, viewname, args=None, kwargs=None, **extra):
     """
     Generate the URL for the view specified as viewname of the object specified as resource.
@@ -171,7 +162,7 @@ def is_valid_uri(uri):
     return False
 
 
-def get_class(kls):  # pragma: no cover
+def get_class(kls):
     parts = kls.split('.')
     module = ".".join(parts[:-1])
     _module = __import__(module)
@@ -182,7 +173,7 @@ def get_class(kls):  # pragma: no cover
 
 def write_export_file(
         version, resource_type, resource_serializer_type, logger
-):  # pylint: disable=too-many-statements,too-many-locals  # pragma: no cover
+):  # pylint: disable=too-many-statements,too-many-locals
     cwd = cd_temp()
     logger.info('Writing export file to tmp directory: %s' % cwd)
 
@@ -270,7 +261,7 @@ def write_export_file(
     os.chdir(cwd)
 
 
-def get_base_url():  # pragma: no cover
+def get_base_url():
     if settings.ENV == 'development':
         return "http://localhost:8000"
 
