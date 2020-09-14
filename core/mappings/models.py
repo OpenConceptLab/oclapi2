@@ -135,7 +135,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
 
     @property
     def to_source_owner_type(self):
-        return get(self.get_to_source(), 'owner_type')
+        return get(self.get_to_source(), 'parent.resource_type')
 
     @property
     def to_source_shorthand(self):
