@@ -479,10 +479,16 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         return errors
 
     def get_unidirectional_mappings(self):
-        return self.get_latest_version().mappings_from.filter(parent=self.parent, id=F('versioned_object_id'))
+        concept = self
+        if self.is_versioned_object:
+            concept = self.get_latest_version()
+        return concept.mappings_from.filter(parent_id=self.parent_id, id=F('versioned_object_id'))
 
     def get_indirect_mappings(self):
-        return self.get_latest_version().mappings_to.filter(parent=self.parent, id=F('versioned_object_id'))
+        concept = self
+        if self.is_versioned_object:
+            concept = self.get_latest_version()
+        return concept.mappings_to.filter(parent_id=concept.parent_id, id=F('versioned_object_id'))
 
     def get_bidirectional_mappings(self):
         queryset = self.get_unidirectional_mappings() | self.get_indirect_mappings()

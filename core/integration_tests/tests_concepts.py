@@ -3,6 +3,7 @@ from mock import ANY
 from core.common.tests import OCLAPITestCase
 from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory, LocalizedTextFactory
+from core.mappings.tests.factories import MappingFactory
 from core.orgs.models import Organization
 from core.sources.tests.factories import OrganizationSourceFactory
 from core.users.models import UserProfile
@@ -28,6 +29,27 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
                 'locale': 'ab', 'locale_preferred': True, 'name': 'c1 name', 'name_type': 'Fully Specified'
             }]
         }
+
+    def test_get_200(self):
+        response = self.client.get(
+            self.source.concepts_url,
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 0)
+
+        ConceptFactory(parent=self.source)
+
+        response = self.client.get(
+            self.source.concepts_url,
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
 
     def test_post_201(self):
         concepts_url = "/orgs/{}/sources/{}/concepts/".format(self.organization.mnemonic, self.source.mnemonic)
@@ -524,9 +546,12 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(latest_version.names.first().name, name1.name)
         self.assertEqual(latest_version.comment, 'Deleted {} in names.'.format(name2.name))
 
-    def test_get_200(self):
+    def test_get_200_with_mappings(self):
         concept1 = ConceptFactory(parent=self.source, mnemonic='conceptA')
         concept2 = ConceptFactory(parent=self.source, mnemonic='conceptB')
+        mapping = MappingFactory(
+            parent=self.source, from_concept=concept2.get_latest_version(), to_concept=concept1.get_latest_version()
+        )
 
         response = self.client.get(
             "/concepts/",
@@ -546,7 +571,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         self.assertFalse(response.has_header('next'))
 
         response = self.client.get(
-            "/concepts/?limit=1",
+            "/concepts/?limit=1&verbose=true&includeMappings=true",
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -554,13 +579,15 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 1)
         self.assertEqual(response.data[0]['id'], concept2.mnemonic)
+        self.assertEqual(len(response.data[0]['mappings']), 1)
+        self.assertEqual(response.data[0]['mappings'][0]['uuid'], str(mapping.id))
         self.assertEqual(response['num_found'], '2')
         self.assertEqual(response['num_returned'], '1')
-        self.assertTrue('/concepts/?limit=1&page=2' in response['next'])
+        self.assertTrue('/concepts/?limit=1&verbose=true&includeMappings=true&page=2' in response['next'])
         self.assertFalse(response.has_header('previous'))
 
         response = self.client.get(
-            "/concepts/?page=2&limit=1",
+            "/concepts/?page=2&limit=1&verbose=true&includeInverseMappings=true",
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -570,7 +597,9 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.data[0]['id'], concept1.mnemonic)
         self.assertEqual(response['num_found'], '2')
         self.assertEqual(response['num_returned'], '1')
-        self.assertTrue('/concepts/?page=1&limit=1' in response['previous'])
+        self.assertEqual(len(response.data[0]['mappings']), 1)
+        self.assertEqual(response.data[0]['mappings'][0]['uuid'], str(mapping.id))
+        self.assertTrue('/concepts/?page=1&limit=1&verbose=true&includeInverseMappings=true' in response['previous'])
         self.assertFalse(response.has_header('next'))
 
 
