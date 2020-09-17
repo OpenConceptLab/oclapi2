@@ -26,24 +26,29 @@ class CollectionTest(OCLTestCase):
 
         self.assertEqual(collection.concepts.count(), 0)
         self.assertEqual(collection.references.count(), 0)
+        self.assertEqual(collection.active_concepts, 0)
 
         source = OrganizationSourceFactory()
         concept = ConceptFactory(parent=source, sources=[source])
         concept_expression = concept.uri
 
         collection.add_references([concept_expression])
+        collection.refresh_from_db()
 
         self.assertEqual(collection.concepts.count(), 1)
         self.assertEqual(collection.references.count(), 1)
         self.assertEqual(collection.references.first().expression, concept_expression)
         self.assertEqual(collection.concepts.first(), concept.get_latest_version())
+        self.assertEqual(collection.active_concepts, 1)
 
         result = collection.add_references([concept_expression])
         self.assertEqual(
             result, {concept_expression: ['Concept or Mapping reference name must be unique in a collection.']}
         )
+        collection.refresh_from_db()
         self.assertEqual(collection.concepts.count(), 1)
         self.assertEqual(collection.references.count(), 1)
+        self.assertEqual(collection.active_concepts, 1)
 
     def test_add_references_openmrs_schema(self):
         collection = OrganizationCollectionFactory(custom_validation_schema=CUSTOM_VALIDATION_SCHEMA_OPENMRS)

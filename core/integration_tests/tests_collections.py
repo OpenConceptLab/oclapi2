@@ -409,8 +409,11 @@ class CollectionReferencesViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 200)
+        self.collection.refresh_from_db()
         self.assertEqual(self.collection.references.count(), 2)
         self.assertEqual(self.collection.concepts.count(), 2)
+        self.assertEqual(self.collection.active_concepts, 2)
+        self.assertEqual(self.collection.active_mappings, 0)
         self.assertTrue(self.collection.references.filter(expression=concept2.uri).exists())
         self.assertEqual(
             response.data,
@@ -433,9 +436,12 @@ class CollectionReferencesViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 200)
+        self.collection.refresh_from_db()
         self.assertEqual(self.collection.references.count(), 3)
         self.assertEqual(self.collection.concepts.count(), 2)
         self.assertEqual(self.collection.mappings.count(), 1)
+        self.assertEqual(self.collection.active_concepts, 2)
+        self.assertEqual(self.collection.active_mappings, 1)
         self.assertTrue(self.collection.references.filter(expression=mapping.uri).exists())
         self.assertEqual(
             response.data,
