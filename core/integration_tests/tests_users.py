@@ -163,14 +163,6 @@ class UserDetailViewTest(OCLAPITestCase):
         self.token = self.user.get_token()
         self.superuser = UserProfile.objects.get(username='ocladmin')
 
-    def test_get_401(self):
-        response = self.client.get(
-            '/users/{}/'.format(self.user.username),
-            format='json'
-        )
-
-        self.assertEqual(response.status_code, 401)
-
     def test_get_200(self):
         response = self.client.get(
             '/users/{}/'.format(self.user.username),

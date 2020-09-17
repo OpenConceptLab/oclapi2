@@ -1,7 +1,7 @@
 from pydash import get
 from rest_framework import mixins, status
 from rest_framework.generics import RetrieveAPIView, UpdateAPIView, DestroyAPIView
-from rest_framework.permissions import IsAdminUser, IsAuthenticated
+from rest_framework.permissions import IsAdminUser, IsAuthenticated, AllowAny
 from rest_framework.response import Response
 
 from core.common.mixins import ListWithHeadersMixin
@@ -82,6 +82,8 @@ class UserDetailView(UserBaseView, RetrieveAPIView, DestroyAPIView, mixins.Updat
     serializer_class = UserDetailSerializer
 
     def get_permissions(self):
+        if self.request.method == 'GET':
+            return [AllowAny()]
         if self.request.method == 'DELETE':
             return [IsAdminUser()]
 
