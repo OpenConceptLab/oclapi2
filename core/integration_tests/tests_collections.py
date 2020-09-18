@@ -931,3 +931,36 @@ class ExportCollectionTaskTest(OCLAPITestCase):
 
         import shutil
         shutil.rmtree(latest_temp_dir)
+
+
+class CollectionConceptsViewTest(OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.user = UserProfileFactory()
+        self.collection = UserCollectionFactory(user=self.user)
+        self.token = self.user.get_token()
+
+    def test_get_200(self):
+        response = self.client.get(
+            self.collection.concepts_url,
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 0)
+
+        source1 = OrganizationSourceFactory()
+        source2 = OrganizationSourceFactory()
+        concept1 = ConceptFactory(parent=source1, mnemonic='concept')
+        concept2 = ConceptFactory(parent=source2, mnemonic='concept')
+        self.collection.add_references([concept1.uri, concept2.uri])
+
+        response = self.client.get(
+            self.collection.concepts_url,
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 2)
