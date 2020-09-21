@@ -12,12 +12,12 @@ class OrganizationDocument(Document):
 
     last_update = fields.DateField(attr='updated_at')
     public_can_view = fields.BooleanField(attr='public_can_view')
+    name = fields.KeywordField(attr='name')
 
     class Django:
         model = Organization
         fields = [
             'is_active',
-            'name',
             'company',
             'location',
         ]
