@@ -964,3 +964,27 @@ class CollectionConceptsViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 2)
+
+    def test_get_duplicate_concept_name_from_multiple_sources_200(self):
+        source1 = OrganizationSourceFactory()
+        source2 = OrganizationSourceFactory()
+        concept1 = ConceptFactory(parent=source1, mnemonic='concept')
+        concept2 = ConceptFactory(parent=source2, mnemonic='concept')
+        self.collection.add_references([concept1.uri, concept2.uri])
+
+        response = self.client.get(
+            self.collection.concepts_url + 'concept/',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 409)
+
+        response = self.client.get(
+            self.collection.concepts_url + 'concept/?uri=' + concept2.uri,
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['uuid'], str(concept2.get_latest_version().id))

@@ -4,7 +4,7 @@ from django.conf import settings
 from django.core.paginator import Paginator
 from django.db.models import Q, F
 from django.http import HttpResponseForbidden, Http404
-from django.urls import resolve, reverse
+from django.urls import resolve, reverse, Resolver404
 from django.utils.functional import cached_property
 from pydash import compact, get
 from rest_framework import status
@@ -15,7 +15,7 @@ from core.common.constants import HEAD, ACCESS_TYPE_EDIT, ACCESS_TYPE_VIEW, ACCE
     VERBOSE_PARAM
 from core.common.permissions import HasPrivateAccess, HasOwnership
 from core.common.services import S3
-from .utils import write_csv_to_s3, get_csv_from_s3, get_query_params_from_url_string
+from .utils import write_csv_to_s3, get_csv_from_s3, get_query_params_from_url_string, compact_dict_by_values
 
 logger = logging.getLogger('oclapi')
 
@@ -453,6 +453,25 @@ class SourceChildMixin:
         if not user.is_staff:
             queryset = queryset.exclude(public_access=ACCESS_TYPE_NONE)
         return queryset
+
+    @staticmethod
+    def get_parent_and_owner_filters_from_uri(uri):
+        filters = dict()
+        if not uri:
+            return filters
+
+        try:
+            resolved_uri = resolve(uri)
+            kwargs = resolved_uri.kwargs
+            filters['parent__mnemonic'] = kwargs.get('source')
+            if 'org' in kwargs:
+                filters['parent__organization__mnemonic'] = kwargs.get('org')
+            if 'user' in kwargs:
+                filters['parent__user__username'] = kwargs.get('user')
+        except Resolver404:
+            pass
+
+        return compact_dict_by_values(filters)
 
 
 class ConceptContainerExportMixin:
