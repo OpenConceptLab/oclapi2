@@ -11,6 +11,7 @@ from rest_framework.response import Response
 from core.common.constants import (
     HEAD, INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_RETIRED_PARAM,
     NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY)
+from core.common.exceptions import Http409
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryMixin
 from core.common.swagger_parameters import (
     q_param, limit_param, sort_desc_param, page_param, exact_match_param, sort_asc_param, verbose_param,
@@ -143,7 +144,17 @@ class ConceptRetrieveUpdateDestroyView(ConceptBaseView, RetrieveAPIView, UpdateA
     serializer_class = ConceptDetailSerializer
 
     def get_object(self, queryset=None):
-        return get_object_or_404(self.get_queryset(), id=F('versioned_object_id'))
+        queryset = self.get_queryset()
+        filters = dict(id=F('versioned_object_id'))
+        if 'collection' in self.kwargs:
+            filters = dict(is_latest_version=True)
+            uri_param = self.request.query_params.dict().get('uri')
+            if uri_param:
+                filters.update(Concept.get_parent_and_owner_filters_from_uri(uri_param))
+            if queryset.count() > 1 and not uri_param:
+                raise Http409()
+
+        return get_object_or_404(queryset, **filters)
 
     def get_permissions(self):
         if self.request.method in ['GET']:
