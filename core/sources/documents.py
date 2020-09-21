@@ -19,11 +19,11 @@ class SourceDocument(Document):
     source_type = fields.KeywordField(attr='source_type')
     is_active = fields.KeywordField(attr='is_active')
     version = fields.KeywordField(attr='version')
+    name = fields.KeywordField(attr='name')
 
     class Django:
         model = Source
         fields = [
-            'name',
             'full_name',
             'custom_validation_schema',
         ]
