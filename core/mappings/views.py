@@ -17,8 +17,7 @@ from core.common.swagger_parameters import (
 )
 from core.common.views import SourceChildCommonBaseView
 from core.concepts.permissions import CanEditParentDictionary, CanViewParentDictionary
-from core.mappings.constants import COULD_NOT_FIND_MAPPING_TO_RETIRE, COULD_NOT_FIND_MAPPING_TO_UPDATE, \
-    PARENT_VERSION_NOT_LATEST_CANNOT_UPDATE_MAPPING
+from core.mappings.constants import PARENT_VERSION_NOT_LATEST_CANNOT_UPDATE_MAPPING
 from core.mappings.documents import MappingDocument
 from core.mappings.models import Mapping
 from core.mappings.search import MappingSearch
@@ -129,13 +128,8 @@ class MappingRetrieveUpdateDestroyView(MappingBaseView, RetrieveAPIView, UpdateA
         return [CanEditParentDictionary(), ]
 
     def update(self, request, *args, **kwargs):
-        self.object = self.get_object()
         partial = kwargs.pop('partial', True)
-        if self.object is None:
-            return Response(
-                {'non_field_errors': COULD_NOT_FIND_MAPPING_TO_UPDATE}, status=status.HTTP_404_NOT_FOUND
-            )
-
+        self.object = self.get_object()
         self.parent_resource = self.object.parent
 
         if self.parent_resource != self.parent_resource.head:
@@ -156,11 +150,6 @@ class MappingRetrieveUpdateDestroyView(MappingBaseView, RetrieveAPIView, UpdateA
 
     def destroy(self, request, *args, **kwargs):
         mapping = self.get_object()
-        if not mapping:
-            return Response(
-                dict(non_field_errors=COULD_NOT_FIND_MAPPING_TO_RETIRE),
-                status=status.HTTP_404_NOT_FOUND
-            )
         comment = request.data.get('update_comment', None) or request.data.get('comment', None)
         errors = mapping.retire(request.user, comment)
 
