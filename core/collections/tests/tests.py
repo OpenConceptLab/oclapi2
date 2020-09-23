@@ -221,6 +221,11 @@ class CollectionTest(OCLTestCase):
             {'names': ['Concept fully specified name must be unique for same collection and locale.']}
         )
 
+    def test_parent_id(self):
+        self.assertIsNone(Collection().parent_id)
+        self.assertEqual(Collection(user_id=1).parent_id, 1)
+        self.assertEqual(Collection(organization_id=1).parent_id, 1)
+
 
 class CollectionReferenceTest(OCLTestCase):
     def test_invalid_expression(self):

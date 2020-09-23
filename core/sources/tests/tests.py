@@ -238,6 +238,7 @@ class SourceTest(OCLTestCase):
         concept = ConceptFactory(sources=[source], parent=source)
         source.save()
 
+        self.assertEqual(source.num_concepts, 1)
         self.assertEqual(source.active_concepts, 1)
         self.assertEqual(source.last_concept_update, concept.updated_at)
         self.assertEqual(source.last_child_update, source.last_concept_update)
@@ -268,3 +269,35 @@ class SourceTest(OCLTestCase):
         queryset = Source.head_from_uri(source.uri)
         self.assertEqual(queryset.count(), 1)
         self.assertEqual(queryset.first(), source)
+
+    def test_released_versions(self):
+        source = OrganizationSourceFactory()
+        source_v1 = OrganizationSourceFactory(mnemonic=source.mnemonic, organization=source.organization, version='v1')
+
+        self.assertEqual(source.released_versions.count(), 0)
+
+        source_v1.released = True
+        source_v1.save()
+        self.assertEqual(source.released_versions.count(), 1)
+        self.assertEqual(source_v1.released_versions.count(), 1)
+
+    def test_get_latest_released_version(self):
+        source = OrganizationSourceFactory()
+        source_v1 = OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=source.organization, version='v1', released=True
+        )
+
+        self.assertEqual(source.get_latest_released_version(), source_v1)
+
+        source_v2 = OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=source.organization, version='v2', released=True
+        )
+
+        self.assertEqual(source.get_latest_released_version(), source_v2)
+
+    def test_get_version(self):
+        source = OrganizationSourceFactory()
+        source_v1 = OrganizationSourceFactory(mnemonic=source.mnemonic, organization=source.organization, version='v1')
+
+        self.assertEqual(Source.get_version(source.mnemonic), source)
+        self.assertEqual(Source.get_version(source.mnemonic, 'v1'), source_v1)
