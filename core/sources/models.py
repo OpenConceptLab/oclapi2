@@ -33,6 +33,8 @@ class Source(ConceptContainerModel):
     @classmethod
     def head_from_uri(cls, uri):
         queryset = cls.objects.none()
+        if not uri:
+            return queryset
 
         try:
             kwargs = get(resolve(uri), 'kwargs', dict())

@@ -259,3 +259,12 @@ class SourceTest(OCLTestCase):
 
         self.assertTrue(source.is_active)
         self.assertTrue(concept.is_active)
+
+    def test_head_from_uri(self):
+        source = OrganizationSourceFactory(version='HEAD')
+        self.assertEqual(Source.head_from_uri('').count(), 0)
+        self.assertEqual(Source.head_from_uri('foobar').count(), 0)
+
+        queryset = Source.head_from_uri(source.uri)
+        self.assertEqual(queryset.count(), 1)
+        self.assertEqual(queryset.first(), source)

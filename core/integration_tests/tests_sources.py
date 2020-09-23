@@ -158,11 +158,8 @@ class SourceCreateUpdateDestroyViewTest(OCLAPITestCase):
 
     def test_delete_400(self):
         source = OrganizationSourceFactory(organization=self.organization)
-        sources_url = "/orgs/{}/sources/{}/".format(
-            self.organization.mnemonic, source.mnemonic
-        )
         response = self.client.delete(
-            sources_url,
+            source.uri,
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
