@@ -91,7 +91,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     names = models.ManyToManyField(LocalizedText, related_name='name_locales')
     descriptions = models.ManyToManyField(LocalizedText, related_name='description_locales')
     comment = models.TextField(null=True, blank=True)
-    parent = models.ForeignKey('sources.Source', related_name='concepts_set', on_delete=models.DO_NOTHING)
+    parent = models.ForeignKey('sources.Source', related_name='concepts_set', on_delete=models.CASCADE)
     sources = models.ManyToManyField('sources.Source', related_name='concepts')
     versioned_object = models.ForeignKey(
         'self', related_name='versions_set', null=True, blank=True, on_delete=models.CASCADE
