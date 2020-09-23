@@ -132,10 +132,6 @@ class BaseModel(models.Model):
         return get(self, 'OBJECT_TYPE')
 
     @property
-    def num_stars(self):
-        return 0
-
-    @property
     def url(self):
         if self.uri:
             return self.uri
@@ -169,7 +165,7 @@ class BaseModel(models.Model):
     @classmethod
     def resume_indexing(cls):
         if not get(settings, 'TEST_MODE', False):
-            cls.toggle_indexing(True)
+            cls.toggle_indexing(True)   # pragma: no cover
 
     @staticmethod
     def toggle_indexing(state=True):
@@ -257,10 +253,6 @@ class VersionedModel(BaseResourceModel):
 
     def get_latest_released_version(self):
         return self.released_versions.order_by('-created_at').first()
-
-    @classmethod
-    def get_version_model(cls):
-        return cls
 
     @property
     def versioned_object(self):
