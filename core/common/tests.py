@@ -332,3 +332,13 @@ class UtilsTest(OCLTestCase):
         self.assertEqual(to_snake_case("foobar"), "foobar")
         self.assertEqual(to_snake_case("foo_bar"), "foo_bar")
         self.assertEqual(to_snake_case("fooBar"), "foo_bar")
+
+
+class BaseModelTest(OCLTestCase):
+    def test_model_name(self):
+        self.assertEqual(Concept().model_name, 'Concept')
+        self.assertEqual(Source().model_name, 'Source')
+
+    def test_app_name(self):
+        self.assertEqual(Concept().app_name, 'concepts')
+        self.assertEqual(Source().app_name, 'sources')

@@ -363,7 +363,7 @@ class ConceptContainerModel(VersionedModel):
 
     @property
     def num_concepts(self):
-        return self.concepts_set.count()
+        return self.concepts_set.filter(id=F('versioned_object_id')).count()
 
     @staticmethod
     def get_version_url_kwarg():
