@@ -1,13 +1,21 @@
-from django.urls import re_path, include, path
+from django.conf.urls import url
+from django.urls import re_path, include
+from drf_yasg.utils import swagger_auto_schema
+from rest_framework.authtoken.serializers import AuthTokenSerializer
 from rest_framework.authtoken.views import obtain_auth_token
 
 from core.common.constants import NAMESPACE_PATTERN
 from core.orgs import views as org_views
 from . import views
 
+decorated_auth_view = swagger_auto_schema(
+    method='post',
+    request_body=AuthTokenSerializer
+)(obtain_auth_token)
+
 urlpatterns = [
     re_path(r'^$', views.UserListView.as_view(), name='userprofile-list'),
-    path('login/', obtain_auth_token, name='user-login'),
+    url('login/', decorated_auth_view, name='user-login'),
     re_path(
         r'^(?P<user>' + NAMESPACE_PATTERN + ')/$',
         views.UserDetailView.as_view(),
