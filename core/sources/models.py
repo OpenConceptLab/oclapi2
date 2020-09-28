@@ -61,7 +61,7 @@ class Source(ConceptContainerModel):
 
     @property
     def source(self):
-        return self.mnemonic  # pragma: no cover
+        return self.mnemonic
 
     @property
     def versions_url(self):
