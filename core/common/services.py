@@ -85,8 +85,22 @@ class S3:
     @classmethod
     def __fetch_keys(cls, prefix='/', delimiter='/'):  # pragma: no cover
         prefix = prefix[1:] if prefix.startswith(delimiter) else prefix
-        bucket = cls._session().resource('s3').Bucket(settings.AWS_STORAGE_BUCKET_NAME)
-        return [_.key for _ in bucket.objects.filter(Prefix=prefix)]
+        s3_resource = cls.resource()
+        objects = s3_resource.meta.client.list_objects(
+            Bucket=settings.AWS_STORAGE_BUCKET_NAME, Prefix=prefix
+        )
+        return [{'Key': k} for k in [obj['Key'] for obj in objects.get('Contents', [])]]
+
+    @classmethod
+    def resource(cls):  # pragma: no cover
+        return cls._session().resource('s3')
+
+    @classmethod
+    def delete_objects(cls, path):  # pragma: no cover
+        s3_resource = cls.resource()
+        keys = cls.__fetch_keys(prefix=path)
+        if keys:
+            s3_resource.meta.client.delete_objects(Bucket=settings.AWS_STORAGE_BUCKET_NAME, Delete=dict(Objects=keys))
 
     @classmethod
     def missing_objects(cls, objects, prefix_path, sub_paths):  # pragma: no cover

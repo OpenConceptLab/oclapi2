@@ -356,7 +356,9 @@ class ConceptContainerModel(VersionedModel):
                 raise ValidationError(dict(detail=CANNOT_DELETE_ONLY_VERSION))
             prev_version.is_latest_version = True
             prev_version.save()
+        generic_export_path = self.generic_export_path()
         super().delete(using=using, keep_parents=keep_parents)
+        S3.delete_objects(generic_export_path)
 
     def get_active_concepts(self):
         return self.concepts_set.filter(is_active=True, retired=False, version=HEAD)
@@ -587,8 +589,14 @@ class ConceptContainerModel(VersionedModel):
     @property
     def export_path(self):
         last_update = self.last_child_update.strftime('%Y%m%d%H%M%S')
-        head = self.head
-        return "%s/%s_%s.%s.zip" % (head.parent_resource, head.mnemonic, self.version, last_update)
+        return self.generic_export_path(suffix="{}.zip".format(last_update))
+
+    def generic_export_path(self, suffix='*'):
+        path = "{}/{}_{}.".format(self.parent_resource, self.mnemonic, self.version)
+        if suffix:
+            path += suffix
+
+        return path
 
     def get_export_url(self):
         return S3.url_for(self.export_path)

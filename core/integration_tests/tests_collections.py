@@ -180,6 +180,7 @@ class CollectionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 404)
 
+    @patch('core.common.services.S3.delete_objects', Mock())
     def test_delete(self):
         coll = OrganizationCollectionFactory(mnemonic='coll1')
         OrganizationCollectionFactory(
@@ -516,6 +517,7 @@ class CollectionVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.data, {'version': [ErrorDetail(string='This field may not be null.', code='null')]})
 
+    @patch('core.common.services.S3.delete_objects', Mock())
     def test_delete(self):
         response = self.client.delete(
             '/collections/coll/v1/',
