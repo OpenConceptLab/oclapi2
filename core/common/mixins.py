@@ -4,6 +4,7 @@ from django.conf import settings
 from django.core.paginator import Paginator
 from django.db.models import Q, F
 from django.http import HttpResponseForbidden, Http404
+from django.shortcuts import get_object_or_404
 from django.urls import resolve, reverse, Resolver404
 from django.utils.functional import cached_property
 from pydash import compact, get
@@ -13,7 +14,7 @@ from rest_framework.response import Response
 
 from core.common.constants import HEAD, ACCESS_TYPE_EDIT, ACCESS_TYPE_VIEW, ACCESS_TYPE_NONE, INCLUDE_FACETS, \
     VERBOSE_PARAM
-from core.common.permissions import HasPrivateAccess, HasOwnership
+from core.common.permissions import HasPrivateAccess, HasOwnership, CanViewConceptDictionary
 from core.common.services import S3
 from .utils import write_csv_to_s3, get_csv_from_s3, get_query_params_from_url_string, compact_dict_by_values
 
@@ -541,3 +542,30 @@ class ConceptContainerExportMixin:
             return Response(status=status.HTTP_200_OK)
 
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class ConceptContainerProcessingMixin:
+    def get_permissions(self):
+        if self.request.method == 'POST':
+            return [HasOwnership(), ]
+
+        return [CanViewConceptDictionary(), ]
+
+    def get_object(self, queryset=None):  # pylint: disable=unused-argument
+        return get_object_or_404(self.get_queryset())
+
+    def get(self, request, *args, **kwargs):  # pylint: disable=unused-argument
+        version = self.get_object()
+        logger.debug('Processing flag requested for %s version %s', self.resource, version)
+
+        response = Response(status=200)
+        response.content = version.is_processing
+        return response
+
+    def post(self, request, *args, **kwargs):  # pylint: disable=unused-argument
+        version = self.get_object()
+        logger.debug('Processing flag clearance requested for %s version %s', self.resource, version)
+
+        version.clear_processing()
+
+        return Response(status=status.HTTP_200_OK)

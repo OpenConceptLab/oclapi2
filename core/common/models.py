@@ -570,7 +570,7 @@ class ConceptContainerModel(VersionedModel):
     @property
     def is_processing(self):
         if self._background_process_ids:
-            for process_id in self._background_process_ids:
+            for process_id in self._background_process_ids.copy():
                 res = AsyncResult(process_id)
                 if res.successful() or res.failed():
                     self.remove_processing(process_id)
@@ -581,10 +581,6 @@ class ConceptContainerModel(VersionedModel):
     def clear_processing(self):
         self._background_process_ids = list()
         self.save(update_fields=['_background_process_ids'])
-
-    @staticmethod
-    def clear_all_processing(klass):
-        klass.objects.all().update(_background_process_ids=set())
 
     @property
     def export_path(self):

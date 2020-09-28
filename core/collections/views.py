@@ -31,11 +31,11 @@ from core.common.constants import (
 )
 from core.common.mixins import (
     ConceptDictionaryCreateMixin, ListWithHeadersMixin, ConceptDictionaryUpdateMixin,
-    ConceptContainerExportMixin
-)
+    ConceptContainerExportMixin,
+    ConceptContainerProcessingMixin)
 from core.common.permissions import (
     CanViewConceptDictionary, CanEditConceptDictionary, HasAccessToVersionedObject,
-    HasOwnership, CanViewConceptDictionaryVersion
+    CanViewConceptDictionaryVersion
 )
 from core.common.tasks import add_references, export_collection
 from core.common.utils import compact_dict_by_values, parse_boolean_query_param
@@ -552,33 +552,9 @@ class CollectionExtraRetrieveUpdateDestroyView(CollectionExtrasBaseView, Retriev
         return Response(dict(detail=NOT_FOUND), status=status.HTTP_404_NOT_FOUND)
 
 
-class CollectionVersionProcessingView(CollectionBaseView):  # pragma: no cover
+class CollectionVersionProcessingView(CollectionBaseView, ConceptContainerProcessingMixin):
     serializer_class = CollectionVersionDetailSerializer
-
-    def get_permissions(self):
-        if self.request.method == 'POST':
-            return [HasOwnership(), ]
-
-        return [CanViewConceptDictionary(), ]
-
-    def get_object(self, queryset=None):
-        return get_object_or_404(self.get_queryset())
-
-    def get(self, request, *args, **kwargs):  # pylint: disable=unused-argument
-        version = self.get_object()
-        logger.debug('Processing flag requested for collection version %s', version)
-
-        response = Response(status=200)
-        response.content = version.is_processing
-        return response
-
-    def post(self, request, *args, **kwargs):  # pylint: disable=unused-argument
-        version = self.get_object()
-        logger.debug('Processing flag clearance requested for collection version %s', version)
-
-        version.clear_processing()
-
-        return Response(status=200)
+    resource = 'collection'
 
 
 class CollectionVersionExportView(CollectionBaseView, ConceptContainerExportMixin):

@@ -13,9 +13,9 @@ from rest_framework.response import Response
 
 from core.common.constants import HEAD, RELEASED_PARAM, PROCESSING_PARAM, NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryCreateMixin, ConceptDictionaryUpdateMixin, \
-    ConceptContainerExportMixin
+    ConceptContainerExportMixin, ConceptContainerProcessingMixin
 from core.common.permissions import CanViewConceptDictionary, CanEditConceptDictionary, HasAccessToVersionedObject, \
-    HasOwnership, CanViewConceptDictionaryVersion
+    CanViewConceptDictionaryVersion
 from core.common.tasks import export_source
 from core.common.utils import parse_boolean_query_param, compact_dict_by_values
 from core.common.views import BaseAPIView
@@ -325,33 +325,9 @@ class SourceExtraRetrieveUpdateDestroyView(SourceExtrasBaseView, RetrieveUpdateD
         return Response(dict(detail=NOT_FOUND), status=status.HTTP_404_NOT_FOUND)
 
 
-class SourceVersionProcessingView(SourceBaseView):   # pragma: no cover
+class SourceVersionProcessingView(SourceBaseView, ConceptContainerProcessingMixin):
     serializer_class = SourceVersionDetailSerializer
-
-    def get_permissions(self):
-        if self.request.method == 'POST':
-            return [HasOwnership(), ]
-
-        return [CanViewConceptDictionary(), ]
-
-    def get_object(self, queryset=None):
-        return self.get_queryset().first()
-
-    def get(self, request, *args, **kwargs):  # pylint: disable=unused-argument
-        version = self.get_object()
-        logger.debug('Processing flag requested for source version %s', version)
-
-        response = Response(status=200)
-        response.content = version.is_processing
-        return response
-
-    def post(self, request, *args, **kwargs):  # pylint: disable=unused-argument
-        version = self.get_object()
-        logger.debug('Processing flag clearance requested for source version %s', version)
-
-        version.clear_processing()
-
-        return Response(status=status.HTTP_200_OK)
+    resource = 'source'
 
 
 class SourceVersionExportView(SourceBaseView, ConceptContainerExportMixin):
