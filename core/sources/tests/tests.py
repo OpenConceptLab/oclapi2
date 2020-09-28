@@ -16,6 +16,10 @@ class SourceTest(OCLTestCase):
         self.new_source = OrganizationSourceFactory.build(organization=None)
         self.user = UserProfileFactory()
 
+    def test_source(self):
+        self.assertEqual(Source().mnemonic, '')
+        self.assertEqual(Source(mnemonic='source').mnemonic, 'source')
+
     def test_is_versioned(self):
         self.assertTrue(Source().is_versioned)
 
