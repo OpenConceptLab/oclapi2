@@ -1,5 +1,6 @@
 from django.db import transaction, IntegrityError
 from django.core.exceptions import ValidationError
+from mock import patch, Mock
 
 from core.common.constants import HEAD
 from core.common.tests import OCLTestCase
@@ -187,6 +188,7 @@ class SourceTest(OCLTestCase):
         self.assertEqual(version1.concepts.count(), 2)
         self.assertEqual(version1.concepts_set.count(), 0)  # no direct child
 
+    @patch('core.common.services.S3.delete_objects', Mock())
     def test_source_version_delete(self):
         source = OrganizationSourceFactory(version=HEAD)
         concept = ConceptFactory(mnemonic='concept1', version=HEAD, sources=[source], parent=source)

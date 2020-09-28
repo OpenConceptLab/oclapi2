@@ -6,6 +6,7 @@ from django.db import transaction
 from mock import patch, Mock, ANY
 from rest_framework.exceptions import ErrorDetail
 
+from core.common.tasks import export_source
 from core.common.tests import OCLAPITestCase
 from core.common.utils import get_latest_dir_in_path
 from core.concepts.serializers import ConceptVersionDetailSerializer
@@ -18,7 +19,7 @@ from core.sources.serializers import SourceDetailSerializer
 from core.sources.tests.factories import OrganizationSourceFactory, UserSourceFactory
 from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
-from core.common.tasks import export_source
+
 
 class SourceListViewTest(OCLAPITestCase):
     def setUp(self):
@@ -360,6 +361,7 @@ class SourceVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.data, {'id': [ErrorDetail(string='This field may not be null.', code='null')]})
 
+    @patch('core.common.services.S3.delete_objects', Mock())
     def test_version_delete_204(self):
         self.assertEqual(self.source.versions.count(), 2)
 
