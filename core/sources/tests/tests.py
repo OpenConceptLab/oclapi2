@@ -17,8 +17,8 @@ class SourceTest(OCLTestCase):
         self.user = UserProfileFactory()
 
     def test_source(self):
-        self.assertEqual(Source().mnemonic, '')
-        self.assertEqual(Source(mnemonic='source').mnemonic, 'source')
+        self.assertEqual(Source().source, '')
+        self.assertEqual(Source(mnemonic='source').source, 'source')
 
     def test_is_versioned(self):
         self.assertTrue(Source().is_versioned)
@@ -307,3 +307,60 @@ class SourceTest(OCLTestCase):
 
         self.assertEqual(Source.get_version(source.mnemonic), source)
         self.assertEqual(Source.get_version(source.mnemonic, 'v1'), source_v1)
+
+    def test_clear_processing(self):
+        source = OrganizationSourceFactory(_background_process_ids=[1, 2])
+
+        self.assertEqual(source._background_process_ids, [1, 2])  # pylint: disable=protected-access
+
+        source.clear_processing()
+
+        self.assertEqual(source._background_process_ids, [])  # pylint: disable=protected-access
+
+    @patch('core.common.models.AsyncResult')
+    def test_is_processing(self, async_result_klass_mock):
+        source = OrganizationSourceFactory()
+        self.assertFalse(source.is_processing)
+
+        async_result_instance_mock = Mock(successful=Mock(return_value=True))
+        async_result_klass_mock.return_value = async_result_instance_mock
+
+        source._background_process_ids = ['1', '2', '3']  # pylint: disable=protected-access
+        source.save()
+
+        self.assertFalse(source.is_processing)
+        self.assertEqual(source._background_process_ids, [])  # pylint: disable=protected-access
+
+        async_result_instance_mock = Mock(successful=Mock(return_value=False), failed=Mock(return_value=True))
+        async_result_klass_mock.return_value = async_result_instance_mock
+
+        source._background_process_ids = [1, 2, 3]  # pylint: disable=protected-access
+        source.save()
+
+        self.assertFalse(source.is_processing)
+        self.assertEqual(source._background_process_ids, [])  # pylint: disable=protected-access
+
+        async_result_instance_mock = Mock(successful=Mock(return_value=False), failed=Mock(return_value=False))
+        async_result_klass_mock.return_value = async_result_instance_mock
+
+        source._background_process_ids = [1, 2, 3]  # pylint: disable=protected-access
+        source.save()
+
+        self.assertTrue(source.is_processing)
+        self.assertEqual(source._background_process_ids, [1, 2, 3])  # pylint: disable=protected-access
+
+    def test_add_processing(self):
+        source = OrganizationSourceFactory()
+        self.assertEqual(source._background_process_ids, [])  # pylint: disable=protected-access
+
+        source.add_processing('123')
+        self.assertEqual(source._background_process_ids, ['123'])  # pylint: disable=protected-access
+
+        source.add_processing('123')
+        self.assertEqual(source._background_process_ids, ['123', '123'])  # pylint: disable=protected-access
+
+        source.add_processing('abc')
+        self.assertEqual(source._background_process_ids, ['123', '123', 'abc'])  # pylint: disable=protected-access
+
+        source.refresh_from_db()
+        self.assertEqual(source._background_process_ids, ['123', '123', 'abc'])  # pylint: disable=protected-access
