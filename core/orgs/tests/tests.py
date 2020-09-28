@@ -2,6 +2,7 @@ from django.core.exceptions import ValidationError
 from mock import patch, Mock
 
 from core.common.constants import ACCESS_TYPE_NONE, HEAD
+from core.common.tasks import delete_organization
 from core.common.tests import OCLTestCase
 from core.orgs.constants import ORG_OBJECT_TYPE
 from core.orgs.models import Organization
@@ -106,3 +107,14 @@ class OrganizationTest(OCLTestCase):
         self.assertTrue(org.is_active)
         self.assertTrue(source.is_active)
         self.assertTrue(collection.is_active)
+
+    def test_delete_organization_task(self):
+        org = OrganizationFactory()
+
+        delete_organization(0)
+
+        self.assertTrue(Organization.objects.filter(id=org.id).exists())
+
+        delete_organization(org.id)
+
+        self.assertFalse(Organization.objects.filter(id=org.id).exists())

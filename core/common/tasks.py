@@ -10,6 +10,25 @@ from core.common.utils import write_export_file
 logger = get_task_logger(__name__)
 
 
+@app.task(base=QueueOnce)
+def delete_organization(org_id):
+    from core.orgs.models import Organization
+    logger.info('Finding org...')
+
+    org = Organization.objects.filter(id=org_id).first()
+
+    if not org:  # pragma: no cover
+        logger.info('Not found org %s', org_id)
+        return
+
+    try:
+        logger.info('Found org %s.  Beginning purge...', org.mnemonic)
+        org.delete()
+        logger.info('Purge complete!')
+    except Exception as ex:
+        logger.info('Org delete failed for %s with exception %s', org.mnemonic, ex.args)
+
+
 @app.task(base=QueueOnce, bind=True)
 def export_source(self, version_id):
     from core.sources.models import Source

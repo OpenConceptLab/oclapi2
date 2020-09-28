@@ -1,3 +1,4 @@
+from celery_once import AlreadyQueued
 from django.http import Http404
 from pydash import get
 from rest_framework import mixins, status, generics
@@ -10,8 +11,9 @@ from core.collections.views import CollectionListView
 from core.common.constants import NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY
 from core.common.mixins import ListWithHeadersMixin
 from core.common.permissions import HasPrivateAccess
+from core.common.tasks import delete_organization
 from core.common.views import BaseAPIView
-from core.orgs.constants import DELETE_SUCCESS
+from core.orgs.constants import DELETE_ACCEPTED
 from core.orgs.documents import OrganizationDocument
 from core.orgs.models import Organization
 from core.orgs.serializers import OrganizationDetailSerializer, OrganizationListSerializer, OrganizationCreateSerializer
@@ -121,11 +123,11 @@ class OrganizationDetailView(OrganizationBaseView, mixins.UpdateModelMixin, mixi
         obj = self.get_object()
 
         try:
-            obj.delete()
-        except Exception as ex:  # pragma: no cover
-            return Response({'detail': ex.args}, status=status.HTTP_400_BAD_REQUEST)
+            delete_organization.delay(obj.id)
+        except AlreadyQueued:  # pragma: no cover
+            return Response({'detail': 'Already Queued'}, status=status.HTTP_409_CONFLICT)
 
-        return Response({'detail': DELETE_SUCCESS}, status=status.HTTP_204_NO_CONTENT)
+        return Response({'detail': DELETE_ACCEPTED}, status=status.HTTP_202_ACCEPTED)
 
 
 class OrganizationMemberView(generics.GenericAPIView):
