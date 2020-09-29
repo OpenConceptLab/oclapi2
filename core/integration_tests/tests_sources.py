@@ -6,6 +6,7 @@ from django.db import transaction
 from mock import patch, Mock, ANY
 from rest_framework.exceptions import ErrorDetail
 
+from core.collections.tests.factories import OrganizationCollectionFactory
 from core.common.tasks import export_source
 from core.common.tests import OCLAPITestCase
 from core.common.utils import get_latest_dir_in_path
@@ -157,7 +158,7 @@ class SourceCreateUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.data['full_name'], source.full_name)
         self.assertEqual(response.data['full_name'], 'Full name')
 
-    def test_delete_400(self):
+    def test_delete_204(self):
         source = OrganizationSourceFactory(organization=self.organization)
         response = self.client.delete(
             source.uri,
@@ -165,9 +166,8 @@ class SourceCreateUpdateDestroyViewTest(OCLAPITestCase):
             format='json'
         )
 
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.data, {'detail': ['Cannot delete only version.']})
-        self.assertEqual(source.versions.count(), 1)
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(Source.objects.filter(id=source.id).exists())
 
 
 class SourceVersionListViewTest(OCLAPITestCase):
@@ -374,6 +374,26 @@ class SourceVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 204)
         self.assertEqual(self.source.versions.count(), 1)
         self.assertFalse(self.source.versions.filter(version='v1').exists())
+
+    @patch('core.common.services.S3.delete_objects', Mock())
+    def test_version_delete_400(self):  # sources content referred in a private collection
+        concept = ConceptFactory(parent=self.source_v1)
+
+        collection = OrganizationCollectionFactory(public_access='None')
+        collection.add_references([concept.uri])
+        self.assertEqual(collection.concepts.count(), 1)
+        self.assertEqual(collection.concepts.first(), concept.get_latest_version())
+
+        response = self.client.delete(
+            self.source_v1.uri,
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data, {'detail': ['Could not delete. Some of the content is referred privately.']})
+        self.assertEqual(self.source.versions.count(), 2)
+        self.assertTrue(self.source.versions.filter(version='v1').exists())
 
 
 class SourceExtraRetrieveUpdateDestroyViewTest(OCLAPITestCase):

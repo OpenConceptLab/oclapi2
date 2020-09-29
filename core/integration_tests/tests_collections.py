@@ -535,10 +535,8 @@ class CollectionVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
             format='json'
         )
 
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.data, {'detail': ['Cannot delete only version.']})
-        self.assertEqual(self.collection.versions.count(), 1)
-        self.assertTrue(self.collection.versions.first().is_latest_version)
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(Collection.objects.filter(id=self.collection.id).exists())
 
 
 class CollectionLatestVersionRetrieveUpdateViewTest(OCLAPITestCase):
