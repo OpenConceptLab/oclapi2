@@ -1,5 +1,4 @@
 from django.db import transaction, IntegrityError
-from django.core.exceptions import ValidationError
 from mock import patch, Mock
 
 from core.common.constants import HEAD
@@ -226,16 +225,6 @@ class SourceTest(OCLTestCase):
         ).exists())
         self.assertTrue(source.is_latest_version)
         self.assertEqual(concept.sources.count(), 1)
-
-        with self.assertRaises(ValidationError) as ex:
-            source.delete()
-
-        self.assertEqual(
-            ex.exception.message_dict,
-            {
-                'detail': ['Cannot delete only version.'],
-            }
-        )
 
     def test_child_count_updates(self):
         source = OrganizationSourceFactory(version=HEAD)

@@ -3,7 +3,7 @@ from django.db.models import UniqueConstraint
 from django.urls import resolve
 from pydash import get
 
-from core.common.constants import HEAD
+from core.common.constants import HEAD, ACCESS_TYPE_NONE
 from core.common.models import ConceptContainerModel
 from core.common.utils import reverse_resource, get_query_params_from_url_string
 from core.concepts.models import LocalizedText
@@ -86,3 +86,18 @@ class Source(ConceptContainerModel):
             return False
 
         return self.custom_validation_schema is not None and self.num_concepts > 0  # pragma: no cover
+
+    def any_concept_referred_privately(self):
+        from core.collections.models import Collection
+        return Collection.objects.filter(
+            public_access=ACCESS_TYPE_NONE
+        ).filter(concepts__in=self.concepts_set.all()).exists()
+
+    def any_mapping_referred_privately(self):
+        from core.collections.models import Collection
+        return Collection.objects.filter(
+            public_access=ACCESS_TYPE_NONE
+        ).filter(mappings__in=self.mappings_set.all()).exists()
+
+    def is_content_privately_referred(self):
+        return self.any_concept_referred_privately() or self.any_mapping_referred_privately()

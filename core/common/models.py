@@ -14,6 +14,7 @@ from pydash import get
 from core.common.services import S3
 from core.common.utils import reverse_resource, reverse_resource_version
 from core.settings import DEFAULT_LOCALE
+from core.sources.constants import CONTENT_REFERRED_PRIVATELY
 from .constants import (
     ACCESS_TYPE_CHOICES, DEFAULT_ACCESS_TYPE, NAMESPACE_REGEX,
     ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT, SUPER_ADMIN_USER_ID,
@@ -347,15 +348,25 @@ class ConceptContainerModel(VersionedModel):
 
     @property
     def prev_version(self):
-        return self.sibling_versions.filter(is_active=True).order_by('-created_at').first()
+        return self.sibling_versions.filter(
+            is_active=True, created_at__lte=self.created_at
+        ).order_by('-created_at').first()
+
+    @staticmethod
+    def is_content_privately_referred():
+        return False
 
     def delete(self, using=None, keep_parents=False):
-        if self.is_latest_version:
+        if self.is_content_privately_referred():
+            raise ValidationError(dict(detail=CONTENT_REFERRED_PRIVATELY))
+
+        if not self.is_head and self.is_latest_version:
             prev_version = self.prev_version
             if not prev_version:
                 raise ValidationError(dict(detail=CANNOT_DELETE_ONLY_VERSION))
             prev_version.is_latest_version = True
             prev_version.save()
+
         generic_export_path = self.generic_export_path()
         super().delete(using=using, keep_parents=keep_parents)
         S3.delete_objects(generic_export_path)

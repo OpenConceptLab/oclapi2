@@ -97,10 +97,15 @@ class S3:
 
     @classmethod
     def delete_objects(cls, path):  # pragma: no cover
-        s3_resource = cls.resource()
-        keys = cls.__fetch_keys(prefix=path)
-        if keys:
-            s3_resource.meta.client.delete_objects(Bucket=settings.AWS_STORAGE_BUCKET_NAME, Delete=dict(Objects=keys))
+        try:
+            s3_resource = cls.resource()
+            keys = cls.__fetch_keys(prefix=path)
+            if keys:
+                s3_resource.meta.client.delete_objects(
+                    Bucket=settings.AWS_STORAGE_BUCKET_NAME, Delete=dict(Objects=keys)
+                )
+        except:  # pylint: disable=bare-except
+            pass
 
     @classmethod
     def missing_objects(cls, objects, prefix_path, sub_paths):  # pragma: no cover
