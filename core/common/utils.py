@@ -1,17 +1,21 @@
 import json
 import os
+import random
 import tempfile
+import uuid
 import zipfile
 from urllib import parse
 
+import requests
 from dateutil import parser
 from django.conf import settings
 from django.urls import NoReverseMatch, reverse, get_resolver, resolve, Resolver404
 from djqscsv import csv_file_for
 from pydash import flatten
+from requests.auth import HTTPBasicAuth
 from rest_framework.utils import encoders
 
-from core.common.constants import UPDATED_SINCE_PARAM
+from core.common.constants import UPDATED_SINCE_PARAM, BULK_IMPORT_QUEUES_COUNT
 from core.common.services import S3
 
 
@@ -271,3 +275,71 @@ def get_base_url():
 def to_snake_case(string):
     # from https://www.geeksforgeeks.org/python-program-to-convert-camel-case-string-to-snake-case/
     return ''.join(['_' + i.lower() if i.isupper() else i for i in string]).lstrip('_')
+
+
+def parse_bulk_import_task_id(task_id):
+    """
+    Used to parse bulk import task id, which is in format '{uuid}-{username}~{queue}'.
+    :param task_id:
+    :return: dictionary with uuid, username, queue
+    """
+    task = dict(uuid=task_id[:37])
+    username = task_id[37:]
+    queue_index = username.find('~')
+    if queue_index != -1:
+        queue = username[queue_index + 1:]
+        username = username[:queue_index]
+    else:
+        queue = 'default'
+
+    task['username'] = username
+    task['queue'] = queue
+    return task
+
+
+def flower_get(url):
+    """
+    Returns a flower response from the given endpoint url.
+    :param url:
+    :return:
+    """
+    return requests.get('http://flower:5555/' + url, auth=HTTPBasicAuth(settings.FLOWER_USER, settings.FLOWER_PWD))
+
+
+def task_exists(task_id):
+    """
+    This method is used to check Celery Task validity when state is PENDING. If task exists in
+    Flower then it's considered as Valid task otherwise invalid task.
+    """
+    flower_response = flower_get('api/task/info/' + task_id)
+    return bool(flower_response and flower_response.status_code == 200 and flower_response.text)
+
+
+def queue_bulk_import(to_import, import_queue, username, update_if_exists):
+    """
+    Used to queue bulk imports. It assigns a bulk import task to a specified import queue or a random one.
+    If requested by the root user, the bulk import goes to the priority queue.
+
+    :param to_import:
+    :param import_queue:
+    :param username:
+    :param update_if_exists:
+    :return: task
+    """
+    task_id = str(uuid.uuid4()) + '-' + username
+
+    if username in ['root', 'ocladmin']:
+        queue_id = 'bulk_import_root'
+        task_id += '~priority'
+    elif import_queue:
+        # assigning to one of 5 queues processed in order
+        queue_id = 'bulk_import_' + str(hash(username + import_queue) % BULK_IMPORT_QUEUES_COUNT)
+        task_id += '~' + import_queue
+    else:
+        # assigning randomly to one of 5 queues processed in order
+        queue_id = 'bulk_import_' + str(random.randrange(0, BULK_IMPORT_QUEUES_COUNT))
+        task_id += '~default'
+
+    from core.common.tasks import bulk_import
+
+    return bulk_import.apply_async((to_import, username, update_if_exists), task_id=task_id, queue=queue_id)

@@ -1,3 +1,4 @@
+import uuid
 from unittest.mock import patch, Mock, mock_open
 
 import boto3
@@ -8,11 +9,12 @@ from django.core.management import call_command
 from django.test import TestCase
 from django.test.runner import DiscoverRunner
 from moto import mock_s3
+from requests.auth import HTTPBasicAuth
 from rest_framework.test import APITestCase
 
 from core.collections.models import Collection
 from core.common.constants import HEAD, OCL_ORG_ID, SUPER_ADMIN_USER_ID
-from core.common.utils import compact_dict_by_values, to_snake_case
+from core.common.utils import compact_dict_by_values, to_snake_case, flower_get, task_exists, parse_bulk_import_task_id
 from core.concepts.models import Concept, LocalizedText
 from core.mappings.models import Mapping
 from core.orgs.models import Organization
@@ -332,6 +334,54 @@ class UtilsTest(OCLTestCase):
         self.assertEqual(to_snake_case("foobar"), "foobar")
         self.assertEqual(to_snake_case("foo_bar"), "foo_bar")
         self.assertEqual(to_snake_case("fooBar"), "foo_bar")
+
+    @patch('core.common.utils.requests.get')
+    def test_flower_get(self, http_get_mock):
+        http_get_mock.return_value = 'foo-task-response'
+
+        self.assertEqual(flower_get('some-url'), 'foo-task-response')
+
+        http_get_mock.assert_called_once_with(
+            'http://flower:5555/some-url',
+            auth=HTTPBasicAuth(settings.FLOWER_USER, settings.FLOWER_PWD)
+        )
+
+    @patch('core.common.utils.flower_get')
+    def test_task_exists(self, flower_get_mock):
+        flower_get_mock.return_value = None
+
+        self.assertFalse(task_exists('task-id'))
+        flower_get_mock.assert_called_with('api/task/info/task-id')
+
+        flower_get_mock.return_value = Mock(status_code=400)
+
+        self.assertFalse(task_exists('task-id'))
+        flower_get_mock.assert_called_with('api/task/info/task-id')
+
+        flower_get_mock.return_value = Mock(status_code=200, text=None)
+
+        self.assertFalse(task_exists('task-id'))
+        flower_get_mock.assert_called_with('api/task/info/task-id')
+
+        flower_get_mock.return_value = Mock(status_code=200, text='Success')
+
+        self.assertTrue(task_exists('task-id'))
+        flower_get_mock.assert_called_with('api/task/info/task-id')
+
+    def test_parse_bulk_import_task_id(self):
+        task_uuid = str(uuid.uuid4())
+
+        task_id = "{}-{}~{}".format(task_uuid, 'username', 'queue')
+        self.assertEqual(
+            parse_bulk_import_task_id(task_id),
+            dict(uuid=task_uuid + '-', username='username', queue='queue')
+        )
+
+        task_id = "{}-{}".format(task_uuid, 'username')
+        self.assertEqual(
+            parse_bulk_import_task_id(task_id),
+            dict(uuid=task_uuid + '-', username='username', queue='default')
+        )
 
 
 class BaseModelTest(OCLTestCase):
