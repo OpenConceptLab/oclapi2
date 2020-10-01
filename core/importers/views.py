@@ -86,11 +86,8 @@ class BulkImportView(APIView):
             task = parse_bulk_import_task_id(task_id)
 
             if user.is_staff or user.username == task['username']:
-                if (
-                        not import_queue or task['queue'] == import_queue
-                ) and (
-                    not username or task['username'] == username
-                ):
+                if (not import_queue or task['queue'] == import_queue) and \
+                        (not username or task['username'] == username):
                     tasks.append(
                         dict(task=task_id, state=value['state'], queue=task['queue'], username=task['username'])
                     )
