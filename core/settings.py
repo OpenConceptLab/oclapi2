@@ -274,3 +274,6 @@ ES_SYNC = True
 USE_X_FORWARDED_HOST = True
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 ENV = os.environ.get('ENVIRONMENT', 'development')
+# Only used for flower
+FLOWER_USER = os.environ.get('FLOWER_USER', 'floweruser')
+FLOWER_PWD = os.environ.get('FLOWER_PWD', 'Flower123')

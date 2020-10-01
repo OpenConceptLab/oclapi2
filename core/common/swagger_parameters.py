@@ -42,3 +42,18 @@ released_param = openapi.Parameter(
 processing_param = openapi.Parameter(
     PROCESSING_PARAM, openapi.IN_QUERY, type=openapi.TYPE_BOOLEAN, default=False,
 )
+
+# bulk import params
+task_param = openapi.Parameter(
+    'task', openapi.IN_QUERY, description="task uuid (mandatory)", type=openapi.TYPE_STRING
+)
+username_param = openapi.Parameter(
+    'username', openapi.IN_QUERY, description="username", type=openapi.TYPE_STRING
+)
+result_param = openapi.Parameter(
+    'result', openapi.IN_QUERY, description="result format (json | report) (optional)", type=openapi.TYPE_STRING
+)
+update_if_exists_param = openapi.Parameter(
+    'update_if_exists', openapi.IN_QUERY, description="true | false (mandatory)", type=openapi.TYPE_STRING,
+    default='true'
+)

@@ -49,3 +49,4 @@ SOURCE_PARENT_CANNOT_BE_NONE = 'Source parent cannot be None.'
 PARENT_RESOURCE_CANNOT_BE_NONE = 'Parent resource cannot be None.'
 CREATOR_CANNOT_BE_NONE = 'Creator cannot be None.'
 CANNOT_DELETE_ONLY_VERSION = 'Cannot delete only version.'
+BULK_IMPORT_QUEUES_COUNT = 5

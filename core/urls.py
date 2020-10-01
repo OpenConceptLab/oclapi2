@@ -15,13 +15,14 @@ Including another URLconf
 """
 from django.conf.urls import url
 from django.contrib import admin
-from django.urls import path, include
+from django.urls import path, include, re_path
 from drf_yasg import openapi
 from drf_yasg.views import get_schema_view
 from rest_framework import permissions
 
 import core.concepts.views as concept_views
 import core.mappings.views as mapping_views
+from core.common.constants import NAMESPACE_PATTERN
 from core.common.utils import get_base_url
 from core.importers.views import BulkImportView
 
@@ -48,5 +49,12 @@ urlpatterns = [
     path('concepts/', concept_views.ConceptVersionListAllView.as_view(), name='all-concepts'),
     path('mappings/', mapping_views.MappingVersionListAllView.as_view(), name='all-mappings'),
     path('importers/', include('core.importers.urls')),
-    url('manage/bulkimport/', BulkImportView.as_view(), name='bulk-import')  # just for ocldev
+
+    # just for ocldev
+    url('manage/bulkimport/', BulkImportView.as_view(), name='bulk-import'),
+    re_path(
+        'manage/bulkimport/(?P<import_queue>{pattern})/'.format(pattern=NAMESPACE_PATTERN),
+        BulkImportView.as_view(),
+        name='bulk-import-detail'
+    )
 ]
