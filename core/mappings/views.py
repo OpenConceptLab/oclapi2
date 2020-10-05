@@ -96,7 +96,8 @@ class MappingListView(MappingBaseView, ListWithHeadersMixin, CreateModelMixin):
         if 'org' in self.kwargs:
             filters = dict(organization__mnemonic=self.kwargs['org'])
         else:
-            filters = dict(user__username=self.kwargs['user'])
+            username = self.request.user.username if self.user_is_self else self.kwargs.get('user')
+            filters = dict(user__username=username)
         if source:
             parent_resource = Source.get_version(source, source_version, filters)
         self.kwargs['parent_resource'] = self.parent_resource = parent_resource

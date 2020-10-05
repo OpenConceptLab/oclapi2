@@ -39,6 +39,8 @@ class OrganizationListView(BaseAPIView,
 
     def get_queryset(self):
         username = self.kwargs.get('user')
+        if not username and self.user_is_self:
+            username = get(self.request.user, 'username')
         if username:
             return Organization.get_by_username(username)
         if self.request.user.is_anonymous:
@@ -184,13 +186,21 @@ class OrganizationMemberView(generics.GenericAPIView):
 
 class OrganizationSourceListView(SourceListView):  # pragma: no cover
     def get_queryset(self):
-        user = UserProfile.objects.get(username=self.kwargs.get('user', None))
+        username = self.kwargs.get('user', None)
+        if not username and self.user_is_self:
+            username = get(self.request.user, 'username')
+
+        user = UserProfile.objects.get(username=username)
         return self.queryset.filter(organization__in=user.organizations.all())
 
 
 class OrganizationCollectionListView(CollectionListView):  # pragma: no cover
     def get_queryset(self):
-        user = UserProfile.objects.get(username=self.kwargs.get('user', None))
+        username = self.kwargs.get('user', None)
+        if not username and self.user_is_self:
+            username = get(self.request.user, 'username')
+
+        user = UserProfile.objects.get(username=username)
         return self.queryset.filter(organization__in=user.organizations.all())
 
 
