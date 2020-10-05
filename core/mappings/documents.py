@@ -41,6 +41,7 @@ class MappingDocument(Document):
     collection_version = fields.ListField(fields.IntegerField())
     collection = fields.ListField(fields.KeywordField())
     public_can_view = fields.BooleanField(attr='public_can_view')
+    id = fields.KeywordField(attr='mnemonic')
 
     @staticmethod
     def prepare_from_concept(instance):

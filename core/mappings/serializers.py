@@ -5,7 +5,8 @@ from core.mappings.models import Mapping
 
 
 class MappingListSerializer(ModelSerializer):
-    id = CharField(source='versioned_object_id', read_only=True)
+    id = CharField(source='mnemonic', required=False)
+    uuid = CharField(source='id', read_only=True)
     source = CharField(source='parent_resource', read_only=True)
     owner = CharField(source='owner_name', read_only=True)
     update_comment = CharField(source='comment', required=False)
@@ -23,7 +24,7 @@ class MappingListSerializer(ModelSerializer):
             'from_source_owner', 'from_source_owner_type', 'from_source_url', 'from_source_name',
             'to_source_owner', 'to_source_owner_type', 'to_source_url', 'to_source_name',
             'url', 'version', 'id', 'versioned_object_id', 'versioned_object_url',
-            'is_latest_version', 'update_comment', 'version_url'
+            'is_latest_version', 'update_comment', 'version_url', 'uuid'
         )
 
     @staticmethod
@@ -77,6 +78,7 @@ class MappingDetailSerializer(MappingListSerializer):
         if to_source_url:
             instance.to_source = Source.head_from_uri(to_source_url).first()
 
+        instance.mnemonic = validated_data.get('mnemonic', instance.mnemonic)
         instance.map_type = validated_data.get('map_type', instance.map_type)
         instance.to_concept_code = validated_data.get('to_concept_code', instance.to_concept_code)
         instance.to_concept_name = validated_data.get('to_concept_name', instance.to_concept_name)

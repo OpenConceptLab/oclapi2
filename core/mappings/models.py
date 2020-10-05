@@ -1,8 +1,11 @@
+import uuid
+
 from django.core.exceptions import ValidationError
+from django.core.validators import RegexValidator
 from django.db import models, IntegrityError, transaction
 from pydash import get, compact
 
-from core.common.constants import TEMP, INCLUDE_RETIRED_PARAM
+from core.common.constants import TEMP, INCLUDE_RETIRED_PARAM, NAMESPACE_REGEX
 from core.common.mixins import SourceChildMixin
 from core.common.models import VersionedModel
 from core.common.utils import parse_updated_since_param
@@ -14,6 +17,7 @@ from core.mappings.mixins import MappingValidationMixin
 class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
     class Meta:
         db_table = 'mappings'
+        unique_together = ('mnemonic', 'version', 'parent')
 
     parent = models.ForeignKey('sources.Source', related_name='mappings_set', on_delete=models.DO_NOTHING)
     map_type = models.TextField()
@@ -34,24 +38,22 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
     versioned_object = models.ForeignKey(
         'self', related_name='versions_set', null=True, blank=True, on_delete=models.CASCADE
     )
+    mnemonic = models.CharField(
+        max_length=255, validators=[RegexValidator(regex=NAMESPACE_REGEX)], default=uuid.uuid4,
+    )
+
     name = None
     full_name = None
     default_locale = None
     supported_locales = None
     website = None
     description = None
-    mnemonic = None
-    mnemonic_attr = 'versioned_object_id'
 
     OBJECT_TYPE = MAPPING_TYPE
     ALREADY_RETIRED = MAPPING_IS_ALREADY_RETIRED
     ALREADY_NOT_RETIRED = MAPPING_IS_ALREADY_NOT_RETIRED
     WAS_RETIRED = MAPPING_WAS_RETIRED
     WAS_UNRETIRED = MAPPING_WAS_UNRETIRED
-
-    @property
-    def mnemonic(self):  # pylint: disable=function-redefined
-        return self.versioned_object_id
 
     @property
     def mapping(self):  # for url kwargs
@@ -179,6 +181,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
     def clone(self, user=None):
         mapping = Mapping(
             version=TEMP,
+            mnemonic=self.mnemonic,
             parent_id=self.parent_id,
             map_type=self.map_type,
             from_concept_id=self.from_concept_id,
@@ -223,6 +226,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         if to_concept_url:
             mapping.to_concept = Concept.from_uri_queryset(to_concept_url).first()
 
+        mapping.mnemonic = data.get('mnemonic', TEMP)
         mapping.version = TEMP
         mapping.errors = dict()
 
@@ -230,8 +234,10 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
             mapping.full_clean()
             mapping.save()
             if mapping.id:
-                mapping.is_latest_version = False
                 mapping.version = str(mapping.id)
+                if mapping.mnemonic == TEMP:
+                    mapping.mnemonic = str(mapping.id)
+                mapping.is_latest_version = False
                 mapping.versioned_object_id = mapping.id
                 mapping.save()
                 initial_version = cls.create_initial_version(mapping)
@@ -346,7 +352,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
                 queryset = queryset.filter(sources__version=container_version)
 
         if mapping:
-            queryset = queryset.filter(versioned_object_id=mapping)
+            queryset = queryset.filter(mnemonic__iexact=mapping)
         if mapping_version:
             queryset = queryset.filter(version=mapping_version)
         if is_latest:
