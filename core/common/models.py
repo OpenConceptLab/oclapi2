@@ -358,7 +358,7 @@ class ConceptContainerModel(VersionedModel):
 
     def delete(self, using=None, keep_parents=False):
         if self.is_content_privately_referred():
-            raise ValidationError(dict(detail=CONTENT_REFERRED_PRIVATELY))
+            raise ValidationError(dict(detail=CONTENT_REFERRED_PRIVATELY.format(self.mnemonic)))
 
         if not self.is_head and self.is_latest_version:
             prev_version = self.prev_version

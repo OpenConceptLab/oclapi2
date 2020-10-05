@@ -15,6 +15,7 @@ from core.concepts.tests.factories import ConceptFactory
 from core.mappings.serializers import MappingDetailSerializer
 from core.mappings.tests.factories import MappingFactory
 from core.orgs.models import Organization
+from core.sources.constants import CONTENT_REFERRED_PRIVATELY
 from core.sources.models import Source
 from core.sources.serializers import SourceDetailSerializer
 from core.sources.tests.factories import OrganizationSourceFactory, UserSourceFactory
@@ -391,7 +392,7 @@ class SourceVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.data, {'detail': ['Could not delete. Some of the content is referred privately.']})
+        self.assertEqual(response.data, {'detail': [CONTENT_REFERRED_PRIVATELY.format(self.source_v1.mnemonic)]})
         self.assertEqual(self.source.versions.count(), 2)
         self.assertTrue(self.source.versions.filter(version='v1').exists())
 
