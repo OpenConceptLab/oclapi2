@@ -9,6 +9,7 @@ from rest_framework.views import APIView
 
 from core.common.swagger_parameters import update_if_exists_param, task_param, result_param, username_param
 from core.common.utils import parse_bulk_import_task_id, task_exists, flower_get, queue_bulk_import
+from core.importers.constants import ALREADY_QUEUED, INVALID_UPDATE_IF_EXISTS
 
 
 class BulkImportView(APIView):
@@ -24,7 +25,7 @@ class BulkImportView(APIView):
         update_if_exists = request.GET.get('update_if_exists', 'true')
         if update_if_exists not in ['true', 'false']:
             return Response(
-                dict(exception="update_if_exists must be either 'true' or 'false'"),
+                dict(exception=INVALID_UPDATE_IF_EXISTS),
                 status=status.HTTP_400_BAD_REQUEST
             )
         update_if_exists = update_if_exists == 'true'
@@ -33,7 +34,7 @@ class BulkImportView(APIView):
             data = request.body.decode('utf-8') if isinstance(request.body, bytes) else request.body
             task = queue_bulk_import(data, import_queue, username, update_if_exists)
         except AlreadyQueued:
-            return Response(dict(exception='The same import has been already queued'), status=status.HTTP_409_CONFLICT)
+            return Response(dict(exception=ALREADY_QUEUED), status=status.HTTP_409_CONFLICT)
 
         parsed_task = parse_bulk_import_task_id(task.id)
 
