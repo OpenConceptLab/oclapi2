@@ -31,6 +31,7 @@ class MappingBaseView(SourceChildCommonBaseView):
     document_model = MappingDocument
     facet_class = MappingSearch
     es_fields = {
+        'id': {'sortable': True, 'filterable': True},
         'last_update': {'sortable': True, 'filterable': False, 'facet': False, 'default': 'desc'},
         'concept': {'sortable': False, 'filterable': True, 'facet': False, 'exact': True},
         'from_concept': {'sortable': False, 'filterable': True, 'facet': False, 'exact': True},
