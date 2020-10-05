@@ -43,6 +43,7 @@ urlpatterns = [
     url(r'^redoc/$', SchemaView.with_ui('redoc', cache_timeout=0), name='schema-redoc'),
     path('admin/', admin.site.urls),
     path('users/', include('core.users.urls')),
+    path('user/', include('core.users.user_urls')),
     path('orgs/', include('core.orgs.urls')),
     path('sources/', include('core.sources.urls')),
     path('collections/', include('core.collections.urls')),

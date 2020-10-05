@@ -47,7 +47,11 @@ class SourceBaseView(BaseAPIView):
         if not version and default_version_to_head:
             version = HEAD
 
-        return {**query_params.copy(), **self.kwargs.copy(), 'version': version}
+        kwargs = self.kwargs.copy()
+        if self.user_is_self and self.request.user.is_authenticated:
+            kwargs['user'] = self.request.user.username
+
+        return {**query_params.copy(), **kwargs, 'version': version}
 
     def get_queryset(self):
         return Source.get_base_queryset(compact_dict_by_values(self.get_filter_params()))

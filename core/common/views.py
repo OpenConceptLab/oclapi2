@@ -266,6 +266,9 @@ class SourceChildCommonBaseView(BaseAPIView):
 
     def __get_params(self):
         kwargs = self.kwargs.copy()
+        if self.user_is_self and self.request.user.is_authenticated:
+            kwargs['user'] = self.request.user.username
+
         query_params = self.request.query_params.dict().copy()
         kwargs.update(query_params)
         return compact_dict_by_values(kwargs)

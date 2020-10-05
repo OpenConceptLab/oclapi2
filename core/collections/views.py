@@ -56,6 +56,8 @@ class CollectionBaseView(BaseAPIView):
         from core.users.models import UserProfile
         org = self.kwargs.get('org', None)
         user = self.kwargs.get('user', None)
+        if not user and self.user_is_self:
+            user = self.request.user.username
         parent_resource = None
         if org:
             parent_resource = Organization.objects.filter(mnemonic=org).first()
@@ -80,8 +82,12 @@ class CollectionBaseView(BaseAPIView):
         if not version and default_version_to_head:
             version = HEAD
 
+        kwargs = self.kwargs.copy()
+        if self.user_is_self and self.request.user.is_authenticated:
+            kwargs['user'] = self.request.user.username
+
         return {
-            **query_params.copy(), **self.kwargs.copy(),
+            **query_params.copy(), **kwargs,
             'version': version, 'include_references': self.should_include_references()
         }
 

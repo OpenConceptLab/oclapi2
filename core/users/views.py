@@ -17,7 +17,6 @@ class UserBaseView(BaseAPIView):
     pk_field = 'username'
     model = UserProfile
     queryset = UserProfile.objects.filter(is_active=True)
-    user_is_self = False
     es_fields = {
         'username': {'sortable': True, 'filterable': True, 'exact': True},
         'date_joined': {'sortable': True, 'default': 'asc', 'filterable': True},
@@ -90,8 +89,9 @@ class UserDetailView(UserBaseView, RetrieveAPIView, DestroyAPIView, mixins.Updat
         return [IsAuthenticated()]
 
     def get_object(self, queryset=None):
-        instance = super().get_object(queryset)
+        instance = self.request.user if self.kwargs.get('user_is_self') else super().get_object(queryset)
         self.user_is_self = self.request.user.username == instance.username
+
         return instance
 
     def put(self, request, *args, **kwargs):
