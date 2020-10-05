@@ -59,6 +59,15 @@ class OrganizationListViewTest(OCLAPITestCase):
             ['user-public-view-org', 'public-edit-org', 'public-view-org', 'OCL']
         )
 
+        response = self.client.get(
+            '/user/orgs/?verbose=true',
+            HTTP_AUTHORIZATION='Token ' + random_user.get_token(),
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 0)
+
     def test_get_200_superuser(self):
         response = self.client.get(
             '/orgs/',
