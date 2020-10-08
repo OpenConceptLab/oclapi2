@@ -29,6 +29,7 @@ class CustomPaginator:
         self.page_number = int(request.GET.get('page', '1'))
         self.paginator = Paginator(self.queryset, self.page_size)
         self.page_object = self.paginator.get_page(self.page_number)
+        self.page_count = self.paginator.num_pages
 
     @property
     def current_page_number(self):
@@ -61,7 +62,8 @@ class CustomPaginator:
     @property
     def headers(self):
         headers = dict(
-            num_found=self.queryset.count(), num_returned=len(self.current_page_results)
+            num_found=self.queryset.count(), num_returned=len(self.current_page_results),
+            pages=self.page_count, page_number=self.page_number
         )
         if self.page_object.has_next():
             headers['next'] = self.get_next_page_url()
