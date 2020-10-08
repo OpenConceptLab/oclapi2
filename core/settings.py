@@ -36,6 +36,8 @@ CORS_ALLOW_HEADERS = default_headers + (
 CORS_EXPOSE_HEADERS = (
     'num_found',
     'num_returned',
+    'pages',
+    'page_number',
     'next',
     'previous',
     'offset',
