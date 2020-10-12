@@ -12,7 +12,7 @@ from django_elasticsearch_dsl.signals import RealTimeSignalProcessor
 from pydash import get
 
 from core.common.services import S3
-from core.common.utils import reverse_resource, reverse_resource_version
+from core.common.utils import reverse_resource, reverse_resource_version, parse_updated_since_param
 from core.settings import DEFAULT_LOCALE
 from core.sources.constants import CONTENT_REFERRED_PRIVATELY
 from .constants import (
@@ -289,6 +289,7 @@ class ConceptContainerModel(VersionedModel):
         org = params.get('org', None)
         version = params.get('version', None)
         is_latest = params.get('is_latest', None)
+        updated_since = parse_updated_since_param(params)
 
         queryset = cls.objects.filter(is_active=True)
         if username:
@@ -299,6 +300,8 @@ class ConceptContainerModel(VersionedModel):
             queryset = queryset.filter(version=version)
         if is_latest:
             queryset = queryset.filter(is_latest_version=True)
+        if updated_since:
+            queryset = queryset.filter(updated_at__gte=updated_since)
 
         return queryset
 
