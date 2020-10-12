@@ -22,6 +22,11 @@ urlpatterns = [
         views.SourceLatestVersionRetrieveUpdateView.as_view(),
         name='sourceversion-latest-detail'
     ),
+    re_path(
+        r'^(?P<source>{pattern})/latest/export/$'.format(pattern=NAMESPACE_PATTERN),
+        views.SourceVersionExportView.as_view(),
+        name='sourceversion-latest-export-detail'
+    ),
     re_path(r"^(?P<source>{pattern})/concepts/".format(pattern=NAMESPACE_PATTERN), include('core.concepts.urls')),
     re_path(r"^(?P<source>{pattern})/mappings/".format(pattern=NAMESPACE_PATTERN), include('core.mappings.urls')),
     re_path(
