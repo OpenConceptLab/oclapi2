@@ -482,8 +482,12 @@ class SourceChildMixin:
 
 
 class ConceptContainerExportMixin:
-    def get_object(self, queryset=None):  # pylint: disable=unused-argument
-        instance = self.get_queryset().first()
+    def get_object(self):
+        queryset = self.get_queryset()
+        if 'version' not in self.kwargs:
+            queryset = queryset.filter(is_latest_version=True)
+
+        instance = queryset.first()
 
         if not instance:
             raise Http404()
