@@ -14,7 +14,8 @@ from rest_framework.test import APITestCase
 
 from core.collections.models import Collection
 from core.common.constants import HEAD, OCL_ORG_ID, SUPER_ADMIN_USER_ID
-from core.common.utils import compact_dict_by_values, to_snake_case, flower_get, task_exists, parse_bulk_import_task_id
+from core.common.utils import compact_dict_by_values, to_snake_case, flower_get, task_exists, parse_bulk_import_task_id, \
+    to_camel_case
 from core.concepts.models import Concept, LocalizedText
 from core.mappings.models import Mapping
 from core.orgs.models import Organization
@@ -334,6 +335,12 @@ class UtilsTest(OCLTestCase):
         self.assertEqual(to_snake_case("foobar"), "foobar")
         self.assertEqual(to_snake_case("foo_bar"), "foo_bar")
         self.assertEqual(to_snake_case("fooBar"), "foo_bar")
+
+    def test_to_camel_case(self):
+        self.assertEqual(to_camel_case(""), "")
+        self.assertEqual(to_camel_case("foobar"), "foobar")
+        self.assertEqual(to_camel_case("foo_bar"), "fooBar")
+        self.assertEqual(to_camel_case("fooBar"), "fooBar")
 
     @patch('core.common.utils.requests.get')
     def test_flower_get(self, http_get_mock):
