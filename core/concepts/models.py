@@ -256,26 +256,26 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         updated_since = parse_updated_since_param(params)
 
         if collection:
-            queryset = queryset.filter(collection_set__mnemonic=collection)
+            queryset = queryset.filter(collection_set__mnemonic__in=collection.split(','))
             if user:
-                queryset = queryset.filter(collection_set__user__username=user)
+                queryset = queryset.filter(collection_set__user__username__in=user.split(','))
             if org:
-                queryset = queryset.filter(collection_set__organization__mnemonic=org)
+                queryset = queryset.filter(collection_set__organization__mnemonic__in=org.split(','))
             if container_version:
-                queryset = queryset.filter(collection_set__version=container_version)
+                queryset = queryset.filter(collection_set__version__in=container_version.split(','))
         if source:
-            queryset = queryset.filter(sources__mnemonic=source)
+            queryset = queryset.filter(sources__mnemonic__in=source.split(','))
             if user:
-                queryset = queryset.filter(parent__user__username=user)
+                queryset = queryset.filter(parent__user__username__in=user.split(','))
             if org:
-                queryset = queryset.filter(parent__organization__mnemonic=org)
+                queryset = queryset.filter(parent__organization__mnemonic__in=org.split(','))
             if container_version:
-                queryset = queryset.filter(sources__version=container_version)
+                queryset = queryset.filter(sources__version__in=container_version.split(','))
 
         if concept:
             queryset = queryset.filter(mnemonic__iexact=concept)
         if concept_version:
-            queryset = queryset.filter(version=concept_version)
+            queryset = queryset.filter(version__in=concept_version.split(','))
         if is_latest:
             queryset = queryset.filter(is_latest_version=True)
         if not include_retired:

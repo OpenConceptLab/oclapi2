@@ -293,11 +293,11 @@ class ConceptContainerModel(VersionedModel):
 
         queryset = cls.objects.filter(is_active=True)
         if username:
-            queryset = queryset.filter(user__username=username)
+            queryset = queryset.filter(user__username__in=username.split(','))
         if org:
-            queryset = queryset.filter(organization__mnemonic=org)
+            queryset = queryset.filter(organization__mnemonic__in=org.split(','))
         if version:
-            queryset = queryset.filter(version=version)
+            queryset = queryset.filter(version__in=version.split(','))
         if is_latest:
             queryset = queryset.filter(is_latest_version=True)
         if updated_since:
