@@ -277,6 +277,12 @@ def to_snake_case(string):
     return ''.join(['_' + i.lower() if i.isupper() else i for i in string]).lstrip('_')
 
 
+def to_camel_case(string):
+    # from https://www.geeksforgeeks.org/python-convert-snake-case-string-to-camel-case/?ref=rp
+    temp = string.split('_')
+    return str(temp[0] + ''.join(ele.title() for ele in temp[1:]))
+
+
 def parse_bulk_import_task_id(task_id):
     """
     Used to parse bulk import task id, which is in format '{uuid}-{username}~{queue}'.
