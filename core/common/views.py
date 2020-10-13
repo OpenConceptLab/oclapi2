@@ -6,7 +6,7 @@ from rest_framework import response, generics, status
 
 from core.common.constants import SEARCH_PARAM, ES_RESULTS_MAX_LIMIT, LIST_DEFAULT_LIMIT, CSV_DEFAULT_LIMIT, LIMIT_PARAM
 from core.common.mixins import PathWalkerMixin
-from core.common.utils import compact_dict_by_values, to_snake_case
+from core.common.utils import compact_dict_by_values, to_snake_case, to_camel_case
 from core.concepts.permissions import CanViewParentDictionary
 from core.orgs.constants import ORG_OBJECT_TYPE
 from core.users.constants import USER_OBJECT_TYPE
@@ -159,13 +159,14 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
             return criterion
 
-    def get_faceted_filters(self):
+    def get_faceted_filters(self, split=False):
         faceted_filters = dict()
         faceted_fields = self.get_faceted_fields()
         query_params = {to_snake_case(k): v for k, v in self.request.query_params.dict().items()}
         for field in faceted_fields:
             if field in query_params:
-                faceted_filters[field] = query_params[field]
+                query_value = query_params[field]
+                faceted_filters[field] = query_value.split(',') if split else query_value
         return faceted_filters
 
     def get_faceted_fields(self):
@@ -190,7 +191,8 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     def get_facets(self):
         facets = dict()
         if self.should_include_facets() and self.facet_class:
-            filters = {**self.default_filters, **self.get_facet_filters_from_kwargs()}
+            faceted_filters = {to_camel_case(k): v for k, v in self.get_faceted_filters(True).items()}
+            filters = {**self.default_filters, **self.get_facet_filters_from_kwargs(), **faceted_filters}
             searcher = self.facet_class(  # pylint: disable=not-callable
                 self.get_search_string(), filters=filters, exact_match=self.is_exact_match_on()
             )

@@ -51,7 +51,7 @@ class Source(ConceptContainerModel):
         source = params.pop('source', None)
         queryset = super().get_base_queryset(params)
         if source:
-            queryset = queryset.filter(mnemonic=source)
+            queryset = queryset.filter(mnemonic__in=source.split(','))
 
         return queryset
 
