@@ -111,7 +111,7 @@ class ConceptListSerializer(ModelSerializer):
         fields = (
             'uuid', 'id', 'external_id', 'concept_class', 'datatype', 'url', 'retired', 'source',
             'owner', 'owner_type', 'owner_url', 'display_name', 'display_locale', 'version', 'update_comment',
-            'locale', 'version_created_by', 'version_created_on', 'mappings', 'is_latest_version'
+            'locale', 'version_created_by', 'version_created_on', 'mappings', 'is_latest_version', 'versions_url',
         )
 
     @staticmethod

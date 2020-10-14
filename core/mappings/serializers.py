@@ -1,4 +1,4 @@
-from rest_framework.fields import CharField, JSONField, IntegerField, SerializerMethodField
+from rest_framework.fields import CharField, JSONField, IntegerField, SerializerMethodField, DateTimeField
 from rest_framework.serializers import ModelSerializer
 
 from core.mappings.models import Mapping
@@ -14,6 +14,7 @@ class MappingListSerializer(ModelSerializer):
     version = CharField(read_only=True)
     to_concept_code = SerializerMethodField()
     to_concept_name = SerializerMethodField()
+    version_created_on = DateTimeField(source='created_at', read_only=True)
 
     class Meta:
         model = Mapping
@@ -24,7 +25,7 @@ class MappingListSerializer(ModelSerializer):
             'from_source_owner', 'from_source_owner_type', 'from_source_url', 'from_source_name',
             'to_source_owner', 'to_source_owner_type', 'to_source_url', 'to_source_name',
             'url', 'version', 'id', 'versioned_object_id', 'versioned_object_url',
-            'is_latest_version', 'update_comment', 'version_url', 'uuid'
+            'is_latest_version', 'update_comment', 'version_url', 'uuid', 'version_created_on'
         )
 
     @staticmethod
