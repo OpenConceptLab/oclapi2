@@ -9,15 +9,15 @@ from rest_framework.mixins import CreateModelMixin
 from rest_framework.response import Response
 
 from core.common.constants import (
-    HEAD, INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_RETIRED_PARAM,
-    NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY)
+    HEAD, INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_RETIRED_PARAM)
 from core.common.exceptions import Http409
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryMixin
 from core.common.swagger_parameters import (
     q_param, limit_param, sort_desc_param, page_param, exact_match_param, sort_asc_param, verbose_param,
     include_facets_header, updated_since_param, include_inverse_mappings_param, include_retired_param
 )
-from core.common.views import SourceChildCommonBaseView
+from core.common.views import SourceChildCommonBaseView, SourceChildExtrasView, \
+    SourceChildExtraRetrieveUpdateDestroyView
 from core.concepts.constants import COULD_NOT_FIND_CONCEPT_TO_UPDATE, PARENT_VERSION_NOT_LATEST_CANNOT_UPDATE_CONCEPT
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept, LocalizedText
@@ -365,60 +365,10 @@ class ConceptDescriptionRetrieveUpdateDestroyView(ConceptLabelRetrieveUpdateDest
     serializer_class = ConceptDescriptionSerializer
 
 
-class ConceptExtrasBaseView(ConceptBaseView):
-    default_qs_sort_attr = '-created_at'
-
-    def get_object(self, queryset=None):
-        return self.get_queryset().filter(is_latest_version=True).first()
-
-
-class ConceptExtrasView(ConceptExtrasBaseView, ListAPIView):
-    permission_classes = (CanViewParentDictionary,)
+class ConceptExtrasView(SourceChildExtrasView, ConceptBaseView):
     serializer_class = ConceptDetailSerializer
 
-    def list(self, request, *args, **kwargs):
-        return Response(get(self.get_object(), 'extras', {}))
 
-
-class ConceptExtraRetrieveUpdateDestroyView(ConceptExtrasBaseView, RetrieveUpdateDestroyAPIView):
+class ConceptExtraRetrieveUpdateDestroyView(SourceChildExtraRetrieveUpdateDestroyView, ConceptBaseView):
     serializer_class = ConceptDetailSerializer
-
-    def get_permissions(self):
-        if self.request.method in ['GET', 'HEAD']:
-            return [CanViewParentDictionary()]
-
-        return [CanEditParentDictionary()]
-
-    def retrieve(self, request, *args, **kwargs):
-        key = kwargs.get('extra')
-        instance = self.get_object()
-        extras = get(instance, 'extras', {})
-        if key in extras:
-            return Response({key: extras[key]})
-        return Response(dict(detail=NOT_FOUND), status=status.HTTP_404_NOT_FOUND)
-
-    def update(self, request, **kwargs):
-        key = kwargs.get('extra')
-        value = request.data.get(key)
-        if not value:
-            return Response([MUST_SPECIFY_EXTRA_PARAM_IN_BODY.format(key)], status=status.HTTP_400_BAD_REQUEST)
-
-        new_version = self.get_object().clone()
-        new_version.extras[key] = value
-        new_version.comment = 'Updated extras: %s=%s.' % (key, value)
-        errors = Concept.persist_clone(new_version, request.user)
-        if errors:
-            return Response(errors, status=status.HTTP_400_BAD_REQUEST)
-        return Response({key: value})
-
-    def delete(self, request, *args, **kwargs):
-        key = kwargs.get('extra')
-        new_version = self.get_object().clone()
-        if key in new_version.extras:
-            del new_version.extras[key]
-            new_version.comment = 'Deleted extra %s.' % key
-            errors = Concept.persist_clone(new_version, request.user)
-            if errors:
-                return Response(errors, status=status.HTTP_400_BAD_REQUEST)
-            return Response(status=status.HTTP_204_NO_CONTENT)
-        return Response(dict(detail=NOT_FOUND), status=status.HTTP_404_NOT_FOUND)
+    model = Concept

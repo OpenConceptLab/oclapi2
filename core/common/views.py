@@ -3,11 +3,14 @@ from django.shortcuts import get_object_or_404
 from elasticsearch_dsl import Q
 from pydash import get
 from rest_framework import response, generics, status
+from rest_framework.generics import ListAPIView, RetrieveUpdateDestroyAPIView
+from rest_framework.response import Response
 
-from core.common.constants import SEARCH_PARAM, ES_RESULTS_MAX_LIMIT, LIST_DEFAULT_LIMIT, CSV_DEFAULT_LIMIT, LIMIT_PARAM
+from core.common.constants import SEARCH_PARAM, ES_RESULTS_MAX_LIMIT, LIST_DEFAULT_LIMIT, CSV_DEFAULT_LIMIT, \
+    LIMIT_PARAM, NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY
 from core.common.mixins import PathWalkerMixin
 from core.common.utils import compact_dict_by_values, to_snake_case, to_camel_case
-from core.concepts.permissions import CanViewParentDictionary
+from core.concepts.permissions import CanViewParentDictionary, CanEditParentDictionary
 from core.orgs.constants import ORG_OBJECT_TYPE
 from core.users.constants import USER_OBJECT_TYPE
 
@@ -281,3 +284,62 @@ class SourceChildCommonBaseView(BaseAPIView):
             self.limit = CSV_DEFAULT_LIMIT if self.params.get('csv') else int(self.params.get(
                 LIMIT_PARAM, LIST_DEFAULT_LIMIT
             ))
+
+
+class SourceChildExtrasBaseView:
+    default_qs_sort_attr = '-created_at'
+
+    def get_object(self):
+        queryset = self.get_queryset()
+
+        if 'concept_version' in self.kwargs or 'mapping_version' in self.kwargs:
+            return queryset.first()
+
+        return queryset.filter(is_latest_version=True).first()
+
+    def get_permissions(self):
+        if self.request.method in ['GET', 'HEAD']:
+            return [CanViewParentDictionary()]
+
+        return [CanEditParentDictionary()]
+
+
+class SourceChildExtrasView(SourceChildExtrasBaseView, ListAPIView):
+    def list(self, request, *args, **kwargs):
+        return Response(get(self.get_object(), 'extras', {}))
+
+
+class SourceChildExtraRetrieveUpdateDestroyView(SourceChildExtrasBaseView, RetrieveUpdateDestroyAPIView):
+    def retrieve(self, request, *args, **kwargs):
+        key = kwargs.get('extra')
+        instance = self.get_object()
+        extras = get(instance, 'extras', {})
+        if key in extras:
+            return Response({key: extras[key]})
+        return Response(dict(detail=NOT_FOUND), status=status.HTTP_404_NOT_FOUND)
+
+    def update(self, request, **kwargs):
+        key = kwargs.get('extra')
+        value = request.data.get(key)
+        if not value:
+            return Response([MUST_SPECIFY_EXTRA_PARAM_IN_BODY.format(key)], status=status.HTTP_400_BAD_REQUEST)
+
+        new_version = self.get_object().clone()
+        new_version.extras[key] = value
+        new_version.comment = 'Updated extras: %s=%s.' % (key, value)
+        errors = self.model.persist_clone(new_version, request.user)
+        if errors:
+            return Response(errors, status=status.HTTP_400_BAD_REQUEST)
+        return Response({key: value})
+
+    def delete(self, request, *args, **kwargs):
+        key = kwargs.get('extra')
+        new_version = self.get_object().clone()
+        if key in new_version.extras:
+            del new_version.extras[key]
+            new_version.comment = 'Deleted extra %s.' % key
+            errors = self.model.persist_clone(new_version, request.user)
+            if errors:
+                return Response(errors, status=status.HTTP_400_BAD_REQUEST)
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        return Response(dict(detail=NOT_FOUND), status=status.HTTP_404_NOT_FOUND)
