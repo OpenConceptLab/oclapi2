@@ -58,6 +58,11 @@ urlpatterns = [
         name='concept-version-detail'
     ),
     re_path(
+        r'^(?P<concept>{pattern})/(?P<concept_version>{pattern})/mappings/$'.format(pattern=NAMESPACE_PATTERN),
+        views.ConceptMappingsView.as_view(),
+        name='concept-version-mapping-list'
+    ),
+    re_path(
         r'^(?P<concept>{pattern})/(?P<concept_version>{pattern})/descriptions/$'.format(pattern=NAMESPACE_PATTERN),
         views.ConceptDescriptionListCreateView.as_view(),
         name='concept-descriptions'
