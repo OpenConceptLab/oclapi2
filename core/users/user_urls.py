@@ -9,7 +9,7 @@ extra_kwargs = dict(user_is_self=True)
 # shortcuts for the currently logged-in user
 urlpatterns = [
     re_path(
-        r'^$', views.UserDetailView.as_view(), name='user-self-detail'
+        r'^$', views.UserDetailView.as_view(), extra_kwargs, name='user-self-detail'
     ),
     re_path(
         r'^orgs/$', orgs_views.OrganizationListView.as_view(), extra_kwargs, name='user-organization-list'
