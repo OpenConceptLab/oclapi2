@@ -45,9 +45,9 @@ class ConceptBaseView(SourceChildCommonBaseView):
         'datatype': {'sortable': True, 'filterable': True, 'facet': True, 'exact': True},
         'locale': {'sortable': False, 'filterable': True, 'facet': True, 'exact': True},
         'retired': {'sortable': False, 'filterable': True, 'facet': True},
-        'source': {'sortable': False, 'filterable': True, 'facet': True, 'exact': True},
+        'source': {'sortable': True, 'filterable': True, 'facet': True, 'exact': True},
         'collection': {'sortable': False, 'filterable': True, 'facet': True},
-        'owner': {'sortable': False, 'filterable': True, 'facet': True, 'exact': True},
+        'owner': {'sortable': True, 'filterable': True, 'facet': True, 'exact': True},
         'owner_type': {'sortable': False, 'filterable': True, 'facet': True, 'exact': True},
     }
 
