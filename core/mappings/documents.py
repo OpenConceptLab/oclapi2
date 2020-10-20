@@ -18,13 +18,13 @@ class MappingDocument(Document):
         ]
 
     last_update = fields.DateField(attr='updated_at')
-    owner = fields.KeywordField(attr='owner_name')
+    owner = fields.KeywordField(attr='owner_name', normalizer="lowercase")
     owner_type = fields.KeywordField(attr='owner_type')
-    source = fields.KeywordField(attr='source')
+    source = fields.KeywordField(attr='source', normalizer="lowercase")
     retired = fields.KeywordField(attr='retired')
     is_active = fields.KeywordField(attr='is_active')
     is_latest_version = fields.KeywordField(attr='is_latest_version')
-    map_type = fields.KeywordField(attr='map_type')
+    map_type = fields.KeywordField(attr='map_type', normalizer="lowercase")
     from_concept = fields.ListField(fields.KeywordField())
     to_concept = fields.ListField(fields.KeywordField())
     concept = fields.ListField(fields.KeywordField())
@@ -41,7 +41,7 @@ class MappingDocument(Document):
     collection_version = fields.ListField(fields.IntegerField())
     collection = fields.ListField(fields.KeywordField())
     public_can_view = fields.BooleanField(attr='public_can_view')
-    id = fields.KeywordField(attr='mnemonic')
+    id = fields.KeywordField(attr='mnemonic', normalizer="lowercase")
 
     @staticmethod
     def prepare_from_concept(instance):
