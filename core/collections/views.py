@@ -107,11 +107,11 @@ class CollectionListView(CollectionBaseView, ConceptDictionaryCreateMixin, ListW
     serializer_class = CollectionListSerializer
     is_searchable = True
     es_fields = {
-        'collection_type': {'sortable': False, 'filterable': True, 'facet': True, 'exact': True},
+        'collection_type': {'sortable': True, 'filterable': True, 'facet': True, 'exact': True},
         'name': {'sortable': True, 'filterable': True, 'exact': True},
         'last_update': {'sortable': True, 'filterable': True, 'default': 'desc'},
         'locale': {'sortable': False, 'filterable': True, 'facet': True},
-        'owner': {'sortable': False, 'filterable': True, 'facet': True, 'exact': True},
+        'owner': {'sortable': True, 'filterable': True, 'facet': True, 'exact': True},
         'owner_type': {'sortable': False, 'filterable': True, 'facet': True},
         'custom_validation_schema': {'sortable': False, 'filterable': True},
     }

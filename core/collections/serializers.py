@@ -22,6 +22,7 @@ class CollectionListSerializer(ModelSerializer):
         model = Collection
         fields = (
             'short_code', 'name', 'url', 'owner', 'owner_type', 'owner_url', 'version', 'created_at', 'id',
+            'collection_type', 'updated_at'
         )
 
 
