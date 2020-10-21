@@ -22,6 +22,7 @@ class SourceListSerializer(ModelSerializer):
         model = Source
         fields = (
             'short_code', 'name', 'url', 'owner', 'owner_type', 'owner_url', 'version', 'created_at', 'id',
+            'source_type', 'updated_at'
         )
 
 

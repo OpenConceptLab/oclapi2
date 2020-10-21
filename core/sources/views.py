@@ -66,11 +66,11 @@ class SourceListView(SourceBaseView, ConceptDictionaryCreateMixin, ListWithHeade
     serializer_class = SourceListSerializer
     is_searchable = True
     es_fields = {
-        'source_type': {'sortable': False, 'filterable': True, 'facet': True, 'exact': True},
+        'source_type': {'sortable': True, 'filterable': True, 'facet': True, 'exact': True},
         'name': {'sortable': True, 'filterable': True, 'exact': True},
         'last_update': {'sortable': True, 'filterable': True, 'default': 'desc'},
         'locale': {'sortable': False, 'filterable': True, 'facet': True},
-        'owner': {'sortable': False, 'filterable': True, 'facet': True, 'exact': True},
+        'owner': {'sortable': True, 'filterable': True, 'facet': True, 'exact': True},
         'owner_type': {'sortable': False, 'filterable': True, 'facet': True},
         'custom_validation_schema': {'sortable': False, 'filterable': True},
     }

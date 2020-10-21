@@ -13,13 +13,13 @@ class SourceDocument(Document):
 
     locale = fields.ListField(fields.KeywordField())
     last_update = fields.DateField(attr='updated_at')
-    owner = fields.KeywordField(attr='parent_resource')
+    owner = fields.KeywordField(attr='parent_resource', normalizer='lowercase')
     owner_type = fields.KeywordField(attr='parent_resource_type')
     public_can_view = fields.TextField(attr='public_can_view')
-    source_type = fields.KeywordField(attr='source_type')
+    source_type = fields.KeywordField(attr='source_type', normalizer='lowercase')
     is_active = fields.KeywordField(attr='is_active')
     version = fields.KeywordField(attr='version')
-    name = fields.KeywordField(attr='name')
+    name = fields.KeywordField(attr='name', normalizer='lowercase')
 
     class Django:
         model = Source

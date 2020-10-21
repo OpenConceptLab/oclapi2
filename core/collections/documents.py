@@ -14,12 +14,12 @@ class CollectionDocument(Document):
     last_update = fields.DateField(attr='updated_at')
     public_can_view = fields.TextField(attr='public_can_view')
     locale = fields.ListField(fields.KeywordField())
-    owner = fields.KeywordField(attr='parent_resource')
+    owner = fields.KeywordField(attr='parent_resource', normalizer='lowercase')
     owner_type = fields.KeywordField(attr='parent_resource_type')
-    collection_type = fields.KeywordField(attr='collection_type')
+    collection_type = fields.KeywordField(attr='collection_type', normalizer='lowercase')
     is_active = fields.KeywordField(attr='is_active')
     version = fields.KeywordField(attr='version')
-    name = fields.KeywordField(attr='name')
+    name = fields.KeywordField(attr='name', normalizer='lowercase')
 
     class Django:
         model = Collection
