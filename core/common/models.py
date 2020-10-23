@@ -223,6 +223,20 @@ class VersionedModel(BaseResourceModel):
         return self.__class__.objects.filter(**{self.mnemonic_attr: self.mnemonic}).order_by('-created_at')
 
     @property
+    def sibling_versions(self):
+        return self.versions.exclude(id=self.id)
+
+    @property
+    def prev_version(self):
+        return self.sibling_versions.filter(
+            is_active=True, created_at__lte=self.created_at
+        ).order_by('-created_at').first()
+
+    @property
+    def prev_version_uri(self):
+        return get(self, 'prev_version.uri')
+
+    @property
     def active_versions(self):
         return self.versions.filter(is_active=True)
 
@@ -344,16 +358,6 @@ class ConceptContainerModel(VersionedModel):
         return super().versions.filter(
             organization_id=self.organization_id, user_id=self.user_id
         ).order_by('-created_at')
-
-    @property
-    def sibling_versions(self):
-        return self.versions.exclude(id=self.id)
-
-    @property
-    def prev_version(self):
-        return self.sibling_versions.filter(
-            is_active=True, created_at__lte=self.created_at
-        ).order_by('-created_at').first()
 
     @staticmethod
     def is_content_privately_referred():

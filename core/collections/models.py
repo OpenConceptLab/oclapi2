@@ -11,12 +11,12 @@ from core.collections.constants import (
     MAPPINGS_EXPRESSIONS,
     REFERENCE_ALREADY_EXISTS, CONCEPT_FULLY_SPECIFIED_NAME_UNIQUE_PER_COLLECTION_AND_LOCALE,
     CONCEPT_PREFERRED_NAME_UNIQUE_PER_COLLECTION_AND_LOCALE, ALL_SYMBOL)
-from core.collections.utils import is_concept, is_mapping, drop_version
+from core.collections.utils import is_concept, is_mapping
 from core.common.constants import (
     DEFAULT_REPOSITORY_TYPE, CUSTOM_VALIDATION_SCHEMA_OPENMRS, ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT
 )
 from core.common.models import ConceptContainerModel
-from core.common.utils import reverse_resource, is_valid_uri
+from core.common.utils import reverse_resource, is_valid_uri, drop_version
 from core.concepts.constants import LOCALES_FULLY_SPECIFIED
 from core.concepts.models import Concept
 from core.concepts.views import ConceptListView

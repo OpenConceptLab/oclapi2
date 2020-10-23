@@ -16,8 +16,8 @@ from core.collections.models import Collection
 from core.common.constants import HEAD, OCL_ORG_ID, SUPER_ADMIN_USER_ID
 from core.common.utils import (
     compact_dict_by_values, to_snake_case, flower_get, task_exists, parse_bulk_import_task_id,
-    to_camel_case
-)
+    to_camel_case,
+    drop_version)
 from core.concepts.models import Concept, LocalizedText
 from core.mappings.models import Mapping
 from core.orgs.models import Organization
@@ -391,6 +391,16 @@ class UtilsTest(OCLTestCase):
             parse_bulk_import_task_id(task_id),
             dict(uuid=task_uuid + '-', username='username', queue='default')
         )
+
+    def test_drop_version(self):
+        from core.concepts.tests.factories import ConceptFactory
+        concept_head = ConceptFactory()
+        concept_v1 = ConceptFactory(
+            parent=concept_head.parent, version='v1', mnemonic=concept_head.mnemonic, versioned_object=concept_head
+        )
+
+        self.assertTrue('/v1/' in concept_v1.uri)
+        self.assertTrue('/v1/' not in drop_version(concept_v1.uri))
 
 
 class BaseModelTest(OCLTestCase):
