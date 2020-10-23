@@ -20,8 +20,8 @@ class UserBaseView(BaseAPIView):
     es_fields = {
         'username': {'sortable': True, 'filterable': True, 'exact': True},
         'date_joined': {'sortable': True, 'default': 'asc', 'filterable': True},
-        'company': {'sortable': False, 'filterable': True, 'exact': True},
-        'location': {'sortable': False, 'filterable': True, 'exact': True},
+        'company': {'sortable': True, 'filterable': True, 'exact': True},
+        'location': {'sortable': True, 'filterable': True, 'exact': True},
     }
     document_model = UserProfileDocument
     is_searchable = True

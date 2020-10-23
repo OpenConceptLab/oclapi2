@@ -93,7 +93,7 @@ class Command(BaseCommand):
                 data['mnemonic'] = mnemonic
                 data['name'] = mnemonic
                 data['parent'] = source
-                Concept.persist_new(data, user, False)
+                Concept.persist_new(data, user)
                 if not created:
                     created = True
         return created

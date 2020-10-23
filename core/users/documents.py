@@ -11,12 +11,13 @@ class UserProfileDocument(Document):
         settings = {'number_of_shards': 1, 'number_of_replicas': 0}
 
     date_joined = fields.DateField(attr='created_at')
+    username = fields.KeywordField(attr='username', normalizer='lowercase')
+    location = fields.KeywordField(attr='location', normalizer='lowercase')
+    company = fields.KeywordField(attr='company', normalizer='lowercase')
+    name = fields.KeywordField(attr='name', normalizer='lowercase')
 
     class Django:
         model = UserProfile
         fields = [
-            'username',
-            'company',
-            'location',
             'is_active'
         ]
