@@ -10,7 +10,7 @@ from core.mappings.serializers import MappingDetailSerializer
 
 class LocalizedNameSerializer(ModelSerializer):
     uuid = CharField(read_only=True, source='id')
-    name_type = CharField(source='type')
+    name_type = CharField(source='type', required=False, allow_null=True, allow_blank=True)
     type = CharField(source='name_type', required=False, allow_null=True, allow_blank=True)
 
     class Meta:
@@ -23,7 +23,7 @@ class LocalizedNameSerializer(ModelSerializer):
 class LocalizedDescriptionSerializer(ModelSerializer):
     uuid = CharField(read_only=True, source='id')
     description = CharField(source='name')
-    description_type = CharField(source='type')
+    description_type = CharField(source='type', required=False, allow_null=True, allow_blank=True)
     type = CharField(source='description_type', required=False, allow_null=True, allow_blank=True)
 
     class Meta:
