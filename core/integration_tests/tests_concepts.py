@@ -129,7 +129,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
             format='json'
         )
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.data, dict(mnemonic='Concept ID must be unique within a source.'))
+        self.assertEqual(response.data, dict(__all__=['Concept ID must be unique within a source.']))
 
     def test_post_400(self):
         concepts_url = "/orgs/{}/sources/{}/concepts/".format(self.organization.mnemonic, self.source.mnemonic)
