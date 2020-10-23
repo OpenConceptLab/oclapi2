@@ -349,3 +349,7 @@ def queue_bulk_import(to_import, import_queue, username, update_if_exists):
     from core.common.tasks import bulk_import
 
     return bulk_import.apply_async((to_import, username, update_if_exists), task_id=task_id, queue=queue_id)
+
+
+def drop_version(expression):
+    return '/'.join(expression.split('/')[0:7]) + '/'

@@ -143,13 +143,6 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
     def to_source_shorthand(self):
         return self.get_to_source() and "%s:%s" % (self.to_source_owner_mnemonic, self.to_source_name)
 
-    @property
-    def versioned_object_url(self):
-        if self.is_versioned_object:
-            return self.uri
-
-        return self.versioned_object.uri
-
     def get_to_concept_name(self):
         if self.to_concept_name:
             return self.to_concept_name

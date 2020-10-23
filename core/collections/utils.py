@@ -9,10 +9,6 @@ def is_mapping(expression):
     return expression and "/mappings/" in expression
 
 
-def drop_version(expression):
-    return '/'.join(expression.split('/')[0:7]) + '/'
-
-
 def is_version_specified(expression):
     return len(expression.split('/')) == EXPRESSION_NUMBER_OF_PARTS_WITH_VERSION
 

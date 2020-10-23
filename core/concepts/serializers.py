@@ -94,7 +94,8 @@ class ConceptListSerializer(ModelSerializer):
     owner = CharField(source='owner_name')
     update_comment = CharField(source='comment')
     locale = SerializerMethodField()
-    url = CharField(source='uri', read_only=True)
+    url = CharField(required=False, source='versioned_object_url')
+    version_url = CharField(read_only=True, source='uri')
     version_created_on = DateTimeField(source='created_at', read_only=True)
     version_created_by = DateTimeField(source='created_by.username', read_only=True)
     mappings = SerializerMethodField()
@@ -112,6 +113,7 @@ class ConceptListSerializer(ModelSerializer):
             'uuid', 'id', 'external_id', 'concept_class', 'datatype', 'url', 'retired', 'source',
             'owner', 'owner_type', 'owner_url', 'display_name', 'display_locale', 'version', 'update_comment',
             'locale', 'version_created_by', 'version_created_on', 'mappings', 'is_latest_version', 'versions_url',
+            'version_url'
         )
 
     @staticmethod
@@ -125,6 +127,16 @@ class ConceptListSerializer(ModelSerializer):
             return MappingDetailSerializer(obj.get_bidirectional_mappings(), many=True).data
 
         return []
+
+
+class ConceptVersionListSerializer(ConceptListSerializer):
+    previous_version_url = CharField(read_only=True, source='prev_version_uri')
+
+    class Meta:
+        model = Concept
+        fields = ConceptListSerializer.Meta.fields + (
+            'previous_version_url',
+        )
 
 
 class ConceptDetailSerializer(ModelSerializer):
@@ -145,7 +157,7 @@ class ConceptDetailSerializer(ModelSerializer):
     display_name = CharField(read_only=True)
     display_locale = CharField(read_only=True)
     retired = BooleanField(required=False)
-    url = URLField(read_only=True)
+    url = CharField(required=False, source='versioned_object_url')
     owner_type = CharField(read_only=True)
     owner_url = URLField(read_only=True)
     extras = JSONField(required=False, allow_null=True)
@@ -222,6 +234,8 @@ class ConceptVersionDetailSerializer(ModelSerializer):
     version_created_on = DateTimeField(source='created_at')
     version_created_by = CharField(source='created_by')
     locale = CharField(source='iso_639_1_locale')
+    url = CharField(source='versioned_object_url', read_only=True)
+    previous_version_url = CharField(source='prev_version_uri', read_only=True)
     mappings = SerializerMethodField()
 
     def __init__(self, *args, **kwargs):
@@ -241,7 +255,7 @@ class ConceptVersionDetailSerializer(ModelSerializer):
             'type', 'uuid', 'id', 'external_id', 'concept_class', 'datatype', 'display_name', 'display_locale',
             'names', 'descriptions', 'extras', 'retired', 'source', 'source_url', 'owner', 'owner_name', 'owner_url',
             'version', 'created_on', 'updated_on', 'version_created_on', 'version_created_by', 'extras',
-            'is_latest_version', 'locale', 'url', 'owner_type', 'version_url', 'mappings'
+            'is_latest_version', 'locale', 'url', 'owner_type', 'version_url', 'mappings', 'previous_version_url',
         )
 
     def get_mappings(self, obj):

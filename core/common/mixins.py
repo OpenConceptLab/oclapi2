@@ -16,7 +16,8 @@ from core.common.constants import HEAD, ACCESS_TYPE_EDIT, ACCESS_TYPE_VIEW, ACCE
     VERBOSE_PARAM
 from core.common.permissions import HasPrivateAccess, HasOwnership, CanViewConceptDictionary
 from core.common.services import S3
-from .utils import write_csv_to_s3, get_csv_from_s3, get_query_params_from_url_string, compact_dict_by_values
+from .utils import write_csv_to_s3, get_csv_from_s3, get_query_params_from_url_string, compact_dict_by_values, \
+    drop_version
 
 logger = logging.getLogger('oclapi')
 
@@ -388,6 +389,10 @@ class SourceChildMixin:
         if self.is_versioned_object:
             return self.get_latest_version().uri
         return self.uri
+
+    @property
+    def versioned_object_url(self):
+        return drop_version(self.uri)
 
     @property
     def head(self):
