@@ -279,6 +279,7 @@ class ConceptContainerModel(VersionedModel):
     last_mapping_update = models.DateTimeField(default=timezone.now, null=True, blank=True)
     last_child_update = models.DateTimeField(default=timezone.now)
     _background_process_ids = ArrayField(models.CharField(max_length=255), default=list, null=True, blank=True)
+    canonical_url = models.URLField(null=True, blank=True)
 
     class Meta:
         abstract = True
