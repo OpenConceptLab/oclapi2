@@ -114,6 +114,7 @@ class CollectionListView(CollectionBaseView, ConceptDictionaryCreateMixin, ListW
         'owner': {'sortable': True, 'filterable': True, 'facet': True, 'exact': True},
         'owner_type': {'sortable': False, 'filterable': True, 'facet': True},
         'custom_validation_schema': {'sortable': False, 'filterable': True},
+        'canonical_url': {'sortable': True, 'filterable': True},
     }
     document_model = CollectionDocument
     facet_class = CollectionSearch

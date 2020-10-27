@@ -20,6 +20,7 @@ class CollectionDocument(Document):
     is_active = fields.KeywordField(attr='is_active')
     version = fields.KeywordField(attr='version')
     name = fields.KeywordField(attr='name', normalizer='lowercase')
+    canonical_url = fields.KeywordField(attr='canonical_url', normalizer='lowercase')
 
     class Django:
         model = Collection
