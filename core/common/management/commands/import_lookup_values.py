@@ -57,7 +57,7 @@ class Command(BaseCommand):
             results.append(self.create_concepts(source, conf['file'], user))
 
         if any(results):
-            rebuild_indexes.delay(['sources', 'concepts'])
+            rebuild_indexes.delay(None)
 
     @staticmethod
     def create_sources(org, user):
