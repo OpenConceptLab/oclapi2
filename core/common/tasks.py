@@ -116,10 +116,22 @@ def handle_pre_delete(app_name, model_name, instance_id):
 
 @app.task
 def populate_indexes(app_names=None):  # app_names has to be an iterable of strings
+    __run_search_index_command('--populate', app_names)
+
+
+@app.task
+def rebuild_indexes(app_names=None):  # app_names has to be an iterable of strings
+    __run_search_index_command('--rebuild', app_names)
+
+
+def __run_search_index_command(command, app_names=None):
+    if not command:
+        return
+
     if app_names:
-        call_command('search_index', '--populate', '-f', '--models', *app_names, '--parallel')
+        call_command('search_index', '%s' % command, '-f', '--models', *app_names, '--parallel')
     else:
-        call_command('search_index', '--populate', '-f', '--parallel')
+        call_command('search_index', command, '-f', '--parallel')
 
 
 @app.task(base=QueueOnce)

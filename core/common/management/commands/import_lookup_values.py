@@ -5,7 +5,7 @@ from django.conf import settings
 from django.core.management import BaseCommand
 
 from core.common.constants import HEAD
-from core.common.tasks import populate_indexes
+from core.common.tasks import rebuild_indexes
 from core.concepts.models import Concept
 from core.orgs.models import Organization
 from core.sources.models import Source
@@ -57,7 +57,7 @@ class Command(BaseCommand):
             results.append(self.create_concepts(source, conf['file'], user))
 
         if any(results):
-            populate_indexes.delay(['sources', 'concepts'])
+            rebuild_indexes.delay(['sources', 'concepts'])
 
     @staticmethod
     def create_sources(org, user):
