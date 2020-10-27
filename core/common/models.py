@@ -555,6 +555,7 @@ class ConceptContainerModel(VersionedModel):
             self.external_id = obj.external_id
             self.organization = obj.organization
             self.user = obj.user
+            self.canonical_url = obj.canonical_url
 
     def seed_concepts(self):
         head = self.head
