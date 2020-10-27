@@ -224,7 +224,7 @@ class Collection(ConceptContainerModel):
                     if self.custom_validation_schema == CUSTOM_VALIDATION_SCHEMA_OPENMRS:
                         try:
                             self.check_concept_uniqueness_in_collection_and_locale_by_name_attribute(
-                                concept, attribute='is_fully_specified', value=True,
+                                concept, attribute='type__in', value=LOCALES_FULLY_SPECIFIED,
                                 error_message=CONCEPT_FULLY_SPECIFIED_NAME_UNIQUE_PER_COLLECTION_AND_LOCALE
                             )
                             self.check_concept_uniqueness_in_collection_and_locale_by_name_attribute(
@@ -246,7 +246,7 @@ class Collection(ConceptContainerModel):
                 self.references.add(ref)
                 added_references.append(ref)
 
-        if user:
+        if user and user.is_authenticated:
             collection_version.updated_by = user
             self.updated_by = user
         collection_version.save()
