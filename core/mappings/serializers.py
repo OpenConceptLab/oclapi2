@@ -10,7 +10,7 @@ class MappingListSerializer(ModelSerializer):
     source = CharField(source='parent_resource', read_only=True)
     owner = CharField(source='owner_name', read_only=True)
     update_comment = CharField(source='comment', required=False)
-    url = CharField(source='version_url', read_only=True)
+    url = SerializerMethodField()
     version = CharField(read_only=True)
     to_concept_code = SerializerMethodField()
     to_concept_name = SerializerMethodField()
@@ -27,6 +27,11 @@ class MappingListSerializer(ModelSerializer):
             'url', 'version', 'id', 'versioned_object_id', 'versioned_object_url',
             'is_latest_version', 'update_comment', 'version_url', 'uuid', 'version_created_on'
         )
+
+    @staticmethod
+    def get_url(obj):
+        from core.collections.utils import drop_version
+        return drop_version(obj.uri)
 
     @staticmethod
     def get_to_concept_code(obj):

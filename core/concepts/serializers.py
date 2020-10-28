@@ -94,7 +94,7 @@ class ConceptListSerializer(ModelSerializer):
     owner = CharField(source='owner_name')
     update_comment = CharField(source='comment')
     locale = SerializerMethodField()
-    url = CharField(source='uri', read_only=True)
+    url = SerializerMethodField()
     version_created_on = DateTimeField(source='created_at', read_only=True)
     version_created_by = DateTimeField(source='created_by.username', read_only=True)
     mappings = SerializerMethodField()
@@ -113,6 +113,11 @@ class ConceptListSerializer(ModelSerializer):
             'owner', 'owner_type', 'owner_url', 'display_name', 'display_locale', 'version', 'update_comment',
             'locale', 'version_created_by', 'version_created_on', 'mappings', 'is_latest_version', 'versions_url',
         )
+
+    @staticmethod
+    def get_url(obj):
+        from core.collections.utils import drop_version
+        return drop_version(obj.uri)
 
     @staticmethod
     def get_locale(obj):
@@ -145,12 +150,12 @@ class ConceptDetailSerializer(ModelSerializer):
     display_name = CharField(read_only=True)
     display_locale = CharField(read_only=True)
     retired = BooleanField(required=False)
-    url = URLField(read_only=True)
     owner_type = CharField(read_only=True)
     owner_url = URLField(read_only=True)
     extras = JSONField(required=False, allow_null=True)
     update_comment = CharField(required=False, source='comment')
     mappings = SerializerMethodField()
+    url = SerializerMethodField()
 
     def __init__(self, *args, **kwargs):
         self.query_params = kwargs.get('context').get('request').query_params.dict()
@@ -175,6 +180,11 @@ class ConceptDetailSerializer(ModelSerializer):
             return MappingDetailSerializer(obj.get_unidirectional_mappings(), many=True).data
 
         return []
+
+    @staticmethod
+    def get_url(obj):
+        from core.collections.utils import drop_version
+        return drop_version(obj.uri)
 
     def create(self, validated_data):
         concept = Concept.persist_new(data=validated_data, user=self.context.get('request').user)
@@ -223,6 +233,7 @@ class ConceptVersionDetailSerializer(ModelSerializer):
     version_created_by = CharField(source='created_by')
     locale = CharField(source='iso_639_1_locale')
     mappings = SerializerMethodField()
+    url = SerializerMethodField()
 
     def __init__(self, *args, **kwargs):
         context = kwargs.get('context')
@@ -243,6 +254,11 @@ class ConceptVersionDetailSerializer(ModelSerializer):
             'version', 'created_on', 'updated_on', 'version_created_on', 'version_created_by', 'extras',
             'is_latest_version', 'locale', 'url', 'owner_type', 'version_url', 'mappings'
         )
+
+    @staticmethod
+    def get_url(obj):
+        from core.collections.utils import drop_version
+        return drop_version(obj.uri)
 
     def get_mappings(self, obj):
         if self.include_direct_mappings:
