@@ -22,7 +22,7 @@ class SourceListSerializer(ModelSerializer):
         model = Source
         fields = (
             'short_code', 'name', 'url', 'owner', 'owner_type', 'owner_url', 'version', 'created_at', 'id',
-            'source_type', 'updated_at'
+            'source_type', 'updated_at', 'canonical_url'
         )
 
 
@@ -36,6 +36,7 @@ class SourceCreateOrUpdateSerializer(ModelSerializer):
 
     def prepare_object(self, validated_data, instance=None):
         source = instance if instance else Source()
+        source.canonical_url = validated_data.get('canonical_url', source.canonical_url)
         source.version = validated_data.get('version', source.version) or HEAD
         source.mnemonic = validated_data.get(self.Meta.lookup_field, source.mnemonic)
         source.name = validated_data.get('name', source.name)
@@ -88,6 +89,7 @@ class SourceCreateSerializer(SourceCreateOrUpdateSerializer):
     supported_locales = ListField(required=False, allow_empty=True)
     website = CharField(required=False, allow_blank=True)
     url = CharField(read_only=True)
+    canonical_url = CharField(required=False, allow_null=True, allow_blank=True)
     versions_url = CharField(read_only=True)
     concepts_url = CharField(read_only=True)
     mappings_url = CharField(read_only=True)
@@ -143,7 +145,7 @@ class SourceDetailSerializer(SourceCreateOrUpdateSerializer):
             'custom_validation_schema', 'public_access', 'default_locale', 'supported_locales', 'website',
             'url', 'owner', 'owner_type', 'owner_url', 'versions',
             'created_on', 'updated_on', 'created_by', 'updated_by', 'extras', 'external_id', 'versions_url',
-            'version', 'concepts_url', 'mappings_url', 'active_concepts', 'active_mappings'
+            'version', 'concepts_url', 'mappings_url', 'active_concepts', 'active_mappings', 'canonical_url'
         )
 
 
@@ -172,5 +174,5 @@ class SourceVersionDetailSerializer(SourceCreateOrUpdateSerializer):
             'custom_validation_schema', 'public_access', 'default_locale', 'supported_locales', 'website',
             'url', 'owner', 'owner_type', 'owner_url', 'versions',
             'created_on', 'updated_on', 'created_by', 'updated_by', 'extras', 'external_id', 'versions_url',
-            'version', 'concepts_url', 'mappings_url', 'is_processing', 'released',
+            'version', 'concepts_url', 'mappings_url', 'is_processing', 'released', 'canonical_url'
         )

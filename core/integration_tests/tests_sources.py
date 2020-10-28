@@ -32,7 +32,7 @@ class SourceListViewTest(OCLAPITestCase):
         self.source_payload = {
             'website': '', 'custom_validation_schema': 'None', 'name': 's2', 'default_locale': 'ab',
             'short_code': 's2', 'description': '', 'source_type': '', 'full_name': 'source 2', 'public_access': 'View',
-            'external_id': '', 'id': 's2', 'supported_locales': 'af,am'
+            'external_id': '', 'id': 's2', 'supported_locales': 'af,am', 'canonical_url': 'https://foo.com/foo/bar/'
         }
 
     def test_get_200(self):
@@ -76,7 +76,7 @@ class SourceListViewTest(OCLAPITestCase):
                 'custom_validation_schema', 'public_access', 'default_locale', 'supported_locales', 'website',
                 'url', 'owner', 'owner_type', 'owner_url', 'versions', 'created_on', 'updated_on', 'created_by',
                 'updated_by', 'extras', 'external_id', 'versions_url', 'version', 'concepts_url', 'mappings_url',
-                'active_concepts', 'active_mappings',
+                'active_concepts', 'active_mappings', 'canonical_url',
             ]
         )
         source = Source.objects.last()
@@ -86,6 +86,8 @@ class SourceListViewTest(OCLAPITestCase):
         self.assertEqual(response.data['full_name'], source.full_name)
         self.assertEqual(response.data['owner_url'], source.parent.uri)
         self.assertEqual(response.data['url'], source.uri)
+        self.assertEqual(response.data['canonical_url'], source.canonical_url)
+        self.assertEqual(source.canonical_url, 'https://foo.com/foo/bar/')
 
     def test_post_400(self):
         sources_url = "/orgs/{}/sources/".format(self.organization.mnemonic)
@@ -149,7 +151,7 @@ class SourceCreateUpdateDestroyViewTest(OCLAPITestCase):
                 'custom_validation_schema', 'public_access', 'default_locale', 'supported_locales', 'website',
                 'url', 'owner', 'owner_type', 'owner_url', 'versions', 'created_on', 'updated_on', 'created_by',
                 'updated_by', 'extras', 'external_id', 'versions_url', 'version', 'concepts_url', 'mappings_url',
-                'active_concepts', 'active_mappings',
+                'active_concepts', 'active_mappings', 'canonical_url',
             ]
         )
         source = Source.objects.last()

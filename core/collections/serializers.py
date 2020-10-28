@@ -22,7 +22,7 @@ class CollectionListSerializer(ModelSerializer):
         model = Collection
         fields = (
             'short_code', 'name', 'url', 'owner', 'owner_type', 'owner_url', 'version', 'created_at', 'id',
-            'collection_type', 'updated_at'
+            'collection_type', 'updated_at', 'canonical_url',
         )
 
 
@@ -36,6 +36,7 @@ class CollectionCreateOrUpdateSerializer(ModelSerializer):
 
     def prepare_object(self, validated_data, instance=None):
         collection = instance if instance else Collection()
+        collection.canonical_url = validated_data.get('canonical_url', collection.canonical_url)
         collection.version = validated_data.get('version', collection.version) or HEAD
         collection.mnemonic = validated_data.get(self.Meta.lookup_field, collection.mnemonic)
         collection.name = validated_data.get('name', collection.name)
@@ -87,6 +88,7 @@ class CollectionCreateSerializer(CollectionCreateOrUpdateSerializer):
     supported_locales = ListField(required=False, allow_empty=True)
     website = CharField(required=False, allow_blank=True)
     url = CharField(read_only=True)
+    canonical_url = CharField(required=False, allow_null=True, allow_blank=True)
     versions_url = CharField(read_only=True)
     concepts_url = CharField(read_only=True)
     mappings_url = CharField(read_only=True)
@@ -142,7 +144,7 @@ class CollectionDetailSerializer(CollectionCreateOrUpdateSerializer):
             'custom_validation_schema', 'public_access', 'default_locale', 'supported_locales', 'website',
             'url', 'owner', 'owner_type', 'owner_url', 'versions',
             'created_on', 'updated_on', 'created_by', 'updated_by', 'extras', 'external_id', 'versions_url',
-            'version', 'concepts_url', 'mappings_url', 'active_concepts', 'active_mappings'
+            'version', 'concepts_url', 'mappings_url', 'active_concepts', 'active_mappings', 'canonical_url'
         )
 
 
@@ -168,7 +170,7 @@ class CollectionVersionDetailSerializer(CollectionCreateOrUpdateSerializer):
             'custom_validation_schema', 'public_access', 'default_locale', 'supported_locales', 'website',
             'url', 'owner', 'owner_type', 'owner_url', 'versions',
             'created_on', 'updated_on', 'created_by', 'updated_by', 'extras', 'external_id', 'versions_url',
-            'version', 'concepts_url', 'mappings_url', 'is_processing'
+            'version', 'concepts_url', 'mappings_url', 'is_processing', 'canonical_url'
         )
 
 
