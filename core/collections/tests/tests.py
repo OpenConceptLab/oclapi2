@@ -3,8 +3,9 @@ from django.db.models import QuerySet
 
 from core.collections.models import CollectionReference, Collection
 from core.collections.tests.factories import OrganizationCollectionFactory
-from core.collections.utils import is_mapping, is_concept, drop_version, is_version_specified, \
+from core.collections.utils import is_mapping, is_concept, is_version_specified, \
     get_concept_by_expression
+from core.common.utils import drop_version
 from core.common.constants import CUSTOM_VALIDATION_SCHEMA_OPENMRS
 from core.common.tests import OCLTestCase
 from core.concepts.models import Concept

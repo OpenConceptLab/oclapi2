@@ -112,11 +112,12 @@ class ConceptListSerializer(ModelSerializer):
             'uuid', 'id', 'external_id', 'concept_class', 'datatype', 'url', 'retired', 'source',
             'owner', 'owner_type', 'owner_url', 'display_name', 'display_locale', 'version', 'update_comment',
             'locale', 'version_created_by', 'version_created_on', 'mappings', 'is_latest_version', 'versions_url',
+            'version_url',
         )
 
     @staticmethod
     def get_url(obj):
-        from core.collections.utils import drop_version
+        from core.common.utils import drop_version
         return drop_version(obj.uri)
 
     @staticmethod
@@ -183,7 +184,7 @@ class ConceptDetailSerializer(ModelSerializer):
 
     @staticmethod
     def get_url(obj):
-        from core.collections.utils import drop_version
+        from core.common.utils import drop_version
         return drop_version(obj.uri)
 
     def create(self, validated_data):
@@ -257,7 +258,7 @@ class ConceptVersionDetailSerializer(ModelSerializer):
 
     @staticmethod
     def get_url(obj):
-        from core.collections.utils import drop_version
+        from core.common.utils import drop_version
         return drop_version(obj.uri)
 
     def get_mappings(self, obj):

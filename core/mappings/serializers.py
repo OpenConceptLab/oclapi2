@@ -30,7 +30,7 @@ class MappingListSerializer(ModelSerializer):
 
     @staticmethod
     def get_url(obj):
-        from core.collections.utils import drop_version
+        from core.common.utils import drop_version
         return drop_version(obj.uri)
 
     @staticmethod
