@@ -220,14 +220,14 @@ class ConceptMappingsView(ConceptBaseView, ListAPIView):
     def get_queryset(self):
         concept = super().get_queryset().first()
         include_retired = self.request.query_params.get(INCLUDE_RETIRED_PARAM, False)
-        include_inverse_mappings = self.request.query_params.get(INCLUDE_INVERSE_MAPPINGS_PARAM, 'false') == 'true'
-        if include_inverse_mappings:
+        include_indirect_mappings = self.request.query_params.get(INCLUDE_INVERSE_MAPPINGS_PARAM, 'false') == 'true'
+        if include_indirect_mappings:
             mappings_queryset = concept.get_bidirectional_mappings()
         else:
             mappings_queryset = concept.get_unidirectional_mappings()
 
         if not include_retired:
-            mappings_queryset = mappings_queryset.exclude(retired=False)
+            mappings_queryset = mappings_queryset.exclude(retired=True)
 
         return mappings_queryset
 
