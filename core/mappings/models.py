@@ -264,6 +264,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         mapping.to_concept_name = self.to_concept_name
         mapping.to_source_id = self.to_source_id
         mapping.retired = self.retired
+        mapping.external_id = self.external_id or mapping.external_id
         mapping.save()
 
     @classmethod
