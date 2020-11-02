@@ -1,9 +1,10 @@
 from django.core.validators import RegexValidator
 from rest_framework.fields import CharField, ChoiceField, ListField, IntegerField, DateTimeField, JSONField, \
-    BooleanField
+    BooleanField, SerializerMethodField
 from rest_framework.relations import PrimaryKeyRelatedField
 from rest_framework.serializers import ModelSerializer
 
+from core.collections.constants import INCLUDE_REFERENCES_PARAM
 from core.collections.models import Collection, CollectionReference
 from core.common.constants import HEAD, DEFAULT_ACCESS_TYPE, NAMESPACE_REGEX, ACCESS_TYPE_CHOICES
 from core.orgs.models import Organization
@@ -142,6 +143,7 @@ class CollectionDetailSerializer(CollectionCreateOrUpdateSerializer):
     supported_locales = ListField(required=False, allow_empty=True)
     created_by = CharField(read_only=True, source='created_by.username')
     updated_by = CharField(read_only=True, source='updated_by.username')
+    references = SerializerMethodField()
 
     class Meta:
         model = Collection
@@ -152,8 +154,14 @@ class CollectionDetailSerializer(CollectionCreateOrUpdateSerializer):
             'url', 'owner', 'owner_type', 'owner_url', 'versions',
             'created_on', 'updated_on', 'created_by', 'updated_by', 'extras', 'external_id', 'versions_url',
             'version', 'concepts_url', 'mappings_url', 'active_concepts', 'active_mappings', 'canonical_url',
-            'custom_resources_linked_source', 'repository_type', 'preferred_source',
+            'custom_resources_linked_source', 'repository_type', 'preferred_source', 'references',
         )
+
+    def get_references(self, obj):
+        if self.context.get(INCLUDE_REFERENCES_PARAM, False):
+            return CollectionReferenceSerializer(obj.references.all(), many=True).data
+
+        return []
 
 
 class CollectionVersionDetailSerializer(CollectionCreateOrUpdateSerializer):
