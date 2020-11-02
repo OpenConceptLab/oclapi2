@@ -700,8 +700,6 @@ class ConceptVersionsViewTest(OCLAPITestCase):
     def setUp(self):
         super().setUp()
         self.concept = ConceptFactory(names=[LocalizedTextFactory()])
-        self.user = UserProfileFactory(organizations=[self.concept.parent.organization])
-        self.token = self.user.get_token()
 
     def test_get_200(self):
         self.assertEqual(self.concept.versions.count(), 1)
@@ -752,3 +750,35 @@ class ConceptVersionsViewTest(OCLAPITestCase):
         self.assertTrue(new_latest_version['is_latest_version'])
         self.assertEqual(new_latest_version['datatype'], 'foobar')
         self.assertEqual(prev_latest_version['datatype'], 'None')
+
+
+class ConceptMappingsViewTest(OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.concept = ConceptFactory(names=[LocalizedTextFactory()])
+
+    def test_get_200_for_concept(self):
+        mappings_url = self.concept.uri + 'mappings/'
+        response = self.client.get(mappings_url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 0)
+
+        concept_latest_version = self.concept.get_latest_version()
+
+        direct_mapping = MappingFactory(parent=self.concept.parent, from_concept=concept_latest_version)
+        indirect_mapping = MappingFactory(parent=self.concept.parent, to_concept=concept_latest_version)
+
+        response = self.client.get(mappings_url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['uuid'], str(direct_mapping.id))
+
+        response = self.client.get(mappings_url + '?includeInverseMappings=true')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 2)
+        self.assertEqual(
+            sorted([mapping['uuid'] for mapping in response.data]),
+            sorted([str(direct_mapping.id), str(indirect_mapping.id)])
+        )
