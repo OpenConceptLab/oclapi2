@@ -203,6 +203,8 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.data['update_comment'], 'Updated datatype')
         self.assertEqual(response.data['concept_class'], 'Procedure')
         self.assertEqual(response.data['url'], concept.uri)
+        self.assertEqual(response.data['url'], version.versioned_object.uri)
+        self.assertEqual(response.data['version_url'], version.uri)
         self.assertFalse(response.data['retired'])
         self.assertEqual(response.data['source'], self.source.mnemonic)
         self.assertEqual(response.data['owner'], self.organization.mnemonic)

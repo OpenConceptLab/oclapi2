@@ -374,6 +374,13 @@ class SourceContainerMixin:
 
 class SourceChildMixin:
     @property
+    def versioned_object_url(self):
+        if self.is_versioned_object:
+            return self.uri
+
+        return self.versioned_object.uri
+
+    @property
     def versions(self):
         if self.is_versioned_object:
             self.versions_set.exclude(id=F('versioned_object_id')).all()

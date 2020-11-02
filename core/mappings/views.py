@@ -20,7 +20,7 @@ from core.mappings.constants import PARENT_VERSION_NOT_LATEST_CANNOT_UPDATE_MAPP
 from core.mappings.documents import MappingDocument
 from core.mappings.models import Mapping
 from core.mappings.search import MappingSearch
-from core.mappings.serializers import MappingDetailSerializer, MappingListSerializer
+from core.mappings.serializers import MappingDetailSerializer, MappingListSerializer, MappingVersionListSerializer
 
 
 class MappingBaseView(SourceChildCommonBaseView):
@@ -167,7 +167,7 @@ class MappingVersionsView(MappingBaseView, ConceptDictionaryMixin, ListWithHeade
         return super().get_queryset().exclude(id=F('versioned_object_id'))
 
     def get_serializer_class(self):
-        return MappingDetailSerializer if self.is_verbose(self.request) else MappingListSerializer
+        return MappingDetailSerializer if self.is_verbose(self.request) else MappingVersionListSerializer
 
     def get(self, request, *args, **kwargs):
         return self.list(request, *args, **kwargs)

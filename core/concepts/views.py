@@ -25,8 +25,8 @@ from core.concepts.permissions import CanViewParentDictionary, CanEditParentDict
 from core.concepts.search import ConceptSearch
 from core.concepts.serializers import (
     ConceptDetailSerializer, ConceptListSerializer, ConceptDescriptionSerializer, ConceptNameSerializer,
-    ConceptVersionDetailSerializer
-)
+    ConceptVersionDetailSerializer,
+    ConceptVersionListSerializer)
 from core.mappings.serializers import MappingListSerializer
 
 
@@ -207,7 +207,7 @@ class ConceptVersionsView(ConceptBaseView, ConceptDictionaryMixin, ListWithHeade
         return super().get_queryset().exclude(id=F('versioned_object_id'))
 
     def get_serializer_class(self):
-        return ConceptDetailSerializer if self.is_verbose(self.request) else ConceptListSerializer
+        return ConceptVersionDetailSerializer if self.is_verbose(self.request) else ConceptVersionListSerializer
 
     def get(self, request, *args, **kwargs):
         return self.list(request, *args, **kwargs)

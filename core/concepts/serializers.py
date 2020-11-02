@@ -94,7 +94,7 @@ class ConceptListSerializer(ModelSerializer):
     owner = CharField(source='owner_name')
     update_comment = CharField(source='comment')
     locale = SerializerMethodField()
-    url = SerializerMethodField()
+    url = CharField(required=False, source='versioned_object_url')
     version_created_on = DateTimeField(source='created_at', read_only=True)
     version_created_by = DateTimeField(source='created_by.username', read_only=True)
     mappings = SerializerMethodField()
@@ -116,11 +116,6 @@ class ConceptListSerializer(ModelSerializer):
         )
 
     @staticmethod
-    def get_url(obj):
-        from core.common.utils import drop_version
-        return drop_version(obj.uri)
-
-    @staticmethod
     def get_locale(obj):
         return obj.iso_639_1_locale
 
@@ -131,6 +126,16 @@ class ConceptListSerializer(ModelSerializer):
             return MappingDetailSerializer(obj.get_bidirectional_mappings(), many=True).data
 
         return []
+
+
+class ConceptVersionListSerializer(ConceptListSerializer):
+    previous_version_url = CharField(read_only=True, source='prev_version_uri')
+
+    class Meta:
+        model = Concept
+        fields = ConceptListSerializer.Meta.fields + (
+            'previous_version_url',
+        )
 
 
 class ConceptDetailSerializer(ModelSerializer):
@@ -156,7 +161,7 @@ class ConceptDetailSerializer(ModelSerializer):
     extras = JSONField(required=False, allow_null=True)
     update_comment = CharField(required=False, source='comment')
     mappings = SerializerMethodField()
-    url = SerializerMethodField()
+    url = CharField(required=False, source='versioned_object_url')
 
     def __init__(self, *args, **kwargs):
         self.query_params = kwargs.get('context').get('request').query_params.dict()
@@ -181,11 +186,6 @@ class ConceptDetailSerializer(ModelSerializer):
             return MappingDetailSerializer(obj.get_unidirectional_mappings(), many=True).data
 
         return []
-
-    @staticmethod
-    def get_url(obj):
-        from core.common.utils import drop_version
-        return drop_version(obj.uri)
 
     def create(self, validated_data):
         concept = Concept.persist_new(data=validated_data, user=self.context.get('request').user)
@@ -234,7 +234,8 @@ class ConceptVersionDetailSerializer(ModelSerializer):
     version_created_by = CharField(source='created_by')
     locale = CharField(source='iso_639_1_locale')
     mappings = SerializerMethodField()
-    url = SerializerMethodField()
+    url = CharField(source='versioned_object_url', read_only=True)
+    previous_version_url = CharField(source='prev_version_uri', read_only=True)
 
     def __init__(self, *args, **kwargs):
         context = kwargs.get('context')
@@ -253,13 +254,8 @@ class ConceptVersionDetailSerializer(ModelSerializer):
             'type', 'uuid', 'id', 'external_id', 'concept_class', 'datatype', 'display_name', 'display_locale',
             'names', 'descriptions', 'extras', 'retired', 'source', 'source_url', 'owner', 'owner_name', 'owner_url',
             'version', 'created_on', 'updated_on', 'version_created_on', 'version_created_by', 'extras',
-            'is_latest_version', 'locale', 'url', 'owner_type', 'version_url', 'mappings'
+            'is_latest_version', 'locale', 'url', 'owner_type', 'version_url', 'mappings', 'previous_version_url'
         )
-
-    @staticmethod
-    def get_url(obj):
-        from core.common.utils import drop_version
-        return drop_version(obj.uri)
 
     def get_mappings(self, obj):
         if self.include_direct_mappings:
