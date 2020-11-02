@@ -2,19 +2,108 @@ import factory
 
 from core.common.constants import HEAD
 from core.common.tests import OCLTestCase
-from core.concepts.tests.factories import ConceptFactory
+from core.concepts.tests.factories import ConceptFactory, LocalizedTextFactory
 from core.mappings.models import Mapping
 from core.mappings.tests.factories import MappingFactory
 from core.orgs.models import Organization
+from core.orgs.tests.factories import OrganizationFactory
 from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory
 from core.users.models import UserProfile
 
 
 class MappingTest(OCLTestCase):
+    def test_mapping(self):
+        self.assertEqual(Mapping(mnemonic='foobar').mapping, 'foobar')
+
     def test_source(self):
         self.assertIsNone(Mapping().source)
         self.assertEqual(Mapping(parent=Source(mnemonic='source')).source, 'source')
+
+    def test_parent_source(self):
+        source = Source(mnemonic='source')
+        self.assertEqual(Mapping(parent=source).parent_source, source)
+
+    def test_from_source_owner_mnemonic(self):
+        from_concept = ConceptFactory(
+            parent=OrganizationSourceFactory(mnemonic='foobar', organization=OrganizationFactory(mnemonic='org-foo'))
+        )
+        mapping = Mapping(from_concept=from_concept)
+
+        self.assertEqual(mapping.from_source_owner_mnemonic, 'org-foo')
+
+    def test_to_source_owner_mnemonic(self):
+        to_concept = ConceptFactory(
+            parent=OrganizationSourceFactory(mnemonic='foobar', organization=OrganizationFactory(mnemonic='org-foo'))
+        )
+        mapping = Mapping(to_concept=to_concept)
+
+        self.assertEqual(mapping.to_source_owner_mnemonic, 'org-foo')
+
+    def test_from_source_shorthand(self):
+        from_concept = ConceptFactory(
+            parent=OrganizationSourceFactory(mnemonic='foobar', organization=OrganizationFactory(mnemonic='org-foo'))
+        )
+        mapping = Mapping(from_concept=from_concept)
+
+        self.assertEqual(mapping.from_source_shorthand, 'org-foo:foobar')
+
+    def test_to_source_shorthand(self):
+        to_concept = ConceptFactory(
+            parent=OrganizationSourceFactory(mnemonic='foobar', organization=OrganizationFactory(mnemonic='org-foo'))
+        )
+        mapping = Mapping(to_concept=to_concept)
+
+        self.assertEqual(mapping.to_source_shorthand, 'org-foo:foobar')
+
+    def test_from_concept_shorthand(self):
+        from_concept = ConceptFactory(
+            mnemonic='concept-foo',
+            parent=OrganizationSourceFactory(mnemonic='source-foo', organization=OrganizationFactory(mnemonic='org-foo'))
+        )
+        mapping = Mapping(from_concept=from_concept)
+
+        self.assertEqual(mapping.from_concept_shorthand, 'org-foo:source-foo:concept-foo')
+
+    def test_to_concept_shorthand(self):
+        to_concept = ConceptFactory(
+            mnemonic='concept-foo',
+            parent=OrganizationSourceFactory(mnemonic='source-foo', organization=OrganizationFactory(mnemonic='org-foo'))
+        )
+        mapping = Mapping(to_concept=to_concept)
+
+        self.assertEqual(mapping.to_concept_shorthand, 'org-foo:source-foo:concept-foo')
+
+    def test_get_to_source(self):
+        mapping = Mapping()
+
+        self.assertIsNone(mapping.get_to_source())
+
+        source = Source(id=123)
+        mapping = Mapping(to_source=source)
+
+        self.assertEqual(mapping.get_to_source(), source)
+
+        concept = ConceptFactory()
+        mapping = Mapping(to_concept=concept)
+
+        self.assertEqual(mapping.get_to_source(), concept.parent)
+
+    def test_get_to_concept_name(self):
+        mapping = Mapping()
+
+        self.assertIsNone(mapping.get_to_concept_name())
+
+        mapping = Mapping(to_concept_name='to-concept-name')
+
+        self.assertEqual(mapping.get_to_concept_name(), 'to-concept-name')
+
+        concept = ConceptFactory(names=[LocalizedTextFactory()])
+        self.assertIsNotNone(concept.display_name)
+
+        mapping = Mapping(to_concept=concept)
+
+        self.assertEqual(mapping.get_to_concept_name(), concept.display_name)
 
     def test_owner(self):
         org = Organization(id=123)

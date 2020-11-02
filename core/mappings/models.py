@@ -133,7 +133,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
 
     @property
     def to_source_owner_mnemonic(self):
-        return get(self.get_to_source(), 'owner.mnemonic')
+        return get(self.get_to_source(), 'parent.mnemonic')
 
     @property
     def to_source_owner_type(self):
@@ -144,24 +144,18 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         return self.get_to_source() and "%s:%s" % (self.to_source_owner_mnemonic, self.to_source_name)
 
     def get_to_concept_name(self):
-        if self.to_concept_name:
-            return self.to_concept_name
-
-        if self.to_concept_id:
-            return self.to_concept.display_name
-
-        return None
+        return self.to_concept_name or get(self, 'to_concept.display_name')
 
     def get_to_concept_code(self):
-        return self.to_concept_code or (self.to_concept and self.to_concept.mnemonic)
+        return self.to_concept_code or get(self, 'to_concept.mnemonic')
 
     @property
     def to_concept_url(self):
-        return self.to_concept.url if self.to_concept else None
+        return get(self, 'to_concept.url')
 
     @property
     def to_concept_shorthand(self):
-        return "%s:%s" % (self.to_source_shorthand, self.get_to_concept_code)
+        return "%s:%s" % (self.to_source_shorthand, self.get_to_concept_code())
 
     @staticmethod
     def get_resource_url_kwarg():
