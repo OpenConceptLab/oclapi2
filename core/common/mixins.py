@@ -188,14 +188,7 @@ class ListWithHeadersMixin(ListModelMixin):
         return self.get_queryset() if is_member else self.get_queryset()[0:100]
 
     def get_parent(self):
-        if hasattr(self, 'parent_resource'):
-            parent = self.parent_resource
-        elif hasattr(self, 'versioned_object'):
-            parent = self.versioned_object
-        else:
-            parent = None
-
-        return parent
+        return get(self, 'parent_resource') or get(self, 'versioned_object') or get(self, 'head')
 
     @staticmethod
     def prepend_head(objects):
