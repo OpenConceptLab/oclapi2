@@ -49,7 +49,9 @@ class CollectionCreateOrUpdateSerializer(ModelSerializer):
         collection.public_access = validated_data.get('public_access', collection.public_access or DEFAULT_ACCESS_TYPE)
         collection.default_locale = validated_data.get('default_locale', collection.default_locale or DEFAULT_LOCALE)
         collection.website = validated_data.get('website', collection.website)
-
+        collection.custom_resources_linked_source = validated_data.get(
+            'custom_resources_linked_source', collection.custom_resources_linked_source
+        )
         supported_locales = validated_data.get('supported_locales')
         if not supported_locales:
             supported_locales = collection.supported_locales
@@ -89,6 +91,7 @@ class CollectionCreateSerializer(CollectionCreateOrUpdateSerializer):
     website = CharField(required=False, allow_blank=True)
     url = CharField(read_only=True)
     canonical_url = CharField(required=False, allow_null=True, allow_blank=True)
+    custom_resources_linked_source = CharField(required=False, allow_null=True, allow_blank=True)
     versions_url = CharField(read_only=True)
     concepts_url = CharField(read_only=True)
     mappings_url = CharField(read_only=True)
@@ -144,7 +147,8 @@ class CollectionDetailSerializer(CollectionCreateOrUpdateSerializer):
             'custom_validation_schema', 'public_access', 'default_locale', 'supported_locales', 'website',
             'url', 'owner', 'owner_type', 'owner_url', 'versions',
             'created_on', 'updated_on', 'created_by', 'updated_by', 'extras', 'external_id', 'versions_url',
-            'version', 'concepts_url', 'mappings_url', 'active_concepts', 'active_mappings', 'canonical_url'
+            'version', 'concepts_url', 'mappings_url', 'active_concepts', 'active_mappings', 'canonical_url',
+            'custom_resources_linked_source',
         )
 
 
