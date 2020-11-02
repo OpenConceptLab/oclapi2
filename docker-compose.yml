@@ -16,7 +16,6 @@ services:
   api:
     image: openconceptlab/oclapi2:${ENVIRONMENT-production}
     restart: "always"
-    command: sh -c "./wait-for-it.sh db:5432 -t 0 -- ./wait-for-it.sh es:9200 -t 0 -- ./startup.sh"
     ports:
       - 8000:8000
     depends_on:
@@ -24,16 +23,20 @@ services:
       - celery
       - redis
       - es
-      - es1
     environment:
-      - REDIS_HOST=redis
-      - DB_HOST=db
+      - REDIS_HOST=${REDIS_HOST-redis}
+      - REDIS_PORT=${REDIS_PORT-6379}
+      - DB_HOST=${DB_HOST-db}
+      - DB_PORT=${DB_PORT-5432}
       - DB_PASSWORD=${DB_PASSWORD-Postgres123}
+      - ES_HOST=${ES_HOST-es}
+      - ES_PORT=${ES_PORT-9200}
       - ENVIRONMENT=${ENVIRONMENT-production}
       - SECRET_KEY
       - SENTRY_DSN_KEY
-      - API_SUPERUSER_PASSWORD=${API_SUPERUSER_PASSWORD-OclAdm1n@123}
+      - API_SUPERUSER_PASSWORD=${API_SUPERUSER_PASSWORD-OclAdmin123}
       - API_SUPERUSER_TOKEN=${API_SUPERUSER_TOKEN-891b4b17feab99f3ff7e5b5d04ccc5da7aa96da6}
+      - API_BASE_URL=${API_BASE_URL-http://localhost:8000}
       - EMAIL_NOREPLY_PASSWORD
       - AWS_ACCESS_KEY_ID
       - AWS_SECRET_ACCESS_KEY
@@ -42,35 +45,32 @@ services:
       test: "curl -f http://localhost:8000/admin"
   celery:
     image: openconceptlab/oclapi2:${ENVIRONMENT-production}
-    command: sh -c ./start_celery_worker.sh
+    command: ["bash", "-c", "./start_celery_worker.sh"]
     restart: "always"
-    depends_on:
-      - redis
-      - es
-      - es1
     healthcheck:
       test: "celery inspect ping -A core.celery"
+    environment:
+      - REDIS_HOST=${REDIS_HOST-redis}
+      - REDIS_PORT=${REDIS_PORT-6379}
   flower:
     image: openconceptlab/oclapi2:${ENVIRONMENT-production}
-    command: sh -c "./wait-for-it.sh redis:6379 -t 0 -- ./start_flower.sh"
+    command: ["bash", "-c", "./start_flower.sh"]
     ports:
       - 5555:5555
     depends_on:
-      - celery
       - redis
     environment:
       - FLOWER_USER=${FLOWER_USER-root}
       - FLOWER_PASSWORD=${FLOWER_PASSWORD-Root123}
+      - REDIS_HOST=${REDIS_HOST-redis}
+      - REDIS_PORT=${REDIS_PORT-6379}
     restart: "always"
     healthcheck:
       test: "curl -u ${FLOWER_USER-root}:${FLOWER_PASSWORD-Root123} -f http://localhost:5555/"
   es:
     image: elasticsearch:7.8.1
     environment:
-      - node.name=es
-      - cluster.name=es-cluster
-      - discovery.seed_hosts=es1
-      - cluster.initial_master_nodes=es,es1
+      - discovery.type=single-node
       - bootstrap.memory_lock=true
       - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
     ulimits:
@@ -82,25 +82,6 @@ services:
     restart: "always"
     healthcheck:
       test: "exit 0"
-  es1:
-    image: elasticsearch:7.8.1
-    environment:
-      - node.name=es1
-      - cluster.name=es-cluster
-      - discovery.seed_hosts=es
-      - cluster.initial_master_nodes=es,es1
-      - bootstrap.memory_lock=true
-      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
-    ulimits:
-      memlock:
-        soft: -1
-        hard: -1
-    volumes:
-      - es1-data:/usr/share/elasticsearch/data
-    restart: "always"
-    healthcheck:
-      test: "exit 0"
 volumes:
   postgres-data:
   es-data:
-  es1-data:

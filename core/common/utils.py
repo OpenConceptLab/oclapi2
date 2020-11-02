@@ -266,10 +266,7 @@ def write_export_file(
 
 
 def get_base_url():
-    if settings.ENV == 'development':
-        return "http://localhost:8000"
-
-    return "https://api.{}2.openconceptlab.org".format(settings.ENV.lower())
+    return settings.BASE_URL
 
 
 def to_snake_case(string):

@@ -12,11 +12,11 @@
 - model: "users.userprofile"
   pk: 1
   fields:
-    email: "ocladmin@openconceptlab.org"
+    email: "admin@openconceptlab.org"
     username: "ocladmin"
     password: "pbkdf2_sha256$180000$YSGItUAkg0Wy$dzSLkkOk9FRFsOQOclMfng95jm9C1ufww0H9LQ/yhAg="
-    first_name: OCL
-    last_name: Admin
+    first_name: "-"
+    last_name: "-"
     company: OCL
     website: 'openconceptlab.org'
     is_staff: true

@@ -18,6 +18,8 @@ from kombu import Queue, Exchange
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+BASE_URL = os.environ.get('BASE_URL', 'http://localhost:8000')
+
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/3.0/howto/deployment/checklist/
 
@@ -156,7 +158,7 @@ DATABASES = {
 
 ELASTICSEARCH_DSL = {
     'default': {
-        'hosts': [os.environ.get('ES_HOST', 'es:9200'), 'es1:9200']
+        'hosts': [os.environ.get('ES_HOST', 'es') + ':' + os.environ.get('ES_PORT', '9200')]
     },
 }
 
@@ -249,13 +251,13 @@ AWS_ACCESS_KEY_ID = os.environ.get('AWS_ACCESS_KEY_ID', '')
 AWS_SECRET_ACCESS_KEY = os.environ.get('AWS_SECRET_ACCESS_KEY', '')
 AWS_STORAGE_BUCKET_NAME = os.environ.get('AWS_STORAGE_BUCKET_NAME', 'ocl-api-dev')
 DISABLE_VALIDATION = os.environ.get('DISABLE_VALIDATION', False)
-API_SUPERUSER_PASSWORD = os.environ.get('API_SUPERUSER_PASSWORD', 'OclAdm1n@123') # password for ocladmin superuser
+API_SUPERUSER_PASSWORD = os.environ.get('API_SUPERUSER_PASSWORD', 'Root123') # password for ocladmin superuser
 API_SUPERUSER_TOKEN = os.environ.get(
     'API_SUPERUSER_TOKEN', '891b4b17feab99f3ff7e5b5d04ccc5da7aa96da6'
 )
 
 #celery/redis
-REDIS_PORT = 6379
+REDIS_PORT = os.environ.get('REDIS_PORT', 6379)
 REDIS_DB = 0
 REDIS_HOST = os.environ.get('REDIS_HOST', 'redis')
 
@@ -272,7 +274,7 @@ CELERY_TASK_PUBLISH_RETRY = True
 CELERY_DISABLE_RATE_LIMITS = False
 CELERY_IGNORE_RESULT = False
 CELERY_SEND_TASK_ERROR_EMAILS = False
-CELERY_RESULT_BACKEND = 'redis://%s:%d/%d' % (REDIS_HOST, REDIS_PORT, REDIS_DB)
+CELERY_RESULT_BACKEND = 'redis://%s:%s/%s' % (REDIS_HOST, REDIS_PORT, REDIS_DB)
 CELERY_BROKER_URL = CELERY_RESULT_BACKEND
 CELERY_TASK_SERIALIZER = "json"
 CELERY_ACCEPT_CONTENT = ['application/json']
@@ -295,5 +297,5 @@ USE_X_FORWARDED_HOST = True
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 ENV = os.environ.get('ENVIRONMENT', 'development')
 # Only used for flower
-FLOWER_USER = os.environ.get('FLOWER_USER', 'floweruser')
-FLOWER_PWD = os.environ.get('FLOWER_PWD', 'Flower123')
+FLOWER_USER = os.environ.get('FLOWER_USER', 'root')
+FLOWER_PWD = os.environ.get('FLOWER_PWD', 'Root123')

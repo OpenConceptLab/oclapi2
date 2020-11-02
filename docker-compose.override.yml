@@ -12,25 +12,23 @@ services:
     ports:
       - 8000:8000
     volumes:
-      - .:/code
+      - .:/code:z
     restart: "no"
     environment:
       - ENVIRONMENT=development
   celery:
     build: .
     volumes:
-      - .:/code
+      - .:/code:z
     restart: "no"
   flower:
     build: .
     volumes:
-      - .:/code
+      - .:/code:z
     ports:
       - 5555:5555
     restart: "no"
   es:
     ports:
       - 9200:9200
-    restart: "no"
-  es1:
     restart: "no"
