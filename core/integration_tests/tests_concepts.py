@@ -694,3 +694,61 @@ class ConceptExtraRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(self.concept.versions.first().extras, dict(foo='bar', tao='ching'))
         self.concept.refresh_from_db()
         self.assertEqual(self.concept.extras, dict(tao='ching'))
+
+
+class ConceptVersionsViewTest(OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.concept = ConceptFactory(names=[LocalizedTextFactory()])
+        self.user = UserProfileFactory(organizations=[self.concept.parent.organization])
+        self.token = self.user.get_token()
+
+    def test_get_200(self):
+        self.assertEqual(self.concept.versions.count(), 1)
+
+        response = self.client.get(self.concept.versions_url)
+
+        self.assertEqual(response.status_code, 200)
+        versions = response.data
+        self.assertEqual(len(versions), 1)
+        version = versions[0]
+        latest_version = self.concept.get_latest_version()
+        self.assertEqual(version['uuid'], str(latest_version.id))
+        self.assertEqual(version['id'], self.concept.mnemonic)
+        self.assertEqual(version['url'], self.concept.uri)
+        self.assertEqual(version['version_url'], latest_version.uri)
+        self.assertTrue(version['is_latest_version'])
+        self.assertIsNone(version['previous_version_url'])
+
+        response = self.client.put(
+            self.concept.uri,
+            {'names': [{
+                'locale': 'ab', 'locale_preferred': True, 'name': 'c1 name', 'name_type': 'Fully Specified'
+            }], 'datatype': 'foobar', 'update_comment': 'Updated datatype'},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.concept.versions.count(), 2)
+
+        response = self.client.get(self.concept.versions_url)
+
+        self.assertEqual(response.status_code, 200)
+        versions = response.data
+        self.assertEqual(len(versions), 2)
+
+        prev_latest_version = [v for v in versions if v['uuid'] == version['uuid']][0]
+        new_latest_version = [v for v in versions if v['uuid'] != version['uuid']][0]
+        latest_version = self.concept.get_latest_version()
+
+        self.assertEqual(new_latest_version['version_url'], latest_version.uri)
+        self.assertEqual(str(latest_version.id), str(new_latest_version['uuid']))
+        self.assertEqual(prev_latest_version['uuid'], version['uuid'])
+        self.assertEqual(new_latest_version['previous_version_url'], prev_latest_version['version_url'])
+        self.assertEqual(new_latest_version['previous_version_url'], version['version_url'])
+        self.assertIsNone(prev_latest_version['previous_version_url'])
+        self.assertFalse(prev_latest_version['is_latest_version'])
+        self.assertTrue(new_latest_version['is_latest_version'])
+        self.assertEqual(new_latest_version['datatype'], 'foobar')
+        self.assertEqual(prev_latest_version['datatype'], 'None')
