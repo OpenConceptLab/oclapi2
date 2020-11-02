@@ -376,11 +376,14 @@ class ConceptContainerModel(VersionedModel):
         S3.delete_objects(generic_export_path)
 
     def get_active_concepts(self):
-        return self.concepts_set.filter(is_active=True, retired=False, id=F('versioned_object_id'))
+        return self.get_concepts_queryset().filter(is_active=True, retired=False)
 
     @property
     def num_concepts(self):
-        return self.concepts_set.filter(id=F('versioned_object_id')).count()
+        return self.get_concepts_queryset().count()
+
+    def get_concepts_queryset(self):
+        return self.concepts_set.filter(id=F('versioned_object_id'))
 
     @staticmethod
     def get_version_url_kwarg():
