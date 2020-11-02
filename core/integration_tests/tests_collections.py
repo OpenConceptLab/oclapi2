@@ -365,6 +365,33 @@ class CollectionReferencesViewTest(OCLAPITestCase):
         self.assertEqual(self.collection.references.count(), 0)
         self.assertEqual(self.collection.concepts.count(), 0)
 
+        concept = ConceptFactory()
+        latest_version = concept.get_latest_version()
+        MappingFactory(from_concept=latest_version, parent=concept.parent)
+        response = self.client.put(
+            '/collections/coll/references/?cascade=sourcemappings',
+            dict(data=dict(mappings=[latest_version.uri])),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+        self.assertEqual(response.status_code, 200)
+        self.collection.refresh_from_db()
+        self.assertEqual(self.collection.references.count(), 2)
+        self.assertEqual(self.collection.concepts.count(), 1)
+        self.assertEqual(self.collection.mappings.count(), 1)
+
+        response = self.client.delete(
+            '/collections/coll/references/?cascade=sourcemappings',
+            dict(expressions=[latest_version.uri]),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+        self.assertEqual(response.status_code, 204)
+        self.collection.refresh_from_db()
+        self.assertEqual(self.collection.references.count(), 0)
+        self.assertEqual(self.collection.concepts.count(), 0)
+        self.assertEqual(self.collection.mappings.count(), 0)
+
     @patch('core.collections.views.add_references')
     def test_put_202_all(self, add_references_mock):
         add_references_mock.delay = Mock()
@@ -454,6 +481,26 @@ class CollectionReferencesViewTest(OCLAPITestCase):
                 )
             ]
         )
+
+        concept3 = ConceptFactory()
+        latest_version = concept3.get_latest_version()
+        mapping2 = MappingFactory(from_concept=latest_version, parent=concept3.parent)
+
+        response = self.client.put(
+            '/collections/coll/references/?cascade=sourcemappings',
+            dict(data=dict(concepts=[latest_version.uri])),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+        self.assertEqual(response.status_code, 200)
+        self.collection.refresh_from_db()
+        self.assertEqual(self.collection.references.count(), 5)
+        self.assertEqual(self.collection.concepts.count(), 3)
+        self.assertEqual(self.collection.mappings.count(), 2)
+        self.assertEqual(self.collection.active_concepts, 3)
+        self.assertEqual(self.collection.active_mappings, 2)
+        self.assertTrue(self.collection.references.filter(expression=mapping2.uri).exists())
+        self.assertTrue(self.collection.references.filter(expression=latest_version.uri).exists())
 
 
 class CollectionVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):

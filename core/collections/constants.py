@@ -25,3 +25,4 @@ DELETE_FAILURE = 'Could not delete Collection.'
 DELETE_SUCCESS = 'Successfully deleted Collection.'
 NO_MATCH = 'No Collection matches the given query.'
 VERSION_ALREADY_EXISTS = "Collection version '{}' already exist."
+SOURCE_MAPPINGS = 'sourcemappings'

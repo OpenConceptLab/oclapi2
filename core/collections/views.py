@@ -16,7 +16,8 @@ from rest_framework.response import Response
 from core.collections.constants import (
     INCLUDE_REFERENCES_PARAM, HEAD_OF_CONCEPT_ADDED_TO_COLLECTION,
     HEAD_OF_MAPPING_ADDED_TO_COLLECTION, CONCEPT_ADDED_TO_COLLECTION_FMT, MAPPING_ADDED_TO_COLLECTION_FMT,
-    DELETE_FAILURE, DELETE_SUCCESS, NO_MATCH, VERSION_ALREADY_EXISTS
+    DELETE_FAILURE, DELETE_SUCCESS, NO_MATCH, VERSION_ALREADY_EXISTS,
+    SOURCE_MAPPINGS
 )
 from core.collections.documents import CollectionDocument
 from core.collections.models import Collection, CollectionReference
@@ -234,14 +235,12 @@ class CollectionReferencesView(
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
         expressions = request.data.get("references") or request.data.get("expressions")
-        cascade_mappings_flag = request.data.get('cascade', 'none')
-
         if not expressions:
             return Response(status=status.HTTP_400_BAD_REQUEST)
 
         if expressions == '*':
             expressions = list(instance.references.values_list('expression', flat=True))
-        if self.cascade_mapping_resolver(cascade_mappings_flag):
+        if self.should_cascade_mappings():
             expressions += self.get_related_mappings_with_version_information(instance, expressions)
 
         instance.delete_references(expressions)
@@ -250,12 +249,11 @@ class CollectionReferencesView(
     def update(self, request, *args, **kwargs):  # pylint: disable=too-many-locals,unused-argument # Fixme: Sny
         collection = self.get_object()
 
-        cascade_mappings_flag = request.query_params.get('cascade', 'none')
+        cascade_mappings = self.should_cascade_mappings()
         data = request.data.get('data')
         concept_expressions = data.get('concepts', [])
         mapping_expressions = data.get('mappings', [])
         expressions = data.get('expressions', [])
-        cascade_mappings = self.cascade_mapping_resolver(cascade_mappings_flag)
 
         adding_all = mapping_expressions == '*' or concept_expressions == '*'
 
@@ -282,6 +280,9 @@ class CollectionReferencesView(
                 response.append(response_item)
 
         return Response(response, status=status.HTTP_200_OK)
+
+    def should_cascade_mappings(self):
+        return self.request.query_params.get('cascade', '').lower() == SOURCE_MAPPINGS
 
     def create_response_item(self, added_expressions, errors, expression):
         adding_expression_failed = len(errors) > 0 and expression in errors
@@ -334,15 +335,6 @@ class CollectionReferencesView(
         if resource_type == 'concepts':
             return CONCEPT_ADDED_TO_COLLECTION_FMT.format(resource_name, collection_name)
         return MAPPING_ADDED_TO_COLLECTION_FMT.format(resource_name, collection_name)
-
-    @staticmethod
-    def cascade_mapping_resolver(cascade_mappings_flag):
-        cascade_mappings_flag_resolver = {
-            'none': False,
-            'sourcemappings': True
-        }
-
-        return cascade_mappings_flag_resolver.get(cascade_mappings_flag.lower(), False)
 
     def get_related_mappings_with_version_information(self, instance, expressions):
         related_mappings = []
