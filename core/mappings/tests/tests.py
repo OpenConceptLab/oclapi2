@@ -59,7 +59,9 @@ class MappingTest(OCLTestCase):
     def test_from_concept_shorthand(self):
         from_concept = ConceptFactory(
             mnemonic='concept-foo',
-            parent=OrganizationSourceFactory(mnemonic='source-foo', organization=OrganizationFactory(mnemonic='org-foo'))
+            parent=OrganizationSourceFactory(
+                mnemonic='source-foo', organization=OrganizationFactory(mnemonic='org-foo')
+            )
         )
         mapping = Mapping(from_concept=from_concept)
 
@@ -68,7 +70,9 @@ class MappingTest(OCLTestCase):
     def test_to_concept_shorthand(self):
         to_concept = ConceptFactory(
             mnemonic='concept-foo',
-            parent=OrganizationSourceFactory(mnemonic='source-foo', organization=OrganizationFactory(mnemonic='org-foo'))
+            parent=OrganizationSourceFactory(
+                mnemonic='source-foo', organization=OrganizationFactory(mnemonic='org-foo')
+            )
         )
         mapping = Mapping(to_concept=to_concept)
 
