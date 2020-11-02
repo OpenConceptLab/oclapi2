@@ -700,6 +700,8 @@ class ConceptVersionsViewTest(OCLAPITestCase):
     def setUp(self):
         super().setUp()
         self.concept = ConceptFactory(names=[LocalizedTextFactory()])
+        self.user = UserProfileFactory(organizations=[self.concept.parent.organization])
+        self.token = self.user.get_token()
 
     def test_get_200(self):
         self.assertEqual(self.concept.versions.count(), 1)

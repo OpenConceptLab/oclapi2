@@ -18,7 +18,7 @@ from core.common.swagger_parameters import (
 )
 from core.common.views import SourceChildCommonBaseView, SourceChildExtrasView, \
     SourceChildExtraRetrieveUpdateDestroyView
-from core.concepts.constants import COULD_NOT_FIND_CONCEPT_TO_UPDATE, PARENT_VERSION_NOT_LATEST_CANNOT_UPDATE_CONCEPT
+from core.concepts.constants import PARENT_VERSION_NOT_LATEST_CANNOT_UPDATE_CONCEPT
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept, LocalizedText
 from core.concepts.permissions import CanViewParentDictionary, CanEditParentDictionary
@@ -166,11 +166,6 @@ class ConceptRetrieveUpdateDestroyView(ConceptBaseView, RetrieveAPIView, UpdateA
     def update(self, request, *args, **kwargs):
         self.object = self.get_object()
         partial = kwargs.pop('partial', True)
-        if self.object is None:
-            return Response(
-                {'non_field_errors': COULD_NOT_FIND_CONCEPT_TO_UPDATE}, status=status.HTTP_404_NOT_FOUND
-            )
-
         self.parent_resource = self.object.parent
 
         if self.parent_resource != self.parent_resource.head:
