@@ -53,6 +53,7 @@ class CollectionCreateOrUpdateSerializer(ModelSerializer):
             'custom_resources_linked_source', collection.custom_resources_linked_source
         )
         collection.repository_type = validated_data.get('repository_type', collection.repository_type)
+        collection.preferred_source = validated_data.get('preferred_source', collection.preferred_source)
         supported_locales = validated_data.get('supported_locales')
         if not supported_locales:
             supported_locales = collection.supported_locales
@@ -94,6 +95,7 @@ class CollectionCreateSerializer(CollectionCreateOrUpdateSerializer):
     canonical_url = CharField(required=False, allow_null=True, allow_blank=True)
     custom_resources_linked_source = CharField(required=False, allow_null=True, allow_blank=True)
     repository_type = CharField(required=False, allow_null=True, allow_blank=True)
+    preferred_source = CharField(required=False, allow_null=True, allow_blank=True)
     versions_url = CharField(read_only=True)
     concepts_url = CharField(read_only=True)
     mappings_url = CharField(read_only=True)
@@ -150,7 +152,7 @@ class CollectionDetailSerializer(CollectionCreateOrUpdateSerializer):
             'url', 'owner', 'owner_type', 'owner_url', 'versions',
             'created_on', 'updated_on', 'created_by', 'updated_by', 'extras', 'external_id', 'versions_url',
             'version', 'concepts_url', 'mappings_url', 'active_concepts', 'active_mappings', 'canonical_url',
-            'custom_resources_linked_source', 'repository_type',
+            'custom_resources_linked_source', 'repository_type', 'preferred_source',
         )
 
 

@@ -89,6 +89,7 @@ class Collection(ConceptContainerModel):
             self.collection_type = obj.collection_type
             self.custom_resources_linked_source = obj.custom_resources_linked_source
             self.repository_type = obj.repository_type
+            self.preferred_source = obj.preferred_source
 
     def add_concept(self, concept):
         self.concepts.add(concept)
