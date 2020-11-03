@@ -1,4 +1,5 @@
 from django.core.exceptions import ValidationError
+from pydash import get
 
 from core.common.constants import LOOKUP_CONCEPT_CLASSES
 from core.concepts.constants import (
@@ -69,21 +70,21 @@ class OpenMRSConceptValidator(BaseConceptValidator):
         )
 
     def attribute_should_be_unique_for_source_and_locale(self, concept, attribute, error_message):
-        self_id = getattr(concept, 'head.id', getattr(concept, 'id', None))
+        versioned_object_id = concept.versioned_object_id or get(concept, 'head.id')
 
         names = [name for name in concept.saved_unsaved_names if getattr(name, attribute)]
         for name in names:
-            if self.no_other_record_has_same_name(name, self_id):
+            if self.no_other_record_has_same_name(name, versioned_object_id):
                 continue
 
             raise ValidationError({'names': [message_with_name_details(error_message, name)]})
 
-    def no_other_record_has_same_name(self, name, self_id):
+    def no_other_record_has_same_name(self, name, versioned_object_id):
         if not self.repo:
             return True
 
         return not self.repo.concepts_set.exclude(
-            id=self_id
+            versioned_object_id=versioned_object_id
         ).exclude(names__type__in=LOCALES_SHORT).filter(
             is_active=True, retired=False, is_latest_version=True, names__locale=name.locale, names__name=name.name
         ).exists()

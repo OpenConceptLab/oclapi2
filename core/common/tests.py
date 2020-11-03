@@ -46,27 +46,7 @@ class PauseElasticSearchIndex:
     settings.ES_SYNC = False
 
 
-class OCLAPITestCase(APITestCase, PauseElasticSearchIndex):
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        call_command("loaddata", "core/fixtures/base_entities.yaml")
-
-    def tearDown(self):
-        super().tearDown()
-        delete_all()
-
-
-class OCLTestCase(TestCase, PauseElasticSearchIndex):
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        call_command("loaddata", "core/fixtures/base_entities.yaml")
-
-    def tearDown(self):
-        super().tearDown()
-        delete_all()
-
+class BaseTestCase(PauseElasticSearchIndex):
     @staticmethod
     def create_lookup_concept_classes(user=None, org=None):
         from core.sources.tests.factories import OrganizationSourceFactory
@@ -216,6 +196,28 @@ class OCLTestCase(TestCase, PauseElasticSearchIndex):
             version=HEAD, updated_by=user, parent=locales_source, concept_class="Locale",
             names=[LocalizedTextFactory(name="English")]
         )
+
+
+class OCLAPITestCase(APITestCase, BaseTestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        call_command("loaddata", "core/fixtures/base_entities.yaml")
+
+    def tearDown(self):
+        super().tearDown()
+        delete_all()
+
+
+class OCLTestCase(TestCase, BaseTestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        call_command("loaddata", "core/fixtures/base_entities.yaml")
+
+    def tearDown(self):
+        super().tearDown()
+        delete_all()
 
 
 class S3Test(TestCase):

@@ -342,6 +342,8 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
         self.names.set(names)
         self.descriptions.set(descriptions)
+        self.cloned_names = []
+        self.cloned_descriptions = []
 
     def remove_locales(self):
         self.names.all().delete()

@@ -1,5 +1,6 @@
 from mock import ANY
 
+from core.common.constants import CUSTOM_VALIDATION_SCHEMA_OPENMRS
 from core.common.tests import OCLAPITestCase
 from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory, LocalizedTextFactory
@@ -21,12 +22,12 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
             'concept_class': 'Procedure',
             'extras': {'foo': 'bar'},
             'descriptions': [{
-                'locale': 'ab', 'locale_preferred': True, 'description': 'c1 desc', 'description_type': 'None'
+                'locale': 'en', 'locale_preferred': True, 'description': 'c1 desc', 'description_type': 'None'
             }],
             'external_id': '',
             'id': 'c1',
             'names': [{
-                'locale': 'ab', 'locale_preferred': True, 'name': 'c1 name', 'name_type': 'Fully Specified'
+                'locale': 'en', 'locale_preferred': True, 'name': 'c1 name', 'name_type': 'Fully Specified'
             }]
         }
 
@@ -112,7 +113,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.data['owner_type'], "Organization")
         self.assertEqual(response.data['owner_url'], self.organization.uri)
         self.assertEqual(response.data['display_name'], 'c1 name')
-        self.assertEqual(response.data['display_locale'], 'ab')
+        self.assertEqual(response.data['display_locale'], 'en')
         self.assertEqual(response.data['versions_url'], concept.uri + 'versions/')
         self.assertEqual(response.data['version'], str(concept.id))
         self.assertEqual(response.data['extras'], dict(foo='bar'))
@@ -211,7 +212,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.data['owner_type'], "Organization")
         self.assertEqual(response.data['owner_url'], self.organization.uri)
         self.assertEqual(response.data['display_name'], 'c1 name')
-        self.assertEqual(response.data['display_locale'], 'ab')
+        self.assertEqual(response.data['display_locale'], 'en')
         self.assertEqual(response.data['versions_url'], concept.uri + 'versions/')
         self.assertEqual(response.data['version'], str(version.id))
         self.assertEqual(response.data['extras'], dict(foo='bar'))
@@ -221,6 +222,104 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.data['mappings'], [])
         self.assertTrue(concept.is_versioned_object)
         self.assertEqual(concept.datatype, "None")
+
+    def test_put_200_openmrs_schema(self):
+        self.create_lookup_concept_classes()
+        source = OrganizationSourceFactory(custom_validation_schema=CUSTOM_VALIDATION_SCHEMA_OPENMRS)
+        name = LocalizedTextFactory(locale='fr')
+        concept = ConceptFactory(parent=source, names=[name])
+        self.assertEqual(concept.versions.count(), 1)
+        response = self.client.put(
+            concept.uri,
+            {**self.concept_payload, 'datatype': 'None', 'update_comment': 'Updated datatype'},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertListEqual(
+            list(response.data.keys()),
+            ['uuid',
+             'id',
+             'external_id',
+             'concept_class',
+             'datatype',
+             'url',
+             'retired',
+             'source',
+             'owner',
+             'owner_type',
+             'owner_url',
+             'display_name',
+             'display_locale',
+             'names',
+             'descriptions',
+             'created_on',
+             'updated_on',
+             'versions_url',
+             'version',
+             'extras',
+             'parent_id',
+             'name',
+             'type',
+             'update_comment',
+             'version_url',
+             'mappings']
+        )
+
+        names = response.data['names']
+
+        version = Concept.objects.last()
+        concept.refresh_from_db()
+
+        self.assertFalse(version.is_versioned_object)
+        self.assertTrue(version.is_latest_version)
+        self.assertEqual(version.versions.count(), 2)
+        self.assertEqual(response.data['uuid'], str(version.id))
+        self.assertEqual(response.data['datatype'], 'None')
+        self.assertEqual(response.data['update_comment'], 'Updated datatype')
+        self.assertEqual(response.data['concept_class'], 'Procedure')
+        self.assertEqual(response.data['url'], concept.uri)
+        self.assertEqual(response.data['url'], version.versioned_object.uri)
+        self.assertEqual(response.data['version_url'], version.uri)
+        self.assertFalse(response.data['retired'])
+        self.assertEqual(response.data['source'], source.mnemonic)
+        self.assertEqual(response.data['owner'], source.organization.mnemonic)
+        self.assertEqual(response.data['owner_type'], "Organization")
+        self.assertEqual(response.data['owner_url'], source.organization.uri)
+        self.assertEqual(response.data['display_name'], 'c1 name')
+        self.assertEqual(response.data['display_locale'], 'en')
+        self.assertEqual(response.data['versions_url'], concept.uri + 'versions/')
+        self.assertEqual(response.data['version'], str(version.id))
+        self.assertEqual(response.data['extras'], dict(foo='bar'))
+        self.assertEqual(response.data['parent_id'], str(source.id))
+        self.assertEqual(response.data['type'], 'Concept')
+        self.assertEqual(response.data['version_url'], version.uri)
+        self.assertEqual(response.data['mappings'], [])
+        self.assertTrue(concept.is_versioned_object)
+        self.assertEqual(concept.datatype, "None")
+
+        # same names in update
+        names[0]['uuid'] = str(name.id)
+        response = self.client.put(
+            concept.uri,
+            {**self.concept_payload, 'names': names, 'datatype': 'Numeric', 'update_comment': 'Updated datatype'},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+        concept.refresh_from_db()
+        self.assertEqual(concept.datatype, "Numeric")
+        self.assertEqual(concept.names.count(), 1)
+
+        latest_version = concept.get_latest_version()
+        prev_version = latest_version.prev_version
+        self.assertEqual(latest_version.names.count(), 1)
+        self.assertEqual(prev_version.names.count(), 1)
+        self.assertEqual(prev_version.names.first().name, latest_version.names.first().name)
+        self.assertEqual(prev_version.names.first().locale, latest_version.names.first().locale)
 
     def test_put_400(self):
         concept = ConceptFactory(parent=self.source)
