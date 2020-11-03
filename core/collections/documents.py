@@ -21,6 +21,7 @@ class CollectionDocument(Document):
     version = fields.KeywordField(attr='version')
     name = fields.KeywordField(attr='name', normalizer='lowercase')
     canonical_url = fields.KeywordField(attr='canonical_url', normalizer='lowercase')
+    mnemonic = fields.KeywordField(attr='mnemonic', normalizer='lowercase')
 
     class Django:
         model = Collection

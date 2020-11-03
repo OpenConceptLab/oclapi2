@@ -109,6 +109,7 @@ class CollectionListView(CollectionBaseView, ConceptDictionaryCreateMixin, ListW
     is_searchable = True
     es_fields = {
         'collection_type': {'sortable': True, 'filterable': True, 'facet': True, 'exact': True},
+        'mnemonic': {'sortable': True, 'filterable': True, 'exact': True},
         'name': {'sortable': True, 'filterable': True, 'exact': True},
         'last_update': {'sortable': True, 'filterable': True, 'default': 'desc'},
         'locale': {'sortable': False, 'filterable': True, 'facet': True},
