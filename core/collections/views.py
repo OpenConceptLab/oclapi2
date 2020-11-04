@@ -24,8 +24,8 @@ from core.collections.models import Collection, CollectionReference
 from core.collections.search import CollectionSearch
 from core.collections.serializers import (
     CollectionDetailSerializer, CollectionListSerializer,
-    CollectionCreateSerializer, CollectionReferenceSerializer, CollectionVersionDetailSerializer
-)
+    CollectionCreateSerializer, CollectionReferenceSerializer, CollectionVersionDetailSerializer,
+    CollectionVersionListSerializer)
 from core.collections.utils import is_concept, is_version_specified
 from core.common.constants import (
     HEAD, RELEASED_PARAM, PROCESSING_PARAM, OK_MESSAGE, NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY
@@ -380,7 +380,7 @@ class CollectionVersionListView(CollectionVersionBaseView, mixins.CreateModelMix
         if self.request.method == 'POST':
             return CollectionCreateSerializer
 
-        return CollectionListSerializer  # pragma: no cover
+        return CollectionVersionListSerializer  # pragma: no cover
 
     def get(self, request, *args, **kwargs):
         self.released_filter = parse_boolean_query_param(request, RELEASED_PARAM, self.released_filter)

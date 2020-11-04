@@ -16,13 +16,29 @@ class SourceListSerializer(ModelSerializer):
     owner = CharField(source='parent_resource')
     owner_type = CharField(source='parent_resource_type')
     owner_url = CharField(source='parent_url')
-    id = CharField(source='version')
+    id = CharField(source='mnemonic')
 
     class Meta:
         model = Source
         fields = (
             'short_code', 'name', 'url', 'owner', 'owner_type', 'owner_url', 'version', 'created_at', 'id',
             'source_type', 'updated_at', 'canonical_url'
+        )
+
+
+class SourceVersionListSerializer(ModelSerializer):
+    short_code = CharField(source='mnemonic')
+    owner = CharField(source='parent_resource')
+    owner_type = CharField(source='parent_resource_type')
+    owner_url = CharField(source='parent_url')
+    id = CharField(source='version')
+    version_url = CharField(source='uri')
+
+    class Meta:
+        model = Source
+        fields = (
+            'short_code', 'name', 'url', 'owner', 'owner_type', 'owner_url', 'version', 'created_at', 'id',
+            'source_type', 'updated_at', 'canonical_url', 'released', 'retired', 'version_url',
         )
 
 
@@ -174,5 +190,6 @@ class SourceVersionDetailSerializer(SourceCreateOrUpdateSerializer):
             'custom_validation_schema', 'public_access', 'default_locale', 'supported_locales', 'website',
             'url', 'owner', 'owner_type', 'owner_url', 'versions',
             'created_on', 'updated_on', 'created_by', 'updated_by', 'extras', 'external_id', 'versions_url',
-            'version', 'concepts_url', 'mappings_url', 'is_processing', 'released', 'canonical_url'
+            'version', 'concepts_url', 'mappings_url', 'is_processing', 'released', 'canonical_url', 'released',
+            'retired',
         )

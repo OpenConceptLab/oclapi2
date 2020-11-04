@@ -24,8 +24,8 @@ from core.sources.documents import SourceDocument
 from core.sources.models import Source
 from core.sources.search import SourceSearch
 from core.sources.serializers import (
-    SourceDetailSerializer, SourceListSerializer, SourceCreateSerializer, SourceVersionDetailSerializer
-)
+    SourceDetailSerializer, SourceListSerializer, SourceCreateSerializer, SourceVersionDetailSerializer,
+    SourceVersionListSerializer)
 
 logger = logging.getLogger('oclapi')
 
@@ -162,7 +162,7 @@ class SourceVersionListView(SourceVersionBaseView, mixins.CreateModelMixin, List
         if self.request.method == 'POST':
             return SourceCreateSerializer
 
-        return SourceListSerializer
+        return SourceVersionListSerializer
 
     def get(self, request, *args, **kwargs):
         self.released_filter = parse_boolean_query_param(request, RELEASED_PARAM, self.released_filter)

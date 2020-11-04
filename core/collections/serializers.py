@@ -27,6 +27,22 @@ class CollectionListSerializer(ModelSerializer):
         )
 
 
+class CollectionVersionListSerializer(ModelSerializer):
+    short_code = CharField(source='mnemonic')
+    owner = CharField(source='parent_resource')
+    owner_type = CharField(source='parent_resource_type')
+    owner_url = CharField(source='parent_url')
+    id = CharField(source='version')
+    version_url = CharField(source='uri')
+
+    class Meta:
+        model = Collection
+        fields = (
+            'short_code', 'name', 'url', 'owner', 'owner_type', 'owner_url', 'version', 'created_at', 'id',
+            'collection_type', 'updated_at', 'canonical_url', 'version_url,'
+        )
+
+
 class CollectionCreateOrUpdateSerializer(ModelSerializer):
     class Meta:
         model = Collection
@@ -186,7 +202,7 @@ class CollectionVersionDetailSerializer(CollectionCreateOrUpdateSerializer):
             'custom_validation_schema', 'public_access', 'default_locale', 'supported_locales', 'website',
             'url', 'owner', 'owner_type', 'owner_url', 'versions',
             'created_on', 'updated_on', 'created_by', 'updated_by', 'extras', 'external_id', 'versions_url',
-            'version', 'concepts_url', 'mappings_url', 'is_processing', 'canonical_url'
+            'version', 'concepts_url', 'mappings_url', 'is_processing', 'canonical_url', 'released', 'retired',
         )
 
 
