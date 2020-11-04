@@ -349,4 +349,18 @@ def queue_bulk_import(to_import, import_queue, username, update_if_exists):
 
 
 def drop_version(expression):
-    return '/'.join(expression.split('/')[0:7]) + '/'
+    if not expression:
+        return expression
+
+    parts = expression.split('/')
+
+    if len(parts) <= 4:
+        return expression
+
+    resource = parts[-4]
+    name = parts[-3]
+    version = parts[-2]
+    if resource in ['concepts', 'mappings', 'sources', 'collections'] and name and version:
+        return '/'.join(parts[:-2]) + '/'
+
+    return expression

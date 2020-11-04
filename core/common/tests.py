@@ -16,8 +16,8 @@ from core.collections.models import Collection
 from core.common.constants import HEAD, OCL_ORG_ID, SUPER_ADMIN_USER_ID
 from core.common.utils import (
     compact_dict_by_values, to_snake_case, flower_get, task_exists, parse_bulk_import_task_id,
-    to_camel_case
-)
+    to_camel_case,
+    drop_version)
 from core.concepts.models import Concept, LocalizedText
 from core.mappings.models import Mapping
 from core.orgs.models import Organization
@@ -393,6 +393,86 @@ class UtilsTest(OCLTestCase):
             parse_bulk_import_task_id(task_id),
             dict(uuid=task_uuid + '-', username='username', queue='default')
         )
+
+    def test_drop_version(self):
+        self.assertEqual(drop_version(None), None)
+        self.assertEqual(drop_version(''), '')
+        self.assertEqual(drop_version('/foo/bar'), '/foo/bar')
+        self.assertEqual(drop_version('/users/username/'), '/users/username/')
+        # user-source-concept
+        self.assertEqual(
+            drop_version("/users/user/sources/source/concepts/concept/"),
+            "/users/user/sources/source/concepts/concept/"
+        )
+        self.assertEqual(
+            drop_version("/users/user/sources/source/concepts/concept/version/"),
+            "/users/user/sources/source/concepts/concept/"
+        )
+        self.assertEqual(
+            drop_version("/users/user/sources/source/concepts/concept/1.23/"),
+            "/users/user/sources/source/concepts/concept/"
+        )
+        self.assertEqual(
+            drop_version("/users/user/sources/source/source-version/concepts/concept/1.23/"),
+            "/users/user/sources/source/source-version/concepts/concept/"
+        )
+        # org-source-concept
+        self.assertEqual(
+            drop_version("/orgs/org/sources/source/concepts/concept/"),
+            "/orgs/org/sources/source/concepts/concept/"
+        )
+        self.assertEqual(
+            drop_version("/orgs/org/sources/source/concepts/concept/version/"),
+            "/orgs/org/sources/source/concepts/concept/"
+        )
+        self.assertEqual(
+            drop_version("/orgs/org/sources/source/concepts/concept/1.24/"),
+            "/orgs/org/sources/source/concepts/concept/"
+        )
+        self.assertEqual(
+            drop_version("/orgs/org/sources/source/source-version/concepts/concept/1.24/"),
+            "/orgs/org/sources/source/source-version/concepts/concept/"
+        )
+        # user-collection-concept
+        self.assertEqual(
+            drop_version("/users/user/collections/coll/concepts/concept/"),
+            "/users/user/collections/coll/concepts/concept/"
+        )
+        self.assertEqual(
+            drop_version("/users/user/collections/coll/concepts/concept/version/"),
+            "/users/user/collections/coll/concepts/concept/"
+        )
+        self.assertEqual(
+            drop_version("/users/user/collections/coll/concepts/concept/1.23/"),
+            "/users/user/collections/coll/concepts/concept/"
+        )
+        self.assertEqual(
+            drop_version("/users/user/collections/coll/coll-version/concepts/concept/1.23/"),
+            "/users/user/collections/coll/coll-version/concepts/concept/"
+        )
+        # org-collection-concept
+        self.assertEqual(
+            drop_version("/orgs/org/collections/coll/concepts/concept/"),
+            "/orgs/org/collections/coll/concepts/concept/"
+        )
+        self.assertEqual(
+            drop_version("/orgs/org/collections/coll/concepts/concept/version/"),
+            "/orgs/org/collections/coll/concepts/concept/"
+        )
+        self.assertEqual(
+            drop_version("/orgs/org/collections/coll/concepts/concept/1.24/"),
+            "/orgs/org/collections/coll/concepts/concept/"
+        )
+        self.assertEqual(
+            drop_version("/orgs/org/collections/coll/coll-version/concepts/concept/1.24/"),
+            "/orgs/org/collections/coll/coll-version/concepts/concept/"
+        )
+        # user-source
+        self.assertEqual(drop_version("/users/user/sources/source/"), "/users/user/sources/source/")
+        self.assertEqual(drop_version("/users/user/sources/source/1.2/"), "/users/user/sources/source/")
+        # org-source
+        self.assertEqual(drop_version("/orgs/org/sources/source/"), "/orgs/org/sources/source/")
+        self.assertEqual(drop_version("/orgs/org/sources/source/version/"), "/orgs/org/sources/source/")
 
 
 class BaseModelTest(OCLTestCase):

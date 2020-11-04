@@ -12,7 +12,7 @@ from django_elasticsearch_dsl.signals import RealTimeSignalProcessor
 from pydash import get
 
 from core.common.services import S3
-from core.common.utils import reverse_resource, reverse_resource_version, parse_updated_since_param
+from core.common.utils import reverse_resource, reverse_resource_version, parse_updated_since_param, drop_version
 from core.settings import DEFAULT_LOCALE
 from core.sources.constants import CONTENT_REFERRED_PRIVATELY
 from .constants import (
@@ -256,6 +256,10 @@ class VersionedModel(BaseResourceModel):
         return self.active_versions.filter(version=HEAD).first()
 
     head = property(get_head)
+
+    @property
+    def versioned_object_url(self):
+        return drop_version(self.uri)
 
     @classmethod
     def get_version(cls, mnemonic, version=HEAD, filters=None):

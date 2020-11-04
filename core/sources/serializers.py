@@ -33,12 +33,14 @@ class SourceVersionListSerializer(ModelSerializer):
     owner_url = CharField(source='parent_url')
     id = CharField(source='version')
     version_url = CharField(source='uri')
+    url = CharField(source='versioned_object_url')
+    previous_version_url = CharField(source='prev_version_uri')
 
     class Meta:
         model = Source
         fields = (
             'short_code', 'name', 'url', 'owner', 'owner_type', 'owner_url', 'version', 'created_at', 'id',
-            'source_type', 'updated_at', 'canonical_url', 'released', 'retired', 'version_url',
+            'source_type', 'updated_at', 'canonical_url', 'released', 'retired', 'version_url', 'previous_version_url'
         )
 
 
@@ -181,6 +183,9 @@ class SourceVersionDetailSerializer(SourceCreateOrUpdateSerializer):
     supported_locales = ListField(required=False, allow_empty=True)
     is_processing = BooleanField(read_only=True)
     released = BooleanField(default=False)
+    version_url = CharField(source='uri')
+    url = CharField(source='versioned_object_url')
+    previous_version_url = CharField(source='prev_version_uri')
 
     class Meta:
         model = Source
@@ -188,8 +193,7 @@ class SourceVersionDetailSerializer(SourceCreateOrUpdateSerializer):
         fields = (
             'type', 'uuid', 'id', 'short_code', 'name', 'full_name', 'description', 'source_type',
             'custom_validation_schema', 'public_access', 'default_locale', 'supported_locales', 'website',
-            'url', 'owner', 'owner_type', 'owner_url', 'versions',
-            'created_on', 'updated_on', 'created_by', 'updated_by', 'extras', 'external_id', 'versions_url',
+            'url', 'owner', 'owner_type', 'owner_url', 'versions', 'retired', 'version_url', 'previous_version_url',
+            'created_on', 'updated_on', 'created_by', 'updated_by', 'extras', 'external_id',
             'version', 'concepts_url', 'mappings_url', 'is_processing', 'released', 'canonical_url', 'released',
-            'retired',
         )
