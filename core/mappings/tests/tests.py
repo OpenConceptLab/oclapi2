@@ -1,6 +1,7 @@
 import factory
+from django.core.exceptions import ValidationError
 
-from core.common.constants import HEAD
+from core.common.constants import HEAD, CUSTOM_VALIDATION_SCHEMA_OPENMRS
 from core.common.tests import OCLTestCase
 from core.concepts.tests.factories import ConceptFactory, LocalizedTextFactory
 from core.mappings.models import Mapping
@@ -192,3 +193,41 @@ class MappingTest(OCLTestCase):
         self.assertEqual(
             persisted_mapping.version_url, persisted_mapping.uri
         )
+
+
+class OpenMRSMappingValidatorTest(OCLTestCase):
+    def setUp(self):
+        self.create_lookup_concept_classes()
+
+    def test_single_mapping_between_concepts(self):
+        source = OrganizationSourceFactory(version=HEAD, custom_validation_schema=CUSTOM_VALIDATION_SCHEMA_OPENMRS)
+        concept1 = ConceptFactory(parent=source, names=[LocalizedTextFactory()])
+        concept2 = ConceptFactory(parent=source, names=[LocalizedTextFactory()])
+        mapping1 = MappingFactory.build(parent=source, to_concept=concept1, from_concept=concept2)
+        mapping1.clean()
+        mapping1.save()
+
+        mapping2 = MappingFactory.build(parent=source, to_concept=concept1, from_concept=concept2)
+
+        with self.assertRaises(ValidationError) as ex:
+            mapping2.clean()
+
+        self.assertEqual(ex.exception.messages, ['There can be only one mapping between two concepts'])
+
+        mapping3 = MappingFactory.build(parent=source, to_concept=concept2, from_concept=concept1)
+        mapping3.clean()
+
+    def test_invalid_map_type(self):
+        source = OrganizationSourceFactory(version=HEAD, custom_validation_schema=CUSTOM_VALIDATION_SCHEMA_OPENMRS)
+        concept1 = ConceptFactory(parent=source, names=[LocalizedTextFactory()])
+        concept2 = ConceptFactory(parent=source, names=[LocalizedTextFactory()])
+
+        mapping = MappingFactory.build(parent=source, to_concept=concept1, from_concept=concept2, map_type='Foo bar')
+
+        with self.assertRaises(ValidationError) as ex:
+            mapping.clean()
+        self.assertEqual(ex.exception.messages, ['Invalid mapping type'])
+
+        # 'Q-AND-A' is present in OpenMRS lookup values
+        mapping = MappingFactory.build(parent=source, to_concept=concept1, from_concept=concept2, map_type='Q-AND-A')
+        mapping.clean()
