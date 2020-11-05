@@ -77,7 +77,7 @@ class CollectionCreateOrUpdateSerializer(ModelSerializer):
         if not supported_locales:
             supported_locales = collection.supported_locales
         if supported_locales and isinstance(supported_locales, str):
-            supported_locales = supported_locales.split(',')  # pragma: no cover
+            supported_locales = supported_locales.split(',')
 
         collection.supported_locales = supported_locales
         collection.extras = validated_data.get('extras', collection.extras)

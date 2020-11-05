@@ -296,7 +296,7 @@ class CollectionReferencesView(
 
         references = list(filter(lambda expr: expr.startswith(expression), added_expressions))
         if len(references) < 1:
-            return None  # pragma: no cover
+            return None
 
         return {
             'added': True,
@@ -360,7 +360,7 @@ class CollectionReferencesView(
 class CollectionVersionReferencesView(CollectionVersionBaseView, ListWithHeadersMixin):
     serializer_class = CollectionReferenceSerializer
 
-    def get(self, request, *args, **kwargs):  # pragma: no cover
+    def get(self, request, *args, **kwargs):
         query_params = self.request.query_params
         search_query = query_params.get('q', '')
         sort = query_params.get('search_sort', 'ASC')
@@ -380,7 +380,7 @@ class CollectionVersionListView(CollectionVersionBaseView, mixins.CreateModelMix
         if self.request.method == 'POST':
             return CollectionCreateSerializer
 
-        return CollectionVersionListSerializer  # pragma: no cover
+        return CollectionVersionListSerializer
 
     def get(self, request, *args, **kwargs):
         self.released_filter = parse_boolean_query_param(request, RELEASED_PARAM, self.released_filter)
@@ -408,7 +408,7 @@ class CollectionVersionListView(CollectionVersionBaseView, mixins.CreateModelMix
                     version_id = data.get('uuid')
                     export_collection.delay(version_id)
                     return Response(data, status=status.HTTP_201_CREATED)
-            except IntegrityError as ex:  # pragma: no cover
+            except IntegrityError as ex:
                 return Response(
                     dict(
                         error=str(ex), detail=VERSION_ALREADY_EXISTS.format(version)
@@ -443,7 +443,7 @@ class CollectionLatestVersionRetrieveUpdateView(CollectionVersionBaseView, Retri
         self.object = self.get_object()
         head = self.object.head
         if not head:
-            return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)  # pragma: no cover
+            return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
 
         serializer = self.get_serializer(self.object, data=request.data, partial=True)
 
@@ -471,7 +471,7 @@ class CollectionVersionRetrieveUpdateDestroyView(CollectionBaseView, RetrieveAPI
         self.object = self.get_object()
         head = self.object.head
         if not head:
-            return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)  # pragma: no cover
+            return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
 
         serializer = self.get_serializer(self.object, data=request.data, partial=True)
 

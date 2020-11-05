@@ -95,7 +95,7 @@ class Collection(ConceptContainerModel):
         self.concepts.add(concept)
 
     def add_mapping(self, mapping):
-        self.mappings.add(mapping)  # pragma: no cover
+        self.mappings.add(mapping)
 
     def get_concepts(self, start=None, end=None):
         """ Use for efficient iteration over paginated concepts. Note that any filter will be applied only to concepts
@@ -122,7 +122,7 @@ class Collection(ConceptContainerModel):
 
         if self.custom_validation_schema == CUSTOM_VALIDATION_SCHEMA_OPENMRS:
             if reference.concepts and reference.concepts.count() == 0:
-                return  # pragma: no cover
+                return
 
             concept = reference.concepts[0]
             self.check_concept_uniqueness_in_collection_and_locale_by_name_attribute(
@@ -399,7 +399,7 @@ class CollectionReference(models.Model):
 
     def save(self, force_insert=False, force_update=False, using=None, update_fields=None):
         if not self.internal_reference_id and self.id:
-            self.internal_reference_id = str(self.id)  # pragma: no cover
+            self.internal_reference_id = str(self.id)
         super().save(force_insert, force_update, using, update_fields)
 
     def create_entities_from_expressions(self):
@@ -409,7 +409,7 @@ class CollectionReference(models.Model):
             self.mappings = self.get_mappings()
 
         if (not self.concepts or not self.concepts.exists()) and (not self.mappings or not self.mappings.exists()):
-            raise ValidationError({'detail': [EXPRESSION_INVALID]})  # pragma: no cover
+            raise ValidationError({'detail': [EXPRESSION_INVALID]})
 
     def get_related_mappings(self, exclude_mapping_uris):
         mappings = []
