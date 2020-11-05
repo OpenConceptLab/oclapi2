@@ -6,14 +6,14 @@ from core.common.utils import get_base_url
 from core.users.models import UserProfile
 
 
-class ImportResults:  # pragma: no cover
+class ImportResults:
     def __init__(self, importer):
         self.json = json.loads(importer.import_results.to_json())
         self.detailed_summary = importer.import_results.get_detailed_summary()
         self.report = importer.import_results.display_report()
 
 
-class BulkImport:  # pragma: no cover
+class BulkImport:
     def __init__(self, content, username, update_if_exists):
         self.input_list = []
         self.user = None
