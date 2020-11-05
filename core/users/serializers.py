@@ -25,14 +25,11 @@ class UserCreateSerializer(serializers.ModelSerializer):
     company = serializers.CharField(required=False)
     location = serializers.CharField(required=False)
     preferred_locale = serializers.CharField(required=False)
-    orgs = serializers.IntegerField(read_only=True)
-    public_collections = serializers.IntegerField(read_only=True)
-    public_sources = serializers.IntegerField(read_only=True)
+    orgs = serializers.IntegerField(read_only=True, source='orgs_count')
     created_on = serializers.DateTimeField(source='created_at', read_only=True)
     updated_on = serializers.DateTimeField(source='updated_at', read_only=True)
     created_by = serializers.CharField(read_only=True)
     updated_by = serializers.CharField(read_only=True)
-    url = serializers.CharField(read_only=True)
     extras = serializers.JSONField(required=False, allow_null=True)
     token = serializers.CharField(required=False, read_only=True)
 
@@ -77,15 +74,11 @@ class UserDetailSerializer(serializers.ModelSerializer):
     company = serializers.CharField(required=False)
     location = serializers.CharField(required=False)
     preferred_locale = serializers.CharField(required=False)
-    orgs = serializers.IntegerField(read_only=True)
-    public_collections = serializers.IntegerField(read_only=True)
-    public_sources = serializers.IntegerField(read_only=True)
+    orgs = serializers.IntegerField(read_only=True, source='orgs_count')
     created_on = serializers.DateTimeField(source='created_at', read_only=True)
     updated_on = serializers.DateTimeField(source='updated_at', read_only=True)
     created_by = serializers.CharField(read_only=True)
     updated_by = serializers.CharField(read_only=True)
-    url = serializers.URLField(read_only=True)
-    organizations_url = serializers.URLField(read_only=True)
     extras = serializers.JSONField(required=False, allow_null=True)
 
     class Meta:
@@ -93,7 +86,7 @@ class UserDetailSerializer(serializers.ModelSerializer):
         fields = (
             'type', 'uuid', 'username', 'name', 'email', 'company', 'location', 'preferred_locale', 'orgs',
             'public_collections', 'public_sources', 'created_on', 'updated_on', 'created_by', 'updated_by',
-            'url', 'organizations_url', 'extras', 'sources_url',
+            'url', 'organizations_url', 'extras', 'sources_url', 'collections_url',
         )
 
     def update(self, instance, validated_data):

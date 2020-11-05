@@ -81,5 +81,9 @@ class UserProfile(AbstractUser, BaseModel, SourceContainerMixin):
     def __str__(self):
         return str(self.mnemonic)
 
+    @property
+    def orgs_count(self):
+        return self.organizations.count()
+
 
 admin.site.register(UserProfile)

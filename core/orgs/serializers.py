@@ -76,14 +76,13 @@ class OrganizationDetailSerializer(serializers.ModelSerializer):
     url = serializers.URLField(read_only=True)
     members_url = serializers.URLField(read_only=True)
     extras = serializers.JSONField(required=False, allow_null=True)
-    public_sources = serializers.IntegerField(read_only=True)
 
     class Meta:
         model = Organization
         fields = (
             'type', 'uuid', 'id', 'public_access', 'name', 'company', 'website', 'location', 'members',
             'created_on', 'updated_on', 'url', 'extras', 'members_url', 'created_by', 'updated_by', 'location',
-            'sources_url', 'public_sources'
+            'sources_url', 'public_sources', 'collections_url', 'public_collections'
         )
 
     def update(self, instance, validated_data):

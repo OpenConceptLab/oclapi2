@@ -361,8 +361,16 @@ class SourceContainerMixin:
         return self.source_set.exclude(public_access=ACCESS_TYPE_NONE).filter(version=HEAD).count()
 
     @property
+    def public_collections(self):
+        return self.collection_set.exclude(public_access=ACCESS_TYPE_NONE).filter(version=HEAD).count()
+
+    @property
     def sources_url(self):
         return reverse('source-list', kwargs={self.get_url_kwarg(): self.mnemonic})
+
+    @property
+    def collections_url(self):
+        return reverse('collection-list', kwargs={self.get_url_kwarg(): self.mnemonic})
 
 
 class SourceChildMixin:
