@@ -11,4 +11,4 @@ RUN chmod +x startup.sh
 RUN chmod +x start_celery_worker.sh
 RUN chmod +x start_flower.sh
 EXPOSE 8000
-CMD ["bash", "-c", "startup.sh"]
+CMD ["bash", "-c", "./startup.sh"]
