@@ -201,7 +201,7 @@ class SourceVersionListView(SourceVersionBaseView, mixins.CreateModelMixin, List
     def get_queryset(self):
         queryset = super().get_queryset()
         if self.released_filter is not None:
-            queryset = queryset.filter(released=self.released_filter)   # pragma: no cover
+            queryset = queryset.filter(released=self.released_filter)
         return queryset.order_by('-created_at')
 
 
@@ -223,7 +223,7 @@ class SourceLatestVersionRetrieveUpdateView(SourceVersionBaseView, RetrieveAPIVi
         self.object = self.get_object()
         head = self.object.head
         if not head:
-            return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)   # pragma: no cover
+            return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
 
         serializer = self.get_serializer(self.object, data=request.data, partial=True)
 
@@ -247,11 +247,11 @@ class SourceVersionRetrieveUpdateDestroyView(SourceVersionBaseView, RetrieveAPIV
         self.object = self.get_object()
         head = self.object.head
         if not head:
-            return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)   # pragma: no cover
+            return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
 
         external_id = get(request.data, 'version_external_id')
         if external_id:
-            request.data['external_id'] = external_id   # pragma: no cover
+            request.data['external_id'] = external_id
         serializer = self.get_serializer(self.object, data=request.data, partial=True)
 
         if serializer.is_valid():
@@ -267,7 +267,7 @@ class SourceVersionRetrieveUpdateDestroyView(SourceVersionBaseView, RetrieveAPIV
 
         try:
             instance.delete()
-        except ValidationError as ex:   # pragma: no cover
+        except ValidationError as ex:
             return Response(ex.message_dict, status=status.HTTP_400_BAD_REQUEST)
 
         return Response(status=status.HTTP_204_NO_CONTENT)

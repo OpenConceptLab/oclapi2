@@ -85,7 +85,7 @@ class Source(ConceptContainerModel):
         if origin_source.custom_validation_schema == self.custom_validation_schema:
             return False
 
-        return self.custom_validation_schema is not None and self.num_concepts > 0  # pragma: no cover
+        return self.custom_validation_schema is not None and self.num_concepts > 0
 
     def any_concept_referred_privately(self):
         from core.collections.models import Collection
