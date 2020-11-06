@@ -15,7 +15,7 @@ class S3:
 
         return session.client(
             's3',
-            config=Config(signature_version='s3v4')
+            config=Config(region_name=settings.AWS_REGION_NAME, signature_version='s3v4')
         )
 
     @staticmethod
