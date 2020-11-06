@@ -162,6 +162,8 @@ class ConceptDetailSerializer(ModelSerializer):
     update_comment = CharField(required=False, source='comment')
     mappings = SerializerMethodField()
     url = CharField(required=False, source='versioned_object_url')
+    updated_by = DateTimeField(source='updated_by.username', read_only=True)
+    created_by = DateTimeField(source='created_by.username', read_only=True)
 
     def __init__(self, *args, **kwargs):
         self.query_params = kwargs.get('context').get('request').query_params.dict()
@@ -176,7 +178,7 @@ class ConceptDetailSerializer(ModelSerializer):
             'uuid', 'id', 'external_id', 'concept_class', 'datatype', 'url', 'retired', 'source',
             'owner', 'owner_type', 'owner_url', 'display_name', 'display_locale', 'names', 'descriptions',
             'created_on', 'updated_on', 'versions_url', 'version', 'extras', 'parent_id', 'name', 'type',
-            'update_comment', 'version_url', 'mappings'
+            'update_comment', 'version_url', 'mappings', 'updated_by', 'created_by'
         )
 
     def get_mappings(self, obj):
