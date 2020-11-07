@@ -65,32 +65,36 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 201)
         self.assertListEqual(
             list(response.data.keys()),
-            ['uuid',
-             'id',
-             'external_id',
-             'concept_class',
-             'datatype',
-             'url',
-             'retired',
-             'source',
-             'owner',
-             'owner_type',
-             'owner_url',
-             'display_name',
-             'display_locale',
-             'names',
-             'descriptions',
-             'created_on',
-             'updated_on',
-             'versions_url',
-             'version',
-             'extras',
-             'parent_id',
-             'name',
-             'type',
-             'update_comment',
-             'version_url',
-             'mappings']
+            [
+                'uuid',
+                'id',
+                'external_id',
+                'concept_class',
+                'datatype',
+                'url',
+                'retired',
+                'source',
+                'owner',
+                'owner_type',
+                'owner_url',
+                'display_name',
+                'display_locale',
+                'names',
+                'descriptions',
+                'created_on',
+                'updated_on',
+                'versions_url',
+                'version',
+                'extras',
+                'parent_id',
+                'name',
+                'type',
+                'update_comment',
+                'version_url',
+                'mappings',
+                'updated_by',
+                'created_by',
+             ]
         )
 
         concept = Concept.objects.first()
@@ -190,7 +194,9 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
              'type',
              'update_comment',
              'version_url',
-             'mappings']
+             'mappings',
+             'updated_by',
+             'created_by']
         )
 
         version = Concept.objects.last()
@@ -264,7 +270,9 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
              'type',
              'update_comment',
              'version_url',
-             'mappings']
+             'mappings',
+             'updated_by',
+             'created_by']
         )
 
         names = response.data['names']
