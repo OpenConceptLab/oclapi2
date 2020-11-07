@@ -24,6 +24,7 @@ import core.concepts.views as concept_views
 import core.mappings.views as mapping_views
 from core.common.constants import NAMESPACE_PATTERN
 from core.common.utils import get_base_url
+from core.common.views import RootView
 from core.importers.views import BulkImportView
 
 SchemaView = get_schema_view(
@@ -38,24 +39,25 @@ SchemaView = get_schema_view(
 )
 
 urlpatterns = [
+    path('', RootView.as_view(), name='root'),
     url(r'^swagger(?P<format>\.json|\.yaml)$', SchemaView.without_ui(cache_timeout=0), name='schema-json'),
     url(r'^swagger/$', SchemaView.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui'),
     url(r'^redoc/$', SchemaView.with_ui('redoc', cache_timeout=0), name='schema-redoc'),
-    path('admin/', admin.site.urls),
-    path('users/', include('core.users.urls')),
-    path('user/', include('core.users.user_urls')),
-    path('orgs/', include('core.orgs.urls')),
-    path('sources/', include('core.sources.urls')),
-    path('collections/', include('core.collections.urls')),
-    path('concepts/', concept_views.ConceptVersionListAllView.as_view(), name='all-concepts'),
-    path('mappings/', mapping_views.MappingVersionListAllView.as_view(), name='all-mappings'),
-    path('importers/', include('core.importers.urls')),
+    path('admin/', admin.site.urls, name='admin_urls'),
+    path('users/', include('core.users.urls'), name='users_urls'),
+    path('user/', include('core.users.user_urls'), name='current_user_urls'),
+    path('orgs/', include('core.orgs.urls'), name='orgs_url'),
+    path('sources/', include('core.sources.urls'), name='sources_url'),
+    path('collections/', include('core.collections.urls'), name='collections_urls'),
+    path('concepts/', concept_views.ConceptVersionListAllView.as_view(), name='all_concepts_urls'),
+    path('mappings/', mapping_views.MappingVersionListAllView.as_view(), name='all_mappings_urls'),
+    path('importers/', include('core.importers.urls'), name='importer_urls'),
 
     # just for ocldev
-    url('manage/bulkimport/', BulkImportView.as_view(), name='bulk-import'),
+    url('manage/bulkimport/', BulkImportView.as_view(), name='bulk_import_urls'),
     re_path(
         'manage/bulkimport/(?P<import_queue>{pattern})/'.format(pattern=NAMESPACE_PATTERN),
         BulkImportView.as_view(),
-        name='bulk-import-detail'
+        name='bulk_import_detail_url'
     )
 ]

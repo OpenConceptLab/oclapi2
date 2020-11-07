@@ -4,6 +4,7 @@ from elasticsearch_dsl import Q
 from pydash import get
 from rest_framework import response, generics, status
 from rest_framework.generics import ListAPIView, RetrieveUpdateDestroyAPIView
+from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
 from core.common.constants import SEARCH_PARAM, ES_RESULTS_MAX_LIMIT, LIST_DEFAULT_LIMIT, CSV_DEFAULT_LIMIT, \
@@ -343,3 +344,23 @@ class SourceChildExtraRetrieveUpdateDestroyView(SourceChildExtrasBaseView, Retri
                 return Response(errors, status=status.HTTP_400_BAD_REQUEST)
             return Response(status=status.HTTP_204_NO_CONTENT)
         return Response(dict(detail=NOT_FOUND), status=status.HTTP_404_NOT_FOUND)
+
+
+class RootView(BaseAPIView):  # pragma: no cover
+    permission_classes = (AllowAny,)
+
+    def get(self, _):
+        from core.urls import urlpatterns
+        data = dict(version='2.0.0.beta.1', routes={})
+        for pattern in urlpatterns:
+            name = getattr(pattern, 'name', None) or getattr(pattern, 'app_name', None)
+            route = str(pattern.pattern)
+            if route and name is None:
+                name = route.split('/')[0] + '_urls'
+                if name == 'user_urls':
+                    name = 'current_user_urls'
+            data['routes'][name] = self.get_host_url() + '/' + str(pattern.pattern)
+
+        data['routes'].pop('root')
+
+        return Response(data)
