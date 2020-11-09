@@ -105,7 +105,7 @@ class CollectionCreateSerializer(CollectionCreateOrUpdateSerializer):
     full_name = CharField(required=False)
     description = CharField(required=False, allow_blank=True)
     collection_type = CharField(required=False)
-    custom_validation_schema = CharField(required=False, allow_blank=True)
+    custom_validation_schema = CharField(required=False, allow_blank=True, allow_null=True)
     public_access = ChoiceField(required=False, choices=ACCESS_TYPE_CHOICES)
     default_locale = CharField(required=False, allow_blank=True)
     supported_locales = ListField(required=False, allow_empty=True)

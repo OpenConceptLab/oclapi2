@@ -303,10 +303,14 @@ class ConceptDictionaryCreateMixin(ConceptDictionaryMixin):
         permission = HasOwnership()
         if not permission.has_object_permission(request, self, self.parent_resource):
             return Response(status=status.HTTP_403_FORBIDDEN)
+        supported_locales = request.data.pop('supported_locales', '')
+        if isinstance(supported_locales, str):
+            supported_locales = compact(supported_locales.split(','))
+
         serializer = self.get_serializer(
             data={
                 'mnemonic': request.data.get('id'),
-                'supported_locales': compact(request.data.pop('supported_locales', '').split(',')),
+                'supported_locales': supported_locales,
                 'version': HEAD, **request.data, **{self.parent_resource.resource_type.lower(): self.parent_resource.id}
             }
         )
@@ -343,7 +347,11 @@ class ConceptDictionaryUpdateMixin(ConceptDictionaryMixin):
         save_kwargs = {'force_update': True, 'parent_resource': self.parent_resource}
         success_status_code = status.HTTP_200_OK
 
-        request.data['supported_locales'] = compact(request.data.pop('supported_locales', '').split(','))
+        supported_locales = request.data.pop('supported_locales', '')
+        if isinstance(supported_locales, str):
+            supported_locales = compact(supported_locales.split(','))
+
+        request.data['supported_locales'] = supported_locales
         serializer = self.get_serializer(self.object, data=request.data, partial=True)
 
         if serializer.is_valid():
