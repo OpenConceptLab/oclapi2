@@ -94,7 +94,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
                 'mappings',
                 'updated_by',
                 'created_by',
-             ]
+            ]
         )
 
         concept = Concept.objects.first()
