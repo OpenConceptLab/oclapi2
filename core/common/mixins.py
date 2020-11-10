@@ -540,7 +540,7 @@ class ConceptContainerExportMixin:
         logger.debug('%s Export requested for version %s (post)', self.entity, version.version)
         status_code = status.HTTP_303_SEE_OTHER
 
-        if not version.has_export():
+        if not S3.exists(version.export_path):
             status_code = self.handle_export_version()
             return Response(status=status_code)
 

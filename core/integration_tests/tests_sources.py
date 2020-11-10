@@ -542,11 +542,10 @@ class SourceVersionExportViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 405)
 
-    @patch('core.common.services.S3.url_for')
-    def test_post_303(self, s3_url_for_mock):
+    @patch('core.common.services.S3.exists')
+    def test_post_303(self, s3_exists_mock):
         Source.objects.filter(id=self.source_v1.id).update(last_child_update='2020-01-01 10:00:00')
-        s3_url = 'https://s3/username/source1_v1.20200101100000.zip'
-        s3_url_for_mock.return_value = s3_url
+        s3_exists_mock.return_value = True
         response = self.client.post(
             '/sources/source1/v1/export/',
             HTTP_AUTHORIZATION='Token ' + self.token,
@@ -555,14 +554,14 @@ class SourceVersionExportViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 303)
         self.assertEqual(response['URL'], self.source_v1.uri + 'export/')
-        s3_url_for_mock.assert_called_once_with("username/source1_v1.20200101100000.zip")
+        s3_exists_mock.assert_called_once_with("username/source1_v1.20200101100000.zip")
 
     @patch('core.sources.views.export_source')
-    @patch('core.common.services.S3.url_for')
-    def test_post_202(self, s3_url_for_mock, export_source_mock):
+    @patch('core.common.services.S3.exists')
+    def test_post_202(self, s3_exists_mock, export_source_mock):
         Source.objects.filter(id=self.source_v1.id).update(last_child_update='2020-01-01 10:00:00')
 
-        s3_url_for_mock.return_value = None
+        s3_exists_mock.return_value = False
         export_source_mock.delay = Mock()
         response = self.client.post(
             '/sources/source1/v1/export/',
@@ -571,15 +570,15 @@ class SourceVersionExportViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 202)
-        s3_url_for_mock.assert_called_once_with("username/source1_v1.20200101100000.zip")
+        s3_exists_mock.assert_called_once_with("username/source1_v1.20200101100000.zip")
         export_source_mock.delay.assert_called_once_with(self.source_v1.id)
 
     @patch('core.sources.views.export_source')
-    @patch('core.common.services.S3.url_for')
-    def test_post_409(self, s3_url_for_mock, export_source_mock):
+    @patch('core.common.services.S3.exists')
+    def test_post_409(self, s3_exists_mock, export_source_mock):
         Source.objects.filter(id=self.source_v1.id).update(last_child_update='2020-01-01 10:00:00')
 
-        s3_url_for_mock.return_value = None
+        s3_exists_mock.return_value = False
         export_source_mock.delay.side_effect = AlreadyQueued('already-queued')
         response = self.client.post(
             '/sources/source1/v1/export/',
@@ -588,7 +587,7 @@ class SourceVersionExportViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 409)
-        s3_url_for_mock.assert_called_once_with("username/source1_v1.20200101100000.zip")
+        s3_exists_mock.assert_called_once_with("username/source1_v1.20200101100000.zip")
         export_source_mock.delay.assert_called_once_with(self.source_v1.id)
 
 

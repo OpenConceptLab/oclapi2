@@ -336,7 +336,7 @@ class SourceVersionProcessingView(SourceBaseView, ConceptContainerProcessingMixi
     resource = 'source'
 
 
-class SourceVersionExportView(SourceBaseView, ConceptContainerExportMixin):
+class SourceVersionExportView(ConceptContainerExportMixin, SourceVersionBaseView):
     entity = 'Source'
     permission_classes = (CanViewConceptDictionary,)
     serializer_class = SourceVersionDetailSerializer

@@ -819,11 +819,10 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 405)
 
-    @patch('core.common.services.S3.url_for')
-    def test_post_303(self, s3_url_for_mock):
+    @patch('core.common.services.S3.exists')
+    def test_post_303(self, s3_exists_mock):
         Collection.objects.filter(id=self.collection_v1.id).update(last_child_update='2020-01-01 10:00:00')
-        s3_url = 'https://s3/username/coll_v1.20200101100000.zip'
-        s3_url_for_mock.return_value = s3_url
+        s3_exists_mock.return_value = True
         response = self.client.post(
             '/collections/coll/v1/export/',
             HTTP_AUTHORIZATION='Token ' + self.token,
@@ -832,14 +831,14 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 303)
         self.assertEqual(response['URL'], self.collection_v1.uri + 'export/')
-        s3_url_for_mock.assert_called_once_with("username/coll_v1.20200101100000.zip")
+        s3_exists_mock.assert_called_once_with("username/coll_v1.20200101100000.zip")
 
     @patch('core.collections.views.export_collection')
-    @patch('core.common.services.S3.url_for')
-    def test_post_202(self, s3_url_for_mock, export_collection_mock):
+    @patch('core.common.services.S3.exists')
+    def test_post_202(self, s3_exists_mock, export_collection_mock):
         Collection.objects.filter(id=self.collection_v1.id).update(last_child_update='2020-01-01 10:00:00')
 
-        s3_url_for_mock.return_value = None
+        s3_exists_mock.return_value = False
         export_collection_mock.delay = Mock()
         response = self.client.post(
             '/collections/coll/v1/export/',
@@ -848,15 +847,15 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 202)
-        s3_url_for_mock.assert_called_once_with("username/coll_v1.20200101100000.zip")
+        s3_exists_mock.assert_called_once_with("username/coll_v1.20200101100000.zip")
         export_collection_mock.delay.assert_called_once_with(self.collection_v1.id)
 
     @patch('core.collections.views.export_collection')
-    @patch('core.common.services.S3.url_for')
-    def test_post_409(self, s3_url_for_mock, export_collection_mock):
+    @patch('core.common.services.S3.exists')
+    def test_post_409(self, s3_exists_mock, export_collection_mock):
         Collection.objects.filter(id=self.collection_v1.id).update(last_child_update='2020-01-01 10:00:00')
 
-        s3_url_for_mock.return_value = None
+        s3_exists_mock.return_value = False
         export_collection_mock.delay.side_effect = AlreadyQueued('already-queued')
         response = self.client.post(
             '/collections/coll/v1/export/',
@@ -865,7 +864,7 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 409)
-        s3_url_for_mock.assert_called_once_with("username/coll_v1.20200101100000.zip")
+        s3_exists_mock.assert_called_once_with("username/coll_v1.20200101100000.zip")
         export_collection_mock.delay.assert_called_once_with(self.collection_v1.id)
 
 

@@ -1,7 +1,7 @@
 import boto3
 import requests
 from botocore.client import Config
-from botocore.exceptions import NoCredentialsError
+from botocore.exceptions import NoCredentialsError, ClientError
 from django.conf import settings
 
 
@@ -81,6 +81,15 @@ class S3:
             settings.AWS_STORAGE_BUCKET_NAME,
             file_path,
         )
+
+    @classmethod
+    def exists(cls, key):
+        try:
+            cls.resource().meta.client.head_object(Key=key, Bucket=settings.AWS_STORAGE_BUCKET_NAME)
+        except ClientError:
+            return False
+
+        return True
 
     @classmethod
     def __fetch_keys(cls, prefix='/', delimiter='/'):  # pragma: no cover

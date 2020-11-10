@@ -557,7 +557,7 @@ class CollectionVersionProcessingView(CollectionBaseView, ConceptContainerProces
     resource = 'collection'
 
 
-class CollectionVersionExportView(CollectionBaseView, ConceptContainerExportMixin):
+class CollectionVersionExportView(ConceptContainerExportMixin, CollectionVersionBaseView):
     entity = 'Collection'
     permission_classes = (CanViewConceptDictionary,)
     serializer_class = CollectionVersionDetailSerializer
