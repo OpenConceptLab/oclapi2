@@ -278,7 +278,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             queryset = queryset.filter(cls.get_iexact_or_criteria('version', concept_version))
         if is_latest:
             queryset = queryset.filter(is_latest_version=True)
-        if not include_retired:
+        if not include_retired and not concept:
             queryset = queryset.filter(retired=False)
         if updated_since:
             queryset = queryset.filter(updated_at__gte=updated_since)
