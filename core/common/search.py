@@ -8,8 +8,8 @@ class CommonSearch(FacetedSearch):
 
     def format_search_str(self, search_str):
         if self.exact_match:
-            return "*{}*".format(search_str)
-        return search_str
+            return search_str
+        return "*{}*".format(search_str)
 
     def query(self, search, query):
         if query:

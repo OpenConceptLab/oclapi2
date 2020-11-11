@@ -57,7 +57,7 @@ class Collection(ConceptContainerModel):
         include_references = params.pop('include_references', None)
         queryset = super().get_base_queryset(params)
         if collection:
-            queryset = queryset.filter(mnemonic__in=collection.split(','))
+            queryset = queryset.filter(cls.get_iexact_or_criteria('mnemonic', collection))
         if contains_uri:
             queryset = queryset.filter(
                 references__expression=contains_uri, public_access__in=[ACCESS_TYPE_EDIT, ACCESS_TYPE_VIEW]

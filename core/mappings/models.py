@@ -323,26 +323,26 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         updated_since = parse_updated_since_param(params)
 
         if collection:
-            queryset = queryset.filter(collection_set__mnemonic__in=collection.split(','))
+            queryset = queryset.filter(cls.get_iexact_or_criteria('collection_set__mnemonic', collection))
             if user:
-                queryset = queryset.filter(collection_set__user__username__in=user.split(','))
+                queryset = queryset.filter(cls.get_iexact_or_criteria('collection_set__user__username', user))
             if org:
-                queryset = queryset.filter(collection_set__organization__mnemonic__in=org.split(','))
+                queryset = queryset.filter(cls.get_iexact_or_criteria('collection_set__organization__mnemonic', org))
             if container_version:
-                queryset = queryset.filter(collection_set__version__in=container_version.split(','))
+                queryset = queryset.filter(cls.get_iexact_or_criteria('collection_set__version', container_version))
         if source:
-            queryset = queryset.filter(sources__mnemonic__in=source.split(','))
+            queryset = queryset.filter(cls.get_iexact_or_criteria('sources__mnemonic', source))
             if user:
-                queryset = queryset.filter(parent__user__username__in=user.split(','))
+                queryset = queryset.filter(cls.get_iexact_or_criteria('parent__user__username', user))
             if org:
-                queryset = queryset.filter(parent__organization__mnemonic__in=org.split(','))
+                queryset = queryset.filter(cls.get_iexact_or_criteria('parent__organization__mnemonic', org))
             if container_version:
-                queryset = queryset.filter(sources__version__in=container_version.split(','))
+                queryset = queryset.filter(cls.get_iexact_or_criteria('sources__version', container_version))
 
         if mapping:
             queryset = queryset.filter(mnemonic__iexact=mapping)
         if mapping_version:
-            queryset = queryset.filter(version__in=mapping_version.split(','))
+            queryset = queryset.filter(cls.get_iexact_or_criteria('version', mapping_version))
         if is_latest:
             queryset = queryset.filter(is_latest_version=True)
         if not include_retired:

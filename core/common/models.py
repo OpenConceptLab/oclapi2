@@ -4,7 +4,7 @@ from django.contrib.postgres.fields import JSONField, ArrayField
 from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator
 from django.db import models, IntegrityError
-from django.db.models import Max, Value
+from django.db.models import Max, Value, Q
 from django.db.models.expressions import CombinedExpression, F
 from django.utils import timezone
 from django_elasticsearch_dsl.registries import registry
@@ -174,6 +174,18 @@ class BaseModel(models.Model):
         settings.ELASTICSEARCH_DSL_AUTOSYNC = state
         settings.ES_SYNC = state
 
+    @staticmethod
+    def get_iexact_or_criteria(attr, values):
+        criteria = Q()
+
+        if isinstance(values, str):
+            values = values.split(',')
+
+        for value in values:
+            criteria = criteria | Q(**{'{}__iexact'.format(attr): value})
+
+        return criteria
+
 
 class BaseResourceModel(BaseModel):
     """
@@ -308,11 +320,11 @@ class ConceptContainerModel(VersionedModel):
 
         queryset = cls.objects.filter(is_active=True)
         if username:
-            queryset = queryset.filter(user__username__in=username.split(','))
+            queryset = queryset.filter(cls.get_iexact_or_criteria('user__username', username))
         if org:
-            queryset = queryset.filter(organization__mnemonic__in=org.split(','))
+            queryset = queryset.filter(cls.get_iexact_or_criteria('organization__mnemonic', org))
         if version:
-            queryset = queryset.filter(version__in=version.split(','))
+            queryset = queryset.filter(cls.get_iexact_or_criteria('version', version))
         if is_latest:
             queryset = queryset.filter(is_latest_version=True)
         if updated_since:

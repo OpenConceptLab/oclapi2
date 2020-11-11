@@ -8,10 +8,12 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
 from core.common.constants import SEARCH_PARAM, ES_RESULTS_MAX_LIMIT, LIST_DEFAULT_LIMIT, CSV_DEFAULT_LIMIT, \
-    LIMIT_PARAM, NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY
+    LIMIT_PARAM, NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY, INCLUDE_RETIRED_PARAM
 from core.common.mixins import PathWalkerMixin
 from core.common.utils import compact_dict_by_values, to_snake_case, to_camel_case
 from core.concepts.permissions import CanViewParentDictionary, CanEditParentDictionary
+from core.concepts.search import ConceptSearch
+from core.mappings.search import MappingSearch
 from core.orgs.constants import ORG_OBJECT_TYPE
 from core.users.constants import USER_OBJECT_TYPE
 
@@ -196,13 +198,22 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         facets = dict()
         if self.should_include_facets() and self.facet_class:
             faceted_filters = {to_camel_case(k): v for k, v in self.get_faceted_filters(True).items()}
-            filters = {**self.default_filters, **self.get_facet_filters_from_kwargs(), **faceted_filters}
+            filters = {
+                **self.default_filters, **self.get_facet_filters_from_kwargs(), **faceted_filters, 'retired': False
+            }
+
+            if self.should_include_retired() or self.facet_class not in [ConceptSearch, MappingSearch]:
+                filters.pop('retired')
+
             searcher = self.facet_class(  # pylint: disable=not-callable
                 self.get_search_string(), filters=filters, exact_match=self.is_exact_match_on()
             )
             facets = searcher.execute().facets.to_dict()
 
         return facets
+
+    def should_include_retired(self):
+        return self.request.query_params.get(INCLUDE_RETIRED_PARAM, False) in ['true', True]
 
     def get_search_results(self):
         results = None

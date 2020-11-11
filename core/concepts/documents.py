@@ -1,7 +1,6 @@
 from django_elasticsearch_dsl import Document, fields
 from django_elasticsearch_dsl.registries import registry
 
-from core.common.constants import HEAD
 from core.concepts.models import Concept
 
 
@@ -18,8 +17,8 @@ class ConceptDocument(Document):
     source = fields.KeywordField(attr='parent_resource', normalizer="lowercase")
     owner = fields.KeywordField(attr='owner_name', normalizer="lowercase")
     owner_type = fields.KeywordField(attr='owner_type')
-    source_version = fields.ListField(fields.IntegerField())
-    collection_version = fields.ListField(fields.IntegerField())
+    source_version = fields.ListField(fields.TextField())
+    collection_version = fields.ListField(fields.TextField())
     collection = fields.ListField(fields.KeywordField())
     public_can_view = fields.BooleanField(attr='public_can_view')
     datatype = fields.KeywordField(attr='datatype', normalizer="lowercase")
@@ -42,18 +41,12 @@ class ConceptDocument(Document):
 
     @staticmethod
     def prepare_source_version(instance):
-        return list(instance.sources.values_list('id', flat=True))
+        return list(instance.sources.values_list('version', flat=True))
 
     @staticmethod
     def prepare_collection_version(instance):
-        return list(instance.collection_set.values_list('id', flat=True))
+        return list(instance.collection_set.values_list('version', flat=True))
 
     @staticmethod
     def prepare_collection(instance):
-        from core.collections.models import Collection
-        return list(
-            Collection.objects.filter(
-                version=HEAD,
-                mnemonic__in=instance.collection_set.values_list('mnemonic', flat=True)
-            ).distinct('id').values_list('id', flat=True)
-        )
+        return list(set(list(instance.collection_set.values_list('mnemonic', flat=True))))
