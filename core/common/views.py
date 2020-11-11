@@ -354,6 +354,8 @@ class RootView(BaseAPIView):  # pragma: no cover
         data = dict(version='2.0.0.beta.1', routes={})
         for pattern in urlpatterns:
             name = getattr(pattern, 'name', None) or getattr(pattern, 'app_name', None)
+            if name in ['admin']:
+                continue
             route = str(pattern.pattern)
             if route and name is None:
                 name = route.split('/')[0] + '_urls'
