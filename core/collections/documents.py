@@ -22,6 +22,7 @@ class CollectionDocument(Document):
     name = fields.KeywordField(attr='name', normalizer='lowercase')
     canonical_url = fields.KeywordField(attr='canonical_url', normalizer='lowercase')
     mnemonic = fields.KeywordField(attr='mnemonic', normalizer='lowercase')
+    extras = fields.ObjectField()
 
     class Django:
         model = Collection
@@ -33,3 +34,7 @@ class CollectionDocument(Document):
     @staticmethod
     def prepare_locale(instance):
         return get(instance.supported_locales, [])
+
+    @staticmethod
+    def prepare_extras(instance):
+        return instance.extras or {}

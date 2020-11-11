@@ -15,9 +15,14 @@ class UserProfileDocument(Document):
     location = fields.KeywordField(attr='location', normalizer='lowercase')
     company = fields.KeywordField(attr='company', normalizer='lowercase')
     name = fields.KeywordField(attr='name', normalizer='lowercase')
+    extras = fields.ObjectField()
 
     class Django:
         model = UserProfile
         fields = [
             'is_active'
         ]
+
+    @staticmethod
+    def prepare_extras(instance):
+        return instance.extras or {}

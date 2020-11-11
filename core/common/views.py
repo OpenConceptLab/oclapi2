@@ -215,6 +215,9 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     def should_include_retired(self):
         return self.request.query_params.get(INCLUDE_RETIRED_PARAM, False) in ['true', True]
 
+    def get_extras_searchable_fields_from_query_params(self):
+        return {k: v for k, v in self.request.query_params.dict().items() if k.startswith('extras.')}
+
     def get_search_results(self):
         results = None
 
@@ -227,12 +230,19 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             if faceted_criterion:
                 results = results.query(faceted_criterion)
 
+            extras_fields = self.get_extras_searchable_fields_from_query_params()
             if self.is_exact_match_on():
                 results = results.query(self.get_exact_search_criterion())
             else:
                 results = results.filter(
                     "query_string", query=self.get_wildcard_search_string(), fields=self.get_searchable_fields()
                 )
+
+            if extras_fields:
+                for field, value in extras_fields.items():
+                    results = results.filter(
+                        "query_string", query=value, fields=[field]
+                    )
             results = results[0:ES_RESULTS_MAX_LIMIT]
 
             sort_field = self.get_sort_attr()
@@ -255,7 +265,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             SEARCH_PARAM in self.request.query_params and
             self.document_model and
             self.get_searchable_fields()
-        )
+        ) or bool(self.get_extras_searchable_fields_from_query_params())
 
 
 class SourceChildCommonBaseView(BaseAPIView):

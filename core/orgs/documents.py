@@ -14,6 +14,7 @@ class OrganizationDocument(Document):
     public_can_view = fields.BooleanField(attr='public_can_view')
     name = fields.KeywordField(attr='name')
     mnemonic = fields.KeywordField(attr='mnemonic')
+    extras = fields.ObjectField()
 
     class Django:
         model = Organization
@@ -22,3 +23,7 @@ class OrganizationDocument(Document):
             'company',
             'location',
         ]
+
+    @staticmethod
+    def prepare_extras(instance):
+        return instance.extras or {}

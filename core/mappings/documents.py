@@ -41,6 +41,7 @@ class MappingDocument(Document):
     collection = fields.ListField(fields.KeywordField())
     public_can_view = fields.BooleanField(attr='public_can_view')
     id = fields.KeywordField(attr='mnemonic', normalizer="lowercase")
+    extras = fields.ObjectField()
 
     @staticmethod
     def prepare_from_concept(instance):
@@ -76,3 +77,7 @@ class MappingDocument(Document):
     @staticmethod
     def prepare_collection(instance):
         return list(set(list(instance.collection_set.values_list('mnemonic', flat=True))))
+
+    @staticmethod
+    def prepare_extras(instance):
+        return instance.extras or {}

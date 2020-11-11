@@ -26,6 +26,7 @@ class ConceptDocument(Document):
     retired = fields.KeywordField(attr='retired')
     is_active = fields.KeywordField(attr='is_active')
     is_latest_version = fields.KeywordField(attr='is_latest_version')
+    extras = fields.ObjectField()
 
     class Django:
         model = Concept
@@ -50,3 +51,7 @@ class ConceptDocument(Document):
     @staticmethod
     def prepare_collection(instance):
         return list(set(list(instance.collection_set.values_list('mnemonic', flat=True))))
+
+    @staticmethod
+    def prepare_extras(instance):
+        return instance.extras or {}
