@@ -6,6 +6,7 @@ from rest_framework import status
 from rest_framework.generics import RetrieveAPIView, DestroyAPIView, ListCreateAPIView, RetrieveUpdateDestroyAPIView, \
     ListAPIView, UpdateAPIView
 from rest_framework.mixins import CreateModelMixin
+from rest_framework.permissions import IsAuthenticatedOrReadOnly
 from rest_framework.response import Response
 
 from core.common.constants import (
@@ -281,14 +282,8 @@ class ConceptLabelListCreateView(ConceptBaseView, ListWithHeadersMixin, ListCrea
 class ConceptLabelRetrieveUpdateDestroyView(ConceptBaseView, RetrieveUpdateDestroyAPIView):
     model = LocalizedText
     parent_list_attribute = None
-    permission_classes = (CanEditParentDictionary,)
+    permission_classes = (IsAuthenticatedOrReadOnly,)
     default_qs_sort_attr = '-created_at'
-
-    def get_permissions(self):
-        if self.request.method in ['GET', 'HEAD']:
-            return [CanViewParentDictionary()]
-
-        return [CanEditParentDictionary()]
 
     def get_queryset(self):
         if not self.parent_list_attribute:
