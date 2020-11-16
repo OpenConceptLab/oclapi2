@@ -216,7 +216,19 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         return self.request.query_params.get(INCLUDE_RETIRED_PARAM, False) in ['true', True]
 
     def get_extras_searchable_fields_from_query_params(self):
-        return {k: v for k, v in self.request.query_params.dict().items() if k.startswith('extras.')}
+        query_params = self.request.query_params.dict()
+
+        return {
+            k: v for k, v in query_params.items() if k.startswith('extras.') and not k.startswith('extras.exists')
+        }
+
+    def get_extras_fields_exists_from_query_params(self):
+        extras_exists_fields = self.request.query_params.dict().get('extras.exists', None)
+
+        if extras_exists_fields:
+            return extras_exists_fields.split(',')
+
+        return []
 
     def get_search_results(self):
         results = None
@@ -227,10 +239,12 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                 results = results.filter("match", **{field: value})
 
             faceted_criterion = self.get_faceted_criterion()
+            extras_fields = self.get_extras_searchable_fields_from_query_params()
+            extras_fields_exists = self.get_extras_fields_exists_from_query_params()
+
             if faceted_criterion:
                 results = results.query(faceted_criterion)
 
-            extras_fields = self.get_extras_searchable_fields_from_query_params()
             if self.is_exact_match_on():
                 results = results.query(self.get_exact_search_criterion())
             else:
@@ -242,6 +256,11 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                 for field, value in extras_fields.items():
                     results = results.filter(
                         "query_string", query=value, fields=[field]
+                    )
+            if extras_fields_exists:
+                for field in extras_fields_exists:
+                    results = results.query(
+                        "exists", field="extras.{}".format(field)
                     )
             results = results[0:ES_RESULTS_MAX_LIMIT]
 
@@ -265,7 +284,9 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             SEARCH_PARAM in self.request.query_params and
             self.document_model and
             self.get_searchable_fields()
-        ) or bool(self.get_extras_searchable_fields_from_query_params())
+        ) or bool(
+            self.get_extras_searchable_fields_from_query_params()
+        ) or bool(self.get_extras_fields_exists_from_query_params())
 
 
 class SourceChildCommonBaseView(BaseAPIView):
