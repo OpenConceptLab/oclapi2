@@ -133,7 +133,7 @@ class MappingRetrieveUpdateDestroyView(MappingBaseView, RetrieveAPIView, UpdateA
         self.object = self.get_object()
         self.parent_resource = self.object.parent
 
-        if self.parent_resource != self.parent_resource.head:
+        if not self.parent_resource.is_head:
             return Response(
                 {'non_field_errors': PARENT_VERSION_NOT_LATEST_CANNOT_UPDATE_MAPPING},
                 status=status.HTTP_400_BAD_REQUEST
