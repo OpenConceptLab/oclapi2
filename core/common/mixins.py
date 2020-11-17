@@ -12,8 +12,7 @@ from rest_framework import status
 from rest_framework.mixins import ListModelMixin, CreateModelMixin
 from rest_framework.response import Response
 
-from core.common.constants import HEAD, ACCESS_TYPE_EDIT, ACCESS_TYPE_VIEW, ACCESS_TYPE_NONE, INCLUDE_FACETS, \
-    VERBOSE_PARAM
+from core.common.constants import HEAD, ACCESS_TYPE_EDIT, ACCESS_TYPE_VIEW, ACCESS_TYPE_NONE, INCLUDE_FACETS
 from core.common.permissions import HasPrivateAccess, HasOwnership, CanViewConceptDictionary
 from core.common.services import S3
 from .utils import write_csv_to_s3, get_csv_from_s3, get_query_params_from_url_string, compact_dict_by_values
@@ -74,12 +73,8 @@ class CustomPaginator:
 
 
 class ListWithHeadersMixin(ListModelMixin):
-    verbose_param = VERBOSE_PARAM
     default_filters = {'is_active': True}
     object_list = None
-
-    def is_verbose(self, request):
-        return request.query_params.get(self.verbose_param, False) in ['true', True]
 
     def list(self, request, *args, **kwargs):  # pylint:disable=too-many-locals
         query_params = request.query_params.dict()

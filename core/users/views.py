@@ -33,7 +33,7 @@ class UserListView(UserBaseView,
                    mixins.CreateModelMixin):
 
     def get_serializer_class(self):
-        if self.request.method == 'GET' and self.is_verbose(self.request):
+        if self.request.method == 'GET' and self.is_verbose():
             return UserDetailSerializer
         if self.request.method == 'POST':
             return UserCreateSerializer

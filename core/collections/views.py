@@ -93,11 +93,16 @@ class CollectionBaseView(BaseAPIView):
         }
 
     def get_queryset(self):
-        return Collection.get_base_queryset(
+        queryset = Collection.get_base_queryset(
             compact_dict_by_values(self.get_filter_params())
         ).select_related(
             'user', 'organization'
         )
+
+        if self.is_verbose():
+            queryset = queryset.select_related('created_by', 'updated_by')
+
+        return queryset
 
     def should_include_references(self):
         return self.request.query_params.get(INCLUDE_REFERENCES_PARAM, 'false').lower() == 'true'
@@ -127,7 +132,7 @@ class CollectionListView(CollectionBaseView, ConceptDictionaryCreateMixin, ListW
     default_filters = dict(is_active=True, version=HEAD)
 
     def get_serializer_class(self):
-        if self.request.method == 'GET' and self.is_verbose(self.request):
+        if self.request.method == 'GET' and self.is_verbose():
             return CollectionDetailSerializer
         if self.request.method == 'POST':
             return CollectionCreateSerializer
@@ -380,7 +385,7 @@ class CollectionVersionListView(CollectionVersionBaseView, mixins.CreateModelMix
 
     def get_serializer_class(self):
         if self.request.method in ['GET', 'HEAD']:
-            return CollectionVersionDetailSerializer if self.is_verbose(self.request) else CollectionListSerializer
+            return CollectionVersionDetailSerializer if self.is_verbose() else CollectionListSerializer
         if self.request.method == 'POST':
             return CollectionCreateSerializer
 

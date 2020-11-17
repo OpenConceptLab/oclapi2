@@ -8,7 +8,7 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
 from core.common.constants import SEARCH_PARAM, ES_RESULTS_MAX_LIMIT, LIST_DEFAULT_LIMIT, CSV_DEFAULT_LIMIT, \
-    LIMIT_PARAM, NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY, INCLUDE_RETIRED_PARAM
+    LIMIT_PARAM, NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY, INCLUDE_RETIRED_PARAM, VERBOSE_PARAM
 from core.common.mixins import PathWalkerMixin
 from core.common.utils import compact_dict_by_values, to_snake_case, to_camel_case
 from core.concepts.permissions import CanViewParentDictionary, CanEditParentDictionary
@@ -35,6 +35,9 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     default_qs_sort_attr = '-updated_at'
     exact_match = 'exact_match'
     facet_class = None
+
+    def is_verbose(self):
+        return self.request.query_params.get(VERBOSE_PARAM, False) in ['true', True]
 
     def initial(self, request, *args, **kwargs):
         super().initial(request, *args, **kwargs)

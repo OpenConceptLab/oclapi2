@@ -63,10 +63,7 @@ class ConceptVersionListAllView(ConceptBaseView, ListWithHeadersMixin):
     permission_classes = (CanViewParentDictionary,)
 
     def get_serializer_class(self):
-        if self.is_verbose(self.request):
-            return ConceptDetailSerializer
-
-        return ConceptListSerializer
+        return ConceptDetailSerializer if self.is_verbose() else ConceptListSerializer
 
     def get_queryset(self):
         return Concept.global_listing_queryset(
@@ -96,7 +93,7 @@ class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
         return [CanViewParentDictionary(), ]
 
     def get_serializer_class(self):
-        if (self.request.method == 'GET' and self.is_verbose(self.request)) or self.request.method == 'POST':
+        if (self.request.method == 'GET' and self.is_verbose()) or self.request.method == 'POST':
             return ConceptDetailSerializer
 
         return ConceptListSerializer
@@ -203,7 +200,7 @@ class ConceptVersionsView(ConceptBaseView, ConceptDictionaryMixin, ListWithHeade
         return super().get_queryset().exclude(id=F('versioned_object_id'))
 
     def get_serializer_class(self):
-        return ConceptVersionDetailSerializer if self.is_verbose(self.request) else ConceptVersionListSerializer
+        return ConceptVersionDetailSerializer if self.is_verbose() else ConceptVersionListSerializer
 
     def get(self, request, *args, **kwargs):
         return self.list(request, *args, **kwargs)

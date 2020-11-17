@@ -54,11 +54,16 @@ class SourceBaseView(BaseAPIView):
         return {**query_params.copy(), **kwargs, 'version': version}
 
     def get_queryset(self):
-        return Source.get_base_queryset(
+        queryset = Source.get_base_queryset(
             compact_dict_by_values(self.get_filter_params())
         ).select_related(
             'user', 'organization'
         )
+
+        if self.is_verbose():
+            queryset = queryset.select_related('created_by', 'updated_by')
+
+        return queryset
 
 
 class SourceVersionBaseView(SourceBaseView):
@@ -85,7 +90,7 @@ class SourceListView(SourceBaseView, ConceptDictionaryCreateMixin, ListWithHeade
     default_filters = dict(is_active=True, version=HEAD)
 
     def get_serializer_class(self):
-        if self.request.method == 'GET' and self.is_verbose(self.request):
+        if self.request.method == 'GET' and self.is_verbose():
             return SourceDetailSerializer
         if self.request.method == 'POST':
             return SourceCreateSerializer
@@ -161,7 +166,7 @@ class SourceVersionListView(SourceVersionBaseView, mixins.CreateModelMixin, List
     processing_filter = None
 
     def get_serializer_class(self):
-        if self.request.method in ['GET', 'HEAD'] and self.is_verbose(self.request):
+        if self.request.method in ['GET', 'HEAD'] and self.is_verbose():
             return SourceVersionDetailSerializer
         if self.request.method == 'POST':
             return SourceCreateSerializer

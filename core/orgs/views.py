@@ -53,7 +53,7 @@ class OrganizationListView(BaseAPIView,
         return queryset.distinct()
 
     def get_serializer_class(self):
-        if self.request.method == 'GET' and self.is_verbose(self.request):
+        if self.request.method == 'GET' and self.is_verbose():
             return OrganizationDetailSerializer
         if self.request.method == 'POST':
             return OrganizationCreateSerializer

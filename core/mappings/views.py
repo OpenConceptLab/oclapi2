@@ -70,7 +70,7 @@ class MappingListView(MappingBaseView, ListWithHeadersMixin, CreateModelMixin):
         return [CanViewParentDictionary(), ]
 
     def get_serializer_class(self):
-        if (self.request.method == 'GET' and self.is_verbose(self.request)) or self.request.method == 'POST':
+        if (self.request.method == 'GET' and self.is_verbose()) or self.request.method == 'POST':
             return MappingDetailSerializer
 
         return MappingListSerializer
@@ -167,7 +167,7 @@ class MappingVersionsView(MappingBaseView, ConceptDictionaryMixin, ListWithHeade
         return super().get_queryset().exclude(id=F('versioned_object_id'))
 
     def get_serializer_class(self):
-        return MappingDetailSerializer if self.is_verbose(self.request) else MappingVersionListSerializer
+        return MappingDetailSerializer if self.is_verbose() else MappingVersionListSerializer
 
     def get(self, request, *args, **kwargs):
         return self.list(request, *args, **kwargs)
@@ -185,10 +185,7 @@ class MappingVersionListAllView(MappingBaseView, ListWithHeadersMixin):
     permission_classes = (CanViewParentDictionary,)
 
     def get_serializer_class(self):
-        if self.is_verbose(self.request):
-            return MappingDetailSerializer
-
-        return MappingListSerializer
+        return MappingDetailSerializer if self.is_verbose() else MappingListSerializer
 
     def get_queryset(self):
         return Mapping.global_listing_queryset(
