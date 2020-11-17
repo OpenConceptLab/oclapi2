@@ -25,6 +25,7 @@ import core.mappings.views as mapping_views
 from core.common.constants import NAMESPACE_PATTERN
 from core.common.utils import get_api_base_url
 from core.importers.views import BulkImportView
+from core.common.views import RootView
 
 SchemaView = get_schema_view(
     openapi.Info(
