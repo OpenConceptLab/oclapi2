@@ -54,7 +54,11 @@ class SourceBaseView(BaseAPIView):
         return {**query_params.copy(), **kwargs, 'version': version}
 
     def get_queryset(self):
-        return Source.get_base_queryset(compact_dict_by_values(self.get_filter_params()))
+        return Source.get_base_queryset(
+            compact_dict_by_values(self.get_filter_params())
+        ).select_related(
+            'user', 'organization'
+        )
 
 
 class SourceVersionBaseView(SourceBaseView):

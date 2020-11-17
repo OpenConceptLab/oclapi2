@@ -93,7 +93,11 @@ class CollectionBaseView(BaseAPIView):
         }
 
     def get_queryset(self):
-        return Collection.get_base_queryset(compact_dict_by_values(self.get_filter_params()))
+        return Collection.get_base_queryset(
+            compact_dict_by_values(self.get_filter_params())
+        ).select_related(
+            'user', 'organization'
+        )
 
     def should_include_references(self):
         return self.request.query_params.get(INCLUDE_REFERENCES_PARAM, 'false').lower() == 'true'
