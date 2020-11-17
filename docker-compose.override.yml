@@ -21,19 +21,11 @@ services:
     volumes:
       - .:/code:z
     restart: "no"
-  celery_bulk_import_0:
+  celery_bulk_import_0_1:
     volumes:
       - .:/code:z
     restart: "no"
-  celery_bulk_import_1:
-    volumes:
-      - .:/code:z
-    restart: "no"
-  celery_bulk_import_2:
-    volumes:
-      - .:/code:z
-    restart: "no"
-  celery_bulk_import_3:
+  celery_bulk_import_2_3:
     volumes:
       - .:/code:z
     restart: "no"
