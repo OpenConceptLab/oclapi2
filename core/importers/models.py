@@ -2,7 +2,7 @@ import json
 
 from ocldev.oclfleximporter import OclFlexImporter
 
-from core.common.utils import get_base_url
+from core.common.utils import get_api_internal_base_url
 from core.users.models import UserProfile
 
 
@@ -36,7 +36,7 @@ class BulkImport:
     def initialize_importer(self):
         self.importer = OclFlexImporter(
             input_list=self.input_list,
-            api_url_root=get_base_url(),
+            api_url_root=get_api_internal_base_url(),
             api_token=self.user.get_token(),
             do_update_if_exists=self.update_if_exists
         )

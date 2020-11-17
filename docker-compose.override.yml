@@ -21,6 +21,26 @@ services:
     volumes:
       - .:/code:z
     restart: "no"
+  celery_bulk_import_0:
+    volumes:
+      - .:/code:z
+    restart: "no"
+  celery_bulk_import_1:
+    volumes:
+      - .:/code:z
+    restart: "no"
+  celery_bulk_import_2:
+    volumes:
+      - .:/code:z
+    restart: "no"
+  celery_bulk_import_3:
+    volumes:
+      - .:/code:z
+    restart: "no"
+  celery_bulk_import_root:
+    volumes:
+      - .:/code:z
+    restart: "no"
   flower:
     build: .
     volumes:

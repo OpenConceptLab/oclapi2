@@ -9,7 +9,6 @@ from core.common.utils import write_export_file
 
 logger = get_task_logger(__name__)
 
-
 @app.task(base=QueueOnce)
 def delete_organization(org_id):
     from core.orgs.models import Organization

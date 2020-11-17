@@ -18,7 +18,9 @@ from kombu import Queue, Exchange
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-BASE_URL = os.environ.get('BASE_URL', 'http://localhost:8000')
+API_BASE_URL = os.environ.get('API_BASE_URL', 'http://localhost:8000')
+
+API_INTERNAL_BASE_URL = os.environ.get('API_INTERNAL_BASE_URL', 'http://api:8000')
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/3.0/howto/deployment/checklist/

@@ -265,8 +265,11 @@ def write_export_file(
     os.chdir(cwd)
 
 
-def get_base_url():
-    return settings.BASE_URL
+def get_api_base_url():
+    return settings.API_BASE_URL
+
+def get_api_internal_base_url():
+    return settings.API_INTERNAL_BASE_URL
 
 
 def to_snake_case(string):

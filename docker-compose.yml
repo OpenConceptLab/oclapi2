@@ -37,6 +37,7 @@ services:
       - API_SUPERUSER_PASSWORD=${API_SUPERUSER_PASSWORD-Root123}
       - API_SUPERUSER_TOKEN=${API_SUPERUSER_TOKEN-891b4b17feab99f3ff7e5b5d04ccc5da7aa96da6}
       - API_BASE_URL=${API_BASE_URL-http://localhost:8000}
+      - INTERNAL_API_BASE_URL=${INTERNAL_API_BASE_URL-http://api:8000}
       - EMAIL_NOREPLY_PASSWORD
       - AWS_ACCESS_KEY_ID
       - AWS_SECRET_ACCESS_KEY
@@ -46,7 +47,52 @@ services:
       test: "curl -f http://localhost:8000/admin"
   celery:
     image: openconceptlab/oclapi2:${ENVIRONMENT-production}
-    command: ["bash", "-c", "./start_celery_worker.sh"]
+    command: ["bash", "-c", "./start_celery_worker.sh -Q default -n default --autoscale=15,3"]
+    restart: "always"
+    healthcheck:
+      test: "celery inspect ping -A core.celery"
+    environment:
+      - REDIS_HOST=${REDIS_HOST-redis}
+      - REDIS_PORT=${REDIS_PORT-6379}
+  celery_bulk_import_0:
+    image: openconceptlab/oclapi2:${ENVIRONMENT-production}
+    command: ["bash", "-c", "./start_celery_worker.sh -Q bulk_import_0 -n bulk_import_0 -c 1"]
+    restart: "always"
+    healthcheck:
+      test: "celery inspect ping -A core.celery"
+    environment:
+      - REDIS_HOST=${REDIS_HOST-redis}
+      - REDIS_PORT=${REDIS_PORT-6379}
+  celery_bulk_import_1:
+    image: openconceptlab/oclapi2:${ENVIRONMENT-production}
+    command: ["bash", "-c", "./start_celery_worker.sh -Q bulk_import_1 -n bulk_import_1 -c 1"]
+    restart: "always"
+    healthcheck:
+      test: "celery inspect ping -A core.celery"
+    environment:
+      - REDIS_HOST=${REDIS_HOST-redis}
+      - REDIS_PORT=${REDIS_PORT-6379}
+  celery_bulk_import_2:
+    image: openconceptlab/oclapi2:${ENVIRONMENT-production}
+    command: ["bash", "-c", "./start_celery_worker.sh -Q bulk_import_2 -n bulk_import_2 -c 1"]
+    restart: "always"
+    healthcheck:
+      test: "celery inspect ping -A core.celery"
+    environment:
+      - REDIS_HOST=${REDIS_HOST-redis}
+      - REDIS_PORT=${REDIS_PORT-6379}
+  celery_bulk_import_3:
+    image: openconceptlab/oclapi2:${ENVIRONMENT-production}
+    command: ["bash", "-c", "./start_celery_worker.sh -Q bulk_import_3 -n bulk_import_3 -c 1"]
+    restart: "always"
+    healthcheck:
+      test: "celery inspect ping -A core.celery"
+    environment:
+      - REDIS_HOST=${REDIS_HOST-redis}
+      - REDIS_PORT=${REDIS_PORT-6379}
+  celery_bulk_import_root:
+    image: openconceptlab/oclapi2:${ENVIRONMENT-production}
+    command: ["bash", "-c", "./start_celery_worker.sh -Q bulk_import_root -n bulk_import_root -c 1"]
     restart: "always"
     healthcheck:
       test: "celery inspect ping -A core.celery"

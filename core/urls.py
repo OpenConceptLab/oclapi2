@@ -23,8 +23,7 @@ from rest_framework import permissions
 import core.concepts.views as concept_views
 import core.mappings.views as mapping_views
 from core.common.constants import NAMESPACE_PATTERN
-from core.common.utils import get_base_url
-from core.common.views import RootView
+from core.common.utils import get_api_base_url
 from core.importers.views import BulkImportView
 
 SchemaView = get_schema_view(
@@ -35,7 +34,7 @@ SchemaView = get_schema_view(
     ),
     public=True,
     permission_classes=(permissions.AllowAny,),
-    url=get_base_url()
+    url=get_api_base_url()
 )
 
 urlpatterns = [
