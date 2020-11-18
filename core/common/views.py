@@ -10,6 +10,7 @@ from rest_framework.response import Response
 from core.common.constants import SEARCH_PARAM, ES_RESULTS_MAX_LIMIT, LIST_DEFAULT_LIMIT, CSV_DEFAULT_LIMIT, \
     LIMIT_PARAM, NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY, INCLUDE_RETIRED_PARAM, VERBOSE_PARAM
 from core.common.mixins import PathWalkerMixin
+from core.common.serializers import RootSerializer
 from core.common.utils import compact_dict_by_values, to_snake_case, to_camel_case
 from core.concepts.permissions import CanViewParentDictionary, CanEditParentDictionary
 from core.concepts.search import ConceptSearch
@@ -393,6 +394,7 @@ class SourceChildExtraRetrieveUpdateDestroyView(SourceChildExtrasBaseView, Retri
 
 class RootView(BaseAPIView):  # pragma: no cover
     permission_classes = (AllowAny,)
+    serializer_class = RootSerializer
 
     def get(self, _):
         from core.urls import urlpatterns
