@@ -61,13 +61,14 @@ class BulkImportView(APIView):
 
             if task.successful():
                 result = task.get()
-                if result_format == 'json':
+                if result and result_format == 'json':
                     response = Response(result.json, content_type="application/json")
                     response['Content-Encoding'] = 'gzip'
                     return response
-                if result_format == 'report':
+                if result and result_format == 'report':
                     return Response(result.report)
-                return Response(result.detailed_summary)
+                if result:
+                    return Response(result.detailed_summary)
             if task.failed():
                 return Response(dict(exception=str(task.result)), status=status.HTTP_400_BAD_REQUEST)
             if task.state == 'PENDING' and not task_exists(task_id):

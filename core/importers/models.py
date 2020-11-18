@@ -44,3 +44,4 @@ class BulkImport:
     def run(self):
         self.importer.process()
         self.result = ImportResults(self.importer)
+        return self.result
