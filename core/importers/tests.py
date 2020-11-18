@@ -1,5 +1,6 @@
 import uuid
 
+from celery_once import AlreadyQueued
 from mock import patch, Mock, ANY
 
 from core.common.tests import OCLAPITestCase, OCLTestCase
@@ -195,12 +196,36 @@ class BulkImportViewTest(OCLAPITestCase):
     def test_post_400(self):
         response = self.client.post(
             '/importers/bulk-import/?update_if_exists=1',
+            'some-data',
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.data, dict(exception="update_if_exists must be either 'true' or 'false'"))
+
+        response = self.client.post(
+            '/importers/bulk-import/?update_if_exists=true',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data, dict(exception="No content to import"))
+
+    @patch('core.importers.views.queue_bulk_import')
+    def test_post_409(self, queue_bulk_import_mock):
+        queue_bulk_import_mock.side_effect = AlreadyQueued('already-queued')
+
+        response = self.client.post(
+            '/importers/bulk-import/?update_if_exists=true',
+            'some-data',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.data, dict(exception="The same import has been already queued"))
 
     @patch('core.common.tasks.bulk_import')
     def test_post_202(self, bulk_import_mock):
@@ -250,3 +275,12 @@ class BulkImportViewTest(OCLAPITestCase):
         self.assertEqual(bulk_import_mock.apply_async.call_args[0], (('"some-data"', 'oswell', True),))
         self.assertEqual(bulk_import_mock.apply_async.call_args[1]['task_id'][37:], 'oswell~foobar-queue')
         self.assertTrue(bulk_import_mock.apply_async.call_args[1]['queue'].startswith('bulk_import_'))
+
+    def test_post_file_upload_400(self):
+        response = self.client.post(
+            "/importers/bulk-import/upload/?update_if_exists=true",
+            {'file': ''},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data, dict(exception='No content to import'))

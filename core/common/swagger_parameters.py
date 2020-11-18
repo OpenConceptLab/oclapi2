@@ -57,3 +57,6 @@ update_if_exists_param = openapi.Parameter(
     'update_if_exists', openapi.IN_QUERY, description="true | false (mandatory)", type=openapi.TYPE_STRING,
     default='true'
 )
+file_upload_param = openapi.Parameter(
+    'file', openapi.IN_FORM, description="JSON Content File (mandatory)", type=openapi.TYPE_FILE
+)
