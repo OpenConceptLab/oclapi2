@@ -107,7 +107,7 @@ class BulkImportViewTest(OCLAPITestCase):
         )
         self.assertEqual(response.status_code, 403)
 
-        async_result_mock = Mock(json='json-format', report='report-format', detailed_summary='summary')
+        async_result_mock = dict(json='json-format', report='report-format', detailed_summary='summary')
         async_result_instance_mock = Mock(successful=Mock(return_value=True), get=Mock(return_value=async_result_mock))
         async_result_klass_mock.return_value = async_result_instance_mock
 

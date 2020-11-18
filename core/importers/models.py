@@ -12,6 +12,11 @@ class ImportResults:
         self.detailed_summary = importer.import_results.get_detailed_summary()
         self.report = importer.import_results.display_report()
 
+    def to_dict(self):
+        return dict(
+            json=self.json, detailed_summary=self.detailed_summary, report=self.report
+        )
+
 
 class BulkImport:
     def __init__(self, content, username, update_if_exists):
@@ -44,3 +49,5 @@ class BulkImport:
     def run(self):
         self.importer.process()
         self.result = ImportResults(self.importer)
+
+        return self.result.to_dict()
