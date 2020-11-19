@@ -21,6 +21,6 @@ kombu==4.6.10
 django-elasticsearch-dsl==7.1.4
 drf-yasg==1.17.1
 git+https://github.com/snyaggarwal/django-queryset-csv
-git+https://github.com/OpenConceptLab/ocldev.git@summary-report-format
+git+https://github.com/OpenConceptLab/ocldev
 coverage
 tblib
