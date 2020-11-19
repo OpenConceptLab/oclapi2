@@ -315,7 +315,7 @@ class ConceptContainerModel(VersionedModel):
         username = params.get('user', None)
         org = params.get('org', None)
         version = params.get('version', None)
-        is_latest = params.get('is_latest', None)
+        is_latest = params.get('is_latest', None) in [True, 'true']
         updated_since = parse_updated_since_param(params)
 
         queryset = cls.objects.filter(is_active=True)

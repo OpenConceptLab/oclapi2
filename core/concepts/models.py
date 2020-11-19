@@ -251,8 +251,9 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         container_version = params.get('version', None)
         concept = params.get('concept', None)
         concept_version = params.get('concept_version', None)
-        is_latest = params.get('is_latest', None)
-        include_retired = params.get(INCLUDE_RETIRED_PARAM, False)
+        is_latest = params.get('is_latest', None) in [True, 'true']
+        include_retired = params.get(INCLUDE_RETIRED_PARAM, None) in [True, 'true']
+
         updated_since = parse_updated_since_param(params)
 
         if collection:

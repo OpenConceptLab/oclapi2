@@ -54,7 +54,7 @@ class Collection(ConceptContainerModel):
     def get_base_queryset(cls, params):
         collection = params.pop('collection', None)
         contains_uri = params.pop('contains', None)
-        include_references = params.pop('include_references', None)
+        include_references = params.pop('include_references', None) in [True, 'true']
         queryset = super().get_base_queryset(params)
         if collection:
             queryset = queryset.filter(cls.get_iexact_or_criteria('mnemonic', collection))
