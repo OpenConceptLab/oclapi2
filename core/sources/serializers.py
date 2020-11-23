@@ -1,6 +1,6 @@
 from django.core.validators import RegexValidator
 from rest_framework.fields import CharField, IntegerField, DateTimeField, ChoiceField, JSONField, ListField, \
-    BooleanField, DateField
+    BooleanField
 from rest_framework.relations import PrimaryKeyRelatedField
 from rest_framework.serializers import ModelSerializer
 
