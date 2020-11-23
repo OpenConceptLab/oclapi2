@@ -126,7 +126,7 @@ class BaseModel(models.Model):
 
     @property
     def public_can_view(self):
-        return self.public_access in [ACCESS_TYPE_EDIT, ACCESS_TYPE_VIEW]
+        return self.public_access.lower() in [ACCESS_TYPE_EDIT.lower(), ACCESS_TYPE_VIEW.lower()]
 
     @property
     def resource_type(self):

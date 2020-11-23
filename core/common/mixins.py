@@ -1,4 +1,5 @@
 import logging
+from math import ceil
 
 from django.conf import settings
 from django.core.paginator import Paginator
@@ -21,14 +22,15 @@ logger = logging.getLogger('oclapi')
 
 
 class CustomPaginator:
-    def __init__(self, request, queryset, page_size):
+    def __init__(self, request, total_count, queryset, page_size):
+        self.total = total_count
         self.request = request
         self.queryset = queryset
         self.page_size = page_size
         self.page_number = int(request.GET.get('page', '1'))
         self.paginator = Paginator(self.queryset, self.page_size)
         self.page_object = self.paginator.get_page(self.page_number)
-        self.page_count = self.paginator.num_pages
+        self.page_count = ceil(self.total_count / self.page_size)
 
     @property
     def current_page_number(self):
@@ -40,7 +42,7 @@ class CustomPaginator:
 
     @cached_property
     def total_count(self):
-        return self.queryset.count()
+        return get(self, 'total') or self.queryset.count()
 
     def __get_query_params(self):
         return self.request.GET.copy()
@@ -58,15 +60,21 @@ class CustomPaginator:
         query_params['page'] = str(self.current_page_number - 1)
         return self.__get_full_url() + '?' + query_params.urlencode()
 
+    def has_next(self):
+        return self.page_number < self.page_count
+
+    def has_previous(self):
+        return self.page_number > 1
+
     @property
     def headers(self):
         headers = dict(
-            num_found=self.queryset.count(), num_returned=len(self.current_page_results),
+            num_found=self.total_count, num_returned=len(self.current_page_results),
             pages=self.page_count, page_number=self.page_number
         )
-        if self.page_object.has_next():
+        if self.has_next():
             headers['next'] = self.get_next_page_url()
-        if self.page_object.has_previous():
+        if self.has_previous():
             headers['previous'] = self.get_previous_page_url()
 
         return headers
@@ -117,7 +125,9 @@ class ListWithHeadersMixin(ListModelMixin):
         headers = dict()
         results = sorted_list
         if not skip_pagination:
-            paginator = CustomPaginator(request=request, queryset=sorted_list, page_size=self.limit)
+            paginator = CustomPaginator(
+                request=request, queryset=sorted_list, page_size=self.limit, total_count=self.total_count
+            )
             headers = paginator.headers
             results = paginator.current_page_results
 

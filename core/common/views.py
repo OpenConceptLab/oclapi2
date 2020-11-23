@@ -1,5 +1,6 @@
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
+from django.utils.functional import cached_property
 from elasticsearch_dsl import Q
 from pydash import get
 from rest_framework import response, generics, status
@@ -7,7 +8,7 @@ from rest_framework.generics import ListAPIView, RetrieveUpdateDestroyAPIView
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
-from core.common.constants import SEARCH_PARAM, ES_RESULTS_MAX_LIMIT, LIST_DEFAULT_LIMIT, CSV_DEFAULT_LIMIT, \
+from core.common.constants import SEARCH_PARAM, LIST_DEFAULT_LIMIT, CSV_DEFAULT_LIMIT, \
     LIMIT_PARAM, NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY, INCLUDE_RETIRED_PARAM, VERBOSE_PARAM
 from core.common.mixins import PathWalkerMixin
 from core.common.serializers import RootSerializer
@@ -36,6 +37,24 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     default_qs_sort_attr = '-updated_at'
     exact_match = 'exact_match'
     facet_class = None
+    total_count = 0
+
+    def _should_exclude_retired(self):
+        from core.orgs.documents import OrganizationDocument
+        from core.users.documents import UserProfileDocument
+        if self.document_model in [OrganizationDocument, UserProfileDocument]:
+            return False
+
+        params = get(self, 'params') or self.request.query_params.dict()
+        include_retired = params.get(INCLUDE_RETIRED_PARAM, None) in [True, 'true']
+        return not include_retired
+
+    def _should_include_private(self):
+        from core.users.documents import UserProfileDocument
+        if self.document_model in [UserProfileDocument]:
+            return True
+
+        return self.request.user.is_staff
 
     def is_verbose(self):
         return self.request.query_params.get(VERBOSE_PARAM, False) in ['true', True]
@@ -75,12 +94,13 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
     def head(self, request, **kwargs):  # pylint: disable=unused-argument
         res = HttpResponse()
-        res['num_found'] = self.filter_queryset(self.get_queryset()).count()
+        queryset = self.filter_queryset(self.get_queryset())
+        res['num_found'] = get(self, 'total_count') or queryset.count()
         return res
 
     def filter_queryset(self, queryset):
         if self.is_searchable and self.should_perform_es_search():
-            return self.get_search_results_qs().filter(id__in=queryset.values_list('id'))
+            return self.get_search_results_qs()
 
         return super().filter_queryset(queryset).order_by(self.default_qs_sort_attr)
 
@@ -234,7 +254,8 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
         return []
 
-    def get_search_results(self):
+    @cached_property
+    def __search_results(self):  # pylint: disable=too-many-branches
         results = None
 
         if self.should_perform_es_search():
@@ -266,7 +287,15 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                     results = results.query(
                         "exists", field="extras.{}".format(field)
                     )
-            results = results[0:ES_RESULTS_MAX_LIMIT]
+
+            if self._should_exclude_retired():
+                results = results.filter('match', retired=False)
+            if not self._should_include_private():
+                results = results.filter('match', public_can_view=True)
+
+            kwargs_filters = self.get_facet_filters_from_kwargs()
+            for key, value in kwargs_filters.items():
+                results = results.filter('match', **{to_snake_case(key): value})
 
             sort_field = self.get_sort_attr()
             if sort_field:
@@ -275,13 +304,19 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         return results
 
     def get_search_results_qs(self):
-        queryset = None
-        search_results = self.get_search_results()
+        if not self.should_perform_es_search():
+            return None
 
-        if search_results:
-            queryset = search_results.to_queryset()
+        self.total_count = self.__search_results.count()
 
-        return queryset
+        if isinstance(self.limit, str):
+            self.limit = int(self.limit)
+
+        page = int(self.request.GET.get('page', '1'))
+        start = (page - 1) * self.limit
+        end = start + self.limit
+
+        return self.__search_results[start:end].to_queryset()
 
     def should_perform_es_search(self):
         return bool(
