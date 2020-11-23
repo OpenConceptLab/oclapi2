@@ -305,7 +305,15 @@ class ConceptContainerModel(VersionedModel):
     last_mapping_update = models.DateTimeField(default=timezone.now, null=True, blank=True)
     last_child_update = models.DateTimeField(default=timezone.now)
     _background_process_ids = ArrayField(models.CharField(max_length=255), default=list, null=True, blank=True)
+
     canonical_url = models.URLField(null=True, blank=True)
+    identifier = JSONField(null=True, blank=True, default=dict)
+    contact = JSONField(null=True, blank=True, default=dict)
+    jurisdiction = JSONField(null=True, blank=True, default=dict)
+    publisher = models.TextField(null=True, blank=True)
+    purpose = models.TextField(null=True, blank=True)
+    copyright = models.TextField(null=True, blank=True)
+    revision_date = models.DateField(null=True, blank=True)
 
     class Meta:
         abstract = True

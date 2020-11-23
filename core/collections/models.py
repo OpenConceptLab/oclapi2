@@ -49,6 +49,7 @@ class Collection(ConceptContainerModel):
     concepts = models.ManyToManyField('concepts.Concept', blank=True, related_name='collection_set')
     mappings = models.ManyToManyField('mappings.Mapping', blank=True, related_name='collection_set')
     references = models.ManyToManyField('collections.CollectionReference', blank=True, related_name='collections')
+    immutable = models.BooleanField(default=False)
 
     @classmethod
     def get_base_queryset(cls, params):

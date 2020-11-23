@@ -27,6 +27,7 @@ class Source(ConceptContainerModel):
         ]
 
     source_type = models.TextField(blank=True, null=True)
+    content_type = models.TextField(blank=True, null=True)
 
     OBJECT_TYPE = SOURCE_TYPE
 

@@ -23,12 +23,16 @@ class CollectionDocument(Document):
     canonical_url = fields.KeywordField(attr='canonical_url', normalizer='lowercase')
     mnemonic = fields.KeywordField(attr='mnemonic', normalizer='lowercase')
     extras = fields.ObjectField()
+    identifier = fields.ObjectField()
+    publisher = fields.KeywordField(attr='publisher', normalizer='lowercase')
+    immutable = fields.KeywordField(attr='immutable')
 
     class Django:
         model = Collection
         fields = [
             'full_name',
             'custom_validation_schema',
+            'revision_date',
         ]
 
     @staticmethod
@@ -38,3 +42,7 @@ class CollectionDocument(Document):
     @staticmethod
     def prepare_extras(instance):
         return instance.extras or {}
+
+    @staticmethod
+    def prepare_identifier(instance):
+        return instance.identifier or {}
