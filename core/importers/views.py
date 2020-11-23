@@ -71,7 +71,7 @@ class BulkImportFileURLView(APIView):
 
         try:
             file = urllib.request.urlopen(request.data.get('file_url'))
-        except:
+        except:  # pylint: disable=bare-except
             pass
 
         if not file:
