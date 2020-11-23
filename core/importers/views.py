@@ -1,3 +1,5 @@
+import urllib
+
 from celery.result import AsyncResult
 from celery_once import AlreadyQueued
 from drf_yasg import openapi
@@ -9,7 +11,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from core.common.swagger_parameters import update_if_exists_param, task_param, result_param, username_param, \
-    file_upload_param
+    file_upload_param, file_url_param
 from core.common.utils import parse_bulk_import_task_id, task_exists, flower_get, queue_bulk_import
 from core.importers.constants import ALREADY_QUEUED, INVALID_UPDATE_IF_EXISTS, NO_CONTENT_TO_IMPORT
 
@@ -50,6 +52,27 @@ class BulkImportFileUploadView(APIView):
     )
     def post(self, request, import_queue=None):
         file = request.data.get('file', None)
+
+        if not file:
+            return Response(dict(exception=NO_CONTENT_TO_IMPORT), status=status.HTTP_400_BAD_REQUEST)
+
+        return import_response(self.request, import_queue, file.read())
+
+
+class BulkImportFileURLView(APIView):
+    permission_classes = (IsAuthenticated, )
+    parser_classes = (MultiPartParser, )
+
+    @swagger_auto_schema(
+        manual_parameters=[update_if_exists_param, file_url_param],
+    )
+    def post(self, request, import_queue=None):
+        file = None
+
+        try:
+            file = urllib.request.urlopen(request.data.get('file_url'))
+        except:
+            pass
 
         if not file:
             return Response(dict(exception=NO_CONTENT_TO_IMPORT), status=status.HTTP_400_BAD_REQUEST)

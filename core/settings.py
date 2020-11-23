@@ -302,3 +302,5 @@ ENV = os.environ.get('ENVIRONMENT', 'development')
 # Only used for flower
 FLOWER_USER = os.environ.get('FLOWER_USER', 'root')
 FLOWER_PWD = os.environ.get('FLOWER_PWD', 'Root123')
+DATA_UPLOAD_MAX_MEMORY_SIZE = 100*1024*1024
+FILE_UPLOAD_MAX_MEMORY_SIZE = 100*1024*1024

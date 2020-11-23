@@ -284,3 +284,12 @@ class BulkImportViewTest(OCLAPITestCase):
         )
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.data, dict(exception='No content to import'))
+
+    def test_post_file_url_400(self):
+        response = self.client.post(
+            "/importers/bulk-import/file-url/?update_if_exists=true",
+            {'file_url': 'foobar'},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data, dict(exception='No content to import'))
