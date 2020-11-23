@@ -33,6 +33,7 @@ class CollectionDocument(Document):
             'full_name',
             'custom_validation_schema',
             'revision_date',
+            'retired',
         ]
 
     @staticmethod

@@ -33,7 +33,8 @@ class SourceDocument(Document):
         fields = [
             'full_name',
             'custom_validation_schema',
-            'revision_date'
+            'revision_date',
+            'retired',
         ]
 
     @staticmethod
