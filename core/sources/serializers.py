@@ -1,6 +1,6 @@
 from django.core.validators import RegexValidator
 from rest_framework.fields import CharField, IntegerField, DateTimeField, ChoiceField, JSONField, ListField, \
-    BooleanField
+    BooleanField, DateField
 from rest_framework.relations import PrimaryKeyRelatedField
 from rest_framework.serializers import ModelSerializer
 
@@ -54,7 +54,6 @@ class SourceCreateOrUpdateSerializer(ModelSerializer):
 
     def prepare_object(self, validated_data, instance=None):
         source = instance if instance else Source()
-        source.canonical_url = validated_data.get('canonical_url', source.canonical_url)
         source.version = validated_data.get('version', source.version) or HEAD
         source.mnemonic = validated_data.get(self.Meta.lookup_field, source.mnemonic)
         source.name = validated_data.get('name', source.name)
@@ -82,6 +81,17 @@ class SourceCreateOrUpdateSerializer(ModelSerializer):
         source.user = validated_data.get('user', source.user)
         source.organization = validated_data.get('organization', source.organization)
         source.released = validated_data.get('released', source.released)
+
+        source.canonical_url = validated_data.get('canonical_url', source.canonical_url)
+        source.identifier = validated_data.get('identifier', source.identifier)
+        source.publisher = validated_data.get('publisher', source.publisher)
+        source.contact = validated_data.get('contact', source.contact)
+        source.jurisdiction = validated_data.get('jurisdiction', source.jurisdiction)
+        source.purpose = validated_data.get('purpose', source.purpose)
+        source.copyright = validated_data.get('copyright', source.copyright)
+        source.content_type = validated_data.get('content_type', source.content_type)
+        source.revision_date = validated_data.get('revision_date', source.revision_date)
+
         return source
 
     def update(self, instance, validated_data):
@@ -124,6 +134,13 @@ class SourceCreateSerializer(SourceCreateOrUpdateSerializer):
     user_id = PrimaryKeyRelatedField(required=False, queryset=UserProfile.objects.all(), allow_null=True)
     organization_id = PrimaryKeyRelatedField(required=False, queryset=Organization.objects.all(), allow_null=True)
     version = CharField(default=HEAD)
+    identifier = JSONField(required=False, allow_null=True)
+    contact = JSONField(required=False, allow_null=True)
+    jurisdiction = JSONField(required=False, allow_null=True)
+    publisher = CharField(required=False, allow_null=True, allow_blank=True)
+    purpose = CharField(required=False, allow_null=True, allow_blank=True)
+    copyright = CharField(required=False, allow_null=True, allow_blank=True)
+    content_type = CharField(required=False, allow_null=True, allow_blank=True)
 
     def create(self, validated_data):
         source = self.prepare_object(validated_data)
@@ -163,7 +180,9 @@ class SourceDetailSerializer(SourceCreateOrUpdateSerializer):
             'custom_validation_schema', 'public_access', 'default_locale', 'supported_locales', 'website',
             'url', 'owner', 'owner_type', 'owner_url', 'versions',
             'created_on', 'updated_on', 'created_by', 'updated_by', 'extras', 'external_id', 'versions_url',
-            'version', 'concepts_url', 'mappings_url', 'active_concepts', 'active_mappings', 'canonical_url'
+            'version', 'concepts_url', 'mappings_url', 'active_concepts', 'active_mappings',
+            'canonical_url', 'identifier', 'publisher', 'contact', 'jurisdiction', 'purpose', 'copyright',
+            'content_type', 'revision_date',
         )
 
 
@@ -195,5 +214,7 @@ class SourceVersionDetailSerializer(SourceCreateOrUpdateSerializer):
             'custom_validation_schema', 'public_access', 'default_locale', 'supported_locales', 'website',
             'url', 'owner', 'owner_type', 'owner_url', 'versions', 'retired', 'version_url', 'previous_version_url',
             'created_on', 'updated_on', 'created_by', 'updated_by', 'extras', 'external_id',
-            'version', 'concepts_url', 'mappings_url', 'is_processing', 'released', 'canonical_url', 'released',
+            'version', 'concepts_url', 'mappings_url', 'is_processing', 'released',
+            'canonical_url', 'identifier', 'publisher', 'contact', 'jurisdiction', 'purpose', 'copyright',
+            'content_type', 'revision_date',
         )

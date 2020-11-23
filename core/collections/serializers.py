@@ -55,7 +55,6 @@ class CollectionCreateOrUpdateSerializer(ModelSerializer):
 
     def prepare_object(self, validated_data, instance=None):
         collection = instance if instance else Collection()
-        collection.canonical_url = validated_data.get('canonical_url', collection.canonical_url)
         collection.version = validated_data.get('version', collection.version) or HEAD
         collection.mnemonic = validated_data.get(self.Meta.lookup_field, collection.mnemonic)
         collection.name = validated_data.get('name', collection.name)
@@ -86,6 +85,17 @@ class CollectionCreateOrUpdateSerializer(ModelSerializer):
         collection.organization_id = validated_data.get('organization_id', collection.organization_id)
         collection.user = validated_data.get('user', collection.user)
         collection.organization = validated_data.get('organization', collection.organization)
+
+        collection.canonical_url = validated_data.get('canonical_url', collection.canonical_url)
+        collection.identifier = validated_data.get('identifier', collection.identifier)
+        collection.publisher = validated_data.get('publisher', collection.publisher)
+        collection.contact = validated_data.get('contact', collection.contact)
+        collection.jurisdiction = validated_data.get('jurisdiction', collection.jurisdiction)
+        collection.purpose = validated_data.get('purpose', collection.purpose)
+        collection.copyright = validated_data.get('copyright', collection.copyright)
+        collection.immutable = validated_data.get('immutable', collection.immutable)
+        collection.revision_date = validated_data.get('revision_date', collection.revision_date)
+
         return collection
 
     def update(self, instance, validated_data):
@@ -131,6 +141,12 @@ class CollectionCreateSerializer(CollectionCreateOrUpdateSerializer):
     user_id = PrimaryKeyRelatedField(required=False, queryset=UserProfile.objects.all(), allow_null=True)
     organization_id = PrimaryKeyRelatedField(required=False, queryset=Organization.objects.all(), allow_null=True)
     version = CharField(default=HEAD)
+    identifier = JSONField(required=False, allow_null=True)
+    contact = JSONField(required=False, allow_null=True)
+    jurisdiction = JSONField(required=False, allow_null=True)
+    publisher = CharField(required=False, allow_null=True, allow_blank=True)
+    purpose = CharField(required=False, allow_null=True, allow_blank=True)
+    copyright = CharField(required=False, allow_null=True, allow_blank=True)
 
     def create(self, validated_data):
         collection = self.prepare_object(validated_data)
@@ -171,8 +187,11 @@ class CollectionDetailSerializer(CollectionCreateOrUpdateSerializer):
             'custom_validation_schema', 'public_access', 'default_locale', 'supported_locales', 'website',
             'url', 'owner', 'owner_type', 'owner_url', 'versions',
             'created_on', 'updated_on', 'created_by', 'updated_by', 'extras', 'external_id', 'versions_url',
-            'version', 'concepts_url', 'mappings_url', 'active_concepts', 'active_mappings', 'canonical_url',
+            'version', 'concepts_url', 'mappings_url', 'active_concepts', 'active_mappings',
             'custom_resources_linked_source', 'repository_type', 'preferred_source', 'references',
+            'canonical_url', 'identifier', 'publisher', 'contact', 'jurisdiction', 'purpose', 'copyright',
+            'immutable', 'revision_date',
+
         )
 
     def get_references(self, obj):
@@ -207,7 +226,9 @@ class CollectionVersionDetailSerializer(CollectionCreateOrUpdateSerializer):
             'custom_validation_schema', 'public_access', 'default_locale', 'supported_locales', 'website',
             'url', 'owner', 'owner_type', 'owner_url', 'versions', 'version_url', 'previous_version_url',
             'created_on', 'updated_on', 'created_by', 'updated_by', 'extras', 'external_id', 'version',
-            'version', 'concepts_url', 'mappings_url', 'is_processing', 'canonical_url', 'released', 'retired',
+            'version', 'concepts_url', 'mappings_url', 'is_processing', 'released', 'retired',
+            'canonical_url', 'identifier', 'publisher', 'contact', 'jurisdiction', 'purpose', 'copyright',
+            'immutable', 'revision_date',
         )
 
 
