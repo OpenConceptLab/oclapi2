@@ -217,6 +217,8 @@ class CollectionVersionDetailSerializer(CollectionCreateOrUpdateSerializer):
     version_url = CharField(source='uri')
     url = CharField(source='versioned_object_url')
     previous_version_url = CharField(source='prev_version_uri')
+    created_by = CharField(read_only=True, source='created_by.username')
+    updated_by = CharField(read_only=True, source='updated_by.username')
 
     class Meta:
         model = Collection
