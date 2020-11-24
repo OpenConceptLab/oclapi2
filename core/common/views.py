@@ -218,6 +218,15 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
         return filters
 
+    def get_kwargs_filters(self):
+        filters = self.get_facet_filters_from_kwargs()
+        if 'version' in self.kwargs and 'source' in self.kwargs:
+            filters['source_version'] = self.kwargs['version']
+        if 'version' in self.kwargs and 'collection' in self.kwargs:
+            filters['collection_version'] = self.kwargs['version']
+
+        return filters
+
     def get_facets(self):
         facets = dict()
         if self.should_include_facets() and self.facet_class:
@@ -293,7 +302,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             if not self._should_include_private():
                 results = results.filter('match', public_can_view=True)
 
-            kwargs_filters = self.get_facet_filters_from_kwargs()
+            kwargs_filters = self.get_kwargs_filters()
             for key, value in kwargs_filters.items():
                 results = results.filter('match', **{to_snake_case(key): value})
 
