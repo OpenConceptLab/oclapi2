@@ -114,13 +114,7 @@ class ListWithHeadersMixin(ListModelMixin):
         return_all = not self.limit or int(self.limit) == 0
         skip_pagination = compress or return_all
 
-        # Switch between paginated or standard style responses
-        from core.collections.models import Collection
-        from core.sources.models import Source
-        if self.model in [Source, Collection]:
-            sorted_list = self.prepend_head(self.object_list) if len(self.object_list) > 0 else self.object_list
-        else:
-            sorted_list = self.object_list
+        sorted_list = self.object_list
 
         headers = dict()
         results = sorted_list
@@ -194,22 +188,6 @@ class ListWithHeadersMixin(ListModelMixin):
 
     def get_parent(self):
         return get(self, 'parent_resource') or get(self, 'versioned_object') or get(self, 'head')
-
-    @staticmethod
-    def prepend_head(objects):
-        if len(objects) > 0 and hasattr(objects[0], 'mnemonic'):
-            head_el = [el for el in objects if hasattr(el, 'mnemonic') and el.mnemonic == HEAD]
-            if head_el:
-                objects = head_el + [el for el in objects if el.mnemonic != HEAD]
-
-        return objects
-
-    @staticmethod
-    def _reduce_func(prev, current):
-        prev_version_ids = map(lambda v: v.versioned_object_id, prev)
-        if current.versioned_object_id not in prev_version_ids:
-            prev.append(current)
-        return prev
 
 
 class PathWalkerMixin:
