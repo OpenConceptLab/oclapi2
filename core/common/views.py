@@ -327,14 +327,21 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
         return self.__search_results[start:end].to_queryset()
 
+    def is_head(self):
+        return self.request.method.lower() == 'head'
+
     def should_perform_es_search(self):
-        return bool(
-            SEARCH_PARAM in self.request.query_params and
+        if self.is_head():
+            result = bool(self.get_search_string())
+        else:
+            result = SEARCH_PARAM in self.request.query_params
+
+        return result and bool(bool(
             self.document_model and
             self.get_searchable_fields()
         ) or bool(
             self.get_extras_searchable_fields_from_query_params()
-        ) or bool(self.get_extras_fields_exists_from_query_params())
+        ) or bool(self.get_extras_fields_exists_from_query_params()))
 
 
 class SourceChildCommonBaseView(BaseAPIView):
