@@ -219,7 +219,7 @@ class MappingVersionRetrieveViewTest(OCLAPITestCase):
         self.assertEqual(response.data['versioned_object_id'], self.mapping.id)
 
     def test_get_404(self):
-        response = self.client.get(self.mapping.url + '123/')
+        response = self.client.get(self.mapping.url + 'unknown/')
 
         self.assertEqual(response.status_code, 404)
 

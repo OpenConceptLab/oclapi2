@@ -8,7 +8,7 @@ from pydash import get, compact
 from core.common.constants import TEMP, INCLUDE_RETIRED_PARAM, NAMESPACE_REGEX
 from core.common.mixins import SourceChildMixin
 from core.common.models import VersionedModel
-from core.common.utils import parse_updated_since_param
+from core.common.utils import parse_updated_since_param, drop_version
 from core.mappings.constants import MAPPING_TYPE, MAPPING_IS_ALREADY_RETIRED, MAPPING_WAS_RETIRED, \
     MAPPING_IS_ALREADY_NOT_RETIRED, MAPPING_WAS_UNRETIRED, PERSIST_CLONE_ERROR, PERSIST_CLONE_SPECIFY_USER_ERROR
 from core.mappings.mixins import MappingValidationMixin
@@ -199,19 +199,42 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         initial_version.save()
         return initial_version
 
-    @classmethod
-    def persist_new(cls, data, user):
+    def populate_relations_from_data(self, data):
         from core.concepts.models import Concept
+        from core.sources.models import Source
 
-        from_concept_url = data.pop('from_concept_url', None)
-        to_concept_url = data.pop('to_concept_url', None)
-
-        mapping = Mapping(**data, created_by=user, updated_by=user)
+        from_concept_url = data.get('from_concept_url', None)
+        to_concept_url = data.get('to_concept_url', None)
+        to_source_url = data.get('to_source_url', None)
 
         if from_concept_url:
-            mapping.from_concept = Concept.from_uri_queryset(from_concept_url).first()
+            self.from_concept_id = get(Concept.objects.filter(uri=from_concept_url), '[0].versioned_object_id')
         if to_concept_url:
-            mapping.to_concept = Concept.from_uri_queryset(to_concept_url).first()
+            self.to_concept_id = get(Concept.objects.filter(uri=to_concept_url), '[0].versioned_object_id')
+        if to_source_url:
+            self.to_source = Source.objects.filter(uri=drop_version(to_source_url)).first()
+
+    @classmethod
+    def create_new_version_for(cls, instance, data, user):
+        instance.populate_relations_from_data(data)
+        instance.extras = data.get('extras', instance.extras)
+        instance.external_id = data.get('external_id', instance.external_id)
+        instance.comment = data.get('update_comment') or data.get('comment')
+        instance.retired = data.get('retired', instance.retired)
+        instance.mnemonic = data.get('mnemonic', instance.mnemonic)
+        instance.map_type = data.get('map_type', instance.map_type)
+        instance.to_concept_code = data.get('to_concept_code', instance.to_concept_code)
+        instance.to_concept_name = data.get('to_concept_name', instance.to_concept_name)
+
+        return cls.persist_clone(instance, user)
+
+    @classmethod
+    def persist_new(cls, data, user):
+        field_data = {k: v for k, v in data.items() if k not in ['from_concept_url', 'to_concept_url', 'to_source_url']}
+        url_params = {k: v for k, v in data.items() if k in ['from_concept_url', 'to_concept_url', 'to_source_url']}
+
+        mapping = Mapping(**field_data, created_by=user, updated_by=user)
+        mapping.populate_relations_from_data(url_params)
 
         mapping.mnemonic = data.get('mnemonic', TEMP)
         mapping.version = TEMP

@@ -67,34 +67,12 @@ class MappingDetailSerializer(MappingListSerializer):
 
     def create(self, validated_data):
         mapping = Mapping.persist_new(data=validated_data, user=self.context.get('request').user)
-        self._errors.update(mapping.errors)
+        if mapping.errors:
+            self._errors.update(mapping.errors)
         return mapping
 
     def update(self, instance, validated_data):
-        from core.concepts.models import Concept
-        from core.sources.models import Source
-
-        instance.extras = validated_data.get('extras', instance.extras)
-        instance.external_id = validated_data.get('external_id', instance.external_id)
-        instance.comment = validated_data.get('update_comment') or validated_data.get('comment')
-        instance.retired = validated_data.get('retired', instance.retired)
-        from_concept_url = validated_data.get('from_concept_url', None)
-        to_concept_url = validated_data.get('to_concept_url', None)
-        to_source_url = validated_data.get('to_source_url', None)
-        if from_concept_url:
-            instance.from_concept = Concept.from_uri_queryset(from_concept_url).first()
-        if to_concept_url:
-            instance.to_concept = Concept.from_uri_queryset(to_concept_url).first()
-        if to_source_url:
-            instance.to_source = Source.head_from_uri(to_source_url).first()
-
-        instance.mnemonic = validated_data.get('mnemonic', instance.mnemonic)
-        instance.map_type = validated_data.get('map_type', instance.map_type)
-        instance.to_concept_code = validated_data.get('to_concept_code', instance.to_concept_code)
-        instance.to_concept_name = validated_data.get('to_concept_name', instance.to_concept_name)
-
-        errors = Mapping.persist_clone(instance, self.context.get('request').user)
+        errors = Mapping.create_new_version_for(instance, validated_data, self.context.get('request').user)
         if errors:
             self._errors.update(errors)
-
         return instance
