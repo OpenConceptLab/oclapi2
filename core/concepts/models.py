@@ -53,19 +53,26 @@ class LocalizedText(models.Model):
 
     @classmethod
     def build_name(cls, params):
-        return LocalizedText(
-            **{**params, 'type': params.pop('name_type', params.pop('type', None))}
+        name_type = params.pop('name_type', None) or params.pop('type', None)
+        return cls(
+            **{**params, 'type': name_type}
         )
 
     @classmethod
     def build_description(cls, params):
-        return LocalizedText(
+        description_type = params.pop('description_type', None) or params.pop('type', None)
+        description_name = params.pop('description', None) or params.pop('name', None)
+        return cls(
             **{
                 **params,
-                'type': params.pop('description_type', params.pop('type', None)),
-                'name': params.pop('description', params.pop('name', None)),
+                'type': description_type,
+                'name': description_name,
             }
         )
+
+    @classmethod
+    def build_locales(cls, locale_params, used_as='name'):
+        return [cls.build(locale, used_as) for locale in locale_params]
 
     @property
     def is_fully_specified(self):
@@ -328,6 +335,23 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         initial_version.is_latest_version = True
         initial_version.save()
         return initial_version
+
+    @classmethod
+    def create_new_version_for(cls, instance, data, user):
+        instance.concept_class = data.get('concept_class', instance.concept_class)
+        instance.datatype = data.get('datatype', instance.datatype)
+        instance.extras = data.get('extras', instance.extras)
+        instance.external_id = data.get('external_id', instance.external_id)
+        instance.comment = data.get('update_comment') or data.get('comment')
+        instance.retired = data.get('retired', instance.retired)
+
+        new_names = LocalizedText.build_locales(data.get('names', []))
+        new_descriptions = LocalizedText.build_locales(data.get('descriptions', []), 'description')
+
+        instance.cloned_names = compact(new_names)
+        instance.cloned_descriptions = compact(new_descriptions)
+
+        return cls.persist_clone(instance, user)
 
     def set_locales(self):
         if not self.id:

@@ -1,4 +1,3 @@
-from pydash import compact
 from rest_framework.fields import CharField, DateTimeField, BooleanField, URLField, JSONField, SerializerMethodField, \
     UUIDField
 from rest_framework.serializers import ModelSerializer
@@ -191,31 +190,12 @@ class ConceptDetailSerializer(ModelSerializer):
 
     def create(self, validated_data):
         concept = Concept.persist_new(data=validated_data, user=self.context.get('request').user)
-        self._errors.update(concept.errors)
+        if concept.errors:
+            self._errors.update(concept.errors)
         return concept
 
     def update(self, instance, validated_data):
-        instance.concept_class = validated_data.get('concept_class', instance.concept_class)
-        instance.datatype = validated_data.get('datatype', instance.datatype)
-        instance.extras = validated_data.get('extras', instance.extras)
-        instance.external_id = validated_data.get('external_id', instance.external_id)
-        instance.comment = validated_data.get('update_comment') or validated_data.get('comment')
-        instance.retired = validated_data.get('retired', instance.retired)
-
-        new_names = [
-            LocalizedText(
-                **{k: v for k, v in name.items() if k not in ['name_type']}
-            ) for name in validated_data.get('names', [])
-        ]
-        new_descriptions = [
-            LocalizedText(
-                **{k: v for k, v in desc.items() if k not in ['description_type']}
-            ) for desc in validated_data.get('descriptions', [])
-        ]
-
-        instance.cloned_names = compact(new_names)
-        instance.cloned_descriptions = compact(new_descriptions)
-        errors = Concept.persist_clone(instance, self.context.get('request').user)
+        errors = Concept.create_new_version_for(instance, validated_data, self.context.get('request').user)
         if errors:
             self._errors.update(errors)
         return instance
