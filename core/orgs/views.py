@@ -10,7 +10,7 @@ from rest_framework.views import APIView
 from core.collections.views import CollectionListView
 from core.common.constants import NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY
 from core.common.mixins import ListWithHeadersMixin
-from core.common.permissions import HasPrivateAccess
+from core.common.permissions import HasPrivateAccess, CanViewConceptDictionary
 from core.common.tasks import delete_organization
 from core.common.views import BaseAPIView
 from core.orgs.constants import DELETE_ACCEPTED
@@ -97,7 +97,7 @@ class OrganizationDetailView(OrganizationBaseView, mixins.UpdateModelMixin, mixi
         if self.request.method == 'DELETE':
             return [HasPrivateAccess(), ]
 
-        return [IsAuthenticated(), ]
+        return [CanViewConceptDictionary(), ]
 
     def get_serializer_class(self):
         if self.request.method == 'POST':
