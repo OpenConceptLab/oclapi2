@@ -30,7 +30,7 @@ class CustomPaginator:
         self.page_number = int(request.GET.get('page', '1'))
         self.paginator = Paginator(self.queryset, self.page_size)
         self.page_object = self.paginator.get_page(self.page_number)
-        self.page_count = ceil(self.total_count / self.page_size)
+        self.page_count = ceil(int(self.total_count) / int(self.page_size))
 
     @property
     def current_page_number(self):
