@@ -72,6 +72,9 @@ class LocalizedText(models.Model):
 
     @classmethod
     def build_locales(cls, locale_params, used_as='name'):
+        if not locale_params:
+            return []
+
         return [cls.build(locale, used_as) for locale in locale_params]
 
     @property
