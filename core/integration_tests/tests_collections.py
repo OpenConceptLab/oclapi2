@@ -318,6 +318,14 @@ class CollectionReferencesViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+
+        response = self.client.get(
+            '/collections/coll/references/?q=/mappings/&search_sort=desc',
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 0)
 
     def test_delete_400(self):

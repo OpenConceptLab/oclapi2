@@ -234,7 +234,7 @@ class CollectionReferencesView(
         queryset = instance.references
 
         if search_query:
-            queryset = queryset.filter(expression__iexact=search_query).order_by(sort + 'expression')
+            queryset = queryset.filter(expression__icontains=search_query).order_by(sort + 'expression')
 
         return queryset.all()
 
