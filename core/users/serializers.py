@@ -72,6 +72,7 @@ class UserDetailSerializer(serializers.ModelSerializer):
     name = serializers.CharField(required=False)
     email = serializers.CharField(required=False)
     company = serializers.CharField(required=False)
+    website = serializers.CharField(required=False)
     location = serializers.CharField(required=False)
     preferred_locale = serializers.CharField(required=False)
     orgs = serializers.IntegerField(read_only=True, source='orgs_count')
@@ -86,7 +87,7 @@ class UserDetailSerializer(serializers.ModelSerializer):
         fields = (
             'type', 'uuid', 'username', 'name', 'email', 'company', 'location', 'preferred_locale', 'orgs',
             'public_collections', 'public_sources', 'created_on', 'updated_on', 'created_by', 'updated_by',
-            'url', 'organizations_url', 'extras', 'sources_url', 'collections_url',
+            'url', 'organizations_url', 'extras', 'sources_url', 'collections_url', 'website',
         )
 
     def update(self, instance, validated_data):
@@ -94,6 +95,7 @@ class UserDetailSerializer(serializers.ModelSerializer):
         instance.email = validated_data.get('email', instance.email)
         instance.username = validated_data.get('username', instance.username)
         instance.company = validated_data.get('company', instance.company)
+        instance.website = validated_data.get('website', instance.website)
         instance.location = validated_data.get('location', instance.location)
         instance.preferred_locale = validated_data.get('preferred_locale', instance.preferred_locale)
         instance.extras = validated_data.get('extras', instance.extras)
