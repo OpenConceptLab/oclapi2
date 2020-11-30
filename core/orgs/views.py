@@ -3,7 +3,7 @@ from django.http import Http404
 from pydash import get
 from rest_framework import mixins, status, generics
 from rest_framework.generics import RetrieveAPIView, DestroyAPIView, RetrieveUpdateDestroyAPIView
-from rest_framework.permissions import IsAuthenticated, IsAuthenticatedOrReadOnly
+from rest_framework.permissions import IsAuthenticatedOrReadOnly
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
