@@ -1,9 +1,9 @@
-from mock import Mock, patch
+from mock import Mock, patch, ANY
 from rest_framework.authtoken.models import Token
 
 from core.collections.tests.factories import OrganizationCollectionFactory
 from core.common.constants import ACCESS_TYPE_NONE, HEAD, OCL_ORG_ID
-from core.common.tests import OCLTestCase
+from core.common.tests import OCLTestCase, OCLAPITestCase
 from core.orgs.models import Organization
 from core.sources.tests.factories import OrganizationSourceFactory
 from core.users.constants import USER_OBJECT_TYPE
@@ -151,3 +151,34 @@ class UserProfileTest(OCLTestCase):
 
         user.set_token('token')
         self.assertEqual(user.auth_token.key, 'token')
+
+
+class TokenAuthenticationViewTest(OCLAPITestCase):
+    def test_login(self):
+        response = self.client.post('/users/login/', {})
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.data,
+            dict(username=['This field is required.'], password=['This field is required.'])
+        )
+
+        response = self.client.post('/users/login/', dict(username='foo', password='bar'))
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.data,
+            dict(non_field_errors=["Unable to log in with provided credentials."])
+        )
+
+        user = UserProfileFactory()
+        user.set_password('password')
+        user.save()
+        self.assertIsNone(user.last_login)
+
+        response = self.client.post('/users/login/', dict(username=user.username, password='password'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, dict(token=ANY))
+        user.refresh_from_db()
+        self.assertIsNotNone(user.last_login)

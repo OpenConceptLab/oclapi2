@@ -1,5 +1,9 @@
+from django.contrib.auth.models import update_last_login
+from drf_yasg.utils import swagger_auto_schema
 from pydash import get
 from rest_framework import mixins, status
+from rest_framework.authtoken.serializers import AuthTokenSerializer
+from rest_framework.authtoken.views import ObtainAuthToken
 from rest_framework.generics import RetrieveAPIView, UpdateAPIView, DestroyAPIView
 from rest_framework.permissions import IsAdminUser, IsAuthenticated, AllowAny
 from rest_framework.response import Response
@@ -10,6 +14,21 @@ from core.orgs.models import Organization
 from core.users.documents import UserProfileDocument
 from core.users.serializers import UserDetailSerializer, UserCreateSerializer, UserListSerializer
 from .models import UserProfile
+
+
+class TokenAuthenticationView(ObtainAuthToken):
+    """Implementation of ObtainAuthToken with last_login update"""
+
+    @swagger_auto_schema(request_body=AuthTokenSerializer)
+    def post(self, request, *args, **kwargs):
+        result = super().post(request, *args, **kwargs)
+        try:
+            user = UserProfile.objects.get(username=request.data['username'])
+            update_last_login(None, user)
+        except:  # pylint: disable=bare-except
+            pass
+
+        return result
 
 
 class UserBaseView(BaseAPIView):
