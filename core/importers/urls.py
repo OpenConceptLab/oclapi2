@@ -4,6 +4,7 @@ from core.common.constants import NAMESPACE_PATTERN
 from core.importers import views
 
 urlpatterns = [
+    re_path(r'^bulk-import-inline/$', views.BulkImportInlineView.as_view(), name='bulk-import-inline'),
     re_path(r'^bulk-import/file-url/$', views.BulkImportFileURLView.as_view(), name='bulk-import-file-url'),
     re_path(
         r"^bulk-import/(?P<import_queue>{pattern})/file-url/$".format(pattern=NAMESPACE_PATTERN),

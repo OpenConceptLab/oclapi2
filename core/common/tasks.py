@@ -140,6 +140,12 @@ def bulk_import(to_import, username, update_if_exists):
 
 
 @app.task(base=QueueOnce)
+def bulk_import_inline(to_import, username, update_if_exists):
+    from core.importers.models import BulkImportInline
+    return BulkImportInline(content=to_import, username=username, update_if_exists=update_if_exists).run()
+
+
+@app.task(base=QueueOnce)
 def bulk_priority_import(to_import, username, update_if_exists):
     from core.importers.models import BulkImport
     return BulkImport(content=to_import, username=username, update_if_exists=update_if_exists).run()

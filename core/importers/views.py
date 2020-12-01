@@ -16,7 +16,7 @@ from core.common.utils import parse_bulk_import_task_id, task_exists, flower_get
 from core.importers.constants import ALREADY_QUEUED, INVALID_UPDATE_IF_EXISTS, NO_CONTENT_TO_IMPORT
 
 
-def import_response(request, import_queue, data):
+def import_response(request, import_queue, data, inline=False):
     if not data:
         return Response(dict(exception=NO_CONTENT_TO_IMPORT), status=status.HTTP_400_BAD_REQUEST)
 
@@ -33,7 +33,7 @@ def import_response(request, import_queue, data):
     data = data.decode('utf-8') if isinstance(data, bytes) else data
 
     try:
-        task = queue_bulk_import(data, import_queue, username, update_if_exists)
+        task = queue_bulk_import(data, import_queue, username, update_if_exists, inline)
     except AlreadyQueued:
         return Response(dict(exception=ALREADY_QUEUED), status=status.HTTP_409_CONFLICT)
     parsed_task = parse_bulk_import_task_id(task.id)
@@ -142,3 +142,26 @@ class BulkImportView(APIView):
                     )
 
         return Response(tasks)
+
+
+class BulkImportInlineView(APIView):
+    permission_classes = (IsAuthenticated, )
+    parser_classes = (MultiPartParser, )
+
+    @swagger_auto_schema(
+        manual_parameters=[update_if_exists_param, file_url_param, file_upload_param],
+    )
+    def post(self, request, import_queue=None):
+        file = None
+        try:
+            if 'file' in request.data:
+                file = request.data['file']
+            elif 'file_url' in request.data:
+                file = urllib.request.urlopen(request.data['file_url'])
+        except:  # pylint: disable=bare-except
+            pass
+
+        if not file:
+            return Response(dict(exception=NO_CONTENT_TO_IMPORT), status=status.HTTP_400_BAD_REQUEST)
+
+        return import_response(self.request, import_queue, file.read(), True)

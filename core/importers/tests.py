@@ -1,10 +1,22 @@
+import json
+import os
 import uuid
 
 from celery_once import AlreadyQueued
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db.models import F
 from mock import patch, Mock, ANY
 
+from core.collections.models import Collection
 from core.common.tests import OCLAPITestCase, OCLTestCase
-from core.importers.models import BulkImport
+from core.concepts.models import Concept
+from core.concepts.tests.factories import ConceptFactory
+from core.importers.models import BulkImport, BulkImportInline
+from core.mappings.models import Mapping
+from core.orgs.models import Organization
+from core.orgs.tests.factories import OrganizationFactory
+from core.sources.models import Source
+from core.sources.tests.factories import OrganizationSourceFactory
 from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
 
@@ -36,6 +48,282 @@ class BulkImportTest(OCLTestCase):
             do_update_if_exists=True
         )
         flex_importer_instance_mock.process.assert_called_once()
+
+
+class BulkImportInlineTest(OCLTestCase):
+    def test_org_import(self):
+        self.assertFalse(Organization.objects.filter(mnemonic='DemoOrg').exists())
+
+        data = {
+            "type": "Organization", "id": "DemoOrg", "website": "", "name": "OCL Demo Organization", "company": "",
+            "public_access": "View"
+        }
+        importer = BulkImportInline(json.dumps(data), 'ocladmin', True)
+        importer.run()
+
+        self.assertTrue(Organization.objects.filter(mnemonic='DemoOrg').exists())
+        self.assertEqual(importer.processed, 1)
+        self.assertEqual(len(importer.created), 1)
+        self.assertEqual(importer.created[0], data)
+        self.assertTrue(importer.elapsed_seconds > 0)
+
+        data = {
+            "type": "Organization", "id": "DemoOrg", "website": "", "name": "OCL Demo Organization", "company": "",
+            "public_access": "View"
+        }
+        importer = BulkImportInline(json.dumps(data), 'ocladmin', True)
+        importer.run()
+
+        self.assertEqual(importer.processed, 1)
+        self.assertEqual(len(importer.created), 0)
+        self.assertEqual(len(importer.failed), 0)
+        self.assertEqual(len(importer.exists), 1)
+        self.assertEqual(importer.exists[0], data)
+        self.assertTrue(importer.elapsed_seconds > 0)
+
+    def test_source_import_success(self):
+        OrganizationFactory(mnemonic='DemoOrg')
+        self.assertFalse(Source.objects.filter(mnemonic='DemoSource').exists())
+
+        data = {
+            "type": "Source", "id": "DemoSource", "short_code": "DemoSource", "name": "OCL Demo Source",
+            "full_name": "OCL Demo Source", "owner_type": "Organization", "owner": "DemoOrg",
+            "description": "Source used for demo purposes", "default_locale": "en", "source_type": "Dictionary",
+            "public_access": "View", "supported_locales": "en", "custom_validation_schema": "None"
+        }
+        importer = BulkImportInline(json.dumps(data), 'ocladmin', True)
+        importer.run()
+
+        self.assertTrue(Source.objects.filter(mnemonic='DemoSource', version='HEAD').exists())
+        self.assertEqual(importer.processed, 1)
+        self.assertEqual(len(importer.created), 1)
+        self.assertEqual(importer.created[0], data)
+        self.assertTrue(importer.elapsed_seconds > 0)
+
+    def test_source_import_failed(self):
+        self.assertFalse(Source.objects.filter(mnemonic='DemoSource').exists())
+
+        data = {
+            "type": "Source", "id": "DemoSource", "short_code": "DemoSource", "name": "OCL Demo Source",
+            "full_name": "OCL Demo Source", "owner_type": "Organization", "owner": "DemoOrg",
+            "description": "Source used for demo purposes", "default_locale": "en", "source_type": "Dictionary",
+            "public_access": "View", "supported_locales": "en", "custom_validation_schema": "None"
+        }
+        importer = BulkImportInline(json.dumps(data), 'ocladmin', True)
+        importer.run()
+
+        self.assertFalse(Source.objects.filter(mnemonic='DemoSource').exists())
+        self.assertEqual(importer.processed, 1)
+        self.assertEqual(len(importer.created), 0)
+        self.assertEqual(len(importer.failed), 1)
+        self.assertEqual(importer.failed[0], data)
+        self.assertTrue(importer.elapsed_seconds > 0)
+
+    def test_source_and_version_import(self):
+        OrganizationFactory(mnemonic='DemoOrg')
+        self.assertFalse(Source.objects.filter(mnemonic='DemoSource').exists())
+
+        data = '{"type": "Source", "id": "DemoSource", "short_code": "DemoSource", "name": "OCL Demo Source", ' \
+               '"full_name": "OCL Demo Source", "owner_type": "Organization", "owner": "DemoOrg", "description": ' \
+               '"Source used for demo purposes", "default_locale": "en", "source_type": "Dictionary", ' \
+               '"public_access": "View", "supported_locales": "en", "custom_validation_schema": "None"}\n' \
+               '{"type": "Source Version", "id": "initial", "source": "DemoSource", "description": "Initial empty ' \
+               'repository version", "released": true, "owner": "DemoOrg", "owner_type": "Organization"} '
+
+        importer = BulkImportInline(data, 'ocladmin', True)
+        importer.run()
+
+        self.assertTrue(Source.objects.filter(mnemonic='DemoSource', version='HEAD').exists())
+        self.assertTrue(Source.objects.filter(mnemonic='DemoSource', version='initial').exists())
+        self.assertEqual(importer.processed, 2)
+        self.assertEqual(len(importer.created), 1)
+        self.assertEqual(len(importer.updated), 1)
+        self.assertEqual(importer.failed, [])
+        self.assertTrue(importer.elapsed_seconds > 0)
+
+    def test_collection_import_success(self):
+        OrganizationFactory(mnemonic='PEPFAR')
+        self.assertFalse(Collection.objects.filter(mnemonic='MER-R-MOH-Facility-FY19').exists())
+
+        data = {
+            "type": "Collection", "id": "MER-R-MOH-Facility-FY19", "name": "MER R: MOH Facility Based FY19",
+            "default_locale": "en", "short_code": "MER-R-MOH-Facility-FY19", "external_id": "OBhi1PUW3OL",
+            "extras": {
+                "Period": "FY19", "Period Description": "COP18 (FY19Q1)",
+                "datim_sync_moh_fy19": True, "DHIS2-Dataset-Code": "MER_R_MOH"
+            },
+            "collection_type": "Code List", "full_name": "MER Results: MOH Facility Based FY19", "owner": "PEPFAR",
+            "public_access": "View", "owner_type": "Organization", "supported_locales": "en"
+        }
+        importer = BulkImportInline(json.dumps(data), 'ocladmin', True)
+        importer.run()
+
+        self.assertTrue(Collection.objects.filter(mnemonic='MER-R-MOH-Facility-FY19', version='HEAD').exists())
+        self.assertEqual(importer.processed, 1)
+        self.assertEqual(len(importer.created), 1)
+        self.assertEqual(importer.created[0], data)
+        self.assertTrue(importer.elapsed_seconds > 0)
+
+    def test_collection_import_failed(self):
+        self.assertFalse(Collection.objects.filter(mnemonic='MER-R-MOH-Facility-FY19').exists())
+
+        data = {
+            "type": "Collection", "id": "MER-R-MOH-Facility-FY19", "name": "MER R: MOH Facility Based FY19",
+            "default_locale": "en", "short_code": "MER-R-MOH-Facility-FY19", "external_id": "OBhi1PUW3OL",
+            "extras": {
+                "Period": "FY19", "Period Description": "COP18 (FY19Q1)",
+                "datim_sync_moh_fy19": True, "DHIS2-Dataset-Code": "MER_R_MOH"
+            },
+            "collection_type": "Code List", "full_name": "MER Results: MOH Facility Based FY19", "owner": "PEPFAR",
+            "public_access": "View", "owner_type": "Organization", "supported_locales": "en"
+        }
+        importer = BulkImportInline(json.dumps(data), 'ocladmin', True)
+        importer.run()
+
+        self.assertFalse(Collection.objects.filter(mnemonic='MER-R-MOH-Facility-FY19').exists())
+        self.assertEqual(importer.processed, 1)
+        self.assertEqual(len(importer.created), 0)
+        self.assertEqual(len(importer.failed), 1)
+        self.assertEqual(importer.failed[0], data)
+        self.assertTrue(importer.elapsed_seconds > 0)
+
+    def test_collection_and_version_import(self):
+        OrganizationFactory(mnemonic='PEPFAR')
+        self.assertFalse(Collection.objects.filter(mnemonic='MER-R-MOH-Facility-FY19').exists())
+
+        data = '{"type": "Collection", "id": "MER-R-MOH-Facility-FY19", "name": "MER R: MOH Facility Based FY19", ' \
+               '"default_locale": "en", "short_code": "MER-R-MOH-Facility-FY19", "external_id": "OBhi1PUW3OL", ' \
+               '"extras": {"Period": "FY19", "Period Description": "COP18 (FY19Q1)", "datim_sync_moh_fy19": true, ' \
+               '"DHIS2-Dataset-Code": "MER_R_MOH"}, "collection_type": "Code List", "full_name": ' \
+               '"MER Results: MOH Facility Based FY19", "owner": "PEPFAR", "public_access": "View", ' \
+               '"owner_type": "Organization", "supported_locales": "en"}\n' \
+               '{"type": "Collection Version", "id": "FY19.v0", ' \
+               '"description": "Initial release of FY19 DATIM-MOH definitions", ' \
+               '"collection": "MER-R-MOH-Facility-FY19", "released": true, "owner": "PEPFAR", ' \
+               '"owner_type": "Organization"}'
+
+        importer = BulkImportInline(data, 'ocladmin', True)
+        importer.run()
+
+        self.assertTrue(Collection.objects.filter(mnemonic='MER-R-MOH-Facility-FY19', version='HEAD').exists())
+        self.assertTrue(Collection.objects.filter(mnemonic='MER-R-MOH-Facility-FY19', version='FY19.v0').exists())
+        self.assertEqual(importer.processed, 2)
+        self.assertEqual(len(importer.created), 1)
+        self.assertEqual(len(importer.updated), 1)
+        self.assertEqual(importer.failed, [])
+        self.assertTrue(importer.elapsed_seconds > 0)
+
+    def test_concept_import(self):
+        self.assertFalse(Concept.objects.filter(mnemonic='Food').exists())
+
+        OrganizationSourceFactory(
+            organization=(OrganizationFactory(mnemonic='DemoOrg')), mnemonic='DemoSource', version='HEAD'
+        )
+
+        data = {
+            "type": "Concept", "id": "Food", "concept_class": "Root",
+            "datatype": "None", "source": "DemoSource", "owner": "DemoOrg", "owner_type": "Organization",
+            "names": [{"name": "Food", "locale": "en", "locale_preferred": "True", "name_type": "Fully Specified"}],
+            "descriptions": [],
+        }
+
+        importer = BulkImportInline(json.dumps(data), 'ocladmin', True)
+        importer.run()
+
+        self.assertEqual(Concept.objects.filter(mnemonic='Food').count(), 2)
+        self.assertEqual(
+            Concept.objects.filter(mnemonic='Food', id=F('versioned_object_id')).first().versions.count(), 1
+        )
+        self.assertTrue(Concept.objects.filter(mnemonic='Food', is_latest_version=True).exists())
+        self.assertEqual(importer.processed, 1)
+        self.assertEqual(len(importer.created), 1)
+        self.assertEqual(importer.failed, [])
+        self.assertTrue(importer.elapsed_seconds > 0)
+
+        data = {
+            "type": "Concept", "id": "Food", "concept_class": "Root",
+            "datatype": "Rule", "source": "DemoSource", "owner": "DemoOrg", "owner_type": "Organization",
+            "names": [{"name": "Food", "locale": "en", "locale_preferred": "True", "name_type": "Fully Specified"}],
+            "descriptions": [],
+        }
+
+        importer = BulkImportInline(json.dumps(data), 'ocladmin', True)
+        importer.run()
+
+        self.assertEqual(
+            Concept.objects.filter(mnemonic='Food', id=F('versioned_object_id')).first().versions.count(), 2
+        )
+        self.assertTrue(Concept.objects.filter(mnemonic='Food', is_latest_version=True, datatype='Rule').exists())
+        self.assertEqual(importer.processed, 1)
+        self.assertEqual(len(importer.created), 0)
+        self.assertEqual(len(importer.updated), 1)
+        self.assertEqual(importer.failed, [])
+        self.assertTrue(importer.elapsed_seconds > 0)
+
+    def test_mapping_import(self):
+        self.assertEqual(Mapping.objects.count(), 0)
+
+        source = OrganizationSourceFactory(
+            organization=(OrganizationFactory(mnemonic='DemoOrg')), mnemonic='DemoSource', version='HEAD'
+        )
+        ConceptFactory(parent=source, mnemonic='Corn')
+        ConceptFactory(parent=source, mnemonic='Vegetable')
+
+        data = {
+            "to_concept_url": "/orgs/DemoOrg/sources/DemoSource/concepts/Corn/",
+            "from_concept_url": "/orgs/DemoOrg/sources/DemoSource/concepts/Vegetable/",
+            "type": "Mapping", "source": "DemoSource",
+            "extras": None, "owner": "DemoOrg", "map_type": "Has Child", "owner_type": "Organization",
+            "external_id": None
+        }
+
+        importer = BulkImportInline(json.dumps(data), 'ocladmin', True)
+        importer.run()
+
+        self.assertEqual(Mapping.objects.filter(map_type='Has Child').count(), 2)
+        self.assertEqual(
+            Mapping.objects.filter(map_type='Has Child', id=F('versioned_object_id')).first().versions.count(), 1
+        )
+        self.assertTrue(Mapping.objects.filter(map_type='Has Child', is_latest_version=True).exists())
+        self.assertEqual(importer.processed, 1)
+        self.assertEqual(len(importer.created), 1)
+        self.assertEqual(importer.failed, [])
+        self.assertTrue(importer.elapsed_seconds > 0)
+
+        data = {
+            "to_concept_url": "/orgs/DemoOrg/sources/DemoSource/concepts/Corn/",
+            "from_concept_url": "/orgs/DemoOrg/sources/DemoSource/concepts/Vegetable/",
+            "type": "Mapping", "source": "DemoSource",
+            "extras": {"foo": "bar"}, "owner": "DemoOrg", "map_type": "Has Child", "owner_type": "Organization",
+            "external_id": None
+        }
+
+        importer = BulkImportInline(json.dumps(data), 'ocladmin', True)
+        importer.run()
+
+        self.assertEqual(
+            Mapping.objects.filter(map_type='Has Child', id=F('versioned_object_id')).first().versions.count(), 2
+        )
+        self.assertEqual(importer.processed, 1)
+        self.assertEqual(len(importer.created), 0)
+        self.assertEqual(len(importer.updated), 1)
+        self.assertEqual(importer.failed, [])
+        self.assertTrue(importer.elapsed_seconds > 0)
+
+    def test_sample_import(self):
+        importer = BulkImportInline(
+            open(os.path.join(os.path.dirname(__file__), '..', 'samples/sample_ocldev.json'), 'r').read(),
+            'ocladmin', True
+        )
+        importer.run()
+
+        self.assertEqual(importer.processed, 64)
+        self.assertEqual(len(importer.created), 47)
+        self.assertEqual(len(importer.exists), 3)
+        self.assertEqual(len(importer.updated), 14)
+        self.assertEqual(len(importer.failed), 0)
+        self.assertEqual(len(importer.invalid), 0)
+        self.assertEqual(len(importer.others), 0)
 
 
 class BulkImportViewTest(OCLAPITestCase):
@@ -293,3 +581,22 @@ class BulkImportViewTest(OCLAPITestCase):
         )
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.data, dict(exception='No content to import'))
+
+    @patch('core.common.tasks.bulk_import_inline')
+    def test_post_inline_202(self, bulk_import_mock):
+        task_mock = Mock(id='task-id', state='pending')
+        bulk_import_mock.apply_async = Mock(return_value=task_mock)
+        file = SimpleUploadedFile('file.json', b'{"key": "value"}', "application/json")
+
+        response = self.client.post(
+            "/importers/bulk-import-inline/?update_if_exists=true",
+            {'file': file},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+        )
+
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.data, dict(task='task-id', state='pending', queue='default', username='ocladmin'))
+        self.assertEqual(bulk_import_mock.apply_async.call_count, 1)
+        self.assertEqual(bulk_import_mock.apply_async.call_args[0], (('{"key": "value"}', 'ocladmin', True),))
+        self.assertEqual(bulk_import_mock.apply_async.call_args[1]['task_id'][37:], 'ocladmin~priority')
+        self.assertEqual(bulk_import_mock.apply_async.call_args[1]['queue'], 'bulk_import_root')

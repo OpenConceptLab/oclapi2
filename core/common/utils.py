@@ -321,7 +321,7 @@ def task_exists(task_id):
     return bool(flower_response and flower_response.status_code == 200 and flower_response.text)
 
 
-def queue_bulk_import(to_import, import_queue, username, update_if_exists):
+def queue_bulk_import(to_import, import_queue, username, update_if_exists, inline=False):
     """
     Used to queue bulk imports. It assigns a bulk import task to a specified import queue or a random one.
     If requested by the root user, the bulk import goes to the priority queue.
@@ -330,6 +330,7 @@ def queue_bulk_import(to_import, import_queue, username, update_if_exists):
     :param import_queue:
     :param username:
     :param update_if_exists:
+    :param inline:
     :return: task
     """
     task_id = str(uuid.uuid4()) + '-' + username
@@ -346,8 +347,11 @@ def queue_bulk_import(to_import, import_queue, username, update_if_exists):
         queue_id = 'bulk_import_' + str(random.randrange(0, BULK_IMPORT_QUEUES_COUNT))
         task_id += '~default'
 
-    from core.common.tasks import bulk_import
+    if inline:
+        from core.common.tasks import bulk_import_inline
+        return bulk_import_inline.apply_async((to_import, username, update_if_exists), task_id=task_id, queue=queue_id)
 
+    from core.common.tasks import bulk_import
     return bulk_import.apply_async((to_import, username, update_if_exists), task_id=task_id, queue=queue_id)
 
 
