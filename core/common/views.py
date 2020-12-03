@@ -40,9 +40,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     total_count = 0
 
     def _should_exclude_retired(self):
-        from core.orgs.documents import OrganizationDocument
-        from core.users.documents import UserProfileDocument
-        if self.document_model in [OrganizationDocument, UserProfileDocument]:
+        if self.is_owner_document_model():
             return False
 
         params = get(self, 'params') or self.request.query_params.dict()
@@ -263,6 +261,11 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
         return []
 
+    def is_owner_document_model(self):
+        from core.orgs.documents import OrganizationDocument
+        from core.users.documents import UserProfileDocument
+        return self.document_model in [UserProfileDocument, OrganizationDocument]
+
     @cached_property
     def __search_results(self):  # pylint: disable=too-many-branches
         results = None
@@ -302,7 +305,10 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             if not self._should_include_private():
                 results = results.filter('match', public_can_view=True)
 
-            kwargs_filters = self.get_kwargs_filters()
+            if self.is_owner_document_model():
+                kwargs_filters = self.kwargs
+            else:
+                kwargs_filters = self.get_kwargs_filters()
             for key, value in kwargs_filters.items():
                 results = results.filter('match', **{to_snake_case(key): value})
 

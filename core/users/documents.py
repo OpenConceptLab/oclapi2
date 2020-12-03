@@ -16,6 +16,7 @@ class UserProfileDocument(Document):
     company = fields.KeywordField(attr='company', normalizer='lowercase')
     name = fields.KeywordField(attr='name', normalizer='lowercase')
     extras = fields.ObjectField()
+    org = fields.ListField(fields.KeywordField())
 
     class Django:
         model = UserProfile
@@ -26,3 +27,7 @@ class UserProfileDocument(Document):
     @staticmethod
     def prepare_extras(instance):
         return instance.extras or {}
+
+    @staticmethod
+    def prepare_org(instance):
+        return list(instance.organizations.values_list('mnemonic', flat=True))

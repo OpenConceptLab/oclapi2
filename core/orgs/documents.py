@@ -15,6 +15,7 @@ class OrganizationDocument(Document):
     name = fields.KeywordField(attr='name')
     mnemonic = fields.KeywordField(attr='mnemonic')
     extras = fields.ObjectField()
+    user = fields.ListField(fields.KeywordField())
 
     class Django:
         model = Organization
@@ -27,3 +28,7 @@ class OrganizationDocument(Document):
     @staticmethod
     def prepare_extras(instance):
         return instance.extras or {}
+
+    @staticmethod
+    def prepare_user(instance):
+        return list(instance.members.values_list('username', flat=True))
