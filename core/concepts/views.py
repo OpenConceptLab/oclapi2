@@ -51,6 +51,7 @@ class ConceptBaseView(SourceChildCommonBaseView):
         'owner': {'sortable': True, 'filterable': True, 'facet': True, 'exact': True},
         'owner_type': {'sortable': False, 'filterable': True, 'facet': True, 'exact': True},
     }
+    default_filters = dict(is_active=True)
 
     def get_detail_serializer(self, obj, data=None, files=None, partial=False):
         return ConceptDetailSerializer(obj, data, files, partial, context=dict(request=self.request))

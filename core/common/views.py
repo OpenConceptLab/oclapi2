@@ -223,6 +223,13 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         if 'version' in self.kwargs and 'collection' in self.kwargs:
             filters['collection_version'] = self.kwargs['version']
 
+        if 'collection' in self.kwargs and self.is_source_child_document_model():
+            owner_type = filters.pop('ownerType', None)
+            owner = filters.pop('owner', None)
+            if owner_type == USER_OBJECT_TYPE:
+                filters['collection_owner_url'] = "/users/{}/".format(owner)
+            if owner_type == ORG_OBJECT_TYPE:
+                filters['collection_owner_url'] = "/orgs/{}/".format(owner)
         return filters
 
     def get_facets(self):
@@ -266,13 +273,22 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         from core.users.documents import UserProfileDocument
         return self.document_model in [UserProfileDocument, OrganizationDocument]
 
+    def is_source_child_document_model(self):
+        from core.concepts.documents import ConceptDocument
+        from core.mappings.documents import MappingDocument
+        return self.document_model in [ConceptDocument, MappingDocument]
+
     @cached_property
     def __search_results(self):  # pylint: disable=too-many-branches
         results = None
 
         if self.should_perform_es_search():
             results = self.document_model.search()
-            for field, value in self.default_filters.items():
+            default_filters = self.default_filters
+            if self.is_source_child_document_model() and 'collection' not in self.kwargs:
+                default_filters['is_latest_version'] = True
+
+            for field, value in default_filters.items():
                 results = results.filter("match", **{field: value})
 
             faceted_criterion = self.get_faceted_criterion()
@@ -309,6 +325,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                 kwargs_filters = self.kwargs
             else:
                 kwargs_filters = self.get_kwargs_filters()
+
             for key, value in kwargs_filters.items():
                 results = results.filter('match', **{to_snake_case(key): value})
 
@@ -360,7 +377,7 @@ class SourceChildCommonBaseView(BaseAPIView):
     pk_field = 'mnemonic'
     permission_classes = (CanViewParentDictionary, )
     is_searchable = True
-    default_filters = dict(is_active=True, is_latest_version=True)
+    default_filters = dict(is_active=True)
 
     def initial(self, request, *args, **kwargs):
         super().initial(request, *args, **kwargs)

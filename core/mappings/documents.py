@@ -39,6 +39,7 @@ class MappingDocument(Document):
     source_version = fields.ListField(fields.KeywordField())
     collection_version = fields.ListField(fields.KeywordField())
     collection = fields.ListField(fields.KeywordField())
+    collection_owner_url = fields.ListField(fields.KeywordField())
     public_can_view = fields.BooleanField(attr='public_can_view')
     id = fields.KeywordField(attr='mnemonic', normalizer="lowercase")
     extras = fields.ObjectField()
@@ -77,6 +78,10 @@ class MappingDocument(Document):
     @staticmethod
     def prepare_collection(instance):
         return list(set(list(instance.collection_set.values_list('mnemonic', flat=True))))
+
+    @staticmethod
+    def prepare_collection_owner_url(instance):
+        return list({coll.parent_url for coll in instance.collection_set.select_related('user', 'organization')})
 
     @staticmethod
     def prepare_extras(instance):
