@@ -387,17 +387,12 @@ class ConceptTest(OCLTestCase):
         concept3 = ConceptFactory(parent=source2)
         concept4 = ConceptFactory(parent=source2)
 
-        concept1_latest = concept1.get_latest_version()
-        concept2_latest = concept2.get_latest_version()
-        concept3_latest = concept3.get_latest_version()
-        concept4_latest = concept4.get_latest_version()
-
-        mapping1 = MappingFactory(from_concept=concept1_latest, to_concept=concept2_latest, parent=source1)
-        mapping2 = MappingFactory(from_concept=concept1_latest, to_concept=concept3_latest, parent=source1)
-        mapping3 = MappingFactory(from_concept=concept1_latest, to_concept=concept3_latest, parent=source2)
-        mapping4 = MappingFactory(from_concept=concept4_latest, to_concept=concept1_latest, parent=source1)
-        mapping5 = MappingFactory(from_concept=concept4_latest, to_concept=concept1_latest, parent=source2)
-        MappingFactory(from_concept=concept1_latest, to_concept=concept2_latest, parent=source2)
+        mapping1 = MappingFactory(from_concept=concept1, to_concept=concept2, parent=source1)
+        mapping2 = MappingFactory(from_concept=concept1, to_concept=concept3, parent=source1)
+        mapping3 = MappingFactory(from_concept=concept1, to_concept=concept3, parent=source2)
+        mapping4 = MappingFactory(from_concept=concept4, to_concept=concept1, parent=source1)
+        mapping5 = MappingFactory(from_concept=concept4, to_concept=concept1, parent=source2)
+        MappingFactory(from_concept=concept1, to_concept=concept2, parent=source2)
 
         mappings = concept1.get_unidirectional_mappings()
         self.assertEqual(mappings.count(), 2)
@@ -412,24 +407,6 @@ class ConceptTest(OCLTestCase):
         )
 
         mappings = concept1.get_bidirectional_mappings()
-        self.assertEqual(mappings.count(), 3)
-        self.assertEqual(
-            list(mappings.order_by('created_at')), [mapping1, mapping2, mapping4]
-        )
-
-        mappings = concept1_latest.get_unidirectional_mappings()
-        self.assertEqual(mappings.count(), 2)
-        self.assertEqual(
-            list(mappings.order_by('created_at')), [mapping1, mapping2]
-        )
-
-        mappings = concept1_latest.get_indirect_mappings()
-        self.assertEqual(mappings.count(), 1)
-        self.assertEqual(
-            list(mappings.order_by('created_at')), [mapping4]
-        )
-
-        mappings = concept1_latest.get_bidirectional_mappings()
         self.assertEqual(mappings.count(), 3)
         self.assertEqual(
             list(mappings.order_by('created_at')), [mapping1, mapping2, mapping4]

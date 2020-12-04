@@ -516,8 +516,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         return self.__get_mappings_from_relation('mappings_to')
 
     def __get_mappings_from_relation(self, relation_manager):
-        concept = self.get_latest_version() if self.is_versioned_object else self
-        return getattr(concept, relation_manager).filter(parent_id=concept.parent_id, id=F('versioned_object_id'))
+        return getattr(self, relation_manager).filter(parent_id=self.parent_id, id=F('versioned_object_id'))
 
     def get_bidirectional_mappings(self):
         queryset = self.get_unidirectional_mappings() | self.get_indirect_mappings()

@@ -872,10 +872,8 @@ class ConceptMappingsViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 0)
 
-        concept_latest_version = self.concept.get_latest_version()
-
-        direct_mapping = MappingFactory(parent=self.concept.parent, from_concept=concept_latest_version)
-        indirect_mapping = MappingFactory(parent=self.concept.parent, to_concept=concept_latest_version)
+        direct_mapping = MappingFactory(parent=self.concept.parent, from_concept=self.concept)
+        indirect_mapping = MappingFactory(parent=self.concept.parent, to_concept=self.concept)
 
         response = self.client.get(mappings_url)
 
