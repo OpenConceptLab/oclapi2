@@ -10,8 +10,10 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from core.common.permissions import IsSuperuser
 from core.common.swagger_parameters import update_if_exists_param, task_param, result_param, username_param, \
-    file_upload_param, file_url_param
+    file_upload_param, file_url_param, apps_param
+from core.common.tasks import rebuild_indexes, populate_indexes
 from core.common.utils import parse_bulk_import_task_id, task_exists, flower_get, queue_bulk_import
 from core.importers.constants import ALREADY_QUEUED, INVALID_UPDATE_IF_EXISTS, NO_CONTENT_TO_IMPORT
 
@@ -165,3 +167,33 @@ class BulkImportInlineView(APIView):
             return Response(dict(exception=NO_CONTENT_TO_IMPORT), status=status.HTTP_400_BAD_REQUEST)
 
         return import_response(self.request, import_queue, file.read(), True)
+
+
+class RebuildESIndexView(APIView):  # pragma: no cover
+    permission_classes = (IsSuperuser,)
+    parser_classes = (MultiPartParser,)
+
+    @swagger_auto_schema(manual_parameters=[apps_param])
+    def post(self, request):
+        apps = request.data.get('apps', '').split(',')
+        result = rebuild_indexes.delay(apps)
+
+        return Response(
+            dict(state=result.state, username=self.request.user.username, task=result.task_id, queue='default'),
+            status=status.HTTP_202_ACCEPTED
+        )
+
+
+class PopulateESIndexView(APIView):  # pragma: no cover
+    permission_classes = (IsSuperuser,)
+    parser_classes = (MultiPartParser,)
+
+    @swagger_auto_schema(manual_parameters=[apps_param])
+    def post(self, request):
+        apps = request.data.get('apps', '').split(',')
+        result = populate_indexes.delay(apps)
+
+        return Response(
+            dict(state=result.state, username=self.request.user.username, task=result.task_id, queue='default'),
+            status=status.HTTP_202_ACCEPTED
+        )

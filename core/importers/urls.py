@@ -23,4 +23,6 @@ urlpatterns = [
         views.BulkImportView.as_view(),
         name='bulk-import-detail'
     ),
+    re_path(r"^populate-indexes/$", views.PopulateESIndexView.as_view(), name='populate-es-indexes'),
+    re_path(r"^rebuild-indexes/$", views.RebuildESIndexView.as_view(), name='rebuild-es-indexes'),
 ]

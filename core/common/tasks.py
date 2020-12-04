@@ -113,12 +113,12 @@ def handle_pre_delete(app_name, model_name, instance_id):
     __handle_pre_delete(apps.get_model(app_name, model_name).objects.get(id=instance_id))
 
 
-@app.task
+@app.task(base=QueueOnce)
 def populate_indexes(app_names=None):  # app_names has to be an iterable of strings
     __run_search_index_command('--populate', app_names)
 
 
-@app.task
+@app.task(base=QueueOnce)
 def rebuild_indexes(app_names=None):  # app_names has to be an iterable of strings
     __run_search_index_command('--rebuild', app_names)
 
