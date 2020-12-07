@@ -11,6 +11,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from core.common.permissions import IsSuperuser
+from core.common.services import RedisService
 from core.common.swagger_parameters import update_if_exists_param, task_param, result_param, username_param, \
     file_upload_param, file_url_param, apps_param, parallel_threads_param
 from core.common.tasks import rebuild_indexes, populate_indexes
@@ -93,7 +94,9 @@ class BulkImportView(APIView):
         return import_response(self.request, import_queue, request.body)
 
     @swagger_auto_schema(manual_parameters=[task_param, result_param, username_param])
-    def get(self, request, import_queue=None):  # pylint: disable=too-many-return-statements
+    def get(
+            self, request, import_queue=None
+    ):  # pylint: disable=too-many-return-statements,too-many-locals,too-many-branches
         task_id = request.GET.get('task')
         result_format = request.GET.get('result')
         username = request.GET.get('username')
@@ -120,6 +123,17 @@ class BulkImportView(APIView):
                     return Response(result.get('detailed_summary', None))
             if task.failed():
                 return Response(dict(exception=str(task.result)), status=status.HTTP_400_BAD_REQUEST)
+            if task.state == 'STARTED':
+                service = RedisService()
+                if service.exists(task_id):
+                    summary = service.get(task_id).decode('utf-8')
+                    return Response(
+                        dict(
+                            summary=summary, task=task.id, state=task.state,
+                            username=username, queue=parsed_task['queue']
+                        ),
+                        status=status.HTTP_200_OK
+                    )
             if task.state == 'PENDING' and not task_exists(task_id):
                 return Response(dict(exception='task ' + task_id + ' not found'), status=status.HTTP_404_NOT_FOUND)
 

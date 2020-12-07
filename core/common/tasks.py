@@ -9,6 +9,7 @@ from core.common.utils import write_export_file
 
 logger = get_task_logger(__name__)
 
+
 @app.task(base=QueueOnce)
 def delete_organization(org_id):
     from core.orgs.models import Organization
@@ -139,11 +140,12 @@ def bulk_import(to_import, username, update_if_exists):
     return BulkImport(content=to_import, username=username, update_if_exists=update_if_exists).run()
 
 
-@app.task(base=QueueOnce)
-def bulk_import_parallel_inline(to_import, username, update_if_exists, threads=5):
+@app.task(base=QueueOnce, bind=True)
+def bulk_import_parallel_inline(self, to_import, username, update_if_exists, threads=5):
     from core.importers.models import BulkImportParallelRunner
     return BulkImportParallelRunner(
-        content=to_import, username=username, update_if_exists=update_if_exists, parallel=threads
+        content=to_import, username=username, update_if_exists=update_if_exists, parallel=threads,
+        self_task_id=self.request.id
     ).run()
 
 
@@ -153,11 +155,12 @@ def bulk_import_inline(to_import, username, update_if_exists):
     return BulkImportInline(content=to_import, username=username, update_if_exists=update_if_exists).run()
 
 
-@app.task()
-def bulk_import_parts_inline(input_list, username, update_if_exists):
+@app.task(bind=True)
+def bulk_import_parts_inline(self, input_list, username, update_if_exists):
     from core.importers.models import BulkImportInline
     return BulkImportInline(
-        content=None, username=username, update_if_exists=update_if_exists, input_list=input_list
+        content=None, username=username, update_if_exists=update_if_exists, input_list=input_list,
+        self_task_id=self.request.id
     ).run()
 
 

@@ -8,6 +8,7 @@ from pydash import compact
 
 from core.collections.models import Collection
 from core.common.constants import HEAD
+from core.common.services import RedisService
 from core.common.utils import get_api_internal_base_url, drop_version, queue_bulk_import
 from core.concepts.models import Concept
 from core.mappings.models import Mapping
@@ -419,9 +420,11 @@ class MappingImporter(BaseResourceImporter):
 
 class BulkImportInline(BaseImporter):
     def __init__(   # pylint: disable=too-many-arguments
-            self, content, username, update_if_exists=False, input_list=None, user=None, set_user=True
+            self, content, username, update_if_exists=False, input_list=None, user=None, set_user=True,
+            self_task_id=None
     ):
         super().__init__(content, username, update_if_exists, user, not bool(input_list), set_user)
+        self.self_task_id = self_task_id
         if input_list:
             self.input_list = input_list
         self.unknown = []
@@ -457,9 +460,15 @@ class BulkImportInline(BaseImporter):
         print("****Unexpected Result****", result)
         self.others.append(item)
 
+    def notify_progress(self):
+        if self.self_task_id:
+            service = RedisService()
+            service.set(self.self_task_id, self.processed)
+
     def run(self):
         for original_item in self.input_list:
             self.processed += 1
+            self.notify_progress()
             item = original_item.copy()
             item_type = item.pop('type', '').lower()
             if not item_type:
@@ -533,9 +542,13 @@ class BulkImportInline(BaseImporter):
 
 
 class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
-    def __init__(self, content, username, update_if_exists, parallel=None):
+    def __init__(
+            self, content, username, update_if_exists, parallel=None, self_task_id=None
+    ):  # pylint: disable=too-many-arguments
         super().__init__(content, username, update_if_exists, None, False)
+        self.self_task_id = self_task_id
         self.username = username
+        self.total = 0
         self.data = dict()
         self.parallel = int(parallel) or 5
         self.tasks = []
@@ -547,10 +560,13 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
         self.make_parts()
         self.result = None
         self._json_result = None
+        self.redis_service = RedisService()
 
     def make_parts(self):
         prev_line = None
-        for data in self.content.splitlines():
+        lines = self.content.splitlines()
+        self.total = len(lines)
+        for data in lines:
             line = json.loads(data)
             data_type = line.get('type', None).lower()
             if prev_line:
@@ -582,8 +598,29 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
 
         return True
 
+    def get_overall_tasks_progress(self):
+        total_processed = 0
+        for task in self.tasks:
+            try:
+                if task.task_id:
+                    total_processed += self.redis_service.get_int(task.task_id)
+            except:  # pylint: disable=bare-except
+                pass
+
+        return total_processed
+
+    def notify_progress(self):
+        if self.self_task_id:
+            self.redis_service.set(
+                self.self_task_id, "Started:{} | Processed: {}/{} | Time: {}secs".format(
+                    self.start_time_formatted, self.get_overall_tasks_progress(), self.total, self.elapsed_seconds
+                )
+            )
+
     def wait_till_tasks_alive(self):
         while self.is_any_process_alive():
+            self.update_elapsed_seconds()
+            self.notify_progress()
             time.sleep(1)
 
     def run(self):
@@ -598,19 +635,26 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
                     self.resource_wise_time[part_type] = 0
                 self.resource_wise_time[part_type] += (time.time() - start_time)
 
-        self.elapsed_seconds = time.time() - self.start_time
+        self.update_elapsed_seconds()
 
         self.make_result()
 
         return self.result
 
+    def update_elapsed_seconds(self):
+        self.elapsed_seconds = time.time() - self.start_time
+
     @property
     def detailed_summary(self):
         result = self.json_result
         return "Started: {} | Processed: {}/{} | Created: {} | Updated: {} | Existing: {} | Time: {}secs".format(
-            datetime.fromtimestamp(self.start_time), result.get('processed'), result.get('total'),
+            self.start_time_formatted, result.get('processed'), result.get('total'),
             len(result.get('created')), len(result.get('updated')), len(result.get('exists')), self.elapsed_seconds
         )
+
+    @property
+    def start_time_formatted(self):
+        return datetime.fromtimestamp(self.start_time)
 
     @property
     def json_result(self):
@@ -627,7 +671,7 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
             for key in total_result:
                 total_result[key] += result.get(key)
 
-        total_result['start_time'] = datetime.fromtimestamp(self.start_time)
+        total_result['start_time'] = self.start_time_formatted
         total_result['elapsed_seconds'] = self.elapsed_seconds
         total_result['child_resource_time_distribution'] = self.resource_wise_time
         self._json_result = total_result
@@ -656,5 +700,8 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
 
         for _list in compact(chunked_lists):
             self.tasks.append(
-                queue_bulk_import(_list, 'concurrent', self.username, self.update_if_exists, None, True, True)
+                queue_bulk_import(
+                    to_import=_list, import_queue='concurrent', username=self.username,
+                    update_if_exists=self.update_if_exists, threads=self.parallel, inline=True, sub_task=True,
+                )
             )
