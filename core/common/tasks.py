@@ -140,9 +140,25 @@ def bulk_import(to_import, username, update_if_exists):
 
 
 @app.task(base=QueueOnce)
+def bulk_import_parallel_inline(to_import, username, update_if_exists, threads=5):
+    from core.importers.models import BulkImportParallelRunner
+    return BulkImportParallelRunner(
+        content=to_import, username=username, update_if_exists=update_if_exists, parallel=threads
+    ).run()
+
+
+@app.task(base=QueueOnce)
 def bulk_import_inline(to_import, username, update_if_exists):
     from core.importers.models import BulkImportInline
     return BulkImportInline(content=to_import, username=username, update_if_exists=update_if_exists).run()
+
+
+@app.task()
+def bulk_import_parts_inline(input_list, username, update_if_exists):
+    from core.importers.models import BulkImportInline
+    return BulkImportInline(
+        content=None, username=username, update_if_exists=update_if_exists, input_list=input_list
+    ).run()
 
 
 @app.task(base=QueueOnce)

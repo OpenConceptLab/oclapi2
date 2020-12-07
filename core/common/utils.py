@@ -321,7 +321,9 @@ def task_exists(task_id):
     return bool(flower_response and flower_response.status_code == 200 and flower_response.text)
 
 
-def queue_bulk_import(to_import, import_queue, username, update_if_exists, inline=False):
+def queue_bulk_import(  # pylint: disable=too-many-arguments
+        to_import, import_queue, username, update_if_exists, threads=None, inline=False, sub_task=False
+):
     """
     Used to queue bulk imports. It assigns a bulk import task to a specified import queue or a random one.
     If requested by the root user, the bulk import goes to the priority queue.
@@ -330,14 +332,19 @@ def queue_bulk_import(to_import, import_queue, username, update_if_exists, inlin
     :param import_queue:
     :param username:
     :param update_if_exists:
+    :param threads:
     :param inline:
+    :param sub_task:
     :return: task
     """
     task_id = str(uuid.uuid4()) + '-' + username
 
-    if username in ['root', 'ocladmin']:
+    if username in ['root', 'ocladmin'] and import_queue != 'concurrent':
         queue_id = 'bulk_import_root'
         task_id += '~priority'
+    elif import_queue == 'concurrent':
+        queue_id = import_queue
+        task_id += '~' + import_queue
     elif import_queue:
         # assigning to one of 5 queues processed in order
         queue_id = 'bulk_import_' + str(hash(username + import_queue) % BULK_IMPORT_QUEUES_COUNT)
@@ -348,8 +355,16 @@ def queue_bulk_import(to_import, import_queue, username, update_if_exists, inlin
         task_id += '~default'
 
     if inline:
-        from core.common.tasks import bulk_import_inline
-        return bulk_import_inline.apply_async((to_import, username, update_if_exists), task_id=task_id, queue=queue_id)
+        if sub_task:
+            from core.common.tasks import bulk_import_parts_inline
+            return bulk_import_parts_inline.apply_async(
+                (to_import, username, update_if_exists), task_id=task_id, queue=queue_id
+            )
+
+        from core.common.tasks import bulk_import_parallel_inline
+        return bulk_import_parallel_inline.apply_async(
+            (to_import, username, update_if_exists, threads), task_id=task_id, queue=queue_id
+        )
 
     from core.common.tasks import bulk_import
     return bulk_import.apply_async((to_import, username, update_if_exists), task_id=task_id, queue=queue_id)

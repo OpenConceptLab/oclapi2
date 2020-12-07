@@ -12,13 +12,13 @@ from rest_framework.views import APIView
 
 from core.common.permissions import IsSuperuser
 from core.common.swagger_parameters import update_if_exists_param, task_param, result_param, username_param, \
-    file_upload_param, file_url_param, apps_param
+    file_upload_param, file_url_param, apps_param, parallel_threads_param
 from core.common.tasks import rebuild_indexes, populate_indexes
 from core.common.utils import parse_bulk_import_task_id, task_exists, flower_get, queue_bulk_import
 from core.importers.constants import ALREADY_QUEUED, INVALID_UPDATE_IF_EXISTS, NO_CONTENT_TO_IMPORT
 
 
-def import_response(request, import_queue, data, inline=False):
+def import_response(request, import_queue, data, threads=None, inline=False):
     if not data:
         return Response(dict(exception=NO_CONTENT_TO_IMPORT), status=status.HTTP_400_BAD_REQUEST)
 
@@ -35,7 +35,7 @@ def import_response(request, import_queue, data, inline=False):
     data = data.decode('utf-8') if isinstance(data, bytes) else data
 
     try:
-        task = queue_bulk_import(data, import_queue, username, update_if_exists, inline)
+        task = queue_bulk_import(data, import_queue, username, update_if_exists, threads, inline)
     except AlreadyQueued:
         return Response(dict(exception=ALREADY_QUEUED), status=status.HTTP_409_CONFLICT)
     parsed_task = parse_bulk_import_task_id(task.id)
@@ -146,14 +146,15 @@ class BulkImportView(APIView):
         return Response(tasks)
 
 
-class BulkImportInlineView(APIView):
+class BulkImportParallelInlineView(APIView):  # pragma: no cover
     permission_classes = (IsAuthenticated, )
     parser_classes = (MultiPartParser, )
 
     @swagger_auto_schema(
-        manual_parameters=[update_if_exists_param, file_url_param, file_upload_param],
+        manual_parameters=[update_if_exists_param, file_url_param, file_upload_param, parallel_threads_param],
     )
     def post(self, request, import_queue=None):
+        parallel_threads = request.data.get('parallel')
         file = None
         try:
             if 'file' in request.data:
@@ -166,17 +167,18 @@ class BulkImportInlineView(APIView):
         if not file:
             return Response(dict(exception=NO_CONTENT_TO_IMPORT), status=status.HTTP_400_BAD_REQUEST)
 
-        return import_response(self.request, import_queue, file.read(), True)
+        return import_response(self.request, import_queue or 'concurrent', file.read(), parallel_threads, True)
 
 
-class RebuildESIndexView(APIView):  # pragma: no cover
+class BaseESIndexView(APIView):  # pragma: no cover
     permission_classes = (IsSuperuser,)
     parser_classes = (MultiPartParser,)
+    task = None
 
     @swagger_auto_schema(manual_parameters=[apps_param])
     def post(self, request):
         apps = request.data.get('apps', '').split(',')
-        result = rebuild_indexes.delay(apps)
+        result = self.task.delay(apps)
 
         return Response(
             dict(state=result.state, username=self.request.user.username, task=result.task_id, queue='default'),
@@ -184,16 +186,9 @@ class RebuildESIndexView(APIView):  # pragma: no cover
         )
 
 
-class PopulateESIndexView(APIView):  # pragma: no cover
-    permission_classes = (IsSuperuser,)
-    parser_classes = (MultiPartParser,)
+class RebuildESIndexView(BaseESIndexView):  # pragma: no cover
+    task = rebuild_indexes
 
-    @swagger_auto_schema(manual_parameters=[apps_param])
-    def post(self, request):
-        apps = request.data.get('apps', '').split(',')
-        result = populate_indexes.delay(apps)
 
-        return Response(
-            dict(state=result.state, username=self.request.user.username, task=result.task_id, queue='default'),
-            status=status.HTTP_202_ACCEPTED
-        )
+class PopulateESIndexView(BaseESIndexView):  # pragma: no cover
+    task = populate_indexes

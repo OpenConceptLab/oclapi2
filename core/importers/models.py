@@ -1,13 +1,14 @@
 import json
 import time
-from threading import Thread
+from datetime import datetime
 
 from django.db.models import F
 from ocldev.oclfleximporter import OclFlexImporter
+from pydash import compact
 
 from core.collections.models import Collection
 from core.common.constants import HEAD
-from core.common.utils import get_api_internal_base_url, drop_version
+from core.common.utils import get_api_internal_base_url, drop_version, queue_bulk_import
 from core.concepts.models import Concept
 from core.mappings.models import Mapping
 from core.orgs.models import Organization
@@ -532,64 +533,128 @@ class BulkImportInline(BaseImporter):
 
 
 class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
-    def __init__(self, content, username, update_if_exists, parallel=10):
+    def __init__(self, content, username, update_if_exists, parallel=None):
         super().__init__(content, username, update_if_exists, None, False)
         self.username = username
         self.data = dict()
-        self.parallel = parallel
-        self.separate_data()
-        self.threads = []
+        self.parallel = int(parallel) or 5
+        self.tasks = []
         self.results = []
         self.start_time = time.time()
         self.elapsed_seconds = 0
         self.resource_wise_time = dict()
+        self.parts = [[]]
+        self.make_parts()
+        self.result = None
+        self._json_result = None
 
-    def separate_data(self):
-        for line in self.content.splitlines():
-            data = json.loads(line)
-            data_type = data['type']
-            if data_type not in self.data:
-                self.data[data_type] = []
-            self.data[data_type].append(data)
-
-    def process(self, input_list):
-        importer = BulkImportInline(
-            content=None, username=None, update_if_exists=self.update_if_exists, input_list=input_list,
-            user=self.user, set_user=False
-        )
-        importer.run()
-        self.results.append(importer)
+    def make_parts(self):
+        prev_line = None
+        for data in self.content.splitlines():
+            line = json.loads(data)
+            data_type = line.get('type', None).lower()
+            if prev_line:
+                prev_type = prev_line.get('type').lower()
+                if prev_type == data_type or (
+                        data_type not in ['concept', 'mapping'] and prev_type not in ['concept', 'mapping']
+                ):
+                    self.parts[-1].append(line)
+                else:
+                    self.parts.append([line])
+            else:
+                self.parts[-1].append(line)
+            prev_line = line
 
     @staticmethod
     def chunker_list(seq, size):
         return (seq[i::size] for i in range(size))
 
     def is_any_process_alive(self):
-        if not self.threads:
+        if not self.tasks:
             return False
 
-        return any(thread.is_alive() for thread in self.threads)
+        if all(task.state == 'SUCCESS' for task in self.tasks):
+            return False
+        if any(task.state in ['FAILURE'] for task in self.tasks):
+            raise Exception('one of the task failed')
+        if any(task.state in ['RETRY'] for task in self.tasks):
+            raise Exception('one of the task needs retry')
 
-    def wait_till_threads_alive(self):
+        return True
+
+    def wait_till_tasks_alive(self):
         while self.is_any_process_alive():
             time.sleep(1)
 
     def run(self):
-        for entity, lines in self.data.items():
-            print("***********")
-            print(entity)
-            print("***********")
+        for part_list in self.parts:
+            part_type = part_list[0].get('type').lower()
+            is_child = part_type in ['concept', 'mapping']
             start_time = time.time()
-            self.run_threads(lines)
-            self.wait_till_threads_alive()
-            self.resource_wise_time[entity] = time.time() - start_time
+            self.queue_tasks(part_list, is_child)
+            self.wait_till_tasks_alive()
+            if is_child:
+                if part_type not in self.resource_wise_time:
+                    self.resource_wise_time[part_type] = 0
+                self.resource_wise_time[part_type] += (time.time() - start_time)
 
         self.elapsed_seconds = time.time() - self.start_time
 
-    def run_threads(self, data):
-        chunked_lists = self.chunker_list(data, self.parallel)
-        for _list in chunked_lists:
-            if _list:
-                thread = Thread(target=self.process, args=[_list])
-                thread.start()
-                self.threads.append(thread)
+        self.make_result()
+
+        return self.result
+
+    @property
+    def detailed_summary(self):
+        result = self.json_result
+        return "Started: {} | Processed: {}/{} | Created: {} | Updated: {} | Existing: {} | Time: {}secs".format(
+            datetime.fromtimestamp(self.start_time), result.get('processed'), result.get('total'),
+            len(result.get('created')), len(result.get('updated')), len(result.get('exists')), self.elapsed_seconds
+        )
+
+    @property
+    def json_result(self):
+        if self._json_result:
+            return self._json_result
+
+        total_result = dict(
+            total=0, processed=0, created=[], updated=[],
+            invalid=[], exists=[], failed=[], exception=[],
+            others=[], unknown=[], elapsed_seconds=self.elapsed_seconds
+        )
+        for task in self.tasks:
+            result = task.result.get('json')
+            for key in total_result:
+                total_result[key] += result.get(key)
+
+        total_result['start_time'] = datetime.fromtimestamp(self.start_time)
+        total_result['elapsed_seconds'] = self.elapsed_seconds
+        total_result['child_resource_time_distribution'] = self.resource_wise_time
+        self._json_result = total_result
+        return self._json_result
+
+    @property
+    def report(self):
+        data = {
+            k: len(v) if isinstance(v, list) else v for k, v in self.json_result.items()
+        }
+
+        data['child_resource_time_distribution'] = self.resource_wise_time
+
+        return data
+
+    def make_result(self):
+        self.result = dict(
+            json=self.json_result, detailed_summary=self.detailed_summary, report=self.report
+        )
+
+    def queue_tasks(self, part_list, is_child):
+        if is_child:
+            chunked_lists = self.chunker_list(part_list, self.parallel)
+        else:
+            chunked_lists = [part_list]
+
+        for _list in compact(chunked_lists):
+            self.tasks.append(
+                queue_bulk_import(_list, 'concurrent', self.username, self.update_if_exists, None, True, True)
+            )
