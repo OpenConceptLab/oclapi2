@@ -1,8 +1,11 @@
 import boto3
+import redis
 import requests
 from botocore.client import Config
 from botocore.exceptions import NoCredentialsError, ClientError
 from django.conf import settings
+
+from core.settings import REDIS_HOST, REDIS_PORT, REDIS_DB
 
 
 class S3:
@@ -145,3 +148,20 @@ class S3:
             )
         except NoCredentialsError: # pragma: no cover
             pass
+
+
+class RedisService:  # pragma: no cover
+    def __init__(self):
+        self.conn = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB)
+
+    def set(self, key, val):
+        return self.conn.set(key, val)
+
+    def exists(self, key):
+        return self.conn.exists(key)
+
+    def get(self, key):
+        return self.conn.get(key)
+
+    def get_int(self, key):
+        return int(self.conn.get(key).decode('utf-8'))
