@@ -13,7 +13,8 @@ from rest_framework import status
 from rest_framework.mixins import ListModelMixin, CreateModelMixin
 from rest_framework.response import Response
 
-from core.common.constants import HEAD, ACCESS_TYPE_EDIT, ACCESS_TYPE_VIEW, ACCESS_TYPE_NONE, INCLUDE_FACETS
+from core.common.constants import HEAD, ACCESS_TYPE_EDIT, ACCESS_TYPE_VIEW, ACCESS_TYPE_NONE, INCLUDE_FACETS, \
+    LIST_DEFAULT_LIMIT, HTTP_COMPRESS_HEADER
 from core.common.permissions import HasPrivateAccess, HasOwnership, CanViewConceptDictionary
 from core.common.services import S3
 from .utils import write_csv_to_s3, get_csv_from_s3, get_query_params_from_url_string, compact_dict_by_values
@@ -83,6 +84,7 @@ class CustomPaginator:
 class ListWithHeadersMixin(ListModelMixin):
     default_filters = {'is_active': True}
     object_list = None
+    limit = LIST_DEFAULT_LIMIT
 
     def list(self, request, *args, **kwargs):  # pylint:disable=too-many-locals
         query_params = request.query_params.dict()
@@ -108,17 +110,16 @@ class ListWithHeadersMixin(ListModelMixin):
             return self.get_csv(request, queryset)
 
         # Skip pagination if compressed results are requested
-        meta = request._request.META  # pylint: disable=protected-access
+        compress = self.should_compress()
 
-        compress = meta.get('HTTP_COMPRESS', False)
-        return_all = not self.limit or int(self.limit) == 0
-        skip_pagination = compress or return_all
+        if not compress and (not self.limit or int(self.limit) == 0 or int(self.limit) > 100):
+            self.limit = LIST_DEFAULT_LIMIT
 
         sorted_list = self.object_list
 
         headers = dict()
         results = sorted_list
-        if not skip_pagination:
+        if not compress:
             paginator = CustomPaginator(
                 request=request, queryset=sorted_list, page_size=self.limit, total_count=self.total_count
             )
@@ -139,7 +140,10 @@ class ListWithHeadersMixin(ListModelMixin):
         return response
 
     def should_include_facets(self):
-        return self.request.META.get(INCLUDE_FACETS, False)
+        return self.request.META.get(INCLUDE_FACETS, False) in ['true', True]
+
+    def should_compress(self):
+        return self.request.META.get(HTTP_COMPRESS_HEADER, False) in ['true', True]
 
     def get_object_ids(self):
         self.object_list.limit_iter = False

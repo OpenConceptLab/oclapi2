@@ -11,8 +11,8 @@ from core.common.constants import HEAD
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryMixin
 from core.common.swagger_parameters import (
     q_param, limit_param, sort_desc_param, page_param, exact_match_param, sort_asc_param, verbose_param,
-    include_facets_header, updated_since_param, include_retired_param
-)
+    include_facets_header, updated_since_param, include_retired_param,
+    compress_header)
 from core.common.views import SourceChildCommonBaseView, SourceChildExtrasView, \
     SourceChildExtraRetrieveUpdateDestroyView
 from core.concepts.permissions import CanEditParentDictionary, CanViewParentDictionary
@@ -198,7 +198,7 @@ class MappingVersionListAllView(MappingBaseView, ListWithHeadersMixin):
         manual_parameters=[
             q_param, limit_param, sort_desc_param, sort_asc_param, exact_match_param, page_param, verbose_param,
             include_retired_param, updated_since_param,
-            include_facets_header
+            include_facets_header, compress_header
         ]
     )
     def get(self, request, *args, **kwargs):

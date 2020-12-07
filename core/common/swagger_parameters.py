@@ -7,6 +7,10 @@ from core.common.constants import RELEASED_PARAM, VERBOSE_PARAM, INCLUDE_RETIRED
 include_facets_header = openapi.Parameter(
     'INCLUDEFACETS', openapi.IN_HEADER, type=openapi.TYPE_BOOLEAN, default=False
 )
+# HEADERS
+compress_header = openapi.Parameter(
+    'COMPRESS', openapi.IN_HEADER, type=openapi.TYPE_BOOLEAN, default=False
+)
 
 # QUERY PARAMS
 q_param = openapi.Parameter('q', openapi.IN_QUERY, description="search text", type=openapi.TYPE_STRING)

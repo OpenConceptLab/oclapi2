@@ -58,6 +58,30 @@ class SourceListViewTest(OCLAPITestCase):
         self.assertEqual(response.data[0]['owner_type'], 'Organization')
         self.assertEqual(response.data[0]['owner_url'], self.organization.uri)
 
+    def test_get_200_zip(self):
+        response = self.client.get(
+            self.organization.sources_url,
+            HTTP_COMPRESS='true',
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response['Content-Type'], 'application/zip')
+        content = json.loads(zipfile.ZipFile(response.rendered_content.filelike).read('export.json').decode('utf-8'))
+        self.assertEqual(content, [])
+
+        source = OrganizationSourceFactory(organization=self.organization)
+
+        response = self.client.get(
+            self.organization.sources_url + '?verbose=true',
+            HTTP_COMPRESS='true',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response['Content-Type'], 'application/zip')
+        content = json.loads(zipfile.ZipFile(response.rendered_content.filelike).read('export.json').decode('utf-8'))
+        self.assertEqual(content, SourceDetailSerializer([source], many=True).data)
+
     def test_post_201(self):
         sources_url = "/orgs/{}/sources/".format(self.organization.mnemonic)
 

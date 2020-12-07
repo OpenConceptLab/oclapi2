@@ -4,6 +4,7 @@ from celery_once import AlreadyQueued
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError
 from django.shortcuts import get_object_or_404
+from drf_yasg.utils import swagger_auto_schema
 from pydash import get
 from rest_framework import status, mixins
 from rest_framework.generics import (
@@ -16,6 +17,8 @@ from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryCreateMixi
     ConceptContainerExportMixin, ConceptContainerProcessingMixin
 from core.common.permissions import CanViewConceptDictionary, CanEditConceptDictionary, HasAccessToVersionedObject, \
     CanViewConceptDictionaryVersion
+from core.common.swagger_parameters import q_param, limit_param, sort_desc_param, sort_asc_param, exact_match_param, \
+    page_param, verbose_param, include_retired_param, updated_since_param, include_facets_header, compress_header
 from core.common.tasks import export_source
 from core.common.utils import parse_boolean_query_param, compact_dict_by_values
 from core.common.views import BaseAPIView
@@ -97,6 +100,12 @@ class SourceListView(SourceBaseView, ConceptDictionaryCreateMixin, ListWithHeade
 
         return SourceListSerializer
 
+    @swagger_auto_schema(
+        manual_parameters=[
+            q_param, limit_param, sort_desc_param, sort_asc_param, exact_match_param, page_param, verbose_param,
+            include_retired_param, updated_since_param, include_facets_header, compress_header
+        ]
+    )
     def get(self, request, *args, **kwargs):
         return self.list(request, *args, **kwargs)
 
