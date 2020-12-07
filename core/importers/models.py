@@ -546,40 +546,65 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
             self, content, username, update_if_exists, parallel=None, self_task_id=None
     ):  # pylint: disable=too-many-arguments
         super().__init__(content, username, update_if_exists, None, False)
+        self.start_time = time.time()
         self.self_task_id = self_task_id
         self.username = username
         self.total = 0
-        self.data = dict()
-        self.parallel = int(parallel) or 5
+        self.resource_distribution = dict()
+        self.parallel = int(parallel) if parallel else 5
         self.tasks = []
         self.results = []
-        self.start_time = time.time()
         self.elapsed_seconds = 0
         self.resource_wise_time = dict()
         self.parts = [[]]
-        self.make_parts()
         self.result = None
         self._json_result = None
         self.redis_service = RedisService()
+        if self.content:
+            self.input_list = self.content.splitlines()
+            self.total = len(self.input_list)
+        self.separate_data()
+        self.make_parts()
+
+    def separate_data(self):
+        for line in self.input_list:
+            data = json.loads(line)
+            data_type = data['type']
+            if data_type not in self.resource_distribution:
+                self.resource_distribution[data_type] = []
+            self.resource_distribution[data_type].append(data)
 
     def make_parts(self):
         prev_line = None
-        lines = self.content.splitlines()
-        self.total = len(lines)
-        for data in lines:
+        orgs = self.resource_distribution.get('Organization', None)
+        sources = self.resource_distribution.get('Source', None)
+        collections = self.resource_distribution.get('Collection', None)
+        if orgs:
+            self.parts = [orgs]
+        if sources:
+            self.parts.append(sources)
+        if collections:
+            self.parts.append(collections)
+
+        self.parts = compact(self.parts)
+
+        self.parts.append([])
+
+        for data in self.input_list:
             line = json.loads(data)
             data_type = line.get('type', None).lower()
-            if prev_line:
-                prev_type = prev_line.get('type').lower()
-                if prev_type == data_type or (
-                        data_type not in ['concept', 'mapping'] and prev_type not in ['concept', 'mapping']
-                ):
-                    self.parts[-1].append(line)
+            if data_type not in ['organization', 'source', 'collection']:
+                if prev_line:
+                    prev_type = prev_line.get('type').lower()
+                    if prev_type == data_type or (
+                            data_type not in ['concept', 'mapping'] and prev_type not in ['concept', 'mapping']
+                    ):
+                        self.parts[-1].append(line)
+                    else:
+                        self.parts.append([line])
                 else:
-                    self.parts.append([line])
-            else:
-                self.parts[-1].append(line)
-            prev_line = line
+                    self.parts[-1].append(line)
+                prev_line = line
 
     @staticmethod
     def chunker_list(seq, size):
@@ -600,6 +625,9 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
 
     def get_overall_tasks_progress(self):
         total_processed = 0
+        if not self.tasks:
+            return total_processed
+
         for task in self.tasks:
             try:
                 if task.task_id:
@@ -612,7 +640,7 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
     def notify_progress(self):
         if self.self_task_id:
             self.redis_service.set(
-                self.self_task_id, "Started:{} | Processed: {}/{} | Time: {}secs".format(
+                self.self_task_id, "Started: {} | Processed: {}/{} | Time: {}secs".format(
                     self.start_time_formatted, self.get_overall_tasks_progress(), self.total, self.elapsed_seconds
                 )
             )

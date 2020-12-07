@@ -11,7 +11,7 @@ from core.collections.models import Collection
 from core.common.tests import OCLAPITestCase, OCLTestCase
 from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory
-from core.importers.models import BulkImport, BulkImportInline
+from core.importers.models import BulkImport, BulkImportInline, BulkImportParallelRunner
 from core.mappings.models import Mapping
 from core.orgs.models import Organization
 from core.orgs.tests.factories import OrganizationFactory
@@ -324,6 +324,112 @@ class BulkImportInlineTest(OCLTestCase):
         self.assertEqual(len(importer.failed), 0)
         self.assertEqual(len(importer.invalid), 0)
         self.assertEqual(len(importer.others), 0)
+
+
+class BulkImportParallelRunnerTest(OCLTestCase):
+    @patch('core.importers.models.RedisService')
+    def test_make_parts(self, redis_service_mock):
+        redis_service_mock.return_value = Mock()
+
+        importer = BulkImportParallelRunner(
+            open(os.path.join(os.path.dirname(__file__), '..', 'samples/sample_ocldev.json'), 'r').read(),
+            'ocladmin', True
+        )
+
+        self.assertEqual(len(importer.parts), 7)
+        self.assertEqual(len(importer.parts[0]), 2)
+        self.assertEqual(len(importer.parts[1]), 2)
+        self.assertEqual(len(importer.parts[2]), 1)
+        self.assertEqual(len(importer.parts[3]), 23)
+        self.assertEqual(len(importer.parts[4]), 22)
+        self.assertEqual(len(importer.parts[5]), 2)
+        self.assertEqual(len(importer.parts[6]), 12)
+        self.assertEqual([l['type'] for l in importer.parts[0]], ['Organization', 'Organization'])
+        self.assertEqual([l['type'] for l in importer.parts[1]], ['Source', 'Source'])
+        self.assertEqual([l['type'] for l in importer.parts[2]], ['Source Version'])
+        self.assertEqual(list({l['type'] for l in importer.parts[3]}), ['Concept'])
+        self.assertEqual(list({l['type'] for l in importer.parts[4]}), ['Mapping'])
+        self.assertEqual([l['type'] for l in importer.parts[5]], ['Source Version', 'Source Version'])
+        self.assertEqual(list({l['type'] for l in importer.parts[6]}), ['Concept'])
+
+    @patch('core.importers.models.RedisService')
+    def test_is_any_process_alive(self, redis_service_mock):
+        redis_service_mock.return_value = Mock()
+        importer = BulkImportParallelRunner(
+            open(os.path.join(os.path.dirname(__file__), '..', 'samples/sample_ocldev.json'), 'r').read(),
+            'ocladmin', True
+        )
+        self.assertFalse(importer.is_any_process_alive())
+
+        importer.tasks = [Mock(state='SUCCESS'), Mock(state='SUCCESS')]
+        self.assertFalse(importer.is_any_process_alive())
+
+        importer.tasks = [Mock(state='FAILURE'), Mock(state='SUCCESS')]
+        with self.assertRaises(Exception) as ex:
+            importer.is_any_process_alive()
+        self.assertEqual(ex.exception.args, ('one of the task failed', ))
+
+        importer.tasks = [Mock(state='RETRY'), Mock(state='SUCCESS')]
+        with self.assertRaises(Exception) as ex:
+            importer.is_any_process_alive()
+        self.assertEqual(ex.exception.args, ('one of the task needs retry', ))
+
+        importer.tasks = [Mock(state='UNKNOWN'), Mock(state='SUCCESS')]
+        self.assertTrue(importer.is_any_process_alive())
+
+    @patch('core.importers.models.RedisService')
+    def test_get_overall_tasks_progress(self, redis_service_mock):
+        redis_instance_mock = Mock()
+        redis_instance_mock.get_int.side_effect = [100, 50]
+        redis_service_mock.return_value = redis_instance_mock
+        importer = BulkImportParallelRunner(
+            open(os.path.join(os.path.dirname(__file__), '..', 'samples/sample_ocldev.json'), 'r').read(),
+            'ocladmin', True
+        )
+        self.assertEqual(importer.get_overall_tasks_progress(), 0)
+        importer.tasks = [Mock(task_id='task1'), Mock(task_id='task2')]
+        self.assertEqual(importer.get_overall_tasks_progress(), 150)
+
+    @patch('core.importers.models.RedisService')
+    def test_update_elapsed_seconds(self, redis_service_mock):
+        redis_service_mock.return_value = Mock()
+
+        importer = BulkImportParallelRunner(
+            open(os.path.join(os.path.dirname(__file__), '..', 'samples/sample_ocldev.json'), 'r').read(),
+            'ocladmin', True
+        )
+        self.assertIsNotNone(importer.start_time)
+        self.assertEqual(importer.elapsed_seconds, 0)
+        importer.update_elapsed_seconds()
+        self.assertTrue(importer.elapsed_seconds > 0)
+
+    @patch('core.importers.models.RedisService')
+    def test_notify_progress(self, redis_service_mock):  # pylint: disable=no-self-use
+        redis_instance_mock = Mock(set=Mock())
+        redis_service_mock.return_value = redis_instance_mock
+        importer = BulkImportParallelRunner(
+            open(os.path.join(os.path.dirname(__file__), '..', 'samples/sample_ocldev.json'), 'r').read(),
+            'ocladmin', True, None, 'task-id'
+        )
+        now = 1607346541.793877  # datetime.datetime(2020, 12, 7, 13, 09, 1, 793877) UTC
+        importer.start_time = now
+        importer.elapsed_seconds = 10.45
+        importer.notify_progress()
+
+        redis_instance_mock.set.assert_called_once_with(
+            'task-id', "Started: 2020-12-07 13:09:01.793877 | Processed: 0/64 | Time: 10.45secs"
+        )
+
+    def test_chunker_list(self):
+        self.assertEqual(
+            list(BulkImportParallelRunner.chunker_list([1, 2, 3], 3)), [[1], [2], [3]]
+        )
+        self.assertEqual(
+            list(BulkImportParallelRunner.chunker_list([1, 2, 3], 2)), [[1, 3], [2]]
+        )
+        self.assertEqual(
+            list(BulkImportParallelRunner.chunker_list([1, 2, 3], 1)), [[1, 2, 3]]
+        )
 
 
 class BulkImportViewTest(OCLAPITestCase):
