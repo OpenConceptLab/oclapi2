@@ -1,3 +1,5 @@
+import json
+
 import boto3
 import redis
 import requests
@@ -156,6 +158,21 @@ class RedisService:  # pragma: no cover
 
     def set(self, key, val):
         return self.conn.set(key, val)
+
+    def set_json(self, key, val):
+        return self.conn.set(key, json.dumps(val))
+
+    def get_formatted(self, key):
+        val = self.get(key)
+        if isinstance(val, bytes):
+            val = val.decode()
+
+        try:
+            val = json.loads(val)
+        except:  # pylint: disable=bare-except
+            pass
+
+        return val
 
     def exists(self, key):
         return self.conn.exists(key)

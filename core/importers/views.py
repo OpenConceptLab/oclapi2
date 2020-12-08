@@ -126,10 +126,9 @@ class BulkImportView(APIView):
             if task.state == 'STARTED':
                 service = RedisService()
                 if service.exists(task_id):
-                    summary = service.get(task_id).decode('utf-8')
                     return Response(
                         dict(
-                            summary=summary, task=task.id, state=task.state,
+                            details=service.get_formatted(task_id), task=task.id, state=task.state,
                             username=username, queue=parsed_task['queue']
                         ),
                         status=status.HTTP_200_OK

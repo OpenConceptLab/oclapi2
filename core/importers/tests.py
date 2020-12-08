@@ -401,19 +401,24 @@ class BulkImportParallelRunnerTest(OCLTestCase):
 
     @patch('core.importers.models.RedisService')
     def test_notify_progress(self, redis_service_mock):  # pylint: disable=no-self-use
-        redis_instance_mock = Mock(set=Mock())
+        redis_instance_mock = Mock(set_json=Mock())
         redis_service_mock.return_value = redis_instance_mock
         importer = BulkImportParallelRunner(
             open(os.path.join(os.path.dirname(__file__), '..', 'samples/sample_ocldev.json'), 'r').read(),
             'ocladmin', True, None, 'task-id'
         )
+        importer.tasks = [Mock(task_id='task-1'), Mock(task_id='task-2')]
         now = 1607346541.793877  # datetime.datetime(2020, 12, 7, 13, 09, 1, 793877) UTC
         importer.start_time = now
         importer.elapsed_seconds = 10.45
         importer.notify_progress()
 
-        redis_instance_mock.set.assert_called_once_with(
-            'task-id', "Started: 2020-12-07 13:09:01.793877 | Processed: 0/64 | Time: 10.45secs"
+        redis_instance_mock.set_json.assert_called_once_with(
+            'task-id',
+            dict(
+                summary="Started: 2020-12-07 13:09:01.793877 | Processed: 0/64 | Time: 10.45secs",
+                sub_task_ids=['task-1', 'task-2']
+            )
         )
 
     def test_chunker_list(self):

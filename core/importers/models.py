@@ -563,10 +563,10 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
         if self.content:
             self.input_list = self.content.splitlines()
             self.total = len(self.input_list)
-        self.separate_data()
+        self.make_resource_distribution()
         self.make_parts()
 
-    def separate_data(self):
+    def make_resource_distribution(self):
         for line in self.input_list:
             data = json.loads(line)
             data_type = data['type']
@@ -630,13 +630,19 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
 
         return total_processed
 
+    def get_details_to_notify(self):
+        summary = "Started: {} | Processed: {}/{} | Time: {}secs".format(
+            self.start_time_formatted, self.get_overall_tasks_progress(), self.total, self.elapsed_seconds
+        )
+
+        return dict(summary=summary, sub_task_ids=self.get_sub_task_ids())
+
+    def get_sub_task_ids(self):
+        return [task.task_id for task in self.tasks]
+
     def notify_progress(self):
         if self.self_task_id:
-            self.redis_service.set(
-                self.self_task_id, "Started: {} | Processed: {}/{} | Time: {}secs".format(
-                    self.start_time_formatted, self.get_overall_tasks_progress(), self.total, self.elapsed_seconds
-                )
-            )
+            self.redis_service.set_json(self.self_task_id, self.get_details_to_notify())
 
     def wait_till_tasks_alive(self):
         while self.is_any_process_alive():
