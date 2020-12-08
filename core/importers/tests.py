@@ -365,14 +365,10 @@ class BulkImportParallelRunnerTest(OCLTestCase):
         self.assertFalse(importer.is_any_process_alive())
 
         importer.tasks = [Mock(state='FAILURE'), Mock(state='SUCCESS')]
-        with self.assertRaises(Exception) as ex:
-            importer.is_any_process_alive()
-        self.assertEqual(ex.exception.args, ('one of the task failed', ))
+        self.assertFalse(importer.is_any_process_alive())
 
         importer.tasks = [Mock(state='RETRY'), Mock(state='SUCCESS')]
-        with self.assertRaises(Exception) as ex:
-            importer.is_any_process_alive()
-        self.assertEqual(ex.exception.args, ('one of the task needs retry', ))
+        self.assertTrue(importer.is_any_process_alive())
 
         importer.tasks = [Mock(state='UNKNOWN'), Mock(state='SUCCESS')]
         self.assertTrue(importer.is_any_process_alive())
