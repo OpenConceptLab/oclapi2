@@ -614,7 +614,7 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
         if not self.tasks:
             return False
 
-        return not all(task.state in ['SUCCESS', 'FAILURE'] for task in self.tasks)
+        return any(task.state not in ['SUCCESS', 'FAILURE'] for task in self.tasks)
 
     def get_overall_tasks_progress(self):
         total_processed = 0
