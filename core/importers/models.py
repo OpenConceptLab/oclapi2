@@ -730,6 +730,6 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
             self.tasks.append(
                 queue_bulk_import(
                     to_import=_list, import_queue='concurrent', username=self.username,
-                    update_if_exists=self.update_if_exists, threads=self.parallel, inline=True, sub_task=True,
+                    update_if_exists=self.update_if_exists, threads=None, inline=True, sub_task=True,
                 )
             )
