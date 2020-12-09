@@ -95,12 +95,12 @@ def __handle_pre_delete(instance):
     registry.delete_related(instance)
 
 
-@app.task
+@app.task(ignore_result=True)
 def handle_save(app_name, model_name, instance_id):
     __handle_save(apps.get_model(app_name, model_name).objects.get(id=instance_id))
 
 
-@app.task
+@app.task(ignore_result=True)
 def handle_m2m_changed(app_name, model_name, instance_id, action):
     instance = apps.get_model(app_name, model_name).objects.get(id=instance_id)
     if action in ('post_add', 'post_remove', 'post_clear'):
@@ -109,7 +109,7 @@ def handle_m2m_changed(app_name, model_name, instance_id, action):
         __handle_pre_delete(instance)
 
 
-@app.task
+@app.task(ignore_result=True)
 def handle_pre_delete(app_name, model_name, instance_id):
     __handle_pre_delete(apps.get_model(app_name, model_name).objects.get(id=instance_id))
 
