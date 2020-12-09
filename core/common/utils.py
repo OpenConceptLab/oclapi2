@@ -309,7 +309,10 @@ def flower_get(url):
     :param url:
     :return:
     """
-    return requests.get('http://%s:%s/%s' % (settings.FLOWER_HOST, settings.FLOWER_PORT, url), auth=HTTPBasicAuth(settings.FLOWER_USER, settings.FLOWER_PWD))
+    return requests.get(
+        'http://%s:%s/%s' % (settings.FLOWER_HOST, settings.FLOWER_PORT, url),
+        auth=HTTPBasicAuth(settings.FLOWER_USER, settings.FLOWER_PWD)
+    )
 
 
 def task_exists(task_id):
