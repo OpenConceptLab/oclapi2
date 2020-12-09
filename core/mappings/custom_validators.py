@@ -40,6 +40,5 @@ class OpenMRSMappingValidator:
                 parent__mnemonic='MapTypes', parent__organization__mnemonic='OCL',
                 id=F('versioned_object_id'), retired=False, is_active=True,
                 concept_class='MapType', names__name=self.mapping.map_type or 'None',
-
         ).exists():
             raise ValidationError({'map_type': [OPENMRS_INVALID_MAPTYPE]})
