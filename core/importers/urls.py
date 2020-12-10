@@ -6,6 +6,11 @@ from core.importers import views
 urlpatterns = [
     re_path(
         r'^bulk-import-inline/$',
+        views.BulkImportInlineView.as_view(),
+        name='bulk-import-inline'
+    ),
+    re_path(
+        r'^bulk-import-parallel-inline/$',
         views.BulkImportParallelInlineView.as_view(),
         name='bulk-import-inline'
     ),

@@ -690,8 +690,28 @@ class BulkImportViewTest(OCLAPITestCase):
         self.assertEqual(response.data, dict(exception='No content to import'))
 
     @patch('core.common.tasks.bulk_import_parallel_inline')
-    def test_post_inline_202(self, bulk_import_mock):
+    def test_post_inline_parallel_202(self, bulk_import_mock):
         task_id = 'ace5abf4-3b7f-4e4a-b16f-d1c041088c3e-ocladmin~concurrent'
+        task_mock = Mock(id=task_id, state='pending')
+        bulk_import_mock.apply_async = Mock(return_value=task_mock)
+        file = SimpleUploadedFile('file.json', b'{"key": "value"}', "application/json")
+
+        response = self.client.post(
+            "/importers/bulk-import-parallel-inline/?update_if_exists=true",
+            {'file': file},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+        )
+
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.data, dict(task=task_id, state='pending', queue='concurrent', username='ocladmin'))
+        self.assertEqual(bulk_import_mock.apply_async.call_count, 1)
+        self.assertEqual(bulk_import_mock.apply_async.call_args[0], (('{"key": "value"}', 'ocladmin', True, 5),))
+        self.assertEqual(bulk_import_mock.apply_async.call_args[1]['task_id'][37:], 'ocladmin~concurrent')
+        self.assertEqual(bulk_import_mock.apply_async.call_args[1]['queue'], 'concurrent')
+
+    @patch('core.common.tasks.bulk_import_inline')
+    def test_post_inline_202(self, bulk_import_mock):
+        task_id = 'ace5abf4-3b7f-4e4a-b16f-d1c041088c3e-ocladmin~priority'
         task_mock = Mock(id=task_id, state='pending')
         bulk_import_mock.apply_async = Mock(return_value=task_mock)
         file = SimpleUploadedFile('file.json', b'{"key": "value"}', "application/json")
@@ -703,8 +723,8 @@ class BulkImportViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 202)
-        self.assertEqual(response.data, dict(task=task_id, state='pending', queue='concurrent', username='ocladmin'))
+        self.assertEqual(response.data, dict(task=task_id, state='pending', queue='priority', username='ocladmin'))
         self.assertEqual(bulk_import_mock.apply_async.call_count, 1)
-        self.assertEqual(bulk_import_mock.apply_async.call_args[0], (('{"key": "value"}', 'ocladmin', True, None),))
-        self.assertEqual(bulk_import_mock.apply_async.call_args[1]['task_id'][37:], 'ocladmin~concurrent')
-        self.assertEqual(bulk_import_mock.apply_async.call_args[1]['queue'], 'concurrent')
+        self.assertEqual(bulk_import_mock.apply_async.call_args[0], (('{"key": "value"}', 'ocladmin', True),))
+        self.assertEqual(bulk_import_mock.apply_async.call_args[1]['task_id'][37:], 'ocladmin~priority')
+        self.assertEqual(bulk_import_mock.apply_async.call_args[1]['queue'], 'bulk_import_root')

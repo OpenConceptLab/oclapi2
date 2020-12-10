@@ -364,9 +364,14 @@ def queue_bulk_import(  # pylint: disable=too-many-arguments
                 (to_import, username, update_if_exists), task_id=task_id, queue=queue_id
             )
 
-        from core.common.tasks import bulk_import_parallel_inline
-        return bulk_import_parallel_inline.apply_async(
-            (to_import, username, update_if_exists, threads), task_id=task_id, queue=queue_id
+        if threads:
+            from core.common.tasks import bulk_import_parallel_inline
+            return bulk_import_parallel_inline.apply_async(
+                (to_import, username, update_if_exists, threads), task_id=task_id, queue=queue_id
+            )
+        from core.common.tasks import bulk_import_inline
+        return bulk_import_inline.apply_async(
+            (to_import, username, update_if_exists), task_id=task_id, queue=queue_id
         )
 
     from core.common.tasks import bulk_import

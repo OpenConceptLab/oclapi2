@@ -167,7 +167,7 @@ class BulkImportParallelInlineView(APIView):  # pragma: no cover
         manual_parameters=[update_if_exists_param, file_url_param, file_upload_param, parallel_threads_param],
     )
     def post(self, request, import_queue=None):
-        parallel_threads = request.data.get('parallel')
+        parallel_threads = request.data.get('parallel') or 5
         file = None
         try:
             if 'file' in request.data:
@@ -181,6 +181,29 @@ class BulkImportParallelInlineView(APIView):  # pragma: no cover
             return Response(dict(exception=NO_CONTENT_TO_IMPORT), status=status.HTTP_400_BAD_REQUEST)
 
         return import_response(self.request, import_queue or 'concurrent', file.read(), parallel_threads, True)
+
+
+class BulkImportInlineView(APIView):  # pragma: no cover
+    permission_classes = (IsAuthenticated, )
+    parser_classes = (MultiPartParser, )
+
+    @swagger_auto_schema(
+        manual_parameters=[update_if_exists_param, file_url_param, file_upload_param],
+    )
+    def post(self, request, import_queue=None):
+        file = None
+        try:
+            if 'file' in request.data:
+                file = request.data['file']
+            elif 'file_url' in request.data:
+                file = urllib.request.urlopen(request.data['file_url'])
+        except:  # pylint: disable=bare-except
+            pass
+
+        if not file:
+            return Response(dict(exception=NO_CONTENT_TO_IMPORT), status=status.HTTP_400_BAD_REQUEST)
+
+        return import_response(self.request, import_queue, file.read(), None, True)
 
 
 class BaseESIndexView(APIView):  # pragma: no cover
