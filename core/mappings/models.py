@@ -41,6 +41,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
     mnemonic = models.CharField(
         max_length=255, validators=[RegexValidator(regex=NAMESPACE_REGEX)], default=uuid.uuid4,
     )
+    logo_path = None
 
     name = None
     full_name = None

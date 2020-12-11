@@ -487,3 +487,12 @@ class RootView(BaseAPIView):  # pragma: no cover
         data['routes'].pop('root')
 
         return Response(data)
+
+
+class BaseLogoView:
+    def post(self, request, *args, **kwargs):  # pylint: disable=unused-argument
+        data = request.data
+        obj = self.get_object()
+        obj.upload_base64_logo(data.get('base64'), 'logo.png')
+
+        return Response(self.get_serializer_class()(obj).data, status=status.HTTP_200_OK)

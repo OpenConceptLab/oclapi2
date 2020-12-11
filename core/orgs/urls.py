@@ -12,6 +12,11 @@ urlpatterns = [
         name='organization-detail'
     ),
     re_path(
+        r'^(?P<org>' + NAMESPACE_PATTERN + ')/logo/$',
+        views.OrganizationLogoView.as_view(),
+        name='organization-logo'
+    ),
+    re_path(
         r'^(?P<org>' + NAMESPACE_PATTERN + ')/extras/$',
         views.OrganizationExtrasView.as_view(),
         name='organization-extras'

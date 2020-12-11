@@ -5,11 +5,11 @@ from django.urls import reverse
 from rest_framework.authtoken.models import Token
 
 from core.common.mixins import SourceContainerMixin
-from core.common.models import BaseModel
+from core.common.models import BaseModel, CommonLogoModel
 from .constants import USER_OBJECT_TYPE
 
 
-class UserProfile(AbstractUser, BaseModel, SourceContainerMixin):
+class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin):
     class Meta:
         db_table = 'user_profiles'
         swappable = 'AUTH_USER_MODEL'

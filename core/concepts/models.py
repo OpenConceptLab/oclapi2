@@ -106,6 +106,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     versioned_object = models.ForeignKey(
         'self', related_name='versions_set', null=True, blank=True, on_delete=models.CASCADE
     )
+    logo_path = None
 
     OBJECT_TYPE = CONCEPT_TYPE
     ALREADY_RETIRED = CONCEPT_IS_ALREADY_RETIRED

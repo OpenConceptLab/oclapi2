@@ -187,7 +187,27 @@ class BaseModel(models.Model):
         return criteria
 
 
-class BaseResourceModel(BaseModel):
+class CommonLogoModel(models.Model):
+    logo_path = models.TextField(null=True, blank=True)
+
+    class Meta:
+        abstract = True
+
+    @property
+    def logo_url(self):
+        url = None
+        if self.logo_path:
+            url = S3.public_url_for(self.logo_path)
+
+        return url
+
+    def upload_base64_logo(self, data, name):
+        name = self.uri[1:] + name
+        self.logo_path = S3.upload_base64(data, name, False, True)
+        self.save()
+
+
+class BaseResourceModel(BaseModel, CommonLogoModel):
     """
     A base resource has a mnemonic that is unique across all objects of its type.
     A base resource may contain sub-resources.

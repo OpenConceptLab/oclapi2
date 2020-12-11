@@ -12,7 +12,7 @@ from core.common.constants import NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY
 from core.common.mixins import ListWithHeadersMixin
 from core.common.permissions import HasPrivateAccess, CanViewConceptDictionary
 from core.common.tasks import delete_organization
-from core.common.views import BaseAPIView
+from core.common.views import BaseAPIView, BaseLogoView
 from core.orgs.constants import DELETE_ACCEPTED
 from core.orgs.documents import OrganizationDocument
 from core.orgs.models import Organization
@@ -90,9 +90,17 @@ class OrganizationBaseView(BaseAPIView, RetrieveAPIView, DestroyAPIView):
     queryset = Organization.objects.filter(is_active=True)
 
 
-class OrganizationDetailView(OrganizationBaseView, mixins.UpdateModelMixin, mixins.CreateModelMixin):
-    queryset = Organization.objects.filter(is_active=True)
+class OrganizationLogoView(OrganizationBaseView, BaseLogoView):
+    serializer_class = OrganizationDetailSerializer
 
+    def get_permissions(self):
+        if self.request.method == 'DELETE':
+            return [HasPrivateAccess(), ]
+
+        return [CanViewConceptDictionary(), ]
+
+
+class OrganizationDetailView(OrganizationBaseView, mixins.UpdateModelMixin, mixins.CreateModelMixin):
     def get_permissions(self):
         if self.request.method == 'DELETE':
             return [HasPrivateAccess(), ]

@@ -82,7 +82,7 @@ class OrganizationDetailSerializer(serializers.ModelSerializer):
         fields = (
             'type', 'uuid', 'id', 'public_access', 'name', 'company', 'website', 'location', 'members',
             'created_on', 'updated_on', 'url', 'extras', 'members_url', 'created_by', 'updated_by', 'location',
-            'sources_url', 'public_sources', 'collections_url', 'public_collections'
+            'sources_url', 'public_sources', 'collections_url', 'public_collections', 'logo_url'
         )
 
     def update(self, instance, validated_data):
