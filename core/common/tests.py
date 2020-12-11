@@ -226,13 +226,13 @@ class S3Test(TestCase):
     @mock_s3
     def test_upload(self):
         _conn = boto3.resource('s3', region_name='us-east-1')
-        _conn.create_bucket(Bucket='ocl-api-dev')
+        _conn.create_bucket(Bucket='oclapi2-dev')
 
         S3.upload('some/path', 'content')
 
         self.assertEqual(
             _conn.Object(
-                'ocl-api-dev',
+                'oclapi2-dev',
                 'some/path'
             ).get()['Body'].read().decode("utf-8"),
             'content'
@@ -248,7 +248,7 @@ class S3Test(TestCase):
 
         conn_mock.upload_fileobj.assert_called_once_with(
             'content',
-            'ocl-api-dev',
+            'oclapi2-dev',
             'some/path',
             ExtraArgs={'ACL': 'public-read'},
         )
@@ -333,12 +333,12 @@ class S3Test(TestCase):
     @mock_s3
     def test_remove(self):
         _conn = boto3.resource('s3', region_name='us-east-1')
-        _conn.create_bucket(Bucket='ocl-api-dev')
+        _conn.create_bucket(Bucket='oclapi2-dev')
 
         S3.upload('some/path', 'content')
         self.assertEqual(
             _conn.Object(
-                'ocl-api-dev',
+                'oclapi2-dev',
                 'some/path'
             ).get()['Body'].read().decode("utf-8"),
             'content'
@@ -347,18 +347,18 @@ class S3Test(TestCase):
         S3.remove(key='some/path')
 
         with self.assertRaises(ClientError):
-            _conn.Object('ocl-api-dev', 'some/path').get()
+            _conn.Object('oclapi2-dev', 'some/path').get()
 
     @mock_s3
     def test_url_for(self):
         _conn = boto3.resource('s3', region_name='us-east-1')
-        _conn.create_bucket(Bucket='ocl-api-dev')
+        _conn.create_bucket(Bucket='oclapi2-dev')
 
         S3.upload('some/path', 'content')
         _url = S3.url_for('some/path')
 
         self.assertTrue(
-            'https://ocl-api-dev.s3.amazonaws.com/some/path' in _url
+            'https://oclapi2-dev.s3.amazonaws.com/some/path' in _url
         )
         self.assertTrue(
             '&X-Amz-Credential=' in _url
@@ -373,7 +373,7 @@ class S3Test(TestCase):
     def test_public_url_for(self):
         self.assertEqual(
             S3.public_url_for('some/path'),
-            'http://ocl-api-dev.s3.amazonaws.com/some/path'
+            'http://oclapi2-dev.s3.amazonaws.com/some/path'
         )
 
 
