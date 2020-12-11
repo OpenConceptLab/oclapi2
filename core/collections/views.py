@@ -43,7 +43,7 @@ from core.common.swagger_parameters import q_param, compress_header, page_param,
     include_facets_header, sort_asc_param, sort_desc_param, updated_since_param, include_retired_param, limit_param
 from core.common.tasks import add_references, export_collection
 from core.common.utils import compact_dict_by_values, parse_boolean_query_param
-from core.common.views import BaseAPIView
+from core.common.views import BaseAPIView, BaseLogoView
 
 logger = logging.getLogger('oclapi')
 
@@ -179,6 +179,16 @@ class CollectionListView(CollectionBaseView, ConceptDictionaryCreateMixin, ListW
         ])
         del values.field_names[0:12]
         return values
+
+
+class CollectionLogoView(CollectionBaseView, BaseLogoView):
+    serializer_class = CollectionDetailSerializer
+
+    def get_permissions(self):
+        if self.request.method in ['GET', 'HEAD']:
+            return [CanViewConceptDictionary()]
+
+        return [IsAuthenticated(), CanEditConceptDictionary()]
 
 
 class CollectionRetrieveUpdateDestroyView(CollectionBaseView, ConceptDictionaryUpdateMixin):

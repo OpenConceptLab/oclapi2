@@ -15,13 +15,14 @@ from rest_framework.response import Response
 from core.common.constants import HEAD, RELEASED_PARAM, PROCESSING_PARAM, NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryCreateMixin, ConceptDictionaryUpdateMixin, \
     ConceptContainerExportMixin, ConceptContainerProcessingMixin
+from core.common.models import CommonLogoModel
 from core.common.permissions import CanViewConceptDictionary, CanEditConceptDictionary, HasAccessToVersionedObject, \
     CanViewConceptDictionaryVersion
 from core.common.swagger_parameters import q_param, limit_param, sort_desc_param, sort_asc_param, exact_match_param, \
     page_param, verbose_param, include_retired_param, updated_since_param, include_facets_header, compress_header
 from core.common.tasks import export_source
 from core.common.utils import parse_boolean_query_param, compact_dict_by_values
-from core.common.views import BaseAPIView
+from core.common.views import BaseAPIView, BaseLogoView
 from core.sources.constants import DELETE_FAILURE, DELETE_SUCCESS, VERSION_ALREADY_EXISTS
 from core.sources.documents import SourceDocument
 from core.sources.models import Source
@@ -137,6 +138,16 @@ class SourceListView(SourceBaseView, ConceptDictionaryCreateMixin, ListWithHeade
         ])
         del values.field_names[0:12]
         return values
+
+
+class SourceLogoView(SourceBaseView, BaseLogoView):
+    serializer_class = SourceDetailSerializer
+
+    def get_permissions(self):
+        if self.request.method in ['GET', 'HEAD']:
+            return [CanViewConceptDictionary()]
+
+        return [CanEditConceptDictionary()]
 
 
 class SourceRetrieveUpdateDestroyView(SourceBaseView, ConceptDictionaryUpdateMixin):

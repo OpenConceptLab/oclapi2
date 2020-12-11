@@ -182,7 +182,7 @@ class SourceDetailSerializer(SourceCreateOrUpdateSerializer):
             'created_on', 'updated_on', 'created_by', 'updated_by', 'extras', 'external_id', 'versions_url',
             'version', 'concepts_url', 'mappings_url', 'active_concepts', 'active_mappings',
             'canonical_url', 'identifier', 'publisher', 'contact', 'jurisdiction', 'purpose', 'copyright',
-            'content_type', 'revision_date',
+            'content_type', 'revision_date', 'logo_url'
         )
 
 

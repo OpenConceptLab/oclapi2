@@ -1042,3 +1042,34 @@ class CollectionConceptsViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['uuid'], str(concept2.get_latest_version().id))
+
+
+class CollectionLogoViewTest(OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.user = UserProfileFactory(username='username')
+        self.token = self.user.get_token()
+        self.collection = UserCollectionFactory(mnemonic='coll1', user=self.user)
+
+    @patch('core.common.services.S3.upload_base64')
+    def test_post_200(self, upload_base64_mock):
+        upload_base64_mock.return_value = 'users/username/collections/coll1/logo.png'
+        self.assertIsNone(self.collection.logo_url)
+        self.assertIsNone(self.collection.logo_path)
+
+        response = self.client.post(
+            self.collection.uri + 'logo/',
+            dict(base64='base64-data'),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        expected_logo_url = 'http://oclapi2-dev.s3.amazonaws.com/users/username/collections/coll1/logo.png'
+        self.assertEqual(response.data['logo_url'], expected_logo_url)
+        self.collection.refresh_from_db()
+        self.assertEqual(self.collection.logo_url, expected_logo_url)
+        self.assertEqual(self.collection.logo_path, 'users/username/collections/coll1/logo.png')
+        upload_base64_mock.assert_called_once_with(
+            'base64-data', 'users/username/collections/coll1/logo.png', False, True
+        )

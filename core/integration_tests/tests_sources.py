@@ -101,7 +101,7 @@ class SourceListViewTest(OCLAPITestCase):
                 'url', 'owner', 'owner_type', 'owner_url', 'versions', 'created_on', 'updated_on', 'created_by',
                 'updated_by', 'extras', 'external_id', 'versions_url', 'version', 'concepts_url', 'mappings_url',
                 'active_concepts', 'active_mappings', 'canonical_url', 'identifier', 'publisher', 'contact',
-                'jurisdiction', 'purpose', 'copyright', 'content_type', 'revision_date',
+                'jurisdiction', 'purpose', 'copyright', 'content_type', 'revision_date', 'logo_url',
             ]
         )
         source = Source.objects.last()
@@ -177,7 +177,7 @@ class SourceCreateUpdateDestroyViewTest(OCLAPITestCase):
                 'url', 'owner', 'owner_type', 'owner_url', 'versions', 'created_on', 'updated_on', 'created_by',
                 'updated_by', 'extras', 'external_id', 'versions_url', 'version', 'concepts_url', 'mappings_url',
                 'active_concepts', 'active_mappings', 'canonical_url', 'identifier', 'publisher', 'contact',
-                'jurisdiction', 'purpose', 'copyright', 'content_type', 'revision_date',
+                'jurisdiction', 'purpose', 'copyright', 'content_type', 'revision_date', 'logo_url'
             ]
         )
         source = Source.objects.last()
@@ -661,3 +661,34 @@ class ExportSourceTaskTest(OCLAPITestCase):
 
         import shutil
         shutil.rmtree(latest_temp_dir)
+
+
+class SourceLogoViewTest(OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.user = UserProfileFactory(username='username')
+        self.token = self.user.get_token()
+        self.source = UserSourceFactory(mnemonic='source1', user=self.user)
+
+    @patch('core.common.services.S3.upload_base64')
+    def test_post_200(self, upload_base64_mock):
+        upload_base64_mock.return_value = 'users/username/sources/source1/logo.png'
+        self.assertIsNone(self.source.logo_url)
+        self.assertIsNone(self.source.logo_path)
+
+        response = self.client.post(
+            self.source.uri + 'logo/',
+            dict(base64='base64-data'),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        expected_logo_url = 'http://oclapi2-dev.s3.amazonaws.com/users/username/sources/source1/logo.png'
+        self.assertEqual(response.data['logo_url'], expected_logo_url)
+        self.source.refresh_from_db()
+        self.assertEqual(self.source.logo_url, expected_logo_url)
+        self.assertEqual(self.source.logo_path, 'users/username/sources/source1/logo.png')
+        upload_base64_mock.assert_called_once_with(
+            'base64-data', 'users/username/sources/source1/logo.png', False, True
+        )

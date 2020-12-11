@@ -190,7 +190,7 @@ class CollectionDetailSerializer(CollectionCreateOrUpdateSerializer):
             'version', 'concepts_url', 'mappings_url', 'active_concepts', 'active_mappings',
             'custom_resources_linked_source', 'repository_type', 'preferred_source', 'references',
             'canonical_url', 'identifier', 'publisher', 'contact', 'jurisdiction', 'purpose', 'copyright',
-            'immutable', 'revision_date',
+            'immutable', 'revision_date', 'logo_url'
 
         )
 

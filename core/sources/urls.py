@@ -11,6 +11,11 @@ urlpatterns = [
         views.SourceRetrieveUpdateDestroyView.as_view(),
         name='source-detail'
     ),
+    re_path(
+        r"^(?P<source>{pattern})/logo/$".format(pattern=NAMESPACE_PATTERN),
+        views.SourceLogoView.as_view(),
+        name='source-logo'
+    ),
     re_path(r'^(?P<source>{pattern})/atom/$'.format(pattern=NAMESPACE_PATTERN), SourceFeed()),
     re_path(
         r"^(?P<source>{pattern})/versions/$".format(pattern=NAMESPACE_PATTERN),

@@ -12,6 +12,11 @@ urlpatterns = [
         name='collection-detail'
     ),
     re_path(
+        r"^(?P<collection>{pattern})/logo/$".format(pattern=NAMESPACE_PATTERN),
+        views.CollectionLogoView.as_view(),
+        name='collection-logo'
+    ),
+    re_path(
         r'^(?P<collection>{pattern})/versions/$'.format(pattern=NAMESPACE_PATTERN),
         views.CollectionVersionListView.as_view(),
         name='collection-version-list'
