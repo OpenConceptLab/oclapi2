@@ -438,3 +438,32 @@ class OrganizationExtraRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 404)
         self.organization.refresh_from_db()
         self.assertEqual(self.organization.extras, dict(tao='ching'))
+
+
+class OrganizationLogoViewTest(OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.organization = OrganizationFactory(mnemonic='org-1')
+        self.user = UserProfileFactory(organizations=[self.organization])
+        self.token = self.user.get_token()
+
+    @patch('core.common.services.S3.upload_base64')
+    def test_post_200(self, upload_base64_mock):
+        upload_base64_mock.return_value = 'orgs/org-1/logo.png'
+        self.assertIsNone(self.organization.logo_url)
+        self.assertIsNone(self.organization.logo_path)
+
+        response = self.client.post(
+            self.organization.uri + 'logo/',
+            dict(base64='base64-data'),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        expected_logo_url = 'http://oclapi2-dev.s3.amazonaws.com/orgs/org-1/logo.png'
+        self.assertEqual(response.data['logo_url'], expected_logo_url)
+        self.organization.refresh_from_db()
+        self.assertEqual(self.organization.logo_url, expected_logo_url)
+        self.assertEqual(self.organization.logo_path, 'orgs/org-1/logo.png')
+        upload_base64_mock.assert_called_once_with('base64-data', 'orgs/org-1/logo.png', False, True)

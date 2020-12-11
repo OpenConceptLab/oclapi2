@@ -118,3 +118,9 @@ class OrganizationTest(OCLTestCase):
         delete_organization(org.id)
 
         self.assertFalse(Organization.objects.filter(id=org.id).exists())
+
+    def test_logo_url(self):
+        self.assertIsNone(Organization(logo_path=None).logo_url)
+        self.assertEqual(
+            Organization(logo_path='path/foo.png').logo_url, 'http://oclapi2-dev.s3.amazonaws.com/path/foo.png'
+        )
