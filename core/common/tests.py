@@ -1,3 +1,4 @@
+import base64
 import uuid
 from unittest.mock import patch, Mock, mock_open
 
@@ -5,6 +6,7 @@ import boto3
 from botocore.exceptions import ClientError
 from colour_runner.django_runner import ColourRunnerMixin
 from django.conf import settings
+from django.core.files.base import ContentFile
 from django.core.management import call_command
 from django.test import TestCase
 from django.test.runner import DiscoverRunner
@@ -259,6 +261,74 @@ class S3Test(TestCase):
             self.assertEqual(res, 200)
             S3.upload.assert_called_once_with(file_path, 'file-content', {'header1': 'val1'})
             mock_file.assert_called_once_with(file_path, 'r')
+
+    @patch('core.common.services.S3.upload')
+    def test_upload_base64(self, s3_upload_mock):
+        file_content = base64.b64encode(b'file-content')
+        uploaded_file_name_with_ext = S3.upload_base64(
+            doc_base64='extension/ext;base64,' + file_content.decode(),
+            file_name='some-file-name',
+        )
+
+        self.assertEqual(
+            uploaded_file_name_with_ext,
+            'some-file-name.ext'
+        )
+        mock_calls = s3_upload_mock.mock_calls
+        self.assertEqual(len(mock_calls), 1)
+        self.assertEqual(
+            mock_calls[0][1][0],
+            'some-file-name.ext'
+        )
+        self.assertTrue(
+            isinstance(mock_calls[0][1][1], ContentFile)
+        )
+
+    @patch('core.common.services.S3.upload_public')
+    def test_upload_base64_public(self, s3_upload_mock):
+        file_content = base64.b64encode(b'file-content')
+        uploaded_file_name_with_ext = S3.upload_base64(
+            doc_base64='extension/ext;base64,' + file_content.decode(),
+            file_name='some-file-name',
+            public_read=True,
+        )
+
+        self.assertEqual(
+            uploaded_file_name_with_ext,
+            'some-file-name.ext'
+        )
+        mock_calls = s3_upload_mock.mock_calls
+        self.assertEqual(len(mock_calls), 1)
+        self.assertEqual(
+            mock_calls[0][1][0],
+            'some-file-name.ext'
+        )
+        self.assertTrue(
+            isinstance(mock_calls[0][1][1], ContentFile)
+        )
+
+    @patch('core.common.services.S3.upload')
+    def test_upload_base64_no_ext(self, s3_upload_mock):
+        file_content = base64.b64encode(b'file-content')
+        uploaded_file_name_with_ext = S3.upload_base64(
+            doc_base64='extension/ext;base64,' + file_content.decode(),
+            file_name='some-file-name',
+            append_extension=False,
+        )
+
+        self.assertEqual(
+            uploaded_file_name_with_ext,
+            'some-file-name.jpg'
+        )
+        mock_calls = s3_upload_mock.mock_calls
+        self.assertEqual(len(mock_calls), 1)
+        self.assertEqual(
+            mock_calls[0][1][0],
+            'some-file-name.jpg'
+        )
+        self.assertTrue(
+            isinstance(mock_calls[0][1][1], ContentFile)
+        )
 
     @mock_s3
     def test_remove(self):

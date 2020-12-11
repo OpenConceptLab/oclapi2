@@ -1,3 +1,4 @@
+import base64
 import json
 
 import boto3
@@ -6,6 +7,7 @@ import requests
 from botocore.client import Config
 from botocore.exceptions import NoCredentialsError, ClientError
 from django.conf import settings
+from django.core.files.base import ContentFile
 
 from core.settings import REDIS_HOST, REDIS_PORT, REDIS_DB
 
@@ -77,15 +79,49 @@ class S3:
             pass
 
     @classmethod
+    def upload_base64(  # pylint: disable=too-many-arguments,inconsistent-return-statements
+            cls, doc_base64, file_name, append_extension=True, public_read=False, headers=None
+    ):
+        _format = None
+        _doc_string = None
+        try:
+            _format, _doc_string = doc_base64.split(';base64,')
+        except:  # pylint: disable=bare-except # pragma: no cover
+            pass
+
+        if not _format or not _doc_string:  # pragma: no cover
+            return
+
+        if append_extension:
+            file_name_with_ext = file_name + "." + _format.split('/')[-1]
+        else:
+            if file_name and file_name.split('.')[-1].lower() not in [
+                    'pdf', 'jpg', 'jpeg', 'bmp', 'gif', 'png'
+            ]:
+                file_name += '.jpg'
+            file_name_with_ext = file_name
+
+        doc_data = ContentFile(base64.b64decode(_doc_string))
+        if public_read:
+            cls.upload_public(file_name_with_ext, doc_data)
+        else:
+            cls.upload(file_name_with_ext, doc_data, headers)
+
+        return file_name_with_ext
+
+    @classmethod
     def url_for(cls, file_path):
         return cls.generate_signed_url(cls.GET, file_path) if file_path else None
 
     @classmethod
     def public_url_for(cls, file_path):
-        return "http://{0}.s3.amazonaws.com/{1}".format(
+        url = "http://{0}.s3.amazonaws.com/{1}".format(
             settings.AWS_STORAGE_BUCKET_NAME,
             file_path,
         )
+        if settings.ENV != 'development':
+            url = url.replace('http://', 'https://')
+        return url
 
     @classmethod
     def exists(cls, key):
