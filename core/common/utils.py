@@ -80,9 +80,13 @@ def reverse_resource(resource, viewname, args=None, kwargs=None, **extra):
                 head = parent.get_latest_version()
             else:
                 head = parent.head
-            kwargs.update({head.get_url_kwarg(): head.mnemonic, parent.get_url_kwarg(): parent.version})
-            if parent.get_resource_url_kwarg() not in kwargs:
-                kwargs.update({parent.get_resource_url_kwarg(): parent.mnemonic})
+            kwargs.update({parent.get_url_kwarg(): parent.version})
+
+            if head:
+                kwargs.update({head.get_url_kwarg(): head.mnemonic})
+            parent_resource_url_kwarg = parent.get_resource_url_kwarg()
+            if parent_resource_url_kwarg not in kwargs:
+                kwargs.update({parent_resource_url_kwarg: parent.mnemonic})
         else:
             kwargs.update({parent.get_url_kwarg(): parent.mnemonic})
         parent = parent.parent if hasattr(parent, 'parent') else None
