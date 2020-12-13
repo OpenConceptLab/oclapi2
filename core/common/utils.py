@@ -108,10 +108,10 @@ def reverse_resource_version(resource, viewname, args=None, kwargs=None, **extra
         head = resource.head
 
     kwargs = kwargs or {}
-    kwargs.update({
-        resource.get_url_kwarg(): resource.version,
-        head.get_url_kwarg(): head.mnemonic,
-    })
+    kwargs.update({resource.get_url_kwarg(): resource.version})
+    if head:
+        kwargs.update({head.get_url_kwarg(): head.mnemonic})
+
     resource_url_kwarg = resource.get_resource_url_kwarg()
 
     if resource_url_kwarg not in kwargs:
