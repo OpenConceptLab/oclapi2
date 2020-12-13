@@ -122,5 +122,6 @@ class OrganizationTest(OCLTestCase):
     def test_logo_url(self):
         self.assertIsNone(Organization(logo_path=None).logo_url)
         self.assertEqual(
-            Organization(logo_path='path/foo.png').logo_url, 'http://oclapi2-dev.s3.amazonaws.com/path/foo.png'
+            Organization(logo_path='path/foo.png').logo_url.replace('https://', 'http://'),
+            'http://oclapi2-dev.s3.amazonaws.com/path/foo.png'
         )

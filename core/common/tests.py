@@ -372,7 +372,7 @@ class S3Test(TestCase):
 
     def test_public_url_for(self):
         self.assertEqual(
-            S3.public_url_for('some/path'),
+            S3.public_url_for('some/path').replace('https://', 'http://'),
             'http://oclapi2-dev.s3.amazonaws.com/some/path'
         )
 

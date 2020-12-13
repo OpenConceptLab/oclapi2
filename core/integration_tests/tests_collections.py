@@ -1066,9 +1066,9 @@ class CollectionLogoViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 200)
         expected_logo_url = 'http://oclapi2-dev.s3.amazonaws.com/users/username/collections/coll1/logo.png'
-        self.assertEqual(response.data['logo_url'], expected_logo_url)
+        self.assertEqual(response.data['logo_url'].replace('https://', 'http://'), expected_logo_url)
         self.collection.refresh_from_db()
-        self.assertEqual(self.collection.logo_url, expected_logo_url)
+        self.assertEqual(self.collection.logo_url.replace('https://', 'http://'), expected_logo_url)
         self.assertEqual(self.collection.logo_path, 'users/username/collections/coll1/logo.png')
         upload_base64_mock.assert_called_once_with(
             'base64-data', 'users/username/collections/coll1/logo.png', False, True
