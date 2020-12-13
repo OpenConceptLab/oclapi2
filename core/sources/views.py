@@ -15,7 +15,6 @@ from rest_framework.response import Response
 from core.common.constants import HEAD, RELEASED_PARAM, PROCESSING_PARAM, NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryCreateMixin, ConceptDictionaryUpdateMixin, \
     ConceptContainerExportMixin, ConceptContainerProcessingMixin
-from core.common.models import CommonLogoModel
 from core.common.permissions import CanViewConceptDictionary, CanEditConceptDictionary, HasAccessToVersionedObject, \
     CanViewConceptDictionaryVersion
 from core.common.swagger_parameters import q_param, limit_param, sort_desc_param, sort_asc_param, exact_match_param, \
