@@ -471,7 +471,7 @@ class BulkImportInline(BaseImporter):
     def run(self):
         for original_item in self.input_list:
             self.processed += 1
-            logger.info('Processing {} of {} | Started at {}'.format(self.processed, self.total, self.start_time))
+            logger.info('Processing %s of %s', str(self.processed), str(self.total))
             self.notify_progress()
             item = original_item.copy()
             item_type = item.pop('type', '').lower()
