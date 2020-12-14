@@ -213,7 +213,9 @@ class BaseESIndexView(APIView):  # pragma: no cover
 
     @swagger_auto_schema(manual_parameters=[apps_param])
     def post(self, request):
-        apps = request.data.get('apps', '').split(',')
+        apps = request.data.get('apps', None)
+        if apps:
+            apps = apps.split(',')
         result = self.task.delay(apps)
 
         return Response(
