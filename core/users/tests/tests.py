@@ -182,3 +182,118 @@ class TokenAuthenticationViewTest(OCLAPITestCase):
         self.assertEqual(response.data, dict(token=ANY))
         user.refresh_from_db()
         self.assertIsNotNone(user.last_login)
+
+
+class UserPinnedItemsViewTest(OCLAPITestCase):
+    def test_get_200(self):
+        source = OrganizationSourceFactory()
+        user = UserProfileFactory()
+        token = user.get_token()
+
+        response = self.client.get(
+            user.uri + 'pins/',
+            HTTP_AUTHORIZATION='Token ' + token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 0)
+
+        pin1 = user.pins.create(resource=source)
+        pin2 = user.pins.create(resource=source, organization=source.organization)
+
+        response = self.client.get(
+            user.uri + 'pins/',
+            HTTP_AUTHORIZATION='Token ' + token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['resource_uri'], source.uri)
+        self.assertEqual(response.data[0]['id'], pin1.id)
+        self.assertIsNone(response.data[0]['organization_id'])
+
+        response = self.client.get(
+            user.uri + 'pins/?organization_id=' + str(source.organization_id),
+            HTTP_AUTHORIZATION='Token ' + token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['resource_uri'], source.uri)
+        self.assertEqual(response.data[0]['id'], pin2.id)
+        self.assertEqual(response.data[0]['organization_id'], source.organization.id)
+
+    def test_post_201(self):
+        source = OrganizationSourceFactory()
+        user = UserProfileFactory()
+        token = user.get_token()
+
+        response = self.client.post(
+            user.uri + 'pins/',
+            dict(resource_type='Source', resource_id=source.id),
+            HTTP_AUTHORIZATION='Token ' + token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data['resource_uri'], source.uri)
+        self.assertEqual(response.data['user_id'], user.id)
+        self.assertIsNone(response.data['organization_id'])
+
+        response = self.client.post(
+            user.uri + 'pins/',
+            dict(resource_type='Source', resource_id=source.id, organization_id=source.organization.id),
+            HTTP_AUTHORIZATION='Token ' + token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data['resource_uri'], source.uri)
+        self.assertEqual(response.data['user_id'], user.id)
+        self.assertEqual(response.data['organization_id'], source.organization.id)
+
+    def test_post_400(self):
+        user = UserProfileFactory()
+        token = user.get_token()
+
+        response = self.client.post(
+            user.uri + 'pins/',
+            dict(resource_type='Source', resource_id=1209),
+            HTTP_AUTHORIZATION='Token ' + token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data, dict(resource='Resource type Source with id 1209 does not exists.'))
+
+
+class UserPinnedItemViewTest(OCLAPITestCase):
+    def setUp(self):
+        self.user = UserProfileFactory()
+        self.token = self.user.get_token()
+        self.source = OrganizationSourceFactory()
+        self.user.pins.create(resource=self.source)
+        self.url = self.user.uri + 'pins/' + str(self.user.pins.first().id) + '/'
+
+    def test_get_200(self):
+        response = self.client.get(
+            self.url,
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['resource_uri'], self.source.uri)
+
+    def test_delete_204(self):
+        response = self.client.delete(
+            self.url,
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(self.user.pins.count(), 0)

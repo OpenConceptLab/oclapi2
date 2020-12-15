@@ -1,4 +1,6 @@
 from django.contrib.auth.models import update_last_login
+from django.http import Http404
+from django.shortcuts import get_object_or_404
 from drf_yasg.utils import swagger_auto_schema
 from pydash import get
 from rest_framework import mixins, status
@@ -12,8 +14,9 @@ from core.common.mixins import ListWithHeadersMixin
 from core.common.views import BaseAPIView
 from core.orgs.models import Organization
 from core.users.documents import UserProfileDocument
-from core.users.serializers import UserDetailSerializer, UserCreateSerializer, UserListSerializer
-from .models import UserProfile
+from core.users.serializers import UserDetailSerializer, UserCreateSerializer, UserListSerializer, \
+    UserPinnedItemSerializer
+from .models import UserProfile, PinnedItem
 
 
 class TokenAuthenticationView(ObtainAuthToken):
@@ -111,6 +114,8 @@ class UserDetailView(UserBaseView, RetrieveAPIView, DestroyAPIView, mixins.Updat
         instance = self.request.user if self.kwargs.get('user_is_self') else super().get_object(queryset)
         self.user_is_self = self.request.user.username == instance.username
 
+        if not instance or instance.is_anonymous:
+            raise Http404()
         return instance
 
     def put(self, request, *args, **kwargs):
@@ -136,3 +141,48 @@ class UserReactivateView(UserBaseView, UpdateAPIView):
         profile = self.get_object()
         profile.undelete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class UserPinnedItemsView(UserBaseView, mixins.CreateModelMixin):
+    serializer_class = UserPinnedItemSerializer
+    permission_classes = (IsAuthenticated, )
+
+    def get_object(self, queryset=None):
+        instance = self.request.user if self.kwargs.get('user_is_self') else super().get_object(queryset)
+        self.user_is_self = self.request.user.username == instance.username
+
+        return instance
+
+    def get(self, request, *args, **kwargs):  # pylint: disable=unused-argument
+        org_id = request.query_params.get('organization_id', None)
+        queryset = self.get_object().pins
+
+        if org_id:
+            queryset = queryset.filter(organization_id=org_id)
+        else:
+            queryset = queryset.filter(organization_id__isnull=True)
+
+        queryset = queryset.prefetch_related('resource').all()
+
+        return Response(self.serializer_class(queryset, many=True).data)
+
+    def post(self, request, *args, **kwargs):  # pylint: disable=unused-argument
+        user = self.get_object()
+        serializer = self.get_serializer(data={**request.data, 'user_id': user.id})
+        if serializer.is_valid():
+            serializer.save(force_insert=True)
+            if not serializer.errors:
+                return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class UserPinnedItemView(RetrieveAPIView, DestroyAPIView):
+    serializer_class = UserPinnedItemSerializer
+
+    def get_queryset(self):
+        return PinnedItem.objects.filter(
+            id=self.kwargs.get('pin_id'), user__username=self.kwargs.get('username')
+        )
+
+    def get_object(self):
+        return get_object_or_404(self.get_queryset())

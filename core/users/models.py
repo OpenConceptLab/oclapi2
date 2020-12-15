@@ -1,7 +1,11 @@
 from django.contrib import admin
 from django.contrib.auth.models import AbstractUser
+from django.contrib.contenttypes.fields import GenericForeignKey
+from django.contrib.contenttypes.models import ContentType
 from django.db import models
+from django.db.models import UniqueConstraint
 from django.urls import reverse
+from pydash import get
 from rest_framework.authtoken.models import Token
 
 from core.common.mixins import SourceContainerMixin
@@ -84,6 +88,49 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
     @property
     def orgs_count(self):
         return self.organizations.count()
+
+
+class PinnedItem(models.Model):
+    class Meta:
+        db_table = 'user_pins'
+        ordering = ['created_at']
+        constraints = [
+            UniqueConstraint(
+                fields=['resource_type', 'resource_id', 'user'],
+                name="user_pin_unique",
+                condition=models.Q(organization=None),
+            ),
+            UniqueConstraint(
+                fields=['resource_type', 'resource_id', 'user', 'organization'],
+                name="user_org_pin_unique",
+                condition=~models.Q(organization=None),
+            )
+        ]
+
+    resource_type = models.ForeignKey(ContentType, on_delete=models.CASCADE)
+    resource_id = models.PositiveIntegerField()
+    resource = GenericForeignKey('resource_type', 'resource_id')
+    user = models.ForeignKey(UserProfile, on_delete=models.CASCADE, related_name='pins')
+    organization = models.ForeignKey('orgs.Organization', on_delete=models.CASCADE, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    @property
+    def resource_uri(self):
+        return get(self, 'resource.uri')
+
+    @classmethod
+    def get_resource(cls, resource_type, resource_id):
+        if resource_type.lower() == 'source':
+            from core.sources.models import Source
+            return Source.objects.filter(id=resource_id).first()
+        if resource_type.lower() == 'collection':
+            from core.collections.models import Collection
+            return Collection.objects.filter(id=resource_id).first()
+        if resource_type.lower() in ['org', 'organization']:
+            from core.orgs.models import Organization
+            return Organization.objects.filter(id=resource_id).first()
+
+        return None
 
 
 admin.site.register(UserProfile)

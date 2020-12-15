@@ -1,5 +1,5 @@
 from django.conf.urls import url
-from django.urls import re_path, include
+from django.urls import re_path, include, path
 
 from core.common.constants import NAMESPACE_PATTERN
 from core.orgs import views as org_views
@@ -12,6 +12,16 @@ urlpatterns = [
         r'^(?P<user>' + NAMESPACE_PATTERN + ')/$',
         views.UserDetailView.as_view(),
         name='userprofile-detail'
+    ),
+    re_path(
+        r'^(?P<user>' + NAMESPACE_PATTERN + ')/pins/$',
+        views.UserPinnedItemsView.as_view(),
+        name='userprofile-pins'
+    ),
+    path(
+        '<str:username>/pins/<int:pin_id>/',
+        views.UserPinnedItemView.as_view(),
+        name='userprofile-pin'
     ),
     re_path(
         r'^(?P<user>' + NAMESPACE_PATTERN + ')/reactivate/$',
