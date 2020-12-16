@@ -14,6 +14,11 @@ urlpatterns = [
         name='userprofile-detail'
     ),
     re_path(
+        r'^(?P<user>' + NAMESPACE_PATTERN + ')/logo/$',
+        views.UserLogoView.as_view(),
+        name='userprofile-logo'
+    ),
+    re_path(
         r'^(?P<user>' + NAMESPACE_PATTERN + ')/pins/$',
         views.UserPinnedItemsView.as_view(),
         name='userprofile-pins'

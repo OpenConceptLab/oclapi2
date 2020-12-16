@@ -11,7 +11,7 @@ from rest_framework.permissions import IsAdminUser, IsAuthenticated, AllowAny
 from rest_framework.response import Response
 
 from core.common.mixins import ListWithHeadersMixin
-from core.common.views import BaseAPIView
+from core.common.views import BaseAPIView, BaseLogoView
 from core.orgs.models import Organization
 from core.users.documents import UserProfileDocument
 from core.users.serializers import UserDetailSerializer, UserCreateSerializer, UserListSerializer, \
@@ -48,6 +48,11 @@ class UserBaseView(BaseAPIView):
     document_model = UserProfileDocument
     is_searchable = True
     default_qs_sort_attr = '-created_at'
+
+
+class UserLogoView(UserBaseView, BaseLogoView):
+    serializer_class = UserDetailSerializer
+    permission_classes = (IsAuthenticated, )
 
 
 class UserListView(UserBaseView,

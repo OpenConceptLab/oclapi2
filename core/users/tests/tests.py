@@ -297,3 +297,31 @@ class UserPinnedItemViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 204)
         self.assertEqual(self.user.pins.count(), 0)
+
+
+class UserLogoViewTest(OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.user = UserProfileFactory(username='username1')
+        self.token = self.user.get_token()
+
+    @patch('core.common.services.S3.upload_base64')
+    def test_post_200(self, upload_base64_mock):
+        upload_base64_mock.return_value = 'users/username1/logo.png'
+        self.assertIsNone(self.user.logo_url)
+        self.assertIsNone(self.user.logo_path)
+
+        response = self.client.post(
+            self.user.uri + 'logo/',
+            dict(base64='base64-data'),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        expected_logo_url = 'http://oclapi2-dev.s3.amazonaws.com/users/username1/logo.png'
+        self.assertEqual(response.data['logo_url'].replace('https://', 'http://'), expected_logo_url)
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.logo_url.replace('https://', 'http://'), expected_logo_url)
+        self.assertEqual(self.user.logo_path, 'users/username1/logo.png')
+        upload_base64_mock.assert_called_once_with('base64-data', 'users/username1/logo.png', False, True)

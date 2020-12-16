@@ -91,6 +91,7 @@ class UserDetailSerializer(serializers.ModelSerializer):
             'type', 'uuid', 'username', 'name', 'email', 'company', 'location', 'preferred_locale', 'orgs',
             'public_collections', 'public_sources', 'created_on', 'updated_on', 'created_by', 'updated_by',
             'url', 'organizations_url', 'extras', 'sources_url', 'collections_url', 'website', 'last_login',
+            'logo_url'
         )
 
     def update(self, instance, validated_data):
