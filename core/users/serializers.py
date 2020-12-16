@@ -1,7 +1,8 @@
 from django.core.validators import RegexValidator
+from pydash import get
 from rest_framework import serializers
 
-from core.common.constants import NAMESPACE_REGEX
+from core.common.constants import NAMESPACE_REGEX, INCLUDE_SUBSCRIBED_ORGS
 from .models import UserProfile
 
 
@@ -81,6 +82,7 @@ class UserDetailSerializer(serializers.ModelSerializer):
     created_by = serializers.CharField(read_only=True)
     updated_by = serializers.CharField(read_only=True)
     extras = serializers.JSONField(required=False, allow_null=True)
+    subscribed_orgs = serializers.SerializerMethodField()
 
     class Meta:
         model = UserProfile
@@ -88,8 +90,26 @@ class UserDetailSerializer(serializers.ModelSerializer):
             'type', 'uuid', 'username', 'name', 'email', 'company', 'location', 'preferred_locale', 'orgs',
             'public_collections', 'public_sources', 'created_on', 'updated_on', 'created_by', 'updated_by',
             'url', 'organizations_url', 'extras', 'sources_url', 'collections_url', 'website', 'last_login',
-            'logo_url'
+            'logo_url', 'subscribed_orgs', 'is_superuser', 'is_staff'
         )
+
+    def __init__(self, *args, **kwargs):
+        params = get(kwargs, 'context.request.query_params')
+        self.include_subscribed_orgs = False
+        if params:
+            self.query_params = params.dict()
+            self.include_subscribed_orgs = self.query_params.get(INCLUDE_SUBSCRIBED_ORGS) in ['true', True]
+        if not self.include_subscribed_orgs:
+            self.fields.pop('subscribed_orgs')
+
+        super().__init__(*args, **kwargs)
+
+    def get_subscribed_orgs(self, obj):
+        if self.include_subscribed_orgs:
+            from core.orgs.serializers import OrganizationListSerializer
+            return OrganizationListSerializer(obj.organizations.all(), many=True).data
+
+        return None
 
     def update(self, instance, validated_data):
         request_user = self.context['request'].user

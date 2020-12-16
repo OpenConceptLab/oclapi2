@@ -175,6 +175,42 @@ class UserDetailViewTest(OCLAPITestCase):
         self.assertEqual(response.data['name'], self.user.name)
         self.assertEqual(response.data['url'], self.user.uri)
 
+    def test_get_200_with_subscribed_orgs(self):
+        response = self.client.get(
+            '/users/{}/?includeSubscribedOrgs=false'.format(self.user.username),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['username'], self.user.username)
+        self.assertEqual(response.data['name'], self.user.name)
+        self.assertEqual(response.data['url'], self.user.uri)
+        self.assertFalse('subscribed_orgs' in response.data)
+
+        response = self.client.get(
+            '/users/{}/?includeSubscribedOrgs=true'.format(self.user.username),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['username'], self.user.username)
+        self.assertEqual(len(response.data['subscribed_orgs']), 0)
+
+        org = OrganizationFactory()
+        self.user.organizations.add(org)
+
+        response = self.client.get(
+            '/users/{}/?includeSubscribedOrgs=true'.format(self.user.username),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['username'], self.user.username)
+        self.assertEqual(len(response.data['subscribed_orgs']), 1)
+
     def test_get_404(self):
         response = self.client.get(
             '/users/foobar/',

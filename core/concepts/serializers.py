@@ -100,8 +100,8 @@ class ConceptListSerializer(ModelSerializer):
 
     def __init__(self, *args, **kwargs):
         self.query_params = kwargs.get('context').get('request').query_params.dict()
-        self.include_indirect_mappings = self.query_params.get(INCLUDE_INVERSE_MAPPINGS_PARAM) == 'true'
-        self.include_direct_mappings = self.query_params.get(INCLUDE_MAPPINGS_PARAM) == 'true'
+        self.include_indirect_mappings = self.query_params.get(INCLUDE_INVERSE_MAPPINGS_PARAM) in ['true', True]
+        self.include_direct_mappings = self.query_params.get(INCLUDE_MAPPINGS_PARAM) in ['true', True]
 
         super().__init__(*args, **kwargs)
 
@@ -166,8 +166,8 @@ class ConceptDetailSerializer(ModelSerializer):
 
     def __init__(self, *args, **kwargs):
         self.query_params = kwargs.get('context').get('request').query_params.dict()
-        self.include_indirect_mappings = self.query_params.get(INCLUDE_INVERSE_MAPPINGS_PARAM) == 'true'
-        self.include_direct_mappings = self.query_params.get(INCLUDE_MAPPINGS_PARAM) == 'true'
+        self.include_indirect_mappings = self.query_params.get(INCLUDE_INVERSE_MAPPINGS_PARAM) in ['true', True]
+        self.include_direct_mappings = self.query_params.get(INCLUDE_MAPPINGS_PARAM) in ['true', True]
 
         super().__init__(*args, **kwargs)
 

@@ -3,6 +3,7 @@ from rest_framework import status
 from rest_framework.generics import RetrieveAPIView, DestroyAPIView
 from rest_framework.response import Response
 
+from core.common.constants import MAX_PINS_ALLOWED
 from core.common.permissions import CanViewConceptDictionary
 from core.common.views import BaseAPIView
 from core.orgs.models import Organization
@@ -54,6 +55,11 @@ class PinListView(PinBaseView):
         parent = self.get_parent()
         if not parent:
             return Response(status=status.HTTP_404_NOT_FOUND)
+        if parent.pins.count() >= MAX_PINS_ALLOWED:
+            return Response(
+                dict(error=["Can only keep max {} items pinned".format(MAX_PINS_ALLOWED)]),
+                status=status.HTTP_404_NOT_FOUND
+            )
 
         serializer = self.get_serializer(data={**request.data, self.get_parent_type() + '_id': parent.id})
         if serializer.is_valid():
