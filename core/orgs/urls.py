@@ -38,4 +38,5 @@ urlpatterns = [
     ),
     re_path(r'^(?P<org>' + NAMESPACE_PATTERN + ')/sources/', include('core.sources.urls')),
     re_path(r'^(?P<org>' + NAMESPACE_PATTERN + ')/collections/', include('core.collections.urls')),
+    re_path(r'^(?P<org>' + NAMESPACE_PATTERN + ')/pins/', include('core.pins.urls')),
 ]

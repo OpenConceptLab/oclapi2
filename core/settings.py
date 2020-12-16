@@ -72,6 +72,7 @@ INSTALLED_APPS = [
     'core.concepts',
     'core.mappings',
     'core.importers',
+    'core.pins'
 ]
 
 REST_FRAMEWORK = {
