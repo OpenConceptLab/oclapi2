@@ -21,6 +21,7 @@ class Organization(BaseResourceModel, SourceContainerMixin):
     mnemonic = models.CharField(
         max_length=255, validators=[RegexValidator(regex=NAMESPACE_REGEX)], unique=True
     )
+    description = models.TextField(null=True, blank=True)
 
     @property
     def org(self):

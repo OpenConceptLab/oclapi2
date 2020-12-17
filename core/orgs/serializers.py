@@ -33,7 +33,7 @@ class OrganizationCreateSerializer(serializers.ModelSerializer):
         model = Organization
         fields = (
             'type', 'uuid', 'id', 'public_access', 'name', 'company', 'website', 'location', 'members',
-            'created_on', 'updated_on', 'url', 'extras', 'public_sources',
+            'created_on', 'updated_on', 'url', 'extras', 'public_sources', 'description',
         )
 
     def prepare_object(self, validated_data):
@@ -50,6 +50,7 @@ class OrganizationCreateSerializer(serializers.ModelSerializer):
         organization.website = validated_data.get('website', None)
         organization.location = validated_data.get('location', None)
         organization.extras = validated_data.get('extras', None)
+        organization.description = validated_data.get('description', None)
         return organization
 
     def create(self, validated_data):
@@ -68,6 +69,7 @@ class OrganizationDetailSerializer(serializers.ModelSerializer):
     company = serializers.CharField(required=False, allow_blank=True)
     website = serializers.CharField(required=False, allow_blank=True)
     location = serializers.CharField(required=False)
+    description = serializers.CharField(required=False)
     members = serializers.IntegerField(source='num_members', read_only=True)
     created_on = serializers.DateTimeField(source='created_at', read_only=True)
     updated_on = serializers.DateTimeField(source='updated_at', read_only=True)
@@ -82,11 +84,12 @@ class OrganizationDetailSerializer(serializers.ModelSerializer):
         fields = (
             'type', 'uuid', 'id', 'public_access', 'name', 'company', 'website', 'location', 'members',
             'created_on', 'updated_on', 'url', 'extras', 'members_url', 'created_by', 'updated_by', 'location',
-            'sources_url', 'public_sources', 'collections_url', 'public_collections', 'logo_url'
+            'sources_url', 'public_sources', 'collections_url', 'public_collections', 'logo_url', 'description',
         )
 
     def update(self, instance, validated_data):
         request_user = self.context['request'].user
+        instance.description = validated_data.get('description', instance.description)
         instance.public_access = validated_data.get('public_access', instance.public_access)
         instance.name = validated_data.get('name', instance.name)
         instance.company = validated_data.get('company', instance.company)
