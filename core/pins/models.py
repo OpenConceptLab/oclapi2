@@ -3,13 +3,14 @@ from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import UniqueConstraint
+from ordered_model.models import OrderedModel
 from pydash import get
 
 
-class Pin(models.Model):
-    class Meta:
+class Pin(OrderedModel):
+    class Meta(OrderedModel.Meta):
         db_table = 'pins'
-        ordering = ['created_at']
+        ordering = ['order']
         constraints = [
             UniqueConstraint(
                 fields=['resource_type', 'resource_id', 'user'],
@@ -33,6 +34,7 @@ class Pin(models.Model):
         'orgs.Organization', on_delete=models.CASCADE, null=True, blank=True, related_name='pins'
     )
     created_at = models.DateTimeField(auto_now_add=True)
+    order_with_respect_to = ('user', 'organization')
 
     def clean(self):
         if not self.user_id and not self.organization_id:

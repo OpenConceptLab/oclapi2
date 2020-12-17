@@ -25,3 +25,4 @@ git+https://github.com/snyaggarwal/django-queryset-csv
 git+https://github.com/OpenConceptLab/ocldev
 coverage
 tblib
+django-ordered-model

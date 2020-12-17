@@ -64,6 +64,7 @@ INSTALLED_APPS = [
     'drf_yasg',
     'django_elasticsearch_dsl',
     'corsheaders',
+    'ordered_model',
     'core.common.apps.CommonConfig',
     'core.users',
     'core.orgs',
@@ -72,7 +73,7 @@ INSTALLED_APPS = [
     'core.concepts',
     'core.mappings',
     'core.importers',
-    'core.pins'
+    'core.pins',
 ]
 
 REST_FRAMEWORK = {

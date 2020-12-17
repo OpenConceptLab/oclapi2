@@ -65,6 +65,79 @@ class PinTest(OCLTestCase):
         self.assertEqual(pin.soft_delete(), True)
         pin.delete.assert_called_once()
 
+    def test_default_order(self):
+        org = OrganizationFactory(mnemonic='org-1')
+        source = OrganizationSourceFactory(organization=org)
+        user = UserProfileFactory(username='user-1')
+
+        org_pin1 = Pin(organization=org, resource=source)
+        org_pin1.save()
+        self.assertEqual(org_pin1.order, 0)
+
+        org_pin2 = Pin(organization=org, resource=OrganizationCollectionFactory(organization=org))
+        org_pin2.save()
+        self.assertEqual(org_pin2.order, 1)
+
+        org_pin2.delete()
+
+        org_pin3 = Pin(organization=org, resource=OrganizationCollectionFactory(organization=org))
+        org_pin3.save()
+        self.assertEqual(org_pin3.order, 1)
+
+        user_pin1 = Pin(user=user, resource=source)
+        user_pin1.save()
+        self.assertEqual(user_pin1.order, 0)
+
+        user_pin2 = Pin(user=user, resource=OrganizationCollectionFactory(organization=org))
+        user_pin2.save()
+        self.assertEqual(user_pin2.order, 1)
+
+        user_pin2.delete()
+
+        user_pin3 = Pin(user=user, resource=OrganizationCollectionFactory(organization=org))
+        user_pin3.save()
+        self.assertEqual(user_pin3.order, 1)
+
+    def test_update_order(self):
+        org = OrganizationFactory(mnemonic='org-1')
+
+        org_pin1 = Pin(organization=org, resource=OrganizationSourceFactory(organization=org))
+        org_pin1.save()
+        self.assertEqual(org_pin1.order, 0)
+
+        org_pin2 = Pin(organization=org, resource=OrganizationCollectionFactory(organization=org))
+        org_pin2.save()
+        self.assertEqual(org_pin2.order, 1)
+
+        org_pin3 = Pin(organization=org, resource=OrganizationCollectionFactory(organization=org))
+        org_pin3.save()
+        self.assertEqual(org_pin3.order, 2)
+
+        org_pin3.to(0)
+
+        org_pin1.refresh_from_db()
+        org_pin2.refresh_from_db()
+        org_pin3.refresh_from_db()
+        self.assertEqual(org_pin3.order, 0)
+        self.assertEqual(org_pin1.order, 1)
+        self.assertEqual(org_pin2.order, 2)
+
+        org_pin3.to(2)
+        org_pin1.refresh_from_db()
+        org_pin2.refresh_from_db()
+        org_pin3.refresh_from_db()
+        self.assertEqual(org_pin1.order, 0)
+        self.assertEqual(org_pin2.order, 1)
+        self.assertEqual(org_pin3.order, 2)
+
+        org_pin3.to(1)
+        org_pin1.refresh_from_db()
+        org_pin2.refresh_from_db()
+        org_pin3.refresh_from_db()
+        self.assertEqual(org_pin1.order, 0)
+        self.assertEqual(org_pin3.order, 1)
+        self.assertEqual(org_pin2.order, 2)
+
 
 class PinListViewTest(OCLAPITestCase):
     def tearDown(self):
@@ -165,7 +238,7 @@ class PinListViewTest(OCLAPITestCase):
         self.assertEqual(response.data, dict(resource='Resource type Source with id 1209 does not exists.'))
 
 
-class PinRetrieveDestroyViewTest(OCLAPITestCase):
+class PinRetrieveUpdateDestroyViewTest(OCLAPITestCase):
     def setUp(self):
         self.user = UserProfileFactory()
         self.org = OrganizationFactory()
@@ -185,6 +258,7 @@ class PinRetrieveDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.data['resource_uri'], self.source.uri)
         self.assertEqual(response.data['resource']['id'], self.source.mnemonic)
         self.assertEqual(response.data['user_id'], self.user.id)
+        self.assertEqual(response.data['order'], 0)
 
         response = self.client.get(
             self.org.uri + 'pins/' + str(self.org_pin.id) + '/',
@@ -196,6 +270,7 @@ class PinRetrieveDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.data['resource_uri'], self.source.uri)
         self.assertEqual(response.data['resource']['id'], self.source.mnemonic)
         self.assertEqual(response.data['organization_id'], self.org.id)
+        self.assertEqual(response.data['order'], 0)
 
     def test_delete_204(self):
         response = self.client.delete(
@@ -215,3 +290,24 @@ class PinRetrieveDestroyViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 204)
         self.assertEqual(self.user.pins.count(), 0)
+
+    def test_put_200(self):
+        user_pin2 = self.user.pins.create(resource=self.org)
+        self.assertEqual(self.user_pin.order, 0)
+        self.assertEqual(user_pin2.order, 1)
+
+        response = self.client.put(
+            self.user.uri + 'pins/' + str(user_pin2.id) + '/',
+            dict(order=0),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['order'], 0)
+        self.assertEqual(response.data['id'], user_pin2.id)
+
+        self.user_pin.refresh_from_db()
+        user_pin2.refresh_from_db()
+        self.assertEqual(self.user_pin.order, 1)
+        self.assertEqual(user_pin2.order, 0)

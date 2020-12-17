@@ -1,6 +1,6 @@
 from django.shortcuts import get_object_or_404
 from rest_framework import status
-from rest_framework.generics import RetrieveAPIView, DestroyAPIView
+from rest_framework.generics import RetrieveAPIView, DestroyAPIView, UpdateAPIView
 from rest_framework.response import Response
 
 from core.common.constants import MAX_PINS_ALLOWED
@@ -8,7 +8,7 @@ from core.common.permissions import CanViewConceptDictionary
 from core.common.views import BaseAPIView
 from core.orgs.models import Organization
 from core.pins.models import Pin
-from core.pins.serializers import PinSerializer
+from core.pins.serializers import PinSerializer, PinUpdateSerializer
 from core.users.models import UserProfile
 
 
@@ -69,7 +69,13 @@ class PinListView(PinBaseView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
-class PinRetrieveDestroyView(PinBaseView, RetrieveAPIView, DestroyAPIView):
+class PinRetrieveUpdateDestroyView(PinBaseView, UpdateAPIView, RetrieveAPIView, DestroyAPIView):
+    def get_serializer_class(self):
+        if self.request.method == 'PUT':
+            return PinUpdateSerializer
+
+        return PinSerializer
+
     def get_queryset(self):
         queryset = super().get_queryset()
         return queryset.filter(id=self.kwargs.get('pin_id'))

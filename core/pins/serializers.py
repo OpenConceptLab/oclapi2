@@ -6,6 +6,40 @@ from rest_framework.fields import SerializerMethodField
 from core.pins.models import Pin
 
 
+class PinUpdateSerializer(serializers.ModelSerializer):
+    order = serializers.IntegerField(required=False)
+    resource = SerializerMethodField()
+
+    class Meta:
+        model = Pin
+        fields = (
+            'id', 'created_at', 'resource_uri', 'user_id', 'organization_id',
+            'resource', 'uri', 'order'
+        )
+
+    def update(self, instance, validated_data):
+        instance.to(validated_data.get('order', instance.order))
+        return instance
+
+    @staticmethod
+    def get_resource(obj):
+        resource = obj.resource
+        if not resource:
+            return None
+        resource_type = resource.resource_type.lower()
+        if resource_type == 'source':
+            from core.sources.serializers import SourceDetailSerializer
+            return SourceDetailSerializer(resource).data
+        if resource_type == 'collection':
+            from core.collections.serializers import CollectionDetailSerializer
+            return CollectionDetailSerializer(resource).data
+        if resource_type == 'organization':
+            from core.orgs.serializers import OrganizationDetailSerializer
+            return OrganizationDetailSerializer(resource).data
+
+        return None
+
+
 class PinSerializer(serializers.ModelSerializer):
     resource_type = serializers.CharField(required=True, write_only=True)
     resource_id = serializers.IntegerField(required=True, write_only=True)
@@ -17,7 +51,7 @@ class PinSerializer(serializers.ModelSerializer):
         model = Pin
         fields = (
             'id', 'created_at', 'resource_uri', 'user_id', 'organization_id', 'resource_type', 'resource_id',
-            'resource', 'uri',
+            'resource', 'uri', 'order'
         )
 
     def create(self, validated_data):
