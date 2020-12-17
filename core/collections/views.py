@@ -489,11 +489,7 @@ class CollectionVersionRetrieveUpdateDestroyView(CollectionBaseView, RetrieveAPI
     serializer_class = CollectionVersionDetailSerializer
 
     def get_object(self, queryset=None):
-        instance = self.get_queryset().first()
-        if not instance:
-            raise Http404()
-
-        return instance
+        return get_object_or_404(self.get_queryset())
 
     def update(self, request, *args, **kwargs):
         self.object = self.get_object()

@@ -269,7 +269,7 @@ class SourceVersionRetrieveUpdateDestroyView(SourceVersionBaseView, RetrieveAPIV
     serializer_class = SourceVersionDetailSerializer
 
     def get_object(self, queryset=None):
-        return self.get_queryset().first()
+        return get_object_or_404(self.get_queryset())
 
     def update(self, request, *args, **kwargs):
         self.object = self.get_object()
