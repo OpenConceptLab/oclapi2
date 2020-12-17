@@ -1,10 +1,10 @@
 from django.shortcuts import get_object_or_404
 from rest_framework import status
 from rest_framework.generics import RetrieveAPIView, DestroyAPIView, UpdateAPIView
+from rest_framework.permissions import IsAuthenticatedOrReadOnly
 from rest_framework.response import Response
 
 from core.common.constants import MAX_PINS_ALLOWED
-from core.common.permissions import CanViewConceptDictionary
 from core.common.views import BaseAPIView
 from core.orgs.models import Organization
 from core.pins.models import Pin
@@ -14,7 +14,7 @@ from core.users.models import UserProfile
 
 class PinBaseView(BaseAPIView):
     serializer_class = PinSerializer
-    permission_classes = (CanViewConceptDictionary,)
+    permission_classes = (IsAuthenticatedOrReadOnly,)
 
     def get_parent_type(self):
         if self.kwargs.get('user_is_self') or 'user' in self.kwargs:
