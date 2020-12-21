@@ -310,3 +310,16 @@ FLOWER_HOST = os.environ.get('FLOWER_HOST', 'flower')
 FLOWER_PORT = os.environ.get('FLOWER_PORT', 5555)
 DATA_UPLOAD_MAX_MEMORY_SIZE = 100*1024*1024
 FILE_UPLOAD_MAX_MEMORY_SIZE = 100*1024*1024
+
+# Mail settings
+EMAIL_HOST = os.environ.get('EMAIL_HOST', 'smtp.gmail.com')
+EMAIL_USE_TLS = os.environ.get('EMAIL_USE_TLS', True) in ['true', True]
+EMAIL_HOST_USER = os.environ.get('EMAIL_HOST_USER', 'no-reply@openconceptlab.org')
+EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', '')
+EMAIL_PORT = os.environ.get('EMAIL_PORT', 587)
+EMAIL_SUBJECT_PREFIX = '[Openconceptlab.org] '
+
+if not ENV or ENV in ['development']:
+    EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+else:
+    EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
