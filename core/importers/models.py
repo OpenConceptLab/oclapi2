@@ -470,9 +470,10 @@ class BulkImportInline(BaseImporter):
             service.set(self.self_task_id, self.processed)
 
     def run(self):
-        print("****STARTED SUBPROCESS****")
-        print("TASK ID: {}".format(self.self_task_id))
-        print("***************")
+        if self.self_task_id:
+            print("****STARTED SUBPROCESS****")
+            print("TASK ID: {}".format(self.self_task_id))
+            print("***************")
         for original_item in self.input_list:
             self.processed += 1
             logger.info('Processing %s of %s', str(self.processed), str(self.total))
@@ -670,9 +671,10 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
             time.sleep(1)
 
     def run(self):
-        print("****STARTED MAIN****")
-        print("TASK ID: {}".format(self.self_task_id))
-        print("***************")
+        if self.self_task_id:
+            print("****STARTED MAIN****")
+            print("TASK ID: {}".format(self.self_task_id))
+            print("***************")
         for part_list in self.parts:
             part_type = part_list[0].get('type').lower()
             is_child = part_type in ['concept', 'mapping']
