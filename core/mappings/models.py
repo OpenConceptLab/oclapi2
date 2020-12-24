@@ -303,13 +303,13 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
                     obj.update_versioned_object()
                     versioned_object = obj.versioned_object
                     latest_version = versioned_object.versions.exclude(id=obj.id).filter(is_latest_version=True).first()
-                    latest_version.is_latest_version = False
-                    latest_version.save()
-                    obj.sources.set(compact([parent, parent_head]))
+                    if latest_version:
+                        latest_version.is_latest_version = False
+                        latest_version.save()
 
+                    obj.sources.set(compact([parent, parent_head]))
                     persisted = True
                     cls.resume_indexing()
-
                     def index_all():
                         parent.save()
                         parent_head.save()
