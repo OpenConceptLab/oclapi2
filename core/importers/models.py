@@ -1,7 +1,7 @@
 import json
 import time
 from datetime import datetime
-
+from celery import group
 from celery.utils.log import get_task_logger
 from django.db.models import F
 from ocldev.oclfleximporter import OclFlexImporter
@@ -10,7 +10,8 @@ from pydash import compact
 from core.collections.models import Collection
 from core.common.constants import HEAD
 from core.common.services import RedisService
-from core.common.utils import get_api_internal_base_url, drop_version, queue_bulk_import
+from core.common.tasks import bulk_import_parts_inline
+from core.common.utils import get_api_internal_base_url, drop_version
 from core.concepts.models import Concept
 from core.mappings.models import Mapping
 from core.orgs.models import Organization
@@ -469,6 +470,9 @@ class BulkImportInline(BaseImporter):
             service.set(self.self_task_id, self.processed)
 
     def run(self):
+        print("****STARTED SUBPROCESS****")
+        print("TASK ID: {}".format(self.self_task_id))
+        print("***************")
         for original_item in self.input_list:
             self.processed += 1
             logger.info('Processing %s of %s', str(self.processed), str(self.total))
@@ -557,6 +561,7 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
         self.resource_distribution = dict()
         self.parallel = int(parallel) if parallel else 5
         self.tasks = []
+        self.groups = []
         self.results = []
         self.elapsed_seconds = 0
         self.resource_wise_time = dict()
@@ -615,10 +620,17 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
         return (seq[i::size] for i in range(size))
 
     def is_any_process_alive(self):
-        if not self.tasks:
+        if not self.groups:
             return False
 
-        return any(task.state not in ['SUCCESS', 'FAILURE'] for task in self.tasks)
+        result = True
+
+        try:
+            result = any(grp.completed_count() != len(grp) for grp in self.groups)
+        except:  # pylint: disable=bare-except
+            pass
+
+        return result
 
     def get_overall_tasks_progress(self):
         total_processed = 0
@@ -639,14 +651,17 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
             self.start_time_formatted, self.get_overall_tasks_progress(), self.total, self.elapsed_seconds
         )
 
-        return dict(summary=summary, sub_task_ids=self.get_sub_task_ids())
+        return dict(summary=summary)
 
     def get_sub_task_ids(self):
-        return [task.task_id for task in self.tasks]
+        return {task.task_id: task.state for task in self.tasks}
 
     def notify_progress(self):
         if self.self_task_id:
-            self.redis_service.set_json(self.self_task_id, self.get_details_to_notify())
+            try:
+                self.redis_service.set_json(self.self_task_id, self.get_details_to_notify())
+            except:  # pylint: disable=bare-except
+                pass
 
     def wait_till_tasks_alive(self):
         while self.is_any_process_alive():
@@ -655,6 +670,9 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
             time.sleep(1)
 
     def run(self):
+        print("****STARTED MAIN****")
+        print("TASK ID: {}".format(self.self_task_id))
+        print("***************")
         for part_list in self.parts:
             part_type = part_list[0].get('type').lower()
             is_child = part_type in ['concept', 'mapping']
@@ -729,10 +747,10 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
         else:
             chunked_lists = [part_list]
 
-        for _list in compact(chunked_lists):
-            self.tasks.append(
-                queue_bulk_import(
-                    to_import=_list, import_queue='concurrent', username=self.username,
-                    update_if_exists=self.update_if_exists, threads=None, inline=True, sub_task=True,
-                )
-            )
+        chunked_lists = compact(chunked_lists)
+
+        queue = 'concurrent'
+        jobs = group(bulk_import_parts_inline.s(_list, self.username, self.update_if_exists) for _list in chunked_lists)
+        group_result = jobs.apply_async(queue=queue)
+        self.groups.append(group_result)
+        self.tasks += group_result.results
