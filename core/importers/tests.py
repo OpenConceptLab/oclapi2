@@ -361,16 +361,32 @@ class BulkImportParallelRunnerTest(OCLTestCase):
         )
         self.assertFalse(importer.is_any_process_alive())
 
-        importer.tasks = [Mock(state='SUCCESS'), Mock(state='SUCCESS')]
+        importer.groups = [
+            Mock(completed_count=Mock(return_value=5), __len__=Mock(return_value=5)),
+            Mock(completed_count=Mock(return_value=5), __len__=Mock(return_value=5)),
+        ]
         self.assertFalse(importer.is_any_process_alive())
 
-        importer.tasks = [Mock(state='FAILURE'), Mock(state='SUCCESS')]
-        self.assertFalse(importer.is_any_process_alive())
-
-        importer.tasks = [Mock(state='RETRY'), Mock(state='SUCCESS')]
+        importer.groups = [
+            Mock(completed_count=Mock(return_value=10), __len__=Mock(return_value=10)),
+            Mock(completed_count=Mock(return_value=5), __len__=Mock(return_value=10)),
+        ]
         self.assertTrue(importer.is_any_process_alive())
 
-        importer.tasks = [Mock(state='UNKNOWN'), Mock(state='SUCCESS')]
+        importer.groups = [
+            Mock(completed_count=Mock(return_value=5), __len__=Mock(return_value=10)),
+            Mock(completed_count=Mock(return_value=5), __len__=Mock(return_value=10)),
+        ]
+        self.assertTrue(importer.is_any_process_alive())
+
+        importer.groups = [
+            Mock(completed_count=Mock(return_value=0), __len__=Mock(return_value=10)),
+        ]
+        self.assertTrue(importer.is_any_process_alive())
+
+        importer.groups = [
+            Mock(completed_count=Mock(return_value=9), __len__=Mock(return_value=10)),
+        ]
         self.assertTrue(importer.is_any_process_alive())
 
     @patch('core.importers.models.RedisService')
@@ -417,7 +433,7 @@ class BulkImportParallelRunnerTest(OCLTestCase):
             'task-id',
             dict(
                 summary="Started: 2020-12-07 13:09:01.793877 | Processed: 0/64 | Time: 10.45secs",
-                sub_task_ids=['task-1', 'task-2']
+                #sub_task_ids=['task-1', 'task-2']
             )
         )
 
@@ -691,7 +707,7 @@ class BulkImportViewTest(OCLAPITestCase):
 
     @patch('core.common.tasks.bulk_import_parallel_inline')
     def test_post_inline_parallel_202(self, bulk_import_mock):
-        task_id = 'ace5abf4-3b7f-4e4a-b16f-d1c041088c3e-ocladmin~concurrent'
+        task_id = 'ace5abf4-3b7f-4e4a-b16f-d1c041088c3e-ocladmin~priority'
         task_mock = Mock(id=task_id, state='pending')
         bulk_import_mock.apply_async = Mock(return_value=task_mock)
         file = SimpleUploadedFile('file.json', b'{"key": "value"}', "application/json")
@@ -703,11 +719,11 @@ class BulkImportViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 202)
-        self.assertEqual(response.data, dict(task=task_id, state='pending', queue='concurrent', username='ocladmin'))
+        self.assertEqual(response.data, dict(task=task_id, state='pending', queue='priority', username='ocladmin'))
         self.assertEqual(bulk_import_mock.apply_async.call_count, 1)
         self.assertEqual(bulk_import_mock.apply_async.call_args[0], (('{"key": "value"}', 'ocladmin', True, 5),))
-        self.assertEqual(bulk_import_mock.apply_async.call_args[1]['task_id'][37:], 'ocladmin~concurrent')
-        self.assertEqual(bulk_import_mock.apply_async.call_args[1]['queue'], 'concurrent')
+        self.assertEqual(bulk_import_mock.apply_async.call_args[1]['task_id'][37:], 'ocladmin~priority')
+        self.assertEqual(bulk_import_mock.apply_async.call_args[1]['queue'], 'bulk_import_root')
 
     @patch('core.common.tasks.bulk_import_inline')
     def test_post_inline_202(self, bulk_import_mock):
