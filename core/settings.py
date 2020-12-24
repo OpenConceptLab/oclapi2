@@ -289,6 +289,7 @@ CELERYD_HIJACK_ROOT_LOGGER = False
 CELERYD_PREFETCH_MULTIPLIER = 1
 CELERYD_MAX_TASKS_PER_CHILD = 1000
 BROKER_URL = CELERY_RESULT_BACKEND
+BROKER_TRANSPORT_OPTIONS = {'visibility_timeout': 259200}  # 72 hours
 CELERY_ROUTES = {
     'tasks.bulk_import': {'queue': 'bulk_import'},
     'tasks.bulk_priority_import': {'queue': 'bulk_priority_import'}
