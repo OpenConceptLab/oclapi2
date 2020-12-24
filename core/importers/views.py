@@ -180,7 +180,7 @@ class BulkImportParallelInlineView(APIView):  # pragma: no cover
         if not file:
             return Response(dict(exception=NO_CONTENT_TO_IMPORT), status=status.HTTP_400_BAD_REQUEST)
 
-        return import_response(self.request, import_queue or 'concurrent', file.read(), parallel_threads, True)
+        return import_response(self.request, import_queue, file.read(), parallel_threads, True)
 
 
 class BulkImportInlineView(APIView):  # pragma: no cover
