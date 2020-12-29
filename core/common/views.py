@@ -248,6 +248,10 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             )
             facets = searcher.execute().facets.to_dict()
 
+        if 'user' in self.kwargs or 'org' in self.kwargs:
+            facets.pop('owner', None)
+            facets.pop('ownerType', None)
+
         return facets
 
     def should_include_retired(self):
