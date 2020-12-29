@@ -12,8 +12,8 @@ class OrganizationDocument(Document):
 
     last_update = fields.DateField(attr='updated_at')
     public_can_view = fields.BooleanField(attr='public_can_view')
-    name = fields.KeywordField(attr='name')
-    mnemonic = fields.KeywordField(attr='mnemonic')
+    name = fields.KeywordField(attr='name', normalizer="lowercase")
+    mnemonic = fields.KeywordField(attr='mnemonic', normalizer="lowercase")
     extras = fields.ObjectField()
     user = fields.ListField(fields.KeywordField())
 
