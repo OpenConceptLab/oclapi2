@@ -1,8 +1,10 @@
 import json
 import time
 from datetime import datetime
+
 from celery import group
 from celery.utils.log import get_task_logger
+from django.conf import settings
 from django.db.models import F
 from ocldev.oclfleximporter import OclFlexImporter
 from pydash import compact
@@ -99,6 +101,7 @@ class BaseResourceImporter:
         self.user = user
         self.data = data
         self.update_if_exists = update_if_exists
+        self.queryset = None
 
     def get(self, attr, default_value=None):
         return self.data.get(attr, default_value)
@@ -307,7 +310,6 @@ class ConceptImporter(BaseResourceImporter):
     def __init__(self, data, user, update_if_exists):
         super().__init__(data, user, update_if_exists)
         self.version = False
-        self.queryset = None
 
     def exists(self):
         return self.get_queryset().exists()
@@ -362,7 +364,6 @@ class MappingImporter(BaseResourceImporter):
     def __init__(self, data, user, update_if_exists):
         super().__init__(data, user, update_if_exists)
         self.version = False
-        self.queryset = None
 
     def exists(self):
         return self.get_queryset().exists()
@@ -420,6 +421,37 @@ class MappingImporter(BaseResourceImporter):
         if instance.id:
             return CREATED
         return instance.errors or FAILED
+
+
+class ReferenceImporter(BaseResourceImporter):
+    mandatory_fields = {"data"}
+    allowed_fields = ["data", "collection", "owner", "owner_type", "__cascade", "collection_url"]
+
+    def exists(self):
+        return False
+
+    def get_queryset(self):
+        if self.queryset:
+            return self.queryset
+
+        if self.get('collection', None):
+            self.queryset = Collection.objects.filter(
+                **{self.get_owner_type_filter(): self.get('owner')}, mnemonic=self.get('collection'), version='HEAD'
+            )
+        elif self.get('collection_url', None):
+            self.queryset = Collection.objects.filter(uri=self.get('collection_url'))
+
+        return self.queryset
+
+    def process(self):
+        collection = self.get_queryset().first()
+
+        if collection:
+            collection.add_expressions(
+                self.get('data'), settings.API_BASE_URL, self.user, self.get('__cascade', False)
+            )
+            return CREATED
+        return FAILED
 
 
 class BulkImportInline(BaseImporter):
@@ -515,6 +547,11 @@ class BulkImportInline(BaseImporter):
             if item_type == 'mapping':
                 self.handle_item_import_result(
                     MappingImporter(item, self.user, self.update_if_exists).run(), original_item
+                )
+                continue
+            if item_type == 'reference':
+                self.handle_item_import_result(
+                    ReferenceImporter(item, self.user, self.update_if_exists).run(), original_item
                 )
                 continue
 

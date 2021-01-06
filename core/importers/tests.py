@@ -310,6 +310,46 @@ class BulkImportInlineTest(OCLTestCase):
         self.assertEqual(importer.failed, [])
         self.assertTrue(importer.elapsed_seconds > 0)
 
+    def test_reference_import(self):
+        importer = BulkImportInline(
+            open(
+                os.path.join(os.path.dirname(__file__), '..', 'samples/sample_collection_references.json'), 'r'
+            ).read(),
+            'ocladmin', True
+        )
+        importer.run()
+        self.assertEqual(importer.processed, 9)
+        self.assertEqual(len(importer.created), 9)
+        self.assertEqual(len(importer.exists), 0)
+        self.assertEqual(len(importer.updated), 0)
+        self.assertEqual(len(importer.failed), 0)
+        self.assertEqual(len(importer.invalid), 0)
+        self.assertEqual(len(importer.others), 0)
+        collection = Collection.objects.filter(uri='/orgs/PEPFAR/collections/MER-R-MOH-Facility-FY19/').first()
+        self.assertEqual(collection.concepts.count(), 4)
+        self.assertEqual(collection.mappings.count(), 0)
+        self.assertEqual(collection.references.count(), 4)
+
+        # duplicate run
+        importer = BulkImportInline(
+            open(
+                os.path.join(os.path.dirname(__file__), '..', 'samples/sample_collection_references.json'), 'r'
+            ).read(),
+            'ocladmin', True
+        )
+        importer.run()
+        self.assertEqual(importer.processed, 9)
+        self.assertEqual(len(importer.created), 2)
+        self.assertEqual(len(importer.exists), 3)
+        self.assertEqual(len(importer.updated), 4)
+        self.assertEqual(len(importer.failed), 0)
+        self.assertEqual(len(importer.invalid), 0)
+        self.assertEqual(len(importer.others), 0)
+        collection = Collection.objects.filter(uri='/orgs/PEPFAR/collections/MER-R-MOH-Facility-FY19/').first()
+        self.assertEqual(collection.concepts.count(), 4)
+        self.assertEqual(collection.mappings.count(), 0)
+        self.assertEqual(collection.references.count(), 4)
+
     def test_sample_import(self):
         importer = BulkImportInline(
             open(os.path.join(os.path.dirname(__file__), '..', 'samples/sample_ocldev.json'), 'r').read(),
