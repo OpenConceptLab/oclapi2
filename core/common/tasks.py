@@ -1,4 +1,4 @@
-from billiard import WorkerLostError
+from billiard.exceptions import WorkerLostError
 from celery.utils.log import get_task_logger
 from celery_once import QueueOnce
 from django.apps import apps
