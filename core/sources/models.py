@@ -1,7 +1,7 @@
 from django.db import models
 from django.db.models import UniqueConstraint
 from django.urls import resolve
-from pydash import get
+from pydash import get, compact
 
 from core.common.constants import HEAD, ACCESS_TYPE_NONE
 from core.common.models import ConceptContainerModel
@@ -102,3 +102,14 @@ class Source(ConceptContainerModel):
 
     def is_content_privately_referred(self):
         return self.any_concept_referred_privately() or self.any_mapping_referred_privately()
+
+    def update_mappings(self):
+        from core.mappings.models import Mapping
+        uris = compact([self.uri, self.canonical_url])
+        for mapping in Mapping.objects.filter(to_source__isnull=True, to_source_url__in=uris):
+            mapping.to_source = self
+            mapping.save()
+
+        for mapping in Mapping.objects.filter(from_source__isnull=True, from_source_url__in=uris):
+            mapping.from_source = self
+            mapping.save()

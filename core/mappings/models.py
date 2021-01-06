@@ -8,7 +8,7 @@ from pydash import get, compact
 from core.common.constants import TEMP, INCLUDE_RETIRED_PARAM, NAMESPACE_REGEX
 from core.common.mixins import SourceChildMixin
 from core.common.models import VersionedModel
-from core.common.utils import parse_updated_since_param, drop_version
+from core.common.utils import parse_updated_since_param, separate_version, to_parent_uri
 from core.mappings.constants import MAPPING_TYPE, MAPPING_IS_ALREADY_RETIRED, MAPPING_WAS_RETIRED, \
     MAPPING_IS_ALREADY_NOT_RETIRED, MAPPING_WAS_UNRETIRED, PERSIST_CLONE_ERROR, PERSIST_CLONE_SPECIFY_USER_ERROR
 from core.mappings.mixins import MappingValidationMixin
@@ -21,17 +21,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
 
     parent = models.ForeignKey('sources.Source', related_name='mappings_set', on_delete=models.DO_NOTHING)
     map_type = models.TextField()
-    from_concept = models.ForeignKey(
-        'concepts.Concept', related_name='mappings_from', on_delete=models.CASCADE
-    )
-    to_concept = models.ForeignKey(
-        'concepts.Concept', null=True, blank=True, related_name='mappings_to', on_delete=models.CASCADE
-    )
-    to_source = models.ForeignKey(
-        'sources.Source', null=True, blank=True, related_name='mappings_to', on_delete=models.CASCADE
-    )
-    to_concept_code = models.TextField(null=True, blank=True)
-    to_concept_name = models.TextField(null=True, blank=True)
+
     sources = models.ManyToManyField('sources.Source', related_name='mappings')
     external_id = models.TextField(null=True, blank=True)
     comment = models.TextField(null=True, blank=True)
@@ -41,8 +31,31 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
     mnemonic = models.CharField(
         max_length=255, validators=[RegexValidator(regex=NAMESPACE_REGEX)], default=uuid.uuid4,
     )
-    logo_path = None
+    from_concept = models.ForeignKey(
+        'concepts.Concept', null=True, blank=True, related_name='mappings_from', on_delete=models.SET_NULL
+    )
+    to_concept = models.ForeignKey(
+        'concepts.Concept', null=True, blank=True, related_name='mappings_to', on_delete=models.SET_NULL
+    )
+    to_source = models.ForeignKey(
+        'sources.Source', null=True, blank=True, related_name='mappings_to', on_delete=models.SET_NULL
+    )
+    from_source = models.ForeignKey(
+        'sources.Source', null=True, blank=True, related_name='mappings_from', on_delete=models.SET_NULL
+    )
 
+    # new schema -- https://github.com/OpenConceptLab/ocl_issues/issues/408
+    from_concept_code = models.TextField(null=True, blank=True)
+    from_concept_name = models.TextField(null=True, blank=True)
+    from_source_url = models.TextField(null=True, blank=True)
+    from_source_version = models.TextField(null=True, blank=True)
+
+    to_concept_code = models.TextField(null=True, blank=True)
+    to_concept_name = models.TextField(null=True, blank=True)
+    to_source_url = models.TextField(null=True, blank=True)
+    to_source_version = models.TextField(null=True, blank=True)
+
+    logo_path = None
     name = None
     full_name = None
     default_locale = None
@@ -69,44 +82,28 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         return self.parent
 
     @property
-    def from_source(self):
-        return self.from_concept.parent
-
-    @property
     def from_source_owner(self):
-        return str(self.from_source.parent)
+        return str(get(self.get_from_source(), 'parent', ''))
 
     @property
     def from_source_owner_mnemonic(self):
-        return self.from_source.parent.mnemonic
+        return get(self.get_from_source(), 'parent.mnemonic')
 
     @property
     def from_source_owner_type(self):
-        return self.from_source.parent.resource_type
+        return get(self.get_from_source(), 'parent.resource_type')
 
     @property
     def from_source_name(self):
-        return self.from_source.mnemonic
-
-    @property
-    def from_source_url(self):
-        return self.from_source.url
+        return get(self.get_from_source(), 'mnemonic')
 
     @property
     def from_source_shorthand(self):
         return "%s:%s" % (self.from_source_owner_mnemonic, self.from_source_name)
 
     @property
-    def from_concept_code(self):
-        return self.from_concept.mnemonic
-
-    @property
-    def from_concept_name(self):
-        return self.from_concept.display_name
-
-    @property
     def from_concept_url(self):
-        return self.from_concept.url
+        return get(self, 'from_concept.url', '')
 
     @property
     def from_concept_shorthand(self):
@@ -120,13 +117,17 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
 
         return None
 
+    def get_from_source(self):
+        if self.from_source_id:
+            return self.from_source
+        if self.from_concept_id:
+            return self.from_concept.parent
+
+        return None
+
     @property
     def to_source_name(self):
         return get(self.get_to_source(), 'mnemonic')
-
-    @property
-    def to_source_url(self):
-        return get(self.get_to_source(), 'url')
 
     @property
     def to_source_owner(self):
@@ -172,18 +173,25 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
             mnemonic=self.mnemonic,
             parent_id=self.parent_id,
             map_type=self.map_type,
-            from_concept_id=self.from_concept_id,
-            to_concept_id=self.to_concept_id,
-            to_source_id=self.to_source_id,
-            to_concept_code=self.to_concept_code,
-            to_concept_name=self.to_concept_name,
             retired=self.retired,
             released=self.released,
             is_latest_version=self.is_latest_version,
             extras=self.extras,
             public_access=self.public_access,
             external_id=self.external_id,
-            versioned_object_id=self.versioned_object_id
+            versioned_object_id=self.versioned_object_id,
+            to_concept_id=self.to_concept_id,
+            to_concept_code=self.to_concept_code,
+            to_concept_name=self.to_concept_name,
+            to_source_id=self.to_source_id,
+            to_source_url=self.to_source_url,
+            to_source_version=self.to_source_version,
+            from_concept_id=self.from_concept_id,
+            from_concept_code=self.from_concept_code,
+            from_concept_name=self.from_concept_name,
+            from_source_id=self.from_source_id,
+            from_source_url=self.from_source_url,
+            from_source_version=self.from_source_version,
         )
         if user:
             mapping.created_by = mapping.updated_by = user
@@ -200,42 +208,81 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         initial_version.save()
         return initial_version
 
-    def populate_relations_from_data(self, data):
+    def populate_fields_from_relations(self, data):
         from core.concepts.models import Concept
         from core.sources.models import Source
 
-        from_concept_url = data.get('from_concept_url', None)
         to_concept_url = data.get('to_concept_url', None)
+        from_concept_url = data.get('from_concept_url', None)
         to_source_url = data.get('to_source_url', None)
+        from_source_url = data.get('from_source_url', None)
 
-        if from_concept_url:
-            self.from_concept_id = get(Concept.objects.filter(uri=from_concept_url), '[0].versioned_object_id')
-        if to_concept_url:
-            self.to_concept_id = get(Concept.objects.filter(uri=to_concept_url), '[0].versioned_object_id')
-        if to_source_url:
-            self.to_source = Source.objects.filter(uri=drop_version(to_source_url)).first()
+        def get_concept(expression):
+            concept = Concept.objects.filter(uri=expression).first()
+            if concept:
+                return concept
+
+            parent_uri = to_parent_uri(expression)
+            code = expression.replace(parent_uri, '').replace('concepts/', '').split('/')[0]
+            return dict(mnemonic=code)
+
+        def get_source_info(parent_uri, child_uri, existing_version, concept):
+            if not parent_uri and not child_uri:
+                return existing_version, get(concept, 'parent.uri')
+
+            if parent_uri:
+                version, uri = separate_version(parent_uri)
+            else:
+                version, uri = separate_version(to_parent_uri(child_uri))
+
+            return version or existing_version, uri or get(concept, 'parent.uri')
+
+        from_concept = get_concept(from_concept_url) if from_concept_url else get(self, 'from_concept')
+        to_concept = get_concept(to_concept_url) if to_concept_url else get(self, 'to_concept')
+
+        self.from_concept_id = get(from_concept, 'id')
+        self.to_concept_id = get(to_concept, 'id')
+
+        self.from_concept_code = data.get(
+            'from_concept_code', None) or get(from_concept, 'mnemonic') or self.from_concept_code
+        self.from_concept_name = data.get('from_concept_name', None) or self.from_concept_name
+        self.to_concept_code = data.get('to_concept_code', None) or get(to_concept, 'mnemonic') or self.to_concept_code
+        self.to_concept_name = data.get('to_concept_name', None) or self.to_concept_name
+
+        self.from_source_version, self.from_source_url = get_source_info(
+            from_source_url, from_concept_url, self.from_source_version, from_concept
+        )
+        self.to_source_version, self.to_source_url = get_source_info(
+            to_source_url, to_concept_url, self.to_source_version, to_concept
+        )
+
+        self.to_source = Source.objects.filter(
+            models.Q(uri=self.to_source_url) | models.Q(canonical_url=self.to_source_url)
+        ).first()
+        self.from_source = Source.objects.filter(
+            models.Q(uri=self.from_source_url) | models.Q(canonical_url=self.from_source_url)
+        ).first()
 
     @classmethod
     def create_new_version_for(cls, instance, data, user):
-        instance.populate_relations_from_data(data)
+        instance.populate_fields_from_relations(data)
         instance.extras = data.get('extras', instance.extras)
         instance.external_id = data.get('external_id', instance.external_id)
         instance.comment = data.get('update_comment') or data.get('comment')
         instance.retired = data.get('retired', instance.retired)
         instance.mnemonic = data.get('mnemonic', instance.mnemonic)
         instance.map_type = data.get('map_type', instance.map_type)
-        instance.to_concept_code = data.get('to_concept_code', instance.to_concept_code)
-        instance.to_concept_name = data.get('to_concept_name', instance.to_concept_name)
 
         return cls.persist_clone(instance, user)
 
     @classmethod
     def persist_new(cls, data, user):
-        field_data = {k: v for k, v in data.items() if k not in ['from_concept_url', 'to_concept_url', 'to_source_url']}
-        url_params = {k: v for k, v in data.items() if k in ['from_concept_url', 'to_concept_url', 'to_source_url']}
+        related_fields = ['from_concept_url', 'to_concept_url', 'to_source_url', 'from_source_url']
+        field_data = {k: v for k, v in data.items() if k not in related_fields}
+        url_params = {k: v for k, v in data.items() if k in related_fields}
 
         mapping = Mapping(**field_data, created_by=user, updated_by=user)
-        mapping.populate_relations_from_data(url_params)
+        mapping.populate_fields_from_relations(url_params)
 
         mapping.mnemonic = data.get('mnemonic', TEMP)
         mapping.version = TEMP
@@ -244,20 +291,19 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         try:
             mapping.full_clean()
             mapping.save()
-            if mapping.id:
-                mapping.version = str(mapping.id)
-                if mapping.mnemonic == TEMP:
-                    mapping.mnemonic = str(mapping.id)
-                mapping.is_latest_version = False
-                mapping.versioned_object_id = mapping.id
-                mapping.save()
-                initial_version = cls.create_initial_version(mapping)
-                parent = mapping.parent
-                parent_head = parent.head
-                initial_version.sources.set([parent, parent_head])
-                mapping.sources.set([parent, parent_head])
-                parent.save()
-                parent_head.save()
+            mapping.versioned_object_id = mapping.id
+            mapping.version = str(mapping.id)
+            mapping.is_latest_version = False
+            if mapping.mnemonic == TEMP:
+                mapping.mnemonic = str(mapping.id)
+            mapping.save()
+            parent = mapping.parent
+            parent_head = parent.head
+            initial_version = cls.create_initial_version(mapping)
+            initial_version.sources.set([parent, parent_head])
+            mapping.sources.set([parent, parent_head])
+            parent.save()
+            parent_head.save()
         except ValidationError as ex:
             mapping.errors.update(ex.message_dict)
         except IntegrityError as ex:
@@ -269,13 +315,23 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         mapping = self.versioned_object
         mapping.extras = self.extras
         mapping.map_type = self.map_type
-        mapping.from_concept_id = self.from_concept_id
-        mapping.to_concept_id = self.to_concept_id
-        mapping.to_concept_code = self.to_concept_code
-        mapping.to_concept_name = self.to_concept_name
-        mapping.to_source_id = self.to_source_id
         mapping.retired = self.retired
         mapping.external_id = self.external_id or mapping.external_id
+
+        mapping.from_concept_id = self.from_concept_id
+        mapping.to_concept_id = self.to_concept_id
+        mapping.to_source_id = self.to_source_id
+        mapping.from_source_id = self.from_source_id
+
+        mapping.to_concept_code = self.to_concept_code
+        mapping.to_concept_name = self.to_concept_name
+        mapping.to_source_url = self.to_source_url
+        mapping.to_source_version = self.to_source_version
+        mapping.from_concept_code = self.from_concept_code
+        mapping.from_concept_name = self.from_concept_name
+        mapping.from_source_url = self.from_source_url
+        mapping.from_source_version = self.from_source_version
+
         mapping.save()
 
     @classmethod
@@ -294,8 +350,8 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         try:
             with transaction.atomic():
                 cls.pause_indexing()
+
                 obj.is_latest_version = True
-                obj.full_clean()
                 obj.save(**kwargs)
                 if obj.id:
                     obj.version = str(obj.id)
@@ -310,6 +366,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
                     obj.sources.set(compact([parent, parent_head]))
                     persisted = True
                     cls.resume_indexing()
+
                     def index_all():
                         parent.save()
                         parent_head.save()
@@ -375,3 +432,6 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
             queryset = queryset.filter(updated_at__gte=updated_since)
 
         return queryset.distinct()
+
+    def is_from_same_as_to(self):
+        return self.from_concept_code == self.to_concept_code and self.from_source_url == self.to_source_url

@@ -116,7 +116,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
     @property
     def concept(self):  # for url kwargs
-        return self.mnemonic # pragma: no cover
+        return self.mnemonic  # pragma: no cover
 
     @staticmethod
     def get_resource_url_kwarg():
@@ -432,6 +432,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
             concept.sources.set([parent_resource, parent_resource_head])
 
+            concept.update_mappings()
             parent_resource.save()
             parent_resource_head.save()
         except ValidationError as ex:
@@ -471,9 +472,9 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
                 obj.is_latest_version = True
                 obj.save(**kwargs)
-                obj.version = str(obj.id)
-                obj.save()
                 if obj.id:
+                    obj.version = str(obj.id)
+                    obj.save()
                     obj.set_locales()
                     obj.clean()  # clean here to validate locales that can only be saved after obj is saved
                     obj.update_versioned_object()
@@ -486,6 +487,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                     obj.sources.set(compact([parent, parent_head]))
                     persisted = True
                     cls.resume_indexing()
+
                     def index_all():
                         parent.save()
                         parent_head.save()
@@ -494,7 +496,6 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                         obj.save()
 
                     transaction.on_commit(index_all)
-
         except ValidationError as err:
             errors.update(err.message_dict)
         finally:
@@ -539,3 +540,18 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             query |= criteria
 
         return Concept.objects.filter(query)
+
+    def update_mappings(self):
+        from core.mappings.models import Mapping
+        parent_uris = compact([self.parent.uri, self.parent.canonical_url])
+        for mapping in Mapping.objects.filter(
+                to_concept_code=self.mnemonic, to_source_url__in=parent_uris, to_concept__isnull=True
+        ):
+            mapping.to_concept = self
+            mapping.save()
+
+        for mapping in Mapping.objects.filter(
+                from_concept_code=self.mnemonic, from_source_url__in=parent_uris, from_concept__isnull=True
+        ):
+            mapping.from_concept = self
+            mapping.save()

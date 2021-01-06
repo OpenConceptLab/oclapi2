@@ -19,7 +19,7 @@ from core.common.constants import HEAD, OCL_ORG_ID, SUPER_ADMIN_USER_ID
 from core.common.utils import (
     compact_dict_by_values, to_snake_case, flower_get, task_exists, parse_bulk_import_task_id,
     to_camel_case,
-    drop_version)
+    drop_version, is_versioned_uri, separate_version, to_parent_uri)
 from core.concepts.models import Concept, LocalizedText
 from core.mappings.models import Mapping
 from core.orgs.models import Organization
@@ -543,6 +543,73 @@ class UtilsTest(OCLTestCase):
         # org-source
         self.assertEqual(drop_version("/orgs/org/sources/source/"), "/orgs/org/sources/source/")
         self.assertEqual(drop_version("/orgs/org/sources/source/version/"), "/orgs/org/sources/source/")
+
+    def test_is_versioned_uri(self):
+        self.assertFalse(is_versioned_uri("/users/user/sources/source/"))
+        self.assertFalse(is_versioned_uri("/orgs/org/sources/source/"))
+        self.assertFalse(is_versioned_uri("/orgs/org/collections/coll/concepts/concept/"))
+
+        self.assertTrue(is_versioned_uri("/orgs/org/sources/source/version/"))
+        self.assertTrue(is_versioned_uri("/users/user/sources/source/1.2/"))
+        self.assertTrue(is_versioned_uri("/orgs/org/sources/source/concepts/concept/1.24/"))
+        self.assertTrue(is_versioned_uri("/orgs/org/sources/source/source-version/concepts/concept/1.24/"))
+        self.assertTrue(is_versioned_uri("/orgs/org/collections/coll/concepts/concept/1.24/"))
+        self.assertTrue(is_versioned_uri("/orgs/org/collections/coll/concepts/concept/version/"))
+        self.assertTrue(is_versioned_uri("/orgs/org/collections/coll/coll-version/concepts/concept/1.24/"))
+        self.assertTrue(is_versioned_uri("/users/user/collections/coll/coll-version/concepts/concept/1.23/"))
+        self.assertTrue(is_versioned_uri("/users/user/collections/coll/concepts/concept/1.23/"))
+
+    def test_separate_version(self):
+        self.assertEqual(
+            separate_version("/orgs/org/collections/coll/coll-version/concepts/concept/1.24/"),
+            ("1.24", "/orgs/org/collections/coll/coll-version/concepts/concept/")
+        )
+        self.assertEqual(
+            separate_version("/orgs/org/collections/coll/concepts/concept/1.24/"),
+            ("1.24", "/orgs/org/collections/coll/concepts/concept/")
+        )
+        self.assertEqual(
+            separate_version("/orgs/org/collections/coll/concepts/concept/"),
+            (None, "/orgs/org/collections/coll/concepts/concept/")
+        )
+
+    def test_to_parent_uri(self):
+        self.assertEqual(
+            to_parent_uri("/orgs/org/collections/coll/coll-version/concepts/concept/1.24/"),
+            "/orgs/org/collections/coll/coll-version/"
+        )
+        self.assertEqual(
+            to_parent_uri("/users/user/collections/coll/coll-version/mappings/M1234/1.24/"),
+            "/users/user/collections/coll/coll-version/"
+        )
+        self.assertEqual(
+            to_parent_uri("/orgs/org/collections/coll/coll-version/concepts/concept"),
+            "/orgs/org/collections/coll/coll-version/"
+        )
+        self.assertEqual(
+            to_parent_uri("/users/user/collections/coll/coll-version/"),
+            "/users/user/collections/coll/coll-version/"
+        )
+        self.assertEqual(
+            to_parent_uri("/users/user/collections/coll/"),
+            "/users/user/collections/coll/"
+        )
+        self.assertEqual(
+            to_parent_uri("/users/user/"),
+            "/users/user/"
+        )
+        self.assertEqual(
+            to_parent_uri("https://foobar.com/users/user/"),
+            "https://foobar.com/users/user/"
+        )
+        self.assertEqual(
+            to_parent_uri("https://foobar.com/users/user/sources/source/"),
+            "https://foobar.com/users/user/sources/source/"
+        )
+        self.assertEqual(
+            to_parent_uri("https://foobar.com/users/user/sources/source/mappings/mapping1/v1/"),
+            "https://foobar.com/users/user/sources/source/"
+        )
 
 
 class BaseModelTest(OCLTestCase):

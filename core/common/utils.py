@@ -273,6 +273,7 @@ def write_export_file(
 def get_api_base_url():
     return settings.API_BASE_URL
 
+
 def get_api_internal_base_url():
     return settings.API_INTERNAL_BASE_URL
 
@@ -399,3 +400,28 @@ def drop_version(expression):
         return '/'.join(parts[:-2]) + '/'
 
     return expression
+
+
+def is_versioned_uri(expression):
+    return expression != drop_version(expression)
+
+
+def to_parent_uri(expression):
+    splitter = None
+    if '/concepts/' in expression:
+        splitter = '/concepts/'
+    elif '/mappings/' in expression:
+        splitter = '/mappings/'
+
+    if splitter:
+        return expression.split(splitter)[0] + '/'
+
+    return expression
+
+
+def separate_version(expression):
+    versionless_expression = drop_version(expression)
+    if expression != versionless_expression:
+        return expression.replace(versionless_expression, '').replace('/', ''), versionless_expression
+
+    return None, expression

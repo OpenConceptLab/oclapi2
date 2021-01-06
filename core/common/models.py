@@ -441,6 +441,10 @@ class ConceptContainerModel(VersionedModel):
         elif parent_resource_type in ['UserProfile', 'User']:
             self.user = parent_resource
 
+    @staticmethod
+    def update_mappings():
+        pass
+
     @classmethod
     def persist_new(cls, obj, created_by, **kwargs):
         errors = dict()
@@ -468,6 +472,7 @@ class ConceptContainerModel(VersionedModel):
         obj.version = HEAD
         try:
             obj.save(**kwargs)
+            obj.update_mappings()
             persisted = True
         except IntegrityError as ex:
             errors.update({'__all__': ex.args})

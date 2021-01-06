@@ -15,21 +15,13 @@ class OpenMRSMappingValidator:
     def pair_must_be_unique(self):
         from .models import Mapping
         queryset = Mapping.objects.filter(
-            parent=self.mapping.parent, from_concept_id=self.mapping.from_concept_id, is_active=True, retired=False,
+            parent=self.mapping.parent, is_active=True, retired=False,
+            from_source_url=self.mapping.from_source_url, from_concept_code=self.mapping.from_concept_code,
+            to_source_url=self.mapping.to_source_url, to_concept_code=self.mapping.to_concept_code,
         )
 
         if self.mapping.versioned_object_id:
             queryset = queryset.exclude(versioned_object_id=self.mapping.versioned_object_id)
-        if self.mapping.to_concept_id:
-            queryset = queryset.filter(to_concept_id=self.mapping.to_concept_id)
-        elif self.mapping.to_concept_code:
-            queryset = queryset.filter(
-                to_source_id=self.mapping.to_source_id, to_concept_code=self.mapping.to_concept_code
-            )
-        elif self.mapping.to_concept_name:
-            queryset = queryset.filter(
-                to_source_id=self.mapping.to_source_id, to_concept_name=self.mapping.to_concept_name
-            )
 
         if queryset.exists():
             raise ValidationError(OPENMRS_SINGLE_MAPPING_BETWEEN_TWO_CONCEPTS)

@@ -78,9 +78,6 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
     def __delete_token(self):
         return Token.objects.filter(user=self).delete()
 
-    def __str__(self):
-        return str(self.mnemonic)
-
     @property
     def orgs_count(self):
         return self.organizations.count()

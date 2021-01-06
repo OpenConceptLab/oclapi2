@@ -1,4 +1,4 @@
-from rest_framework.fields import CharField, JSONField, IntegerField, SerializerMethodField, DateTimeField
+from rest_framework.fields import CharField, JSONField, IntegerField, DateTimeField
 from rest_framework.serializers import ModelSerializer
 
 from core.mappings.models import Mapping
@@ -12,8 +12,6 @@ class MappingListSerializer(ModelSerializer):
     update_comment = CharField(source='comment', required=False)
     url = CharField(required=False, source='versioned_object_url')
     version = CharField(read_only=True)
-    to_concept_code = SerializerMethodField()
-    to_concept_name = SerializerMethodField()
     version_created_on = DateTimeField(source='created_at', read_only=True)
 
     class Meta:
@@ -25,16 +23,9 @@ class MappingListSerializer(ModelSerializer):
             'from_source_owner', 'from_source_owner_type', 'from_source_url', 'from_source_name',
             'to_source_owner', 'to_source_owner_type', 'to_source_url', 'to_source_name',
             'url', 'version', 'id', 'versioned_object_id', 'versioned_object_url',
-            'is_latest_version', 'update_comment', 'version_url', 'uuid', 'version_created_on'
+            'is_latest_version', 'update_comment', 'version_url', 'uuid', 'version_created_on',
+            'from_source_version', 'to_source_version'
         )
-
-    @staticmethod
-    def get_to_concept_code(obj):
-        return obj.get_to_concept_code()
-
-    @staticmethod
-    def get_to_concept_name(obj):
-        return obj.get_to_concept_name()
 
 
 class MappingVersionListSerializer(MappingListSerializer):
@@ -53,8 +44,8 @@ class MappingDetailSerializer(MappingListSerializer):
     updated_by = CharField(source='created_by.username', read_only=True)
     parent_id = IntegerField(required=True)
     map_type = CharField(required=True)
-    to_concept_url = CharField(required=True)
-    from_concept_url = CharField(required=True)
+    to_concept_url = CharField(required=False)
+    from_concept_url = CharField(required=False)
     previous_version_url = CharField(read_only=True, source='prev_version_uri')
 
     class Meta:

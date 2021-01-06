@@ -29,7 +29,7 @@ class MappingTest(OCLTestCase):
         from_concept = ConceptFactory(
             parent=OrganizationSourceFactory(mnemonic='foobar', organization=OrganizationFactory(mnemonic='org-foo'))
         )
-        mapping = Mapping(from_concept=from_concept)
+        mapping = Mapping(from_concept=from_concept, from_source=from_concept.parent)
 
         self.assertEqual(mapping.from_source_owner_mnemonic, 'org-foo')
 
@@ -64,7 +64,7 @@ class MappingTest(OCLTestCase):
                 mnemonic='source-foo', organization=OrganizationFactory(mnemonic='org-foo')
             )
         )
-        mapping = Mapping(from_concept=from_concept)
+        mapping = Mapping(from_concept=from_concept, from_concept_code='concept-foo', from_source=from_concept.parent)
 
         self.assertEqual(mapping.from_concept_shorthand, 'org-foo:source-foo:concept-foo')
 
@@ -204,10 +204,13 @@ class OpenMRSMappingValidatorTest(OCLTestCase):
         concept1 = ConceptFactory(parent=source, names=[LocalizedTextFactory()])
         concept2 = ConceptFactory(parent=source, names=[LocalizedTextFactory()])
         mapping1 = MappingFactory.build(parent=source, to_concept=concept1, from_concept=concept2)
-        mapping1.clean()
+        mapping1.populate_fields_from_relations({})
         mapping1.save()
 
-        mapping2 = MappingFactory.build(parent=source, to_concept=concept1, from_concept=concept2)
+        self.assertIsNotNone(mapping1.id)
+
+        mapping2 = MappingFactory.build(parent=source, to_concept=concept1, from_concept=concept2, mnemonic='m2')
+        mapping2.populate_fields_from_relations({})
 
         with self.assertRaises(ValidationError) as ex:
             mapping2.clean()
@@ -215,6 +218,7 @@ class OpenMRSMappingValidatorTest(OCLTestCase):
         self.assertEqual(ex.exception.messages, ['There can be only one mapping between two concepts'])
 
         mapping3 = MappingFactory.build(parent=source, to_concept=concept2, from_concept=concept1)
+        mapping3.populate_fields_from_relations({})
         mapping3.clean()
 
     def test_invalid_map_type(self):
@@ -223,6 +227,7 @@ class OpenMRSMappingValidatorTest(OCLTestCase):
         concept2 = ConceptFactory(parent=source, names=[LocalizedTextFactory()])
 
         mapping = MappingFactory.build(parent=source, to_concept=concept1, from_concept=concept2, map_type='Foo bar')
+        mapping.populate_fields_from_relations({})
 
         with self.assertRaises(ValidationError) as ex:
             mapping.clean()
@@ -230,4 +235,5 @@ class OpenMRSMappingValidatorTest(OCLTestCase):
 
         # 'Q-AND-A' is present in OpenMRS lookup values
         mapping = MappingFactory.build(parent=source, to_concept=concept1, from_concept=concept2, map_type='Q-AND-A')
+        mapping.populate_fields_from_relations({})
         mapping.clean()
