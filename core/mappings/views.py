@@ -82,7 +82,7 @@ class MappingListView(MappingBaseView, ListWithHeadersMixin, CreateModelMixin):
             queryset = queryset.filter(is_latest_version=True)
         return queryset.select_related(
             'parent__organization', 'parent__user', 'from_concept__parent', 'to_concept__parent', 'to_source',
-            'versioned_object',
+            'versioned_object', 'from_source',
         )
 
     def get(self, request, *args, **kwargs):

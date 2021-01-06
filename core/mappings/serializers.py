@@ -22,6 +22,8 @@ class MappingListSerializer(ModelSerializer):
     to_concept = ConceptListSerializer()
     from_source = SourceListSerializer()
     to_source = SourceListSerializer()
+    from_concept_name_resolved = CharField(source='from_concept.display_name', read_only=True)
+    to_concept_name_resolved = CharField(source='to_concept.display_name', read_only=True)
 
     class Meta:
         model = Mapping
@@ -33,7 +35,8 @@ class MappingListSerializer(ModelSerializer):
             'to_source_owner', 'to_source_owner_type', 'to_source_url', 'to_source_name',
             'url', 'version', 'id', 'versioned_object_id', 'versioned_object_url',
             'is_latest_version', 'update_comment', 'version_url', 'uuid', 'version_created_on',
-            'from_source_version', 'to_source_version', 'from_concept', 'to_concept', 'from_source', 'to_source'
+            'from_source_version', 'to_source_version', 'from_concept', 'to_concept', 'from_source', 'to_source',
+            'from_concept_name_resolved', 'to_concept_name_resolved'
         )
 
     def __init__(self, *args, **kwargs):
