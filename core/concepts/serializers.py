@@ -121,10 +121,11 @@ class ConceptListSerializer(ModelSerializer):
 
     def get_mappings(self, obj):
         from core.mappings.serializers import MappingDetailSerializer
+        context = get(self, 'context')
         if self.include_direct_mappings:
-            return MappingDetailSerializer(obj.get_unidirectional_mappings(), many=True).data
+            return MappingDetailSerializer(obj.get_unidirectional_mappings(), many=True, context=context).data
         if self.include_indirect_mappings:
-            return MappingDetailSerializer(obj.get_bidirectional_mappings(), many=True).data
+            return MappingDetailSerializer(obj.get_bidirectional_mappings(), many=True, context=context).data
 
         return []
 
@@ -185,10 +186,11 @@ class ConceptDetailSerializer(ModelSerializer):
 
     def get_mappings(self, obj):
         from core.mappings.serializers import MappingDetailSerializer
+        context = get(self, 'context')
         if self.include_indirect_mappings:
-            return MappingDetailSerializer(obj.get_bidirectional_mappings(), many=True).data
+            return MappingDetailSerializer(obj.get_bidirectional_mappings(), many=True, context=context).data
         if self.include_direct_mappings:
-            return MappingDetailSerializer(obj.get_unidirectional_mappings(), many=True).data
+            return MappingDetailSerializer(obj.get_unidirectional_mappings(), many=True, context=context).data
 
         return []
 
@@ -245,9 +247,10 @@ class ConceptVersionDetailSerializer(ModelSerializer):
 
     def get_mappings(self, obj):
         from core.mappings.serializers import MappingDetailSerializer
+        context = get(self, 'context')
         if self.include_direct_mappings:
-            return MappingDetailSerializer(obj.get_unidirectional_mappings(), many=True).data
+            return MappingDetailSerializer(obj.get_unidirectional_mappings(), many=True, context=context).data
         if self.include_indirect_mappings:
-            return MappingDetailSerializer(obj.get_bidirectional_mappings(), many=True).data
+            return MappingDetailSerializer(obj.get_bidirectional_mappings(), many=True, context=context).data
 
         return []
