@@ -360,7 +360,7 @@ class MappingListViewTest(OCLAPITestCase):
         self.assertEqual(mapping.to_source, concept.parent)
         self.assertEqual(mapping.to_concept, concept)
 
-    def test_post_using_canonical_url_201(self):
+    def test_post_using_canonical_url_201(self):  # pylint: disable=too-many-statements
         source = UserSourceFactory(user=self.user, mnemonic='source')
         response = self.client.post(
             source.mappings_url,
@@ -428,6 +428,115 @@ class MappingListViewTest(OCLAPITestCase):
         self.assertTrue(mapping.from_concept_code == concept.mnemonic == '32700-7')
         self.assertEqual(mapping.from_concept_name, 'Microscopic observation [Identifier] in Blood by Malaria smear')
         self.assertNotEqual(concept.display_name, 'Microscopic observation [Identifier] in Blood by Malaria smear')
+
+        # retrievals with lookups
+        response = self.client.get(
+            mapping.uri,
+            HTTP_AUTHORIZATION='Token ' + self.token,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['url'], mapping.uri)
+        self.assertTrue('from_concept' not in response.data)
+        self.assertTrue('to_concept' not in response.data)
+        self.assertTrue('from_source' not in response.data)
+        self.assertTrue('to_source' not in response.data)
+
+        response = self.client.get(
+            mapping.uri + '?lookupConcepts=false',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['url'], mapping.uri)
+        self.assertTrue('from_concept' not in response.data)
+        self.assertTrue('to_concept' not in response.data)
+        self.assertTrue('from_source' not in response.data)
+        self.assertTrue('to_source' not in response.data)
+
+        response = self.client.get(
+            mapping.uri + '?lookupConcepts=true',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['url'], mapping.uri)
+        self.assertIsNotNone(response.data['from_concept'])
+        self.assertIsNotNone(response.data['to_concept'])
+        self.assertTrue('from_source' not in response.data)
+        self.assertTrue('to_source' not in response.data)
+
+        response = self.client.get(
+            mapping.uri + '?lookupFromConcept=true',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['url'], mapping.uri)
+        self.assertIsNotNone(response.data['from_concept'])
+        self.assertTrue('to_concept' not in response.data)
+        self.assertTrue('from_source' not in response.data)
+        self.assertTrue('to_source' not in response.data)
+
+        response = self.client.get(
+            mapping.uri + '?lookupToConcept=true',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['url'], mapping.uri)
+        self.assertIsNotNone(response.data['to_concept'])
+        self.assertTrue('from_concept' not in response.data)
+        self.assertTrue('from_source' not in response.data)
+        self.assertTrue('to_source' not in response.data)
+
+        response = self.client.get(
+            mapping.uri + '?lookupSources=true',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['url'], mapping.uri)
+        self.assertTrue('from_concept' not in response.data)
+        self.assertTrue('to_concept' not in response.data)
+        self.assertIsNotNone(response.data['from_source'])
+        self.assertIsNotNone(response.data['to_source'])
+
+        response = self.client.get(
+            mapping.uri + '?lookupFromSource=true',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['url'], mapping.uri)
+        self.assertTrue('from_concept' not in response.data)
+        self.assertTrue('to_concept' not in response.data)
+        self.assertIsNotNone(response.data['from_source'])
+        self.assertTrue('to_source' not in response.data)
+
+        response = self.client.get(
+            mapping.uri + '?lookupToSource=true',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['url'], mapping.uri)
+        self.assertTrue('from_concept' not in response.data)
+        self.assertTrue('to_concept' not in response.data)
+        self.assertIsNotNone(response.data['to_source'])
+        self.assertTrue('from_source' not in response.data)
+
+        response = self.client.get(
+            mapping.uri + '?lookupFromSource=true&lookupToSource=true',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['url'], mapping.uri)
+        self.assertTrue('from_concept' not in response.data)
+        self.assertTrue('to_concept' not in response.data)
+        self.assertIsNotNone(response.data['from_source'])
+        self.assertIsNotNone(response.data['to_source'])
 
 
 class MappingRetrieveUpdateDestroyViewTest(OCLAPITestCase):

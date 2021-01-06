@@ -1,7 +1,12 @@
+from pydash import get
 from rest_framework.fields import CharField, JSONField, IntegerField, DateTimeField
 from rest_framework.serializers import ModelSerializer
 
+from core.common.constants import MAPPING_LOOKUP_CONCEPTS, MAPPING_LOOKUP_SOURCES, MAPPING_LOOKUP_FROM_CONCEPT, \
+    MAPPING_LOOKUP_TO_CONCEPT, MAPPING_LOOKUP_FROM_SOURCE, MAPPING_LOOKUP_TO_SOURCE
+from core.concepts.serializers import ConceptListSerializer, ConceptDetailSerializer
 from core.mappings.models import Mapping
+from core.sources.serializers import SourceListSerializer, SourceDetailSerializer
 
 
 class MappingListSerializer(ModelSerializer):
@@ -13,6 +18,10 @@ class MappingListSerializer(ModelSerializer):
     url = CharField(required=False, source='versioned_object_url')
     version = CharField(read_only=True)
     version_created_on = DateTimeField(source='created_at', read_only=True)
+    from_concept = ConceptListSerializer()
+    to_concept = ConceptListSerializer()
+    from_source = SourceListSerializer()
+    to_source = SourceListSerializer()
 
     class Meta:
         model = Mapping
@@ -24,8 +33,40 @@ class MappingListSerializer(ModelSerializer):
             'to_source_owner', 'to_source_owner_type', 'to_source_url', 'to_source_name',
             'url', 'version', 'id', 'versioned_object_id', 'versioned_object_url',
             'is_latest_version', 'update_comment', 'version_url', 'uuid', 'version_created_on',
-            'from_source_version', 'to_source_version'
+            'from_source_version', 'to_source_version', 'from_concept', 'to_concept', 'from_source', 'to_source'
         )
+
+    def __init__(self, *args, **kwargs):
+        params = get(kwargs, 'context.request.query_params')
+        self.query_params = params.dict() if params else dict()
+        self.include_from_source = False
+        self.include_to_source = False
+        self.include_sources = False
+        self.include_from_concept = False
+        self.include_to_concept = False
+        self.include_concepts = False
+
+        self.include_concepts = self.query_params.get(MAPPING_LOOKUP_CONCEPTS) in ['true', True]
+        self.include_from_concept = self.query_params.get(MAPPING_LOOKUP_FROM_CONCEPT) in ['true', True]
+        self.include_to_concept = self.query_params.get(MAPPING_LOOKUP_TO_CONCEPT) in ['true', True]
+
+        self.include_sources = self.query_params.get(MAPPING_LOOKUP_SOURCES) in ['true', True]
+        self.include_from_source = self.query_params.get(MAPPING_LOOKUP_FROM_SOURCE) in ['true', True]
+        self.include_to_source = self.query_params.get(MAPPING_LOOKUP_TO_SOURCE) in ['true', True]
+
+        if not self.include_concepts:
+            if not self.include_from_concept:
+                self.fields.pop('from_concept')
+            if not self.include_to_concept:
+                self.fields.pop('to_concept')
+
+        if not self.include_sources:
+            if not self.include_from_source:
+                self.fields.pop('from_source')
+            if not self.include_to_source:
+                self.fields.pop('to_source')
+
+        super().__init__(*args, **kwargs)
 
 
 class MappingVersionListSerializer(MappingListSerializer):
@@ -47,6 +88,10 @@ class MappingDetailSerializer(MappingListSerializer):
     to_concept_url = CharField(required=False)
     from_concept_url = CharField(required=False)
     previous_version_url = CharField(read_only=True, source='prev_version_uri')
+    from_concept = ConceptDetailSerializer()
+    to_concept = ConceptDetailSerializer()
+    from_source = SourceDetailSerializer()
+    to_source = SourceDetailSerializer()
 
     class Meta:
         model = Mapping

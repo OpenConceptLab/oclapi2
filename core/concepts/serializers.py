@@ -1,10 +1,10 @@
+from pydash import get
 from rest_framework.fields import CharField, DateTimeField, BooleanField, URLField, JSONField, SerializerMethodField, \
     UUIDField
 from rest_framework.serializers import ModelSerializer
 
 from core.common.constants import INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_MAPPINGS_PARAM
 from core.concepts.models import Concept, LocalizedText
-from core.mappings.serializers import MappingDetailSerializer
 
 
 class LocalizedNameSerializer(ModelSerializer):
@@ -99,7 +99,8 @@ class ConceptListSerializer(ModelSerializer):
     mappings = SerializerMethodField()
 
     def __init__(self, *args, **kwargs):
-        self.query_params = kwargs.get('context').get('request').query_params.dict()
+        params = get(kwargs, 'context.request.query_params')
+        self.query_params = params.dict() if params else dict()
         self.include_indirect_mappings = self.query_params.get(INCLUDE_INVERSE_MAPPINGS_PARAM) in ['true', True]
         self.include_direct_mappings = self.query_params.get(INCLUDE_MAPPINGS_PARAM) in ['true', True]
 
@@ -119,6 +120,7 @@ class ConceptListSerializer(ModelSerializer):
         return obj.iso_639_1_locale
 
     def get_mappings(self, obj):
+        from core.mappings.serializers import MappingDetailSerializer
         if self.include_direct_mappings:
             return MappingDetailSerializer(obj.get_unidirectional_mappings(), many=True).data
         if self.include_indirect_mappings:
@@ -165,7 +167,8 @@ class ConceptDetailSerializer(ModelSerializer):
     created_by = DateTimeField(source='created_by.username', read_only=True)
 
     def __init__(self, *args, **kwargs):
-        self.query_params = kwargs.get('context').get('request').query_params.dict()
+        params = get(kwargs, 'context.request.query_params')
+        self.query_params = params.dict() if params else dict()
         self.include_indirect_mappings = self.query_params.get(INCLUDE_INVERSE_MAPPINGS_PARAM) in ['true', True]
         self.include_direct_mappings = self.query_params.get(INCLUDE_MAPPINGS_PARAM) in ['true', True]
 
@@ -181,6 +184,7 @@ class ConceptDetailSerializer(ModelSerializer):
         )
 
     def get_mappings(self, obj):
+        from core.mappings.serializers import MappingDetailSerializer
         if self.include_indirect_mappings:
             return MappingDetailSerializer(obj.get_bidirectional_mappings(), many=True).data
         if self.include_direct_mappings:
@@ -220,13 +224,13 @@ class ConceptVersionDetailSerializer(ModelSerializer):
     previous_version_url = CharField(source='prev_version_uri', read_only=True)
 
     def __init__(self, *args, **kwargs):
-        context = kwargs.get('context')
+        params = get(kwargs, 'context.request.query_params')
+
         self.include_indirect_mappings = False
         self.include_direct_mappings = False
-        if context:
-            self.query_params = context.get('request').query_params.dict()
-            self.include_indirect_mappings = self.query_params.get(INCLUDE_INVERSE_MAPPINGS_PARAM) == 'true'
-            self.include_direct_mappings = self.query_params.get(INCLUDE_MAPPINGS_PARAM) == 'true'
+        self.query_params = params.dict() if params else dict()
+        self.include_indirect_mappings = self.query_params.get(INCLUDE_INVERSE_MAPPINGS_PARAM) == 'true'
+        self.include_direct_mappings = self.query_params.get(INCLUDE_MAPPINGS_PARAM) == 'true'
 
         super().__init__(*args, **kwargs)
 
@@ -240,6 +244,7 @@ class ConceptVersionDetailSerializer(ModelSerializer):
         )
 
     def get_mappings(self, obj):
+        from core.mappings.serializers import MappingDetailSerializer
         if self.include_direct_mappings:
             return MappingDetailSerializer(obj.get_unidirectional_mappings(), many=True).data
         if self.include_indirect_mappings:
