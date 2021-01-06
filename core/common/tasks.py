@@ -1,3 +1,4 @@
+from billiard import WorkerLostError
 from celery.utils.log import get_task_logger
 from celery_once import QueueOnce
 from django.apps import apps
@@ -95,12 +96,18 @@ def __handle_pre_delete(instance):
     registry.delete_related(instance)
 
 
-@app.task(ignore_result=True)
+@app.task(
+    ignore_result=True, autoretry_for=(Exception, WorkerLostError, ), retry_kwargs={'max_retries': 2, 'countdown': 2},
+    acks_late=True, reject_on_worker_lost=True
+)
 def handle_save(app_name, model_name, instance_id):
     __handle_save(apps.get_model(app_name, model_name).objects.get(id=instance_id))
 
 
-@app.task(ignore_result=True)
+@app.task(
+    ignore_result=True, autoretry_for=(Exception, WorkerLostError, ), retry_kwargs={'max_retries': 2, 'countdown': 2},
+    acks_late=True, reject_on_worker_lost=True
+)
 def handle_m2m_changed(app_name, model_name, instance_id, action):
     instance = apps.get_model(app_name, model_name).objects.get(id=instance_id)
     if action in ('post_add', 'post_remove', 'post_clear'):
