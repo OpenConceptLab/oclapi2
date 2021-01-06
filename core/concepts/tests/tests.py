@@ -165,7 +165,7 @@ class ConceptTest(OCLTestCase):
         concept = ConceptFactory(descriptions=(es_locale, en_locale), names=(en_locale,), released=True)
         cloned_concept = concept.clone()
 
-        self.assertEqual(cloned_concept.version, '--TEMP--')
+        self.assertTrue(cloned_concept.version.startswith('--TEMP--'))
         self.assertEqual(cloned_concept.mnemonic, concept.mnemonic)
         self.assertEqual(cloned_concept.parent, concept.parent)
         self.assertEqual(len(cloned_concept.cloned_names), concept.names.count())

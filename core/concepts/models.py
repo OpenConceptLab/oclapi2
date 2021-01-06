@@ -4,10 +4,10 @@ from django.db import models, IntegrityError, transaction
 from django.db.models import F
 from pydash import get, compact
 
-from core.common.constants import TEMP, ISO_639_1, INCLUDE_RETIRED_PARAM
+from core.common.constants import ISO_639_1, INCLUDE_RETIRED_PARAM
 from core.common.mixins import SourceChildMixin
 from core.common.models import VersionedModel
-from core.common.utils import reverse_resource, parse_updated_since_param
+from core.common.utils import reverse_resource, parse_updated_since_param, generate_temp_version
 from core.concepts.constants import CONCEPT_TYPE, LOCALES_FULLY_SPECIFIED, LOCALES_SHORT, LOCALES_SEARCH_INDEX_TERM, \
     CONCEPT_WAS_RETIRED, CONCEPT_IS_ALREADY_RETIRED, CONCEPT_IS_ALREADY_NOT_RETIRED, CONCEPT_WAS_UNRETIRED, \
     PERSIST_CLONE_ERROR, PERSIST_CLONE_SPECIFY_USER_ERROR, ALREADY_EXISTS
@@ -300,7 +300,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     def clone(self):
         concept_version = Concept(
             mnemonic=self.mnemonic,
-            version=TEMP,
+            version=generate_temp_version(),
             public_access=self.public_access,
             external_id=self.external_id,
             concept_class=self.concept_class,
@@ -332,7 +332,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
     @classmethod
     def create_initial_version(cls, concept, **kwargs):
-        initial_version = cls.version_for_concept(concept, TEMP)
+        initial_version = cls.version_for_concept(concept, generate_temp_version())
         initial_version.save(**kwargs)
         initial_version.version = initial_version.id
         initial_version.released = True
@@ -404,7 +404,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             ) for desc in data.pop('descriptions', []) or []
         ]
         concept = Concept(**data)
-        concept.version = TEMP
+        concept.version = generate_temp_version()
         if user:
             concept.created_by = concept.updated_by = user
         concept.errors = dict()
@@ -461,7 +461,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             return errors
         obj.created_by = user
         obj.updated_by = user
-        obj.version = TEMP
+        obj.version = obj.version or generate_temp_version()
         parent = obj.parent
         parent_head = parent.head
         persisted = False

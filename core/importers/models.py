@@ -483,7 +483,11 @@ class BulkImportInline(BaseImporter):
         if result is False:
             self.invalid.append(item)
             return
-        if result == FAILED or isinstance(result, dict):
+        if result == FAILED:
+            self.failed.append(item)
+            return
+        if isinstance(result, dict):
+            item['errors'] = result
             self.failed.append(item)
             return
         if result == CREATED:

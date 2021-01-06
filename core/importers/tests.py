@@ -116,7 +116,7 @@ class BulkImportInlineTest(OCLTestCase):
         self.assertEqual(importer.processed, 1)
         self.assertEqual(len(importer.created), 0)
         self.assertEqual(len(importer.failed), 1)
-        self.assertEqual(importer.failed[0], data)
+        self.assertEqual(importer.failed[0], {**data, 'errors': {'parent': 'Parent resource cannot be None.'}})
         self.assertTrue(importer.elapsed_seconds > 0)
 
     def test_source_and_version_import(self):
@@ -184,7 +184,7 @@ class BulkImportInlineTest(OCLTestCase):
         self.assertEqual(importer.processed, 1)
         self.assertEqual(len(importer.created), 0)
         self.assertEqual(len(importer.failed), 1)
-        self.assertEqual(importer.failed[0], data)
+        self.assertEqual(importer.failed[0], {**data, 'errors': {'parent': 'Parent resource cannot be None.'}})
         self.assertTrue(importer.elapsed_seconds > 0)
 
     def test_collection_and_version_import(self):
@@ -361,6 +361,21 @@ class BulkImportInlineTest(OCLTestCase):
         self.assertEqual(len(importer.created), 47)
         self.assertEqual(len(importer.exists), 3)
         self.assertEqual(len(importer.updated), 14)
+        self.assertEqual(len(importer.failed), 0)
+        self.assertEqual(len(importer.invalid), 0)
+        self.assertEqual(len(importer.others), 0)
+
+    def test_pepfar_import(self):
+        importer = BulkImportInline(
+            open(os.path.join(os.path.dirname(__file__), '..', 'samples/pepfar_datim_moh_fy19.json'), 'r').read(),
+            'ocladmin', True
+        )
+        importer.run()
+
+        self.assertEqual(importer.processed, 413)
+        self.assertEqual(len(importer.created), 411)
+        self.assertEqual(len(importer.exists), 0)
+        self.assertEqual(len(importer.updated), 2)
         self.assertEqual(len(importer.failed), 0)
         self.assertEqual(len(importer.invalid), 0)
         self.assertEqual(len(importer.others), 0)

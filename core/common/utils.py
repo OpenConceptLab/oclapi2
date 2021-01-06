@@ -15,7 +15,7 @@ from pydash import flatten
 from requests.auth import HTTPBasicAuth
 from rest_framework.utils import encoders
 
-from core.common.constants import UPDATED_SINCE_PARAM, BULK_IMPORT_QUEUES_COUNT
+from core.common.constants import UPDATED_SINCE_PARAM, BULK_IMPORT_QUEUES_COUNT, TEMP
 from core.common.services import S3
 
 
@@ -425,3 +425,7 @@ def separate_version(expression):
         return expression.replace(versionless_expression, '').replace('/', ''), versionless_expression
 
     return None, expression
+
+
+def generate_temp_version():
+    return "{}-{}".format(TEMP, str(uuid.uuid4())[:8])

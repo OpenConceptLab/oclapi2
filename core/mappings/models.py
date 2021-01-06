@@ -5,10 +5,10 @@ from django.core.validators import RegexValidator
 from django.db import models, IntegrityError, transaction
 from pydash import get, compact
 
-from core.common.constants import TEMP, INCLUDE_RETIRED_PARAM, NAMESPACE_REGEX
+from core.common.constants import INCLUDE_RETIRED_PARAM, NAMESPACE_REGEX
 from core.common.mixins import SourceChildMixin
 from core.common.models import VersionedModel
-from core.common.utils import parse_updated_since_param, separate_version, to_parent_uri
+from core.common.utils import parse_updated_since_param, separate_version, to_parent_uri, generate_temp_version
 from core.mappings.constants import MAPPING_TYPE, MAPPING_IS_ALREADY_RETIRED, MAPPING_WAS_RETIRED, \
     MAPPING_IS_ALREADY_NOT_RETIRED, MAPPING_WAS_UNRETIRED, PERSIST_CLONE_ERROR, PERSIST_CLONE_SPECIFY_USER_ERROR
 from core.mappings.mixins import MappingValidationMixin
@@ -19,7 +19,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         db_table = 'mappings'
         unique_together = ('mnemonic', 'version', 'parent')
 
-    parent = models.ForeignKey('sources.Source', related_name='mappings_set', on_delete=models.DO_NOTHING)
+    parent = models.ForeignKey('sources.Source', related_name='mappings_set', on_delete=models.CASCADE)
     map_type = models.TextField()
 
     sources = models.ManyToManyField('sources.Source', related_name='mappings')
@@ -169,7 +169,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
 
     def clone(self, user=None):
         mapping = Mapping(
-            version=TEMP,
+            version=generate_temp_version(),
             mnemonic=self.mnemonic,
             parent_id=self.parent_id,
             map_type=self.map_type,
@@ -284,8 +284,9 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         mapping = Mapping(**field_data, created_by=user, updated_by=user)
         mapping.populate_fields_from_relations(url_params)
 
-        mapping.mnemonic = data.get('mnemonic', TEMP)
-        mapping.version = TEMP
+        temp_version = generate_temp_version()
+        mapping.mnemonic = data.get('mnemonic', temp_version)
+        mapping.version = temp_version
         mapping.errors = dict()
 
         try:
@@ -294,7 +295,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
             mapping.versioned_object_id = mapping.id
             mapping.version = str(mapping.id)
             mapping.is_latest_version = False
-            if mapping.mnemonic == TEMP:
+            if mapping.mnemonic == temp_version:
                 mapping.mnemonic = str(mapping.id)
             mapping.save()
             parent = mapping.parent
@@ -340,7 +341,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         if not user:
             errors['version_created_by'] = PERSIST_CLONE_SPECIFY_USER_ERROR
             return errors
-        obj.version = TEMP
+        obj.version = obj.version or generate_temp_version()
         obj.created_by = user
         obj.updated_by = user
         parent = obj.parent
