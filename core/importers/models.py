@@ -7,7 +7,7 @@ from celery.utils.log import get_task_logger
 from django.conf import settings
 from django.db.models import F
 from ocldev.oclfleximporter import OclFlexImporter
-from pydash import compact
+from pydash import compact, get
 
 from core.collections.models import Collection
 from core.common.constants import HEAD
@@ -657,6 +657,8 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
                     self.parts[-1].append(line)
                 prev_line = line
 
+        self.parts = compact(self.parts)
+
     @staticmethod
     def chunker_list(seq, size):
         return (seq[i::size] for i in range(size))
@@ -717,15 +719,17 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
             print("TASK ID: {}".format(self.self_task_id))
             print("***************")
         for part_list in self.parts:
-            part_type = part_list[0].get('type').lower()
-            is_child = part_type in ['concept', 'mapping']
-            start_time = time.time()
-            self.queue_tasks(part_list, is_child)
-            self.wait_till_tasks_alive()
-            if is_child:
-                if part_type not in self.resource_wise_time:
-                    self.resource_wise_time[part_type] = 0
-                self.resource_wise_time[part_type] += (time.time() - start_time)
+            if part_list:
+                part_type = get(part_list, '0.type', '').lower()
+                if part_type:
+                    is_child = part_type in ['concept', 'mapping']
+                    start_time = time.time()
+                    self.queue_tasks(part_list, is_child)
+                    self.wait_till_tasks_alive()
+                    if is_child:
+                        if part_type not in self.resource_wise_time:
+                            self.resource_wise_time[part_type] = 0
+                        self.resource_wise_time[part_type] += (time.time() - start_time)
 
         self.update_elapsed_seconds()
 
