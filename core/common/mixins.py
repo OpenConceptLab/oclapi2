@@ -112,7 +112,7 @@ class ListWithHeadersMixin(ListModelMixin):
         # Skip pagination if compressed results are requested
         compress = self.should_compress()
 
-        if not compress and (not self.limit or int(self.limit) == 0 or int(self.limit) > 100):
+        if not compress and (not self.limit or int(self.limit) == 0 or int(self.limit) > 1000):
             self.limit = LIST_DEFAULT_LIMIT
 
         sorted_list = self.object_list
