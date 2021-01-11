@@ -1,4 +1,4 @@
-from rest_framework.permissions import BasePermission
+from rest_framework.permissions import BasePermission, IsAuthenticatedOrReadOnly
 
 from core.common.permissions import CanViewConceptDictionary, CanEditConceptDictionary
 
@@ -14,9 +14,9 @@ class CanAccessParentDictionary(BasePermission):
         return parent_view_perm.has_object_permission(request, view, parent)
 
 
-class CanViewParentDictionary(CanAccessParentDictionary):
-    parent_permission_class = CanViewConceptDictionary
+class CanViewParentDictionary(IsAuthenticatedOrReadOnly, CanAccessParentDictionary):
+    pass
 
 
-class CanEditParentDictionary(CanAccessParentDictionary):
-    parent_permission_class = CanEditConceptDictionary
+class CanEditParentDictionary(IsAuthenticatedOrReadOnly, CanAccessParentDictionary):
+    pass

@@ -194,6 +194,28 @@ class ConceptRetrieveUpdateDestroyView(ConceptBaseView, RetrieveAPIView, UpdateA
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
+class ConceptReactivateView(ConceptBaseView, UpdateAPIView):
+    def get_object(self, queryset=None):
+        queryset = self.get_queryset()
+        return get_object_or_404(queryset, id=F('versioned_object_id'))
+
+    def get_permissions(self):
+        if self.request.method in ['GET']:
+            return [CanViewParentDictionary(), ]
+
+        return [CanEditParentDictionary(), ]
+
+    def update(self, request, *args, **kwargs):
+        concept = self.get_object()
+        comment = request.data.get('update_comment', None) or request.data.get('comment', None)
+        errors = concept.unretire(request.user, comment)
+
+        if errors:
+            return Response(errors, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
 class ConceptVersionsView(ConceptBaseView, ConceptDictionaryMixin, ListWithHeadersMixin):
     permission_classes = (CanViewParentDictionary,)
 
