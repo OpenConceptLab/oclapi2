@@ -196,8 +196,7 @@ class ConceptRetrieveUpdateDestroyView(ConceptBaseView, RetrieveAPIView, UpdateA
 
 class ConceptReactivateView(ConceptBaseView, UpdateAPIView):
     def get_object(self, queryset=None):
-        queryset = self.get_queryset()
-        return get_object_or_404(queryset, id=F('versioned_object_id'))
+        return get_object_or_404(self.get_queryset(), id=F('versioned_object_id'))
 
     def get_permissions(self):
         if self.request.method in ['GET']:

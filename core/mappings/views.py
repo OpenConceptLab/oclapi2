@@ -160,6 +160,29 @@ class MappingRetrieveUpdateDestroyView(MappingBaseView, RetrieveAPIView, UpdateA
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
+class MappingReactivateView(MappingBaseView, UpdateAPIView):
+    serializer_class = MappingDetailSerializer
+
+    def get_object(self, queryset=None):
+        return get_object_or_404(self.get_queryset(), id=F('versioned_object_id'))
+
+    def get_permissions(self):
+        if self.request.method in ['GET']:
+            return [CanViewParentDictionary(), ]
+
+        return [CanEditParentDictionary(), ]
+
+    def update(self, request, *args, **kwargs):
+        mapping = self.get_object()
+        comment = request.data.get('update_comment', None) or request.data.get('comment', None)
+        errors = mapping.unretire(request.user, comment)
+
+        if errors:
+            return Response(errors, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
 class MappingVersionsView(MappingBaseView, ConceptDictionaryMixin, ListWithHeadersMixin):
     permission_classes = (CanViewParentDictionary,)
 

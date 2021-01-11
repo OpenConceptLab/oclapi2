@@ -11,6 +11,11 @@ urlpatterns = [
         name='mapping-detail'
     ),
     re_path(
+        r"^(?P<mapping>{pattern})/reactivate/$".format(pattern=NAMESPACE_PATTERN),
+        views.MappingReactivateView.as_view(),
+        name='mapping-reactivate'
+    ),
+    re_path(
         r"^(?P<mapping>{pattern})/versions/$".format(pattern=NAMESPACE_PATTERN),
         views.MappingVersionsView.as_view(),
         name='mapping-version-list'
