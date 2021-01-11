@@ -14,9 +14,9 @@ class CanAccessParentDictionary(BasePermission):
         return parent_view_perm.has_object_permission(request, view, parent)
 
 
-class CanViewParentDictionary(IsAuthenticatedOrReadOnly, CanAccessParentDictionary):
+class CanViewParentDictionary(IsAuthenticatedOrReadOnly, CanAccessParentDictionary, CanViewConceptDictionary):
     pass
 
 
-class CanEditParentDictionary(IsAuthenticatedOrReadOnly, CanAccessParentDictionary):
+class CanEditParentDictionary(IsAuthenticatedOrReadOnly, CanAccessParentDictionary, CanEditConceptDictionary):
     pass
