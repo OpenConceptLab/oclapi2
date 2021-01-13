@@ -5,7 +5,7 @@ from django.core.validators import RegexValidator
 from django.db import models, IntegrityError, transaction
 from pydash import get, compact
 
-from core.common.constants import INCLUDE_RETIRED_PARAM, NAMESPACE_REGEX
+from core.common.constants import INCLUDE_RETIRED_PARAM, NAMESPACE_REGEX, HEAD
 from core.common.mixins import SourceChildMixin
 from core.common.models import VersionedModel
 from core.common.utils import parse_updated_since_param, separate_version, to_parent_uri, generate_temp_version
@@ -258,10 +258,10 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
 
         self.to_source = Source.objects.filter(
             models.Q(uri=self.to_source_url) | models.Q(canonical_url=self.to_source_url)
-        ).first()
+        ).filter(version=HEAD).first()
         self.from_source = Source.objects.filter(
             models.Q(uri=self.from_source_url) | models.Q(canonical_url=self.from_source_url)
-        ).first()
+        ).filter(version=HEAD).first()
 
     @classmethod
     def create_new_version_for(cls, instance, data, user):
