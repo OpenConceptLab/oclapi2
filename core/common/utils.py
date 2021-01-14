@@ -437,5 +437,5 @@ def jsonify_safe(value):
 
     try:
         return json.loads(value)
-    except:
+    except:  # pylint: disable=bare-except
         return value
