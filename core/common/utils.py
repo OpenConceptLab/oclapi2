@@ -429,3 +429,13 @@ def separate_version(expression):
 
 def generate_temp_version():
     return "{}-{}".format(TEMP, str(uuid.uuid4())[:8])
+
+
+def jsonify_safe(value):
+    if isinstance(value, dict):
+        return value
+
+    try:
+        return json.loads(value)
+    except:
+        return value

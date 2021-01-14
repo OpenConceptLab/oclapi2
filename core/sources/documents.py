@@ -2,6 +2,7 @@ from django_elasticsearch_dsl import Document, fields
 from django_elasticsearch_dsl.registries import registry
 from pydash import get
 
+from core.common.utils import jsonify_safe
 from core.sources.models import Source
 
 
@@ -43,12 +44,26 @@ class SourceDocument(Document):
 
     @staticmethod
     def prepare_extras(instance):
-        return instance.extras or {}
+        value = {}
+
+        if instance.extras:
+            value = jsonify_safe(instance.extras)
+
+        return value or {}
 
     @staticmethod
     def prepare_identifier(instance):
-        return instance.identifier or {}
+        value = {}
+
+        if instance.identifier:
+            value = jsonify_safe(instance.identifier)
+
+        return value or {}
 
     @staticmethod
     def prepare_jurisdiction(instance):
-        return instance.jurisdiction or {}
+        value = {}
+        if instance.jurisdiction:
+            value = jsonify_safe(instance.jurisdiction)
+
+        return value or {}

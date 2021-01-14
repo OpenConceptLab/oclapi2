@@ -81,6 +81,7 @@ class SourceCreateOrUpdateSerializer(ModelSerializer):
         source.user = validated_data.get('user', source.user)
         source.organization = validated_data.get('organization', source.organization)
         source.released = validated_data.get('released', source.released)
+        source.retired = validated_data.get('retired', source.retired)
 
         source.canonical_url = validated_data.get('canonical_url', source.canonical_url)
         source.identifier = validated_data.get('identifier', source.identifier)

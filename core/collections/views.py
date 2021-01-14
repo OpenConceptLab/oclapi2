@@ -503,7 +503,6 @@ class CollectionVersionRetrieveUpdateDestroyView(CollectionBaseView, RetrieveAPI
         if serializer.is_valid():
             self.object = serializer.save(force_update=True)
             if serializer.is_valid():
-                serializer = CollectionVersionDetailSerializer(self.object, context={'request': request})
                 return Response(serializer.data, status=status.HTTP_200_OK)
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)

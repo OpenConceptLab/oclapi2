@@ -19,7 +19,7 @@ from core.common.constants import HEAD, OCL_ORG_ID, SUPER_ADMIN_USER_ID
 from core.common.utils import (
     compact_dict_by_values, to_snake_case, flower_get, task_exists, parse_bulk_import_task_id,
     to_camel_case,
-    drop_version, is_versioned_uri, separate_version, to_parent_uri)
+    drop_version, is_versioned_uri, separate_version, to_parent_uri, jsonify_safe)
 from core.concepts.models import Concept, LocalizedText
 from core.mappings.models import Mapping
 from core.orgs.models import Organization
@@ -610,6 +610,13 @@ class UtilsTest(OCLTestCase):
             to_parent_uri("https://foobar.com/users/user/sources/source/mappings/mapping1/v1/"),
             "https://foobar.com/users/user/sources/source/"
         )
+
+    def test_jsonify_safe(self):
+        self.assertEqual(jsonify_safe(None), None)
+        self.assertEqual(jsonify_safe(dict()), dict())
+        self.assertEqual(jsonify_safe(dict(a=1)), dict(a=1))
+        self.assertEqual(jsonify_safe('foobar'), 'foobar')
+        self.assertEqual(jsonify_safe('{"foo": "bar"}'), dict(foo='bar'))
 
 
 class BaseModelTest(OCLTestCase):

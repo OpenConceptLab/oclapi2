@@ -85,6 +85,8 @@ class CollectionCreateOrUpdateSerializer(ModelSerializer):
         collection.organization_id = validated_data.get('organization_id', collection.organization_id)
         collection.user = validated_data.get('user', collection.user)
         collection.organization = validated_data.get('organization', collection.organization)
+        collection.released = validated_data.get('released', collection.released)
+        collection.retired = validated_data.get('retired', collection.retired)
 
         collection.canonical_url = validated_data.get('canonical_url', collection.canonical_url)
         collection.identifier = validated_data.get('identifier', collection.identifier)
@@ -214,6 +216,7 @@ class CollectionVersionDetailSerializer(CollectionCreateOrUpdateSerializer):
     updated_on = DateTimeField(source='updated_at')
     supported_locales = ListField(required=False, allow_empty=True)
     is_processing = BooleanField(read_only=True)
+    released = BooleanField(default=False)
     version_url = CharField(source='uri')
     url = CharField(source='versioned_object_url')
     previous_version_url = CharField(source='prev_version_uri')
