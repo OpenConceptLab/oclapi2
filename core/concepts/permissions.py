@@ -15,8 +15,8 @@ class CanAccessParentDictionary(BasePermission):
 
 
 class CanViewParentDictionary(IsAuthenticatedOrReadOnly, CanAccessParentDictionary, CanViewConceptDictionary):
-    pass
+    parent_permission_class = CanViewConceptDictionary
 
 
 class CanEditParentDictionary(IsAuthenticatedOrReadOnly, CanAccessParentDictionary, CanEditConceptDictionary):
-    pass
+    parent_permission_class = CanEditConceptDictionary
