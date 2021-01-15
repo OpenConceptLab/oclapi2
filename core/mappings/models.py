@@ -403,6 +403,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         is_latest = params.get('is_latest', None) in [True, 'true']
         include_retired = params.get(INCLUDE_RETIRED_PARAM, None) in [True, 'true']
         updated_since = parse_updated_since_param(params)
+        uri = params.get('uri', None)
 
         if collection:
             queryset = queryset.filter(cls.get_iexact_or_criteria('collection_set__mnemonic', collection))
@@ -431,6 +432,8 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
             queryset = queryset.filter(retired=False)
         if updated_since:
             queryset = queryset.filter(updated_at__gte=updated_since)
+        if uri:
+            queryset = queryset.filter(uri__icontains=uri)
 
         return queryset
 

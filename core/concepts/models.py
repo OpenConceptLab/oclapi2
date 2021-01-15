@@ -263,6 +263,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         concept = params.get('concept', None)
         concept_version = params.get('concept_version', None)
         is_latest = params.get('is_latest', None) in [True, 'true']
+        uri = params.get('uri', None)
         include_retired = params.get(INCLUDE_RETIRED_PARAM, None) in [True, 'true']
 
         updated_since = parse_updated_since_param(params)
@@ -294,6 +295,8 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             queryset = queryset.filter(retired=False)
         if updated_since:
             queryset = queryset.filter(updated_at__gte=updated_since)
+        if uri:
+            queryset = queryset.filter(uri__icontains=uri)
 
         return queryset
 
