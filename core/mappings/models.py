@@ -432,7 +432,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         if updated_since:
             queryset = queryset.filter(updated_at__gte=updated_since)
 
-        return queryset.distinct()
+        return queryset
 
     def is_from_same_as_to(self):
         return self.from_concept_code == self.to_concept_code and self.from_source_url == self.to_source_url

@@ -295,7 +295,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         if updated_since:
             queryset = queryset.filter(updated_at__gte=updated_since)
 
-        return queryset.distinct()
+        return queryset
 
     def clone(self):
         concept_version = Concept(
