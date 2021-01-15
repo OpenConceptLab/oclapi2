@@ -54,7 +54,7 @@ class BaseModel(models.Model):
     )
     is_active = models.BooleanField(default=True)
     extras = JSONField(null=True, blank=True, default=dict)
-    uri = models.TextField(null=True, blank=True)
+    uri = models.TextField(null=True, blank=True, db_index=True)
     extras_have_been_encoded = False
     extras_have_been_decoded = False
     is_being_saved = False
@@ -214,7 +214,8 @@ class BaseResourceModel(BaseModel, CommonLogoModel):
     (An Organization is a base resource, but a Concept is not.)
     """
     mnemonic = models.CharField(
-        max_length=255, validators=[RegexValidator(regex=NAMESPACE_REGEX)]
+        max_length=255, validators=[RegexValidator(regex=NAMESPACE_REGEX)],
+        db_index=True
     )
     mnemonic_attr = 'mnemonic'
 

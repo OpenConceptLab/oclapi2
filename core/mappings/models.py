@@ -20,7 +20,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         unique_together = ('mnemonic', 'version', 'parent')
 
     parent = models.ForeignKey('sources.Source', related_name='mappings_set', on_delete=models.CASCADE)
-    map_type = models.TextField()
+    map_type = models.TextField(db_index=True)
 
     sources = models.ManyToManyField('sources.Source', related_name='mappings')
     external_id = models.TextField(null=True, blank=True)
@@ -45,14 +45,14 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
     )
 
     # new schema -- https://github.com/OpenConceptLab/ocl_issues/issues/408
-    from_concept_code = models.TextField(null=True, blank=True)
+    from_concept_code = models.TextField(null=True, blank=True, db_index=True)
     from_concept_name = models.TextField(null=True, blank=True)
-    from_source_url = models.TextField(null=True, blank=True)
+    from_source_url = models.TextField(null=True, blank=True, db_index=True)
     from_source_version = models.TextField(null=True, blank=True)
 
-    to_concept_code = models.TextField(null=True, blank=True)
+    to_concept_code = models.TextField(null=True, blank=True, db_index=True)
     to_concept_name = models.TextField(null=True, blank=True)
-    to_source_url = models.TextField(null=True, blank=True)
+    to_source_url = models.TextField(null=True, blank=True, db_index=True)
     to_source_version = models.TextField(null=True, blank=True)
 
     logo_path = None
