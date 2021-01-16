@@ -85,7 +85,6 @@ REST_FRAMEWORK = {
     ),
     'DEFAULT_RENDERER_CLASSES': (
         'rest_framework.renderers.JSONRenderer',
-        'rest_framework.renderers.BrowsableAPIRenderer',
         'core.common.renderers.ZippedJSONRenderer',
     ),
     'COERCE_DECIMAL_TO_STRING': False,
