@@ -435,7 +435,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         if uri:
             queryset = queryset.filter(uri__icontains=uri)
 
-        return queryset
+        return queryset.distinct('updated_at')
 
     def is_from_same_as_to(self):
         return self.from_concept_code == self.to_concept_code and self.from_source_url == self.to_source_url

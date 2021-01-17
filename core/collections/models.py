@@ -94,9 +94,11 @@ class Collection(ConceptContainerModel):
 
     def add_concept(self, concept):
         self.concepts.add(concept)
+        concept.save()  # for ES indexing
 
     def add_mapping(self, mapping):
         self.mappings.add(mapping)
+        mapping.save()  # for ES indexing
 
     def get_concepts(self, start=None, end=None):
         """ Use for efficient iteration over paginated concepts. Note that any filter will be applied only to concepts

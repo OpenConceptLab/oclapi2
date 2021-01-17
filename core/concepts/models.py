@@ -265,7 +265,6 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         is_latest = params.get('is_latest', None) in [True, 'true']
         uri = params.get('uri', None)
         include_retired = params.get(INCLUDE_RETIRED_PARAM, None) in [True, 'true']
-
         updated_since = parse_updated_since_param(params)
 
         if collection:
@@ -298,7 +297,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         if uri:
             queryset = queryset.filter(uri__icontains=uri)
 
-        return queryset
+        return queryset.distinct('updated_at')
 
     def clone(self):
         concept_version = Concept(
