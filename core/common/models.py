@@ -4,7 +4,7 @@ from django.contrib.postgres.fields import JSONField, ArrayField
 from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator
 from django.db import models, IntegrityError
-from django.db.models import Max, Value, Q
+from django.db.models import Value, Q
 from django.db.models.expressions import CombinedExpression, F
 from django.utils import timezone
 from django_elasticsearch_dsl.registries import registry
@@ -569,15 +569,13 @@ class ConceptContainerModel(VersionedModel):
         concepts = self.concepts
         if not concepts.exists():
             return None
-        agg = concepts.aggregate(Max('updated_at'))
-        return agg.get('updated_at__max')
+        return concepts.latest('updated_at').updated_at
 
     def __get_last_mapping_updated_at(self):
         mappings = self.mappings
         if not mappings.exists():
             return None
-        agg = mappings.aggregate(Max('updated_at'))
-        return agg.get('updated_at__max')
+        return mappings.latest('updated_at').updated_at
 
     def __get_last_child_updated_at(self):
         last_concept_update = self.last_concept_update
