@@ -440,7 +440,7 @@ class SourceChildMixin:
             kwargs = get(resolve(uri), 'kwargs', dict())
             query_params = get_query_params_from_url_string(uri)  # parsing query parameters
             kwargs.update(query_params)
-            queryset = cls.get_base_queryset(kwargs)
+            queryset = cls.get_base_queryset(kwargs, None)
             if queryset.count() > 1 and \
                     ('concept_version' not in kwargs or 'mapping_version' not in kwargs) and \
                     ('concept' in kwargs or 'mapping' in kwargs):

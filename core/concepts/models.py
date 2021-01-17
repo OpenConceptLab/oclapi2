@@ -253,7 +253,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         return unsaved_names
 
     @classmethod
-    def get_base_queryset(cls, params):  # pylint: disable=too-many-branches
+    def get_base_queryset(cls, params, distinct_by='updated_at'):  # pylint: disable=too-many-branches
         queryset = cls.objects.filter(is_active=True)
         user = params.get('user', None)
         org = params.get('org', None)
@@ -297,7 +297,10 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         if uri:
             queryset = queryset.filter(uri__icontains=uri)
 
-        return queryset.distinct('updated_at')
+        if distinct_by:
+            queryset = queryset.distinct(distinct_by)
+
+        return queryset
 
     def clone(self):
         concept_version = Concept(
