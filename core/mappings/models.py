@@ -303,8 +303,6 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
             initial_version = cls.create_initial_version(mapping)
             initial_version.sources.set([parent, parent_head])
             mapping.sources.set([parent, parent_head])
-            parent.save()
-            parent_head.save()
         except ValidationError as ex:
             mapping.errors.update(ex.message_dict)
         except IntegrityError as ex:
@@ -369,9 +367,8 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
                     cls.resume_indexing()
 
                     def index_all():
-                        parent.save()
-                        parent_head.save()
-                        latest_version.save()
+                        if latest_version:
+                            latest_version.save()
                         obj.save()
 
                     transaction.on_commit(index_all)

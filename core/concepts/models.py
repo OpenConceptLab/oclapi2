@@ -436,10 +436,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                 initial_version.sources.set([parent_resource, parent_resource_head])
 
             concept.sources.set([parent_resource, parent_resource_head])
-
             concept.update_mappings()
-            parent_resource.save()
-            parent_resource_head.save()
         except ValidationError as ex:
             concept.errors.update(ex.message_dict)
         except IntegrityError as ex:
@@ -494,8 +491,6 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                     cls.resume_indexing()
 
                     def index_all():
-                        parent.save()
-                        parent_head.save()
                         if latest_version:
                             latest_version.save()
                         obj.save()

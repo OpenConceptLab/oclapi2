@@ -320,11 +320,6 @@ class ConceptContainerModel(VersionedModel):
     """
     organization = models.ForeignKey('orgs.Organization', on_delete=models.CASCADE, blank=True, null=True)
     user = models.ForeignKey('users.UserProfile', on_delete=models.CASCADE, blank=True, null=True)
-    active_concepts = models.IntegerField(default=0)
-    active_mappings = models.IntegerField(default=0)
-    last_concept_update = models.DateTimeField(default=timezone.now, null=True, blank=True)
-    last_mapping_update = models.DateTimeField(default=timezone.now, null=True, blank=True)
-    last_child_update = models.DateTimeField(default=timezone.now)
     _background_process_ids = ArrayField(models.CharField(max_length=255), default=list, null=True, blank=True)
 
     canonical_url = models.URLField(null=True, blank=True)
@@ -338,6 +333,36 @@ class ConceptContainerModel(VersionedModel):
 
     class Meta:
         abstract = True
+
+    @property
+    def active_concepts(self):
+        return self.concepts.filter(retired=False, is_active=True).distinct('versioned_object_id').count()
+
+    @property
+    def active_mappings(self):
+        return self.mappings.filter(retired=False, is_active=True).distinct('versioned_object_id').count()
+
+    @property
+    def last_concept_update(self):
+        updated_at = None
+        if self.concepts.exists():
+            updated_at = self.concepts.latest('updated_at').updated_at
+        return updated_at
+
+    @property
+    def last_mapping_update(self):
+        updated_at = None
+        if self.mappings.exists():
+            updated_at = self.mappings.latest('updated_at').updated_at
+        return updated_at
+
+    @property
+    def last_child_update(self):
+        last_concept_update = self.last_concept_update
+        last_mapping_update = self.last_mapping_update
+        if last_concept_update and last_mapping_update:
+            return max(last_concept_update, last_mapping_update)
+        return last_concept_update or last_mapping_update or self.updated_at or timezone.now()
 
     @classmethod
     def get_base_queryset(cls, params):
@@ -555,40 +580,6 @@ class ConceptContainerModel(VersionedModel):
                 failed_concept_validations.append(concept_validation_error)
 
         return failed_concept_validations
-
-    def update_active_counts(self):
-        self.active_concepts = self.concepts.filter(retired=False).distinct('versioned_object_id').count()
-        self.active_mappings = self.mappings.filter(retired=False).distinct('versioned_object_id').count()
-
-    def update_last_updates(self):
-        self.last_concept_update = self.__get_last_concept_updated_at()
-        self.last_mapping_update = self.__get_last_mapping_updated_at()
-        self.last_child_update = self.__get_last_child_updated_at()
-
-    def __get_last_concept_updated_at(self):
-        concepts = self.concepts
-        if not concepts.exists():
-            return None
-        return concepts.latest('updated_at').updated_at
-
-    def __get_last_mapping_updated_at(self):
-        mappings = self.mappings
-        if not mappings.exists():
-            return None
-        return mappings.latest('updated_at').updated_at
-
-    def __get_last_child_updated_at(self):
-        last_concept_update = self.last_concept_update
-        last_mapping_update = self.last_mapping_update
-        if last_concept_update and last_mapping_update:
-            return max(last_concept_update, last_mapping_update)
-        return last_concept_update or last_mapping_update or self.updated_at or timezone.now()
-
-    def save(self, force_insert=False, force_update=False, using=None, update_fields=None):
-        if self.id:
-            self.update_active_counts()
-            self.update_last_updates()
-        super().save(force_insert, force_update, using, update_fields)
 
     def update_version_data(self, obj=None):
         if obj:
