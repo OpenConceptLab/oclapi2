@@ -533,7 +533,6 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
         return queryset.filter(id=F('versioned_object_id'))
 
-
     def get_bidirectional_mappings(self):
         queryset = self.get_unidirectional_mappings() | self.get_indirect_mappings()
 
