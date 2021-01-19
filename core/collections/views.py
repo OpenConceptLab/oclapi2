@@ -270,7 +270,7 @@ class CollectionReferencesView(
         if expressions == '*':
             expressions = list(instance.references.values_list('expression', flat=True))
         if self.should_cascade_mappings():
-            expressions += self.get_related_mappings_with_version_information(instance, expressions)
+            expressions += self.get_related_mappings_with_version_information(expressions)
 
         instance.delete_references(expressions)
         return Response({'message': OK_MESSAGE}, status=status.HTTP_204_NO_CONTENT)
@@ -307,6 +307,14 @@ class CollectionReferencesView(
             response_item = self.create_response_item(added_expressions, errors, expression)
             if response_item:
                 response.append(response_item)
+
+        for ref in added_references:
+            if ref.concepts:
+                for concept in ref.concepts:
+                    concept.save()
+            if ref.mappings:
+                for mapping in ref.mappings:
+                    mapping.save()
 
         return Response(response, status=status.HTTP_200_OK)
 
@@ -365,24 +373,17 @@ class CollectionReferencesView(
             return CONCEPT_ADDED_TO_COLLECTION_FMT.format(resource_name, collection_name)
         return MAPPING_ADDED_TO_COLLECTION_FMT.format(resource_name, collection_name)
 
-    def get_related_mappings_with_version_information(self, instance, expressions):
+    @staticmethod
+    def get_related_mappings_with_version_information(expressions):
         related_mappings = []
 
         for expression in expressions:
             if is_concept(expression):
                 concepts = CollectionReference.get_concept_heads_from_expression(expression)
                 for concept in concepts:
-                    related_mappings += concept.get_unidirectional_mappings()
+                    related_mappings += concept.get_latest_unidirectional_mappings()
 
-        return self.get_version_information_of_related_mappings(instance, related_mappings)
-
-    @staticmethod
-    def get_version_information_of_related_mappings(instance, related_mappings):
-        return list(
-            instance.references.filter(
-                expression__in=[mapping.url for mapping in related_mappings]
-            ).values_list('expression', flat=True)
-        )
+        return [mapping.uri for mapping in related_mappings]
 
 
 class CollectionVersionReferencesView(CollectionVersionBaseView, ListWithHeadersMixin):

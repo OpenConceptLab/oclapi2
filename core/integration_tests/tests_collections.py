@@ -54,7 +54,9 @@ class CollectionListViewTest(OCLAPITestCase):
         coll.concepts.set(reference.concepts)
 
         response = self.client.get(
-            '/orgs/{}/collections/?contains={}&includeReferences=true'.format(coll.parent.mnemonic, concept.uri),
+            '/orgs/{}/collections/?contains={}&includeReferences=true'.format(
+                coll.parent.mnemonic, concept.get_latest_version().uri
+            ),
             format='json'
         )
 
@@ -299,17 +301,17 @@ class CollectionReferencesViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 1)
-        self.assertEqual(response.data[0]['expression'], self.concept.uri)
+        self.assertEqual(response.data[0]['expression'], self.concept.get_latest_version().uri)
         self.assertEqual(response.data[0]['reference_type'], 'concepts')
 
         response = self.client.get(
-            '/collections/coll/references/?q={}&search_sort=desc'.format(self.concept.uri),
+            '/collections/coll/references/?q={}&search_sort=desc'.format(self.concept.get_latest_version().uri),
             format='json'
         )
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 1)
-        self.assertEqual(response.data[0]['expression'], self.concept.uri)
+        self.assertEqual(response.data[0]['expression'], self.concept.get_latest_version().uri)
         self.assertEqual(response.data[0]['reference_type'], 'concepts')
 
         response = self.client.get(
@@ -364,7 +366,7 @@ class CollectionReferencesViewTest(OCLAPITestCase):
     def test_delete_204_specific_expression(self):
         response = self.client.delete(
             '/collections/coll/references/',
-            dict(expressions=[self.concept.uri]),
+            dict(expressions=[self.concept.get_latest_version().uri]),
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -450,12 +452,12 @@ class CollectionReferencesViewTest(OCLAPITestCase):
         self.assertEqual(self.collection.concepts.count(), 2)
         self.assertEqual(self.collection.active_concepts, 2)
         self.assertEqual(self.collection.active_mappings, 0)
-        self.assertTrue(self.collection.references.filter(expression=concept2.uri).exists())
+        self.assertTrue(self.collection.references.filter(expression=concept2.get_latest_version().uri).exists())
         self.assertEqual(
             response.data,
             [
                 dict(
-                    added=True, expression=concept2.uri,
+                    added=True, expression=concept2.get_latest_version().uri,
                     message='Added the latest versions of concept to the collection. Future updates will not be added'
                             ' automatically.'
                 )
@@ -478,12 +480,12 @@ class CollectionReferencesViewTest(OCLAPITestCase):
         self.assertEqual(self.collection.mappings.count(), 1)
         self.assertEqual(self.collection.active_concepts, 2)
         self.assertEqual(self.collection.active_mappings, 1)
-        self.assertTrue(self.collection.references.filter(expression=mapping.uri).exists())
+        self.assertTrue(self.collection.references.filter(expression=mapping.get_latest_version().uri).exists())
         self.assertEqual(
             response.data,
             [
                 dict(
-                    added=True, expression=mapping.uri,
+                    added=True, expression=mapping.get_latest_version().uri,
                     message='Added the latest versions of mapping to the collection. Future updates will not be added'
                             ' automatically.'
                 )
@@ -507,7 +509,7 @@ class CollectionReferencesViewTest(OCLAPITestCase):
         self.assertEqual(self.collection.mappings.count(), 2)
         self.assertEqual(self.collection.active_concepts, 3)
         self.assertEqual(self.collection.active_mappings, 2)
-        self.assertTrue(self.collection.references.filter(expression=mapping2.uri).exists())
+        self.assertTrue(self.collection.references.filter(expression=mapping2.get_latest_version().uri).exists())
         self.assertTrue(self.collection.references.filter(expression=latest_version.uri).exists())
 
 

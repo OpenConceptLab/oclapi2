@@ -38,7 +38,7 @@ class CollectionTest(OCLTestCase):
 
         self.assertEqual(collection.concepts.count(), 1)
         self.assertEqual(collection.references.count(), 1)
-        self.assertEqual(collection.references.first().expression, concept_expression)
+        self.assertEqual(collection.references.first().expression, concept.get_latest_version().uri)
         self.assertEqual(collection.concepts.first(), concept.get_latest_version())
         self.assertEqual(collection.active_concepts, 1)
 
@@ -65,7 +65,7 @@ class CollectionTest(OCLTestCase):
 
         self.assertEqual(collection.concepts.count(), 1)
         self.assertEqual(collection.references.count(), 1)
-        self.assertEqual(collection.references.first().expression, concept_expression)
+        self.assertEqual(collection.references.first().expression, concept.get_latest_version().uri)
         self.assertEqual(collection.concepts.first(), concept.get_latest_version())
 
         concept2 = ConceptFactory(parent=source, sources=[source])
@@ -86,13 +86,13 @@ class CollectionTest(OCLTestCase):
         self.assertEqual(collection.mappings.count(), 1)
         self.assertEqual(collection.references.count(), 3)
 
-        collection.delete_references([concept2.uri, mapping.uri])
+        collection.delete_references([concept2.get_latest_version().uri, mapping.get_latest_version().uri])
 
         self.assertEqual(collection.concepts.count(), 1)
         self.assertEqual(collection.mappings.count(), 0)
         self.assertEqual(collection.references.count(), 1)
         self.assertEqual(collection.concepts.first().uri, concept1.get_latest_version().uri)
-        self.assertEqual(collection.references.first().expression, concept1.uri)
+        self.assertEqual(collection.references.first().expression, concept1.get_latest_version().uri)
 
     def test_get_concepts(self):
         collection = OrganizationCollectionFactory()
@@ -173,7 +173,7 @@ class CollectionTest(OCLTestCase):
         self.assertEqual(
             ex.exception.message_dict,
             {
-                concept.uri: [
+                concept.get_latest_version().uri: [
                     'Concept or Mapping reference name must be unique in a collection.'
                 ]
             }

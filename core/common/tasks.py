@@ -84,6 +84,14 @@ def add_references(
     finally:
         head.remove_processing(self.request.id)
 
+    for ref in added_references:
+        if ref.concepts:
+            for concept in ref.concepts:
+                concept.save()
+        if ref.mappings:
+            for mapping in ref.mappings:
+                mapping.save()
+
     return added_references, errors
 
 

@@ -94,11 +94,9 @@ class Collection(ConceptContainerModel):
 
     def add_concept(self, concept):
         self.concepts.add(concept)
-        concept.save()  # for ES indexing
 
     def add_mapping(self, mapping):
         self.mappings.add(mapping)
-        mapping.save()  # for ES indexing
 
     def get_concepts(self, start=None, end=None):
         """ Use for efficient iteration over paginated concepts. Note that any filter will be applied only to concepts
@@ -374,7 +372,7 @@ class CollectionReference(models.Model):
 
     @property
     def is_valid_expression(self):
-        return is_valid_uri(self.expression)
+        return is_valid_uri(self.expression) and self.expression.count('/') >= 7
 
     @property
     def reference_type(self):
@@ -406,13 +404,20 @@ class CollectionReference(models.Model):
         super().save(force_insert, force_update, using, update_fields)
 
     def create_entities_from_expressions(self):
-        if is_concept(self.expression):
+        __is_concept = is_concept(self.expression)
+        __is_mapping = is_mapping(self.expression)
+        if __is_concept:
             self.concepts = self.get_concepts()
-        elif is_mapping(self.expression):
+        elif __is_mapping:
             self.mappings = self.get_mappings()
 
         if (not self.concepts or not self.concepts.exists()) and (not self.mappings or not self.mappings.exists()):
             raise ValidationError({'detail': [EXPRESSION_INVALID]})
+
+        if __is_concept:
+            self.expression = self.concepts.first().uri
+        elif __is_mapping:
+            self.expression = self.mappings.first().uri
 
     def get_related_mappings(self, exclude_mapping_uris):
         mappings = []
