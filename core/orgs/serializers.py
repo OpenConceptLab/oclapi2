@@ -97,4 +97,5 @@ class OrganizationDetailSerializer(serializers.ModelSerializer):
         instance.location = validated_data.get('location', instance.website)
         instance.extras = validated_data.get('extras', instance.extras)
         instance.updated_by = request_user
+        instance.save()
         return instance
