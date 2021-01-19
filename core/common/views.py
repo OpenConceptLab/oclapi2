@@ -12,7 +12,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from core.common.constants import SEARCH_PARAM, LIST_DEFAULT_LIMIT, CSV_DEFAULT_LIMIT, \
-    LIMIT_PARAM, NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY, INCLUDE_RETIRED_PARAM, VERBOSE_PARAM
+    LIMIT_PARAM, NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY, INCLUDE_RETIRED_PARAM, VERBOSE_PARAM, HEAD
 from core.common.mixins import PathWalkerMixin
 from core.common.permissions import IsSuperuser
 from core.common.serializers import RootSerializer
@@ -228,13 +228,20 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         if 'version' in self.kwargs and 'collection' in self.kwargs:
             filters['collection_version'] = self.kwargs['version']
 
-        if 'collection' in self.kwargs and self.is_source_child_document_model():
-            owner_type = filters.pop('ownerType', None)
-            owner = filters.pop('owner', None)
-            if owner_type == USER_OBJECT_TYPE:
-                filters['collection_owner_url'] = "/users/{}/".format(owner)
-            if owner_type == ORG_OBJECT_TYPE:
-                filters['collection_owner_url'] = "/orgs/{}/".format(owner)
+        is_source_child_document_model = self.is_source_child_document_model()
+        if is_source_child_document_model:
+            is_version_specified = 'version' in self.kwargs
+            if 'collection' in self.kwargs:
+                owner_type = filters.pop('ownerType', None)
+                owner = filters.pop('owner', None)
+                if owner_type == USER_OBJECT_TYPE:
+                    filters['collection_owner_url'] = "/users/{}/".format(owner)
+                if owner_type == ORG_OBJECT_TYPE:
+                    filters['collection_owner_url'] = "/orgs/{}/".format(owner)
+                if not is_version_specified:
+                    filters['collection_version'] = HEAD
+            if 'source' in self.kwargs and not is_version_specified:
+                filters['source_version'] = HEAD
         return filters
 
     def get_facets(self):

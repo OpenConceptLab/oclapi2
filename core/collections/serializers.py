@@ -242,4 +242,4 @@ class CollectionReferenceSerializer(ModelSerializer):
 
     class Meta:
         model = CollectionReference
-        fields = ('expression', 'reference_type',)
+        fields = ('expression', 'reference_type', 'id')
