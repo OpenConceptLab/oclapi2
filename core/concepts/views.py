@@ -18,7 +18,7 @@ from core.common.swagger_parameters import (
     include_facets_header, updated_since_param, include_inverse_mappings_param, include_retired_param,
     compress_header)
 from core.common.views import SourceChildCommonBaseView, SourceChildExtrasView, \
-    SourceChildExtraRetrieveUpdateDestroyView
+    SourceChildExtraRetrieveUpdateDestroyView, ResourceIndexView
 from core.concepts.constants import PARENT_VERSION_NOT_LATEST_CANNOT_UPDATE_CONCEPT
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept, LocalizedText
@@ -195,6 +195,8 @@ class ConceptRetrieveUpdateDestroyView(ConceptBaseView, RetrieveAPIView, UpdateA
 
 
 class ConceptReactivateView(ConceptBaseView, UpdateAPIView):
+    serializer_class = ConceptDetailSerializer
+
     def get_object(self, queryset=None):
         return get_object_or_404(self.get_queryset(None), id=F('versioned_object_id'))
 
@@ -380,4 +382,9 @@ class ConceptExtrasView(SourceChildExtrasView, ConceptBaseView):
 
 class ConceptExtraRetrieveUpdateDestroyView(SourceChildExtraRetrieveUpdateDestroyView, ConceptBaseView):
     serializer_class = ConceptDetailSerializer
+    model = Concept
+
+
+class ConceptsIndexView(ResourceIndexView):
+    serializer_class = ConceptListSerializer
     model = Concept

@@ -43,7 +43,7 @@ from core.common.swagger_parameters import q_param, compress_header, page_param,
     include_facets_header, sort_asc_param, sort_desc_param, updated_since_param, include_retired_param, limit_param
 from core.common.tasks import add_references, export_collection
 from core.common.utils import compact_dict_by_values, parse_boolean_query_param
-from core.common.views import BaseAPIView, BaseLogoView
+from core.common.views import BaseAPIView, BaseLogoView, ResourceIndexView
 
 logger = logging.getLogger('oclapi')
 
@@ -594,3 +594,8 @@ class CollectionVersionExportView(ConceptContainerExportMixin, CollectionVersion
             return status.HTTP_202_ACCEPTED
         except AlreadyQueued:
             return status.HTTP_409_CONFLICT
+
+
+class CollectionsIndexView(ResourceIndexView):
+    serializer_class = CollectionListSerializer
+    model = Collection
