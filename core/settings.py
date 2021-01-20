@@ -305,7 +305,7 @@ SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 ENV = os.environ.get('ENVIRONMENT', 'development')
 # Only used for flower
 FLOWER_USER = os.environ.get('FLOWER_USER', 'root')
-FLOWER_PWD = os.environ.get('FLOWER_PWD', 'Root123')
+FLOWER_PASSWORD = os.environ.get('FLOWER_PASSWORD', 'Root123')
 FLOWER_HOST = os.environ.get('FLOWER_HOST', 'flower')
 FLOWER_PORT = os.environ.get('FLOWER_PORT', 5555)
 DATA_UPLOAD_MAX_MEMORY_SIZE = 100*1024*1024

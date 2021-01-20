@@ -317,7 +317,7 @@ def flower_get(url):
     """
     return requests.get(
         'http://%s:%s/%s' % (settings.FLOWER_HOST, settings.FLOWER_PORT, url),
-        auth=HTTPBasicAuth(settings.FLOWER_USER, settings.FLOWER_PWD)
+        auth=HTTPBasicAuth(settings.FLOWER_USER, settings.FLOWER_PASSWORD)
     )
 
 

@@ -424,7 +424,7 @@ class UtilsTest(OCLTestCase):
 
         http_get_mock.assert_called_once_with(
             'http://flower:5555/some-url',
-            auth=HTTPBasicAuth(settings.FLOWER_USER, settings.FLOWER_PWD)
+            auth=HTTPBasicAuth(settings.FLOWER_USER, settings.FLOWER_PASSWORD)
         )
 
     @patch('core.common.utils.flower_get')
