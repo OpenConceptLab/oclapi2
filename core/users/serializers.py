@@ -70,6 +70,8 @@ class UserDetailSerializer(serializers.ModelSerializer):
     type = serializers.CharField(source='resource_type', read_only=True)
     uuid = serializers.CharField(source='id', read_only=True)
     username = serializers.CharField(required=False)
+    first_name = serializers.CharField(required=False)
+    last_name = serializers.CharField(required=False)
     name = serializers.CharField(required=False)
     email = serializers.CharField(required=False)
     company = serializers.CharField(required=False)
@@ -90,7 +92,7 @@ class UserDetailSerializer(serializers.ModelSerializer):
             'type', 'uuid', 'username', 'name', 'email', 'company', 'location', 'preferred_locale', 'orgs',
             'public_collections', 'public_sources', 'created_on', 'updated_on', 'created_by', 'updated_by',
             'url', 'organizations_url', 'extras', 'sources_url', 'collections_url', 'website', 'last_login',
-            'logo_url', 'subscribed_orgs', 'is_superuser', 'is_staff'
+            'logo_url', 'subscribed_orgs', 'is_superuser', 'is_staff', 'first_name', 'last_name'
         )
 
     def __init__(self, *args, **kwargs):
@@ -115,6 +117,8 @@ class UserDetailSerializer(serializers.ModelSerializer):
         request_user = self.context['request'].user
         instance.email = validated_data.get('email', instance.email)
         instance.username = validated_data.get('username', instance.username)
+        instance.first_name = validated_data.get('first_name', instance.first_name)
+        instance.last_name = validated_data.get('last_name', instance.last_name)
         instance.company = validated_data.get('company', instance.company)
         instance.website = validated_data.get('website', instance.website)
         instance.location = validated_data.get('location', instance.location)
