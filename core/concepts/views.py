@@ -1,4 +1,5 @@
 from django.db.models import F
+from django.http import Http404
 from django.shortcuts import get_object_or_404
 from drf_yasg.utils import swagger_auto_schema
 from pydash import get
@@ -154,7 +155,12 @@ class ConceptRetrieveUpdateDestroyView(ConceptBaseView, RetrieveAPIView, UpdateA
             if queryset.count() > 1 and not uri_param:
                 raise Http409()
 
-        return get_object_or_404(queryset, **filters)
+        instance = queryset.filter(**filters).first()
+
+        if not instance:
+            raise Http404()
+
+        return instance
 
     def get_permissions(self):
         if self.request.method in ['GET']:
@@ -221,7 +227,7 @@ class ConceptVersionsView(ConceptBaseView, ConceptDictionaryMixin, ListWithHeade
     permission_classes = (CanViewParentDictionary,)
 
     def get_queryset(self, _=None):
-        return super().get_queryset(None).exclude(id=F('versioned_object_id'))
+        return super().get_queryset().exclude(id=F('versioned_object_id'))
 
     def get_serializer_class(self):
         return ConceptVersionDetailSerializer if self.is_verbose() else ConceptVersionListSerializer
