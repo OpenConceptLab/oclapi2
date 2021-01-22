@@ -447,7 +447,7 @@ class ReferenceImporter(BaseResourceImporter):
         collection = self.get_queryset().first()
 
         if collection:
-            added_references, = collection.add_expressions(
+            (added_references, _) = collection.add_expressions(
                 self.get('data'), settings.API_BASE_URL, self.user, self.get('__cascade', False)
             )
             for ref in added_references:
