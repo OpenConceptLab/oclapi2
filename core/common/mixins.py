@@ -413,6 +413,10 @@ class SourceChildMixin:
     def parent_resource(self):
         return get(self.parent, 'mnemonic')
 
+    @property
+    def parent_url(self):
+        return get(self.parent, 'uri')
+
     def retire(self, user, comment=None):
         if self.versioned_object.retired:
             return {'__all__': self.ALREADY_RETIRED}

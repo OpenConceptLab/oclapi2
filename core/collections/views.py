@@ -26,7 +26,7 @@ from core.collections.search import CollectionSearch
 from core.collections.serializers import (
     CollectionDetailSerializer, CollectionListSerializer,
     CollectionCreateSerializer, CollectionReferenceSerializer, CollectionVersionDetailSerializer,
-    CollectionVersionListSerializer)
+    CollectionVersionListSerializer, CollectionVersionExportSerializer)
 from core.collections.utils import is_concept, is_version_specified
 from core.common.constants import (
     HEAD, RELEASED_PARAM, PROCESSING_PARAM, OK_MESSAGE, NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY
@@ -585,7 +585,7 @@ class CollectionVersionProcessingView(CollectionBaseView, ConceptContainerProces
 class CollectionVersionExportView(ConceptContainerExportMixin, CollectionVersionBaseView):
     entity = 'Collection'
     permission_classes = (CanViewConceptDictionary,)
-    serializer_class = CollectionVersionDetailSerializer
+    serializer_class = CollectionVersionExportSerializer
 
     def handle_export_version(self):
         version = self.get_object()

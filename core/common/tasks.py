@@ -44,7 +44,7 @@ def export_source(self, version_id):
     version.add_processing(self.request.id)
     try:
         logger.info('Found source version %s.  Beginning export...', version.version)
-        write_export_file(version, 'source', 'core.sources.serializers.SourceDetailSerializer', logger)
+        write_export_file(version, 'source', 'core.sources.serializers.SourceVersionExportSerializer', logger)
         logger.info('Export complete!')
     finally:
         version.remove_processing(self.request.id)
@@ -64,7 +64,9 @@ def export_collection(self, version_id):
     version.add_processing(self.request.id)
     try:
         logger.info('Found collection version %s.  Beginning export...', version.version)
-        write_export_file(version, 'collection', 'core.collections.serializers.CollectionDetailSerializer', logger)
+        write_export_file(
+            version, 'collection', 'core.collections.serializers.CollectionVersionExportSerializer', logger
+        )
         logger.info('Export complete!')
     finally:
         version.remove_processing(self.request.id)

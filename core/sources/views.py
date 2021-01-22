@@ -28,7 +28,7 @@ from core.sources.models import Source
 from core.sources.search import SourceSearch
 from core.sources.serializers import (
     SourceDetailSerializer, SourceListSerializer, SourceCreateSerializer, SourceVersionDetailSerializer,
-    SourceVersionListSerializer)
+    SourceVersionListSerializer, SourceVersionExportSerializer)
 
 logger = logging.getLogger('oclapi')
 
@@ -367,7 +367,7 @@ class SourceVersionProcessingView(SourceBaseView, ConceptContainerProcessingMixi
 class SourceVersionExportView(ConceptContainerExportMixin, SourceVersionBaseView):
     entity = 'Source'
     permission_classes = (CanViewConceptDictionary,)
-    serializer_class = SourceVersionDetailSerializer
+    serializer_class = SourceVersionExportSerializer
 
     def handle_export_version(self):
         version = self.get_object()

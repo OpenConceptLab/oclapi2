@@ -17,7 +17,7 @@ from core.mappings.tests.factories import MappingFactory
 from core.orgs.models import Organization
 from core.sources.constants import CONTENT_REFERRED_PRIVATELY
 from core.sources.models import Source
-from core.sources.serializers import SourceDetailSerializer
+from core.sources.serializers import SourceDetailSerializer, SourceVersionExportSerializer
 from core.sources.tests.factories import OrganizationSourceFactory, UserSourceFactory
 from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
@@ -630,7 +630,9 @@ class ExportSourceTaskTest(OCLAPITestCase):
         zipped_file = zipfile.ZipFile(latest_temp_dir + '/export.zip')
         exported_data = json.loads(zipped_file.read('export.json').decode('utf-8'))
 
-        self.assertEqual(exported_data, {**SourceDetailSerializer(source_v1).data, 'concepts': ANY, 'mappings': ANY})
+        self.assertEqual(
+            exported_data, {**SourceVersionExportSerializer(source_v1).data, 'concepts': ANY, 'mappings': ANY}
+        )
 
         exported_concepts = exported_data['concepts']
         expected_concepts = ConceptVersionDetailSerializer([concept2, concept1], many=True).data

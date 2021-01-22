@@ -95,11 +95,13 @@ class MappingDetailSerializer(MappingListSerializer):
     to_concept = ConceptDetailSerializer()
     from_source = SourceDetailSerializer()
     to_source = SourceDetailSerializer()
+    created_on = DateTimeField(source='created_at', read_only=True)
+    updated_on = DateTimeField(source='updated_at', read_only=True)
 
     class Meta:
         model = Mapping
         fields = MappingListSerializer.Meta.fields + (
-            'type', 'uuid', 'extras', 'created_at', 'updated_at',
+            'type', 'uuid', 'extras', 'created_on', 'updated_on',
             'created_by', 'updated_by', 'parent_id', 'previous_version_url',
         )
         extra_kwargs = {'parent_id': {'write_only': True}}

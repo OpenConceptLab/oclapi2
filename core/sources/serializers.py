@@ -217,5 +217,15 @@ class SourceVersionDetailSerializer(SourceCreateOrUpdateSerializer):
             'created_on', 'updated_on', 'created_by', 'updated_by', 'extras', 'external_id',
             'version', 'concepts_url', 'mappings_url', 'is_processing', 'released',
             'canonical_url', 'identifier', 'publisher', 'contact', 'jurisdiction', 'purpose', 'copyright',
-            'content_type', 'revision_date',
+            'content_type', 'revision_date', 'active_concepts', 'active_mappings',
+        )
+
+
+class SourceVersionExportSerializer(SourceVersionDetailSerializer):
+    source = SourceDetailSerializer(source='head')
+
+    class Meta:
+        model = Source
+        fields = (
+            *SourceVersionDetailSerializer.Meta.fields, 'source'
         )

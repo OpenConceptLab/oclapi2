@@ -18,6 +18,11 @@ class LocalizedNameSerializer(ModelSerializer):
             'uuid', 'name', 'external_id', 'type', 'locale', 'locale_preferred', 'name_type',
         )
 
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        ret.update({"type": "ConceptName"})
+        return ret
+
 
 class LocalizedDescriptionSerializer(ModelSerializer):
     uuid = CharField(read_only=True, source='id')
@@ -30,6 +35,11 @@ class LocalizedDescriptionSerializer(ModelSerializer):
         fields = (
             'uuid', 'description', 'external_id', 'type', 'locale', 'locale_preferred', 'description_type'
         )
+
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        ret.update({"type": "ConceptDescription"})
+        return ret
 
 
 class ConceptLabelSerializer(ModelSerializer):
@@ -214,7 +224,7 @@ class ConceptVersionDetailSerializer(ModelSerializer):
     names = LocalizedNameSerializer(many=True)
     descriptions = LocalizedDescriptionSerializer(many=True)
     source = CharField(source='parent_resource')
-    source_url = URLField(source='owner_url')
+    source_url = URLField(source='parent_url')
     owner = CharField(source='owner_name')
     created_on = DateTimeField(source='created_at', read_only=True)
     updated_on = DateTimeField(source='updated_at', read_only=True)

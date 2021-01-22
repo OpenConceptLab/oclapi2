@@ -243,3 +243,13 @@ class CollectionReferenceSerializer(ModelSerializer):
     class Meta:
         model = CollectionReference
         fields = ('expression', 'reference_type', 'id')
+
+
+class CollectionVersionExportSerializer(CollectionVersionDetailSerializer):
+    collection = CollectionDetailSerializer(source='head')
+
+    class Meta:
+        model = Collection
+        fields = (
+            *CollectionVersionDetailSerializer.Meta.fields, 'collection'
+        )

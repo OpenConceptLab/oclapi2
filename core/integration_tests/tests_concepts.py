@@ -229,7 +229,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         self.assertTrue(concept.is_versioned_object)
         self.assertEqual(concept.datatype, "None")
 
-    def test_put_200_openmrs_schema(self):
+    def test_put_200_openmrs_schema(self):  # pylint: disable=too-many-statements
         self.create_lookup_concept_classes()
         source = OrganizationSourceFactory(custom_validation_schema=CUSTOM_VALIDATION_SCHEMA_OPENMRS)
         name = LocalizedTextFactory(locale='fr')
@@ -309,6 +309,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
 
         # same names in update
         names[0]['uuid'] = str(name.id)
+        [name.pop('type', None) for name in names]  # pylint: disable=expression-not-assigned
         response = self.client.put(
             concept.uri,
             {**self.concept_payload, 'names': names, 'datatype': 'Numeric', 'update_comment': 'Updated datatype'},
