@@ -447,9 +447,17 @@ class ReferenceImporter(BaseResourceImporter):
         collection = self.get_queryset().first()
 
         if collection:
-            collection.add_expressions(
+            (added_references, errors) = collection.add_expressions(
                 self.get('data'), settings.API_BASE_URL, self.user, self.get('__cascade', False)
             )
+            for ref in added_references:
+                if ref.concepts:
+                    for concept in ref.concepts:
+                        concept.save()
+                if ref.mappings:
+                    for mapping in ref.mappings:
+                        mapping.save()
+
             return CREATED
         return FAILED
 
