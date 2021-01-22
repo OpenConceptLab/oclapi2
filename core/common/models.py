@@ -434,14 +434,21 @@ class ConceptContainerModel(VersionedModel):
         if self.is_content_privately_referred():
             raise ValidationError(dict(detail=CONTENT_REFERRED_PRIVATELY.format(self.mnemonic)))
 
-        if not self.is_head and self.is_latest_version:
-            prev_version = self.prev_version
-            if not prev_version:
-                raise ValidationError(dict(detail=CANNOT_DELETE_ONLY_VERSION))
-            prev_version.is_latest_version = True
-            prev_version.save()
-
         generic_export_path = self.generic_export_path()
+
+        if self.is_head:
+            self.versions.exclude(id=self.id).delete()
+        else:
+            if self.is_latest_version:
+                prev_version = self.prev_version
+                if not prev_version:
+                    raise ValidationError(dict(detail=CANNOT_DELETE_ONLY_VERSION))
+                prev_version.is_latest_version = True
+                prev_version.save()
+
+        from core.pins.models import Pin
+        Pin.objects.filter(resource_type__model=self.resource_type.lower(), resource_id=self.id).delete()
+
         super().delete(using=using, keep_parents=keep_parents)
         S3.delete_objects(generic_export_path)
 
