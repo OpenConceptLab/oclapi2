@@ -193,7 +193,7 @@ class CollectionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(coll.versions.count(), 2)
 
         response = self.client.delete(
-            '/collections/coll1/',
+            '/collections/coll1/v1/',
             HTTP_AUTHORIZATION='Token ' + user.get_token(),
             format='json'
         )
@@ -207,8 +207,9 @@ class CollectionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
             format='json'
         )
 
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(coll.versions.count(), 1)
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(coll.versions.count(), 0)
+        self.assertFalse(Collection.objects.filter(mnemonic='coll1').exists())
 
     def test_put_401(self):
         coll = OrganizationCollectionFactory(mnemonic='coll1', name='Collection')
