@@ -42,7 +42,7 @@ class S3:
                     'Bucket': settings.AWS_STORAGE_BUCKET_NAME,
                     'Key': key
                 },
-                ExpiresIn=600,
+                ExpiresIn=60*60*24*7,  # a week
             )
         except NoCredentialsError:  # pragma: no cover
             pass
