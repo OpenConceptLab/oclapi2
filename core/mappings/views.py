@@ -1,5 +1,5 @@
 from django.db.models import F
-from django.http import QueryDict
+from django.http import QueryDict, Http404
 from django.shortcuts import get_object_or_404
 from drf_yasg.utils import swagger_auto_schema
 from rest_framework import status
@@ -8,6 +8,7 @@ from rest_framework.mixins import CreateModelMixin
 from rest_framework.response import Response
 
 from core.common.constants import HEAD
+from core.common.exceptions import Http409
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryMixin
 from core.common.swagger_parameters import (
     q_param, limit_param, sort_desc_param, page_param, exact_match_param, sort_asc_param, verbose_param,
@@ -120,7 +121,22 @@ class MappingRetrieveUpdateDestroyView(MappingBaseView, RetrieveAPIView, UpdateA
     serializer_class = MappingDetailSerializer
 
     def get_object(self, queryset=None):
-        return get_object_or_404(self.get_queryset(None), is_latest_version=True)
+        queryset = self.get_queryset(None)
+        filters = dict(id=F('versioned_object_id'))
+        if 'collection' in self.kwargs:
+            filters = dict(is_latest_version=True)
+            uri_param = self.request.query_params.dict().get('uri')
+            if uri_param:
+                filters.update(Mapping.get_parent_and_owner_filters_from_uri(uri_param))
+            if queryset.count() > 1 and not uri_param:
+                raise Http409()
+
+        instance = queryset.filter(**filters).first()
+
+        if not instance:
+            raise Http404()
+
+        return instance
 
     def get_permissions(self):
         if self.request.method in ['GET']:
@@ -187,7 +203,7 @@ class MappingVersionsView(MappingBaseView, ConceptDictionaryMixin, ListWithHeade
     permission_classes = (CanViewParentDictionary,)
 
     def get_queryset(self, _=None):
-        return super().get_queryset(None).exclude(id=F('versioned_object_id'))
+        return super().get_queryset().exclude(id=F('versioned_object_id'))
 
     def get_serializer_class(self):
         return MappingDetailSerializer if self.is_verbose() else MappingVersionListSerializer
