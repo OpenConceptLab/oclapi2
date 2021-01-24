@@ -551,7 +551,7 @@ class MappingRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         response = self.client.get(self.mapping.uri, format='json')
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data['uuid'], str(self.mapping.get_latest_version().id))
+        self.assertEqual(response.data['uuid'], str(self.mapping.id))
 
     def test_get_404(self):
         response = self.client.get(
