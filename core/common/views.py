@@ -273,7 +273,15 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         query_params = self.request.query_params.dict()
 
         return {
-            k: v for k, v in query_params.items() if k.startswith('extras.') and not k.startswith('extras.exists')
+            k: v for k, v in query_params.items() if k.startswith(
+                'extras.') and not k.startswith('extras.exists') and not k.startswith('extras.exact')
+        }
+
+    def get_extras_exact_fields_from_query_params(self):
+        query_params = self.request.query_params.dict()
+
+        return {
+            k.replace('.exact', ''): v for k, v in query_params.items() if k.startswith('extras.exact')
         }
 
     def get_extras_fields_exists_from_query_params(self):
@@ -305,10 +313,11 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                 default_filters['is_latest_version'] = True
 
             for field, value in default_filters.items():
-                results = results.filter("match", **{field: value})
+                results = results.query("match", **{field: value})
 
             faceted_criterion = self.get_faceted_criterion()
             extras_fields = self.get_extras_searchable_fields_from_query_params()
+            extras_fields_exact = self.get_extras_exact_fields_from_query_params()
             extras_fields_exists = self.get_extras_fields_exists_from_query_params()
 
             if faceted_criterion:
@@ -331,11 +340,14 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                     results = results.query(
                         "exists", field="extras.{}".format(field)
                     )
+            if extras_fields_exact:
+                for field, value in extras_fields_exact.items():
+                    results = results.query("match", **{field: value})
 
             if self._should_exclude_retired():
-                results = results.filter('match', retired=False)
+                results = results.query('match', retired=False)
             if not self._should_include_private():
-                results = results.filter('match', public_can_view=True)
+                results = results.query('match', public_can_view=True)
 
             if self.is_owner_document_model():
                 kwargs_filters = self.kwargs
@@ -343,7 +355,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                 kwargs_filters = self.get_kwargs_filters()
 
             for key, value in kwargs_filters.items():
-                results = results.filter('match', **{to_snake_case(key): value})
+                results = results.query('match', **{to_snake_case(key): value})
 
             sort_field = self.get_sort_attr()
             if sort_field:
@@ -380,7 +392,9 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             self.get_searchable_fields()
         ) or bool(
             self.get_extras_searchable_fields_from_query_params()
-        ) or bool(self.get_extras_fields_exists_from_query_params()))
+        ) or bool(
+            self.get_extras_fields_exists_from_query_params()
+        ) or bool(self.get_extras_exact_fields_from_query_params()))
 
 
 class SourceChildCommonBaseView(BaseAPIView):
