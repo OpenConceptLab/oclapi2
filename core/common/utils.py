@@ -442,6 +442,6 @@ def jsonify_safe(value):
 
 
 def web_url():
-    if settings.ENV == 'development':
+    if not settings.ENV or settings.ENV in ['development', 'ci']:
         return 'http://localhost:4000'
     return settings.API_BASE_URL.replace('api.', '')
