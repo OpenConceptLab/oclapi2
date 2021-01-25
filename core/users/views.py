@@ -12,6 +12,7 @@ from rest_framework.response import Response
 from core.common.mixins import ListWithHeadersMixin
 from core.common.views import BaseAPIView, BaseLogoView
 from core.orgs.models import Organization
+from core.users.constants import VERIFICATION_TOKEN_MISMATCH, VERIFY_EMAIL_MESSAGE
 from core.users.documents import UserProfileDocument
 from core.users.serializers import UserDetailSerializer, UserCreateSerializer, UserListSerializer
 from .models import UserProfile
@@ -25,6 +26,11 @@ class TokenAuthenticationView(ObtainAuthToken):
         result = super().post(request, *args, **kwargs)
         try:
             user = UserProfile.objects.get(username=request.data['username'])
+            if not user.verified:
+                user.send_verification_email()
+                return Response(
+                    {'detail': VERIFY_EMAIL_MESSAGE, 'email': user.email}, status=status.HTTP_401_UNAUTHORIZED
+                )
             update_last_login(None, user)
         except:  # pylint: disable=bare-except
             pass
@@ -93,13 +99,47 @@ class UserListView(UserBaseView,
         self.perform_create(serializer)
         headers = self.get_success_headers(serializer.data)
 
+        if serializer.errors:
+            return Response(serializer.data, status=status.HTTP_400_BAD_REQUEST)
+
         data = serializer.data.copy()
-        if 'username' in serializer._errors and 'token' not in data and get(  # pylint: disable=protected-access
-                serializer, 'instance.token'
-        ):
+        if 'username' in serializer.errors and 'token' not in data and get(serializer, 'instance.token'):
             data['token'] = serializer.instance.token  # for ocl_web
 
         return Response(data, status=status.HTTP_201_CREATED, headers=headers)
+
+
+class UserSignup(UserBaseView, mixins.CreateModelMixin):
+    serializer_class = UserCreateSerializer
+    permission_classes = (AllowAny, )
+
+    def post(self, request, *args, **kwargs):  # pylint: disable=unused-argument
+        serializer = self.get_serializer(data={**request.data, 'verified': False})
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+
+        if serializer.errors:
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        headers = self.get_success_headers(serializer.data)
+        return Response({'detail': VERIFY_EMAIL_MESSAGE}, status=status.HTTP_201_CREATED, headers=headers)
+
+
+class UserEmailVerificationView(UserBaseView):
+    serializer_class = UserDetailSerializer
+    permission_classes = (AllowAny, )
+
+    def get(self, request, *args, **kwargs):  # pylint: disable=unused-argument
+        user = self.get_object()
+        if not user:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+
+        result = user.mark_verified(kwargs.get('verification_token'))
+        if result:
+            update_last_login(None, user)
+            return Response({'token': user.get_token()}, status=status.HTTP_200_OK)
+
+        return Response(dict(detail=VERIFICATION_TOKEN_MISMATCH), status=status.HTTP_401_UNAUTHORIZED)
 
 
 class UserDetailView(UserBaseView, RetrieveAPIView, DestroyAPIView, mixins.UpdateModelMixin):

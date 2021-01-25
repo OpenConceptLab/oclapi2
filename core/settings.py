@@ -222,6 +222,9 @@ AUTH_PASSWORD_VALIDATORS = [
     },
     {
         'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator',
+        'OPTIONS': {
+            'min_length': 8,
+        }
     },
     {
         'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator',
@@ -318,8 +321,13 @@ EMAIL_HOST_USER = os.environ.get('EMAIL_HOST_USER', 'no-reply@openconceptlab.org
 EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', '')
 EMAIL_PORT = os.environ.get('EMAIL_PORT', 587)
 EMAIL_SUBJECT_PREFIX = '[Openconceptlab.org] '
+DEFAULT_FROM_EMAIL = 'openconceptlab <noreply@openconceptlab.org>'
+ACCOUNT_EMAIL_SUBJECT_PREFIX = '[openconceptlab.org] '
 
 if not ENV or ENV in ['development']:
     EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
 else:
     EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+    ADMINS = (
+        ('Jonathan Payne', 'paynejd@gmail.com')
+    )

@@ -1,8 +1,85 @@
+from mock import patch
+from rest_framework.exceptions import ErrorDetail
+
 from core.common.constants import ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT
 from core.common.tests import OCLAPITestCase
 from core.orgs.tests.factories import OrganizationFactory
+from core.users.constants import VERIFY_EMAIL_MESSAGE, VERIFICATION_TOKEN_MISMATCH
 from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
+
+
+class UserSignupTest(OCLAPITestCase):
+    @patch('core.users.models.UserProfile.send_verification_email')
+    def test_signup_unverified_201(self, send_mail_mock):
+        response = self.client.post(
+            '/users/signup/',
+            dict(username='charles', name='Charles Dickens', password='short', email='charles@fiction.com'),
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.data,
+            dict(password=['This password is too short. It must contain at least 8 characters.'])
+        )
+
+        response = self.client.post(
+            '/users/signup/',
+            dict(username='charles', name='Charles Dickens', password='scroooge', email='charles@fiction.com'),
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data, dict(detail=VERIFY_EMAIL_MESSAGE))
+        send_mail_mock.assert_called_once()
+
+        created_user = UserProfile.objects.get(username='charles')
+        self.assertFalse(created_user.verified)
+        self.assertIsNotNone(created_user.verification_token)
+
+        response = self.client.post(
+            '/users/login/',
+            dict(username='charles', password='scroooge'),
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.data, dict(detail=VERIFY_EMAIL_MESSAGE, email='charles@fiction.com'))
+
+        response = self.client.get(
+            '/users/charles/verify/random-token/',
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.data, dict(detail=VERIFICATION_TOKEN_MISMATCH))
+
+        response = self.client.get(
+            '/users/unknown/verify/{}/'.format(created_user.verification_token),
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+        response = self.client.get(
+            '/users/charles/verify/{}/'.format(created_user.verification_token),
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, dict(token=created_user.get_token()))
+        created_user.refresh_from_db()
+        self.assertTrue(created_user.verified)
+
+        response = self.client.post(
+            '/users/login/',
+            dict(username='charles', password='scroooge'),
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, dict(token=created_user.get_token()))
 
 
 class UserOrganizationListViewTest(OCLAPITestCase):
@@ -116,7 +193,7 @@ class UserListViewTest(OCLAPITestCase):
     def test_post_201(self):
         response = self.client.post(
             '/users/',
-            dict(username='charles', name='Charles Dickens', password='scrooge', email='charles@fiction.com'),
+            dict(username='charles', name='Charles Dickens', password='scroooge', email='charles@fiction.com'),
             HTTP_AUTHORIZATION='Token ' + self.superuser.get_token(),
             format='json'
         )
@@ -127,17 +204,21 @@ class UserListViewTest(OCLAPITestCase):
 
         response = self.client.post(
             '/users/',
-            dict(username='charles', name='Charles Dickens', password='scrooge', email='charles@fiction.com'),
+            dict(username='charles', name='Charles Dickens', password='scroooge', email='charles@fiction.com'),
             HTTP_AUTHORIZATION='Token ' + self.superuser.get_token(),
             format='json'
         )
 
-        self.assertEqual(response.status_code, 201)
-        self.assertIsNotNone(response.data['token'])
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.data,
+            {'username': [ErrorDetail(string='A user with this username already exists', code='unique')],
+             'email': [ErrorDetail(string='A user with this email already exists', code='unique')]}
+        )
 
         response = self.client.post(
             '/users/login/',
-            dict(username='charles', password='scrooge'),
+            dict(username='charles', password='scroooge'),
             format='json'
         )
 

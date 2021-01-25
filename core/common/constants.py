@@ -58,3 +58,4 @@ CREATOR_CANNOT_BE_NONE = 'Creator cannot be None.'
 CANNOT_DELETE_ONLY_VERSION = 'Cannot delete only version.'
 BULK_IMPORT_QUEUES_COUNT = 4
 MAX_PINS_ALLOWED = 4
+CONFIRM_EMAIL_ADDRESS = "Confirm E-mail Address"

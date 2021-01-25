@@ -439,3 +439,9 @@ def jsonify_safe(value):
         return json.loads(value)
     except:  # pylint: disable=bare-except
         return value
+
+
+def web_url():
+    if settings.ENV == 'development':
+        return 'http://localhost:4000'
+    return settings.API_BASE_URL.replace('api.', '')

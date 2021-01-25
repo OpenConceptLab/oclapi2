@@ -152,6 +152,36 @@ class UserProfileTest(OCLTestCase):
         user.set_token('token')
         self.assertEqual(user.auth_token.key, 'token')
 
+    @patch('core.users.models.send_user_verification_email')
+    def test_send_verification_email(self, mail_mock):  # pylint: disable=no-self-use
+        user = UserProfile(id=189)
+        user.send_verification_email()
+
+        mail_mock.apply_async.assert_called_once_with((189, ))
+
+    def test_email_verification_url(self):
+        user = UserProfile(id=189, username='foobar', verification_token='some-token')
+        self.assertEqual(
+            user.email_verification_url,
+            'http://localhost:4000/#/accounts/foobar/verify/some-token/'
+        )
+
+    def test_mark_verified(self):
+        user = UserProfileFactory(verified=False, verification_token='some-token')
+        self.assertFalse(user.verified)
+
+        self.assertFalse(user.mark_verified(token='wrong-token'))
+        user.refresh_from_db()
+        self.assertFalse(user.verified)
+
+        self.assertTrue(user.mark_verified(token='some-token'))
+        user.refresh_from_db()
+        self.assertTrue(user.verified)
+
+        user.save = Mock()
+        self.assertTrue(user.mark_verified(token='some-token'))
+        user.save.assert_not_called()
+
 
 class TokenAuthenticationViewTest(OCLAPITestCase):
     def test_login(self):

@@ -1,11 +1,15 @@
+
 from billiard.exceptions import WorkerLostError
 from celery.utils.log import get_task_logger
 from celery_once import QueueOnce
 from django.apps import apps
+from django.core.mail import EmailMessage
 from django.core.management import call_command
+from django.template.loader import render_to_string
 from django_elasticsearch_dsl.registries import registry
 
 from core.celery import app
+from core.common.constants import CONFIRM_EMAIL_ADDRESS
 from core.common.utils import write_export_file
 
 logger = get_task_logger(__name__)
@@ -185,3 +189,22 @@ def bulk_import_parts_inline(self, input_list, username, update_if_exists):
 def bulk_priority_import(to_import, username, update_if_exists):
     from core.importers.models import BulkImport
     return BulkImport(content=to_import, username=username, update_if_exists=update_if_exists).run()
+
+
+@app.task
+def send_user_verification_email(user_id):
+    from core.users.models import UserProfile
+    user = UserProfile.objects.filter(id=user_id).first()
+    if not user:
+        return user
+
+    msg_html_for_readers = render_to_string(
+        'verification.html', {
+            'user': user,
+            'url': user.email_verification_url,
+        }
+    )
+    mail = EmailMessage(subject=CONFIRM_EMAIL_ADDRESS, body=msg_html_for_readers, to=[user.email])
+    mail.content_subtype = "html"
+    res = mail.send()
+    return res

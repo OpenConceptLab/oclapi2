@@ -6,6 +6,8 @@ from rest_framework.authtoken.models import Token
 
 from core.common.mixins import SourceContainerMixin
 from core.common.models import BaseModel, CommonLogoModel
+from core.common.tasks import send_user_verification_email
+from core.common.utils import web_url
 from .constants import USER_OBJECT_TYPE
 
 
@@ -20,6 +22,8 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
     location = models.TextField(null=True, blank=True)
     preferred_locale = models.TextField(null=True, blank=True)
     website = models.TextField(null=True, blank=True)
+    verified = models.BooleanField(default=True)
+    verification_token = models.TextField(null=True, blank=True)
 
     @property
     def user(self):
@@ -81,6 +85,24 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
     @property
     def orgs_count(self):
         return self.organizations.count()
+
+    def send_verification_email(self):
+        return send_user_verification_email.apply_async((self.id, ))
+
+    @property
+    def email_verification_url(self):
+        return "{}/#/accounts/{}/verify/{}/".format(web_url(), self.username, self.verification_token)
+
+    def mark_verified(self, token):
+        if self.verified:
+            return True
+
+        if token == self.verification_token:
+            self.verified = True
+            self.save()
+            return True
+
+        return False
 
 
 admin.site.register(UserProfile)

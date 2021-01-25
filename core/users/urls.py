@@ -1,5 +1,5 @@
 from django.conf.urls import url
-from django.urls import re_path, include
+from django.urls import re_path, include, path
 
 from core.common.constants import NAMESPACE_PATTERN
 from core.orgs import views as org_views
@@ -8,10 +8,16 @@ from . import views
 urlpatterns = [
     re_path(r'^$', views.UserListView.as_view(), name='userprofile-list'),
     url('login/', views.TokenAuthenticationView.as_view(), name='user-login'),
+    url('signup/', views.UserSignup.as_view(), name='user-signup'),
     re_path(
         r'^(?P<user>' + NAMESPACE_PATTERN + ')/$',
         views.UserDetailView.as_view(),
         name='userprofile-detail'
+    ),
+    path(
+        '<str:user>/verify/<str:verification_token>/',
+        views.UserEmailVerificationView.as_view(),
+        name='userprofile-email-verify'
     ),
     re_path(
         r'^(?P<user>' + NAMESPACE_PATTERN + ')/logo/$',
