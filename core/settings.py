@@ -320,14 +320,18 @@ EMAIL_USE_TLS = os.environ.get('EMAIL_USE_TLS', True) in ['true', True]
 EMAIL_HOST_USER = os.environ.get('EMAIL_HOST_USER', 'no-reply@openconceptlab.org')
 EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', '')
 EMAIL_PORT = os.environ.get('EMAIL_PORT', 587)
-EMAIL_SUBJECT_PREFIX = '[Openconceptlab.org] '
 DEFAULT_FROM_EMAIL = 'openconceptlab <noreply@openconceptlab.org>'
 ACCOUNT_EMAIL_SUBJECT_PREFIX = '[openconceptlab.org] '
+ADMINS = (
+    ('Jonathan Payne', 'paynejd@gmail.com')
+)
 
-if not ENV or ENV in ['development']:
+if not ENV or ENV in ['production']:
+    EMAIL_SUBJECT_PREFIX = '[Openconceptlab.org] '
+else:
+    EMAIL_SUBJECT_PREFIX = '[Openconceptlab.org] [{}]'.format(ENV.upper())
+
+if not ENV or ENV in ['development', 'ci']:
     EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
 else:
     EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
-    ADMINS = (
-        ('Jonathan Payne', 'paynejd@gmail.com')
-    )
