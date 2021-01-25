@@ -134,7 +134,10 @@ class UserProfileTest(OCLTestCase):
             dict(errors=['This password is too short. It must contain at least 8 characters.'])
         )
 
+        user.verification_token = 'some-token'
+        user.save()
         user.update_password(password='Newpassw0rd')
+        self.assertIsNone(user.verification_token)
         self.assertFalse(user.check_password('Password123!'))
         self.assertTrue(user.check_password('Newpassw0rd'))
 
@@ -195,14 +198,17 @@ class UserProfileTest(OCLTestCase):
 
         self.assertFalse(user.mark_verified(token='wrong-token'))
         user.refresh_from_db()
+        self.assertEqual(user.verification_token, 'some-token')
         self.assertFalse(user.verified)
 
         self.assertTrue(user.mark_verified(token='some-token'))
         user.refresh_from_db()
+        self.assertIsNone(user.verification_token)
         self.assertTrue(user.verified)
 
         user.save = Mock()
         self.assertTrue(user.mark_verified(token='some-token'))
+        self.assertIsNone(user.verification_token)
         user.save.assert_not_called()
 
 

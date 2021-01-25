@@ -116,6 +116,7 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
 
         if token == self.verification_token:
             self.verified = True
+            self.verification_token = None
             self.save()
             return True
 
