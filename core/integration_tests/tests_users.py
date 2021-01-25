@@ -9,9 +9,9 @@ from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
 
 
-class UserSignupTest(OCLAPITestCase):
+class UserSignupVerificationViewTest(OCLAPITestCase):
     @patch('core.users.models.UserProfile.send_verification_email')
-    def test_signup_unverified_201(self, send_mail_mock):
+    def test_signup_unverified_to_verified(self, send_mail_mock):
         response = self.client.post(
             '/users/signup/',
             dict(username='charles', name='Charles Dickens', password='short', email='charles@fiction.com'),
@@ -80,6 +80,85 @@ class UserSignupTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data, dict(token=created_user.get_token()))
+
+
+class UserPasswordResetViewTest(OCLAPITestCase):
+    @patch('core.users.models.UserProfile.send_reset_password_email')
+    def test_request_and_reset(self, send_mail_mock):
+        user = UserProfileFactory(username='foo-user', email='foo@user.com')
+        self.assertIsNone(user.verification_token)
+
+        response = self.client.post(
+            '/users/password/reset/',
+            dict(),
+            format='json'
+        )
+        self.assertEqual(response.status_code, 400)
+
+        response = self.client.post(
+            '/users/password/reset/',
+            dict(email='bad@user.com'),
+            format='json'
+        )
+        self.assertEqual(response.status_code, 404)
+
+        response = self.client.post(
+            '/users/password/reset/',
+            dict(email='foo@user.com'),
+            format='json'
+        )
+        self.assertEqual(response.status_code, 200)
+        user.refresh_from_db()
+        self.assertIsNotNone(user.verification_token)
+        send_mail_mock.assert_called_once()
+
+        response = self.client.put(
+            '/users/password/reset/',
+            dict(),
+            format='json'
+        )
+        self.assertEqual(response.status_code, 400)
+
+        response = self.client.put(
+            '/users/password/reset/',
+            dict(token='bad-token'),
+            format='json'
+        )
+        self.assertEqual(response.status_code, 400)
+
+        response = self.client.put(
+            '/users/password/reset/',
+            dict(new_password='new-password123'),
+            format='json'
+        )
+        self.assertEqual(response.status_code, 400)
+
+        response = self.client.put(
+            '/users/password/reset/',
+            dict(token='bad-token', new_password='new-password123'),
+            format='json'
+        )
+        self.assertEqual(response.status_code, 404)
+
+        response = self.client.put(
+            '/users/password/reset/',
+            dict(token=user.verification_token, new_password='new-password123'),
+            format='json'
+        )
+        self.assertEqual(response.status_code, 200)
+
+        user.refresh_from_db()
+        self.assertIsNone(user.verification_token)
+        self.assertTrue(user.check_password('new-password123'))
+
+        response = self.client.post(
+            '/users/login/',
+            dict(username='foo-user', password='new-password123'),
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, dict(token=user.get_token()))
 
 
 class UserOrganizationListViewTest(OCLAPITestCase):
@@ -309,7 +388,7 @@ class UserDetailViewTest(OCLAPITestCase):
 
         response = self.client.put(
             '/users/{}/'.format(self.user.username),
-            dict(password='newpassword', email='user@user.com'),
+            dict(password='newpassword123', email='user@user.com'),
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -317,7 +396,7 @@ class UserDetailViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['username'], self.user.username)
         self.user.refresh_from_db()
-        self.assertTrue(self.user.check_password('newpassword'))
+        self.assertTrue(self.user.check_password('newpassword123'))
         self.assertEqual(self.user.email, 'user@user.com')
 
     def test_delete_self_405(self):

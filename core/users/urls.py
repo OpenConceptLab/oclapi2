@@ -19,6 +19,11 @@ urlpatterns = [
         views.UserEmailVerificationView.as_view(),
         name='userprofile-email-verify'
     ),
+    path(
+        'password/reset/',
+        views.UserPasswordResetView.as_view(),
+        name='userprofile-email-verify'
+    ),
     re_path(
         r'^(?P<user>' + NAMESPACE_PATTERN + ')/logo/$',
         views.UserLogoView.as_view(),

@@ -1,12 +1,14 @@
 from django.contrib import admin
 from django.contrib.auth.models import AbstractUser
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.urls import reverse
 from rest_framework.authtoken.models import Token
 
 from core.common.mixins import SourceContainerMixin
 from core.common.models import BaseModel, CommonLogoModel
-from core.common.tasks import send_user_verification_email
+from core.common.tasks import send_user_verification_email, send_user_reset_password_email
 from core.common.utils import web_url
 from .constants import USER_OBJECT_TYPE
 
@@ -51,14 +53,22 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
 
     def update_password(self, password=None, hashed_password=None):
         if not password and not hashed_password:
-            return
+            return None
 
         if password:
-            self.set_password(password)
+            try:
+                validate_password(password)
+                self.set_password(password)
+            except ValidationError as ex:
+                return dict(errors=ex.messages)
         elif hashed_password:
             self.password = hashed_password
+
+        if self.verification_token:
+            self.verification_token = None
         self.save()
         self.refresh_token()
+        return None
 
     def refresh_token(self):
         self.__delete_token()
@@ -89,9 +99,16 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
     def send_verification_email(self):
         return send_user_verification_email.apply_async((self.id, ))
 
+    def send_reset_password_email(self):
+        return send_user_reset_password_email.apply_async((self.id,))
+
     @property
     def email_verification_url(self):
         return "{}/#/accounts/{}/verify/{}/".format(web_url(), self.username, self.verification_token)
+
+    @property
+    def reset_password_url(self):
+        return "{}/#/accounts/{}/password-reset/{}/".format(web_url(), self.username, self.verification_token)
 
     def mark_verified(self, token):
         if self.verified:

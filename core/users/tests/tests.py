@@ -119,15 +119,24 @@ class UserProfileTest(OCLTestCase):
 
     def test_update_password(self):
         user = UserProfileFactory()
-        user.set_password('password')
+        user.set_password('Password123!')
         user.save()
 
         user.update_password()
-        self.assertTrue(user.check_password('password'))
+        self.assertTrue(user.check_password('Password123!'))
 
-        user.update_password(password='newpassword')
-        self.assertFalse(user.check_password('password'))
-        self.assertTrue(user.check_password('newpassword'))
+        self.assertEqual(
+            user.update_password(password='newpassword'),
+            dict(errors=['This password is too common.'])
+        )
+        self.assertEqual(
+            user.update_password(password='short'),
+            dict(errors=['This password is too short. It must contain at least 8 characters.'])
+        )
+
+        user.update_password(password='Newpassw0rd')
+        self.assertFalse(user.check_password('Password123!'))
+        self.assertTrue(user.check_password('Newpassw0rd'))
 
         user.update_password(hashed_password='hashedpassword')
         self.assertFalse(user.check_password('password'))
@@ -159,11 +168,25 @@ class UserProfileTest(OCLTestCase):
 
         mail_mock.apply_async.assert_called_once_with((189, ))
 
+    @patch('core.users.models.send_user_reset_password_email')
+    def test_send_reset_password_email(self, mail_mock):  # pylint: disable=no-self-use
+        user = UserProfile(id=189)
+        user.send_reset_password_email()
+
+        mail_mock.apply_async.assert_called_once_with((189, ))
+
     def test_email_verification_url(self):
         user = UserProfile(id=189, username='foobar', verification_token='some-token')
         self.assertEqual(
             user.email_verification_url,
             'http://localhost:4000/#/accounts/foobar/verify/some-token/'
+        )
+
+    def test_reset_password_url(self):
+        user = UserProfile(id=189, username='foobar', verification_token='some-token')
+        self.assertEqual(
+            user.reset_password_url,
+            'http://localhost:4000/#/accounts/foobar/password-reset/some-token/'
         )
 
     def test_mark_verified(self):

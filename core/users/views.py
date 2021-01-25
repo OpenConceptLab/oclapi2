@@ -1,3 +1,5 @@
+import uuid
+
 from django.contrib.auth.models import update_last_login
 from django.http import Http404
 from drf_yasg.utils import swagger_auto_schema
@@ -140,6 +142,46 @@ class UserEmailVerificationView(UserBaseView):
             return Response({'token': user.get_token()}, status=status.HTTP_200_OK)
 
         return Response(dict(detail=VERIFICATION_TOKEN_MISMATCH), status=status.HTTP_401_UNAUTHORIZED)
+
+
+class UserPasswordResetView(UserBaseView):
+    serializer_class = UserDetailSerializer
+    permission_classes = (AllowAny, )
+
+    def post(self, request, *args, **kwargs):  # pylint: disable=unused-argument,no-self-use
+        """Sends reset password mail"""
+
+        email = request.data.get('email')
+        if not email:
+            return Response(status=status.HTTP_400_BAD_REQUEST)
+
+        user = UserProfile.objects.filter(email=email).first()
+        if not user:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+
+        user.verification_token = uuid.uuid4()
+        user.save()
+        user.send_reset_password_email()
+        return Response(status=status.HTTP_200_OK)
+
+    def put(self, request, *args, **kwargs):  # pylint: disable=unused-argument,no-self-use
+        """Resets password"""
+
+        token = request.data.get('token', None)
+        password = request.data.get('new_password', None)
+        if not token or not password:
+            return Response(status=status.HTTP_400_BAD_REQUEST)
+
+        user = UserProfile.objects.filter(verification_token=token).first()
+
+        if not user:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+
+        result = user.update_password(password=password)
+        if get(result, 'errors'):
+            return Response(result, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(status=status.HTTP_200_OK)
 
 
 class UserDetailView(UserBaseView, RetrieveAPIView, DestroyAPIView, mixins.UpdateModelMixin):

@@ -9,8 +9,8 @@ from django.template.loader import render_to_string
 from django_elasticsearch_dsl.registries import registry
 
 from core.celery import app
-from core.common.constants import CONFIRM_EMAIL_ADDRESS
-from core.common.utils import write_export_file
+from core.common.constants import CONFIRM_EMAIL_ADDRESS_MAIL_SUBJECT, PASSWORD_RESET_MAIL_SUBJECT
+from core.common.utils import write_export_file, web_url
 
 logger = get_task_logger(__name__)
 
@@ -198,13 +198,33 @@ def send_user_verification_email(user_id):
     if not user:
         return user
 
-    msg_html_for_readers = render_to_string(
+    html_body = render_to_string(
         'verification.html', {
             'user': user,
             'url': user.email_verification_url,
         }
     )
-    mail = EmailMessage(subject=CONFIRM_EMAIL_ADDRESS, body=msg_html_for_readers, to=[user.email])
+    mail = EmailMessage(subject=CONFIRM_EMAIL_ADDRESS_MAIL_SUBJECT, body=html_body, to=[user.email])
+    mail.content_subtype = "html"
+    res = mail.send()
+    return res
+
+
+@app.task
+def send_user_reset_password_email(user_id):
+    from core.users.models import UserProfile
+    user = UserProfile.objects.filter(id=user_id).first()
+    if not user:
+        return user
+
+    html_body = render_to_string(
+        'password_reset.html', {
+            'user': user,
+            'url': user.reset_password_url,
+            'web_url': web_url(),
+        }
+    )
+    mail = EmailMessage(subject=PASSWORD_RESET_MAIL_SUBJECT, body=html_body, to=[user.email])
     mail.content_subtype = "html"
     res = mail.send()
     return res
