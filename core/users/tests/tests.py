@@ -189,7 +189,7 @@ class UserProfileTest(OCLTestCase):
         user = UserProfile(id=189, username='foobar', verification_token='some-token')
         self.assertEqual(
             user.reset_password_url,
-            'http://localhost:4000/#/accounts/foobar/password-reset/some-token/'
+            'http://localhost:4000/#/accounts/foobar/password/reset/some-token/'
         )
 
     def test_mark_verified(self):

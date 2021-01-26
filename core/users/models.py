@@ -108,7 +108,7 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
 
     @property
     def reset_password_url(self):
-        return "{}/#/accounts/{}/password-reset/{}/".format(web_url(), self.username, self.verification_token)
+        return "{}/#/accounts/{}/password/reset/{}/".format(web_url(), self.username, self.verification_token)
 
     def mark_verified(self, token):
         if self.verified:
