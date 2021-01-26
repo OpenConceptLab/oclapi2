@@ -323,7 +323,7 @@ EMAIL_PORT = os.environ.get('EMAIL_PORT', 587)
 DEFAULT_FROM_EMAIL = 'openconceptlab <noreply@openconceptlab.org>'
 ACCOUNT_EMAIL_SUBJECT_PREFIX = '[openconceptlab.org] '
 ADMINS = (
-    ('Jonathan Payne', 'paynejd@gmail.com')
+    ('Jonathan Payne', 'paynejd@gmail.com'),
 )
 
 if not ENV or ENV in ['production']:

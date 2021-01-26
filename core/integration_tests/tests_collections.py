@@ -779,9 +779,9 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 404)
 
-    @patch('core.common.services.S3.url_for')
-    def test_get_204(self, s3_url_for_mock):
-        s3_url_for_mock.return_value = None
+    @patch('core.common.services.S3.exists')
+    def test_get_204(self, s3_exists_mock):
+        s3_exists_mock.return_value = False
 
         response = self.client.get(
             '/collections/coll/v1/export/',
@@ -790,10 +790,12 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 204)
-        s3_url_for_mock.assert_called_once_with("username/coll_v1.{}.zip".format(self.v1_updated_at))
+        s3_exists_mock.assert_called_once_with("username/coll_v1.{}.zip".format(self.v1_updated_at))
 
     @patch('core.common.services.S3.url_for')
-    def test_get_303(self, s3_url_for_mock):
+    @patch('core.common.services.S3.exists')
+    def test_get_303(self, s3_exists_mock, s3_url_for_mock):
+        s3_exists_mock.return_value = True
         s3_url = "https://s3/username/coll_v1.{}.zip".format(self.v1_updated_at)
         s3_url_for_mock.return_value = s3_url
 
@@ -807,6 +809,7 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
         self.assertEqual(response['Location'], s3_url)
         self.assertEqual(response['Last-Updated'], str(self.collection_v1.last_child_update.isoformat()))
         self.assertEqual(response['Last-Updated-Timezone'], 'America/New_York')
+        s3_exists_mock.assert_called_once_with("username/coll_v1.{}.zip".format(self.v1_updated_at))
         s3_url_for_mock.assert_called_once_with("username/coll_v1.{}.zip".format(self.v1_updated_at))
 
     def test_get_405(self):

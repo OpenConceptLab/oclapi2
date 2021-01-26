@@ -502,17 +502,13 @@ class ConceptContainerExportMixin:
         if version.is_head:
             return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
 
-        key = version.export_path
-        url = S3.url_for(key)
+        exists = S3.exists(version.export_path)
 
-        if url:
-            logger.debug('   URL and Key retrieved for %s version %s', self.entity.lower(), version.version)
-        else:
-            logger.debug('   Key does not exist for %s version %s', self.entity.lower(), version.version)
+        if not exists:
             return Response(status=status.HTTP_204_NO_CONTENT)
 
         response = Response(status=status.HTTP_303_SEE_OTHER)
-        response['Location'] = url
+        response['Location'] = S3.url_for(version.export_path)
 
         # Set headers to ensure sure response is not cached by a client
         response['Cache-Control'] = 'no-cache, no-store, must-revalidate'
