@@ -7,7 +7,7 @@ from pydash import get
 from rest_framework import serializers
 from rest_framework.validators import UniqueValidator
 
-from core.common.constants import NAMESPACE_REGEX, INCLUDE_SUBSCRIBED_ORGS
+from core.common.constants import NAMESPACE_REGEX, INCLUDE_SUBSCRIBED_ORGS, INCLUDE_VERIFICATION_TOKEN
 from .models import UserProfile
 
 
@@ -124,16 +124,21 @@ class UserDetailSerializer(serializers.ModelSerializer):
             'public_collections', 'public_sources', 'created_on', 'updated_on', 'created_by', 'updated_by',
             'url', 'organizations_url', 'extras', 'sources_url', 'collections_url', 'website', 'last_login',
             'logo_url', 'subscribed_orgs', 'is_superuser', 'is_staff', 'first_name', 'last_name', 'verified',
+            'verification_token',
         )
 
     def __init__(self, *args, **kwargs):
         params = get(kwargs, 'context.request.query_params')
         self.include_subscribed_orgs = False
+        self.include_verification_token = False
         if params:
             self.query_params = params.dict()
             self.include_subscribed_orgs = self.query_params.get(INCLUDE_SUBSCRIBED_ORGS) in ['true', True]
+            self.include_verification_token = self.query_params.get(INCLUDE_VERIFICATION_TOKEN) in ['true', True]
         if not self.include_subscribed_orgs:
             self.fields.pop('subscribed_orgs')
+        if not self.include_verification_token:
+            self.fields.pop('verification_token')
 
         super().__init__(*args, **kwargs)
 
