@@ -372,6 +372,8 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         if isinstance(self.limit, str):
             self.limit = int(self.limit)
 
+        self.limit = self.limit or LIST_DEFAULT_LIMIT
+
         page = int(self.request.GET.get('page', '1'))
         start = (page - 1) * self.limit
         end = start + self.limit
