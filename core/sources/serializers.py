@@ -75,7 +75,7 @@ class SourceCreateOrUpdateSerializer(ModelSerializer):
         if supported_locales and isinstance(supported_locales, str):
             supported_locales = supported_locales.split(',')
 
-        source.supported_locales = supported_locales
+        source.supported_locales = supported_locales or [source.default_locale]
         source.extras = validated_data.get('extras', source.extras)
         source.external_id = validated_data.get('external_id', source.external_id)
         source.user_id = validated_data.get('user_id', source.user_id)

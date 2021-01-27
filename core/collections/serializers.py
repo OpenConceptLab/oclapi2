@@ -79,7 +79,7 @@ class CollectionCreateOrUpdateSerializer(ModelSerializer):
         if supported_locales and isinstance(supported_locales, str):
             supported_locales = supported_locales.split(',')
 
-        collection.supported_locales = supported_locales
+        collection.supported_locales = supported_locales or [collection.default_locale]
         collection.extras = validated_data.get('extras', collection.extras)
         collection.external_id = validated_data.get('external_id', collection.external_id)
         collection.user_id = validated_data.get('user_id', collection.user_id)
