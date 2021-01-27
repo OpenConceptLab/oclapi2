@@ -389,14 +389,16 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         else:
             result = SEARCH_PARAM in self.request.query_params
 
-        return result and bool(bool(
-            self.document_model and
-            self.get_searchable_fields()
-        ) or bool(
+        return result or self.has_searchable_extras_fields() or bool(self.get_faceted_filters())
+
+    def has_searchable_extras_fields(self):
+        return bool(
             self.get_extras_searchable_fields_from_query_params()
         ) or bool(
             self.get_extras_fields_exists_from_query_params()
-        ) or bool(self.get_extras_exact_fields_from_query_params()))
+        ) or bool(
+            self.get_extras_exact_fields_from_query_params()
+        )
 
 
 class SourceChildCommonBaseView(BaseAPIView):
