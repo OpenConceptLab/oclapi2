@@ -179,9 +179,9 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
         def get_query(attr, val):
             vals = val.split(',')
-            criteria = Q('match', **{attr: vals.pop()})
+            criteria = Q('match', **{attr: vals.pop().strip('\"').strip('\'')})
             for _val in vals:
-                criteria |= Q('match', **{attr: _val})
+                criteria |= Q('match', **{attr: _val.strip('\"').strip('\'')})
             return criteria
 
         if filters:
