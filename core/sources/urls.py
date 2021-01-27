@@ -12,6 +12,11 @@ urlpatterns = [
         name='source-detail'
     ),
     re_path(
+        r"^(?P<source>{pattern})/summary/$".format(pattern=NAMESPACE_PATTERN),
+        views.SourceSummaryView.as_view(),
+        name='source-summary'
+    ),
+    re_path(
         r"^(?P<source>{pattern})/logo/$".format(pattern=NAMESPACE_PATTERN),
         views.SourceLogoView.as_view(),
         name='source-logo'
@@ -26,6 +31,11 @@ urlpatterns = [
         r'^(?P<source>{pattern})/latest/$'.format(pattern=NAMESPACE_PATTERN),
         views.SourceLatestVersionRetrieveUpdateView.as_view(),
         name='sourceversion-latest-detail'
+    ),
+    re_path(
+        r'^(?P<source>{pattern})/latest/summary/$'.format(pattern=NAMESPACE_PATTERN),
+        views.SourceLatestVersionSummaryView.as_view(),
+        name='sourceversion-latest-summary'
     ),
     re_path(
         r'^(?P<source>{pattern})/latest/export/$'.format(pattern=NAMESPACE_PATTERN),
@@ -43,6 +53,11 @@ urlpatterns = [
         r'^(?P<source>{pattern})/(?P<version>{pattern})/$'.format(pattern=NAMESPACE_PATTERN),
         views.SourceVersionRetrieveUpdateDestroyView.as_view(),
         name='source-version-detail'
+    ),
+    re_path(
+        r'^(?P<source>{pattern})/(?P<version>{pattern})/summary/$'.format(pattern=NAMESPACE_PATTERN),
+        views.SourceVersionSummaryView.as_view(),
+        name='source-version-summary'
     ),
     re_path(
         r"^(?P<source>{pattern})/extras/(?P<extra>{pattern})/$".format(pattern=NAMESPACE_PATTERN),

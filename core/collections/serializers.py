@@ -1,4 +1,5 @@
 from django.core.validators import RegexValidator
+from pydash import get
 from rest_framework.fields import CharField, ChoiceField, ListField, IntegerField, DateTimeField, JSONField, \
     BooleanField, SerializerMethodField
 from rest_framework.relations import PrimaryKeyRelatedField
@@ -6,7 +7,7 @@ from rest_framework.serializers import ModelSerializer
 
 from core.collections.constants import INCLUDE_REFERENCES_PARAM
 from core.collections.models import Collection, CollectionReference
-from core.common.constants import HEAD, DEFAULT_ACCESS_TYPE, NAMESPACE_REGEX, ACCESS_TYPE_CHOICES
+from core.common.constants import HEAD, DEFAULT_ACCESS_TYPE, NAMESPACE_REGEX, ACCESS_TYPE_CHOICES, INCLUDE_SUMMARY
 from core.orgs.models import Organization
 from core.settings import DEFAULT_LOCALE
 from core.users.models import UserProfile
@@ -165,6 +166,42 @@ class CollectionCreateSerializer(CollectionCreateOrUpdateSerializer):
         return collection
 
 
+class CollectionSummarySerializer(ModelSerializer):
+    versions = IntegerField(source='num_versions')
+
+    class Meta:
+        model = Collection
+        fields = ('active_mappings', 'active_concepts', 'versions')
+
+
+class CollectionSummaryDetailSerializer(CollectionSummarySerializer):
+    uuid = CharField(source='id')
+    id = CharField(source='mnemonic')
+
+    class Meta:
+        model = Collection
+        fields = (
+            *CollectionSummarySerializer.Meta.fields, 'id', 'uuid',
+        )
+
+
+class CollectionVersionSummarySerializer(ModelSerializer):
+    class Meta:
+        model = Collection
+        fields = ('active_mappings', 'active_concepts')
+
+
+class CollectionVersionSummaryDetailSerializer(CollectionVersionSummarySerializer):
+    uuid = CharField(source='id')
+    id = CharField(source='version')
+
+    class Meta:
+        model = Collection
+        fields = (
+            *CollectionVersionSummarySerializer.Meta.fields, 'id', 'uuid',
+        )
+
+
 class CollectionDetailSerializer(CollectionCreateOrUpdateSerializer):
     type = CharField(source='resource_type')
     uuid = CharField(source='id')
@@ -173,13 +210,13 @@ class CollectionDetailSerializer(CollectionCreateOrUpdateSerializer):
     owner = CharField(source='parent_resource')
     owner_type = CharField(source='parent_resource_type')
     owner_url = CharField(source='parent_url')
-    versions = IntegerField(source='num_versions')
     created_on = DateTimeField(source='created_at')
     updated_on = DateTimeField(source='updated_at')
     supported_locales = ListField(required=False, allow_empty=True)
     created_by = CharField(read_only=True, source='created_by.username')
     updated_by = CharField(read_only=True, source='updated_by.username')
     references = SerializerMethodField()
+    summary = SerializerMethodField()
 
     class Meta:
         model = Collection
@@ -187,14 +224,37 @@ class CollectionDetailSerializer(CollectionCreateOrUpdateSerializer):
         fields = (
             'type', 'uuid', 'id', 'short_code', 'name', 'full_name', 'description', 'collection_type',
             'custom_validation_schema', 'public_access', 'default_locale', 'supported_locales', 'website',
-            'url', 'owner', 'owner_type', 'owner_url', 'versions',
+            'url', 'owner', 'owner_type', 'owner_url',
             'created_on', 'updated_on', 'created_by', 'updated_by', 'extras', 'external_id', 'versions_url',
-            'version', 'concepts_url', 'mappings_url', 'active_concepts', 'active_mappings',
+            'version', 'concepts_url', 'mappings_url',
             'custom_resources_linked_source', 'repository_type', 'preferred_source', 'references',
             'canonical_url', 'identifier', 'publisher', 'contact', 'jurisdiction', 'purpose', 'copyright',
-            'immutable', 'revision_date', 'logo_url'
+            'immutable', 'revision_date', 'logo_url', 'summary'
 
         )
+
+    def __init__(self, *args, **kwargs):
+        params = get(kwargs, 'context.request.query_params')
+        self.include_summary = False
+        if params:
+            self.query_params = params.dict()
+            self.include_summary = self.query_params.get(INCLUDE_SUMMARY) in ['true', True]
+
+        try:
+            if not self.include_summary:
+                self.fields.pop('summary', None)
+        except:  # pylint: disable=bare-except
+            pass
+
+        super().__init__(*args, **kwargs)
+
+    def get_summary(self, obj):
+        summary = None
+
+        if self.include_summary:
+            summary = CollectionSummarySerializer(obj).data
+
+        return summary
 
     def get_references(self, obj):
         if self.context.get(INCLUDE_REFERENCES_PARAM, False):
@@ -211,7 +271,6 @@ class CollectionVersionDetailSerializer(CollectionCreateOrUpdateSerializer):
     owner = CharField(source='parent_resource')
     owner_type = CharField(source='parent_resource_type')
     owner_url = CharField(source='parent_url')
-    versions = IntegerField(source='num_versions')
     created_on = DateTimeField(source='created_at')
     updated_on = DateTimeField(source='updated_at')
     supported_locales = ListField(required=False, allow_empty=True)
@@ -222,6 +281,7 @@ class CollectionVersionDetailSerializer(CollectionCreateOrUpdateSerializer):
     previous_version_url = CharField(source='prev_version_uri')
     created_by = CharField(read_only=True, source='created_by.username')
     updated_by = CharField(read_only=True, source='updated_by.username')
+    summary = SerializerMethodField()
 
     class Meta:
         model = Collection
@@ -229,12 +289,35 @@ class CollectionVersionDetailSerializer(CollectionCreateOrUpdateSerializer):
         fields = (
             'type', 'uuid', 'id', 'short_code', 'name', 'full_name', 'description', 'collection_type',
             'custom_validation_schema', 'public_access', 'default_locale', 'supported_locales', 'website',
-            'url', 'owner', 'owner_type', 'owner_url', 'versions', 'version_url', 'previous_version_url',
+            'url', 'owner', 'owner_type', 'owner_url', 'version_url', 'previous_version_url',
             'created_on', 'updated_on', 'created_by', 'updated_by', 'extras', 'external_id', 'version',
             'version', 'concepts_url', 'mappings_url', 'is_processing', 'released', 'retired',
             'canonical_url', 'identifier', 'publisher', 'contact', 'jurisdiction', 'purpose', 'copyright',
-            'immutable', 'revision_date',
+            'immutable', 'revision_date', 'summary'
         )
+
+    def __init__(self, *args, **kwargs):
+        params = get(kwargs, 'context.request.query_params')
+        self.include_summary = False
+        if params:
+            self.query_params = params.dict()
+            self.include_summary = self.query_params.get(INCLUDE_SUMMARY) in ['true', True]
+
+        try:
+            if not self.include_summary:
+                self.fields.pop('summary', None)
+        except:  # pylint: disable=bare-except
+            pass
+
+        super().__init__(*args, **kwargs)
+
+    def get_summary(self, obj):
+        summary = None
+
+        if self.include_summary:
+            summary = CollectionVersionSummarySerializer(obj).data
+
+        return summary
 
 
 class CollectionReferenceSerializer(ModelSerializer):

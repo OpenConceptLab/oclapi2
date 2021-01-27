@@ -45,6 +45,8 @@ class CollectionListViewTest(OCLAPITestCase):
         self.assertEqual(response.data[0]['short_code'], 'coll1')
         self.assertEqual(response.data[0]['id'], 'coll1')
         self.assertEqual(response.data[0]['url'], coll.uri)
+        for attr in ['active_concepts', 'active_mappings', 'versions', 'summary']:
+            self.assertFalse(attr in response.data[0])
 
         concept = ConceptFactory()
         reference = CollectionReference(expression=concept.uri)
@@ -62,6 +64,18 @@ class CollectionListViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 1)
+
+        response = self.client.get(
+            '/orgs/{}/collections/?verbose=true&includeSummary=true'.format(coll.parent.mnemonic),
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['short_code'], 'coll1')
+        self.assertEqual(response.data[0]['id'], 'coll1')
+        self.assertEqual(response.data[0]['url'], coll.uri)
+        self.assertEqual(response.data[0]['summary'], dict(versions=1, active_concepts=1, active_mappings=0))
 
     def test_post_201(self):
         org = OrganizationFactory(mnemonic='org')
@@ -173,6 +187,17 @@ class CollectionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['uuid'], str(coll.id))
         self.assertEqual(response.data['short_code'], 'coll1')
+
+        response = self.client.get(
+            coll.uri + 'summary/',
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['uuid'], str(coll.id))
+        self.assertEqual(response.data['active_concepts'], 0)
+        self.assertEqual(response.data['active_mappings'], 0)
+        self.assertEqual(response.data['versions'], 1)
 
     def test_get_404(self):
         response = self.client.get(

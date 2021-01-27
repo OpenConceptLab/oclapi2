@@ -12,6 +12,11 @@ urlpatterns = [
         name='collection-detail'
     ),
     re_path(
+        r"^(?P<collection>{pattern})/summary/$".format(pattern=NAMESPACE_PATTERN),
+        views.CollectionSummaryView.as_view(),
+        name='collection-summary'
+    ),
+    re_path(
         r"^(?P<collection>{pattern})/logo/$".format(pattern=NAMESPACE_PATTERN),
         views.CollectionLogoView.as_view(),
         name='collection-logo'
@@ -26,6 +31,11 @@ urlpatterns = [
         r'^(?P<collection>{pattern})/latest/$'.format(pattern=NAMESPACE_PATTERN),
         views.CollectionLatestVersionRetrieveUpdateView.as_view(),
         name='collectionversion-latest-detail'
+    ),
+    re_path(
+        r'^(?P<collection>{pattern})/latest/summary/$'.format(pattern=NAMESPACE_PATTERN),
+        views.CollectionLatestVersionSummaryView.as_view(),
+        name='collectionversion-latest-summary'
     ),
     re_path(
         r'^(?P<collection>{pattern})/latest/export/$'.format(pattern=NAMESPACE_PATTERN),
@@ -48,6 +58,11 @@ urlpatterns = [
         r'^(?P<collection>{pattern})/(?P<version>{pattern})/$'.format(pattern=NAMESPACE_PATTERN),
         views.CollectionVersionRetrieveUpdateDestroyView.as_view(),
         name='collection-version-detail'
+    ),
+    re_path(
+        r'^(?P<collection>{pattern})/(?P<version>{pattern})/summary/$'.format(pattern=NAMESPACE_PATTERN),
+        views.CollectionVersionSummaryView.as_view(),
+        name='collection-version-summary'
     ),
     re_path(
         r"^(?P<collection>{pattern})/extras/(?P<extra>{pattern})/$".format(pattern=NAMESPACE_PATTERN),

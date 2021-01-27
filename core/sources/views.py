@@ -28,7 +28,8 @@ from core.sources.models import Source
 from core.sources.search import SourceSearch
 from core.sources.serializers import (
     SourceDetailSerializer, SourceListSerializer, SourceCreateSerializer, SourceVersionDetailSerializer,
-    SourceVersionListSerializer, SourceVersionExportSerializer)
+    SourceVersionListSerializer, SourceVersionExportSerializer, SourceSummaryDetailSerializer,
+    SourceVersionSummaryDetailSerializer)
 
 logger = logging.getLogger('oclapi')
 
@@ -381,3 +382,25 @@ class SourceVersionExportView(ConceptContainerExportMixin, SourceVersionBaseView
 class SourcesIndexView(ResourceIndexView):
     serializer_class = SourceListSerializer
     model = Source
+
+
+class SourceSummaryView(SourceBaseView, RetrieveAPIView):
+    serializer_class = SourceSummaryDetailSerializer
+
+
+class SourceVersionSummaryView(SourceVersionBaseView, RetrieveAPIView):
+    serializer_class = SourceVersionSummaryDetailSerializer
+
+
+class SourceLatestVersionSummaryView(SourceVersionBaseView, RetrieveAPIView, UpdateAPIView):
+    serializer_class = SourceVersionSummaryDetailSerializer
+
+    def get_filter_params(self, default_version_to_head=False):
+        params = super().get_filter_params(default_version_to_head)
+        params['is_latest'] = True
+        return params
+
+    def get_object(self, queryset=None):
+        obj = get_object_or_404(self.get_queryset(), released=True)
+        self.check_object_permissions(self.request, obj)
+        return obj

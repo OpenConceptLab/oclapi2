@@ -57,6 +57,22 @@ class SourceListViewTest(OCLAPITestCase):
         self.assertEqual(response.data[0]['owner'], self.organization.mnemonic)
         self.assertEqual(response.data[0]['owner_type'], 'Organization')
         self.assertEqual(response.data[0]['owner_url'], self.organization.uri)
+        for attr in ['active_concepts', 'active_mappings', 'versions', 'summary']:
+            self.assertFalse(attr in response.data[0])
+
+        response = self.client.get(
+            self.organization.sources_url + '?verbose=true&includeSummary=true',
+            format='json'
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['short_code'], source.mnemonic)
+        self.assertEqual(response.data[0]['owner'], self.organization.mnemonic)
+        self.assertEqual(response.data[0]['owner_type'], 'Organization')
+        self.assertEqual(response.data[0]['owner_url'], self.organization.uri)
+        self.assertTrue('summary' in response.data[0])
+        for attr in ['active_concepts', 'active_mappings', 'versions']:
+            self.assertTrue(attr in response.data[0]['summary'])
 
     def test_get_200_zip(self):
         response = self.client.get(
@@ -98,9 +114,9 @@ class SourceListViewTest(OCLAPITestCase):
             [
                 'type', 'uuid', 'id', 'short_code', 'name', 'full_name', 'description', 'source_type',
                 'custom_validation_schema', 'public_access', 'default_locale', 'supported_locales', 'website',
-                'url', 'owner', 'owner_type', 'owner_url', 'versions', 'created_on', 'updated_on', 'created_by',
+                'url', 'owner', 'owner_type', 'owner_url', 'created_on', 'updated_on', 'created_by',
                 'updated_by', 'extras', 'external_id', 'versions_url', 'version', 'concepts_url', 'mappings_url',
-                'active_concepts', 'active_mappings', 'canonical_url', 'identifier', 'publisher', 'contact',
+                'canonical_url', 'identifier', 'publisher', 'contact',
                 'jurisdiction', 'purpose', 'copyright', 'content_type', 'revision_date', 'logo_url',
             ]
         )
@@ -174,9 +190,9 @@ class SourceCreateUpdateDestroyViewTest(OCLAPITestCase):
             [
                 'type', 'uuid', 'id', 'short_code', 'name', 'full_name', 'description', 'source_type',
                 'custom_validation_schema', 'public_access', 'default_locale', 'supported_locales', 'website',
-                'url', 'owner', 'owner_type', 'owner_url', 'versions', 'created_on', 'updated_on', 'created_by',
+                'url', 'owner', 'owner_type', 'owner_url', 'created_on', 'updated_on', 'created_by',
                 'updated_by', 'extras', 'external_id', 'versions_url', 'version', 'concepts_url', 'mappings_url',
-                'active_concepts', 'active_mappings', 'canonical_url', 'identifier', 'publisher', 'contact',
+                'canonical_url', 'identifier', 'publisher', 'contact',
                 'jurisdiction', 'purpose', 'copyright', 'content_type', 'revision_date', 'logo_url'
             ]
         )
@@ -218,7 +234,9 @@ class SourceVersionListViewTest(OCLAPITestCase):
         self.assertEqual(response.data[0]['version'], 'HEAD')
 
         response = self.client.get(
-            '/orgs/{}/sources/{}/versions/?verbose=true'.format(self.organization.mnemonic, self.source.mnemonic),
+            '/orgs/{}/sources/{}/versions/?verbose=true&includeSummary=true'.format(
+                self.organization.mnemonic, self.source.mnemonic
+            ),
             format='json'
         )
 
@@ -226,6 +244,7 @@ class SourceVersionListViewTest(OCLAPITestCase):
         self.assertEqual(len(response.data), 1)
         self.assertEqual(response.data[0]['version'], 'HEAD')
         self.assertEqual(response.data[0]['concepts_url'], self.source.concepts_url)
+        self.assertEqual(response.data[0]['summary'], dict(active_concepts=0, active_mappings=0))
 
     @patch('core.sources.views.export_source')
     def test_post_201(self, export_source_mock):
@@ -291,6 +310,17 @@ class SourceLatestVersionRetrieveUpdateViewTest(OCLAPITestCase):
         self.assertEqual(response.data['id'], 'v1')
         self.assertEqual(response.data['uuid'], str(self.latest_version.id))
         self.assertEqual(response.data['short_code'], self.source.mnemonic)
+
+        response = self.client.get(
+            '/orgs/{}/sources/{}/latest/summary/'.format(self.organization.mnemonic, self.source.mnemonic),
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['id'], 'v1')
+        self.assertEqual(response.data['uuid'], str(self.latest_version.id))
+        self.assertEqual(response.data['active_concepts'], 0)
+        self.assertEqual(response.data['active_mappings'], 0)
 
     def test_put_200(self):
         self.assertIsNone(self.latest_version.external_id)

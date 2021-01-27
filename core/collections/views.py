@@ -26,7 +26,8 @@ from core.collections.search import CollectionSearch
 from core.collections.serializers import (
     CollectionDetailSerializer, CollectionListSerializer,
     CollectionCreateSerializer, CollectionReferenceSerializer, CollectionVersionDetailSerializer,
-    CollectionVersionListSerializer, CollectionVersionExportSerializer)
+    CollectionVersionListSerializer, CollectionVersionExportSerializer, CollectionSummaryDetailSerializer,
+    CollectionVersionSummaryDetailSerializer)
 from core.collections.utils import is_concept, is_version_specified
 from core.common.constants import (
     HEAD, RELEASED_PARAM, PROCESSING_PARAM, OK_MESSAGE, NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY
@@ -599,3 +600,25 @@ class CollectionVersionExportView(ConceptContainerExportMixin, CollectionVersion
 class CollectionsIndexView(ResourceIndexView):
     serializer_class = CollectionListSerializer
     model = Collection
+
+
+class CollectionSummaryView(CollectionBaseView, RetrieveAPIView):
+    serializer_class = CollectionSummaryDetailSerializer
+
+
+class CollectionVersionSummaryView(CollectionBaseView, RetrieveAPIView):
+    serializer_class = CollectionVersionSummaryDetailSerializer
+
+
+class CollectionLatestVersionSummaryView(CollectionVersionBaseView, RetrieveAPIView, UpdateAPIView):
+    serializer_class = CollectionVersionSummaryDetailSerializer
+
+    def get_filter_params(self, default_version_to_head=False):
+        params = super().get_filter_params(default_version_to_head)
+        params['is_latest'] = True
+        return params
+
+    def get_object(self, queryset=None):
+        obj = get_object_or_404(self.get_queryset(), released=True)
+        self.check_object_permissions(self.request, obj)
+        return obj

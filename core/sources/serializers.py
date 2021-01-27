@@ -1,10 +1,12 @@
 from django.core.validators import RegexValidator
+from pydash import get
 from rest_framework.fields import CharField, IntegerField, DateTimeField, ChoiceField, JSONField, ListField, \
-    BooleanField
+    BooleanField, SerializerMethodField
 from rest_framework.relations import PrimaryKeyRelatedField
 from rest_framework.serializers import ModelSerializer
 
-from core.common.constants import DEFAULT_ACCESS_TYPE, NAMESPACE_REGEX, ACCESS_TYPE_CHOICES, HEAD
+from core.common.constants import DEFAULT_ACCESS_TYPE, NAMESPACE_REGEX, ACCESS_TYPE_CHOICES, HEAD, \
+    INCLUDE_SUMMARY
 from core.orgs.models import Organization
 from core.settings import DEFAULT_LOCALE
 from core.sources.models import Source
@@ -158,6 +160,42 @@ class SourceCreateSerializer(SourceCreateOrUpdateSerializer):
         return source
 
 
+class SourceSummarySerializer(ModelSerializer):
+    versions = IntegerField(source='num_versions')
+
+    class Meta:
+        model = Source
+        fields = ('active_mappings', 'active_concepts', 'versions')
+
+
+class SourceSummaryDetailSerializer(SourceSummarySerializer):
+    uuid = CharField(source='id')
+    id = CharField(source='mnemonic')
+
+    class Meta:
+        model = Source
+        fields = (
+            *SourceSummarySerializer.Meta.fields, 'id', 'uuid',
+        )
+
+
+class SourceVersionSummarySerializer(ModelSerializer):
+    class Meta:
+        model = Source
+        fields = ('active_mappings', 'active_concepts')
+
+
+class SourceVersionSummaryDetailSerializer(SourceVersionSummarySerializer):
+    uuid = CharField(source='id')
+    id = CharField(source='version')
+
+    class Meta:
+        model = Source
+        fields = (
+            *SourceVersionSummarySerializer.Meta.fields, 'id', 'uuid',
+        )
+
+
 class SourceDetailSerializer(SourceCreateOrUpdateSerializer):
     type = CharField(source='resource_type')
     uuid = CharField(source='id')
@@ -166,12 +204,12 @@ class SourceDetailSerializer(SourceCreateOrUpdateSerializer):
     owner = CharField(source='parent_resource')
     owner_type = CharField(source='parent_resource_type')
     owner_url = CharField(source='parent_url')
-    versions = IntegerField(source='num_versions')
     created_on = DateTimeField(source='created_at')
     updated_on = DateTimeField(source='updated_at')
     supported_locales = ListField(required=False, allow_empty=True)
     created_by = CharField(source='created_by.username', read_only=True)
     updated_by = DateTimeField(source='updated_by.username', read_only=True)
+    summary = SerializerMethodField()
 
     class Meta:
         model = Source
@@ -179,12 +217,35 @@ class SourceDetailSerializer(SourceCreateOrUpdateSerializer):
         fields = (
             'type', 'uuid', 'id', 'short_code', 'name', 'full_name', 'description', 'source_type',
             'custom_validation_schema', 'public_access', 'default_locale', 'supported_locales', 'website',
-            'url', 'owner', 'owner_type', 'owner_url', 'versions',
+            'url', 'owner', 'owner_type', 'owner_url',
             'created_on', 'updated_on', 'created_by', 'updated_by', 'extras', 'external_id', 'versions_url',
-            'version', 'concepts_url', 'mappings_url', 'active_concepts', 'active_mappings',
+            'version', 'concepts_url', 'mappings_url',
             'canonical_url', 'identifier', 'publisher', 'contact', 'jurisdiction', 'purpose', 'copyright',
-            'content_type', 'revision_date', 'logo_url'
+            'content_type', 'revision_date', 'logo_url', 'summary',
         )
+
+    def __init__(self, *args, **kwargs):
+        params = get(kwargs, 'context.request.query_params')
+        self.include_summary = False
+        if params:
+            self.query_params = params.dict()
+            self.include_summary = self.query_params.get(INCLUDE_SUMMARY) in ['true', True]
+
+        try:
+            if not self.include_summary:
+                self.fields.pop('summary', None)
+        except:  # pylint: disable=bare-except
+            pass
+
+        super().__init__(*args, **kwargs)
+
+    def get_summary(self, obj):
+        summary = None
+
+        if self.include_summary:
+            summary = SourceSummarySerializer(obj).data
+
+        return summary
 
 
 class SourceVersionDetailSerializer(SourceCreateOrUpdateSerializer):
@@ -195,7 +256,6 @@ class SourceVersionDetailSerializer(SourceCreateOrUpdateSerializer):
     owner = CharField(source='parent_resource')
     owner_type = CharField(source='parent_resource_type')
     owner_url = CharField(source='parent_url')
-    versions = IntegerField(source='num_versions')
     created_on = DateTimeField(source='created_at')
     updated_on = DateTimeField(source='updated_at')
     created_by = CharField(source='created_by.username', read_only=True)
@@ -206,6 +266,7 @@ class SourceVersionDetailSerializer(SourceCreateOrUpdateSerializer):
     version_url = CharField(source='uri')
     url = CharField(source='versioned_object_url')
     previous_version_url = CharField(source='prev_version_uri')
+    summary = SerializerMethodField()
 
     class Meta:
         model = Source
@@ -213,12 +274,35 @@ class SourceVersionDetailSerializer(SourceCreateOrUpdateSerializer):
         fields = (
             'type', 'uuid', 'id', 'short_code', 'name', 'full_name', 'description', 'source_type',
             'custom_validation_schema', 'public_access', 'default_locale', 'supported_locales', 'website',
-            'url', 'owner', 'owner_type', 'owner_url', 'versions', 'retired', 'version_url', 'previous_version_url',
+            'url', 'owner', 'owner_type', 'owner_url', 'retired', 'version_url', 'previous_version_url',
             'created_on', 'updated_on', 'created_by', 'updated_by', 'extras', 'external_id',
             'version', 'concepts_url', 'mappings_url', 'is_processing', 'released',
             'canonical_url', 'identifier', 'publisher', 'contact', 'jurisdiction', 'purpose', 'copyright',
-            'content_type', 'revision_date', 'active_concepts', 'active_mappings',
+            'content_type', 'revision_date', 'summary',
         )
+
+    def __init__(self, *args, **kwargs):
+        params = get(kwargs, 'context.request.query_params')
+        self.include_summary = False
+        if params:
+            self.query_params = params.dict()
+            self.include_summary = self.query_params.get(INCLUDE_SUMMARY) in ['true', True]
+
+        try:
+            if not self.include_summary:
+                self.fields.pop('summary', None)
+        except:  # pylint: disable=bare-except
+            pass
+
+        super().__init__(*args, **kwargs)
+
+    def get_summary(self, obj):
+        summary = None
+
+        if self.include_summary:
+            summary = SourceVersionSummarySerializer(obj).data
+
+        return summary
 
 
 class SourceVersionExportSerializer(SourceVersionDetailSerializer):
