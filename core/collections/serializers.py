@@ -59,7 +59,7 @@ class CollectionCreateOrUpdateSerializer(ModelSerializer):
         collection.version = validated_data.get('version', collection.version) or HEAD
         collection.mnemonic = validated_data.get(self.Meta.lookup_field, collection.mnemonic)
         collection.name = validated_data.get('name', collection.name)
-        collection.full_name = validated_data.get('full_name', collection.full_name)
+        collection.full_name = validated_data.get('full_name', collection.full_name) or collection.name
         collection.description = validated_data.get('description', collection.description)
         collection.collection_type = validated_data.get('collection_type', collection.collection_type)
         collection.custom_validation_schema = validated_data.get(

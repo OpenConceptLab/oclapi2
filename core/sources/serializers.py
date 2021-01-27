@@ -59,7 +59,7 @@ class SourceCreateOrUpdateSerializer(ModelSerializer):
         source.version = validated_data.get('version', source.version) or HEAD
         source.mnemonic = validated_data.get(self.Meta.lookup_field, source.mnemonic)
         source.name = validated_data.get('name', source.name)
-        source.full_name = validated_data.get('full_name', source.full_name)
+        source.full_name = validated_data.get('full_name', source.full_name) or source.name
         source.description = validated_data.get('description', source.description)
         source.source_type = validated_data.get('source_type', source.source_type)
         source.custom_validation_schema = validated_data.get(
