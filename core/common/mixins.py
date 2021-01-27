@@ -152,7 +152,7 @@ class ListWithHeadersMixin(ListModelMixin):
     def get_csv(self, request, queryset=None):
         filename, url, prepare_new_file, is_member = None, None, True, False
 
-        parent = self.get_parent()
+        parent = None  # TODO: fix this for parent (owner)
 
         if parent:
             prepare_new_file = False
@@ -189,9 +189,6 @@ class ListWithHeadersMixin(ListModelMixin):
 
     def _get_query_set_from_view(self, is_member):
         return self.get_queryset() if is_member else self.get_queryset()[0:100]
-
-    def get_parent(self):
-        return get(self, 'parent_resource') or get(self, 'versioned_object') or get(self, 'head')
 
 
 class PathWalkerMixin:
