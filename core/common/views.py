@@ -19,8 +19,6 @@ from core.common.serializers import RootSerializer
 from core.common.swagger_parameters import ids_param
 from core.common.utils import compact_dict_by_values, to_snake_case, to_camel_case
 from core.concepts.permissions import CanViewParentDictionary, CanEditParentDictionary
-from core.concepts.search import ConceptSearch
-from core.mappings.search import MappingSearch
 from core.orgs.constants import ORG_OBJECT_TYPE
 from core.users.constants import USER_OBJECT_TYPE
 
@@ -253,7 +251,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                 **self.default_filters, **self.get_facet_filters_from_kwargs(), **faceted_filters, 'retired': False
             }
 
-            if self.should_include_retired() or self.facet_class not in [ConceptSearch, MappingSearch]:
+            if not self._should_exclude_retired_from_search_results() or self.is_source_child_document_model():
                 filters.pop('retired')
 
             searcher = self.facet_class(  # pylint: disable=not-callable
@@ -265,10 +263,13 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             facets.pop('owner', None)
             facets.pop('ownerType', None)
 
-        return facets
+        if 'source' in self.kwargs:
+            facets.pop('source', None)
 
-    def should_include_retired(self):
-        return self.request.query_params.get(INCLUDE_RETIRED_PARAM, False) in ['true', True]
+        if 'collection' in self.kwargs:
+            facets.pop('collection', None)
+
+        return facets
 
     def get_extras_searchable_fields_from_query_params(self):
         query_params = self.request.query_params.dict()
