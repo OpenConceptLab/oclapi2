@@ -251,7 +251,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                 **self.default_filters, **self.get_facet_filters_from_kwargs(), **faceted_filters, 'retired': False
             }
 
-            if not self._should_exclude_retired_from_search_results() or self.is_source_child_document_model():
+            if not self._should_exclude_retired_from_search_results() or not self.is_source_child_document_model():
                 filters.pop('retired')
 
             searcher = self.facet_class(  # pylint: disable=not-callable
