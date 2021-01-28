@@ -193,24 +193,25 @@ class OrganizationMemberView(generics.GenericAPIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
-class OrganizationSourceListView(SourceListView):  # pragma: no cover
+class OrganizationResourceAbstractListView:
     def get_queryset(self):
         username = self.kwargs.get('user', None)
         if not username and self.user_is_self:
             username = get(self.request.user, 'username')
 
-        user = UserProfile.objects.get(username=username)
+        user = UserProfile.objects.filter(username=username).first()
+        if not user:
+            raise Http404()
+
         return self.queryset.filter(organization__in=user.organizations.all())
 
 
-class OrganizationCollectionListView(CollectionListView):  # pragma: no cover
-    def get_queryset(self):
-        username = self.kwargs.get('user', None)
-        if not username and self.user_is_self:
-            username = get(self.request.user, 'username')
+class OrganizationSourceListView(OrganizationResourceAbstractListView, SourceListView):
+    pass
 
-        user = UserProfile.objects.get(username=username)
-        return self.queryset.filter(organization__in=user.organizations.all())
+
+class OrganizationCollectionListView(OrganizationResourceAbstractListView, CollectionListView):
+    pass
 
 
 class OrganizationExtrasBaseView(APIView):
