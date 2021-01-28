@@ -44,12 +44,13 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     facet_class = None
     total_count = 0
 
-    def _should_exclude_retired(self):
+    def _should_exclude_retired_from_search_results(self):
         if self.is_owner_document_model():
             return False
 
         params = get(self, 'params') or self.request.query_params.dict()
-        include_retired = params.get(INCLUDE_RETIRED_PARAM, None) in [True, 'true']
+        include_retired = params.get('retired', None) in [True, 'true'] or params.get(
+            INCLUDE_RETIRED_PARAM, None) in [True, 'true']
         return not include_retired
 
     def _should_include_private(self):
@@ -344,7 +345,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                 for field, value in extras_fields_exact.items():
                     results = results.query("match", **{field: value})
 
-            if self._should_exclude_retired():
+            if self._should_exclude_retired_from_search_results():
                 results = results.query('match', retired=False)
             if not self._should_include_private():
                 results = results.query('match', public_can_view=True)
@@ -367,7 +368,8 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         if not self.should_perform_es_search():
             return None
 
-        self.total_count = self.__search_results.count()
+        search_results = self.__search_results
+        self.total_count = search_results.count()
 
         if isinstance(self.limit, str):
             self.limit = int(self.limit)
@@ -378,7 +380,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         start = (page - 1) * self.limit
         end = start + self.limit
 
-        return self.__search_results[start:end].to_queryset()
+        return search_results[start:end].to_queryset()
 
     def is_head(self):
         return self.request.method.lower() == 'head'
