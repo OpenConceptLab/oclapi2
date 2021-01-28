@@ -396,45 +396,33 @@ class ConceptTest(OCLTestCase):
 
         mappings = concept1.get_unidirectional_mappings()
         self.assertEqual(mappings.count(), 2)
-        self.assertEqual(
-            list(mappings.order_by('created_at')), [mapping1, mapping2]
-        )
+        self.assertEqual(list(mappings), [mapping2, mapping1])
 
         mappings = concept1.get_indirect_mappings()
         self.assertEqual(mappings.count(), 1)
-        self.assertEqual(
-            list(mappings.order_by('created_at')), [mapping4]
-        )
+        self.assertEqual(list(mappings), [mapping4])
 
         mappings = concept1.get_bidirectional_mappings()
         self.assertEqual(mappings.count(), 3)
-        self.assertEqual(
-            list(mappings.order_by('created_at')), [mapping1, mapping2, mapping4]
-        )
+        self.assertEqual(list(mappings), [mapping4, mapping2, mapping1])
 
         mappings = concept2.get_unidirectional_mappings()
         self.assertEqual(mappings.count(), 0)
 
         mappings = concept2.get_indirect_mappings()
         self.assertEqual(mappings.count(), 1)
-        self.assertEqual(
-            list(mappings.order_by('created_at')), [mapping1]
-        )
+        self.assertEqual(list(mappings), [mapping1])
 
         mappings = concept3.get_unidirectional_mappings()
         self.assertEqual(mappings.count(), 0)
 
         mappings = concept3.get_indirect_mappings()
         self.assertEqual(mappings.count(), 1)
-        self.assertEqual(
-            list(mappings.order_by('created_at')), [mapping3]
-        )
+        self.assertEqual(list(mappings), [mapping3])
 
         mappings = concept4.get_unidirectional_mappings()
         self.assertEqual(mappings.count(), 1)
-        self.assertEqual(
-            list(mappings.order_by('created_at')), [mapping5]
-        )
+        self.assertEqual(list(mappings), [mapping5])
 
         mappings = concept4.get_indirect_mappings()
         self.assertEqual(mappings.count(), 0)

@@ -523,10 +523,20 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
     def __get_mappings_from_relation(self, relation_manager, is_latest=False):
         queryset = getattr(self, relation_manager).filter(parent_id=self.parent_id)
+
+        if self.is_versioned_object:
+            latest_version = self.get_latest_version()
+            if latest_version:
+                queryset |= getattr(latest_version, relation_manager).filter(parent_id=self.parent_id)
+        if self.is_latest_version:
+            versioned_object = self.versioned_object
+            if versioned_object:
+                queryset |= getattr(versioned_object, relation_manager).filter(parent_id=self.parent_id)
+
         if is_latest:
             return queryset.filter(is_latest_version=True)
 
-        return queryset.filter(id=F('versioned_object_id'))
+        return queryset.filter(id=F('versioned_object_id')).order_by('-updated_at').distinct('updated_at')
 
     def get_bidirectional_mappings(self):
         queryset = self.get_unidirectional_mappings() | self.get_indirect_mappings()
