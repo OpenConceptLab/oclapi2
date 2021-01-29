@@ -114,9 +114,7 @@ class BulkImportView(APIView):
             if task.successful():
                 result = task.get()
                 if result and result_format == 'json':
-                    response = Response(result.get('json', None), content_type="application/json")
-                    response['Content-Encoding'] = 'gzip'
-                    return response
+                    return Response(result.get('json', None), content_type="application/json")
                 if result and result_format == 'report':
                     return Response(result.get('report', None))
                 if result:
