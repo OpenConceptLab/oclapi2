@@ -20,7 +20,7 @@ from .constants import (
     ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT, SUPER_ADMIN_USER_ID,
     HEAD, PERSIST_NEW_ERROR_MESSAGE, SOURCE_PARENT_CANNOT_BE_NONE, PARENT_RESOURCE_CANNOT_BE_NONE,
     CREATOR_CANNOT_BE_NONE, CANNOT_DELETE_ONLY_VERSION)
-from .tasks import handle_save, handle_m2m_changed
+from .tasks import handle_save, handle_m2m_changed, seed_children
 
 
 class BaseModel(models.Model):
@@ -478,6 +478,10 @@ class ConceptContainerModel(VersionedModel):
     def update_mappings():
         pass
 
+    @staticmethod
+    def seed_references():
+        pass
+
     @classmethod
     def persist_new(cls, obj, created_by, **kwargs):
         errors = dict()
@@ -524,11 +528,13 @@ class ConceptContainerModel(VersionedModel):
             obj.updated_by = user
         obj.update_version_data()
         obj.save(**kwargs)
-        obj.seed_concepts()
-        obj.seed_mappings()
-        from core.collections.models import Collection
-        if isinstance(obj, Collection):
+
+        if get(settings, 'TEST_MODE', False):
+            obj.seed_concepts()
+            obj.seed_mappings()
             obj.seed_references()
+        else:
+            seed_children.delay(obj.resource_type.lower(), obj.id)
 
         if obj.id:
             obj.sibling_versions.update(is_latest_version=False)
@@ -610,11 +616,15 @@ class ConceptContainerModel(VersionedModel):
         head = self.head
         if head:
             self.concepts.set(head.concepts.all())
+            for concept in self.concepts.all():
+                concept.save()  # ES Indexing
 
     def seed_mappings(self):
         head = self.head
         if head:
             self.mappings.set(head.mappings.all())
+            for mapping in self.mappings.all():
+                mapping.save()  # ES Indexing
 
     def add_processing(self, process_id):
         if self.id:

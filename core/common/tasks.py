@@ -228,3 +228,24 @@ def send_user_reset_password_email(user_id):
     mail.content_subtype = "html"
     res = mail.send()
     return res
+
+
+@app.task(bind=True)
+def seed_children(self, resource, obj_id):
+    instance = None
+    if resource == 'source':
+        from core.sources.models import Source
+        instance = Source.objects.filter(id=obj_id).first()
+    if resource == 'collection':
+        from core.collections.models import Collection
+        instance = Collection.objects.filter(id=obj_id).first()
+    if instance:
+        task_id = self.request.id
+
+        try:
+            instance.add_processing(task_id)
+            instance.seed_concepts()
+            instance.seed_mappings()
+            instance.seed_references()
+        finally:
+            instance.remove_processing(task_id)
