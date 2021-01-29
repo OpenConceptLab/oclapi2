@@ -403,7 +403,7 @@ class CollectionVersionReferencesView(CollectionVersionBaseView, ListWithHeaders
 class CollectionVersionListView(CollectionVersionBaseView, mixins.CreateModelMixin, ListWithHeadersMixin):
     released_filter = None
     processing_filter = None
-    default_qs_sort_attr = 'created_at'
+    default_qs_sort_attr = '-created_at'
 
     def get_serializer_class(self):
         if self.request.method in ['GET', 'HEAD']:
