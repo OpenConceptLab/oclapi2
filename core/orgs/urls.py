@@ -27,6 +27,11 @@ urlpatterns = [
         name='organization-members'
     ),
     re_path(
+        r'^(?P<org>' + NAMESPACE_PATTERN + ')/users/$',
+        UserListView.as_view(),
+        name='organization-users'
+    ),
+    re_path(
         r"^(?P<org>{pattern})/extras/(?P<extra>{pattern})/$".format(pattern=NAMESPACE_PATTERN),
         views.OrganizationExtraRetrieveUpdateDestroyView.as_view(),
         name='organization-extra'
