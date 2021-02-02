@@ -36,7 +36,7 @@ class OrganizationCreateSerializer(serializers.ModelSerializer):
         model = Organization
         fields = (
             'type', 'uuid', 'id', 'public_access', 'name', 'company', 'website', 'location', 'members',
-            'created_on', 'updated_on', 'url', 'extras', 'public_sources', 'description',
+            'created_on', 'updated_on', 'url', 'extras', 'public_sources', 'description', 'text'
         )
 
     def prepare_object(self, validated_data):
@@ -54,6 +54,7 @@ class OrganizationCreateSerializer(serializers.ModelSerializer):
         organization.location = validated_data.get('location', None)
         organization.extras = validated_data.get('extras', None)
         organization.description = validated_data.get('description', None)
+        organization.text = validated_data.get('text', None)
         return organization
 
     def create(self, validated_data):
@@ -89,7 +90,7 @@ class OrganizationDetailSerializer(serializers.ModelSerializer):
             'type', 'uuid', 'id', 'public_access', 'name', 'company', 'website', 'location', 'members',
             'created_on', 'updated_on', 'url', 'extras', 'members_url', 'created_by', 'updated_by', 'location',
             'sources_url', 'public_sources', 'collections_url', 'public_collections', 'logo_url', 'description',
-            'client_configs',
+            'client_configs', 'text',
         )
 
     def __init__(self, *args, **kwargs):
@@ -105,7 +106,6 @@ class OrganizationDetailSerializer(serializers.ModelSerializer):
 
     def get_client_configs(self, obj):
         if self.include_client_configs:
-            print(obj.client_configs.filter(is_active=True))
             return ClientConfigSerializer(obj.client_configs.filter(is_active=True), many=True).data
 
         return None
@@ -119,6 +119,7 @@ class OrganizationDetailSerializer(serializers.ModelSerializer):
         instance.website = validated_data.get('website', instance.website)
         instance.location = validated_data.get('location', instance.website)
         instance.extras = validated_data.get('extras', instance.extras)
+        instance.text = validated_data.get('text', None)
         instance.updated_by = request_user
         instance.save()
         return instance
