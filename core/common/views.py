@@ -179,12 +179,12 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         def get_query(attr, val):
             not_query = val.startswith('!')
             vals = val.replace('!', '', 1).split(',')
-            cr = Q('match', **{attr: vals.pop().strip('\"').strip('\'')})
-            criteria = ~cr if not_query else cr
+            query = Q('match', **{attr: vals.pop().strip('\"').strip('\'')})
+            criteria = ~query if not_query else query  # pylint: disable=invalid-unary-operand-type
 
             for _val in vals:
-                cr = Q('match', **{attr: _val.strip('\"').strip('\'')})
-                criteria |= ~cr if not_query else cr
+                query = Q('match', **{attr: _val.strip('\"').strip('\'')})
+                criteria |= ~query if not_query else query  # pylint: disable=invalid-unary-operand-type
 
             return criteria
 

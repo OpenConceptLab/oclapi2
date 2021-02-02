@@ -8,11 +8,6 @@ from core.client_configs.constants import DEFAULT_TYPE, CONFIG_TYPES, LAYOUT_TYP
 from core.common.constants import SUPER_ADMIN_USER_ID
 
 
-# Org Config
-# default_tab: choice (from tabs)
-# tabs: [{type: 'sources', label: 'Sources', fields: [], default_filters: {}}]
-
-
 class ClientConfig(models.Model):
     class Meta:
         db_table = 'client_configurations'
@@ -33,11 +28,9 @@ class ClientConfig(models.Model):
     updated_by = models.ForeignKey(
         'users.UserProfile', default=SUPER_ADMIN_USER_ID, on_delete=models.SET_DEFAULT,
         related_name='%(app_label)s_%(class)s_related_updated_by',
-        related_query_name = '%(app_label)s_%(class)ss_updated_by',
+        related_query_name='%(app_label)s_%(class)ss_updated_by',
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     is_active = models.BooleanField(default=True)
     is_default = models.BooleanField(default=False)
-
-
