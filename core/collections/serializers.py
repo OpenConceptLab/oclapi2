@@ -98,6 +98,7 @@ class CollectionCreateOrUpdateSerializer(ModelSerializer):
         collection.copyright = validated_data.get('copyright', collection.copyright)
         collection.immutable = validated_data.get('immutable', collection.immutable)
         collection.revision_date = validated_data.get('revision_date', collection.revision_date)
+        collection.text = validated_data.get('text', collection.text)
 
         return collection
 
@@ -117,6 +118,7 @@ class CollectionCreateSerializer(CollectionCreateOrUpdateSerializer):
     name = CharField(required=True)
     full_name = CharField(required=False)
     description = CharField(required=False, allow_blank=True)
+    text = CharField(required=False, allow_blank=True)
     collection_type = CharField(required=False)
     custom_validation_schema = CharField(required=False, allow_blank=True, allow_null=True)
     public_access = ChoiceField(required=False, choices=ACCESS_TYPE_CHOICES)
@@ -229,7 +231,7 @@ class CollectionDetailSerializer(CollectionCreateOrUpdateSerializer):
             'version', 'concepts_url', 'mappings_url',
             'custom_resources_linked_source', 'repository_type', 'preferred_source', 'references',
             'canonical_url', 'identifier', 'publisher', 'contact', 'jurisdiction', 'purpose', 'copyright',
-            'immutable', 'revision_date', 'logo_url', 'summary'
+            'immutable', 'revision_date', 'logo_url', 'summary', 'text'
 
         )
 
@@ -293,7 +295,7 @@ class CollectionVersionDetailSerializer(CollectionCreateOrUpdateSerializer):
             'created_on', 'updated_on', 'created_by', 'updated_by', 'extras', 'external_id', 'version',
             'version', 'concepts_url', 'mappings_url', 'is_processing', 'released', 'retired',
             'canonical_url', 'identifier', 'publisher', 'contact', 'jurisdiction', 'purpose', 'copyright',
-            'immutable', 'revision_date', 'summary'
+            'immutable', 'revision_date', 'summary', 'text'
         )
 
     def __init__(self, *args, **kwargs):

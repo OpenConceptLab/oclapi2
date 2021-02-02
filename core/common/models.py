@@ -330,6 +330,7 @@ class ConceptContainerModel(VersionedModel):
     purpose = models.TextField(null=True, blank=True)
     copyright = models.TextField(null=True, blank=True)
     revision_date = models.DateField(null=True, blank=True)
+    text = models.TextField(null=True, blank=True)  # for about description (markup)
 
     class Meta:
         abstract = True

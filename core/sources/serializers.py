@@ -94,6 +94,7 @@ class SourceCreateOrUpdateSerializer(ModelSerializer):
         source.copyright = validated_data.get('copyright', source.copyright)
         source.content_type = validated_data.get('content_type', source.content_type)
         source.revision_date = validated_data.get('revision_date', source.revision_date)
+        source.text = validated_data.get('text', source.text)
 
         return source
 
@@ -113,6 +114,7 @@ class SourceCreateSerializer(SourceCreateOrUpdateSerializer):
     name = CharField(required=True)
     full_name = CharField(required=False)
     description = CharField(required=False, allow_blank=True)
+    text = CharField(required=False, allow_blank=True)
     source_type = CharField(required=False, allow_blank=True)
     custom_validation_schema = CharField(required=False, allow_blank=True, allow_null=True)
     public_access = ChoiceField(required=False, choices=ACCESS_TYPE_CHOICES)
@@ -221,7 +223,7 @@ class SourceDetailSerializer(SourceCreateOrUpdateSerializer):
             'created_on', 'updated_on', 'created_by', 'updated_by', 'extras', 'external_id', 'versions_url',
             'version', 'concepts_url', 'mappings_url',
             'canonical_url', 'identifier', 'publisher', 'contact', 'jurisdiction', 'purpose', 'copyright',
-            'content_type', 'revision_date', 'logo_url', 'summary',
+            'content_type', 'revision_date', 'logo_url', 'summary', 'text',
         )
 
     def __init__(self, *args, **kwargs):
@@ -278,7 +280,7 @@ class SourceVersionDetailSerializer(SourceCreateOrUpdateSerializer):
             'created_on', 'updated_on', 'created_by', 'updated_by', 'extras', 'external_id',
             'version', 'concepts_url', 'mappings_url', 'is_processing', 'released',
             'canonical_url', 'identifier', 'publisher', 'contact', 'jurisdiction', 'purpose', 'copyright',
-            'content_type', 'revision_date', 'summary',
+            'content_type', 'revision_date', 'summary', 'text'
         )
 
     def __init__(self, *args, **kwargs):
