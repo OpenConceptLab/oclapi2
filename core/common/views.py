@@ -177,10 +177,15 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         filters = self.get_faceted_filters()
 
         def get_query(attr, val):
-            vals = val.split(',')
-            criteria = Q('match', **{attr: vals.pop().strip('\"').strip('\'')})
+            not_query = val.startswith('!')
+            vals = val.replace('!', '', 1).split(',')
+            cr = Q('match', **{attr: vals.pop().strip('\"').strip('\'')})
+            criteria = ~cr if not_query else cr
+
             for _val in vals:
-                criteria |= Q('match', **{attr: _val.strip('\"').strip('\'')})
+                cr = Q('match', **{attr: _val.strip('\"').strip('\'')})
+                criteria |= ~cr if not_query else cr
+
             return criteria
 
         if filters:
