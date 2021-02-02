@@ -1,7 +1,9 @@
 from django.contrib import admin
+from django.contrib.contenttypes.fields import GenericRelation
 from django.core.validators import RegexValidator
 from django.db import models
 
+from core.client_configs.models import ClientConfig
 from core.common.constants import NAMESPACE_REGEX, ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT
 from core.common.mixins import SourceContainerMixin
 from core.common.models import BaseResourceModel
@@ -22,6 +24,7 @@ class Organization(BaseResourceModel, SourceContainerMixin):
         max_length=255, validators=[RegexValidator(regex=NAMESPACE_REGEX)], unique=True
     )
     description = models.TextField(null=True, blank=True)
+    client_configs = GenericRelation(ClientConfig, object_id_field='resource_id', content_type_field='resource_type')
 
     @property
     def org(self):

@@ -1,7 +1,10 @@
 from django.core.validators import RegexValidator
+from pydash import get
 from rest_framework import serializers
+from rest_framework.fields import SerializerMethodField
 
-from core.common.constants import NAMESPACE_REGEX, ACCESS_TYPE_CHOICES, DEFAULT_ACCESS_TYPE
+from core.client_configs.serializers import ClientConfigSerializer
+from core.common.constants import NAMESPACE_REGEX, ACCESS_TYPE_CHOICES, DEFAULT_ACCESS_TYPE, INCLUDE_CLIENT_CONFIGS
 from .models import Organization
 
 
@@ -78,6 +81,7 @@ class OrganizationDetailSerializer(serializers.ModelSerializer):
     url = serializers.URLField(read_only=True)
     members_url = serializers.URLField(read_only=True)
     extras = serializers.JSONField(required=False, allow_null=True)
+    client_configs = SerializerMethodField()
 
     class Meta:
         model = Organization
@@ -85,7 +89,26 @@ class OrganizationDetailSerializer(serializers.ModelSerializer):
             'type', 'uuid', 'id', 'public_access', 'name', 'company', 'website', 'location', 'members',
             'created_on', 'updated_on', 'url', 'extras', 'members_url', 'created_by', 'updated_by', 'location',
             'sources_url', 'public_sources', 'collections_url', 'public_collections', 'logo_url', 'description',
+            'client_configs',
         )
+
+    def __init__(self, *args, **kwargs):
+        params = get(kwargs, 'context.request.query_params')
+        self.include_client_configs = False
+        if params:
+            self.query_params = params.dict()
+            self.include_client_configs = self.query_params.get(INCLUDE_CLIENT_CONFIGS) in ['true', True]
+        if not self.include_client_configs:
+            self.fields.pop('client_configs')
+
+        super().__init__(*args, **kwargs)
+
+    def get_client_configs(self, obj):
+        if self.include_client_configs:
+            print(obj.client_configs.filter(is_active=True))
+            return ClientConfigSerializer(obj.client_configs.filter(is_active=True), many=True).data
+
+        return None
 
     def update(self, instance, validated_data):
         request_user = self.context['request'].user
