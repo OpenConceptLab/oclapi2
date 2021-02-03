@@ -65,6 +65,10 @@ INSTALLED_APPS = [
     'django_elasticsearch_dsl',
     'corsheaders',
     'ordered_model',
+    'health_check',  # required
+    'health_check.db',  # stock Django health checkers
+    # 'health_check.contrib.celery_ping',  # requires celery
+    'health_check.contrib.redis',  # requires Redis broker
     'core.common.apps.CommonConfig',
     'core.users',
     'core.orgs',
@@ -163,9 +167,11 @@ DATABASES = {
     }
 }
 
+ES_HOST = os.environ.get('ES_HOST', 'es')
+ES_PORT = os.environ.get('ES_PORT', '9200')
 ELASTICSEARCH_DSL = {
     'default': {
-        'hosts': [os.environ.get('ES_HOST', 'es') + ':' + os.environ.get('ES_PORT', '9200')]
+        'hosts': [ES_HOST + ':' + ES_PORT]
     },
 }
 
@@ -271,6 +277,7 @@ API_SUPERUSER_TOKEN = os.environ.get(
 REDIS_PORT = os.environ.get('REDIS_PORT', 6379)
 REDIS_DB = 0
 REDIS_HOST = os.environ.get('REDIS_HOST', 'redis')
+REDIS_URL = "redis://{}:{}".format(REDIS_HOST, REDIS_PORT)  # needed for healthcheck
 
 CELERY_DEFAULT_QUEUE = 'default'
 CELERY_QUEUES = (

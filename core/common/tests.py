@@ -19,7 +19,7 @@ from core.common.constants import HEAD, OCL_ORG_ID, SUPER_ADMIN_USER_ID
 from core.common.utils import (
     compact_dict_by_values, to_snake_case, flower_get, task_exists, parse_bulk_import_task_id,
     to_camel_case,
-    drop_version, is_versioned_uri, separate_version, to_parent_uri, jsonify_safe)
+    drop_version, is_versioned_uri, separate_version, to_parent_uri, jsonify_safe, es_get)
 from core.concepts.models import Concept, LocalizedText
 from core.mappings.models import Mapping
 from core.orgs.models import Organization
@@ -426,6 +426,14 @@ class UtilsTest(OCLTestCase):
             'http://flower:5555/some-url',
             auth=HTTPBasicAuth(settings.FLOWER_USER, settings.FLOWER_PASSWORD)
         )
+
+    @patch('core.common.utils.requests.get')
+    def test_es_get(self, http_get_mock):
+        http_get_mock.return_value = 'dummy-response'
+
+        self.assertEqual(es_get('some-url', timeout=1), 'dummy-response')
+
+        http_get_mock.assert_called_once_with('http://es:9200/some-url', timeout=1)
 
     @patch('core.common.utils.flower_get')
     def test_task_exists(self, flower_get_mock):

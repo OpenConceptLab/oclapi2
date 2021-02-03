@@ -309,7 +309,7 @@ def parse_bulk_import_task_id(task_id):
     return task
 
 
-def flower_get(url):
+def flower_get(url, **kwargs):
     """
     Returns a flower response from the given endpoint url.
     :param url:
@@ -317,7 +317,20 @@ def flower_get(url):
     """
     return requests.get(
         'http://%s:%s/%s' % (settings.FLOWER_HOST, settings.FLOWER_PORT, url),
-        auth=HTTPBasicAuth(settings.FLOWER_USER, settings.FLOWER_PASSWORD)
+        auth=HTTPBasicAuth(settings.FLOWER_USER, settings.FLOWER_PASSWORD),
+        **kwargs
+    )
+
+
+def es_get(url, **kwargs):
+    """
+    Returns a flower response from the given endpoint url.
+    :param url:
+    :return:
+    """
+    return requests.get(
+        'http://%s:%s/%s' % (settings.ES_HOST, settings.ES_PORT, url),
+        **kwargs
     )
 
 
