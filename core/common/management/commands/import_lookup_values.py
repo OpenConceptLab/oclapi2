@@ -1,11 +1,9 @@
 import json
 import os
 
-from django.conf import settings
 from django.core.management import BaseCommand
 
 from core.common.constants import HEAD
-from core.common.tasks import rebuild_indexes
 from core.concepts.models import Concept
 from core.orgs.models import Organization
 from core.sources.models import Source
@@ -16,9 +14,6 @@ class Command(BaseCommand):
     help = 'import lookup values'
 
     def handle(self, *args, **options):
-        settings.ELASTICSEARCH_DSL_AUTO_REFRESH = False
-        settings.ELASTICSEARCH_DSL_AUTOSYNC = False
-        settings.ES_SYNC = False
         user = UserProfile.objects.filter(username='ocladmin').get()
         org = Organization.objects.get(mnemonic='OCL')
         sources = self.create_sources(org, user)
@@ -51,13 +46,9 @@ class Command(BaseCommand):
             ),
         ]
 
-        results = []
         for conf in importer_confs:
             source = conf['source']
-            results.append(self.create_concepts(source, conf['file'], user))
-
-        if any(results):
-            rebuild_indexes.delay(None)
+            self.create_concepts(source, conf['file'], user)
 
     @staticmethod
     def create_sources(org, user):
