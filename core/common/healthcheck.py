@@ -13,7 +13,7 @@ class FlowerHealthCheck(CeleryPingHealthCheck):
 
     def check_status(self):
         try:
-            response = flower_get('metrics', timeout=5)
+            response = flower_get('metrics', timeout=2)
             if not response.ok:
                 raise ServiceUnavailable('Flower Unavailable')
         except Exception as ex:
@@ -28,7 +28,7 @@ class ESHealthCheck(BaseHealthCheckBackend):
 
     def check_status(self):
         try:
-            response = es_get('_cluster/health', timeout=5)
+            response = es_get('_cluster/health', timeout=2)
             status = get(response.json(), 'status')
             is_ok = status == 'green'
 
@@ -47,8 +47,7 @@ class CeleryQueueHealthCheck(BaseHealthCheckBackend):
     CORRECT_PING_RESPONSE = {"ok": "pong"}
 
     def check_status(self):
-        timeout = getattr(settings, "HEALTHCHECK_CELERY_PING_TIMEOUT", 5)
-
+        timeout = getattr(settings, "HEALTHCHECK_CELERY_PING_TIMEOUT", 2)
         try:
             ping_result = celery_app.control.ping(timeout=timeout)
         except IOError as ex:
