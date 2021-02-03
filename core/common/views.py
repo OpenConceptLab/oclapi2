@@ -309,6 +309,11 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         from core.mappings.documents import MappingDocument
         return self.document_model in [ConceptDocument, MappingDocument]
 
+    def is_concept_container_document_model(self):
+        from core.collections.documents import CollectionDocument
+        from core.sources.documents import SourceDocument
+        return self.document_model in [SourceDocument, CollectionDocument]
+
     @cached_property
     def __search_results(self):  # pylint: disable=too-many-branches
         results = None
@@ -353,8 +358,17 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
             if self._should_exclude_retired_from_search_results():
                 results = results.query('match', retired=False)
-            if not self._should_include_private():
-                results = results.query('match', public_can_view=True)
+
+            include_private = self._should_include_private()
+
+            if not include_private:
+                from core.orgs.documents import OrganizationDocument
+                if self.document_model in [OrganizationDocument] and self.request.user.is_authenticated:
+                    results.query(Q('match', public_can_view=False) & Q('match', user=self.request.user.username))
+                elif self.is_concept_container_document_model() and self.request.user.is_authenticated:
+                    results.query(Q('match', public_can_view=False) & Q('match', created_by=self.request.user.username))
+                else:
+                    results = results.query('match', public_can_view=True)
 
             if self.is_owner_document_model():
                 kwargs_filters = self.kwargs

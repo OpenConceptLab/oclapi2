@@ -27,6 +27,7 @@ class CollectionDocument(Document):
     identifier = fields.ObjectField()
     publisher = fields.KeywordField(attr='publisher', normalizer='lowercase')
     immutable = fields.KeywordField(attr='immutable')
+    created_by = fields.KeywordField()
 
     class Django:
         model = Collection
@@ -58,3 +59,7 @@ class CollectionDocument(Document):
             value = jsonify_safe(instance.identifier)
 
         return value or {}
+
+    @staticmethod
+    def prepare_created_by(instance):
+        return instance.created_by.username

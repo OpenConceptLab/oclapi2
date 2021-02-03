@@ -28,6 +28,7 @@ class SourceDocument(Document):
     jurisdiction = fields.ObjectField()
     publisher = fields.KeywordField(attr='publisher', normalizer='lowercase')
     content_type = fields.KeywordField(attr='content_type', normalizer='lowercase')
+    created_by = fields.KeywordField()
 
     class Django:
         model = Source
@@ -67,3 +68,7 @@ class SourceDocument(Document):
             value = jsonify_safe(instance.jurisdiction)
 
         return value or {}
+
+    @staticmethod
+    def prepare_created_by(instance):
+        return instance.created_by.username
