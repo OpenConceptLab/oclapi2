@@ -386,14 +386,23 @@ class SourcesIndexView(ResourceIndexView):
 
 class SourceSummaryView(SourceBaseView, RetrieveAPIView):
     serializer_class = SourceSummaryDetailSerializer
+    permission_classes = (CanViewConceptDictionary,)
+
+    def get_object(self, queryset=None):
+        return get_object_or_404(self.get_queryset())
 
 
 class SourceVersionSummaryView(SourceVersionBaseView, RetrieveAPIView):
     serializer_class = SourceVersionSummaryDetailSerializer
+    permission_classes = (CanViewConceptDictionary,)
+
+    def get_object(self, queryset=None):
+        return get_object_or_404(self.get_queryset())
 
 
 class SourceLatestVersionSummaryView(SourceVersionBaseView, RetrieveAPIView, UpdateAPIView):
     serializer_class = SourceVersionSummaryDetailSerializer
+    permission_classes = (CanViewConceptDictionary,)
 
     def get_filter_params(self, default_version_to_head=False):
         params = super().get_filter_params(default_version_to_head)
