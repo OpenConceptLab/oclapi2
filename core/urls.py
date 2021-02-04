@@ -61,10 +61,10 @@ urlpatterns = [
     path('importers/', include('core.importers.urls'), name='importer_urls'),
 
     # just for ocldev
-    url('manage/bulkimport/', BulkImportView.as_view(), name='bulk_import_urls'),
     re_path(
         'manage/bulkimport/(?P<import_queue>{pattern})/'.format(pattern=NAMESPACE_PATTERN),
         BulkImportView.as_view(),
         name='bulk_import_detail_url'
-    )
+    ),
+    url('manage/bulkimport/', BulkImportView.as_view(), name='bulk_import_urls'),
 ]
