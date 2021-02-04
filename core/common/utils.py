@@ -60,7 +60,11 @@ def get_downloads_path(is_owner):  # pragma: no cover
 
 def get_csv_from_s3(filename, is_owner):  # pragma: no cover
     filename = get_downloads_path(is_owner) + filename + '.csv.zip'
-    return S3.url_for(filename)
+
+    if S3.exists(filename):
+        return S3.url_for(filename)
+
+    return None
 
 
 def reverse_resource(resource, viewname, args=None, kwargs=None, **extra):
