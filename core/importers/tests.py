@@ -517,9 +517,9 @@ class BulkImportViewTest(OCLAPITestCase):
         task_id3 = "{}-{}~{}".format(str(uuid.uuid4()), 'foobar', 'normal')
         task_id4 = "{}-{}".format(str(uuid.uuid4()), 'foobar')
         flower_tasks = {
-            task_id1: dict(name='tasks.bulk_import', state='success'),
+            task_id1: dict(name='core.common.tasks.bulk_import', state='success'),
             task_id2: dict(name='foo-task', state='failed'),
-            task_id3: dict(name='tasks.bulk_import', state='failed'),
+            task_id3: dict(name='core.common.tasks.bulk_import', state='failed'),
             task_id4: dict(name='foo-task', state='pending')
         }
         flower_get_mock.return_value = Mock(json=Mock(return_value=flower_tasks))

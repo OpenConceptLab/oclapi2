@@ -302,8 +302,8 @@ CELERYD_MAX_TASKS_PER_CHILD = 1000
 BROKER_URL = CELERY_RESULT_BACKEND
 BROKER_TRANSPORT_OPTIONS = {'visibility_timeout': 259200}  # 72 hours
 CELERY_ROUTES = {
-    'tasks.bulk_import': {'queue': 'bulk_import'},
-    'tasks.bulk_priority_import': {'queue': 'bulk_priority_import'}
+    'core.common.tasks.bulk_import': {'queue': 'bulk_import'},
+    'core.common.tasks.bulk_priority_import': {'queue': 'bulk_priority_import'}
 }
 CELERY_TASK_RESULT_EXPIRES = 259200  # 72 hours
 CELERY_TRACK_STARTED = True
