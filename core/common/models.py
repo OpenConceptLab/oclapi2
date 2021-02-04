@@ -676,7 +676,7 @@ class ConceptContainerModel(VersionedModel):
         return S3.url_for(self.export_path)
 
     def has_export(self):
-        return bool(self.get_export_url())
+        return S3.exists(self.export_path)
 
 
 class CelerySignalProcessor(RealTimeSignalProcessor):

@@ -525,13 +525,12 @@ class ConceptContainerExportMixin:
             return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
 
         logger.debug('%s Export requested for version %s (post)', self.entity, version.version)
-        status_code = status.HTTP_303_SEE_OTHER
 
-        if not S3.exists(version.export_path):
+        if not version.has_export():
             status_code = self.handle_export_version()
             return Response(status=status_code)
 
-        response = Response(status=status_code)
+        response = Response(status=status.HTTP_303_SEE_OTHER)
         response['URL'] = version.uri + 'export/'
         return response
 
@@ -539,15 +538,16 @@ class ConceptContainerExportMixin:
         user = request.user
         version = self.get_object()
 
-        permitted = user.is_staff or user.is_superuser or user.is_admin_for(version.head)
+        permitted = user.is_staff or user.is_superuser or user.is_admin_for(version)
 
         if not permitted:
             return HttpResponseForbidden()
+
         if version.has_export():
             S3.remove(version.export_path)
-            return Response(status=status.HTTP_200_OK)
+            return Response(status=status.HTTP_204_NO_CONTENT)
 
-        return Response(status=status.HTTP_204_NO_CONTENT)
+        return Response(status=status.HTTP_404_NOT_FOUND)
 
 
 class ConceptContainerProcessingMixin:
