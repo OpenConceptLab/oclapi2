@@ -538,6 +538,9 @@ class ConceptContainerExportMixin:
         user = request.user
         version = self.get_object()
 
+        if version.is_head:
+            return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
+
         permitted = user.is_staff or user.is_superuser or user.is_admin_for(version)
 
         if not permitted:
