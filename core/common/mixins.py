@@ -499,6 +499,9 @@ class ConceptContainerExportMixin:
         if version.is_head:
             return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
 
+        if version.is_processing:
+            return Response(status=status.HTTP_208_ALREADY_REPORTED)
+
         exists = S3.exists(version.export_path)
 
         if not exists:

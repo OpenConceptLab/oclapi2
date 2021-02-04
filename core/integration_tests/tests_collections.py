@@ -817,6 +817,20 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 204)
         s3_exists_mock.assert_called_once_with("username/coll_v1.{}.zip".format(self.v1_updated_at))
 
+    @patch('core.common.services.S3.exists')
+    def test_get_208(self, s3_exists_mock):
+        self.collection_v1._background_process_ids = ['blah']  # pylint: disable=protected-access
+        self.collection_v1.save()
+
+        response = self.client.get(
+            '/collections/coll/v1/export/',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 208)
+        s3_exists_mock.assert_not_called()
+
     @patch('core.common.services.S3.url_for')
     @patch('core.common.services.S3.exists')
     def test_get_303(self, s3_exists_mock, s3_url_for_mock):
