@@ -1,22 +1,17 @@
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils.functional import cached_property
-from drf_yasg.utils import swagger_auto_schema
 from elasticsearch_dsl import Q
-from pydash import get, compact
+from pydash import get
 from rest_framework import response, generics, status
 from rest_framework.generics import ListAPIView, RetrieveUpdateDestroyAPIView
-from rest_framework.parsers import MultiPartParser
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
-from rest_framework.views import APIView
 
 from core.common.constants import SEARCH_PARAM, LIST_DEFAULT_LIMIT, CSV_DEFAULT_LIMIT, \
     LIMIT_PARAM, NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY, INCLUDE_RETIRED_PARAM, VERBOSE_PARAM, HEAD
 from core.common.mixins import PathWalkerMixin
-from core.common.permissions import IsSuperuser
 from core.common.serializers import RootSerializer
-from core.common.swagger_parameters import ids_param
 from core.common.utils import compact_dict_by_values, to_snake_case, to_camel_case
 from core.concepts.permissions import CanViewParentDictionary, CanEditParentDictionary
 from core.orgs.constants import ORG_OBJECT_TYPE
@@ -552,21 +547,3 @@ class BaseLogoView:
         obj.upload_base64_logo(data.get('base64'), 'logo.png')
 
         return Response(self.get_serializer_class()(obj).data, status=status.HTTP_200_OK)
-
-
-class ResourceIndexView(APIView):
-    permission_classes = (IsSuperuser,)
-    parser_classes = (MultiPartParser,)
-    model = None
-    filter_attr = 'mnemonic__in'
-
-    @swagger_auto_schema(manual_parameters=[ids_param])
-    def post(self, request):
-        ids = request.data.get('ids', None)
-        if ids:
-            ids = [i.strip() for i in compact(ids.split(','))]
-
-        for resource in self.model.objects.filter(**{self.filter_attr: ids}):
-            resource.save()
-
-        return Response(status=status.HTTP_200_OK)

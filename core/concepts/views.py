@@ -19,7 +19,7 @@ from core.common.swagger_parameters import (
     include_facets_header, updated_since_param, include_inverse_mappings_param, include_retired_param,
     compress_header)
 from core.common.views import SourceChildCommonBaseView, SourceChildExtrasView, \
-    SourceChildExtraRetrieveUpdateDestroyView, ResourceIndexView
+    SourceChildExtraRetrieveUpdateDestroyView
 from core.concepts.constants import PARENT_VERSION_NOT_LATEST_CANNOT_UPDATE_CONCEPT
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept, LocalizedText
@@ -388,9 +388,4 @@ class ConceptExtrasView(SourceChildExtrasView, ConceptBaseView):
 
 class ConceptExtraRetrieveUpdateDestroyView(SourceChildExtraRetrieveUpdateDestroyView, ConceptBaseView):
     serializer_class = ConceptDetailSerializer
-    model = Concept
-
-
-class ConceptsIndexView(ResourceIndexView):
-    serializer_class = ConceptListSerializer
     model = Concept

@@ -19,7 +19,8 @@ from core.common.constants import HEAD, OCL_ORG_ID, SUPER_ADMIN_USER_ID
 from core.common.utils import (
     compact_dict_by_values, to_snake_case, flower_get, task_exists, parse_bulk_import_task_id,
     to_camel_case,
-    drop_version, is_versioned_uri, separate_version, to_parent_uri, jsonify_safe, es_get)
+    drop_version, is_versioned_uri, separate_version, to_parent_uri, jsonify_safe, es_get,
+    get_resource_class_from_resource_name)
 from core.concepts.models import Concept, LocalizedText
 from core.mappings.models import Mapping
 from core.orgs.models import Organization
@@ -625,6 +626,17 @@ class UtilsTest(OCLTestCase):
         self.assertEqual(jsonify_safe(dict(a=1)), dict(a=1))
         self.assertEqual(jsonify_safe('foobar'), 'foobar')
         self.assertEqual(jsonify_safe('{"foo": "bar"}'), dict(foo='bar'))
+
+    def test_get_resource_class_from_resource_name(self):
+        self.assertEqual(get_resource_class_from_resource_name('mappings').__name__, 'Mapping')
+        self.assertEqual(get_resource_class_from_resource_name('sources').__name__, 'Source')
+        self.assertEqual(get_resource_class_from_resource_name('source').__name__, 'Source')
+        self.assertEqual(get_resource_class_from_resource_name('collections').__name__, 'Collection')
+        self.assertEqual(get_resource_class_from_resource_name('collection').__name__, 'Collection')
+        for name in ['orgs', 'organizations', 'org', 'ORG']:
+            self.assertEqual(get_resource_class_from_resource_name(name).__name__, 'Organization')
+        for name in ['user', 'USer', 'user_profile', 'USERS']:
+            self.assertEqual(get_resource_class_from_resource_name(name).__name__, 'UserProfile')
 
 
 class BaseModelTest(OCLTestCase):

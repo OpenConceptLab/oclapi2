@@ -21,7 +21,7 @@ from core.common.swagger_parameters import q_param, limit_param, sort_desc_param
     page_param, verbose_param, include_retired_param, updated_since_param, include_facets_header, compress_header
 from core.common.tasks import export_source
 from core.common.utils import parse_boolean_query_param, compact_dict_by_values
-from core.common.views import BaseAPIView, BaseLogoView, ResourceIndexView
+from core.common.views import BaseAPIView, BaseLogoView
 from core.sources.constants import DELETE_FAILURE, DELETE_SUCCESS, VERSION_ALREADY_EXISTS
 from core.sources.documents import SourceDocument
 from core.sources.models import Source
@@ -377,11 +377,6 @@ class SourceVersionExportView(ConceptContainerExportMixin, SourceVersionBaseView
             return status.HTTP_202_ACCEPTED
         except AlreadyQueued:
             return status.HTTP_409_CONFLICT
-
-
-class SourcesIndexView(ResourceIndexView):
-    serializer_class = SourceListSerializer
-    model = Source
 
 
 class SourceSummaryView(SourceBaseView, RetrieveAPIView):

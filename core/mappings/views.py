@@ -15,7 +15,7 @@ from core.common.swagger_parameters import (
     include_facets_header, updated_since_param, include_retired_param,
     compress_header)
 from core.common.views import SourceChildCommonBaseView, SourceChildExtrasView, \
-    SourceChildExtraRetrieveUpdateDestroyView, ResourceIndexView
+    SourceChildExtraRetrieveUpdateDestroyView
 from core.concepts.permissions import CanEditParentDictionary, CanViewParentDictionary
 from core.mappings.constants import PARENT_VERSION_NOT_LATEST_CANNOT_UPDATE_MAPPING
 from core.mappings.documents import MappingDocument
@@ -250,9 +250,4 @@ class MappingExtrasView(SourceChildExtrasView, MappingBaseView):
 
 class MappingExtraRetrieveUpdateDestroyView(SourceChildExtraRetrieveUpdateDestroyView, MappingBaseView):
     serializer_class = MappingDetailSerializer
-    model = Mapping
-
-
-class MappingsIndexView(ResourceIndexView):
-    serializer_class = MappingListSerializer
     model = Mapping

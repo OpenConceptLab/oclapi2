@@ -458,3 +458,30 @@ def web_url():
     if not settings.ENV or settings.ENV in ['development', 'ci']:
         return 'http://localhost:4000'
     return settings.API_BASE_URL.replace('api.', '')
+
+
+def get_resource_class_from_resource_name(resource):  # pylint: disable=too-many-return-statements
+    if not resource:
+        return resource
+
+    name = resource.lower()
+    if name in ['concepts', 'concept']:
+        from core.concepts.models import Concept
+        return Concept
+    if name in ['mappings', 'mapping']:
+        from core.mappings.models import Mapping
+        return Mapping
+    if name in ['users', 'user', 'user_profiles', 'user_profile', 'userprofiles', 'userprofile']:
+        from core.users.models import UserProfile
+        return UserProfile
+    if name in ['orgs', 'org', 'organizations', 'organization']:
+        from core.orgs.models import Organization
+        return Organization
+    if name in ['sources', 'source']:
+        from core.sources.models import Source
+        return Source
+    if name in ['collections', 'collection']:
+        from core.collections.models import Collection
+        return Collection
+
+    return None

@@ -22,12 +22,10 @@ from rest_framework import permissions
 
 import core.concepts.views as concept_views
 import core.mappings.views as mapping_views
-import core.collections.views as collection_views
-import core.sources.views as sources_views
 from core.common.constants import NAMESPACE_PATTERN
 from core.common.utils import get_api_base_url
-from core.importers.views import BulkImportView
 from core.common.views import RootView
+from core.importers.views import BulkImportView
 
 SchemaView = get_schema_view(
     openapi.Info(
@@ -50,15 +48,12 @@ urlpatterns = [
     path('users/', include('core.users.urls'), name='users_urls'),
     path('user/', include('core.users.user_urls'), name='current_user_urls'),
     path('orgs/', include('core.orgs.urls'), name='orgs_url'),
-    path('sources/indexes/', sources_views.SourcesIndexView.as_view(), name='sources-indexes'),
     path('sources/', include('core.sources.urls'), name='sources_url'),
-    path('collections/indexes/', collection_views.CollectionsIndexView.as_view(), name='collections-indexes'),
     path('collections/', include('core.collections.urls'), name='collections_urls'),
-    path('concepts/indexes/', concept_views.ConceptsIndexView.as_view(), name='concepts-indexes'),
     path('concepts/', concept_views.ConceptVersionListAllView.as_view(), name='all_concepts_urls'),
-    path('mappings/indexes/', mapping_views.MappingsIndexView.as_view(), name='mappings-indexes'),
     path('mappings/', mapping_views.MappingVersionListAllView.as_view(), name='all_mappings_urls'),
     path('importers/', include('core.importers.urls'), name='importer_urls'),
+    path('indexes/', include('core.indexes.urls'), name='indexes_urls'),
 
     # just for ocldev
     re_path(

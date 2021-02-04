@@ -73,6 +73,10 @@ apps_param = openapi.Parameter(
 ids_param = openapi.Parameter(
     'ids', openapi.IN_FORM, description="Resource Ids", type=openapi.TYPE_STRING
 )
+resources_body_param = openapi.Parameter(
+    'resource', openapi.IN_PATH, type=openapi.TYPE_STRING,
+    enum=['mappings', 'concepts', 'sources', 'orgs', 'users', 'collections']
+)
 parallel_threads_param = openapi.Parameter(
     'parallel', openapi.IN_FORM, description="Parallel threads count (default: 5, max: 10)", type=openapi.TYPE_INTEGER
 )
