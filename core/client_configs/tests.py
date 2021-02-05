@@ -6,6 +6,10 @@ from core.orgs.tests.factories import OrganizationFactory
 
 
 class ClientConfigTest(OCLTestCase):
+    def tearDown(self):
+        ClientConfig.objects.all().delete()
+        super().tearDown()
+
     def test_is_home(self):
         self.assertTrue(ClientConfig().is_home)
         self.assertTrue(ClientConfig(type='home').is_home)
@@ -66,3 +70,23 @@ class ClientConfigTest(OCLTestCase):
 
         client_config.config = dict(tabs=[dict(foo='bar', default=True), dict(foo='bar', default=False)])
         client_config.full_clean()
+
+    def test_uri(self):
+        self.assertEqual(ClientConfig(id=1).uri, '/client-configs/1/')
+        self.assertEqual(ClientConfig(id=400).uri, '/client-configs/400/')
+
+    def test_siblings(self):
+        org = OrganizationFactory()
+        config1 = ClientConfig(name='first', resource=org, config=dict(tabs=[dict(foo='bar', default=True)]))
+        config1.save()
+
+        self.assertEqual(config1.siblings.count(), 0)
+
+        config2 = ClientConfig(name='second', resource=org, config=dict(tabs=[dict(foo='bar', default=True)]))
+        config2.save()
+
+        self.assertEqual(config1.siblings.count(), 1)
+        self.assertEqual(config1.siblings.first().id, config2.id)
+
+        self.assertEqual(config2.siblings.count(), 1)
+        self.assertEqual(config2.siblings.first().id, config1.id)

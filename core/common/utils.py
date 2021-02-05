@@ -489,3 +489,12 @@ def get_resource_class_from_resource_name(resource):  # pylint: disable=too-many
         return Collection
 
     return None
+
+
+def get_content_type_from_resource_name(resource):
+    model = get_resource_class_from_resource_name(resource)
+    if model:
+        from django.contrib.contenttypes.models import ContentType
+        return ContentType.objects.get_for_model(model)
+
+    return None

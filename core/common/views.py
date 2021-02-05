@@ -179,7 +179,10 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
             for _val in vals:
                 query = Q('match', **{attr: _val.strip('\"').strip('\'')})
-                criteria |= ~query if not_query else query  # pylint: disable=invalid-unary-operand-type
+                if not_query:
+                    criteria &= ~query
+                else:
+                    criteria |= query
 
             return criteria
 

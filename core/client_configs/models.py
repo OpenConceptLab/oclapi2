@@ -16,10 +16,12 @@ class ClientConfig(models.Model):
 
     name = models.TextField(null=True, blank=True)
     type = models.CharField(choices=CONFIG_TYPES, default=HOME_TYPE, max_length=255)
+    is_default = models.BooleanField(default=False)
+    config = JSONField()
     resource_type = models.ForeignKey(ContentType, on_delete=models.CASCADE)
     resource_id = models.PositiveIntegerField()
     resource = GenericForeignKey('resource_type', 'resource_id')
-    config = JSONField()
+
     created_by = models.ForeignKey(
         'users.UserProfile', default=SUPER_ADMIN_USER_ID, on_delete=models.SET_DEFAULT,
         related_name='%(app_label)s_%(class)s_related_created_by',
@@ -33,12 +35,16 @@ class ClientConfig(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     is_active = models.BooleanField(default=True)
-    is_default = models.BooleanField(default=False)
+
     errors = None
 
     @property
     def is_home(self):
         return self.type == HOME_TYPE
+
+    @property
+    def uri(self):
+        return "/client-configs/{}/".format(self.id)
 
     def clean(self):
         self.errors = None
@@ -49,6 +55,12 @@ class ClientConfig(models.Model):
 
         if self.errors:
             raise ValidationError(self.errors)
+
+    @property
+    def siblings(self):
+        return self.__class__.objects.filter(
+            resource_type_id=self.resource_type_id, resource_id=self.resource_id, type=self.type
+        ).exclude(id=self.id)
 
     def validate_home_config(self):
         self.validate_home_tabs_config()

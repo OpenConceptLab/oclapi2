@@ -54,6 +54,7 @@ urlpatterns = [
     path('mappings/', mapping_views.MappingVersionListAllView.as_view(), name='all_mappings_urls'),
     path('importers/', include('core.importers.urls'), name='importer_urls'),
     path('indexes/', include('core.indexes.urls'), name='indexes_urls'),
+    path('client-configs/', include('core.client_configs.urls'), name='client_config_urls'),
 
     # just for ocldev
     re_path(
