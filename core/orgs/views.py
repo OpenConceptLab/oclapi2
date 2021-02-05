@@ -141,9 +141,13 @@ class OrganizationDetailView(OrganizationBaseView, mixins.UpdateModelMixin, mixi
         return Response({'detail': DELETE_ACCEPTED}, status=status.HTTP_202_ACCEPTED)
 
 
-class OrganizationClientConfigsView(OrganizationBaseView):
+class OrganizationClientConfigsView(BaseAPIView, RetrieveAPIView):
+    lookup_field = 'org'
+    model = Organization
+    queryset = Organization.objects.filter(is_active=True)
     serializer_class = ClientConfigSerializer
     permission_classes = (CanViewConceptDictionary, )
+    swagger_schema = None
 
     def get(self, request, *args, **kwargs):
         instance = self.get_object()
