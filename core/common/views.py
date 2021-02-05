@@ -369,9 +369,15 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                     results = results.query('match', public_can_view=True)
 
             if self.is_owner_document_model():
-                kwargs_filters = self.kwargs
+                kwargs_filters = self.kwargs.copy()
+                if self.user_is_self and self.request.user.is_authenticated:
+                    kwargs_filters.pop('user_is_self', None)
+                    kwargs_filters['user'] = self.request.user.username
             else:
                 kwargs_filters = self.get_kwargs_filters()
+                if self.user_is_self and self.request.user.is_authenticated:
+                    kwargs_filters['ownerType'] = 'User'
+                    kwargs_filters['owner'] = self.request.user.username
 
             for key, value in kwargs_filters.items():
                 results = results.query('match', **{to_snake_case(key): value})
