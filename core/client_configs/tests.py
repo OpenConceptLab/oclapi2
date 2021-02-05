@@ -1,7 +1,7 @@
 from django.core.exceptions import ValidationError
 
 from core.client_configs.models import ClientConfig
-from core.common.tests import OCLTestCase
+from core.common.tests import OCLTestCase, OCLAPITestCase
 from core.orgs.tests.factories import OrganizationFactory
 
 
@@ -90,3 +90,112 @@ class ClientConfigTest(OCLTestCase):
 
         self.assertEqual(config2.siblings.count(), 1)
         self.assertEqual(config2.siblings.first().id, config1.id)
+
+
+class ClientConfigsViewTest(OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.org = OrganizationFactory()
+        self.user = self.org.created_by
+        self.token = self.user.get_token()
+        self.dummy_config = dict(tabs=[dict(default=True)])
+
+    def tearDown(self):
+        ClientConfig.objects.all().delete()
+        super().tearDown()
+
+    def test_post(self):
+        response = self.client.post(
+            self.org.url + 'client-configs/',
+            dict(),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.data,
+            {'config': ['This field cannot be null.'], 'tabs': ['At least one tab config is mandatory.']}
+        )
+
+        response = self.client.post(
+            self.org.url + 'client-configs/',
+            dict(name='custom', config=self.dummy_config, is_default=True),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+        self.assertEqual(response.status_code, 201)
+        config1 = ClientConfig.objects.last()
+        self.assertEqual(config1.resource, self.org)
+        self.assertEqual(config1.name, 'custom')
+        self.assertEqual(config1.type, 'home')
+        self.assertEqual(config1.config, self.dummy_config)
+        self.assertEqual(config1.created_by, self.user)
+        self.assertEqual(config1.updated_by, self.user)
+        self.assertTrue(config1.is_default)
+
+        response = self.client.post(
+            self.org.url + 'client-configs/',
+            dict(name='custom1', config=self.dummy_config, is_default=True),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+        self.assertEqual(response.status_code, 201)
+        config2 = ClientConfig.objects.last()
+        config1.refresh_from_db()
+        self.assertTrue(config2.is_default)
+        self.assertFalse(config1.is_default)
+
+    def test_get(self):
+        response = self.client.get(
+            self.org.url + 'client-configs/',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 0)
+
+        config = ClientConfig(config=self.dummy_config, name='foobar', resource=self.org)
+        config.save()
+
+        response = self.client.get(
+            self.org.url + 'client-configs/',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['id'], config.id)
+
+
+class ClientConfigViewTest(OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.org = OrganizationFactory()
+        self.user = self.org.created_by
+        self.token = self.user.get_token()
+        self.dummy_config = dict(tabs=[dict(default=True)])
+        self.config = ClientConfig(config=self.dummy_config, name='foobar', resource=self.org)
+        self.config.save()
+
+    def tearDown(self):
+        ClientConfig.objects.all().delete()
+        super().tearDown()
+
+    def test_put(self):
+        response = self.client.get(
+            '/client-configs/12356/',
+            dict(name='updated'),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+        self.assertEqual(response.status_code, 404)
+
+        response = self.client.put(
+            self.config.uri,
+            dict(name='updated'),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+        self.assertEqual(response.status_code, 200)
+        self.config.refresh_from_db()
+        self.assertTrue(response.data['name'] == self.config.name == 'updated')

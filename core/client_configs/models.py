@@ -14,7 +14,7 @@ class ClientConfig(models.Model):
     class Meta:
         db_table = 'client_configurations'
 
-    name = models.TextField(null=True, blank=True)
+    name = models.TextField(default='View Configuration')
     type = models.CharField(choices=CONFIG_TYPES, default=HOME_TYPE, max_length=255)
     is_default = models.BooleanField(default=False)
     config = JSONField()

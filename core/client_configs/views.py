@@ -1,5 +1,5 @@
 from rest_framework import generics
-from rest_framework.generics import RetrieveAPIView, UpdateAPIView
+from rest_framework.generics import RetrieveAPIView, UpdateAPIView, DestroyAPIView
 from rest_framework.response import Response
 
 from core.client_configs.serializers import ClientConfigSerializer
@@ -14,7 +14,7 @@ class ClientConfigBaseView(generics.GenericAPIView):
     serializer_class = ClientConfigSerializer
 
 
-class ClientConfigView(ClientConfigBaseView, RetrieveAPIView, UpdateAPIView):
+class ClientConfigView(ClientConfigBaseView, RetrieveAPIView, UpdateAPIView, DestroyAPIView):
     def update(self, request, *args, **kwargs):
         partial = kwargs.pop('partial', False)
         instance = self.get_object()
