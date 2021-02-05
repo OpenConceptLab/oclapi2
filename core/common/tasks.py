@@ -29,6 +29,10 @@ def delete_organization(org_id):
     try:
         logger.info('Found org %s.  Beginning purge...', org.mnemonic)
         org.delete()
+        from core.pins.models import Pin
+        Pin.objects.filter(resource_type__model='organization', resource_id=org.id).delete()
+        from core.client_configs.models import ClientConfig
+        ClientConfig.objects.filter(resource_type__model='organization', resource_id=org.id).delete()
         logger.info('Purge complete!')
     except Exception as ex:
         logger.info('Org delete failed for %s with exception %s', org.mnemonic, ex.args)
