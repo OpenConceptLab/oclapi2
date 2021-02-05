@@ -10,5 +10,5 @@ class ClientConfigSerializer(serializers.ModelSerializer):
     class Meta:
         model = ClientConfig
         fields = (
-            'id', 'name', 'type', 'page_size', 'is_default', 'config', 'layout'
+            'id', 'name', 'type', 'is_default', 'config'
         )
