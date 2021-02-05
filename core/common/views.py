@@ -1,4 +1,4 @@
-from django.http import HttpResponse
+from django.http import HttpResponse, Http404
 from django.shortcuts import get_object_or_404
 from django.utils.functional import cached_property
 from elasticsearch_dsl import Q
@@ -62,6 +62,9 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
     def initialize(self, request, path_info_segment, **kwargs):  # pylint: disable=unused-argument
         self.user_is_self = kwargs.pop('user_is_self', False)
+        if self.user_is_self and self.request.user.is_anonymous:
+            raise Http404()
+
         self.limit = request.query_params.dict().get(LIMIT_PARAM, LIST_DEFAULT_LIMIT)
 
     def get_object(self, queryset=None):  # pylint: disable=arguments-differ
