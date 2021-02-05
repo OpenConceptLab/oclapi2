@@ -40,7 +40,7 @@ def write_csv_to_s3(data, is_owner, **kwargs):  # pragma: no cover
         zip_file.write(csv_file.name)
 
     file_path = get_downloads_path(is_owner) + zip_file_name
-    S3.upload_file(file_path, csv_file.name)
+    S3.upload_file(key=file_path, file_path=csv_file.name, binary=True)
     os.chdir(cwd)
     return S3.url_for(file_path)
 
