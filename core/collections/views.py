@@ -124,7 +124,7 @@ class CollectionListView(CollectionBaseView, ConceptDictionaryCreateMixin, ListW
         'collection_type': {'sortable': True, 'filterable': True, 'facet': True, 'exact': True},
         'mnemonic': {'sortable': True, 'filterable': True, 'exact': True},
         'name': {'sortable': True, 'filterable': True, 'exact': True},
-        'last_update': {'sortable': True, 'filterable': True, 'default': 'desc'},
+        'last_update': {'sortable': True, 'filterable': False, 'default': 'desc'},
         'locale': {'sortable': False, 'filterable': True, 'facet': True},
         'owner': {'sortable': True, 'filterable': True, 'facet': True, 'exact': True},
         'owner_type': {'sortable': False, 'filterable': True, 'facet': True},

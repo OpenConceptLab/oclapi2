@@ -31,7 +31,7 @@ class OrganizationListView(BaseAPIView,
     es_fields = {
         'name': {'sortable': True, 'filterable': True, 'exact': True},
         'mnemonic': {'sortable': True, 'filterable': True, 'exact': True},
-        'last_update': {'sortable': True, 'default': 'desc', 'filterable': True},
+        'last_update': {'sortable': True, 'default': 'desc', 'filterable': False},
         'company': {'sortable': False, 'filterable': True, 'exact': True},
         'location': {'sortable': False, 'filterable': True, 'exact': True},
     }
