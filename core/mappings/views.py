@@ -217,7 +217,10 @@ class MappingVersionRetrieveView(MappingBaseView, RetrieveAPIView):
     permission_classes = (CanViewParentDictionary,)
 
     def get_object(self, queryset=None):
-        return get_object_or_404(self.get_queryset(None))
+        instance = self.get_queryset(None).first()
+        if not instance:
+            raise Http404()
+        return instance
 
 
 class MappingVersionListAllView(MappingBaseView, ListWithHeadersMixin):

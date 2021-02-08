@@ -260,7 +260,10 @@ class ConceptVersionRetrieveView(ConceptBaseView, RetrieveAPIView):
     permission_classes = (CanViewParentDictionary,)
 
     def get_object(self, queryset=None):
-        return self.get_queryset(None).first()
+        instance = self.get_queryset(None).first()
+        if not instance:
+            raise Http404()
+        return instance
 
 
 class ConceptLabelListCreateView(ConceptBaseView, ListWithHeadersMixin, ListCreateAPIView):
