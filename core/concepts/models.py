@@ -53,14 +53,22 @@ class LocalizedText(models.Model):
 
     @classmethod
     def build_name(cls, params):
-        name_type = params.pop('name_type', None) or params.pop('type', None)
+        _type = params.pop('type', None)
+        name_type = params.pop('name_type', None)
+        if (not name_type or name_type == 'ConceptName') and _type:
+            name_type = _type
+
         return cls(
             **{**params, 'type': name_type}
         )
 
     @classmethod
     def build_description(cls, params):
-        description_type = params.pop('description_type', None) or params.pop('type', None)
+        _type = params.pop('type', None)
+        description_type = params.pop('description_type', None)
+        if (not description_type or description_type == 'ConceptDescription') and _type:
+            description_type = _type
+
         description_name = params.pop('description', None) or params.pop('name', None)
         return cls(
             **{
