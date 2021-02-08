@@ -459,9 +459,14 @@ def jsonify_safe(value):
 
 
 def web_url():
-    if not settings.ENV or settings.ENV in ['development', 'ci']:
+    env = settings.ENV
+    if not env or env in ['development', 'ci']:
         return 'http://localhost:4000'
-    return settings.API_BASE_URL.replace('api.', '')
+
+    if env == 'production':
+        return "https://app.aws.openconceptlab.org"
+
+    return "https://app.{}.aws.openconceptlab.org".format(env)
 
 
 def get_resource_class_from_resource_name(resource):  # pylint: disable=too-many-return-statements
