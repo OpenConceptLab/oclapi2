@@ -55,7 +55,7 @@ class LocalizedText(models.Model):
     def build_name(cls, params):
         _type = params.pop('type', None)
         name_type = params.pop('name_type', None)
-        if (not name_type or name_type == 'ConceptName') and _type:
+        if not name_type or name_type == 'ConceptName':
             name_type = _type
 
         return cls(
@@ -66,7 +66,7 @@ class LocalizedText(models.Model):
     def build_description(cls, params):
         _type = params.pop('type', None)
         description_type = params.pop('description_type', None)
-        if (not description_type or description_type == 'ConceptDescription') and _type:
+        if not description_type or description_type == 'ConceptDescription':
             description_type = _type
 
         description_name = params.pop('description', None) or params.pop('name', None)
