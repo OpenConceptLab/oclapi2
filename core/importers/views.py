@@ -137,7 +137,15 @@ class BulkImportView(APIView):
                 status=status.HTTP_202_ACCEPTED
             )
 
-        flower_tasks = flower_get('api/tasks').json()
+        try:
+            response = flower_get('api/tasks')
+            flower_tasks = response.json()
+        except Exception as ex:
+            return Response(
+                dict(detail='Flower service returned unexpected result. Maybe check healthcheck.', exception=str(ex)),
+                status=status.HTTP_422_UNPROCESSABLE_ENTITY
+            )
+
         tasks = []
         for task_id, value in flower_tasks.items():
             if not value.get('name', None) or not value['name'].startswith('core.common.tasks.bulk_import'):
