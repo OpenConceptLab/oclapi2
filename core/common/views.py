@@ -251,13 +251,14 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
     def get_facets(self):
         facets = dict()
+        is_source_child_document_model = self.is_source_child_document_model()
         if self.should_include_facets() and self.facet_class:
             faceted_filters = {to_camel_case(k): v for k, v in self.get_faceted_filters(True).items()}
             filters = {
                 **self.default_filters, **self.get_facet_filters_from_kwargs(), **faceted_filters, 'retired': False
             }
 
-            if not self._should_exclude_retired_from_search_results() or not self.is_source_child_document_model():
+            if not self._should_exclude_retired_from_search_results() or not is_source_child_document_model:
                 filters.pop('retired')
 
             searcher = self.facet_class(  # pylint: disable=not-callable
@@ -271,11 +272,17 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
         if 'source' in self.kwargs:
             facets.pop('source', None)
-            if self.is_source_child_document_model():
-                facets['collection_membership'] = facets.pop('collection', None)
 
         if 'collection' in self.kwargs:
             facets.pop('collection', None)
+        elif is_source_child_document_model:
+            facets['collection_membership'] = facets.pop('collection', None)
+
+        if is_source_child_document_model:
+            facets.pop('concept', None)
+            facets.pop('conceptOwner', None)
+            facets.pop('conceptOwnerType', None)
+            facets.pop('conceptSource', None)
 
         return facets
 
