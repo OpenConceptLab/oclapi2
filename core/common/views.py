@@ -271,6 +271,8 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
         if 'source' in self.kwargs:
             facets.pop('source', None)
+            if self.is_source_child_document_model():
+                facets['collection_membership'] = facets.pop('collection', None)
 
         if 'collection' in self.kwargs:
             facets.pop('collection', None)
