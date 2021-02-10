@@ -251,7 +251,7 @@ class ConceptVersionDetailSerializer(ModelSerializer):
         fields = (
             'type', 'uuid', 'id', 'external_id', 'concept_class', 'datatype', 'display_name', 'display_locale',
             'names', 'descriptions', 'extras', 'retired', 'source', 'source_url', 'owner', 'owner_name', 'owner_url',
-            'version', 'created_on', 'updated_on', 'version_created_on', 'version_created_by', 'extras',
+            'version', 'created_on', 'updated_on', 'version_created_on', 'version_created_by',
             'is_latest_version', 'locale', 'url', 'owner_type', 'version_url', 'mappings', 'previous_version_url'
         )
 

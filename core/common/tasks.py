@@ -43,7 +43,9 @@ def export_source(self, version_id):
     from core.sources.models import Source
     logger.info('Finding source version...')
 
-    version = Source.objects.filter(id=version_id).first()
+    version = Source.objects.filter(id=version_id).select_related(
+        'organization', 'user'
+    ).first()
 
     if not version:  # pragma: no cover
         logger.info('Not found source version %s', version_id)
@@ -63,7 +65,9 @@ def export_collection(self, version_id):
     from core.collections.models import Collection
     logger.info('Finding collection version...')
 
-    version = Collection.objects.filter(id=version_id).first()
+    version = Collection.objects.filter(id=version_id).select_related(
+        'organization', 'user'
+    ).first()
 
     if not version:  # pragma: no cover
         logger.info('Not found collection version %s', version_id)

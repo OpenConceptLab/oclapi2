@@ -220,7 +220,8 @@ def write_export_file(
         for start in range(0, total_concepts, batch_size):
             end = min(start + batch_size, total_concepts)
             logger.info('Serializing concepts %d - %d...' % (start+1, end))
-            concept_versions = concepts_qs.all()[start:end]
+            concept_versions = concepts_qs.prefetch_related(
+                'names', 'descriptions').select_related('parent__organization', 'parent__user')[start:end]
             concept_serializer = concept_serializer_class(concept_versions, many=True)
             concept_data = concept_serializer.data
             concept_string = json.dumps(concept_data, cls=encoders.JSONEncoder)
@@ -244,7 +245,11 @@ def write_export_file(
         for start in range(0, total_mappings, batch_size):
             end = min(start + batch_size, total_mappings)
             logger.info('Serializing mappings %d - %d...' % (start+1, end))
-            mappings = mappings_qs.all()[start:end]
+            mappings = mappings_qs.select_related(
+                'parent__organization', 'parent__user', 'from_concept', 'to_concept',
+                'from_source__organization', 'from_source__user',
+                'to_source__organization', 'to_source__user',
+            )[start:end]
             mapping_serializer = mapping_serializer_class(mappings, many=True)
             mapping_data = mapping_serializer.data
             mapping_string = json.dumps(mapping_data, cls=encoders.JSONEncoder)
