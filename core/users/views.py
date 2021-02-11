@@ -187,6 +187,13 @@ class UserPasswordResetView(UserBaseView):
 class UserDetailView(UserBaseView, RetrieveAPIView, DestroyAPIView, mixins.UpdateModelMixin):
     serializer_class = UserDetailSerializer
 
+    def get_queryset(self):
+        queryset = super().get_queryset()
+
+        if self.kwargs.get('user_is_self'):
+            return queryset.filter(username=self.request.user.username)
+        return queryset.filter(username=self.kwargs['user'])
+
     def get_permissions(self):
         if self.request.method == 'GET':
             return [AllowAny()]

@@ -102,6 +102,9 @@ class OrganizationLogoView(OrganizationBaseView, BaseLogoView):
 
 
 class OrganizationDetailView(OrganizationBaseView, mixins.UpdateModelMixin, mixins.CreateModelMixin):
+    def get_queryset(self):
+        return super().get_queryset().filter(mnemonic=self.kwargs['org'])
+
     def get_permissions(self):
         if self.request.method == 'DELETE':
             return [HasPrivateAccess(), ]
