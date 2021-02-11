@@ -13,7 +13,7 @@ from core.collections.models import Collection
 from core.common.constants import HEAD
 from core.common.services import RedisService
 from core.common.tasks import bulk_import_parts_inline
-from core.common.utils import get_api_internal_base_url, drop_version
+from core.common.utils import drop_version
 from core.concepts.models import Concept
 from core.mappings.models import Mapping
 from core.orgs.models import Organization
@@ -76,7 +76,7 @@ class BulkImport(BaseImporter):
     def initialize_importer(self):
         self.importer = OclFlexImporter(
             input_list=self.input_list,
-            api_url_root=get_api_internal_base_url(),
+            api_url_root=settings.API_BASE_URL,
             api_token=self.user.get_token(),
             do_update_if_exists=self.update_if_exists
         )
