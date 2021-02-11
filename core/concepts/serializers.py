@@ -234,6 +234,7 @@ class ConceptVersionDetailSerializer(ModelSerializer):
     mappings = SerializerMethodField()
     url = CharField(source='versioned_object_url', read_only=True)
     previous_version_url = CharField(source='prev_version_uri', read_only=True)
+    update_comment = CharField(source='comment')
 
     def __init__(self, *args, **kwargs):
         params = get(kwargs, 'context.request.query_params')
@@ -251,7 +252,7 @@ class ConceptVersionDetailSerializer(ModelSerializer):
         fields = (
             'type', 'uuid', 'id', 'external_id', 'concept_class', 'datatype', 'display_name', 'display_locale',
             'names', 'descriptions', 'extras', 'retired', 'source', 'source_url', 'owner', 'owner_name', 'owner_url',
-            'version', 'created_on', 'updated_on', 'version_created_on', 'version_created_by',
+            'version', 'created_on', 'updated_on', 'version_created_on', 'version_created_by', 'update_comment',
             'is_latest_version', 'locale', 'url', 'owner_type', 'version_url', 'mappings', 'previous_version_url'
         )
 
