@@ -71,6 +71,28 @@ class ClientConfigTest(OCLTestCase):
         client_config.config = dict(tabs=[dict(foo='bar', default=True), dict(foo='bar', default=False)])
         client_config.full_clean()
 
+    def test_format_home_config_tabs(self):
+        client_config = ClientConfig(config=dict(tabs=[dict(fields=[])]))
+        client_config.format_home_config_tabs()
+
+        self.assertEqual(client_config.config, dict(tabs=[dict(fields=[])]))
+
+        client_config.config['tabs'] = [dict(fields={'source_type': 'Source Type', 'extras.foo': "foobar"})]
+        client_config.format_home_config_tabs()
+
+        self.assertEqual(
+            client_config.config['tabs'][0]['fields'],
+            [{'source_type': 'Source Type'}, {'extras.foo': 'foobar'}]
+        )
+
+        client_config.config['tabs'] = [dict(fields=[{'source_type': 'Source Type'}, {'extras.foo': 'foobar'}])]
+        client_config.format_home_config_tabs()
+
+        self.assertEqual(
+            client_config.config['tabs'][0]['fields'],
+            [{'source_type': 'Source Type'}, {'extras.foo': 'foobar'}]
+        )
+
     def test_uri(self):
         self.assertEqual(ClientConfig(id=1).uri, '/client-configs/1/')
         self.assertEqual(ClientConfig(id=400).uri, '/client-configs/400/')

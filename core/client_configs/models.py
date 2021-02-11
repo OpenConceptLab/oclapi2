@@ -52,6 +52,8 @@ class ClientConfig(models.Model):
 
         if self.is_home:
             self.validate_home_config()
+            if not self.errors:
+                self.format_home_config_tabs()
 
         if self.errors:
             raise ValidationError(self.errors)
@@ -61,6 +63,12 @@ class ClientConfig(models.Model):
         return self.__class__.objects.filter(
             resource_type_id=self.resource_type_id, resource_id=self.resource_id, type=self.type
         ).exclude(id=self.id)
+
+    def format_home_config_tabs(self):
+        for tab in self.config.get('tabs', []):
+            fields = get(tab, 'fields')
+            if isinstance(fields, dict):
+                tab['fields'] = [{k: v} for k, v in fields.items()]
 
     def validate_home_config(self):
         self.validate_home_tabs_config()
