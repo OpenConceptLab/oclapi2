@@ -3,6 +3,7 @@ import logging
 from celery_once import AlreadyQueued
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError
+from django.http import Http404
 from django.shortcuts import get_object_or_404
 from drf_yasg.utils import swagger_auto_schema
 from pydash import get
@@ -150,11 +151,15 @@ class SourceLogoView(SourceBaseView, BaseLogoView):
         return [CanEditConceptDictionary()]
 
 
-class SourceRetrieveUpdateDestroyView(SourceBaseView, ConceptDictionaryUpdateMixin):
+class SourceRetrieveUpdateDestroyView(SourceBaseView, ConceptDictionaryUpdateMixin, RetrieveAPIView):
     serializer_class = SourceDetailSerializer
 
     def get_object(self, queryset=None):
-        return self.get_queryset().filter(is_active=True).order_by('-created_at').first()
+        instance = self.get_queryset().filter(is_active=True).order_by('-created_at').first()
+        if not instance:
+            raise Http404()
+
+        return instance
 
     def get_permissions(self):
         if self.request.method in ['GET', 'HEAD']:
@@ -170,15 +175,6 @@ class SourceRetrieveUpdateDestroyView(SourceBaseView, ConceptDictionaryUpdateMix
             return Response({'detail': get(ex, 'messages', [DELETE_FAILURE])}, status=status.HTTP_400_BAD_REQUEST)
 
         return Response({'detail': DELETE_SUCCESS}, status=status.HTTP_204_NO_CONTENT)
-
-    def get(self, request, *args, **kwargs):  # pylint: disable=unused-argument
-        instance = self.get_object()
-
-        if not instance:
-            return Response(status=status.HTTP_404_NOT_FOUND)
-
-        serializer = self.get_serializer(instance)
-        return Response(serializer.data)
 
 
 class SourceVersionListView(SourceVersionBaseView, mixins.CreateModelMixin, ListWithHeadersMixin):

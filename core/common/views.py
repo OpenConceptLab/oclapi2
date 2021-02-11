@@ -1,4 +1,4 @@
-from django.http import HttpResponse, Http404
+from django.http import Http404
 from django.shortcuts import get_object_or_404
 from django.utils.functional import cached_property
 from elasticsearch_dsl import Q
@@ -91,12 +91,6 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
     def get_host_url(self):
         return self.request.META['wsgi.url_scheme'] + '://' + self.request.get_host()
-
-    def head(self, request, **kwargs):  # pylint: disable=unused-argument
-        res = HttpResponse()
-        queryset = self.filter_queryset(self.get_queryset())
-        res['num_found'] = get(self, 'total_count') or queryset.count()
-        return res
 
     def filter_queryset(self, queryset):
         if self.is_searchable and self.should_perform_es_search():

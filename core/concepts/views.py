@@ -278,7 +278,10 @@ class ConceptLabelListCreateView(ConceptBaseView, ListWithHeadersMixin, ListCrea
         return [CanEditParentDictionary()]
 
     def get_object(self, queryset=None):
-        return super().get_queryset(None).first()
+        instance = super().get_queryset(None).first()
+        if not instance:
+            raise Http404()
+        return instance
 
     def get_queryset(self, _=None):
         if not self.parent_list_attribute:
@@ -323,10 +326,16 @@ class ConceptLabelRetrieveUpdateDestroyView(ConceptBaseView, RetrieveUpdateDestr
         return getattr(instance, self.parent_list_attribute).all()
 
     def get_resource_object(self):
-        return super().get_queryset(None).first()
+        instance = super().get_queryset(None).first()
+        if not instance:
+            raise Http404()
+        return instance
 
     def get_object(self, queryset=None):
-        return get(self.get_resource_object(), self.parent_list_attribute).filter(id=self.kwargs['uuid']).first()
+        instance = get(self.get_resource_object(), self.parent_list_attribute).filter(id=self.kwargs['uuid']).first()
+        if not instance:
+            raise Http404()
+        return instance
 
     def update(self, request, **_):
         partial = True

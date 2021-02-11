@@ -86,6 +86,12 @@ class ListWithHeadersMixin(ListModelMixin):
     object_list = None
     limit = LIST_DEFAULT_LIMIT
 
+    def head(self, request, **kwargs):  # pylint: disable=unused-argument
+        queryset = self.filter_queryset(self.get_queryset())
+        res = Response()
+        res['num_found'] = get(self, 'total_count') or queryset.count()
+        return res
+
     def list(self, request, *args, **kwargs):  # pylint:disable=too-many-locals
         query_params = request.query_params.dict()
         is_csv = query_params.get('csv', False)
