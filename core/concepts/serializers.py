@@ -101,7 +101,7 @@ class ConceptListSerializer(ModelSerializer):
     id = CharField(source='mnemonic')
     source = CharField(source='parent_resource')
     owner = CharField(source='owner_name')
-    update_comment = CharField(source='comment')
+    update_comment = CharField(source='comment', required=False)
     locale = SerializerMethodField()
     url = CharField(required=False, source='versioned_object_url')
     version_created_on = DateTimeField(source='created_at', read_only=True)
@@ -234,7 +234,7 @@ class ConceptVersionDetailSerializer(ModelSerializer):
     mappings = SerializerMethodField()
     url = CharField(source='versioned_object_url', read_only=True)
     previous_version_url = CharField(source='prev_version_uri', read_only=True)
-    update_comment = CharField(source='comment')
+    update_comment = CharField(source='comment', required=False)
 
     def __init__(self, *args, **kwargs):
         params = get(kwargs, 'context.request.query_params')
