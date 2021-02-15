@@ -85,6 +85,7 @@ class ListWithHeadersMixin(ListModelMixin):
     default_filters = {'is_active': True}
     object_list = None
     limit = LIST_DEFAULT_LIMIT
+    document_model = None
 
     def head(self, request, **kwargs):  # pylint: disable=unused-argument
         queryset = self.filter_queryset(self.get_queryset())
