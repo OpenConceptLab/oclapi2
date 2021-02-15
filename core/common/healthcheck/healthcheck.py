@@ -1,14 +1,24 @@
 from celery.app import default_app as celery_app
 from django.conf import settings
 from health_check.backends import BaseHealthCheckBackend
-from health_check.contrib.celery_ping.backends import CeleryPingHealthCheck
 from health_check.exceptions import ServiceReturnedUnexpectedResult, ServiceUnavailable
 from pydash import get
 
 from core.common.utils import flower_get, es_get
 
 
-class FlowerHealthCheck(CeleryPingHealthCheck):
+class BaseHealthCheck(BaseHealthCheckBackend):
+    def __init__(self, **kwargs):
+        if 'critical_service' in kwargs:
+            self.critical_service = kwargs['critical_service']
+
+        super().__init__()
+
+    def check_status(self):
+        raise NotImplementedError
+
+
+class FlowerHealthCheck(BaseHealthCheck):
     critical_service = False
 
     def check_status(self):
@@ -23,7 +33,7 @@ class FlowerHealthCheck(CeleryPingHealthCheck):
         return "Flower"
 
 
-class ESHealthCheck(BaseHealthCheckBackend):
+class ESHealthCheck(BaseHealthCheck):
     critical_service = False
 
     def check_status(self):
@@ -41,7 +51,7 @@ class ESHealthCheck(BaseHealthCheckBackend):
         return 'ElasticSearch'
 
 
-class CeleryQueueHealthCheck(BaseHealthCheckBackend):
+class CeleryQueueHealthCheck(BaseHealthCheck):
     critical_service = False
 
     CORRECT_PING_RESPONSE = {"ok": "pong"}

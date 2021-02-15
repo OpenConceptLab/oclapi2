@@ -4,7 +4,7 @@ omit =
     flowerconfig.py
     core/asgi.py
     core/celery.py
-    core/common/healthcheck.py
+    core/common/healthcheck/*
     core/wsgi.py
     */management/commands/*
     */migrations/*
