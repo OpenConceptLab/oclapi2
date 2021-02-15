@@ -204,10 +204,10 @@ class OrganizationMemberView(generics.GenericAPIView):
         return Response(status=status.HTTP_404_NOT_FOUND)  # pragma: no cover
 
     def put(self, request, **kwargs):  # pylint: disable=unused-argument
-        if not request.user.is_staff:
-            return Response(status=status.HTTP_403_FORBIDDEN)
         if not self.userprofile:
             return Response(status=status.HTTP_404_NOT_FOUND)
+        if not self.user_in_org:
+            return Response(status=status.HTTP_403_FORBIDDEN)
 
         self.userprofile.organizations.add(self.organization)
 
