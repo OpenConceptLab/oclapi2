@@ -7,6 +7,7 @@ urlpatterns = [
     path('flower/', views.FlowerHealthcheckView.as_view(), name='flower-healthcheck'),
     path('db/', views.DBHealthcheckView.as_view(), name='db-healthcheck'),
     path('redis/', views.RedisHealthcheckView.as_view(), name='redis-healthcheck'),
+    path('es/', views.ESHealthcheckView.as_view(), name='redis-healthcheck'),
     path('celery/', views.CeleryHealthCheckView.as_view(), name='celery-healthcheck'),
     path(
         'celery@default/', views.CeleryDefaultHealthCheckView.as_view(),
