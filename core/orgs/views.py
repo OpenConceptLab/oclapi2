@@ -210,6 +210,9 @@ class OrganizationMemberView(generics.GenericAPIView):
             return Response(status=status.HTTP_403_FORBIDDEN)
 
         self.userprofile.organizations.add(self.organization)
+        # ES Index
+        self.organization.save()
+        self.userprofile.save()
 
         return Response(status=status.HTTP_204_NO_CONTENT)
 
@@ -218,6 +221,9 @@ class OrganizationMemberView(generics.GenericAPIView):
             return Response(status=status.HTTP_403_FORBIDDEN)
 
         self.userprofile.organizations.remove(self.organization)
+        # ES Index
+        self.organization.save()
+        self.userprofile.save()
 
         return Response(status=status.HTTP_204_NO_CONTENT)
 
