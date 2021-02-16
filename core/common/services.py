@@ -127,7 +127,7 @@ class S3:
     def exists(cls, key):
         try:
             cls.resource().meta.client.head_object(Key=key, Bucket=settings.AWS_STORAGE_BUCKET_NAME)
-        except ClientError:
+        except (ClientError, NoCredentialsError):
             return False
 
         return True
@@ -184,7 +184,7 @@ class S3:
                 Bucket=settings.AWS_STORAGE_BUCKET_NAME,
                 Key=key
             )
-        except NoCredentialsError: # pragma: no cover
+        except NoCredentialsError:  # pragma: no cover
             pass
 
 
