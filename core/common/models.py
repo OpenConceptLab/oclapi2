@@ -82,7 +82,7 @@ class BaseModel(models.Model):
 
     def encode_extras_recursively(self, extras):
         if isinstance(extras, dict):
-            for old_key in extras:
+            for old_key in extras.copy():
                 key = old_key
                 key = key.replace('%', '%25')
                 key = key.replace('.', '%2E')
@@ -97,7 +97,7 @@ class BaseModel(models.Model):
 
     def decode_extras(self, extras):
         if isinstance(extras, dict):
-            for old_key in extras:
+            for old_key in extras.copy():
                 key = old_key
                 key = key.replace('%25', '%')
                 key = key.replace('%2E', '.')
