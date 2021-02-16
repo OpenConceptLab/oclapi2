@@ -541,6 +541,10 @@ class ConceptContainerExportMixin:
             status_code = self.handle_export_version()
             return Response(status=status_code)
 
+        no_redirect = request.query_params.get('noRedirect', False) in ['true', 'True', True]
+        if no_redirect:
+            return Response(status=status.HTTP_204_NO_CONTENT)
+
         response = Response(status=status.HTTP_303_SEE_OTHER)
         response['URL'] = version.uri + 'export/'
         return response
