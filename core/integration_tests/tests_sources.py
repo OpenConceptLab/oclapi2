@@ -594,6 +594,24 @@ class SourceVersionExportViewTest(OCLAPITestCase):
         s3_exists_mock.assert_called_once_with("username/source1_v1.{}.zip".format(self.v1_updated_at))
         s3_url_for_mock.assert_called_once_with("username/source1_v1.{}.zip".format(self.v1_updated_at))
 
+    @patch('core.common.services.S3.url_for')
+    @patch('core.common.services.S3.exists')
+    def test_get_200(self, s3_exists_mock, s3_url_for_mock):
+        s3_url = 'https://s3/username/source1_v1.{}.zip'.format(self.v1_updated_at)
+        s3_url_for_mock.return_value = s3_url
+        s3_exists_mock.return_value = True
+
+        response = self.client.get(
+            '/sources/source1/v1/export/?noRedirect=true',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, dict(url=s3_url))
+        s3_exists_mock.assert_called_once_with("username/source1_v1.{}.zip".format(self.v1_updated_at))
+        s3_url_for_mock.assert_called_once_with("username/source1_v1.{}.zip".format(self.v1_updated_at))
+
     def test_get_405(self):
         response = self.client.get(
             '/sources/source1/HEAD/export/',

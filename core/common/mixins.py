@@ -509,13 +509,17 @@ class ConceptContainerExportMixin:
         if version.is_processing:
             return Response(status=status.HTTP_208_ALREADY_REPORTED)
 
-        exists = version.has_export()
-
-        if not exists:
+        if not version.has_export():
             return Response(status=status.HTTP_204_NO_CONTENT)
 
+        export_url = version.get_export_url()
+
+        no_redirect = request.query_params.get('noRedirect', False) in ['true', 'True', True]
+        if no_redirect:
+            return Response(dict(url=export_url), status=status.HTTP_200_OK)
+
         response = Response(status=status.HTTP_303_SEE_OTHER)
-        response['Location'] = version.get_export_url()
+        response['Location'] = export_url
 
         # Set headers to ensure sure response is not cached by a client
         response['Cache-Control'] = 'no-cache, no-store, must-revalidate'
