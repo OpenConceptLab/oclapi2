@@ -505,7 +505,7 @@ class SourceChildExtraRetrieveUpdateDestroyView(SourceChildExtrasBaseView, Retri
             return Response({key: extras[key]})
         return Response(dict(detail=NOT_FOUND), status=status.HTTP_404_NOT_FOUND)
 
-    def update(self, request, **kwargs):
+    def update(self, request, **kwargs):  # pylint: disable=arguments-differ
         key = kwargs.get('extra')
         value = request.data.get(key)
         if not value:

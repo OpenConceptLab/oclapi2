@@ -290,7 +290,7 @@ class ConceptLabelListCreateView(ConceptBaseView, ListWithHeadersMixin, ListCrea
         instance = self.get_object()
         return getattr(instance, self.parent_list_attribute).all()
 
-    def create(self, request, **_):
+    def create(self, request, **_):  # pylint: disable=arguments-differ
         serializer = self.get_serializer(data=request.data)
         if serializer.is_valid():
             instance = self.get_object()
@@ -337,7 +337,7 @@ class ConceptLabelRetrieveUpdateDestroyView(ConceptBaseView, RetrieveUpdateDestr
             raise Http404()
         return instance
 
-    def update(self, request, **_):
+    def update(self, request, **_):  # pylint: disable=arguments-differ
         partial = True
         instance = self.get_object()
         serializer = self.get_serializer(instance, data=request.data, partial=partial)
