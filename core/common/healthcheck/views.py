@@ -12,6 +12,13 @@ class BaseHealthcheckView(MainView):
     swagger_schema = None
 
 
+class CriticalHealthcheckView(BaseHealthcheckView):
+    _plugins = [
+        DatabaseBackend(),
+        RedisHealthCheck(),
+    ]
+
+
 class FlowerHealthcheckView(BaseHealthcheckView):
     _plugins = [FlowerHealthCheck(critical_service=True)]
 
