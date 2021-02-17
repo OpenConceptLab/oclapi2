@@ -886,7 +886,7 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
     @patch('core.common.services.S3.exists')
     def test_post_202(self, s3_exists_mock, export_collection_mock):
         s3_exists_mock.return_value = False
-        export_collection_mock.delay = Mock()
+        export_collection_mock.apply_async = Mock()
         response = self.client.post(
             '/collections/coll/v1/export/',
             HTTP_AUTHORIZATION='Token ' + self.token,
@@ -895,13 +895,13 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 202)
         s3_exists_mock.assert_called_once_with("username/coll_v1.{}.zip".format(self.v1_updated_at))
-        export_collection_mock.delay.assert_called_once_with(self.collection_v1.id)
+        export_collection_mock.apply_async.assert_called_once_with(self.collection_v1.id, queue='concurrent')
 
     @patch('core.collections.views.export_collection')
     @patch('core.common.services.S3.exists')
     def test_post_409(self, s3_exists_mock, export_collection_mock):
         s3_exists_mock.return_value = False
-        export_collection_mock.delay.side_effect = AlreadyQueued('already-queued')
+        export_collection_mock.apply_async.side_effect = AlreadyQueued('already-queued')
         response = self.client.post(
             '/collections/coll/v1/export/',
             HTTP_AUTHORIZATION='Token ' + self.token,
@@ -910,7 +910,7 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 409)
         s3_exists_mock.assert_called_once_with("username/coll_v1.{}.zip".format(self.v1_updated_at))
-        export_collection_mock.delay.assert_called_once_with(self.collection_v1.id)
+        export_collection_mock.apply_async.assert_called_once_with(self.collection_v1.id, queue='concurrent')
 
 
 class CollectionVersionListViewTest(OCLAPITestCase):
@@ -973,7 +973,7 @@ class CollectionVersionListViewTest(OCLAPITestCase):
         self.assertEqual(last_created_version.concepts.count(), 1)
         self.assertEqual(last_created_version.references.count(), 1)
         self.assertEqual(last_created_version, self.collection.get_latest_version())
-        export_collection_mock.delay.assert_called_once_with(str(last_created_version.id))
+        export_collection_mock.apply_async.assert_called_once_with(str(last_created_version.id), queue='concurrent')
 
 
 class ExportCollectionTaskTest(OCLAPITestCase):

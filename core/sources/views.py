@@ -214,7 +214,7 @@ class SourceVersionListView(SourceVersionBaseView, mixins.CreateModelMixin, List
                     serializer = SourceDetailSerializer(instance, context={'request': request})
                     data = serializer.data
                     version_id = data.get('uuid')
-                    export_source.delay(version_id)
+                    export_source.apply_async(version_id, queue='concurrent')
                     return Response(data, status=status.HTTP_201_CREATED)
             except IntegrityError as ex:
                 return Response(
@@ -369,7 +369,7 @@ class SourceVersionExportView(ConceptContainerExportMixin, SourceVersionBaseView
     def handle_export_version(self):
         version = self.get_object()
         try:
-            export_source.delay(version.id)
+            export_source.apply_async(version.id, queue='concurrent')
             return status.HTTP_202_ACCEPTED
         except AlreadyQueued:
             return status.HTTP_409_CONFLICT
