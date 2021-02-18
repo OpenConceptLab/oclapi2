@@ -1,6 +1,5 @@
 from django.http import Http404
 from django.shortcuts import get_object_or_404
-from django.utils.functional import cached_property
 from elasticsearch_dsl import Q
 from pydash import get
 from rest_framework import response, generics, status
@@ -318,7 +317,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         from core.sources.documents import SourceDocument
         return self.document_model in [SourceDocument, CollectionDocument]
 
-    @cached_property
+    @property
     def __search_results(self):  # pylint: disable=too-many-branches
         results = None
 
