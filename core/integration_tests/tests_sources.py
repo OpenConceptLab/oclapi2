@@ -259,7 +259,7 @@ class SourceVersionListViewTest(OCLAPITestCase):
         self.assertIsNotNone(response.data['uuid'])
         self.assertEqual(response.data['version'], 'v1')
         self.assertEqual(self.source.versions.count(), 2)
-        export_source_mock.apply_async.assert_called_once_with(response.data['uuid'], queue='concurrent')
+        export_source_mock.apply_async.assert_called_once_with((response.data['uuid'], ), queue='concurrent')
 
     def test_post_409(self):
         OrganizationSourceFactory(version='v1', organization=self.organization, mnemonic=self.source.mnemonic)
@@ -656,7 +656,7 @@ class SourceVersionExportViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 202)
         s3_exists_mock.assert_called_once_with("username/source1_v1.{}.zip".format(self.v1_updated_at))
-        export_source_mock.apply_async.assert_called_once_with(self.source_v1.id, queue='concurrent')
+        export_source_mock.apply_async.assert_called_once_with((self.source_v1.id, ), queue='concurrent')
 
     @patch('core.sources.views.export_source')
     @patch('core.common.services.S3.exists')
@@ -671,7 +671,7 @@ class SourceVersionExportViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 409)
         s3_exists_mock.assert_called_once_with("username/source1_v1.{}.zip".format(self.v1_updated_at))
-        export_source_mock.apply_async.assert_called_once_with(self.source_v1.id, queue='concurrent')
+        export_source_mock.apply_async.assert_called_once_with((self.source_v1.id, ), queue='concurrent')
 
 
 class ExportSourceTaskTest(OCLAPITestCase):
