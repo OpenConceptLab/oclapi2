@@ -371,8 +371,6 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                     results.query(Q('match', public_can_view=False) & Q('match', user=self.request.user.username))
                 elif self.is_concept_container_document_model() and self.request.user.is_authenticated:
                     results.query(Q('match', public_can_view=False) & Q('match', created_by=self.request.user.username))
-                else:
-                    results = results.query('match', public_can_view=True)
 
             if self.is_owner_document_model():
                 kwargs_filters = self.kwargs.copy()
