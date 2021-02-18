@@ -14,19 +14,21 @@ class UserSignupVerificationViewTest(OCLAPITestCase):
     def test_signup_unverified_to_verified(self, send_mail_mock):
         response = self.client.post(
             '/users/signup/',
-            dict(username='charles', name='Charles Dickens', password='short', email='charles@fiction.com'),
+            dict(username='charles', name='Charles Dickens', password='short1', email='charles@fiction.com'),
             format='json'
         )
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(
             response.data,
-            dict(password=['This password is too short. It must contain at least 8 characters.'])
+            dict(password=[
+                'This password is too short. It must contain at least 8 characters.', 'This password is too common.'
+            ])
         )
 
         response = self.client.post(
             '/users/signup/',
-            dict(username='charles', name='Charles Dickens', password='scroooge', email='charles@fiction.com'),
+            dict(username='charles', name='Charles Dickens', password='scroooge1', email='charles@fiction.com'),
             format='json'
         )
 
@@ -40,7 +42,7 @@ class UserSignupVerificationViewTest(OCLAPITestCase):
 
         response = self.client.post(
             '/users/login/',
-            dict(username='charles', password='scroooge'),
+            dict(username='charles', password='scroooge1'),
             format='json'
         )
 
@@ -74,7 +76,7 @@ class UserSignupVerificationViewTest(OCLAPITestCase):
 
         response = self.client.post(
             '/users/login/',
-            dict(username='charles', password='scroooge'),
+            dict(username='charles', password='scroooge1'),
             format='json'
         )
 
@@ -272,7 +274,7 @@ class UserListViewTest(OCLAPITestCase):
     def test_post_201(self):
         response = self.client.post(
             '/users/',
-            dict(username='charles', name='Charles Dickens', password='scroooge', email='charles@fiction.com'),
+            dict(username='charles', name='Charles Dickens', password='scroooge1', email='charles@fiction.com'),
             HTTP_AUTHORIZATION='Token ' + self.superuser.get_token(),
             format='json'
         )
@@ -283,7 +285,7 @@ class UserListViewTest(OCLAPITestCase):
 
         response = self.client.post(
             '/users/',
-            dict(username='charles', name='Charles Dickens', password='scroooge', email='charles@fiction.com'),
+            dict(username='charles', name='Charles Dickens', password='scroooge1', email='charles@fiction.com'),
             HTTP_AUTHORIZATION='Token ' + self.superuser.get_token(),
             format='json'
         )
@@ -297,7 +299,7 @@ class UserListViewTest(OCLAPITestCase):
 
         response = self.client.post(
             '/users/login/',
-            dict(username='charles', password='scroooge'),
+            dict(username='charles', password='scroooge1'),
             format='json'
         )
 

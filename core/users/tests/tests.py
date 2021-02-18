@@ -127,11 +127,14 @@ class UserProfileTest(OCLTestCase):
 
         self.assertEqual(
             user.update_password(password='newpassword'),
-            dict(errors=['This password is too common.'])
+            dict(errors=['This password is too common.', 'This password is not alphanumeric.'])
         )
         self.assertEqual(
             user.update_password(password='short'),
-            dict(errors=['This password is too short. It must contain at least 8 characters.'])
+            dict(errors=[
+                'This password is too short. It must contain at least 8 characters.',
+                'This password is not alphanumeric.'
+            ])
         )
 
         user.verification_token = 'some-token'

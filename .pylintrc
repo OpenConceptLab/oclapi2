@@ -1,7 +1,7 @@
 [MESSAGES CONTROL]
 disable=missing-docstring,too-few-public-methods,no-member,too-many-ancestors,attribute-defined-outside-init,fixme,broad-except,import-outside-toplevel,too-many-instance-attributes,unsupported-membership-test,too-many-public-methods,too-many-lines
 [MASTER]
-ignore=migrations,fixtures,scripts,commands,documents.py
+ignore=migrations,fixtures,scripts,commands,documents.py,password_validation.py
 [FORMAT]
 max-line-length=120
 [DESIGN]
