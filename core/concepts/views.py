@@ -101,7 +101,7 @@ class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
         return ConceptListSerializer
 
     def get_queryset(self, _=None):
-        is_latest_version = 'collection' not in self.kwargs
+        is_latest_version = 'collection' not in self.kwargs and 'version' not in self.kwargs
         queryset = super().get_queryset()
         if is_latest_version:
             queryset = queryset.filter(is_latest_version=True)

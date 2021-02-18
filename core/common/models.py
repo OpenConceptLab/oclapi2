@@ -616,14 +616,26 @@ class ConceptContainerModel(VersionedModel):
     def seed_concepts(self):
         head = self.head
         if head:
-            self.concepts.set(head.concepts.all())
+            from core.sources.models import Source
+            if self.__class__ == Source:
+                concepts = head.concepts.filter(is_latest_version=True)
+            else:
+                concepts = head.concepts.all()
+
+            self.concepts.set(concepts)
             for concept in self.concepts.all():
                 concept.save()  # ES Indexing
 
     def seed_mappings(self):
         head = self.head
         if head:
-            self.mappings.set(head.mappings.all())
+            from core.sources.models import Source
+            if self.__class__ == Source:
+                mappings = head.mappings.filter(is_latest_version=True)
+            else:
+                mappings = head.mappings.all()
+
+            self.mappings.set(mappings)
             for mapping in self.mappings.all():
                 mapping.save()  # ES Indexing
 

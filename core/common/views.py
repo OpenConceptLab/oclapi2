@@ -324,7 +324,8 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         if self.should_perform_es_search():
             results = self.document_model.search()
             default_filters = self.default_filters.copy()
-            if self.is_source_child_document_model() and 'collection' not in self.kwargs:
+            if self.is_source_child_document_model() and 'collection' not in self.kwargs and \
+                    'version' not in self.kwargs:
                 default_filters['is_latest_version'] = True
 
             for field, value in default_filters.items():

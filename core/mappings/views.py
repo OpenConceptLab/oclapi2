@@ -77,10 +77,11 @@ class MappingListView(MappingBaseView, ListWithHeadersMixin, CreateModelMixin):
         return MappingListSerializer
 
     def get_queryset(self, _=None):
-        is_latest_version = 'collection' not in self.kwargs
+        is_latest_version = 'collection' not in self.kwargs and 'version' not in self.kwargs
         queryset = super().get_queryset()
         if is_latest_version:
             queryset = queryset.filter(is_latest_version=True)
+
         return queryset.select_related(
             'parent__organization', 'parent__user', 'from_concept__parent', 'to_concept__parent', 'to_source',
             'versioned_object', 'from_source',

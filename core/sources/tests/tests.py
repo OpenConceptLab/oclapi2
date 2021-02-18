@@ -188,16 +188,19 @@ class SourceTest(OCLTestCase):
         self.assertEqual(source.concepts_set.count(), 2)  # parent-child
         self.assertEqual(source.concepts.count(), 2)
         self.assertTrue(version1.is_latest_version)
-        self.assertEqual(version1.concepts.count(), 2)
+        self.assertEqual(version1.concepts.count(), 1)
+        self.assertEqual(version1.concepts.first(), source.concepts.filter(is_latest_version=True).first())
         self.assertEqual(version1.concepts_set.count(), 0)  # no direct child
 
     @patch('core.common.services.S3.delete_objects', Mock())
     def test_source_version_delete(self):
         source = OrganizationSourceFactory(version=HEAD)
-        concept = ConceptFactory(mnemonic='concept1', version=HEAD, sources=[source], parent=source)
+        concept = ConceptFactory(
+            mnemonic='concept1', version=HEAD, sources=[source], parent=source
+        )
 
         self.assertTrue(source.is_latest_version)
-        self.assertEqual(concept.sources.count(), 1)
+        self.assertEqual(concept.get_latest_version().sources.count(), 1)
 
         version1 = OrganizationSourceFactory.build(
             name='version1', version='v1', mnemonic=source.mnemonic, organization=source.organization
@@ -205,7 +208,7 @@ class SourceTest(OCLTestCase):
         Source.persist_new_version(version1, source.created_by)
         source.refresh_from_db()
 
-        self.assertEqual(concept.sources.count(), 2)
+        self.assertEqual(concept.get_latest_version().sources.count(), 2)
         self.assertTrue(version1.is_latest_version)
         self.assertFalse(source.is_latest_version)
 
@@ -214,7 +217,7 @@ class SourceTest(OCLTestCase):
             version='v1',
         )
         self.assertTrue(source_versions.exists())
-        self.assertEqual(version1.concepts.count(), 2)
+        self.assertEqual(version1.concepts.count(), 1)
 
         version1.delete()
         source.refresh_from_db()
@@ -224,7 +227,7 @@ class SourceTest(OCLTestCase):
             mnemonic=source.mnemonic,
         ).exists())
         self.assertTrue(source.is_latest_version)
-        self.assertEqual(concept.sources.count(), 1)
+        self.assertEqual(concept.get_latest_version().sources.count(), 1)
 
     def test_child_count_updates(self):
         source = OrganizationSourceFactory(version=HEAD)
