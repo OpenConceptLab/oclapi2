@@ -295,8 +295,11 @@ CELERY_TASK_PUBLISH_RETRY = True
 CELERY_TASK_TRACK_STARTED = True
 CELERY_TASK_SERIALIZER = "json"
 CELERY_TASK_ROUTES = {
-    'core.common.tasks.bulk_import': {'queue': 'bulk_import'},
-    'core.common.tasks.bulk_priority_import': {'queue': 'bulk_priority_import'}
+    'core.common.tasks.handle_save': {'queue': 'indexing'},
+    'core.common.tasks.handle_m2m_changed': {'queue': 'indexing'},
+    'core.common.tasks.handle_pre_delete': {'queue': 'indexing'},
+    'core.common.tasks.populate_indexes': {'queue': 'indexing'},
+    'core.common.tasks.rebuild_indexes': {'queue': 'indexing'}
 }
 CELERY_RESULT_BACKEND = 'redis://%s:%s/%s' % (REDIS_HOST, REDIS_PORT, REDIS_DB)
 CELERY_RESULT_BACKEND_TRANSPORT_OPTIONS = {

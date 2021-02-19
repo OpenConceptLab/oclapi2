@@ -55,6 +55,15 @@ services:
     environment:
       - REDIS_HOST=${REDIS_HOST-redis}
       - REDIS_PORT=${REDIS_PORT-6379}
+  celery_indexing:
+    image: openconceptlab/oclapi2:${ENVIRONMENT-production}
+    command: ["bash", "-c", "CELERY_WORKER_NAME=indexing ./start_celery_worker.sh -P prefork -Q indexing -c 10"]
+    restart: "always"
+    healthcheck:
+      test: "celery inspect ping -A core.celery"
+    environment:
+      - REDIS_HOST=${REDIS_HOST-redis}
+      - REDIS_PORT=${REDIS_PORT-6379}
   celery_concurrent:
     image: openconceptlab/oclapi2:${ENVIRONMENT-production}
     command: ["bash", "-c", "CELERY_WORKER_NAME=concurrent ./start_celery_worker.sh -P prefork -Q concurrent -c 10"]
