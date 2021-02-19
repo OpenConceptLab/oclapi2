@@ -7,4 +7,4 @@ set -e
 CELERY_WORKER_NAME=${CELERY_WORKER_NAME:-""}
 UUID=$(cat /proc/sys/kernel/random/uuid)
 
-celery worker -A core.celery -n "${CELERY_WORKER_NAME}-${UUID}" -l INFO "$@"
+celery worker -A core.celery -n "${CELERY_WORKER_NAME}-${UUID}" --loglevel=INFO "$@"

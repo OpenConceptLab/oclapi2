@@ -273,40 +273,44 @@ API_SUPERUSER_TOKEN = os.environ.get(
     'API_SUPERUSER_TOKEN', '891b4b17feab99f3ff7e5b5d04ccc5da7aa96da6'
 )
 
-#celery/redis
+#Redis
 REDIS_PORT = os.environ.get('REDIS_PORT', 6379)
 REDIS_DB = 0
 REDIS_HOST = os.environ.get('REDIS_HOST', 'redis')
 REDIS_URL = "redis://{}:{}".format(REDIS_HOST, REDIS_PORT)  # needed for healthcheck
 
-CELERY_DEFAULT_QUEUE = 'default'
-CELERY_QUEUES = (
-    Queue('default', Exchange('default'), routing_key='default'),
-)
+#Celery
 CELERY_ENABLE_UTC = True
 CELERY_TIMEZONE = "UTC"
-# Sensible settings for celery
 CELERY_ALWAYS_EAGER = False
-CELERY_ACKS_LATE = True
+CELERY_WORKER_DISABLE_RATE_LIMITS = False
+CELERY_WORKER_PREFETCH_MULTIPLIER = 1 # Reserve one task at a time
+CELERY_TASK_ACKS_LATE = True # Retry task in case of failure
+CELERY_TASK_DEFAULT_QUEUE = 'default'
+CELERY_TASK_QUEUES = (
+    Queue('default', Exchange('default'), routing_key='default'),
+)
+CELERY_TASK_IGNORE_RESULT = False
 CELERY_TASK_PUBLISH_RETRY = True
-CELERY_DISABLE_RATE_LIMITS = False
-CELERY_IGNORE_RESULT = False
-CELERY_SEND_TASK_ERROR_EMAILS = False
-CELERY_RESULT_BACKEND = 'redis://%s:%s/%s' % (REDIS_HOST, REDIS_PORT, REDIS_DB)
-CELERY_BROKER_URL = CELERY_RESULT_BACKEND
+CELERY_TASK_TRACK_STARTED = True
 CELERY_TASK_SERIALIZER = "json"
-CELERY_ACCEPT_CONTENT = ['application/json']
-CELERYD_HIJACK_ROOT_LOGGER = False
-CELERYD_PREFETCH_MULTIPLIER = 1
-CELERYD_MAX_TASKS_PER_CHILD = 1000
-BROKER_URL = CELERY_RESULT_BACKEND
-BROKER_TRANSPORT_OPTIONS = {'visibility_timeout': 259200}  # 72 hours
-CELERY_ROUTES = {
+CELERY_TASK_ROUTES = {
     'core.common.tasks.bulk_import': {'queue': 'bulk_import'},
     'core.common.tasks.bulk_priority_import': {'queue': 'bulk_priority_import'}
 }
-CELERY_TASK_RESULT_EXPIRES = 259200  # 72 hours
-CELERY_TRACK_STARTED = True
+CELERY_RESULT_BACKEND = 'redis://%s:%s/%s' % (REDIS_HOST, REDIS_PORT, REDIS_DB)
+CELERY_RESULT_BACKEND_TRANSPORT_OPTIONS = {
+    'retry_policy': {
+        'timeout': 10.0
+    }
+}
+CELERY_RESULT_EXPIRES = 259200  # 72 hours
+CELERY_BROKER_URL = CELERY_RESULT_BACKEND
+CELERY_BROKER_POOL_LIMIT = 50 #should be adjusted considering the number of threads
+CELERY_BROKER_CONNECTION_TIMEOUT = 10.0
+CELERY_BROKER_TRANSPORT_OPTIONS = {'visibility_timeout': 259200}  #72 hours, the lon
+CELERY_ACCEPT_CONTENT = ['application/json']
+
 ELASTICSEARCH_DSL_PARALLEL = True
 ELASTICSEARCH_DSL_AUTO_REFRESH = True
 ELASTICSEARCH_DSL_AUTOSYNC = True

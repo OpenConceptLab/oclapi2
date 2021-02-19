@@ -48,7 +48,7 @@ services:
       test: "curl -f http://localhost:8000/admin"
   celery:
     image: openconceptlab/oclapi2:${ENVIRONMENT-production}
-    command: ["bash", "-c", "CELERY_WORKER_NAME=default ./start_celery_worker.sh -Q default --autoscale=60,15"]
+    command: ["bash", "-c", "CELERY_WORKER_NAME=default ./start_celery_worker.sh -P prefork -Q default -c 10"]
     restart: "always"
     healthcheck:
       test: "celery inspect ping -A core.celery"

@@ -6,7 +6,5 @@ from django.conf import settings
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "core.settings")
 app = Celery('core')
 
-app.config_from_object('django.conf:settings')
+app.config_from_object('django.conf:settings', namespace='CELERY')
 app.autodiscover_tasks(lambda: settings.INSTALLED_APPS)
-app.conf.ONCE_REDIS_URL = app.conf.CELERY_RESULT_BACKEND
-app.conf.CELERY_DEFAULT_QUEUE = 'default'
