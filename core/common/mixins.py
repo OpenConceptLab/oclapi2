@@ -14,7 +14,7 @@ from rest_framework.mixins import ListModelMixin, CreateModelMixin
 from rest_framework.response import Response
 
 from core.common.constants import HEAD, ACCESS_TYPE_EDIT, ACCESS_TYPE_VIEW, ACCESS_TYPE_NONE, INCLUDE_FACETS, \
-    LIST_DEFAULT_LIMIT, HTTP_COMPRESS_HEADER
+    LIST_DEFAULT_LIMIT, HTTP_COMPRESS_HEADER, CSV_DEFAULT_LIMIT
 from core.common.permissions import HasPrivateAccess, HasOwnership, CanViewConceptDictionary
 from core.common.services import S3
 from .utils import write_csv_to_s3, get_csv_from_s3, get_query_params_from_url_string, compact_dict_by_values
@@ -195,7 +195,7 @@ class ListWithHeadersMixin(ListModelMixin):
             requesting_user == parent.created_by
 
     def _get_query_set_from_view(self, is_member):
-        return self.get_queryset() if is_member else self.get_queryset()[0:100]
+        return self.get_queryset() if is_member else self.get_queryset()[0:CSV_DEFAULT_LIMIT]
 
 
 class PathWalkerMixin:
