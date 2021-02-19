@@ -623,8 +623,8 @@ class ConceptContainerModel(VersionedModel):
                 concepts = head.concepts.all()
 
             self.concepts.set(concepts)
-            for concept in self.concepts.all():
-                concept.save()  # ES Indexing
+            from core.concepts.documents import ConceptDocument
+            ConceptDocument().update(self.concepts.all(), parallel=True)
 
     def seed_mappings(self):
         head = self.head
@@ -636,8 +636,8 @@ class ConceptContainerModel(VersionedModel):
                 mappings = head.mappings.all()
 
             self.mappings.set(mappings)
-            for mapping in self.mappings.all():
-                mapping.save()  # ES Indexing
+            from core.mappings.documents import MappingDocument
+            MappingDocument().update(self.mappings.all(), parallel=True)
 
     def add_processing(self, process_id):
         if self.id:

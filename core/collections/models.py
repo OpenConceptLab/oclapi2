@@ -306,10 +306,11 @@ class Collection(ConceptContainerModel):
         head.concepts.set(head.concepts.exclude(id__in=concept_ids))
         head.mappings.set(head.mappings.exclude(id__in=mapping_ids))
         head.references.set(head.references.exclude(expression__in=expressions))
-        for concept in concepts:
-            concept.save()  # ES Indexing
-        for mapping in mappings:
-            mapping.save()  # ES Indexing
+
+        from core.concepts.documents import ConceptDocument
+        from core.mappings.documents import MappingDocument
+        ConceptDocument().update(concepts.all())
+        MappingDocument().update(mappings.all())
 
         return [list(concept_ids), list(mapping_ids)]
 
