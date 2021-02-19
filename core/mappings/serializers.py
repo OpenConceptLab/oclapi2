@@ -14,7 +14,7 @@ class MappingListSerializer(ModelSerializer):
     uuid = CharField(source='id', read_only=True)
     source = CharField(source='parent_resource', read_only=True)
     owner = CharField(source='owner_name', read_only=True)
-    update_comment = CharField(source='comment', required=False)
+    update_comment = CharField(source='comment', required=False, allow_null=True, allow_blank=True)
     url = CharField(required=False, source='versioned_object_url')
     version = CharField(read_only=True)
     version_created_on = DateTimeField(source='created_at', read_only=True)
