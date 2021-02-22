@@ -7,7 +7,7 @@ from rest_framework.permissions import IsAuthenticatedOrReadOnly
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from core.client_configs.serializers import ClientConfigSerializer
+from core.client_configs.views import ResourceClientConfigsView
 from core.collections.views import CollectionListView
 from core.common.constants import NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY
 from core.common.mixins import ListWithHeadersMixin
@@ -144,30 +144,11 @@ class OrganizationDetailView(OrganizationBaseView, mixins.UpdateModelMixin, mixi
         return Response({'detail': DELETE_ACCEPTED}, status=status.HTTP_202_ACCEPTED)
 
 
-class OrganizationClientConfigsView(BaseAPIView, RetrieveAPIView):
+class OrganizationClientConfigsView(ResourceClientConfigsView):
     lookup_field = 'org'
     model = Organization
     queryset = Organization.objects.filter(is_active=True)
-    serializer_class = ClientConfigSerializer
     permission_classes = (CanViewConceptDictionary, )
-    swagger_schema = None
-
-    def get(self, request, *args, **kwargs):
-        instance = self.get_object()
-        configs = instance.client_configs.filter(is_active=True)
-
-        return Response(self.get_serializer(configs, many=True).data, status=status.HTTP_200_OK)
-
-    def post(self, request, *args, **kwargs):  # pylint: disable=unused-argument
-        instance = self.get_object()
-        serializer = self.get_serializer(
-            data={**request.data, 'resource_type': instance.__class__.__name__, 'resource_id': instance.id}
-        )
-        if serializer.is_valid():
-            serializer.save()
-            if serializer.is_valid():
-                return Response(serializer.data, status=status.HTTP_201_CREATED)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
 class OrganizationMemberView(generics.GenericAPIView):
