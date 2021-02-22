@@ -1,5 +1,6 @@
 from celery.result import AsyncResult
 from django.conf import settings
+from django.contrib.contenttypes.fields import GenericRelation
 from django.contrib.postgres.fields import JSONField, ArrayField
 from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator
@@ -331,6 +332,9 @@ class ConceptContainerModel(VersionedModel):
     copyright = models.TextField(null=True, blank=True)
     revision_date = models.DateField(null=True, blank=True)
     text = models.TextField(null=True, blank=True)  # for about description (markup)
+    client_configs = GenericRelation(
+        'client_configs.ClientConfig', object_id_field='resource_id', content_type_field='resource_type'
+    )
 
     class Meta:
         abstract = True
