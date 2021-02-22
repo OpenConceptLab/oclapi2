@@ -12,6 +12,11 @@ urlpatterns = [
         name='source-detail'
     ),
     re_path(
+        r'^(?P<source>' + NAMESPACE_PATTERN + ')/client-configs/$',
+        views.SourceClientConfigsView.as_view(),
+        name='source-client-configs'
+    ),
+    re_path(
         r"^(?P<source>{pattern})/summary/$".format(pattern=NAMESPACE_PATTERN),
         views.SourceSummaryView.as_view(),
         name='source-summary'

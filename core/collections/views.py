@@ -14,6 +14,7 @@ from rest_framework.generics import (
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+from core.client_configs.views import ResourceClientConfigsView
 from core.collections.constants import (
     INCLUDE_REFERENCES_PARAM, HEAD_OF_CONCEPT_ADDED_TO_COLLECTION,
     HEAD_OF_MAPPING_ADDED_TO_COLLECTION, CONCEPT_ADDED_TO_COLLECTION_FMT, MAPPING_ADDED_TO_COLLECTION_FMT,
@@ -620,3 +621,10 @@ class CollectionLatestVersionSummaryView(CollectionVersionBaseView, RetrieveAPIV
         obj = get_object_or_404(self.get_queryset(), released=True)
         self.check_object_permissions(self.request, obj)
         return obj
+
+
+class CollectionClientConfigsView(ResourceClientConfigsView):
+    lookup_field = 'collection'
+    model = Collection
+    queryset = Collection.objects.filter(is_active=True, version='HEAD')
+    permission_classes = (CanViewConceptDictionary, )

@@ -12,6 +12,11 @@ urlpatterns = [
         name='collection-detail'
     ),
     re_path(
+        r'^(?P<collection>' + NAMESPACE_PATTERN + ')/client-configs/$',
+        views.CollectionClientConfigsView.as_view(),
+        name='collection-client-configs'
+    ),
+    re_path(
         r"^(?P<collection>{pattern})/summary/$".format(pattern=NAMESPACE_PATTERN),
         views.CollectionSummaryView.as_view(),
         name='collection-summary'

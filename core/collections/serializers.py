@@ -5,9 +5,11 @@ from rest_framework.fields import CharField, ChoiceField, ListField, IntegerFiel
 from rest_framework.relations import PrimaryKeyRelatedField
 from rest_framework.serializers import ModelSerializer
 
+from core.client_configs.serializers import ClientConfigSerializer
 from core.collections.constants import INCLUDE_REFERENCES_PARAM
 from core.collections.models import Collection, CollectionReference
-from core.common.constants import HEAD, DEFAULT_ACCESS_TYPE, NAMESPACE_REGEX, ACCESS_TYPE_CHOICES, INCLUDE_SUMMARY
+from core.common.constants import HEAD, DEFAULT_ACCESS_TYPE, NAMESPACE_REGEX, ACCESS_TYPE_CHOICES, INCLUDE_SUMMARY, \
+    INCLUDE_CLIENT_CONFIGS
 from core.orgs.models import Organization
 from core.settings import DEFAULT_LOCALE
 from core.users.models import UserProfile
@@ -219,6 +221,7 @@ class CollectionDetailSerializer(CollectionCreateOrUpdateSerializer):
     updated_by = CharField(read_only=True, source='updated_by.username')
     references = SerializerMethodField()
     summary = SerializerMethodField()
+    client_configs = SerializerMethodField()
 
     class Meta:
         model = Collection
@@ -231,20 +234,24 @@ class CollectionDetailSerializer(CollectionCreateOrUpdateSerializer):
             'version', 'concepts_url', 'mappings_url',
             'custom_resources_linked_source', 'repository_type', 'preferred_source', 'references',
             'canonical_url', 'identifier', 'publisher', 'contact', 'jurisdiction', 'purpose', 'copyright',
-            'immutable', 'revision_date', 'logo_url', 'summary', 'text'
+            'immutable', 'revision_date', 'logo_url', 'summary', 'text', 'client_configs',
 
         )
 
     def __init__(self, *args, **kwargs):
         params = get(kwargs, 'context.request.query_params')
         self.include_summary = False
+        self.include_client_configs = False
         if params:
             self.query_params = params.dict()
             self.include_summary = self.query_params.get(INCLUDE_SUMMARY) in ['true', True]
+            self.include_client_configs = self.query_params.get(INCLUDE_CLIENT_CONFIGS) in ['true', True]
 
         try:
             if not self.include_summary:
                 self.fields.pop('summary', None)
+            if not self.include_client_configs:
+                self.fields.pop('client_configs', None)
         except:  # pylint: disable=bare-except
             pass
 
@@ -257,6 +264,12 @@ class CollectionDetailSerializer(CollectionCreateOrUpdateSerializer):
             summary = CollectionSummarySerializer(obj).data
 
         return summary
+
+    def get_client_configs(self, obj):
+        if self.include_client_configs:
+            return ClientConfigSerializer(obj.client_configs.filter(is_active=True), many=True).data
+
+        return None
 
     def get_references(self, obj):
         if self.context.get(INCLUDE_REFERENCES_PARAM, False):

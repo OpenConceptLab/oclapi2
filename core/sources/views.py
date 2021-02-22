@@ -13,6 +13,7 @@ from rest_framework.generics import (
 )
 from rest_framework.response import Response
 
+from core.client_configs.views import ResourceClientConfigsView
 from core.common.constants import HEAD, RELEASED_PARAM, PROCESSING_PARAM, NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryCreateMixin, ConceptDictionaryUpdateMixin, \
     ConceptContainerExportMixin, ConceptContainerProcessingMixin
@@ -404,3 +405,10 @@ class SourceLatestVersionSummaryView(SourceVersionBaseView, RetrieveAPIView, Upd
         obj = get_object_or_404(self.get_queryset(), released=True)
         self.check_object_permissions(self.request, obj)
         return obj
+
+
+class SourceClientConfigsView(ResourceClientConfigsView):
+    lookup_field = 'source'
+    model = Source
+    queryset = Source.objects.filter(is_active=True, version='HEAD')
+    permission_classes = (CanViewConceptDictionary, )
