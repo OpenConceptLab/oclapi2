@@ -301,8 +301,8 @@ class Collection(ConceptContainerModel):
     def delete_references(self, expressions):
         head = self.head
         concepts, mappings = self.__get_children_from_expressions(expressions)
-        concept_ids = concepts.distinct('id').values_list('id', flat=True)
-        mapping_ids = mappings.distinct('id').values_list('id', flat=True)
+        concept_ids = concepts.values_list('id', flat=True)
+        mapping_ids = mappings.values_list('id', flat=True)
         head.concepts.set(head.concepts.exclude(id__in=concept_ids))
         head.mappings.set(head.mappings.exclude(id__in=mapping_ids))
         head.references.set(head.references.exclude(expression__in=expressions))
@@ -316,14 +316,8 @@ class Collection(ConceptContainerModel):
 
     @staticmethod
     def __get_children_from_expressions(expressions):
-        concepts = Concept.objects.none()
-        mappings = Mapping.objects.none()
-        for expression in expressions:
-            if is_concept(expression):
-                concepts |= Concept.from_uri_queryset(expression)
-            if is_mapping(expression):
-                mappings |= Mapping.from_uri_queryset(expression)
-
+        concepts = Concept.objects.filter(uri__in=expressions)
+        mappings = Mapping.objects.filter(uri__in=expressions)
         return concepts, mappings
 
     def get_all_related_mappings(self, expressions):
