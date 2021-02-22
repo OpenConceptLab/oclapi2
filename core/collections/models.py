@@ -300,19 +300,14 @@ class Collection(ConceptContainerModel):
 
     def delete_references(self, expressions):
         head = self.head
-        concepts, mappings = self.__get_children_from_expressions(expressions)
-        concept_ids = concepts.values_list('id', flat=True)
-        mapping_ids = mappings.values_list('id', flat=True)
-        head.concepts.set(head.concepts.exclude(id__in=concept_ids))
-        head.mappings.set(head.mappings.exclude(id__in=mapping_ids))
+        head.concepts.set(head.concepts.exclude(uri__in=expressions))
+        head.mappings.set(head.mappings.exclude(uri__in=expressions))
         head.references.set(head.references.exclude(expression__in=expressions))
 
         from core.concepts.documents import ConceptDocument
         from core.mappings.documents import MappingDocument
-        ConceptDocument().update(concepts.all())
-        MappingDocument().update(mappings.all())
-
-        return [list(concept_ids), list(mapping_ids)]
+        ConceptDocument().update(Concept.objects.filter(uri__in=expressions))
+        MappingDocument().update(Mapping.objects.filter(uri__in=expressions))
 
     @staticmethod
     def __get_children_from_expressions(expressions):
