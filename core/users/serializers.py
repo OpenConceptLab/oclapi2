@@ -129,12 +129,10 @@ class UserDetailSerializer(serializers.ModelSerializer):
 
     def __init__(self, *args, **kwargs):
         params = get(kwargs, 'context.request.query_params')
-        self.include_subscribed_orgs = False
-        self.include_verification_token = False
-        if params:
-            self.query_params = params.dict()
-            self.include_subscribed_orgs = self.query_params.get(INCLUDE_SUBSCRIBED_ORGS) in ['true', True]
-            self.include_verification_token = self.query_params.get(INCLUDE_VERIFICATION_TOKEN) in ['true', True]
+        self.query_params = params.dict() if params else dict()
+        self.include_subscribed_orgs = self.query_params.get(INCLUDE_SUBSCRIBED_ORGS) in ['true', True]
+        self.include_verification_token = self.query_params.get(INCLUDE_VERIFICATION_TOKEN) in ['true', True]
+
         if not self.include_subscribed_orgs:
             self.fields.pop('subscribed_orgs')
         if not self.include_verification_token:

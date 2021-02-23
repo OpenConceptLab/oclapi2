@@ -64,7 +64,7 @@ class MappingListSerializer(ModelSerializer):
                 self.fields.pop('to_source')
 
         if not self.include_extras and self.__class__.__name__ in [
-            'MappingListSerializer', 'MappingVersionListSerializer'
+                'MappingListSerializer', 'MappingVersionListSerializer'
         ]:
             self.fields.pop('extras', None)
 

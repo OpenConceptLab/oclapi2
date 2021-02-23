@@ -95,10 +95,9 @@ class OrganizationDetailSerializer(serializers.ModelSerializer):
 
     def __init__(self, *args, **kwargs):
         params = get(kwargs, 'context.request.query_params')
-        self.include_client_configs = False
-        if params:
-            self.query_params = params.dict()
-            self.include_client_configs = self.query_params.get(INCLUDE_CLIENT_CONFIGS) in ['true', True]
+        self.query_params = params.dict() if params else dict()
+        self.include_client_configs = self.query_params.get(INCLUDE_CLIENT_CONFIGS) in ['true', True]
+
         if not self.include_client_configs:
             self.fields.pop('client_configs')
 
