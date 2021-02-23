@@ -313,7 +313,12 @@ CELERY_BROKER_POOL_LIMIT = 50 #should be adjusted considering the number of thre
 CELERY_BROKER_CONNECTION_TIMEOUT = 10.0
 CELERY_BROKER_TRANSPORT_OPTIONS = {'visibility_timeout': 259200}  #72 hours, the lon
 CELERY_ACCEPT_CONTENT = ['application/json']
-
+CELERY_ONCE = {
+    'backend': 'celery_once.backends.Redis',
+    'settings': {
+        'url': CELERY_RESULT_BACKEND,
+    }
+}
 ELASTICSEARCH_DSL_PARALLEL = True
 ELASTICSEARCH_DSL_AUTO_REFRESH = True
 ELASTICSEARCH_DSL_AUTOSYNC = True
