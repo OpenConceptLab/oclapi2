@@ -3,6 +3,7 @@ from rest_framework.exceptions import ErrorDetail
 
 from core.common.constants import ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT
 from core.common.tests import OCLAPITestCase
+from core.orgs.models import Organization
 from core.orgs.tests.factories import OrganizationFactory
 from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
@@ -184,7 +185,7 @@ class OrganizationDetailViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 403)
 
     @patch('core.orgs.views.delete_organization')
-    def test_delete_204_by_superuser(self, delete_organization_mock):
+    def test_delete_202_by_superuser(self, delete_organization_mock):
         response = self.client.delete(
             '/orgs/{}/'.format(self.org.mnemonic),
             HTTP_AUTHORIZATION='Token ' + self.superuser.get_token(),
@@ -195,7 +196,7 @@ class OrganizationDetailViewTest(OCLAPITestCase):
         delete_organization_mock.delay.assert_called_once_with(self.org.id)
 
     @patch('core.orgs.views.delete_organization')
-    def test_delete_204_by_owner(self, delete_organization_mock):
+    def test_delete_202_by_owner(self, delete_organization_mock):
         response = self.client.delete(
             '/orgs/{}/'.format(self.org.mnemonic),
             HTTP_AUTHORIZATION='Token ' + self.user.get_token(),
@@ -204,6 +205,16 @@ class OrganizationDetailViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 202)
         delete_organization_mock.delay.assert_called_once_with(self.org.id)
+
+    def test_delete_204_inline(self):
+        response = self.client.delete(
+            '/orgs/{}/'.format(self.org.mnemonic) + '?inline=true',
+            HTTP_AUTHORIZATION='Token ' + self.user.get_token(),
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(Organization.objects.filter(mnemonic=self.org.mnemonic).exists())
 
 
 class OrganizationUserListViewTest(OCLAPITestCase):
