@@ -15,6 +15,10 @@ urlpatterns = [
         name='celery-default-healthcheck'
     ),
     path(
+        'celery@indexing/', views.CeleryIndexingHealthCheckView.as_view(),
+        name='celery-indexing-healthcheck'
+    ),
+    path(
         'celery@concurrent/', views.CeleryConcurrentThreadsHealthCheckView.as_view(),
         name='celery-concurrent-healthcheck'
     ),

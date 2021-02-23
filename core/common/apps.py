@@ -12,6 +12,7 @@ class CommonConfig(AppConfig):
         plugin_dir.register(healthcheck.ESHealthCheck)
         plugin_dir.register(healthcheck.FlowerHealthCheck)
         plugin_dir.register(healthcheck.CeleryDefaultQueueHealthCheck)
+        plugin_dir.register(healthcheck.CeleryIndexingQueueHealthCheck)
         plugin_dir.register(healthcheck.CeleryConcurrentThreadsHealthCheck)
         plugin_dir.register(healthcheck.CeleryBulkImport0QueueHealthCheck)
         plugin_dir.register(healthcheck.CeleryBulkImport1QueueHealthCheck)

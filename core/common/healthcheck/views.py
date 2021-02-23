@@ -5,7 +5,7 @@ from health_check.views import MainView
 from core.common.healthcheck.healthcheck import FlowerHealthCheck, CeleryDefaultQueueHealthCheck, \
     CeleryBulkImport0QueueHealthCheck, CeleryBulkImportRootQueueHealthCheck, CeleryBulkImport3QueueHealthCheck, \
     CeleryBulkImport2QueueHealthCheck, CeleryBulkImport1QueueHealthCheck, CeleryConcurrentThreadsHealthCheck, \
-    ESHealthCheck
+    ESHealthCheck, CeleryIndexingQueueHealthCheck
 
 
 class BaseHealthcheckView(MainView):
@@ -38,6 +38,7 @@ class DBHealthcheckView(BaseHealthcheckView):
 class CeleryHealthCheckView(BaseHealthcheckView):
     _plugins = [
         CeleryDefaultQueueHealthCheck(critical_service=True),
+        CeleryIndexingQueueHealthCheck(critical_service=True),
         CeleryConcurrentThreadsHealthCheck(),
         CeleryBulkImport0QueueHealthCheck(),
         CeleryBulkImport1QueueHealthCheck(),
@@ -49,6 +50,10 @@ class CeleryHealthCheckView(BaseHealthcheckView):
 
 class CeleryDefaultHealthCheckView(BaseHealthcheckView):
     _plugins = [CeleryDefaultQueueHealthCheck(critical_service=True)]
+
+
+class CeleryIndexingHealthCheckView(BaseHealthcheckView):
+    _plugins = [CeleryIndexingQueueHealthCheck(critical_service=True)]
 
 
 class CeleryBulkImport0HealthCheckView(BaseHealthcheckView):

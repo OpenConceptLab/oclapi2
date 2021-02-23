@@ -127,6 +127,10 @@ class CeleryConcurrentThreadsHealthCheck(CeleryQueueHealthCheck):
     queues = {'concurrent'}
 
 
+class CeleryIndexingQueueHealthCheck(CeleryQueueHealthCheck):
+    queues = {'indexing'}
+
+
 class CeleryBulkImport0QueueHealthCheck(CeleryQueueHealthCheck):
     queues = {'bulk_import_0'}
 
