@@ -506,28 +506,25 @@ class ConceptContainerExportMixin:
         if version.is_head:
             return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
 
-        if version.is_processing:
-            return Response(status=status.HTTP_208_ALREADY_REPORTED)
+        if version.has_export():
+            export_url = version.get_export_url()
 
-        if not version.has_export():
-            return Response(status=status.HTTP_204_NO_CONTENT)
+            no_redirect = request.query_params.get('noRedirect', False) in ['true', 'True', True]
+            if no_redirect:
+                return Response(dict(url=export_url), status=status.HTTP_200_OK)
 
-        export_url = version.get_export_url()
+            response = Response(status=status.HTTP_303_SEE_OTHER)
+            response['Location'] = export_url
 
-        no_redirect = request.query_params.get('noRedirect', False) in ['true', 'True', True]
-        if no_redirect:
-            return Response(dict(url=export_url), status=status.HTTP_200_OK)
+            # Set headers to ensure sure response is not cached by a client
+            response['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+            response['Pragma'] = 'no-cache'
+            response['Expires'] = '0'
+            response['Last-Updated'] = version.last_child_update.isoformat()
+            response['Last-Updated-Timezone'] = settings.TIME_ZONE_PLACE
+            return response
 
-        response = Response(status=status.HTTP_303_SEE_OTHER)
-        response['Location'] = export_url
-
-        # Set headers to ensure sure response is not cached by a client
-        response['Cache-Control'] = 'no-cache, no-store, must-revalidate'
-        response['Pragma'] = 'no-cache'
-        response['Expires'] = '0'
-        response['Last-Updated'] = version.last_child_update.isoformat()
-        response['Last-Updated-Timezone'] = settings.TIME_ZONE_PLACE
-        return response
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     def post(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         version = self.get_object()
