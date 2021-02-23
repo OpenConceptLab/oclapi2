@@ -3,7 +3,7 @@ from rest_framework.fields import CharField, JSONField, IntegerField, DateTimeFi
 from rest_framework.serializers import ModelSerializer
 
 from core.common.constants import MAPPING_LOOKUP_CONCEPTS, MAPPING_LOOKUP_SOURCES, MAPPING_LOOKUP_FROM_CONCEPT, \
-    MAPPING_LOOKUP_TO_CONCEPT, MAPPING_LOOKUP_FROM_SOURCE, MAPPING_LOOKUP_TO_SOURCE
+    MAPPING_LOOKUP_TO_CONCEPT, MAPPING_LOOKUP_FROM_SOURCE, MAPPING_LOOKUP_TO_SOURCE, INCLUDE_EXTRAS_PARAM
 from core.concepts.serializers import ConceptListSerializer, ConceptDetailSerializer
 from core.mappings.models import Mapping
 from core.sources.serializers import SourceListSerializer, SourceDetailSerializer
@@ -36,26 +36,20 @@ class MappingListSerializer(ModelSerializer):
             'url', 'version', 'id', 'versioned_object_id', 'versioned_object_url',
             'is_latest_version', 'update_comment', 'version_url', 'uuid', 'version_created_on',
             'from_source_version', 'to_source_version', 'from_concept', 'to_concept', 'from_source', 'to_source',
-            'from_concept_name_resolved', 'to_concept_name_resolved'
+            'from_concept_name_resolved', 'to_concept_name_resolved', 'extras',
         )
 
     def __init__(self, *args, **kwargs):
         params = get(kwargs, 'context.request.query_params')
         self.query_params = params.dict() if params else dict()
-        self.include_from_source = False
-        self.include_to_source = False
-        self.include_sources = False
-        self.include_from_concept = False
-        self.include_to_concept = False
-        self.include_concepts = False
-
-        self.include_concepts = self.query_params.get(MAPPING_LOOKUP_CONCEPTS) in ['true', True]
-        self.include_from_concept = self.query_params.get(MAPPING_LOOKUP_FROM_CONCEPT) in ['true', True]
-        self.include_to_concept = self.query_params.get(MAPPING_LOOKUP_TO_CONCEPT) in ['true', True]
-
-        self.include_sources = self.query_params.get(MAPPING_LOOKUP_SOURCES) in ['true', True]
         self.include_from_source = self.query_params.get(MAPPING_LOOKUP_FROM_SOURCE) in ['true', True]
         self.include_to_source = self.query_params.get(MAPPING_LOOKUP_TO_SOURCE) in ['true', True]
+        self.include_sources = self.query_params.get(MAPPING_LOOKUP_SOURCES) in ['true', True]
+        self.include_from_concept = self.query_params.get(MAPPING_LOOKUP_FROM_CONCEPT) in ['true', True]
+        self.include_to_concept = self.query_params.get(MAPPING_LOOKUP_TO_CONCEPT) in ['true', True]
+        self.include_concepts = self.query_params.get(MAPPING_LOOKUP_CONCEPTS) in ['true', True]
+
+        self.include_extras = self.query_params.get(INCLUDE_EXTRAS_PARAM) in ['true', True]
 
         if not self.include_concepts:
             if not self.include_from_concept:
@@ -68,6 +62,11 @@ class MappingListSerializer(ModelSerializer):
                 self.fields.pop('from_source')
             if not self.include_to_source:
                 self.fields.pop('to_source')
+
+        if not self.include_extras and self.__class__.__name__ in [
+            'MappingListSerializer', 'MappingVersionListSerializer'
+        ]:
+            self.fields.pop('extras', None)
 
         super().__init__(*args, **kwargs)
 

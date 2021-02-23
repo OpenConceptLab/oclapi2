@@ -3,7 +3,7 @@ from rest_framework.fields import CharField, DateTimeField, BooleanField, URLFie
     UUIDField
 from rest_framework.serializers import ModelSerializer
 
-from core.common.constants import INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_MAPPINGS_PARAM
+from core.common.constants import INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_MAPPINGS_PARAM, INCLUDE_EXTRAS_PARAM
 from core.concepts.models import Concept, LocalizedText
 
 
@@ -113,6 +113,13 @@ class ConceptListSerializer(ModelSerializer):
         self.query_params = params.dict() if params else dict()
         self.include_indirect_mappings = self.query_params.get(INCLUDE_INVERSE_MAPPINGS_PARAM) in ['true', True]
         self.include_direct_mappings = self.query_params.get(INCLUDE_MAPPINGS_PARAM) in ['true', True]
+        self.include_extras = self.query_params.get(INCLUDE_EXTRAS_PARAM) in ['true', True]
+
+        try:
+            if not self.include_extras:
+                self.fields.pop('extras', None)
+        except:  # pylint: disable=bare-except
+            pass
 
         super().__init__(*args, **kwargs)
 
@@ -122,7 +129,7 @@ class ConceptListSerializer(ModelSerializer):
             'uuid', 'id', 'external_id', 'concept_class', 'datatype', 'url', 'retired', 'source',
             'owner', 'owner_type', 'owner_url', 'display_name', 'display_locale', 'version', 'update_comment',
             'locale', 'version_created_by', 'version_created_on', 'mappings', 'is_latest_version', 'versions_url',
-            'version_url',
+            'version_url', 'extras',
         )
 
     @staticmethod
