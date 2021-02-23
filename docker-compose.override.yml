@@ -21,6 +21,11 @@ services:
     volumes:
       - .:/code:z
     restart: "no"
+  celery_indexing:
+    build: .
+    volumes:
+      - .:/code:z
+    restart: "no"
   celery_concurrent:
     build: .
     volumes:

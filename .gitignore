@@ -300,3 +300,6 @@ src/
 # Patches & Sqls
 *.patch
 *.dump
+
+# Celery Worker Tmp files
+celery-worker-*.tmp
