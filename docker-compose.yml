@@ -45,7 +45,7 @@ services:
       - AWS_STORAGE_BUCKET_NAME
       - AWS_REGION_NAME
     healthcheck:
-      test: "curl -f http://localhost:8000/admin"
+      test: "curl --silent --fail http://localhost:8000/orgs/ || exit 1"
   celery:
     image: openconceptlab/oclapi2:${ENVIRONMENT-production}
     command: ["bash", "-c", "CELERY_WORKER_NAME=default ./start_celery_worker.sh -P prefork -Q default -c 10"]
@@ -114,7 +114,7 @@ services:
       - REDIS_PORT=${REDIS_PORT-6379}
     restart: "always"
     healthcheck:
-      test: "curl -u ${FLOWER_USER-root}:${FLOWER_PASSWORD-Root123} -f http://localhost:5555/"
+      test: "curl --silent --fail -u $${FLOWER_USER:-root}:$${FLOWER_PASSWORD:-Root123} http://localhost:5555/metrics || exit 1"
   es:
     image: elasticsearch:7.8.1
     environment:
@@ -129,7 +129,7 @@ services:
       - es-data:/usr/share/elasticsearch/data
     restart: "always"
     healthcheck:
-      test: "exit 0"
+      test: "curl --silent --fail http://localhost:9200/_cluster/health || exit 1"
 volumes:
   postgres-data:
   es-data:
