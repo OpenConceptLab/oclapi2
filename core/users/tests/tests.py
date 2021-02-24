@@ -3,6 +3,7 @@ from rest_framework.authtoken.models import Token
 
 from core.collections.tests.factories import OrganizationCollectionFactory
 from core.common.constants import ACCESS_TYPE_NONE, HEAD, OCL_ORG_ID
+from core.common.tasks import send_user_verification_email, send_user_reset_password_email
 from core.common.tests import OCLTestCase, OCLAPITestCase
 from core.orgs.models import Organization
 from core.sources.tests.factories import OrganizationSourceFactory
@@ -272,3 +273,37 @@ class UserLogoViewTest(OCLAPITestCase):
         self.assertEqual(self.user.logo_url.replace('https://', 'http://'), expected_logo_url)
         self.assertEqual(self.user.logo_path, 'users/username1/logo.png')
         upload_base64_mock.assert_called_once_with('base64-data', 'users/username1/logo.png', False, True)
+
+
+class TasksTest(OCLTestCase):
+    @patch('core.common.tasks.EmailMessage.send')
+    def test_send_user_verification_email(self, send_mail_mock):
+        send_mail_mock.return_value = 1
+        self.assertIsNone(send_user_verification_email(404))
+        send_mail_mock.assert_not_called()
+
+        user = UserProfileFactory()
+        mail = send_user_verification_email(user.id)
+
+        self.assertEqual(mail.content_subtype, 'html')
+        self.assertEqual(mail.subject, 'Confirm E-mail Address')
+        self.assertEqual(mail.to, [user.email])
+        self.assertTrue(user.email_verification_url in mail.body)
+        self.assertTrue('Hi {},'.format(user.username) in mail.body)
+        send_mail_mock.assert_called_once()
+
+    @patch('core.common.tasks.EmailMessage.send')
+    def test_send_user_reset_password_email(self, send_mail_mock):
+        send_mail_mock.return_value = 1
+        self.assertIsNone(send_user_reset_password_email(404))
+        send_mail_mock.assert_not_called()
+
+        user = UserProfileFactory()
+        mail = send_user_reset_password_email(user.id)
+
+        self.assertEqual(mail.content_subtype, 'html')
+        self.assertEqual(mail.subject, 'Password Reset E-mail')
+        self.assertEqual(mail.to, [user.email])
+        self.assertTrue(user.reset_password_url in mail.body)
+        self.assertTrue('Hi {},'.format(user.username) in mail.body)
+        send_mail_mock.assert_called_once()

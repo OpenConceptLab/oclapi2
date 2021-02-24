@@ -2,8 +2,10 @@ from django.db import transaction, IntegrityError
 from mock import patch, Mock
 
 from core.common.constants import HEAD
+from core.common.tasks import seed_children
 from core.common.tests import OCLTestCase
 from core.concepts.tests.factories import ConceptFactory
+from core.mappings.tests.factories import MappingFactory
 from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory
 from core.users.tests.factories import UserProfileFactory
@@ -356,3 +358,20 @@ class SourceTest(OCLTestCase):
 
         source.refresh_from_db()
         self.assertEqual(source._background_process_ids, ['123', '123', 'abc'])  # pylint: disable=protected-access
+
+
+class TasksTest(OCLTestCase):
+    def test_seed_children_task(self):
+        source = OrganizationSourceFactory()
+        ConceptFactory(parent=source)
+        MappingFactory(parent=source)
+
+        source_v1 = OrganizationSourceFactory(organization=source.organization, version='v1', mnemonic=source.mnemonic)
+
+        self.assertEqual(source_v1.concepts.count(), 0)
+        self.assertEqual(source_v1.mappings.count(), 0)
+
+        seed_children('source', source_v1.id)
+
+        self.assertEqual(source_v1.concepts.count(), 1)
+        self.assertEqual(source_v1.mappings.count(), 1)

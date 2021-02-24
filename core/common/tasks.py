@@ -212,8 +212,8 @@ def send_user_verification_email(user_id):
     )
     mail = EmailMessage(subject=CONFIRM_EMAIL_ADDRESS_MAIL_SUBJECT, body=html_body, to=[user.email])
     mail.content_subtype = "html"
-    res = mail.send()
-    return res
+    mail.send()
+    return mail
 
 
 @app.task
@@ -232,8 +232,8 @@ def send_user_reset_password_email(user_id):
     )
     mail = EmailMessage(subject=PASSWORD_RESET_MAIL_SUBJECT, body=html_body, to=[user.email])
     mail.content_subtype = "html"
-    res = mail.send()
-    return res
+    mail.send()
+    return mail
 
 
 @app.task(bind=True)
