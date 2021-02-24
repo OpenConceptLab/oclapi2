@@ -33,6 +33,7 @@ services:
       - ES_HOST=${ES_HOST-es}
       - ES_PORT=${ES_PORT-9200}
       - ENVIRONMENT=${ENVIRONMENT-production}
+      - DEBUG=${DEBUG-False}
       - SECRET_KEY
       - SENTRY_DSN_KEY
       - API_SUPERUSER_PASSWORD=${API_SUPERUSER_PASSWORD-Root123}
