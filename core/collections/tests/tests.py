@@ -420,7 +420,7 @@ class TasksTest(OCLTestCase):
         self.assertEqual(collection_v1.concepts.count(), 0)
         self.assertEqual(collection_v1.mappings.count(), 0)
 
-        seed_children('collection', collection_v1.id)
+        seed_children('collection', collection_v1.id)  # pylint: disable=no-value-for-parameter
 
         self.assertEqual(collection_v1.references.count(), 2)
         self.assertEqual(collection_v1.concepts.count(), 1)
