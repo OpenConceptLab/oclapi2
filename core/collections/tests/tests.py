@@ -6,6 +6,7 @@ from core.collections.tests.factories import OrganizationCollectionFactory
 from core.collections.utils import is_mapping, is_concept, is_version_specified, \
     get_concept_by_expression
 from core.common.constants import CUSTOM_VALIDATION_SCHEMA_OPENMRS
+from core.common.tasks import add_references
 from core.common.tests import OCLTestCase
 from core.common.utils import drop_version
 from core.concepts.models import Concept
@@ -364,3 +365,38 @@ class CollectionUtilsTest(OCLTestCase):
         self.assertEqual(get_concept_by_expression(concept_head.uri), concept_head)
         self.assertEqual(get_concept_by_expression(concept_v1.uri), concept_v1)
         self.assertIsNone(get_concept_by_expression('/foobar/'))
+
+
+class AddReferencesTaskTest(OCLTestCase):
+    def test_add_references_task(self):
+        collection = OrganizationCollectionFactory()
+        concept1 = ConceptFactory()
+        concept2 = ConceptFactory()
+        mapping1 = MappingFactory(
+            parent=concept2.parent,
+            from_concept=concept2.get_latest_version(),
+            to_concept=concept1.get_latest_version()
+        )
+        mapping2 = MappingFactory()
+
+        added_references, errors = add_references(
+            collection.created_by,
+            dict(expressions=[
+                obj.get_latest_version().version_url for obj in [concept1, concept2, mapping2]
+            ]),
+            collection,
+            None,
+            True
+        )
+
+        self.assertEqual(errors, {})
+        self.assertEqual(len(added_references), 4)
+        self.assertListEqual(
+            sorted([
+                ref.expression for ref in added_references
+            ]),
+            sorted([
+                concept1.get_latest_version().version_url, concept2.get_latest_version().version_url,
+                mapping1.get_latest_version().version_url, mapping2.get_latest_version().version_url,
+            ])
+        )

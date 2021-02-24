@@ -92,9 +92,7 @@ def add_references(
     head.add_processing(self.request.id)
 
     try:
-        (added_references, errors) = collection.add_expressions(
-            data, host_url, user, cascade_mappings
-        )
+        (added_references, errors) = collection.add_expressions(data, host_url, user, cascade_mappings)
     finally:
         head.remove_processing(self.request.id)
 
