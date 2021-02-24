@@ -6,7 +6,7 @@ from core.collections.tests.factories import OrganizationCollectionFactory
 from core.collections.utils import is_mapping, is_concept, is_version_specified, \
     get_concept_by_expression
 from core.common.constants import CUSTOM_VALIDATION_SCHEMA_OPENMRS
-from core.common.tasks import add_references
+from core.common.tasks import add_references, seed_children
 from core.common.tests import OCLTestCase
 from core.common.utils import drop_version
 from core.concepts.models import Concept
@@ -367,7 +367,7 @@ class CollectionUtilsTest(OCLTestCase):
         self.assertIsNone(get_concept_by_expression('/foobar/'))
 
 
-class AddReferencesTaskTest(OCLTestCase):
+class TasksTest(OCLTestCase):
     def test_add_references_task(self):
         collection = OrganizationCollectionFactory()
         concept1 = ConceptFactory()
@@ -399,4 +399,33 @@ class AddReferencesTaskTest(OCLTestCase):
                 concept1.get_latest_version().version_url, concept2.get_latest_version().version_url,
                 mapping1.get_latest_version().version_url, mapping2.get_latest_version().version_url,
             ])
+        )
+
+    def test_seed_children_task(self):
+        collection = OrganizationCollectionFactory()
+        concept = ConceptFactory()
+        mapping = MappingFactory()
+        concept_latest_version = concept.get_latest_version()
+        mapping_latest_version = mapping.get_latest_version()
+        collection.add_references([concept_latest_version.version_url, mapping_latest_version.version_url])
+
+        self.assertEqual(collection.references.count(), 2)
+        self.assertEqual(collection.concepts.count(), 1)
+        self.assertEqual(collection.mappings.count(), 1)
+
+        collection_v1 = OrganizationCollectionFactory(
+            organization=collection.organization, version='v1', mnemonic=collection.mnemonic
+        )
+        self.assertEqual(collection_v1.references.count(), 0)
+        self.assertEqual(collection_v1.concepts.count(), 0)
+        self.assertEqual(collection_v1.mappings.count(), 0)
+
+        seed_children('collection', collection_v1.id)
+
+        self.assertEqual(collection_v1.references.count(), 2)
+        self.assertEqual(collection_v1.concepts.count(), 1)
+        self.assertEqual(collection_v1.mappings.count(), 1)
+        self.assertEqual(
+            list(collection_v1.references.values_list('expression', flat=True)),
+            list(collection.references.values_list('expression', flat=True)),
         )
