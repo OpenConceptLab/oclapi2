@@ -23,7 +23,7 @@ class CollectionDocument(Document):
     name = fields.KeywordField(attr='name', normalizer='lowercase')
     canonical_url = fields.KeywordField(attr='canonical_url', normalizer='lowercase')
     mnemonic = fields.KeywordField(attr='mnemonic', normalizer='lowercase')
-    extras = fields.ObjectField()
+    extras = fields.ObjectField(dynamic=True)
     identifier = fields.ObjectField()
     publisher = fields.KeywordField(attr='publisher', normalizer='lowercase')
     immutable = fields.KeywordField(attr='immutable')

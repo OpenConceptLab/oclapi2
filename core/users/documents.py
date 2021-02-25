@@ -1,6 +1,7 @@
 from django_elasticsearch_dsl import Document, fields
 from django_elasticsearch_dsl.registries import registry
 
+from core.common.utils import jsonify_safe
 from core.users.models import UserProfile
 
 
@@ -15,7 +16,7 @@ class UserProfileDocument(Document):
     location = fields.KeywordField(attr='location', normalizer='lowercase')
     company = fields.KeywordField(attr='company', normalizer='lowercase')
     name = fields.KeywordField(attr='name', normalizer='lowercase')
-    extras = fields.ObjectField()
+    extras = fields.ObjectField(dynamic=True)
     org = fields.ListField(fields.KeywordField())
 
     class Django:
@@ -26,7 +27,12 @@ class UserProfileDocument(Document):
 
     @staticmethod
     def prepare_extras(instance):
-        return instance.extras or {}
+        value = {}
+
+        if instance.extras:
+            value = jsonify_safe(instance.extras)
+
+        return value or {}
 
     @staticmethod
     def prepare_org(instance):

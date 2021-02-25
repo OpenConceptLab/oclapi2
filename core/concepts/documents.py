@@ -1,6 +1,7 @@
 from django_elasticsearch_dsl import Document, fields
 from django_elasticsearch_dsl.registries import registry
 
+from core.common.utils import jsonify_safe
 from core.concepts.models import Concept
 
 
@@ -27,7 +28,7 @@ class ConceptDocument(Document):
     retired = fields.KeywordField(attr='retired')
     is_active = fields.KeywordField(attr='is_active')
     is_latest_version = fields.KeywordField(attr='is_latest_version')
-    extras = fields.ObjectField()
+    extras = fields.ObjectField(dynamic=True)
 
     class Django:
         model = Concept
@@ -59,4 +60,9 @@ class ConceptDocument(Document):
 
     @staticmethod
     def prepare_extras(instance):
-        return instance.extras or {}
+        value = {}
+
+        if instance.extras:
+            value = jsonify_safe(instance.extras)
+
+        return value or {}

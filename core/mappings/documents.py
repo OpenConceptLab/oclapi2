@@ -2,6 +2,7 @@ from django_elasticsearch_dsl import Document, fields
 from django_elasticsearch_dsl.registries import registry
 from pydash import get
 
+from core.common.utils import jsonify_safe
 from core.mappings.models import Mapping
 
 
@@ -43,7 +44,7 @@ class MappingDocument(Document):
     collection_owner_url = fields.ListField(fields.KeywordField())
     public_can_view = fields.BooleanField(attr='public_can_view')
     id = fields.KeywordField(attr='mnemonic', normalizer="lowercase")
-    extras = fields.ObjectField()
+    extras = fields.ObjectField(dynamic=True)
 
     @staticmethod
     def prepare_from_concept(instance):
@@ -87,4 +88,9 @@ class MappingDocument(Document):
 
     @staticmethod
     def prepare_extras(instance):
-        return instance.extras or {}
+        value = {}
+
+        if instance.extras:
+            value = jsonify_safe(instance.extras)
+
+        return value or {}

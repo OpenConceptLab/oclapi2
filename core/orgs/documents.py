@@ -1,6 +1,7 @@
 from django_elasticsearch_dsl import Document, fields
 from django_elasticsearch_dsl.registries import registry
 
+from core.common.utils import jsonify_safe
 from core.orgs.models import Organization
 
 
@@ -14,7 +15,7 @@ class OrganizationDocument(Document):
     public_can_view = fields.BooleanField(attr='public_can_view')
     name = fields.KeywordField(attr='name', normalizer="lowercase")
     mnemonic = fields.KeywordField(attr='mnemonic', normalizer="lowercase")
-    extras = fields.ObjectField()
+    extras = fields.ObjectField(dynamic=True)
     user = fields.ListField(fields.KeywordField())
 
     class Django:
@@ -27,7 +28,12 @@ class OrganizationDocument(Document):
 
     @staticmethod
     def prepare_extras(instance):
-        return instance.extras or {}
+        value = {}
+
+        if instance.extras:
+            value = jsonify_safe(instance.extras)
+
+        return value or {}
 
     @staticmethod
     def prepare_user(instance):
