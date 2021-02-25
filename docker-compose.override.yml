@@ -16,7 +16,6 @@ services:
     restart: "no"
     environment:
       - ENVIRONMENT=development
-      - DEBUG=${DEBUG-True}
   celery:
     build: .
     volumes:
