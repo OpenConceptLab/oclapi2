@@ -3,10 +3,12 @@ from billiard.exceptions import WorkerLostError
 from celery.utils.log import get_task_logger
 from celery_once import QueueOnce
 from django.apps import apps
+from django.conf import settings
 from django.core.mail import EmailMessage
 from django.core.management import call_command
 from django.template.loader import render_to_string
 from django_elasticsearch_dsl.registries import registry
+from pydash import get
 
 from core.celery import app
 from core.common.constants import CONFIRM_EMAIL_ADDRESS_MAIL_SUBJECT, PASSWORD_RESET_MAIL_SUBJECT
@@ -212,8 +214,9 @@ def send_user_verification_email(user_id):
     )
     mail = EmailMessage(subject=CONFIRM_EMAIL_ADDRESS_MAIL_SUBJECT, body=html_body, to=[user.email])
     mail.content_subtype = "html"
-    mail.send()
-    return mail
+    res = mail.send()
+
+    return mail if get(settings, 'TEST_MODE', False) else res
 
 
 @app.task
@@ -232,8 +235,9 @@ def send_user_reset_password_email(user_id):
     )
     mail = EmailMessage(subject=PASSWORD_RESET_MAIL_SUBJECT, body=html_body, to=[user.email])
     mail.content_subtype = "html"
-    mail.send()
-    return mail
+    res = mail.send()
+
+    return mail if get(settings, 'TEST_MODE', False) else res
 
 
 @app.task(bind=True)

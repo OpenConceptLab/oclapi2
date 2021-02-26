@@ -98,10 +98,10 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
         return self.organizations.count()
 
     def send_verification_email(self):
-        return send_user_verification_email.apply_async((self.id, ))
+        return send_user_verification_email.delay(self.id)
 
     def send_reset_password_email(self):
-        return send_user_reset_password_email.apply_async((self.id,))
+        return send_user_reset_password_email.delay(self.id)
 
     @property
     def email_verification_url(self):
