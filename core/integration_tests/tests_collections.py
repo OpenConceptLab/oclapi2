@@ -6,7 +6,7 @@ from mock import patch, Mock, ANY
 from rest_framework.exceptions import ErrorDetail
 
 from core.collections.models import CollectionReference, Collection
-from core.collections.serializers import CollectionVersionExportSerializer
+from core.collections.serializers import CollectionVersionExportSerializer, CollectionReferenceSerializer
 from core.collections.tests.factories import OrganizationCollectionFactory, UserCollectionFactory
 from core.common.tasks import export_collection
 from core.common.tests import OCLAPITestCase
@@ -978,7 +978,8 @@ class ExportCollectionTaskTest(OCLAPITestCase):
         exported_data = json.loads(zipped_file.read('export.json').decode('utf-8'))
 
         self.assertEqual(
-            exported_data, {**CollectionVersionExportSerializer(collection).data, 'concepts': ANY, 'mappings': ANY}
+            exported_data,
+            {**CollectionVersionExportSerializer(collection).data, 'concepts': ANY, 'mappings': ANY, 'references': ANY}
         )
 
         exported_concepts = exported_data['concepts']
@@ -995,6 +996,12 @@ class ExportCollectionTaskTest(OCLAPITestCase):
 
         self.assertEqual(len(exported_mappings), 1)
         self.assertEqual(expected_mappings, exported_mappings)
+
+        exported_references = exported_data['references']
+        expected_references = CollectionReferenceSerializer(collection.references.all(), many=True).data
+
+        self.assertEqual(len(exported_references), 3)
+        self.assertEqual(expected_references, exported_references)
 
         s3_upload_key = collection.export_path
         s3_mock.upload_file.assert_called_once_with(

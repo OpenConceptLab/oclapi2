@@ -186,7 +186,7 @@ def get_class(kls):
 
 def write_export_file(
         version, resource_type, resource_serializer_type, logger
-):  # pylint: disable=too-many-statements,too-many-locals
+):  # pylint: disable=too-many-statements,too-many-locals,too-many-branches
     cwd = cd_temp()
     logger.info('Writing export file to tmp directory: %s' % cwd)
 
@@ -202,7 +202,8 @@ def write_export_file(
     batch_size = 1000
     concepts_qs = version.concepts
     mappings_qs = version.mappings
-    if resource_type != 'collection':
+    is_collection = resource_type == 'collection'
+    if not is_collection:
         concepts_qs = concepts_qs.filter(is_active=True)
         mappings_qs = mappings_qs.filter(is_active=True)
 
@@ -212,9 +213,11 @@ def write_export_file(
     with open('export.json', 'w') as out:
         out.write('%s, "concepts": [' % resource_string[:-1])
 
+    resource_name = resource_type.title()
+
     if total_concepts:
         logger.info(
-            '%s has %d concepts. Getting them in batches of %d...' % (resource_type.title(), total_concepts, batch_size)
+            '%s has %d concepts. Getting them in batches of %d...' % (resource_name, total_concepts, batch_size)
         )
         concept_serializer_class = get_class('core.concepts.serializers.ConceptVersionDetailSerializer')
         for start in range(0, total_concepts, batch_size):
@@ -232,14 +235,41 @@ def write_export_file(
                     out.write(', ')
         logger.info('Done serializing concepts.')
     else:
-        logger.info('%s has no concepts to serialize.' % (resource_type.title()))
+        logger.info('%s has no concepts to serialize.' % resource_name)
+
+    if is_collection:
+        references_qs = version.references
+        total_references = references_qs.count()
+
+        with open('export.json', 'a') as out:
+            out.write('], "references": [')
+        if total_references:
+            logger.info(
+                '%s has %d references. Getting them in batches of %d...' % (
+                    resource_name, total_references, batch_size)
+            )
+            reference_serializer_class = get_class('core.collections.serializers.CollectionReferenceSerializer')
+            for start in range(0, total_references, batch_size):
+                end = min(start + batch_size, total_references)
+                logger.info('Serializing references %d - %d...' % (start + 1, end))
+                references = references_qs.filter()[start:end]
+                reference_serializer = reference_serializer_class(references, many=True)
+                reference_string = json.dumps(reference_serializer.data, cls=encoders.JSONEncoder)
+                reference_string = reference_string[1:-1]
+                with open('export.json', 'a') as out:
+                    out.write(reference_string)
+                    if end != total_references:
+                        out.write(', ')
+            logger.info('Done serializing references.')
+        else:
+            logger.info('%s has no references to serialize.' % resource_name)
 
     with open('export.json', 'a') as out:
         out.write('], "mappings": [')
 
     if total_mappings:
         logger.info(
-            '%s has %d mappings. Getting them in batches of %d...' % (resource_type.title(), total_mappings, batch_size)
+            '%s has %d mappings. Getting them in batches of %d...' % (resource_name, total_mappings, batch_size)
         )
         mapping_serializer_class = get_class('core.mappings.serializers.MappingDetailSerializer')
         for start in range(0, total_mappings, batch_size):
@@ -250,17 +280,17 @@ def write_export_file(
                 'from_source__organization', 'from_source__user',
                 'to_source__organization', 'to_source__user',
             )[start:end]
-            mapping_serializer = mapping_serializer_class(mappings, many=True)
-            mapping_data = mapping_serializer.data
-            mapping_string = json.dumps(mapping_data, cls=encoders.JSONEncoder)
-            mapping_string = mapping_string[1:-1]
+            reference_serializer = mapping_serializer_class(mappings, many=True)
+            reference_data = reference_serializer.data
+            reference_string = json.dumps(reference_data, cls=encoders.JSONEncoder)
+            reference_string = reference_string[1:-1]
             with open('export.json', 'a') as out:
-                out.write(mapping_string)
+                out.write(reference_string)
                 if end != total_mappings:
                     out.write(', ')
         logger.info('Done serializing mappings.')
     else:
-        logger.info('%s has no mappings to serialize.' % (resource_type.title()))
+        logger.info('%s has no mappings to serialize.' % (resource_name))
 
     with open('export.json', 'a') as out:
         out.write(']}')
