@@ -361,7 +361,28 @@ class SourceTest(OCLTestCase):
 
 
 class TasksTest(OCLTestCase):
-    def test_seed_children_task(self):
+    @patch('core.common.models.ConceptContainerModel.index_children')
+    @patch('core.common.tasks.export_source')
+    def test_seed_children_task(self, export_source_task, index_children_mock):
+        source = OrganizationSourceFactory()
+        ConceptFactory(parent=source)
+        MappingFactory(parent=source)
+
+        source_v1 = OrganizationSourceFactory(organization=source.organization, version='v1', mnemonic=source.mnemonic)
+
+        self.assertEqual(source_v1.concepts.count(), 0)
+        self.assertEqual(source_v1.mappings.count(), 0)
+
+        seed_children('source', source_v1.id, False)  # pylint: disable=no-value-for-parameter
+
+        self.assertEqual(source_v1.concepts.count(), 1)
+        self.assertEqual(source_v1.mappings.count(), 1)
+        export_source_task.delay.assert_not_called()
+        index_children_mock.assert_not_called()
+
+    @patch('core.common.models.ConceptContainerModel.index_children')
+    @patch('core.common.tasks.export_source')
+    def test_seed_children_task_with_export(self, export_source_task, index_children_mock):
         source = OrganizationSourceFactory()
         ConceptFactory(parent=source)
         MappingFactory(parent=source)
@@ -375,3 +396,5 @@ class TasksTest(OCLTestCase):
 
         self.assertEqual(source_v1.concepts.count(), 1)
         self.assertEqual(source_v1.mappings.count(), 1)
+        export_source_task.delay.assert_called_once_with(source_v1.id)
+        index_children_mock.assert_called_once()

@@ -617,7 +617,7 @@ class ConceptContainerModel(VersionedModel):
             self.user = obj.user
             self.canonical_url = obj.canonical_url
 
-    def seed_concepts(self):
+    def seed_concepts(self, index=True):
         head = self.head
         if head:
             from core.sources.models import Source
@@ -627,10 +627,11 @@ class ConceptContainerModel(VersionedModel):
                 concepts = head.concepts.all()
 
             self.concepts.set(concepts)
-            from core.concepts.documents import ConceptDocument
-            ConceptDocument().update(self.concepts.all(), parallel=True)
+            if index:
+                from core.concepts.documents import ConceptDocument
+                ConceptDocument().update(self.concepts.all(), parallel=True)
 
-    def seed_mappings(self):
+    def seed_mappings(self, index=True):
         head = self.head
         if head:
             from core.sources.models import Source
@@ -640,8 +641,16 @@ class ConceptContainerModel(VersionedModel):
                 mappings = head.mappings.all()
 
             self.mappings.set(mappings)
-            from core.mappings.documents import MappingDocument
-            MappingDocument().update(self.mappings.all(), parallel=True)
+            if index:
+                from core.mappings.documents import MappingDocument
+                MappingDocument().update(self.mappings.all(), parallel=True)
+
+    def index_children(self):
+        from core.concepts.documents import ConceptDocument
+        ConceptDocument().update(self.concepts.all(), parallel=True)
+
+        from core.mappings.documents import MappingDocument
+        MappingDocument().update(self.mappings.all(), parallel=True)
 
     def add_processing(self, process_id):
         if self.id:

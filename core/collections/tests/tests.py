@@ -1,5 +1,6 @@
 from django.core.exceptions import ValidationError
 from django.db.models import QuerySet
+from mock import patch
 
 from core.collections.models import CollectionReference, Collection
 from core.collections.tests.factories import OrganizationCollectionFactory
@@ -401,7 +402,42 @@ class TasksTest(OCLTestCase):
             ])
         )
 
-    def test_seed_children_task(self):
+    @patch('core.common.models.ConceptContainerModel.index_children')
+    @patch('core.common.tasks.export_collection')
+    def test_seed_children_task(self, export_collection_task, index_children_mock):
+        collection = OrganizationCollectionFactory()
+        concept = ConceptFactory()
+        mapping = MappingFactory()
+        concept_latest_version = concept.get_latest_version()
+        mapping_latest_version = mapping.get_latest_version()
+        collection.add_references([concept_latest_version.version_url, mapping_latest_version.version_url])
+
+        self.assertEqual(collection.references.count(), 2)
+        self.assertEqual(collection.concepts.count(), 1)
+        self.assertEqual(collection.mappings.count(), 1)
+
+        collection_v1 = OrganizationCollectionFactory(
+            organization=collection.organization, version='v1', mnemonic=collection.mnemonic
+        )
+        self.assertEqual(collection_v1.references.count(), 0)
+        self.assertEqual(collection_v1.concepts.count(), 0)
+        self.assertEqual(collection_v1.mappings.count(), 0)
+
+        seed_children('collection', collection_v1.id, False)  # pylint: disable=no-value-for-parameter
+
+        self.assertEqual(collection_v1.references.count(), 2)
+        self.assertEqual(collection_v1.concepts.count(), 1)
+        self.assertEqual(collection_v1.mappings.count(), 1)
+        self.assertEqual(
+            list(collection_v1.references.values_list('expression', flat=True)),
+            list(collection.references.values_list('expression', flat=True)),
+        )
+        export_collection_task.delay.assert_not_called()
+        index_children_mock.assert_not_called()
+
+    @patch('core.common.models.ConceptContainerModel.index_children')
+    @patch('core.common.tasks.export_collection')
+    def test_seed_children_task_with_export(self, export_collection_task, index_children_mock):
         collection = OrganizationCollectionFactory()
         concept = ConceptFactory()
         mapping = MappingFactory()
@@ -429,3 +465,5 @@ class TasksTest(OCLTestCase):
             list(collection_v1.references.values_list('expression', flat=True)),
             list(collection.references.values_list('expression', flat=True)),
         )
+        export_collection_task.delay.assert_called_once_with(collection_v1.id)
+        index_children_mock.assert_called_once()

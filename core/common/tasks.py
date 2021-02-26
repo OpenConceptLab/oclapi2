@@ -237,21 +237,32 @@ def send_user_reset_password_email(user_id):
 
 
 @app.task(bind=True)
-def seed_children(self, resource, obj_id):
+def seed_children(self, resource, obj_id, export=True):
     instance = None
+    export_task = None
+
     if resource == 'source':
         from core.sources.models import Source
         instance = Source.objects.filter(id=obj_id).first()
+        export_task = export_source
     if resource == 'collection':
         from core.collections.models import Collection
         instance = Collection.objects.filter(id=obj_id).first()
+        export_task = export_collection
+
     if instance:
         task_id = self.request.id
 
+        index = not export
+
         try:
             instance.add_processing(task_id)
-            instance.seed_concepts()
-            instance.seed_mappings()
+            instance.seed_concepts(index=index)
+            instance.seed_mappings(index=index)
             instance.seed_references()
+
+            if export:
+                export_task.delay(obj_id)
+                instance.index_children()
         finally:
             instance.remove_processing(task_id)

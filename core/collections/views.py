@@ -430,10 +430,7 @@ class CollectionVersionListView(CollectionVersionBaseView, mixins.CreateModelMix
                 instance = serializer.create_version(payload)
                 if serializer.is_valid():
                     serializer = CollectionDetailSerializer(instance, context={'request': request})
-                    data = serializer.data
-                    version_id = data.get('uuid')
-                    export_collection.apply_async((version_id, ), queue='concurrent')
-                    return Response(data, status=status.HTTP_201_CREATED)
+                    return Response(serializer.data, status=status.HTTP_201_CREATED)
             except IntegrityError as ex:
                 return Response(
                     dict(
@@ -586,7 +583,7 @@ class CollectionVersionExportView(ConceptContainerExportMixin, CollectionVersion
     def handle_export_version(self):
         version = self.get_object()
         try:
-            export_collection.apply_async((version.id, ), queue='concurrent')
+            export_collection.delay(version.id)
             return status.HTTP_202_ACCEPTED
         except AlreadyQueued:
             return status.HTTP_409_CONFLICT
