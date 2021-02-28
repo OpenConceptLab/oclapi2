@@ -7,7 +7,7 @@ from core.common.constants import HEAD, ACCESS_TYPE_NONE
 from core.common.models import ConceptContainerModel
 from core.common.utils import reverse_resource, get_query_params_from_url_string
 from core.concepts.models import LocalizedText
-from core.sources.constants import SOURCE_TYPE
+from core.sources.constants import SOURCE_TYPE, SOURCE_VERSION_TYPE
 
 
 class Source(ConceptContainerModel):
@@ -30,6 +30,7 @@ class Source(ConceptContainerModel):
     content_type = models.TextField(blank=True, null=True)
 
     OBJECT_TYPE = SOURCE_TYPE
+    OBJECT_VERSION_TYPE = SOURCE_VERSION_TYPE
 
     @classmethod
     def head_from_uri(cls, uri):

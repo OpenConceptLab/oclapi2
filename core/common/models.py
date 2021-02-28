@@ -134,6 +134,10 @@ class BaseModel(models.Model):
         return get(self, 'OBJECT_TYPE')
 
     @property
+    def resource_version_type(self):
+        return get(self, 'OBJECT_VERSION_TYPE') or self.resource_type
+
+    @property
     def url(self):
         if self.uri:
             return self.uri

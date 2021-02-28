@@ -178,6 +178,7 @@ class CollectionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.data['uuid'], str(coll.id))
         self.assertEqual(response.data['short_code'], 'coll1')
         self.assertEqual(response.data['url'], coll.uri)
+        self.assertEqual(response.data['type'], 'Collection')
 
         response = self.client.get(
             coll.uri,
@@ -558,6 +559,7 @@ class CollectionVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.data['uuid'], str(self.collection_v1.id))
         self.assertEqual(response.data['id'], 'v1')
         self.assertEqual(response.data['short_code'], 'coll')
+        self.assertEqual(response.data['type'], 'Collection Version')
 
     def test_get_404(self):
         response = self.client.get(

@@ -57,6 +57,7 @@ class SourceListViewTest(OCLAPITestCase):
         self.assertEqual(response.data[0]['owner'], self.organization.mnemonic)
         self.assertEqual(response.data[0]['owner_type'], 'Organization')
         self.assertEqual(response.data[0]['owner_url'], self.organization.uri)
+        self.assertEqual(response.data[0]['type'], 'Source')
         for attr in ['active_concepts', 'active_mappings', 'versions', 'summary']:
             self.assertFalse(attr in response.data[0])
 
@@ -307,6 +308,7 @@ class SourceLatestVersionRetrieveUpdateViewTest(OCLAPITestCase):
         self.assertEqual(response.data['id'], 'v1')
         self.assertEqual(response.data['uuid'], str(self.latest_version.id))
         self.assertEqual(response.data['short_code'], self.source.mnemonic)
+        self.assertEqual(response.data['type'], 'Source Version')
 
         response = self.client.get(
             '/orgs/{}/sources/{}/latest/summary/'.format(self.organization.mnemonic, self.source.mnemonic),

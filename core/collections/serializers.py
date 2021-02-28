@@ -276,7 +276,7 @@ class CollectionDetailSerializer(CollectionCreateOrUpdateSerializer):
 
 
 class CollectionVersionDetailSerializer(CollectionCreateOrUpdateSerializer):
-    type = CharField(source='resource_type')
+    type = CharField(source='resource_version_type')
     uuid = CharField(source='id')
     id = CharField(source='version')
     short_code = CharField(source='mnemonic')

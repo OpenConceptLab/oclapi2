@@ -17,6 +17,12 @@ from core.sources.tests.factories import OrganizationSourceFactory
 
 
 class CollectionTest(OCLTestCase):
+    def test_resource_version_type(self):
+        self.assertEqual(Collection().resource_version_type, 'Collection Version')
+
+    def test_resource_type(self):
+        self.assertEqual(Collection().resource_type, 'Collection')
+
     def test_collection(self):
         self.assertEqual(Collection(mnemonic='coll').collection, 'coll')
         self.assertEqual(Collection().collection, '')
