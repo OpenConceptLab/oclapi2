@@ -1,4 +1,4 @@
-from mock import patch, ANY, Mock
+from mock import patch, Mock
 
 from core.common.tests import OCLAPITestCase
 from core.concepts.tests.factories import ConceptFactory
