@@ -6,6 +6,23 @@ from rest_framework.fields import SerializerMethodField
 from core.pins.models import Pin
 
 
+def build_resource_data(obj):
+    resource = obj.resource
+    if not resource:
+        return None
+    resource_type = resource.resource_type.lower()
+    if resource_type == 'source':
+        from core.sources.serializers import SourceDetailSerializer
+        return SourceDetailSerializer(resource).data
+    if resource_type == 'collection':
+        from core.collections.serializers import CollectionDetailSerializer
+        return CollectionDetailSerializer(resource).data
+    if resource_type == 'organization':
+        from core.orgs.serializers import OrganizationDetailSerializer
+        return OrganizationDetailSerializer(resource).data
+    return None
+
+
 class PinUpdateSerializer(serializers.ModelSerializer):
     order = serializers.IntegerField(required=False)
     resource = SerializerMethodField()
@@ -23,21 +40,7 @@ class PinUpdateSerializer(serializers.ModelSerializer):
 
     @staticmethod
     def get_resource(obj):
-        resource = obj.resource
-        if not resource:
-            return None
-        resource_type = resource.resource_type.lower()
-        if resource_type == 'source':
-            from core.sources.serializers import SourceDetailSerializer
-            return SourceDetailSerializer(resource).data
-        if resource_type == 'collection':
-            from core.collections.serializers import CollectionDetailSerializer
-            return CollectionDetailSerializer(resource).data
-        if resource_type == 'organization':
-            from core.orgs.serializers import OrganizationDetailSerializer
-            return OrganizationDetailSerializer(resource).data
-
-        return None
+        return build_resource_data(obj)
 
 
 class PinSerializer(serializers.ModelSerializer):
@@ -78,18 +81,4 @@ class PinSerializer(serializers.ModelSerializer):
 
     @staticmethod
     def get_resource(obj):
-        resource = obj.resource
-        if not resource:
-            return None
-        resource_type = resource.resource_type.lower()
-        if resource_type == 'source':
-            from core.sources.serializers import SourceDetailSerializer
-            return SourceDetailSerializer(resource).data
-        if resource_type == 'collection':
-            from core.collections.serializers import CollectionDetailSerializer
-            return CollectionDetailSerializer(resource).data
-        if resource_type == 'organization':
-            from core.orgs.serializers import OrganizationDetailSerializer
-            return OrganizationDetailSerializer(resource).data
-
-        return None
+        return build_resource_data(obj)
