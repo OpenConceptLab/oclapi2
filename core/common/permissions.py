@@ -3,14 +3,6 @@ from rest_framework.permissions import BasePermission
 from core.common.constants import ACCESS_TYPE_EDIT, ACCESS_TYPE_VIEW
 
 
-class IsSuperuser(BasePermission):
-    """
-    The request is authenticated, and the user is a superuser
-    """
-    def has_object_permission(self, request, view, obj):
-        return request.user.is_superuser
-
-
 class HasPrivateAccess(BasePermission):
     """
     Current user is authenticated as a staff user, or is designated as the referenced object's owner,
