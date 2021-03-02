@@ -524,6 +524,9 @@ class ConceptContainerExportMixin:
             response['Last-Updated-Timezone'] = settings.TIME_ZONE_PLACE
             return response
 
+        if version.is_processing:
+            return Response(status=status.HTTP_208_ALREADY_REPORTED)
+
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     def post(self, request, *args, **kwargs):  # pylint: disable=unused-argument
