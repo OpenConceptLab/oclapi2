@@ -269,23 +269,21 @@ AWS_STORAGE_BUCKET_NAME = os.environ.get('AWS_STORAGE_BUCKET_NAME', 'oclapi2-dev
 AWS_REGION_NAME = os.environ.get('AWS_REGION_NAME', 'us-east-2')
 DISABLE_VALIDATION = os.environ.get('DISABLE_VALIDATION', False)
 API_SUPERUSER_PASSWORD = os.environ.get('API_SUPERUSER_PASSWORD', 'Root123')  # password for ocladmin superuser
-API_SUPERUSER_TOKEN = os.environ.get(
-    'API_SUPERUSER_TOKEN', '891b4b17feab99f3ff7e5b5d04ccc5da7aa96da6'
-)
+API_SUPERUSER_TOKEN = os.environ.get('API_SUPERUSER_TOKEN', '891b4b17feab99f3ff7e5b5d04ccc5da7aa96da6')
 
-#Redis
+# Redis
 REDIS_PORT = os.environ.get('REDIS_PORT', 6379)
 REDIS_DB = 0
 REDIS_HOST = os.environ.get('REDIS_HOST', 'redis')
 REDIS_URL = "redis://{}:{}".format(REDIS_HOST, REDIS_PORT)  # needed for healthcheck
 
-#Celery
+# Celery
 CELERY_ENABLE_UTC = True
 CELERY_TIMEZONE = "UTC"
 CELERY_ALWAYS_EAGER = False
 CELERY_WORKER_DISABLE_RATE_LIMITS = False
-CELERY_WORKER_PREFETCH_MULTIPLIER = 1 # Reserve one task at a time
-CELERY_TASK_ACKS_LATE = True # Retry task in case of failure
+CELERY_WORKER_PREFETCH_MULTIPLIER = 1  # Reserve one task at a time
+CELERY_TASK_ACKS_LATE = True  # Retry task in case of failure
 CELERY_TASK_DEFAULT_QUEUE = 'default'
 CELERY_TASK_QUEUES = (
     Queue('default', Exchange('default'), routing_key='default'),
@@ -309,9 +307,9 @@ CELERY_RESULT_BACKEND_TRANSPORT_OPTIONS = {
 }
 CELERY_RESULT_EXPIRES = 259200  # 72 hours
 CELERY_BROKER_URL = CELERY_RESULT_BACKEND
-CELERY_BROKER_POOL_LIMIT = 50 #should be adjusted considering the number of threads
+CELERY_BROKER_POOL_LIMIT = 50  # should be adjusted considering the number of threads
 CELERY_BROKER_CONNECTION_TIMEOUT = 10.0
-CELERY_BROKER_TRANSPORT_OPTIONS = {'visibility_timeout': 259200}  #72 hours, the lon
+CELERY_BROKER_TRANSPORT_OPTIONS = {'visibility_timeout': 259200}  # 72 hours, the lon
 CELERY_ACCEPT_CONTENT = ['application/json']
 CELERY_ONCE = {
     'backend': 'celery_once.backends.Redis',
