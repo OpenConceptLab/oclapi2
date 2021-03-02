@@ -318,7 +318,8 @@ class Collection(ConceptContainerModel):
 
     def get_all_related_mappings(self, expressions):
         all_related_mappings = []
-        unversioned_mappings = concept_expressions = []
+        unversioned_mappings = []
+        concept_expressions = []
 
         for expression in expressions:
             if is_mapping(expression):
