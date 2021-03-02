@@ -403,7 +403,10 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         else:
             result = SEARCH_PARAM in self.request.query_params
 
-        return result or self.has_searchable_extras_fields() or bool(self.get_faceted_filters())
+        sort_field, _ = self.get_sort_and_desc()
+        return result or self.has_searchable_extras_fields() or bool(
+            self.get_faceted_filters()
+        ) or self.is_valid_sort(sort_field)
 
     def has_searchable_extras_fields(self):
         return bool(
