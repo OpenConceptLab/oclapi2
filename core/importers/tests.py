@@ -1,5 +1,6 @@
 import json
 import os
+import unittest
 import uuid
 
 from celery_once import AlreadyQueued
@@ -52,24 +53,28 @@ class BulkImportTest(OCLTestCase):
 
 class BulkImportInlineTest(OCLTestCase):
     def test_org_import(self):
-        self.assertFalse(Organization.objects.filter(mnemonic='DemoOrg').exists())
+        self.assertFalse(Organization.objects.filter(mnemonic='DATIM-MOH-BI-FY19').exists())
 
-        data = {
-            "type": "Organization", "id": "DemoOrg", "website": "", "name": "OCL Demo Organization", "company": "",
-            "public_access": "View"
-        }
-        importer = BulkImportInline(json.dumps(data), 'ocladmin', True)
+        OrganizationFactory(mnemonic='DATIM-MOH-BI-FY19', location='blah')
+        self.assertTrue(Organization.objects.filter(mnemonic='DATIM-MOH-BI-FY19').exists())
+
+        data = '{"type": "Organization", "__action": "DELETE", "id": "DATIM-MOH-BI-FY19"}\n' \
+               '{"name": "DATIM MOH Burundi", "extras": {"datim_moh_country_code": "BI", "datim_moh_period": "FY19",' \
+               ' "datim_moh_object": true}, "location": "Burundi", "public_access": "None", "type": "Organization",' \
+               ' "id": "DATIM-MOH-BI-FY19"}'
+        importer = BulkImportInline(data, 'ocladmin', True)
         importer.run()
 
-        self.assertTrue(Organization.objects.filter(mnemonic='DemoOrg').exists())
-        self.assertEqual(importer.processed, 1)
+        self.assertTrue(Organization.objects.filter(mnemonic='DATIM-MOH-BI-FY19').exists())
+        self.assertEqual(importer.processed, 2)
         self.assertEqual(len(importer.created), 1)
-        self.assertEqual(importer.created[0], data)
+        self.assertEqual(len(importer.deleted), 1)
         self.assertTrue(importer.elapsed_seconds > 0)
 
         data = {
-            "type": "Organization", "id": "DemoOrg", "website": "", "name": "OCL Demo Organization", "company": "",
-            "public_access": "View"
+            "name": "DATIM MOH Burundi", "extras": {
+                "datim_moh_country_code": "BI", "datim_moh_period": "FY19", "datim_moh_object": True
+            }, "location": "Burundi", "public_access": "None", "type": "Organization", "id": "DATIM-MOH-BI-FY19"
         }
         importer = BulkImportInline(json.dumps(data), 'ocladmin', True)
         importer.run()
@@ -77,8 +82,22 @@ class BulkImportInlineTest(OCLTestCase):
         self.assertEqual(importer.processed, 1)
         self.assertEqual(len(importer.created), 0)
         self.assertEqual(len(importer.failed), 0)
+        self.assertEqual(len(importer.deleted), 0)
         self.assertEqual(len(importer.exists), 1)
         self.assertEqual(importer.exists[0], data)
+        self.assertTrue(importer.elapsed_seconds > 0)
+
+        data = {"type": "Organization", "__action": "DELETE", "id": "FOOBAR"}
+        importer = BulkImportInline(json.dumps(data), 'ocladmin', True)
+        importer.run()
+
+        self.assertEqual(importer.processed, 1)
+        self.assertEqual(len(importer.created), 0)
+        self.assertEqual(len(importer.failed), 0)
+        self.assertEqual(len(importer.deleted), 0)
+        self.assertEqual(len(importer.exists), 0)
+        self.assertEqual(len(importer.not_found), 1)
+        self.assertEqual(importer.not_found[0], data)
         self.assertTrue(importer.elapsed_seconds > 0)
 
     def test_source_import_success(self):
@@ -365,6 +384,7 @@ class BulkImportInlineTest(OCLTestCase):
         self.assertEqual(len(importer.invalid), 0)
         self.assertEqual(len(importer.others), 0)
 
+    @unittest.skip('[Skipped] PEPFAR (small) Import Sample')
     def test_pepfar_import(self):
         importer = BulkImportInline(
             open(os.path.join(os.path.dirname(__file__), '..', 'samples/pepfar_datim_moh_fy19.json'), 'r').read(),

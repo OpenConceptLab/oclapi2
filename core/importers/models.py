@@ -12,7 +12,7 @@ from pydash import compact, get
 from core.collections.models import Collection
 from core.common.constants import HEAD
 from core.common.services import RedisService
-from core.common.tasks import bulk_import_parts_inline
+from core.common.tasks import bulk_import_parts_inline, delete_organization
 from core.common.utils import drop_version
 from core.concepts.models import Concept
 from core.mappings.models import Mapping
@@ -91,6 +91,8 @@ class BulkImport(BaseImporter):
 CREATED = 1
 UPDATED = 2
 FAILED = 3
+DELETED = 4
+NOT_FOUND = 5
 
 
 class BaseResourceImporter:
@@ -168,7 +170,10 @@ class OrganizationImporter(BaseResourceImporter):
     allowed_fields = ["id", "company", "extras", "location", "name", "public_access", "website"]
 
     def exists(self):
-        return Organization.objects.filter(mnemonic=self.get('id')).exists()
+        return self.get_queryset().exists()
+
+    def get_queryset(self):
+        return Organization.objects.filter(mnemonic=self.get('id'))
 
     def parse(self):
         super().parse()
@@ -180,6 +185,12 @@ class OrganizationImporter(BaseResourceImporter):
             return CREATED
         return FAILED
 
+    def delete(self):
+        if self.exists():
+            delete_organization(self.get_queryset().first().id)
+            return DELETED
+        return NOT_FOUND
+
 
 class SourceImporter(BaseResourceImporter):
     mandatory_fields = {'id', 'short_code', 'name', 'full_name', 'owner_type', 'owner', 'source_type'}
@@ -189,9 +200,12 @@ class SourceImporter(BaseResourceImporter):
     ]
 
     def exists(self):
+        return self.get_queryset().exists()
+
+    def get_queryset(self):
         return Source.objects.filter(
             **{self.get_owner_type_filter(): self.get('owner'), 'mnemonic': self.get('id')}
-        ).exists()
+        )
 
     def parse(self):
         owner_type = self.get('owner_type').lower()
@@ -213,6 +227,17 @@ class SourceImporter(BaseResourceImporter):
         source = Source(**self.data)
         errors = Source.persist_new(source, self.user)
         return errors or CREATED
+
+    def delete(self):
+        if self.exists():
+            source = self.get_queryset().first()
+            try:
+                source.delete()
+                return DELETED
+            except Exception as ex:
+                return dict(errors=ex.args)
+
+        return NOT_FOUND
 
 
 class SourceVersionImporter(BaseResourceImporter):
@@ -250,9 +275,12 @@ class CollectionImporter(BaseResourceImporter):
     ]
 
     def exists(self):
+        return self.get_queryset().exists()
+
+    def get_queryset(self):
         return Collection.objects.filter(
             **{self.get_owner_type_filter(): self.get('owner'), 'mnemonic': self.get('id')}
-        ).exists()
+        )
 
     def parse(self):
         owner_type = self.get('owner_type').lower()
@@ -274,6 +302,17 @@ class CollectionImporter(BaseResourceImporter):
         coll = Collection(**self.data)
         errors = Collection.persist_new(coll, self.user)
         return errors or CREATED
+
+    def delete(self):
+        if self.exists():
+            collection = self.get_queryset().first()
+            try:
+                collection.delete()
+                return DELETED
+            except Exception as ex:
+                return dict(errors=ex.args)
+
+        return NOT_FOUND
 
 
 class CollectionVersionImporter(BaseResourceImporter):
@@ -476,6 +515,8 @@ class BulkImportInline(BaseImporter):
         self.exists = []
         self.created = []
         self.updated = []
+        self.deleted = []
+        self.not_found = []
         self.failed = []
         self.exception = []
         self.others = []
@@ -484,7 +525,7 @@ class BulkImportInline(BaseImporter):
         self.start_time = time.time()
         self.elapsed_seconds = 0
 
-    def handle_item_import_result(self, result, item):
+    def handle_item_import_result(self, result, item):  # pylint: disable=too-many-return-statements
         if result is None:
             self.exists.append(item)
             return
@@ -493,6 +534,12 @@ class BulkImportInline(BaseImporter):
             return
         if result == FAILED:
             self.failed.append(item)
+            return
+        if result == DELETED:
+            self.deleted.append(item)
+            return
+        if result == NOT_FOUND:
+            self.not_found.append(item)
             return
         if isinstance(result, dict):
             item['errors'] = result
@@ -524,16 +571,19 @@ class BulkImportInline(BaseImporter):
             self.notify_progress()
             item = original_item.copy()
             item_type = item.pop('type', '').lower()
+            action = item.pop('__action', '').lower()
             if not item_type:
                 self.unknown.append(original_item)
             if item_type == 'organization':
+                org_importer = OrganizationImporter(item, self.user, self.update_if_exists)
                 self.handle_item_import_result(
-                    OrganizationImporter(item, self.user, self.update_if_exists).run(), original_item
+                    org_importer.delete() if action == 'delete' else org_importer.run(), original_item
                 )
                 continue
             if item_type == 'source':
+                source_importer = SourceImporter(item, self.user, self.update_if_exists)
                 self.handle_item_import_result(
-                    SourceImporter(item, self.user, self.update_if_exists).run(), original_item
+                    source_importer.delete() if action == 'delete' else source_importer.run(), original_item
                 )
                 continue
             if item_type == 'source version':
@@ -542,8 +592,9 @@ class BulkImportInline(BaseImporter):
                 )
                 continue
             if item_type == 'collection':
+                collection_importer = CollectionImporter(item, self.user, self.update_if_exists)
                 self.handle_item_import_result(
-                    CollectionImporter(item, self.user, self.update_if_exists).run(), original_item
+                    collection_importer.delete() if action == 'delete' else collection_importer.run(), original_item
                 )
                 continue
             if item_type == 'collection version':
@@ -575,15 +626,17 @@ class BulkImportInline(BaseImporter):
 
     @property
     def detailed_summary(self):
-        return "Processed: {}/{} | Created: {} | Updated: {} | Existing: {} | Time: {}secs".format(
-            self.processed, self.total, len(self.created), len(self.updated), len(self.exists), self.elapsed_seconds
+        return "Processed: {}/{} | Created: {} | Updated: {} | DELETED: {} | Existing: {} | Time: {}secs".format(
+            self.processed, self.total, len(self.created), len(self.updated), len(self.deleted),
+            len(self.exists), self.elapsed_seconds
         )
 
     @property
     def json_result(self):
         return dict(
             total=self.total, processed=self.processed, created=self.created, updated=self.updated,
-            invalid=self.invalid, exists=self.exists, failed=self.failed, exception=self.exception,
+            invalid=self.invalid, exists=self.exists, failed=self.failed, deleted=self.deleted,
+            not_found=self.not_found, exception=self.exception,
             others=self.others, unknown=self.unknown, elapsed_seconds=self.elapsed_seconds
         )
 
