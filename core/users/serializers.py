@@ -124,7 +124,7 @@ class UserDetailSerializer(serializers.ModelSerializer):
             'public_collections', 'public_sources', 'created_on', 'updated_on', 'created_by', 'updated_by',
             'url', 'organizations_url', 'extras', 'sources_url', 'collections_url', 'website', 'last_login',
             'logo_url', 'subscribed_orgs', 'is_superuser', 'is_staff', 'first_name', 'last_name', 'verified',
-            'verification_token',
+            'verification_token', 'date_joined',
         )
 
     def __init__(self, *args, **kwargs):

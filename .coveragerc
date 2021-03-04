@@ -6,6 +6,7 @@ omit =
     core/celery.py
     core/common/healthcheck/*
     core/wsgi.py
+    */v1_dump/*
     */management/commands/*
     */migrations/*
     */documents.py

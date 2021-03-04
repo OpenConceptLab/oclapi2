@@ -19,6 +19,8 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
         swappable = 'AUTH_USER_MODEL'
 
     OBJECT_TYPE = USER_OBJECT_TYPE
+    first_name = models.CharField(max_length=100, blank=True)
+    last_name = models.CharField(max_length=100, blank=True)
     organizations = models.ManyToManyField('orgs.Organization', related_name='members')
     company = models.TextField(null=True, blank=True)
     location = models.TextField(null=True, blank=True)
