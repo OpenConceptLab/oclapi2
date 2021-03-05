@@ -10,7 +10,7 @@ from django.db.models.expressions import CombinedExpression, F
 from django.utils import timezone
 from django_elasticsearch_dsl.registries import registry
 from django_elasticsearch_dsl.signals import RealTimeSignalProcessor
-from pydash import get, compact
+from pydash import get
 
 from core.common.services import S3
 from core.common.utils import reverse_resource, reverse_resource_version, parse_updated_since_param, drop_version
@@ -669,21 +669,25 @@ class ConceptContainerModel(VersionedModel):
             self._background_process_ids.append(process_id)
 
     def remove_processing(self, process_id):
-        if self.id and process_id:
+        if self.id and self._background_process_ids and process_id in self._background_process_ids:
             self._background_process_ids.remove(process_id)
             self.save(update_fields=['_background_process_ids'])
 
     @property
     def is_processing(self):
-        background_ids = compact(self._background_process_ids)
+        background_ids = self._background_process_ids
         if background_ids:
             for process_id in background_ids.copy():
-                res = AsyncResult(process_id)
-                if res.successful() or res.failed():
-                    self.remove_processing(process_id)
+                if process_id:
+                    res = AsyncResult(process_id)
+                    if res.successful() or res.failed():
+                        self.remove_processing(process_id)
+                    else:
+                        return True
                 else:
-                    return True
-        return bool(self._background_process_ids)
+                    self.remove_processing(process_id)
+
+        return False
 
     def clear_processing(self):
         self._background_process_ids = list()

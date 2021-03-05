@@ -580,6 +580,12 @@ class ConceptContainerProcessingMixin:
 
     def get(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         version = self.get_object()
+        is_debug = request.query_params.get('debug', None) in ['true', True]
+
+        if is_debug:
+            return Response(dict(is_processing=version.is_processing,
+                                 process_ids=version._background_process_ids))  # pylint: disable=protected-access
+
         logger.debug('Processing flag requested for %s version %s', self.resource, version)
 
         response = Response(status=200)

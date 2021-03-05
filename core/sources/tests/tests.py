@@ -325,6 +325,12 @@ class SourceTest(OCLTestCase):
         async_result_instance_mock = Mock(successful=Mock(return_value=True))
         async_result_klass_mock.return_value = async_result_instance_mock
 
+        source._background_process_ids = [None, '']  # pylint: disable=protected-access
+        source.save()
+
+        self.assertFalse(source.is_processing)
+        self.assertEqual(source._background_process_ids, [])  # pylint: disable=protected-access
+
         source._background_process_ids = ['1', '2', '3']  # pylint: disable=protected-access
         source.save()
 
