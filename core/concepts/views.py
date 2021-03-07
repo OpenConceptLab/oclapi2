@@ -236,7 +236,7 @@ class ConceptVersionsView(ConceptBaseView, ConceptDictionaryMixin, ListWithHeade
         return self.list(request, *args, **kwargs)
 
 
-class ConceptMappingsView(ConceptBaseView, ListAPIView):
+class ConceptMappingsView(ConceptBaseView, ListWithHeadersMixin):
     serializer_class = MappingListSerializer
     permission_classes = (CanViewParentDictionary,)
 
@@ -253,6 +253,9 @@ class ConceptMappingsView(ConceptBaseView, ListAPIView):
             mappings_queryset = mappings_queryset.exclude(retired=True)
 
         return mappings_queryset
+
+    def get(self, request, *args, **kwargs):
+        return self.list(request, *args, **kwargs)
 
 
 class ConceptVersionRetrieveView(ConceptBaseView, RetrieveAPIView):
