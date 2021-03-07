@@ -300,6 +300,7 @@ CELERY_TASK_ROUTES = {
     'core.common.tasks.rebuild_indexes': {'queue': 'indexing'}
 }
 CELERY_RESULT_BACKEND = 'redis://%s:%s/%s' % (REDIS_HOST, REDIS_PORT, REDIS_DB)
+CELERY_RESULT_EXTENDED = True
 CELERY_RESULT_BACKEND_TRANSPORT_OPTIONS = {
     'retry_policy': {
         'timeout': 10.0

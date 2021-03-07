@@ -355,6 +355,52 @@ class SourceTest(OCLTestCase):
         self.assertTrue(source.is_processing)
         self.assertEqual(source._background_process_ids, [1, 2, 3])  # pylint: disable=protected-access
 
+    @patch('core.common.models.AsyncResult')
+    def test_is_exporting(self, async_result_klass_mock):
+        source = OrganizationSourceFactory()
+        self.assertFalse(source.is_exporting)
+
+        async_result_instance_mock = Mock(successful=Mock(return_value=True))
+        async_result_klass_mock.return_value = async_result_instance_mock
+
+        source._background_process_ids = [None, '']  # pylint: disable=protected-access
+        source.save()
+
+        self.assertFalse(source.is_exporting)
+
+        source._background_process_ids = ['1', '2', '3']  # pylint: disable=protected-access
+        source.save()
+
+        self.assertFalse(source.is_exporting)
+
+        async_result_instance_mock = Mock(successful=Mock(return_value=False), failed=Mock(return_value=True))
+        async_result_klass_mock.return_value = async_result_instance_mock
+
+        source._background_process_ids = [1, 2, 3]  # pylint: disable=protected-access
+        source.save()
+
+        self.assertFalse(source.is_exporting)
+
+        async_result_instance_mock = Mock(successful=Mock(return_value=False), failed=Mock(return_value=False))
+        async_result_instance_mock.name = 'core.common.tasks.foobar'
+        async_result_klass_mock.return_value = async_result_instance_mock
+
+        source._background_process_ids = [1, 2, 3]  # pylint: disable=protected-access
+        source.save()
+
+        self.assertFalse(source.is_exporting)
+
+        async_result_instance_mock = Mock(
+            name='core.common.tasks.export_source', successful=Mock(return_value=False), failed=Mock(return_value=False)
+        )
+        async_result_instance_mock.name = 'core.common.tasks.export_source'
+        async_result_klass_mock.return_value = async_result_instance_mock
+
+        source._background_process_ids = [1, 2, 3]  # pylint: disable=protected-access
+        source.save()
+
+        self.assertTrue(source.is_exporting)
+
     def test_add_processing(self):
         source = OrganizationSourceFactory()
         self.assertEqual(source._background_process_ids, [])  # pylint: disable=protected-access

@@ -3,7 +3,7 @@ import zipfile
 
 from celery_once import AlreadyQueued
 from django.db import transaction
-from mock import patch, Mock, ANY
+from mock import patch, Mock, ANY, PropertyMock
 from rest_framework.exceptions import ErrorDetail
 
 from core.collections.tests.factories import OrganizationCollectionFactory
@@ -597,12 +597,11 @@ class SourceVersionExportViewTest(OCLAPITestCase):
         s3_exists_mock.assert_called_once_with("username/source1_v1.{}.zip".format(self.v1_updated_at))
         s3_url_for_mock.assert_called_once_with("username/source1_v1.{}.zip".format(self.v1_updated_at))
 
+    @patch('core.sources.models.Source.is_exporting', new_callable=PropertyMock)
     @patch('core.common.services.S3.exists')
-    def test_get_208(self, s3_exists_mock):
+    def test_get_208(self, s3_exists_mock, is_exporting_mock):
         s3_exists_mock.return_value = False
-        self.source_v1._background_process_ids = ['some-task-id']  # pylint: disable=protected-access
-        self.source_v1.save()
-        self.assertTrue(self.source_v1.is_processing)
+        is_exporting_mock.return_value = True
 
         response = self.client.get(
             '/sources/source1/v1/export/',

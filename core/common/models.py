@@ -694,6 +694,19 @@ class ConceptContainerModel(VersionedModel):
         self.save(update_fields=['_background_process_ids'])
 
     @property
+    def is_exporting(self):
+        is_processing = self.is_processing
+
+        if is_processing:
+            for process_id in self._background_process_ids:
+                res = AsyncResult(process_id)
+                task_name = res.name
+                if task_name and task_name.startswith('core.common.tasks.export_'):
+                    return True
+
+        return False
+
+    @property
     def export_path(self):
         last_update = self.last_child_update.strftime('%Y%m%d%H%M%S')
         return self.generic_export_path(suffix="{}.zip".format(last_update))
