@@ -53,7 +53,7 @@ class UserBaseView(BaseAPIView):
     }
     document_model = UserProfileDocument
     is_searchable = True
-    default_qs_sort_attr = '-created_at'
+    default_qs_sort_attr = '-date_joined'
 
 
 class UserLogoView(UserBaseView, BaseLogoView):
