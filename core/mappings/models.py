@@ -10,7 +10,8 @@ from core.common.mixins import SourceChildMixin
 from core.common.models import VersionedModel
 from core.common.utils import parse_updated_since_param, separate_version, to_parent_uri, generate_temp_version
 from core.mappings.constants import MAPPING_TYPE, MAPPING_IS_ALREADY_RETIRED, MAPPING_WAS_RETIRED, \
-    MAPPING_IS_ALREADY_NOT_RETIRED, MAPPING_WAS_UNRETIRED, PERSIST_CLONE_ERROR, PERSIST_CLONE_SPECIFY_USER_ERROR
+    MAPPING_IS_ALREADY_NOT_RETIRED, MAPPING_WAS_UNRETIRED, PERSIST_CLONE_ERROR, PERSIST_CLONE_SPECIFY_USER_ERROR, \
+    ALREADY_EXISTS
 from core.mappings.mixins import MappingValidationMixin
 
 
@@ -263,6 +264,9 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
             models.Q(uri=self.from_source_url) | models.Q(canonical_url=self.from_source_url)
         ).filter(version=HEAD).first()
 
+    def is_existing_in_parent(self):
+        return self.parent.mappings_set.filter(mnemonic__iexact=self.mnemonic).exists()
+
     @classmethod
     def create_new_version_for(cls, instance, data, user):
         instance.populate_fields_from_relations(data)
@@ -282,12 +286,15 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         url_params = {k: v for k, v in data.items() if k in related_fields}
 
         mapping = Mapping(**field_data, created_by=user, updated_by=user)
-        mapping.populate_fields_from_relations(url_params)
 
         temp_version = generate_temp_version()
         mapping.mnemonic = data.get('mnemonic', temp_version)
         mapping.version = temp_version
         mapping.errors = dict()
+        if mapping.is_existing_in_parent():
+            mapping.errors = dict(__all__=[ALREADY_EXISTS])
+            return mapping
+        mapping.populate_fields_from_relations(url_params)
 
         try:
             mapping.full_clean()

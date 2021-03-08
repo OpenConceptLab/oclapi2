@@ -18,3 +18,4 @@ MUST_SPECIFY_TO_CONCEPT_OR_TO_SOURCE = "Must specify either 'to_concept_url' or 
 MUST_SPECIFY_EITHER_TO_CONCEPT_OR_TO_SOURCE = MUST_SPECIFY_TO_CONCEPT_OR_TO_SOURCE + " Cannot specify both."
 TO_CONCEPT_UNIQUE_ATTRIBUTES_ERROR_MESSAGE = "Parent, map_type, from_concept, to_concept must be unique."
 TO_SOURCE_UNIQUE_ATTRIBUTES_ERROR_MESSAGE = "Parent, map_type, from_concept, to_source, to_concept_code must be unique."
+ALREADY_EXISTS = "Mapping ID must be unique within a source."
