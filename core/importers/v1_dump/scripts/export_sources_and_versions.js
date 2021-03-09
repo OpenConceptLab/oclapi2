@@ -6,7 +6,7 @@ org_ids = db.orgs_organization.find({mnemonic: {$in: ["EthiopiaNHDD", "MSF-OCB",
 source_ids = db.sources_source.find({parent_id: {$in: org_ids}}, {_id: 1}).map(doc => doc._id.str);
 
 db.export.sources.insertMany(db.sources_source.find({parent_id: {$in: org_ids}}).map(doc => doc));
-db.export.sourceversions.insertMany(db.sources_sourceversion.find({versioned_object_id: {$in: source_ids}}).map(doc => doc));
+db.export.sourceversions.insertMany(db.sources_sourceversion.find({versioned_object_id: {$in: source_ids}, mnemonic: {$ne: 'HEAD'}}).map(doc => doc));
 
 print(db.export.sources.count() + " matching source found");
 print(db.export.sourceversions.count() + " matching sourceversion found");
