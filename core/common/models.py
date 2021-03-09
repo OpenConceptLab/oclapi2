@@ -339,6 +339,7 @@ class ConceptContainerModel(VersionedModel):
     client_configs = GenericRelation(
         'client_configs.ClientConfig', object_id_field='resource_id', content_type_field='resource_type'
     )
+    snapshot = JSONField(null=True, blank=True, default=dict)
 
     class Meta:
         abstract = True
@@ -529,12 +530,17 @@ class ConceptContainerModel(VersionedModel):
 
     @classmethod
     def persist_new_version(cls, obj, user=None, **kwargs):
+        from core.collections.serializers import CollectionDetailSerializer
+        from core.sources.serializers import SourceDetailSerializer
+
         errors = dict()
 
         obj.is_active = True
         if user:
             obj.created_by = user
             obj.updated_by = user
+        serializer = SourceDetailSerializer if obj.__class__.__name__ == 'Source' else CollectionDetailSerializer
+        obj.snapshot = serializer(obj.head).data
         obj.update_version_data()
         obj.save(**kwargs)
 

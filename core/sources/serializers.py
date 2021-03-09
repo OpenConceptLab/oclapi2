@@ -317,7 +317,7 @@ class SourceVersionDetailSerializer(SourceCreateOrUpdateSerializer):
 
 
 class SourceVersionExportSerializer(SourceVersionDetailSerializer):
-    source = SourceDetailSerializer(source='head')
+    source = JSONField(source='snapshot')
 
     class Meta:
         model = Source

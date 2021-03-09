@@ -341,7 +341,7 @@ class CollectionReferenceSerializer(ModelSerializer):
 
 
 class CollectionVersionExportSerializer(CollectionVersionDetailSerializer):
-    collection = CollectionDetailSerializer(source='head')
+    collection = JSONField(source='snapshot')
 
     class Meta:
         model = Collection
