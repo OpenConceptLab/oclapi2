@@ -783,7 +783,7 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
             if part_list:
                 part_type = get(part_list, '0.type', '').lower()
                 if part_type:
-                    is_child = part_type in ['concept', 'mapping']
+                    is_child = part_type in ['concept', 'mapping', 'reference']
                     start_time = time.time()
                     self.queue_tasks(part_list, is_child)
                     self.wait_till_tasks_alive()
