@@ -293,7 +293,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                 queryset = queryset.filter(cls.get_iexact_or_criteria('sources__version', container_version))
 
         if concept:
-            queryset = queryset.filter(mnemonic__iexact=concept)
+            queryset = queryset.filter(mnemonic__exact=concept)
         if concept_version:
             queryset = queryset.filter(cls.get_iexact_or_criteria('version', concept_version))
         if is_latest:
@@ -402,7 +402,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         return [locale.clone() for locale in locales.all()]
 
     def is_existing_in_parent(self):
-        return self.parent.concepts_set.filter(mnemonic__iexact=self.mnemonic).exists()
+        return self.parent.concepts_set.filter(mnemonic__exact=self.mnemonic).exists()
 
     @classmethod
     def persist_new(cls, data, user=None, create_initial_version=True):

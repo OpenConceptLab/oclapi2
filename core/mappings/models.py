@@ -265,7 +265,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         ).filter(version=HEAD).first()
 
     def is_existing_in_parent(self):
-        return self.parent.mappings_set.filter(mnemonic__iexact=self.mnemonic).exists()
+        return self.parent.mappings_set.filter(mnemonic__exact=self.mnemonic).exists()
 
     @classmethod
     def create_new_version_for(cls, instance, data, user):
@@ -427,7 +427,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
                 queryset = queryset.filter(cls.get_iexact_or_criteria('sources__version', container_version))
 
         if mapping:
-            queryset = queryset.filter(mnemonic__iexact=mapping)
+            queryset = queryset.filter(mnemonic__exact=mapping)
         if mapping_version:
             queryset = queryset.filter(cls.get_iexact_or_criteria('version', mapping_version))
         if is_latest:
