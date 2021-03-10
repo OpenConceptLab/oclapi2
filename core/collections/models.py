@@ -309,8 +309,8 @@ class Collection(ConceptContainerModel):
 
         from core.concepts.documents import ConceptDocument
         from core.mappings.documents import MappingDocument
-        ConceptDocument().update(Concept.objects.filter(uri__in=expressions))
-        MappingDocument().update(Mapping.objects.filter(uri__in=expressions))
+        self.batch_index(Concept.objects.filter(uri__in=expressions), ConceptDocument)
+        self.batch_index(Mapping.objects.filter(uri__in=expressions), MappingDocument)
 
     @staticmethod
     def __get_children_from_expressions(expressions):

@@ -643,7 +643,7 @@ class ConceptContainerModel(VersionedModel):
             self.concepts.set(concepts)
             if index:
                 from core.concepts.documents import ConceptDocument
-                ConceptDocument().update(self.concepts.all(), parallel=True)
+                self.batch_index(self.concepts, ConceptDocument)
 
     def seed_mappings(self, index=True):
         head = self.head
@@ -657,14 +657,25 @@ class ConceptContainerModel(VersionedModel):
             self.mappings.set(mappings)
             if index:
                 from core.mappings.documents import MappingDocument
-                MappingDocument().update(self.mappings.all(), parallel=True)
+                self.batch_index(self.mappings, MappingDocument)
+
+    @staticmethod
+    def batch_index(queryset, document):
+        count = queryset.count()
+        batch_size = 100
+        offset = 0
+        limit = batch_size
+        while offset < count:
+            document().update(queryset.all()[offset:limit], parallel=True)
+            offset = limit
+            limit += batch_size
 
     def index_children(self):
         from core.concepts.documents import ConceptDocument
-        ConceptDocument().update(self.concepts.all(), parallel=True)
-
         from core.mappings.documents import MappingDocument
-        MappingDocument().update(self.mappings.all(), parallel=True)
+
+        self.batch_index(self.concepts, ConceptDocument)
+        self.batch_index(self.mappings, MappingDocument)
 
     def add_processing(self, process_id):
         if self.id:
