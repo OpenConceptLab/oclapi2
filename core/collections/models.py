@@ -13,7 +13,7 @@ from core.collections.constants import (
     CONCEPT_PREFERRED_NAME_UNIQUE_PER_COLLECTION_AND_LOCALE, ALL_SYMBOL, COLLECTION_VERSION_TYPE)
 from core.collections.utils import is_concept, is_mapping
 from core.common.constants import (
-    DEFAULT_REPOSITORY_TYPE, CUSTOM_VALIDATION_SCHEMA_OPENMRS, ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT
+    DEFAULT_REPOSITORY_TYPE, ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT
 )
 from core.common.models import ConceptContainerModel
 from core.common.utils import reverse_resource, is_valid_uri, drop_version
@@ -122,7 +122,7 @@ class Collection(ConceptContainerModel):
         if reference.without_version in [reference.without_version for reference in self.references.all()]:
             raise ValidationError({reference.expression: [REFERENCE_ALREADY_EXISTS]})
 
-        if self.custom_validation_schema == CUSTOM_VALIDATION_SCHEMA_OPENMRS:
+        if self.is_openmrs_schema:
             if reference.concepts and reference.concepts.count() == 0:
                 return
 
@@ -225,8 +225,8 @@ class Collection(ConceptContainerModel):
 
             added = False
             if ref.concepts:
-                for concept in ref.concepts:
-                    if self.custom_validation_schema == CUSTOM_VALIDATION_SCHEMA_OPENMRS:
+                if self.is_openmrs_schema:
+                    for concept in ref.concepts:
                         try:
                             self.check_concept_uniqueness_in_collection_and_locale_by_name_attribute(
                                 concept, attribute='type__in', value=LOCALES_FULLY_SPECIFIED,
@@ -239,12 +239,14 @@ class Collection(ConceptContainerModel):
                         except Exception as ex:
                             errors[expression] = ex.messages if hasattr(ex, 'messages') else ex
                             continue
-                    collection_version.add_concept(concept)
+                        collection_version.add_concept(concept)
+                        added = True
+                else:
+                    collection_version.concepts.add(*ref.concepts.all())
                     added = True
             if ref.mappings:
-                for mapping in ref.mappings:
-                    collection_version.add_mapping(mapping)
-                    added = True
+                collection_version.mappings.add(*ref.mappings.all())
+                added = True
 
             if added:
                 collection_version.references.add(ref)

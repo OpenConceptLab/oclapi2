@@ -20,7 +20,7 @@ from .constants import (
     ACCESS_TYPE_CHOICES, DEFAULT_ACCESS_TYPE, NAMESPACE_REGEX,
     ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT, SUPER_ADMIN_USER_ID,
     HEAD, PERSIST_NEW_ERROR_MESSAGE, SOURCE_PARENT_CANNOT_BE_NONE, PARENT_RESOURCE_CANNOT_BE_NONE,
-    CREATOR_CANNOT_BE_NONE, CANNOT_DELETE_ONLY_VERSION)
+    CREATOR_CANNOT_BE_NONE, CANNOT_DELETE_ONLY_VERSION, CUSTOM_VALIDATION_SCHEMA_OPENMRS)
 from .tasks import handle_save, handle_m2m_changed, seed_children
 
 
@@ -343,6 +343,10 @@ class ConceptContainerModel(VersionedModel):
 
     class Meta:
         abstract = True
+
+    @property
+    def is_openmrs_schema(self):
+        return self.custom_validation_schema == CUSTOM_VALIDATION_SCHEMA_OPENMRS
 
     @property
     def active_concepts(self):

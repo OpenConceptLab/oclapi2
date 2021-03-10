@@ -1,7 +1,6 @@
 from django.conf import settings
 from django.core.exceptions import ValidationError
 
-from core.common.constants import CUSTOM_VALIDATION_SCHEMA_OPENMRS
 from core.sources.models import Source
 from .constants import (
     MUST_SPECIFY_TO_CONCEPT_OR_TO_SOURCE,
@@ -35,7 +34,7 @@ class MappingValidationMixin:
         if settings.DISABLE_VALIDATION:
             return
         try:
-            if self.parent.custom_validation_schema == CUSTOM_VALIDATION_SCHEMA_OPENMRS:
+            if self.parent.is_openmrs_schema:
                 custom_validator = OpenMRSMappingValidator(self)
                 custom_validator.validate()
         except Source.DoesNotExist:
