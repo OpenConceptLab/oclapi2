@@ -662,7 +662,7 @@ class ConceptContainerModel(VersionedModel):
     @staticmethod
     def batch_index(queryset, document):
         count = queryset.count()
-        batch_size = 100
+        batch_size = 1000
         offset = 0
         limit = batch_size
         while offset < count:
