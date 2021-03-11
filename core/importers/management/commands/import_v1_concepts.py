@@ -13,7 +13,7 @@ from core.users.models import UserProfile
 
 
 class Command(BaseCommand):
-    help = 'import v1 sources'
+    help = 'import v1 concepts'
 
     total = 0
     processed = 0
@@ -40,7 +40,7 @@ class Command(BaseCommand):
 
         for line in lines:
             data = json.loads(line)
-            original_data = data
+            original_data = data.copy()
             self.processed += 1
             data.pop('parent_type_id', None)
             created_at = data.pop('created_at')
@@ -100,7 +100,7 @@ class Command(BaseCommand):
                     concept.save()
                     self.created.append(original_data)
                 except Exception as ex:
-                    self.log("Failed: ")
+                    self.log("Failed: {}".format(data['uri']))
                     self.log(ex.args)
                     self.failed.append({**original_data, 'errors': ex.args})
 

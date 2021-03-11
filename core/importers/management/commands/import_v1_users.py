@@ -33,7 +33,7 @@ class Command(BaseCommand):
 
         for line in lines:
             data = json.loads(line)
-            original_data = data
+            original_data = data.copy()
             self.processed += 1
             data.pop('_id')
             _id = data.pop('user_id')

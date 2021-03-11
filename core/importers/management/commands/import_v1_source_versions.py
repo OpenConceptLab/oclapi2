@@ -4,14 +4,12 @@ from pprint import pprint
 from django.core.management import BaseCommand
 from pydash import get
 
-from core.common.constants import HEAD
-from core.orgs.models import Organization
 from core.sources.models import Source
 from core.users.models import UserProfile
 
 
 class Command(BaseCommand):
-    help = 'import v1 sources'
+    help = 'import v1 source versions'
 
     total = 0
     processed = 0
@@ -33,7 +31,7 @@ class Command(BaseCommand):
 
         for line in lines:
             data = json.loads(line)
-            original_data = data
+            original_data = data.copy()
             self.processed += 1
             _id = data.pop('_id')
             data['internal_reference_id'] = get(_id, '$oid')

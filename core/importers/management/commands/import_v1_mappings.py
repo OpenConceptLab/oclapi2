@@ -5,13 +5,14 @@ from pprint import pprint
 from django.core.management import BaseCommand
 from pydash import get
 
-from core.concepts.models import LocalizedText, Concept
+from core.concepts.models import Concept
+from core.mappings.models import Mapping
 from core.sources.models import Source
 from core.users.models import UserProfile
 
 
 class Command(BaseCommand):
-    help = 'import v1 concept versions'
+    help = 'import v1 mappings'
 
     total = 0
     processed = 0
@@ -20,18 +21,34 @@ class Command(BaseCommand):
     failed = []
     start_time = None
     elapsed_seconds = 0
+    sources = dict()
     users = dict()
+    concepts = dict()
 
     @staticmethod
     def log(msg):
         print("*******{}*******".format(msg))
 
+    def get_concept(self, internal_reference_id):
+        if internal_reference_id not in self.concepts:
+            self.concepts[internal_reference_id] = Concept.objects.filter(
+                internal_reference_id=internal_reference_id).first()
+
+        return self.concepts[internal_reference_id]
+
+    def get_source(self, internal_reference_id):
+        if internal_reference_id not in self.sources:
+            self.sources[internal_reference_id] = Source.objects.filter(
+                internal_reference_id=internal_reference_id).first()
+
+        return self.sources[internal_reference_id]
+
     def handle(self, *args, **options):
         self.start_time = time.time()
-        FILE_PATH = '/code/core/importers/v1_dump/data/exported_conceptversions.json'
+        FILE_PATH = '/code/core/importers/v1_dump/data/exported_mappings.json'
         lines = open(FILE_PATH, 'r').readlines()
 
-        self.log('STARTING CONCEPT VERSIONS IMPORT')
+        self.log('STARTING MAPPINGS IMPORT')
         self.total = len(lines)
         self.log('TOTAL: {}'.format(self.total))
 
@@ -39,27 +56,34 @@ class Command(BaseCommand):
             data = json.loads(line)
             original_data = data.copy()
             self.processed += 1
-            data.pop('parent_type_id', None)
             created_at = data.pop('created_at')
             updated_at = data.pop('updated_at')
-            created_by = data.get('created_by') or data.pop('version_created_by') or 'ocladmin'
-            updated_by = data.get('updated_by') or created_by
-            source_version_ids = data.pop('source_version_ids', None) or None
-
-            for attr in [
-                'root_version_id', 'parent_version_id', 'previous_version_id', 'root_version_id', 'version_created_by',
-                'versioned_object_type_id'
-            ]:
-                data.pop(attr, None)
-
-            data['comment'] = data.pop('update_comment', None)
+            created_by = data.get('created_by')
+            updated_by = data.get('updated_by')
             _id = data.pop('_id')
-            versioned_object_id = data.pop('versioned_object_id')
-            versioned_object = Concept.objects.filter(internal_reference_id=versioned_object_id).first()
-            mnemonic = versioned_object.mnemonic
-            descriptions_data = data.pop('descriptions', [])
-            names_data = data.pop('names', [])
-            data['version'] = data.pop('mnemonic')
+            parent_id = get(data.pop('parent_id'), '$oid')
+            mnemonic = data.get('mnemonic')
+            to_source_id = get(data.pop('to_source_id'), '$oid')
+            to_concept_id = get(data.pop('to_concept_id'), '$oid')
+            from_concept_id = get(data.pop('from_concept_id'), '$oid')
+            from_concept = self.get_concept(from_concept_id)
+            if from_concept:
+                data['from_concept'] = from_concept
+                data['from_concept_code'] = get(data, 'from_concept_code') or from_concept.mnemonic
+                data['from_source'] = from_concept.parent
+            if to_concept_id:
+                to_concept = self.get_concept(to_concept_id)
+                if to_concept:
+                    data['to_concept'] = to_concept
+                    data['to_source'] = to_concept.parent
+            elif to_source_id:
+                to_source = self.get_source(to_source_id)
+                if to_source:
+                    data['to_source'] = to_source
+
+            if get(data, 'from_concept', None) is None:
+                self.failed.append({**original_data, 'errors': ['From concept not found']})
+
             data['internal_reference_id'] = get(_id, '$oid')
             data['created_at'] = get(created_at, '$date')
             data['updated_at'] = get(updated_at, '$date')
@@ -83,24 +107,17 @@ class Command(BaseCommand):
                     data['updated_by'] = user
 
             self.log("Processing: {} ({}/{})".format(mnemonic, self.processed, self.total))
-            if Concept.objects.filter(uri=data['uri']).exists():
+            if Mapping.objects.filter(uri=data['uri']).exists():
                 self.existed.append(original_data)
             else:
                 try:
-                    source = versioned_object.parent
-                    names = self.get_locales(names_data)
-                    descriptions = self.get_locales(descriptions_data)
-                    concept = Concept.objects.create(
-                        **data, mnemonic=mnemonic, parent=source, versioned_object_id=versioned_object.id
-                    )
-                    concept.names.set(names)
-                    concept.descriptions.set(descriptions)
-                    source_versions = [source]
-                    if source_version_ids:
-                        source_versions += list(Source.objects.filter(internal_reference_id__in=source_version_ids))
-                    concept.sources.set(source_versions)
-                    concept.update_mappings()
-                    concept.save()
+                    source = self.get_source(parent_id)
+                    mapping = Mapping(**data, version=mnemonic, is_latest_version=False, parent=source)
+                    mapping.full_clean()
+                    mapping.save()
+                    mapping.versioned_object_id = mapping.id
+                    mapping.sources.add(source)
+                    mapping.save()
                     self.created.append(original_data)
                 except Exception as ex:
                     self.log("Failed: {}".format(data['uri']))
@@ -121,19 +138,3 @@ class Command(BaseCommand):
         if self.failed:
             self.log("Failed")
             pprint(self.failed)
-
-    @staticmethod
-    def get_locales(names_data):
-        names_data = names_data or []
-        names = []
-        for data in names_data:
-            params = data.copy()
-            internal_reference_id = params.pop('uuid')
-            params['internal_reference_id'] = internal_reference_id
-            qs = LocalizedText.objects.filter(internal_reference_id=internal_reference_id)
-            if qs.exists():
-                names.append(qs.first())
-            else:
-                names.append(LocalizedText.objects.create(**params))
-        return names
-
