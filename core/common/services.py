@@ -216,5 +216,8 @@ class RedisService:  # pragma: no cover
     def get(self, key):
         return self.conn.get(key)
 
+    def keys(self, pattern):
+        return self.conn.keys(pattern)
+
     def get_int(self, key):
         return int(self.conn.get(key).decode('utf-8'))
