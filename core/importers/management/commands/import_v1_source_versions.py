@@ -59,8 +59,9 @@ class Command(BaseCommand):
                 data['updated_by'] = qs.first()
             data['created_at'] = get(created_at, '$date')
             data['updated_at'] = get(updated_at, '$date')
-            data['organization'] = versioned_object.organization
-            data['user'] = versioned_object.user
+            data['organization_id'] = versioned_object.organization_id
+            data['user_id'] = versioned_object.user_id
+            data['source_type'] = versioned_object.source_type
 
             self.log("Processing: {} ({}/{})".format(version, self.processed, self.total))
             if Source.objects.filter(uri=data['uri']).exists():

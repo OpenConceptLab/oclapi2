@@ -5,11 +5,11 @@ from pprint import pprint
 from django.core.management import BaseCommand
 from pydash import get
 
-from core.concepts.models import Concept
+from core.collections.models import Collection
 
 
 class Command(BaseCommand):
-    help = 'import v1 concept ids'
+    help = 'import v1 collection/version ids'
 
     total = 0
     processed = 0
@@ -26,10 +26,12 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         self.start_time = time.time()
-        FILE_PATH = '/code/core/importers/v1_dump/data/exported_concept_ids.json'
+        FILE_PATH = '/code/core/importers/v1_dump/data/exported_collection_ids.json'
         lines = open(FILE_PATH, 'r').readlines()
+        FILE_PATH = '/code/core/importers/v1_dump/data/exported_collectionversion_ids.json'
+        lines += open(FILE_PATH, 'r').readlines()
 
-        self.log('STARTING CONCEPT IDS IMPORT')
+        self.log('STARTING COLLECTION/VERSION IDS IMPORT')
         self.total = len(lines)
         self.log('TOTAL: {}'.format(self.total))
 
@@ -40,7 +42,7 @@ class Command(BaseCommand):
                 _id = get(data.pop('_id'), '$oid')
                 uri = data.pop('uri')
                 self.processed += 1
-                updated = Concept.objects.filter(uri=uri).update(internal_reference_id=_id)
+                updated = Collection.objects.filter(uri=uri).update(internal_reference_id=_id)
                 if updated:
                     self.created.append(original_data)
                     self.log("Updated: {} ({}/{})".format(uri, self.processed, self.total))
@@ -60,6 +62,7 @@ class Command(BaseCommand):
                 self.elapsed_seconds, self.total, len(self.created), len(self.not_found), len(self.failed)
             )
         )
+
         if self.existed:
             self.log("Existed")
             pprint(self.existed)
