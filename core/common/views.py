@@ -529,11 +529,13 @@ class RootView(BaseAPIView):  # pragma: no cover
             if name in ['admin']:
                 continue
             route = str(pattern.pattern)
+            if route in ['v1-importers/']:
+                continue
             if route and name is None:
                 name = route.split('/')[0] + '_urls'
                 if name == 'user_urls':
                     name = 'current_user_urls'
-            data['routes'][name] = self.get_host_url() + '/' + str(pattern.pattern)
+            data['routes'][name] = self.get_host_url() + '/' + route
 
         data['routes'].pop('root')
 

@@ -15,6 +15,7 @@ omit =
     */feeds.py
     *test*
     core/middlewares/*
+    core/v1_importers/*
     *.css
     *.html
 concurrency=multiprocessing
