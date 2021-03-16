@@ -271,7 +271,8 @@ class UserListViewTest(OCLAPITestCase):
         self.assertEqual(response.data[0]['username'], 'ocladmin')
         self.assertEqual(response.data[0]['email'], self.superuser.email)
 
-    def test_post_201(self):
+    @patch('core.users.models.send_user_verification_email')
+    def test_post_201(self, job_mock):
         response = self.client.post(
             '/users/',
             dict(username='charles', name='Charles Dickens', password='scroooge1', email='charles@fiction.com'),
@@ -282,6 +283,7 @@ class UserListViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 201)
         self.assertIsNotNone(response.data['uuid'])
         self.assertIsNotNone(response.data['token'])
+        job_mock.delay.assert_called_once_with(int(response.data['uuid']))
 
         response = self.client.post(
             '/users/',
