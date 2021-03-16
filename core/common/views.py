@@ -11,7 +11,7 @@ from core.common.constants import SEARCH_PARAM, LIST_DEFAULT_LIMIT, CSV_DEFAULT_
     LIMIT_PARAM, NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY, INCLUDE_RETIRED_PARAM, VERBOSE_PARAM, HEAD
 from core.common.mixins import PathWalkerMixin
 from core.common.serializers import RootSerializer
-from core.common.utils import compact_dict_by_values, to_snake_case, to_camel_case
+from core.common.utils import compact_dict_by_values, to_snake_case, to_camel_case, parse_updated_since_param
 from core.concepts.permissions import CanViewParentDictionary, CanEditParentDictionary
 from core.orgs.constants import ORG_OBJECT_TYPE
 from core.users.constants import USER_OBJECT_TYPE
@@ -46,11 +46,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         return not include_retired
 
     def _should_include_private(self):
-        from core.users.documents import UserProfileDocument
-        if self.document_model in [UserProfileDocument]:
-            return True
-
-        return self.request.user.is_staff
+        return self.is_user_document() or self.request.user.is_staff
 
     def is_verbose(self):
         return self.request.query_params.get(VERBOSE_PARAM, False) in ['true', True]
@@ -286,6 +282,10 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
         return []
 
+    def is_user_document(self):
+        from core.users.documents import UserProfileDocument
+        return self.document_model == UserProfileDocument
+
     def is_owner_document_model(self):
         from core.orgs.documents import OrganizationDocument
         from core.users.documents import UserProfileDocument
@@ -329,6 +329,10 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                 results = results.filter(
                     "query_string", query=self.get_wildcard_search_string(), fields=self.get_searchable_fields()
                 )
+
+            updated_since = parse_updated_since_param(self.request.query_params)
+            if updated_since:
+                results = results.query('range', last_update={"gte": updated_since})
 
             if extras_fields:
                 for field, value in extras_fields.items():

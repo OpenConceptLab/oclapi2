@@ -12,6 +12,7 @@ from rest_framework.permissions import IsAdminUser, IsAuthenticated, AllowAny
 from rest_framework.response import Response
 
 from core.common.mixins import ListWithHeadersMixin
+from core.common.utils import parse_updated_since_param
 from core.common.views import BaseAPIView, BaseLogoView
 from core.orgs.models import Organization
 from core.users.constants import VERIFICATION_TOKEN_MISMATCH, VERIFY_EMAIL_MESSAGE
@@ -54,6 +55,12 @@ class UserBaseView(BaseAPIView):
     document_model = UserProfileDocument
     is_searchable = True
     default_qs_sort_attr = '-date_joined'
+
+    def get_queryset(self):
+        updated_since = parse_updated_since_param(self.request.query_params)
+        if updated_since:
+            self.queryset = self.queryset.filter(updated_at__gte=updated_since)
+        return self.queryset
 
 
 class UserLogoView(UserBaseView, BaseLogoView):

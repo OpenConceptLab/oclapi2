@@ -13,6 +13,7 @@ from core.common.constants import NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY
 from core.common.mixins import ListWithHeadersMixin
 from core.common.permissions import HasPrivateAccess, CanViewConceptDictionary
 from core.common.tasks import delete_organization
+from core.common.utils import parse_updated_since_param
 from core.common.views import BaseAPIView, BaseLogoView
 from core.orgs.constants import DELETE_ACCEPTED
 from core.orgs.documents import OrganizationDocument
@@ -43,15 +44,21 @@ class OrganizationListView(BaseAPIView,
         username = self.kwargs.get('user')
         if not username and self.user_is_self:
             username = get(self.request.user, 'username')
-        if username:
-            return Organization.get_by_username(username)
-        if self.request.user.is_anonymous:
-            return Organization.get_public()
-        if self.request.user.is_superuser or self.request.user.is_staff:
-            return Organization.objects.filter(is_active=True)
 
-        queryset = Organization.get_by_username(self.request.user.username) | Organization.get_public()
-        return queryset.distinct()
+        if username:
+            self.queryset = Organization.get_by_username(username)
+        elif self.request.user.is_anonymous:
+            self.queryset = Organization.get_public()
+        elif self.request.user.is_superuser or self.request.user.is_staff:
+            self.queryset = Organization.objects.filter(is_active=True)
+        else:
+            self.queryset = Organization.get_by_username(self.request.user.username) | Organization.get_public()
+
+        updated_since = parse_updated_since_param(self.request.query_params)
+        if updated_since:
+            self.queryset = self.queryset.filter(updated_at__gte=updated_since)
+
+        return self.queryset.distinct()
 
     def get_serializer_class(self):
         if self.request.method == 'GET' and self.is_verbose():

@@ -11,6 +11,7 @@ class UserProfileDocument(Document):
         name = 'user_profiles'
         settings = {'number_of_shards': 1, 'number_of_replicas': 0}
 
+    last_update = fields.DateField(attr='updated_at')
     date_joined = fields.DateField(attr='created_at')
     username = fields.KeywordField(attr='username', normalizer='lowercase')
     location = fields.KeywordField(attr='location', normalizer='lowercase')
