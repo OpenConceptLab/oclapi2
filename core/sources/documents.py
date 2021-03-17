@@ -2,7 +2,7 @@ from django_elasticsearch_dsl import Document, fields
 from django_elasticsearch_dsl.registries import registry
 from pydash import get
 
-from core.common.utils import jsonify_safe
+from core.common.utils import jsonify_safe, flatten_dict
 from core.sources.models import Source
 
 
@@ -49,6 +49,8 @@ class SourceDocument(Document):
 
         if instance.extras:
             value = jsonify_safe(instance.extras)
+            if isinstance(value, dict):
+                value = flatten_dict(value)
 
         return value or {}
 

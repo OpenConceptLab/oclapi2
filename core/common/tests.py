@@ -20,7 +20,7 @@ from core.common.utils import (
     compact_dict_by_values, to_snake_case, flower_get, task_exists, parse_bulk_import_task_id,
     to_camel_case,
     drop_version, is_versioned_uri, separate_version, to_parent_uri, jsonify_safe, es_get,
-    get_resource_class_from_resource_name)
+    get_resource_class_from_resource_name, flatten_dict)
 from core.concepts.models import Concept, LocalizedText
 from core.mappings.models import Mapping
 from core.orgs.models import Organization
@@ -637,6 +637,60 @@ class UtilsTest(OCLTestCase):
             self.assertEqual(get_resource_class_from_resource_name(name).__name__, 'Organization')
         for name in ['user', 'USer', 'user_profile', 'USERS']:
             self.assertEqual(get_resource_class_from_resource_name(name).__name__, 'UserProfile')
+
+    def test_flatten_dict(self):
+        self.assertEqual(flatten_dict(dict(foo='bar')), dict(foo='bar'))
+        self.assertEqual(flatten_dict(dict(foo=1)), dict(foo='1'))
+        self.assertEqual(flatten_dict(dict(foo=1.1)), dict(foo='1.1'))
+        self.assertEqual(flatten_dict(dict(foo=True)), dict(foo='True'))
+        self.assertEqual(
+            flatten_dict(dict(foo=True, bar=dict(tao=dict(te='ching')))),
+            dict(foo='True', bar__tao__te='ching')
+        )
+        # self.assertEqual(
+        #     flatten_dict(
+        #         {
+        #             'path': [
+        #                 {'text': 'MedicationStatement', 'linkid': '/MedicationStatement'},
+        #                 {'text': 'Family Planning Modern Method', 'linkid': '/MedicationStatement/method'}
+        #             ],
+        #             'header_concept_id': 'ModernMethod',
+        #             'questionnaire_choice_value': 'LA27919-2'
+        #         }
+        #     ),
+        #     dict(
+        #         path__0__text='MedicationStatement', path__0__linkid='/MedicationStatement',
+        #         path__1__text='Family Planning Modern Method', path__1__linkid='/MedicationStatement/method',
+        #         header_concept_id='ModernMethod', questionnaire_choice_value='LA27919-2'
+        #     )
+        # )
+        #
+        # self.assertEqual(
+        #     flatten_dict(
+        #         {
+        #             'path': [
+        #                 {'text': 'MedicationStatement', 'linkid': '/MedicationStatement'},
+        #                 {'text': 'Family Planning Modern Method', 'linkid': '/MedicationStatement/method'}
+        #             ],
+        #             'Applicable Periods': ['FY19', 'FY18'],
+        #             'foobar': [1],
+        #             'bar': [],
+        #             'header_concept_id': 'ModernMethod',
+        #             'questionnaire_choice_value': 'LA27919-2'
+        #         }
+        #     ),
+        #     {
+        #         'path__0__text': 'MedicationStatement',
+        #         'path__0__linkid': '/MedicationStatement',
+        #         'path__1__text': 'Family Planning Modern Method',
+        #         'path__1__linkid': '/MedicationStatement/method',
+        #         'Applicable Periods__0': 'FY19',
+        #         'Applicable Periods__1': 'FY18',
+        #         'foobar__0': '1',
+        #         'header_concept_id': 'ModernMethod',
+        #         'questionnaire_choice_value': 'LA27919-2',
+        #     }
+        # )
 
 
 class BaseModelTest(OCLTestCase):

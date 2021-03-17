@@ -4,6 +4,7 @@ import random
 import tempfile
 import uuid
 import zipfile
+from collections import MutableMapping  # pylint: disable=no-name-in-module
 from urllib import parse
 
 import requests
@@ -538,3 +539,21 @@ def get_content_type_from_resource_name(resource):
         return ContentType.objects.get_for_model(model)
 
     return None
+
+
+def flatten_dict(dikt, parent_key='', sep='__'):
+    items = []
+    for key, val in dikt.items():
+        new_key = parent_key + sep + key if parent_key else key
+
+        if isinstance(val, MutableMapping):
+            items.extend(flatten_dict(val, new_key, sep=sep).items())
+        # elif isinstance(val, list):
+        #     for i, _v in enumerate(val, start=0):
+        #         if isinstance(_v, dict):
+        #             items.extend(flatten_dict(_v, "{}__{}".format(key, i)).items())
+        #         else:
+        #             items.append(("{}__{}".format(key, i), str(_v)))
+        else:
+            items.append((new_key, str(val)))
+    return dict(items)
