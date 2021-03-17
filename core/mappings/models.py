@@ -112,17 +112,17 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
 
     def get_to_source(self):
         if self.to_source_id:
-            return self.to_source
+            return get(self, 'to_source')
         if self.to_concept_id:
-            return self.to_concept.parent
+            return get(self, 'to_concept.parent')
 
         return None
 
     def get_from_source(self):
         if self.from_source_id:
-            return self.from_source
+            return get(self, 'from_source')
         if self.from_concept_id:
-            return self.from_concept.parent
+            return get(self, 'from_concept.parent')
 
         return None
 
