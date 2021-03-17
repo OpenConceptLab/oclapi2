@@ -68,6 +68,10 @@ class BaseModel(models.Model):
     def app_name(self):
         return self.__module__.split('.')[1]
 
+    def index(self):
+        if not get(settings, 'TEST_MODE', False):
+            handle_save.delay(self.app_name, self.model_name, self.id)
+
     def save(self, force_insert=False, force_update=False, using=None, update_fields=None):
         if not self.internal_reference_id and self.id:
             self.internal_reference_id = str(self.id)

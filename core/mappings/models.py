@@ -352,7 +352,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         parent = obj.parent
         parent_head = parent.head
         persisted = False
-        latest_version = None
+        prev_latest_version = None
         try:
             with transaction.atomic():
                 cls.pause_indexing()
@@ -364,19 +364,20 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
                     obj.save()
                     obj.update_versioned_object()
                     versioned_object = obj.versioned_object
-                    latest_version = versioned_object.versions.exclude(id=obj.id).filter(is_latest_version=True).first()
-                    if latest_version:
-                        latest_version.is_latest_version = False
-                        latest_version.save()
+                    prev_latest_version = versioned_object.versions.exclude(id=obj.id).filter(
+                        is_latest_version=True).first()
+                    if prev_latest_version:
+                        prev_latest_version.is_latest_version = False
+                        prev_latest_version.save()
 
                     obj.sources.set(compact([parent, parent_head]))
                     persisted = True
                     cls.resume_indexing()
 
                     def index_all():
-                        if latest_version:
-                            latest_version.save()
-                        obj.save()
+                        if prev_latest_version:
+                            prev_latest_version.index()
+                        obj.index()
 
                     transaction.on_commit(index_all)
         except ValidationError as err:
@@ -386,9 +387,9 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
             if not persisted:
                 if obj.id:
                     obj.sources.remove(parent_head)
-                    if latest_version:
-                        latest_version.is_latest_version = True
-                        latest_version.save()
+                    if prev_latest_version:
+                        prev_latest_version.is_latest_version = True
+                        prev_latest_version.save()
                     obj.delete()
                 errors['non_field_errors'] = [PERSIST_CLONE_ERROR]
 

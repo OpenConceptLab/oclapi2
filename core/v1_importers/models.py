@@ -516,7 +516,7 @@ class V1ConceptVersionImporter(V1BaseImporter):
                     source_versions += list(Source.objects.filter(internal_reference_id__in=source_version_ids))
                 concept.sources.set(source_versions)
                 concept.update_mappings()
-                concept.save()
+                concept.index()
                 self.created.append(original_data)
             except Exception as ex:
                 self.log("Failed: {}".format(data['uri']))

@@ -307,10 +307,10 @@ class CollectionReferencesView(
         for ref in added_references:
             if ref.concepts:
                 for concept in ref.concepts:
-                    concept.save()
+                    concept.index()
             if ref.mappings:
                 for mapping in ref.mappings:
-                    mapping.save()
+                    mapping.index()
 
         return Response(response, status=status.HTTP_200_OK)
 

@@ -475,7 +475,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         parent = obj.parent
         parent_head = parent.head
         persisted = False
-        latest_version = None
+        prev_latest_version = None
         try:
             with transaction.atomic():
                 cls.pause_indexing()
@@ -489,19 +489,20 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                     obj.clean()  # clean here to validate locales that can only be saved after obj is saved
                     obj.update_versioned_object()
                     versioned_object = obj.versioned_object
-                    latest_version = versioned_object.versions.exclude(id=obj.id).filter(is_latest_version=True).first()
-                    if latest_version:
-                        latest_version.is_latest_version = False
-                        latest_version.save()
+                    prev_latest_version = versioned_object.versions.exclude(id=obj.id).filter(
+                        is_latest_version=True).first()
+                    if prev_latest_version:
+                        prev_latest_version.is_latest_version = False
+                        prev_latest_version.save()
 
                     obj.sources.set(compact([parent, parent_head]))
                     persisted = True
                     cls.resume_indexing()
 
                     def index_all():
-                        if latest_version:
-                            latest_version.save()
-                        obj.save()
+                        if prev_latest_version:
+                            prev_latest_version.index()
+                        obj.index()
 
                     transaction.on_commit(index_all)
         except ValidationError as err:
@@ -509,9 +510,9 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         finally:
             cls.resume_indexing()
             if not persisted:
-                if latest_version:
-                    latest_version.is_latest_version = True
-                    latest_version.save()
+                if prev_latest_version:
+                    prev_latest_version.is_latest_version = True
+                    prev_latest_version.save()
                 if obj.id:
                     obj.remove_locales()
                     obj.sources.remove(parent_head)
