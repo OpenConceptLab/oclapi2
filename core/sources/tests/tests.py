@@ -249,6 +249,48 @@ class SourceTest(OCLTestCase):
         self.assertEqual(source.last_concept_update, concept.updated_at)
         self.assertEqual(source.last_child_update, source.last_concept_update)
 
+    def test_new_version_should_not_affect_last_child_update(self):
+        source = OrganizationSourceFactory(version=HEAD)
+        source_updated_at = source.updated_at
+        source_last_child_update = source.last_child_update
+
+        self.assertIsNotNone(source.id)
+        self.assertEqual(source_updated_at, source_last_child_update)
+
+        concept = ConceptFactory(sources=[source], parent=source)
+        source.refresh_from_db()
+
+        self.assertEqual(source.updated_at, source_updated_at)
+        self.assertEqual(source.last_child_update, concept.updated_at)
+        self.assertNotEqual(source.last_child_update, source_updated_at)
+        self.assertNotEqual(source.last_child_update, source_last_child_update)
+        source_last_child_update = source.last_child_update
+
+        source_v1 = OrganizationSourceFactory.build(version='v1', mnemonic=source.mnemonic, organization=source.parent)
+        Source.persist_new_version(source_v1, source.created_by)
+        source_v1 = source.versions.filter(version='v1').first()
+        source.refresh_from_db()
+
+        self.assertIsNotNone(source_v1.id)
+        self.assertEqual(source.last_child_update, source_last_child_update)
+        self.assertEqual(source.updated_at, source_updated_at)
+
+        source_v1_updated_at = source_v1.updated_at
+        source_v1_last_child_update = source_v1.last_child_update
+
+        source_v2 = OrganizationSourceFactory.build(version='v2', mnemonic=source.mnemonic, organization=source.parent)
+        Source.persist_new_version(source_v2, source.created_by)
+        source_v2 = source.versions.filter(version='v2').first()
+        source.refresh_from_db()
+        source_v1.refresh_from_db()
+
+        self.assertIsNotNone(source_v2.id)
+
+        self.assertEqual(source.last_child_update, source_last_child_update)
+        self.assertEqual(source.updated_at, source_updated_at)
+        self.assertEqual(source_v1.last_child_update, source_v1_last_child_update)
+        self.assertEqual(source_v1.updated_at, source_v1_updated_at)
+
     def test_source_active_inactive_should_affect_children(self):
         source = OrganizationSourceFactory(is_active=True)
         concept = ConceptFactory(parent=source, is_active=True)
