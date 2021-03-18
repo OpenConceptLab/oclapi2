@@ -5,12 +5,12 @@ from django.conf import settings
 from django.core.mail import EmailMessage
 from django.http import Http404
 from django.shortcuts import get_object_or_404
+from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
 from elasticsearch_dsl import Q
 from pydash import get
 from rest_framework import response, generics, status
 from rest_framework.generics import ListAPIView, RetrieveUpdateDestroyAPIView
-from rest_framework.parsers import MultiPartParser
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -19,7 +19,6 @@ from core.common.constants import SEARCH_PARAM, LIST_DEFAULT_LIMIT, CSV_DEFAULT_
     LIMIT_PARAM, NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY, INCLUDE_RETIRED_PARAM, VERBOSE_PARAM, HEAD
 from core.common.mixins import PathWalkerMixin
 from core.common.serializers import RootSerializer
-from core.common.swagger_parameters import feedback_message_param, feedback_url_param
 from core.common.utils import compact_dict_by_values, to_snake_case, to_camel_case, parse_updated_since_param
 from core.concepts.permissions import CanViewParentDictionary, CanEditParentDictionary
 from core.orgs.constants import ORG_OBJECT_TYPE
@@ -566,12 +565,17 @@ class BaseLogoView:
 
 class FeedbackView(APIView):  # pragma: no cover
     permission_classes = (AllowAny, )
-    parser_classes = (MultiPartParser,)
 
     @staticmethod
-    @swagger_auto_schema(manual_parameters=[feedback_message_param, feedback_url_param])
+    @swagger_auto_schema(request_body=openapi.Schema(
+        type=openapi.TYPE_OBJECT,
+        properties={
+            'description': openapi.Schema(type=openapi.TYPE_STRING, description='Feedback/Suggestion/Complaint'),
+            'url': openapi.Schema(type=openapi.TYPE_STRING, description='Specific URL to point'),
+        }
+    ))
     def post(request):
-        message = request.data.get('message', '') or ''
+        message = request.data.get('description', '') or ''
         url = request.data.get('url', False)
 
         if not message and not url:
