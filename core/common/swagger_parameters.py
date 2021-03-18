@@ -70,6 +70,12 @@ file_url_param = openapi.Parameter(
 apps_param = openapi.Parameter(
     'apps', openapi.IN_FORM, description="App Names (comma separated)", type=openapi.TYPE_STRING
 )
+feedback_message_param = openapi.Parameter(
+    'message', openapi.IN_FORM, description="Feedback/Suggestion/Complaint", type=openapi.TYPE_STRING
+)
+feedback_url_param = openapi.Parameter(
+    'url', openapi.IN_FORM, description="Specific URL to point", type=openapi.TYPE_STRING
+)
 ids_param = openapi.Parameter(
     'ids', openapi.IN_FORM, description="Resource Ids", type=openapi.TYPE_STRING
 )
