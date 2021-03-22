@@ -577,6 +577,8 @@ class FeedbackView(APIView):  # pragma: no cover
     def post(request):
         message = request.data.get('description', '') or ''
         url = request.data.get('url', False)
+        name = request.data.get('name', None)
+        email = request.data.get('email', None)
 
         if not message and not url:
             return Response(status=status.HTTP_400_BAD_REQUEST)
@@ -590,8 +592,8 @@ class FeedbackView(APIView):  # pragma: no cover
             username = user.username
             email = user.email
         else:
-            username = 'Guest'
-            email = None
+            username = name or 'Guest'
+            email = email or None
 
         message += '\n\n' + 'Reported By: ' + username
         subject = "[{env}] [FEEDBACK] From: {user}".format(env=settings.ENV.upper(), user=username)
