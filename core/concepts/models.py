@@ -122,6 +122,21 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     WAS_RETIRED = CONCEPT_WAS_RETIRED
     WAS_UNRETIRED = CONCEPT_WAS_UNRETIRED
 
+    es_fields = {
+        'id': {'sortable': True, 'filterable': True},
+        'name': {'sortable': True, 'filterable': True, 'exact': True},
+        'last_update': {'sortable': True, 'filterable': False, 'default': 'desc'},
+        'is_latest_version': {'sortable': False, 'filterable': True},
+        'concept_class': {'sortable': True, 'filterable': True, 'facet': True, 'exact': True},
+        'datatype': {'sortable': True, 'filterable': True, 'facet': True, 'exact': True},
+        'locale': {'sortable': False, 'filterable': True, 'facet': True, 'exact': True},
+        'retired': {'sortable': False, 'filterable': True, 'facet': True},
+        'source': {'sortable': True, 'filterable': True, 'facet': True, 'exact': True},
+        'collection': {'sortable': False, 'filterable': True, 'facet': True},
+        'owner': {'sortable': True, 'filterable': True, 'facet': True, 'exact': True},
+        'owner_type': {'sortable': False, 'filterable': True, 'facet': True, 'exact': True},
+    }
+
     @property
     def concept(self):  # for url kwargs
         return self.mnemonic  # pragma: no cover

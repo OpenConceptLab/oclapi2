@@ -30,28 +30,7 @@ class MappingBaseView(SourceChildCommonBaseView):
     queryset = Mapping.objects.filter(is_active=True)
     document_model = MappingDocument
     facet_class = MappingSearch
-    es_fields = {
-        'id': {'sortable': True, 'filterable': True},
-        'last_update': {'sortable': True, 'filterable': False, 'facet': False, 'default': 'desc'},
-        'concept': {'sortable': False, 'filterable': True, 'facet': False, 'exact': True},
-        'from_concept': {'sortable': False, 'filterable': True, 'facet': True, 'exact': True},
-        'to_concept': {'sortable': False, 'filterable': True, 'facet': True, 'exact': True},
-        'retired': {'sortable': False, 'filterable': True, 'facet': True},
-        'map_type': {'sortable': True, 'filterable': True, 'facet': True, 'exact': True},
-        'source': {'sortable': True, 'filterable': True, 'facet': True, 'exact': True},
-        'collection': {'sortable': False, 'filterable': True, 'facet': True},
-        'owner': {'sortable': True, 'filterable': True, 'facet': True, 'exact': True},
-        'owner_type': {'sortable': False, 'filterable': True, 'facet': True},
-        'concept_source': {'sortable': False, 'filterable': True, 'facet': True, 'exact': True},
-        'from_concept_source': {'sortable': False, 'filterable': True, 'facet': True, 'exact': True},
-        'to_concept_source': {'sortable': False, 'filterable': True, 'facet': True, 'exact': True},
-        'concept_owner': {'sortable': False, 'filterable': True, 'facet': True, 'exact': True},
-        'from_concept_owner': {'sortable': False, 'filterable': True, 'facet': True, 'exact': True},
-        'to_concept_owner': {'sortable': False, 'filterable': True, 'facet': True, 'exact': True},
-        'concept_owner_type': {'sortable': False, 'filterable': True, 'facet': True},
-        'from_concept_owner_type': {'sortable': False, 'filterable': True, 'facet': True},
-        'to_concept_owner_type': {'sortable': False, 'filterable': True, 'facet': True},
-    }
+    es_fields = Mapping.es_fields
 
     @staticmethod
     def get_detail_serializer(obj, data=None, files=None, partial=False):

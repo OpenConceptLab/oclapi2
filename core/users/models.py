@@ -30,6 +30,13 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
     verification_token = models.TextField(null=True, blank=True)
     mnemonic_attr = 'username'
 
+    es_fields = {
+        'username': {'sortable': True, 'filterable': True, 'exact': True},
+        'date_joined': {'sortable': True, 'default': 'asc', 'filterable': False},
+        'company': {'sortable': True, 'filterable': True, 'exact': True},
+        'location': {'sortable': True, 'filterable': True, 'exact': True},
+    }
+
     @property
     def user(self):
         return self.username

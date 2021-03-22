@@ -38,20 +38,7 @@ class ConceptBaseView(SourceChildCommonBaseView):
     queryset = Concept.objects.filter(is_active=True)
     document_model = ConceptDocument
     facet_class = ConceptSearch
-    es_fields = {
-        'id': {'sortable': True, 'filterable': True},
-        'name': {'sortable': True, 'filterable': True, 'exact': True},
-        'last_update': {'sortable': True, 'filterable': False, 'default': 'desc'},
-        'is_latest_version': {'sortable': False, 'filterable': True},
-        'concept_class': {'sortable': True, 'filterable': True, 'facet': True, 'exact': True},
-        'datatype': {'sortable': True, 'filterable': True, 'facet': True, 'exact': True},
-        'locale': {'sortable': False, 'filterable': True, 'facet': True, 'exact': True},
-        'retired': {'sortable': False, 'filterable': True, 'facet': True},
-        'source': {'sortable': True, 'filterable': True, 'facet': True, 'exact': True},
-        'collection': {'sortable': False, 'filterable': True, 'facet': True},
-        'owner': {'sortable': True, 'filterable': True, 'facet': True, 'exact': True},
-        'owner_type': {'sortable': False, 'filterable': True, 'facet': True, 'exact': True},
-    }
+    es_fields = Concept.es_fields
     default_filters = dict(is_active=True)
 
     def get_detail_serializer(self, obj, data=None, files=None, partial=False):

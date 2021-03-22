@@ -15,6 +15,13 @@ class Organization(BaseResourceModel, SourceContainerMixin):
         db_table = 'organizations'
 
     OBJECT_TYPE = ORG_OBJECT_TYPE
+    es_fields = {
+        'name': {'sortable': True, 'filterable': True, 'exact': True},
+        'mnemonic': {'sortable': True, 'filterable': True, 'exact': True},
+        'last_update': {'sortable': True, 'default': 'desc', 'filterable': False},
+        'company': {'sortable': False, 'filterable': True, 'exact': True},
+        'location': {'sortable': False, 'filterable': True, 'exact': True},
+    }
 
     name = models.TextField()
     company = models.TextField(null=True, blank=True)

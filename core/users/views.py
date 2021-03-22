@@ -46,12 +46,7 @@ class UserBaseView(BaseAPIView):
     pk_field = 'username'
     model = UserProfile
     queryset = UserProfile.objects.filter(is_active=True)
-    es_fields = {
-        'username': {'sortable': True, 'filterable': True, 'exact': True},
-        'date_joined': {'sortable': True, 'default': 'asc', 'filterable': False},
-        'company': {'sortable': True, 'filterable': True, 'exact': True},
-        'location': {'sortable': True, 'filterable': True, 'exact': True},
-    }
+    es_fields = UserProfile.es_fields
     document_model = UserProfileDocument
     is_searchable = True
     default_qs_sort_attr = '-date_joined'

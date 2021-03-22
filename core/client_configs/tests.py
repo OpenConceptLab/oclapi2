@@ -71,6 +71,29 @@ class ClientConfigTest(OCLTestCase):
         client_config.config = dict(tabs=[dict(foo='bar', default=True), dict(foo='bar', default=False)])
         client_config.full_clean()
 
+        client_config.config = dict(
+            tabs=[dict(foo='bar', default=True, sortAsc='foo', sortDesc='bar', type='concepts'),
+                  dict(foo='bar', default=False)]
+        )
+        with self.assertRaises(ValidationError) as ex:
+            client_config.full_clean()
+
+        self.assertEqual(
+            ex.exception.message_dict, dict(tabs=['Sort either by asc (sortAsc) or desc (sortDesc) order.'])
+        )
+
+        client_config.config = dict(tabs=[dict(foo='bar', default=True, sortAsc='foo', type='concepts'),
+                                          dict(foo='bar', default=False)])
+        with self.assertRaises(ValidationError) as ex:
+            client_config.full_clean()
+
+        self.assertEqual(ex.exception.message_dict, dict(tabs=['Unsupported sort attribute.']))
+
+        client_config.config = dict(
+            tabs=[dict(foo='bar', default=True, sortAsc='id', type='concepts'), dict(foo='bar', default=False)]
+        )
+        client_config.full_clean()
+
     def test_format_home_config_tabs(self):
         client_config = ClientConfig(config=dict(tabs=[dict(fields=[])]))
         client_config.format_home_config_tabs()

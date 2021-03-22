@@ -11,6 +11,18 @@ from core.sources.constants import SOURCE_TYPE, SOURCE_VERSION_TYPE
 
 
 class Source(ConceptContainerModel):
+    es_fields = {
+        'source_type': {'sortable': True, 'filterable': True, 'facet': True, 'exact': True},
+        'mnemonic': {'sortable': True, 'filterable': True, 'exact': True},
+        'name': {'sortable': True, 'filterable': True, 'exact': True},
+        'last_update': {'sortable': True, 'filterable': False, 'default': 'desc'},
+        'locale': {'sortable': False, 'filterable': True, 'facet': True},
+        'owner': {'sortable': True, 'filterable': True, 'facet': True, 'exact': True},
+        'owner_type': {'sortable': False, 'filterable': True, 'facet': True},
+        'custom_validation_schema': {'sortable': False, 'filterable': True},
+        'canonical_url': {'sortable': True, 'filterable': True},
+    }
+
     class Meta:
         db_table = 'sources'
         constraints = [

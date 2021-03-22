@@ -27,6 +27,17 @@ from core.mappings.views import MappingListView
 class Collection(ConceptContainerModel):
     OBJECT_TYPE = COLLECTION_TYPE
     OBJECT_VERSION_TYPE = COLLECTION_VERSION_TYPE
+    es_fields = {
+        'collection_type': {'sortable': True, 'filterable': True, 'facet': True, 'exact': True},
+        'mnemonic': {'sortable': True, 'filterable': True, 'exact': True},
+        'name': {'sortable': True, 'filterable': True, 'exact': True},
+        'last_update': {'sortable': True, 'filterable': False, 'default': 'desc'},
+        'locale': {'sortable': False, 'filterable': True, 'facet': True},
+        'owner': {'sortable': True, 'filterable': True, 'facet': True, 'exact': True},
+        'owner_type': {'sortable': False, 'filterable': True, 'facet': True},
+        'custom_validation_schema': {'sortable': False, 'filterable': True},
+        'canonical_url': {'sortable': True, 'filterable': True},
+    }
 
     class Meta:
         db_table = 'collections'
