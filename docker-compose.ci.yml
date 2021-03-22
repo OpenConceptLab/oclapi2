@@ -6,6 +6,7 @@ services:
       - ENVIRONMENT=ci
     volumes:
       - .:/code
+    mem_limit: 400m
   celery:
     build: .
     volumes:
