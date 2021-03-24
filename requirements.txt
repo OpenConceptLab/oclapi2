@@ -17,8 +17,7 @@ celery[redis]==4.4.7
 celery_once==3.0.1
 flower==0.9.5
 redis==3.5.3
-kombu==4.6.11
-###
+kombu==4.5.0
 django-elasticsearch-dsl==7.1.4
 drf-yasg==1.17.1
 git+https://github.com/snyaggarwal/django-queryset-csv
