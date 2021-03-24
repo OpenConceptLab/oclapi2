@@ -6,10 +6,11 @@ from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
 from rest_framework import status
 from rest_framework.parsers import MultiPartParser
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from core.celery import app
 from core.common.services import RedisService
 from core.common.swagger_parameters import update_if_exists_param, task_param, result_param, username_param, \
     file_upload_param, file_url_param, parallel_threads_param
@@ -82,7 +83,11 @@ class BulkImportFileURLView(APIView):
 
 
 class BulkImportView(APIView):
-    permission_classes = (IsAuthenticated,)
+    def get_permissions(self):
+        if self.request.method == 'DELETE':
+            return [IsAdminUser(), ]
+
+        return [IsAuthenticated(), ]
 
     @swagger_auto_schema(
         manual_parameters=[update_if_exists_param],
@@ -161,6 +166,31 @@ class BulkImportView(APIView):
                     )
 
         return Response(tasks)
+
+    @staticmethod
+    @swagger_auto_schema(request_body=openapi.Schema(
+        type=openapi.TYPE_OBJECT,
+        properties={
+            'task_id': openapi.Schema(
+                type=openapi.TYPE_STRING, description='Task Id to be terminated (mandatory)',
+            ),
+            'signal': openapi.Schema(
+                type=openapi.TYPE_STRING, description='Kill Signal', default='SIGKILL',
+            ),
+        }
+    ))
+    def delete(request, import_queue=None):  # pylint: disable=unused-argument
+        task_id = request.data.get('task_id', None)
+        signal = request.data.get('signal', None) or 'SIGKILL'
+        if not task_id:
+            return Response(status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            app.control.revoke(task_id, terminate=True, signal=signal)
+        except Exception as ex:
+            return Response(dict(errors=ex.args), status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class BulkImportParallelInlineView(APIView):  # pragma: no cover
