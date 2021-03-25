@@ -270,23 +270,31 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     def get_extras_searchable_fields_from_query_params(self):
         query_params = self.request.query_params.dict()
 
-        return {
-            k: v for k, v in query_params.items() if k.startswith(
-                'extras.') and not k.startswith('extras.exists') and not k.startswith('extras.exact')
-        }
+        result = {}
+
+        for key, value in query_params.items():
+            if key.startswith('extras.') and not key.startswith('extras.exists') and not key.startswith('extras.exact'):
+                parts = key.split('extras.')
+                result['extras.' + parts[1].replace('.', '__')] = value
+
+        return result
 
     def get_extras_exact_fields_from_query_params(self):
         query_params = self.request.query_params.dict()
+        result = {}
+        for key, value in query_params.items():
+            if key.startswith('extras.exact'):
+                new_key = key.replace('.exact', '')
+                parts = new_key.split('extras.')
+                result['extras.' + parts[1].replace('.', '__')] = value
 
-        return {
-            k.replace('.exact', ''): v for k, v in query_params.items() if k.startswith('extras.exact')
-        }
+        return result
 
     def get_extras_fields_exists_from_query_params(self):
         extras_exists_fields = self.request.query_params.dict().get('extras.exists', None)
 
         if extras_exists_fields:
-            return extras_exists_fields.split(',')
+            return [field.replace('.', '__') for field in extras_exists_fields.split(',')]
 
         return []
 
@@ -354,7 +362,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                     )
             if extras_fields_exact:
                 for field, value in extras_fields_exact.items():
-                    results = results.query("match", **{field: value})
+                    results = results.query("match", **{field: value}, _expand__to_dot=False)
 
             if self._should_exclude_retired_from_search_results():
                 results = results.query('match', retired=False)
