@@ -1,6 +1,5 @@
 from django.contrib.contenttypes.fields import GenericForeignKey
 from django.contrib.contenttypes.models import ContentType
-from django.contrib.postgres.fields import JSONField
 from django.core.exceptions import ValidationError
 from django.db import models
 from pydash import get
@@ -17,7 +16,7 @@ class ClientConfig(models.Model):
     name = models.TextField(default='View Configuration')
     type = models.CharField(choices=CONFIG_TYPES, default=HOME_TYPE, max_length=255)
     is_default = models.BooleanField(default=False)
-    config = JSONField()
+    config = models.JSONField()
     resource_type = models.ForeignKey(ContentType, on_delete=models.CASCADE)
     resource_id = models.PositiveIntegerField()
     resource = GenericForeignKey('resource_type', 'resource_id')

@@ -1,7 +1,7 @@
 from celery.result import AsyncResult
 from django.conf import settings
 from django.contrib.contenttypes.fields import GenericRelation
-from django.contrib.postgres.fields import JSONField, ArrayField
+from django.contrib.postgres.fields import ArrayField
 from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator
 from django.db import models, IntegrityError
@@ -54,7 +54,7 @@ class BaseModel(models.Model):
         default=SUPER_ADMIN_USER_ID,
     )
     is_active = models.BooleanField(default=True)
-    extras = JSONField(null=True, blank=True, default=dict)
+    extras = models.JSONField(null=True, blank=True, default=dict)
     uri = models.TextField(null=True, blank=True, db_index=True)
     extras_have_been_encoded = False
     extras_have_been_decoded = False
@@ -332,9 +332,9 @@ class ConceptContainerModel(VersionedModel):
     _background_process_ids = ArrayField(models.CharField(max_length=255), default=list, null=True, blank=True)
 
     canonical_url = models.URLField(null=True, blank=True)
-    identifier = JSONField(null=True, blank=True, default=dict)
-    contact = JSONField(null=True, blank=True, default=dict)
-    jurisdiction = JSONField(null=True, blank=True, default=dict)
+    identifier = models.JSONField(null=True, blank=True, default=dict)
+    contact = models.JSONField(null=True, blank=True, default=dict)
+    jurisdiction = models.JSONField(null=True, blank=True, default=dict)
     publisher = models.TextField(null=True, blank=True)
     purpose = models.TextField(null=True, blank=True)
     copyright = models.TextField(null=True, blank=True)
@@ -343,7 +343,7 @@ class ConceptContainerModel(VersionedModel):
     client_configs = GenericRelation(
         'client_configs.ClientConfig', object_id_field='resource_id', content_type_field='resource_type'
     )
-    snapshot = JSONField(null=True, blank=True, default=dict)
+    snapshot = models.JSONField(null=True, blank=True, default=dict)
 
     class Meta:
         abstract = True
