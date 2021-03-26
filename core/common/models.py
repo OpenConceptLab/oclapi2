@@ -237,7 +237,7 @@ class BaseResourceModel(BaseModel, CommonLogoModel):
 
 class VersionedModel(BaseResourceModel):
     version = models.CharField(max_length=255)
-    released = models.NullBooleanField(default=False, blank=True, null=True)
+    released = models.BooleanField(default=False, blank=True, null=True)
     retired = models.BooleanField(default=False)
     is_latest_version = models.BooleanField(default=True)
     name = models.TextField()
