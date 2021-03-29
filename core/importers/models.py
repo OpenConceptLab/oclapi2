@@ -197,6 +197,8 @@ class SourceImporter(BaseResourceImporter):
     allowed_fields = [
         "id", "short_code", "name", "full_name", "description", "source_type", "custom_validation_schema",
         "public_access", "default_locale", "supported_locales", "website", "extras", "external_id",
+        'canonical_url', 'identifier', 'contact', 'jurisdiction', 'publisher', 'purpose', 'copyright',
+        'revision_date', 'text', 'content_type',
     ]
 
     def exists(self):
@@ -272,6 +274,8 @@ class CollectionImporter(BaseResourceImporter):
     allowed_fields = [
         "id", "short_code", "name", "full_name", "description", "collection_type", "custom_validation_schema",
         "public_access", "default_locale", "supported_locales", "website", "extras", "external_id",
+        'canonical_url', 'identifier', 'contact', 'jurisdiction', 'publisher', 'purpose', 'copyright',
+        'revision_date', 'text', 'immutable',
     ]
 
     def exists(self):
