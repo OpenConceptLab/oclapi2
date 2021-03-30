@@ -318,7 +318,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         return self.document_model in [SourceDocument, CollectionDocument]
 
     @property
-    def __search_results(self):  # pylint: disable=too-many-branches
+    def __search_results(self):  # pylint: disable=too-many-branches,too-many-statements
         results = None
 
         if self.should_perform_es_search():
