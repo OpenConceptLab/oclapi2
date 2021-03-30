@@ -372,9 +372,11 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             if not include_private:
                 from core.orgs.documents import OrganizationDocument
                 if self.document_model in [OrganizationDocument] and self.request.user.is_authenticated:
-                    results.query(Q('match', public_can_view=False) & Q('match', user=self.request.user.username))
+                    results = results.query(Q('match', public_can_view=False) & Q('match', user=self.request.user.username))
                 elif self.is_concept_container_document_model() and self.request.user.is_authenticated:
-                    results.query(Q('match', public_can_view=False) & Q('match', created_by=self.request.user.username))
+                    results = results.query(Q('match', public_can_view=False) & Q('match', created_by=self.request.user.username))
+                else:
+                    results = results.query('match', public_can_view=True)
 
             if self.is_owner_document_model():
                 kwargs_filters = self.kwargs.copy()
