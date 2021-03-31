@@ -290,7 +290,8 @@ class V1UserImporter(V1BaseImporter):
                 else:
                     self.failed.append(original_data)
             except Exception as ex:
-                self.failed.append({**original_data, 'errors': ex.args})
+                args = get(ex, 'message_dict') or str(ex)
+                self.failed.append({**original_data, 'errors': args})
 
     def after_run(self):
         populate_indexes.delay(['users', 'orgs'])
@@ -449,8 +450,9 @@ class V1ConceptImporter(V1BaseImporter):
                 self.created.append(original_data)
             except Exception as ex:
                 self.log("Failed: {}".format(data['uri']))
-                self.log(ex.args)
-                self.failed.append({**original_data, 'errors': ex.args})
+                args = get(ex, 'message_dict') or str(ex)
+                self.log(args)
+                self.failed.append({**original_data, 'errors': args})
 
 
 class V1ConceptVersionImporter(V1BaseImporter):
@@ -520,8 +522,9 @@ class V1ConceptVersionImporter(V1BaseImporter):
                 self.created.append(original_data)
             except Exception as ex:
                 self.log("Failed: {}".format(data['uri']))
-                self.log(ex.args)
-                self.failed.append({**original_data, 'errors': ex.args})
+                args = get(ex, 'message_dict') or str(ex)
+                self.log(args)
+                self.failed.append({**original_data, 'errors': args})
 
 
 class V1MappingImporter(V1BaseImporter):
@@ -587,8 +590,9 @@ class V1MappingImporter(V1BaseImporter):
                 self.created.append(original_data)
             except Exception as ex:
                 self.log("Failed: {}".format(data['uri']))
-                self.log(ex.args)
-                self.failed.append({**original_data, 'errors': ex.args})
+                args = get(ex, 'message_dict') or str(ex)
+                self.log(args)
+                self.failed.append({**original_data, 'errors': args})
 
 
 class V1MappingVersionImporter(V1BaseImporter):
@@ -676,8 +680,9 @@ class V1MappingVersionImporter(V1BaseImporter):
                 self.created.append(original_data)
             except Exception as ex:
                 self.log("Failed: {}".format(data['uri']))
-                self.log(ex.args)
-                self.failed.append({**original_data, 'errors': ex.args})
+                args = get(ex, 'message_dict') or str(ex)
+                self.log(args)
+                self.failed.append({**original_data, 'errors': args})
 
 
 class V1CollectionImporter(V1BaseImporter):
