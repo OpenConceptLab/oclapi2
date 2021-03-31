@@ -135,7 +135,8 @@ class ConceptRetrieveUpdateDestroyView(ConceptBaseView, RetrieveAPIView, UpdateA
         queryset = self.get_queryset(None)
         filters = dict(id=F('versioned_object_id'))
         if 'collection' in self.kwargs:
-            filters = dict(is_latest_version=True)
+            filters = dict()
+            queryset = queryset.order_by('id').distinct('id')
             uri_param = self.request.query_params.dict().get('uri')
             if uri_param:
                 filters.update(Concept.get_parent_and_owner_filters_from_uri(uri_param))
