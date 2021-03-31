@@ -4,7 +4,7 @@ from django.db import models, IntegrityError, transaction
 from django.db.models import F
 from pydash import get, compact
 
-from core.common.constants import ISO_639_1, INCLUDE_RETIRED_PARAM
+from core.common.constants import ISO_639_1, INCLUDE_RETIRED_PARAM, LATEST
 from core.common.mixins import SourceChildMixin
 from core.common.models import VersionedModel
 from core.common.utils import reverse_resource, parse_updated_since_param, generate_temp_version
@@ -276,7 +276,9 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         return unsaved_names
 
     @classmethod
-    def get_base_queryset(cls, params, distinct_by='updated_at'):  # pylint: disable=too-many-branches
+    def get_base_queryset(  # pylint: disable=too-many-branches,too-many-locals,too-many-statements
+            cls, params, distinct_by='updated_at'
+    ):
         queryset = cls.objects.filter(is_active=True)
         user = params.get('user', None)
         org = params.get('org', None)
@@ -289,6 +291,21 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         uri = params.get('uri', None)
         include_retired = params.get(INCLUDE_RETIRED_PARAM, None) in [True, 'true']
         updated_since = parse_updated_since_param(params)
+        latest_released_version = None
+        is_latest_released = container_version == LATEST
+        if is_latest_released:
+            filters = dict(user__username=user, organization__mnemonic=org)
+            if source:
+                from core.sources.models import Source
+                latest_released_version = Source.find_latest_released_version_by(
+                    {**filters, 'mnemonic': source})
+            elif collection:
+                from core.collections.models import Collection
+                latest_released_version = Collection.find_latest_released_version_by(
+                    {**filters, 'mnemonic': collection})
+
+            if not latest_released_version:
+                return cls.objects.none()
 
         if collection:
             queryset = queryset.filter(cls.get_iexact_or_criteria('collection_set__mnemonic', collection))
@@ -296,7 +313,11 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                 queryset = queryset.filter(cls.get_iexact_or_criteria('collection_set__user__username', user))
             if org:
                 queryset = queryset.filter(cls.get_iexact_or_criteria('collection_set__organization__mnemonic', org))
-            if container_version:
+            if is_latest_released:
+                queryset = queryset.filter(
+                    cls.get_iexact_or_criteria('collection_set__version', get(latest_released_version, 'version'))
+                )
+            if container_version and not is_latest_released:
                 queryset = queryset.filter(cls.get_iexact_or_criteria('collection_set__version', container_version))
         if source:
             queryset = queryset.filter(cls.get_iexact_or_criteria('sources__mnemonic', source))
@@ -304,7 +325,11 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                 queryset = queryset.filter(cls.get_iexact_or_criteria('parent__user__username', user))
             if org:
                 queryset = queryset.filter(cls.get_iexact_or_criteria('parent__organization__mnemonic', org))
-            if container_version:
+            if is_latest_released:
+                queryset = queryset.filter(
+                    cls.get_iexact_or_criteria('sources__version', get(latest_released_version, 'version'))
+                )
+            if container_version and not is_latest_released:
                 queryset = queryset.filter(cls.get_iexact_or_criteria('sources__version', container_version))
 
         if concept:

@@ -16,7 +16,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from core.common.constants import SEARCH_PARAM, LIST_DEFAULT_LIMIT, CSV_DEFAULT_LIMIT, \
-    LIMIT_PARAM, NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY, INCLUDE_RETIRED_PARAM, VERBOSE_PARAM, HEAD
+    LIMIT_PARAM, NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY, INCLUDE_RETIRED_PARAM, VERBOSE_PARAM, HEAD, LATEST
 from core.common.mixins import PathWalkerMixin
 from core.common.serializers import RootSerializer
 from core.common.utils import compact_dict_by_values, to_snake_case, to_camel_case, parse_updated_since_param
@@ -225,15 +225,34 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
     def get_kwargs_filters(self):
         filters = self.get_facet_filters_from_kwargs()
-        if 'version' in self.kwargs and 'source' in self.kwargs:
+        is_source_child_document_model = self.is_source_child_document_model()
+        is_version_specified = 'version' in self.kwargs
+        is_collection_specified = 'collection' in self.kwargs
+        is_source_specified = 'source' in self.kwargs
+
+        if is_version_specified and is_source_specified:
             filters['source_version'] = self.kwargs['version']
-        if 'version' in self.kwargs and 'collection' in self.kwargs:
+        if is_version_specified and is_collection_specified:
             filters['collection_version'] = self.kwargs['version']
 
-        is_source_child_document_model = self.is_source_child_document_model()
         if is_source_child_document_model:
-            is_version_specified = 'version' in self.kwargs
-            if 'collection' in self.kwargs:
+            if is_version_specified:
+                container_version = self.kwargs['version']
+                is_latest_released = container_version == LATEST
+                if is_latest_released:
+                    params = dict(user__username=self.kwargs.get('user'), organization__mnemonic=self.kwargs.get('org'))
+                    if is_source_specified:
+                        from core.sources.models import Source
+                        latest_released_version = Source.find_latest_released_version_by(
+                            {**params, 'mnemonic': self.kwargs['source']})
+                        filters['source_version'] = get(latest_released_version, 'version')
+                    elif is_collection_specified:
+                        from core.collections.models import Collection
+                        latest_released_version = Collection.find_latest_released_version_by(
+                            {**params, 'mnemonic': self.kwargs['collection']})
+                        filters['collection_version'] = get(latest_released_version, 'version')
+
+            if is_collection_specified:
                 owner_type = filters.pop('ownerType', None)
                 owner = filters.pop('owner', None)
                 if owner_type == USER_OBJECT_TYPE:
@@ -242,7 +261,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                     filters['collection_owner_url'] = "/orgs/{}/".format(owner)
                 if not is_version_specified:
                     filters['collection_version'] = HEAD
-            if 'source' in self.kwargs and not is_version_specified:
+            if is_source_specified and not is_version_specified:
                 filters['source_version'] = HEAD
         return filters
 

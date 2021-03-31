@@ -315,6 +315,10 @@ class VersionedModel(BaseResourceModel):
     def get_latest_released_version(self):
         return self.released_versions.order_by('-created_at').first()
 
+    @classmethod
+    def find_latest_released_version_by(cls, filters):
+        return cls.objects.filter(**filters, released=True).order_by('-created_at').first()
+
     def get_url_kwarg(self):
         if self.is_head:
             return self.get_resource_url_kwarg()
