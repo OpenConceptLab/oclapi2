@@ -317,8 +317,22 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         from core.sources.documents import SourceDocument
         return self.document_model in [SourceDocument, CollectionDocument]
 
+    def get_public_criteria(self):
+        criteria = Q('match', public_can_view=True)
+        user = self.request.user
+
+        if user.is_authenticated:
+            username = user.username
+            from core.orgs.documents import OrganizationDocument
+            if self.document_model in [OrganizationDocument]:
+                criteria |= (Q('match', public_can_view=False) & Q('match', user=username))
+            if self.is_concept_container_document_model():
+                criteria |= (Q('match', public_can_view=False) & Q('match', created_by=username))
+
+        return criteria
+
     @property
-    def __search_results(self):  # pylint: disable=too-many-branches,too-many-statements
+    def __search_results(self):  # pylint: disable=too-many-branches,too-many-locals
         results = None
 
         if self.should_perform_es_search():
@@ -367,33 +381,24 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             if self._should_exclude_retired_from_search_results():
                 results = results.query('match', retired=False)
 
+            user = self.request.user
+            is_authenticated = user.is_authenticated
+            username = user.username
+
             include_private = self._should_include_private()
-
             if not include_private:
-                from core.orgs.documents import OrganizationDocument
-
-                if self.document_model in [OrganizationDocument] and self.request.user.is_authenticated:
-                    results = results.query(
-                        Q('match', public_can_view=True) |
-                        (Q('match', public_can_view=False) & Q('match', user=self.request.user.username))
-                    )
-                elif self.is_concept_container_document_model() and self.request.user.is_authenticated:
-                    results = results.query(
-                        Q('match', public_can_view=True) |
-                        (Q('match', public_can_view=False) & Q('match', created_by=self.request.user.username)))
-                else:
-                    results = results.query('match', public_can_view=True)
+                results = results.query(self.get_public_criteria())
 
             if self.is_owner_document_model():
                 kwargs_filters = self.kwargs.copy()
-                if self.user_is_self and self.request.user.is_authenticated:
+                if self.user_is_self and is_authenticated:
                     kwargs_filters.pop('user_is_self', None)
-                    kwargs_filters['user'] = self.request.user.username
+                    kwargs_filters['user'] = username
             else:
                 kwargs_filters = self.get_kwargs_filters()
-                if self.user_is_self and self.request.user.is_authenticated:
+                if self.user_is_self and is_authenticated:
                     kwargs_filters['ownerType'] = 'User'
-                    kwargs_filters['owner'] = self.request.user.username
+                    kwargs_filters['owner'] = username
 
             for key, value in kwargs_filters.items():
                 results = results.query('match', **{to_snake_case(key): value})
