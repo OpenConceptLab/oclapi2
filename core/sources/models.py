@@ -19,7 +19,7 @@ class Source(ConceptContainerModel):
         'locale': {'sortable': False, 'filterable': True, 'facet': True},
         'owner': {'sortable': True, 'filterable': True, 'facet': True, 'exact': True},
         'owner_type': {'sortable': False, 'filterable': True, 'facet': True},
-        'custom_validation_schema': {'sortable': False, 'filterable': True},
+        'custom_validation_schema': {'sortable': False, 'filterable': True, 'facet': True},
         'canonical_url': {'sortable': True, 'filterable': True},
     }
 

@@ -27,13 +27,13 @@ class CollectionDocument(Document):
     identifier = fields.ObjectField()
     publisher = fields.KeywordField(attr='publisher', normalizer='lowercase')
     immutable = fields.KeywordField(attr='immutable')
+    custom_validation_schema = fields.KeywordField(attr='custom_validation_schema', normalizer='lowercase')
     created_by = fields.KeywordField()
 
     class Django:
         model = Collection
         fields = [
             'full_name',
-            'custom_validation_schema',
             'revision_date',
             'retired',
         ]
