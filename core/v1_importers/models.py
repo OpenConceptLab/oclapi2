@@ -554,6 +554,7 @@ class V1MappingImporter(V1BaseImporter):
             to_concept = self.get_concept(to_concept_id)
             if to_concept:
                 data['to_concept'] = to_concept
+                data['to_concept_code'] = get(data, 'to_concept_code') or to_concept.mnemonic
                 data['to_source'] = to_concept.parent
         elif to_source_id:
             to_source = self.get_source(to_source_id)
