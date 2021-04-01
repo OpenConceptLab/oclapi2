@@ -592,6 +592,7 @@ class V1MappingImporter(V1BaseImporter):
                 self.log("Failed: {}".format(data['uri']))
                 args = get(ex, 'message_dict') or str(ex)
                 self.log(args)
+                self.log(str(data))
                 self.failed.append({**original_data, 'errors': args})
 
 
