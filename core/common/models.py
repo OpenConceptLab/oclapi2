@@ -432,15 +432,15 @@ class ConceptContainerModel(VersionedModel):
 
     @property
     def parent_url(self):
-        return self.parent.url
+        return get(self, 'parent.url')
 
     @property
     def parent_resource(self):
-        return self.parent.mnemonic
+        return get(self, 'parent.mnemonic')
 
     @property
     def parent_resource_type(self):
-        return self.parent.resource_type
+        return get(self, 'parent.resource_type')
 
     @property
     def versions(self):
