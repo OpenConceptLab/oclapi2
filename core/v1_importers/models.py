@@ -724,7 +724,7 @@ class V1CollectionImporter(V1BaseImporter):
         data['created_at'] = get(created_at, '$date')
         data['updated_at'] = get(updated_at, '$date')
         mnemonic = data.get('mnemonic')
-        data['organization'] = self.get_org(parent_id)
+        data['organization'] = self.get_org(internal_reference_id=parent_id)
 
         self.log("Processing: {} ({}/{})".format(mnemonic, self.processed, self.total))
         uri = data['uri']
