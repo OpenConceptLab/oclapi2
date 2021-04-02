@@ -198,7 +198,8 @@ class SourceImporter(BaseResourceImporter):
         "id", "short_code", "name", "full_name", "description", "source_type", "custom_validation_schema",
         "public_access", "default_locale", "supported_locales", "website", "extras", "external_id",
         'canonical_url', 'identifier', 'contact', 'jurisdiction', 'publisher', 'purpose', 'copyright',
-        'revision_date', 'text', 'content_type',
+        'revision_date', 'text', 'content_type', 'experimental', 'case_sensitive', 'collection_reference',
+        'hierarchy_meaning', 'compositional', 'version_needed'
     ]
 
     def exists(self):
@@ -275,7 +276,7 @@ class CollectionImporter(BaseResourceImporter):
         "id", "short_code", "name", "full_name", "description", "collection_type", "custom_validation_schema",
         "public_access", "default_locale", "supported_locales", "website", "extras", "external_id",
         'canonical_url', 'identifier', 'contact', 'jurisdiction', 'publisher', 'purpose', 'copyright',
-        'revision_date', 'text', 'immutable',
+        'revision_date', 'text', 'immutable', 'experimental', 'locked_date'
     ]
 
     def exists(self):
