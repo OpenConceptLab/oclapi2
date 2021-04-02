@@ -7,7 +7,10 @@ from core.common.search import CommonSearch
 class CollectionSearch(CommonSearch):
     index = 'collections'
     doc_types = [Collection]
-    fields = ['collection_type', 'locale', 'owner', 'owner_type', 'is_active', 'version', 'custom_validation_schema']
+    fields = [
+        'collection_type', 'locale', 'owner', 'owner_type', 'is_active', 'version', 'custom_validation_schema',
+        'experimental',
+    ]
 
     facets = {
         'collectionType': TermsFacet(field='collection_type'),
@@ -17,4 +20,5 @@ class CollectionSearch(CommonSearch):
         'is_active': TermsFacet(field='is_active'),
         'version': TermsFacet(field='version'),
         'customValidationSchema': TermsFacet(field='custom_validation_schema'),
+        'experimental': TermsFacet(field='experimental'),
     }

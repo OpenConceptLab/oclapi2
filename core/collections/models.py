@@ -62,6 +62,7 @@ class Collection(ConceptContainerModel):
     mappings = models.ManyToManyField('mappings.Mapping', blank=True, related_name='collection_set')
     references = models.ManyToManyField('collections.CollectionReference', blank=True, related_name='collections')
     immutable = models.BooleanField(default=False)
+    locked_date = models.DateTimeField(null=True, blank=True)
 
     @classmethod
     def get_base_queryset(cls, params):

@@ -36,6 +36,8 @@ class CollectionDocument(Document):
             'full_name',
             'revision_date',
             'retired',
+            'experimental',
+            'locked_date',
         ]
 
     @staticmethod

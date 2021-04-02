@@ -348,6 +348,7 @@ class ConceptContainerModel(VersionedModel):
         'client_configs.ClientConfig', object_id_field='resource_id', content_type_field='resource_type'
     )
     snapshot = models.JSONField(null=True, blank=True, default=dict)
+    experimental = models.BooleanField(null=True, blank=True, default=None)
 
     class Meta:
         abstract = True
