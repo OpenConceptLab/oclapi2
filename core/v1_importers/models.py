@@ -197,6 +197,8 @@ class V1BaseImporter:
             return V1MappingImporter
         if name in ['mapping_version', 'mapping_versions']:
             return V1MappingVersionImporter
+        if name in ['web_user_credential']:
+            return V1WebUserCredentialsImporter
 
         return None
 
@@ -856,6 +858,26 @@ class V1CollectionVersionImporter(V1BaseImporter):
             collection.mappings.set(mappings)
             collection.batch_index(collection.concepts, ConceptDocument)
             collection.batch_index(collection.mappings, MappingDocument)
+
+
+class V1WebUserCredentialsImporter(V1BaseImporter):
+    start_message = 'STARTING WEB USER CREDENTIALS IMPORT'
+    result_attrs = ['updated', 'not_found']
+
+    def process_line(self, line):
+        self.processed += 1
+        data = json.loads(line)
+        original_data = data.copy()
+        username = data.get('username')
+        password = data.get('password')
+        self.log("Processing: {} ({}/{})".format(username, self.processed, self.total))
+        user = UserProfile.objects.filter(username=username).first()
+        if user:
+            user.password = password
+            user.save()
+            self.updated.append(original_data)
+        else:
+            self.not_found.append(original_data)
 
 
 class V1IdsImporter(V1BaseImporter):

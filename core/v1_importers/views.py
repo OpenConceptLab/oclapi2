@@ -70,3 +70,7 @@ class MappingsImporterView(BaseImporterView):
 
 class MappingVersionsImporterView(BaseImporterView):
     importer = 'mapping_version'
+
+
+class WebUserCredentialsImporterView(BaseImporterView):
+    importer = 'web_user_credential'
