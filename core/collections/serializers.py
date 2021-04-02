@@ -71,11 +71,11 @@ class CollectionCreateOrUpdateSerializer(ModelSerializer):
         collection.supported_locales = supported_locales or [collection.default_locale]
 
         for attr in [
-            'experimental', 'locked_date', 'text', 'revision_date', 'immutable', 'copyright', 'purpose', 'jurisdiction',
-            'contact', 'publisher', 'identifier', 'canonical_url', 'retired', 'released', 'organization', 'user',
-            'organization_id', 'user_id', 'external_id', 'extras', 'preferred_source', 'repository_type',
-            'custom_resources_linked_source', 'website', 'custom_validation_schema', 'collection_type', 'description',
-            'name'
+                'experimental', 'locked_date', 'text', 'revision_date', 'immutable', 'copyright', 'purpose',
+                'jurisdiction', 'contact', 'publisher', 'identifier', 'canonical_url', 'retired', 'released',
+                'organization', 'user', 'organization_id', 'user_id', 'external_id', 'extras', 'preferred_source',
+                'repository_type', 'custom_resources_linked_source', 'website', 'custom_validation_schema',
+                'collection_type', 'description', 'name'
         ]:
             setattr(collection, attr, validated_data.get(attr, get(collection, attr)))
 

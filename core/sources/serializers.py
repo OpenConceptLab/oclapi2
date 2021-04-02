@@ -71,11 +71,11 @@ class SourceCreateOrUpdateSerializer(ModelSerializer):
         source.supported_locales = supported_locales or [source.default_locale]
 
         for attr in [
-            'website', 'description', 'source_type', 'name', 'custom_validation_schema',
-            'retired', 'released', 'organization', 'user', 'organization_id', 'user_id', 'external_id', 'extras',
-            'experimental', 'case_sensitive', 'collection_reference', 'hierarchy_meaning', 'compositional',
-            'version_needed', 'canonical_url', 'identifier', 'publisher', 'contact', 'jurisdiction', 'purpose',
-            'copyright', 'content_type', 'revision_date', 'text',
+                'website', 'description', 'source_type', 'name', 'custom_validation_schema',
+                'retired', 'released', 'organization', 'user', 'organization_id', 'user_id', 'external_id', 'extras',
+                'experimental', 'case_sensitive', 'collection_reference', 'hierarchy_meaning', 'compositional',
+                'version_needed', 'canonical_url', 'identifier', 'publisher', 'contact', 'jurisdiction', 'purpose',
+                'copyright', 'content_type', 'revision_date', 'text',
         ]:
             setattr(source, attr, validated_data.get(attr, get(source, attr)))
 
