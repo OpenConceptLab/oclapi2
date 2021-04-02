@@ -118,7 +118,9 @@ class SourceListViewTest(OCLAPITestCase):
                 'url', 'owner', 'owner_type', 'owner_url', 'created_on', 'updated_on', 'created_by',
                 'updated_by', 'extras', 'external_id', 'versions_url', 'version', 'concepts_url', 'mappings_url',
                 'canonical_url', 'identifier', 'publisher', 'contact',
-                'jurisdiction', 'purpose', 'copyright', 'content_type', 'revision_date', 'logo_url', 'text'
+                'jurisdiction', 'purpose', 'copyright', 'content_type', 'revision_date', 'logo_url', 'text',
+                'experimental', 'case_sensitive', 'collection_reference', 'hierarchy_meaning', 'compositional',
+                'version_needed',
             ]
         )
         source = Source.objects.last()
@@ -194,7 +196,9 @@ class SourceCreateUpdateDestroyViewTest(OCLAPITestCase):
                 'url', 'owner', 'owner_type', 'owner_url', 'created_on', 'updated_on', 'created_by',
                 'updated_by', 'extras', 'external_id', 'versions_url', 'version', 'concepts_url', 'mappings_url',
                 'canonical_url', 'identifier', 'publisher', 'contact',
-                'jurisdiction', 'purpose', 'copyright', 'content_type', 'revision_date', 'logo_url', 'text'
+                'jurisdiction', 'purpose', 'copyright', 'content_type', 'revision_date', 'logo_url', 'text',
+                'experimental', 'case_sensitive', 'collection_reference', 'hierarchy_meaning', 'compositional',
+                'version_needed',
             ]
         )
         source = Source.objects.last()

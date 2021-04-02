@@ -59,16 +59,8 @@ class SourceCreateOrUpdateSerializer(ModelSerializer):
         source = instance if instance else Source()
         source.version = validated_data.get('version', source.version) or HEAD
         source.mnemonic = validated_data.get(self.Meta.lookup_field, source.mnemonic)
-        source.name = validated_data.get('name', source.name)
-        source.full_name = validated_data.get('full_name', source.full_name) or source.name
-        source.description = validated_data.get('description', source.description)
-        source.source_type = validated_data.get('source_type', source.source_type)
-        source.custom_validation_schema = validated_data.get(
-            'custom_validation_schema', source.custom_validation_schema
-        )
         source.public_access = validated_data.get('public_access', source.public_access or DEFAULT_ACCESS_TYPE)
         source.default_locale = validated_data.get('default_locale', source.default_locale or DEFAULT_LOCALE)
-        source.website = validated_data.get('website', source.website)
 
         supported_locales = validated_data.get('supported_locales')
         if not supported_locales:
@@ -77,25 +69,17 @@ class SourceCreateOrUpdateSerializer(ModelSerializer):
             supported_locales = supported_locales.split(',')
 
         source.supported_locales = supported_locales or [source.default_locale]
-        source.extras = validated_data.get('extras', source.extras)
-        source.external_id = validated_data.get('external_id', source.external_id)
-        source.user_id = validated_data.get('user_id', source.user_id)
-        source.organization_id = validated_data.get('organization_id', source.organization_id)
-        source.user = validated_data.get('user', source.user)
-        source.organization = validated_data.get('organization', source.organization)
-        source.released = validated_data.get('released', source.released)
-        source.retired = validated_data.get('retired', source.retired)
 
-        source.canonical_url = validated_data.get('canonical_url', source.canonical_url)
-        source.identifier = validated_data.get('identifier', source.identifier)
-        source.publisher = validated_data.get('publisher', source.publisher)
-        source.contact = validated_data.get('contact', source.contact)
-        source.jurisdiction = validated_data.get('jurisdiction', source.jurisdiction)
-        source.purpose = validated_data.get('purpose', source.purpose)
-        source.copyright = validated_data.get('copyright', source.copyright)
-        source.content_type = validated_data.get('content_type', source.content_type)
-        source.revision_date = validated_data.get('revision_date', source.revision_date)
-        source.text = validated_data.get('text', source.text)
+        for attr in [
+            'website', 'description', 'source_type', 'name', 'custom_validation_schema',
+            'retired', 'released', 'organization', 'user', 'organization_id', 'user_id', 'external_id', 'extras',
+            'experimental', 'case_sensitive', 'collection_reference', 'hierarchy_meaning', 'compositional',
+            'version_needed', 'canonical_url', 'identifier', 'publisher', 'contact', 'jurisdiction', 'purpose',
+            'copyright', 'content_type', 'revision_date', 'text',
+        ]:
+            setattr(source, attr, validated_data.get(attr, get(source, attr)))
+
+        source.full_name = validated_data.get('full_name', source.full_name) or source.name
 
         return source
 
@@ -147,6 +131,12 @@ class SourceCreateSerializer(SourceCreateOrUpdateSerializer):
     purpose = CharField(required=False, allow_null=True, allow_blank=True)
     copyright = CharField(required=False, allow_null=True, allow_blank=True)
     content_type = CharField(required=False, allow_null=True, allow_blank=True)
+    experimental = BooleanField(required=False, allow_null=True, default=None)
+    case_sensitive = BooleanField(required=False, allow_null=True, default=None)
+    compositional = BooleanField(required=False, allow_null=True, default=None)
+    version_needed = BooleanField(required=False, allow_null=True, default=None)
+    hierarchy_meaning = CharField(required=False, allow_null=True, allow_blank=True)
+    collection_reference = CharField(required=False, allow_null=True, allow_blank=True)
 
     def create(self, validated_data):
         source = self.prepare_object(validated_data)
@@ -226,6 +216,8 @@ class SourceDetailSerializer(SourceCreateOrUpdateSerializer):
             'version', 'concepts_url', 'mappings_url',
             'canonical_url', 'identifier', 'publisher', 'contact', 'jurisdiction', 'purpose', 'copyright',
             'content_type', 'revision_date', 'logo_url', 'summary', 'text', 'client_configs',
+            'experimental', 'case_sensitive', 'collection_reference', 'hierarchy_meaning', 'compositional',
+            'version_needed'
         )
 
     def __init__(self, *args, **kwargs):
@@ -289,7 +281,9 @@ class SourceVersionDetailSerializer(SourceCreateOrUpdateSerializer):
             'created_on', 'updated_on', 'created_by', 'updated_by', 'extras', 'external_id',
             'version', 'concepts_url', 'mappings_url', 'is_processing', 'released',
             'canonical_url', 'identifier', 'publisher', 'contact', 'jurisdiction', 'purpose', 'copyright',
-            'content_type', 'revision_date', 'summary', 'text'
+            'content_type', 'revision_date', 'summary', 'text',
+            'experimental', 'case_sensitive', 'collection_reference', 'hierarchy_meaning', 'compositional',
+            'version_needed'
         )
 
     def __init__(self, *args, **kwargs):

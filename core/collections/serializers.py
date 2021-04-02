@@ -60,21 +60,8 @@ class CollectionCreateOrUpdateSerializer(ModelSerializer):
         collection = instance if instance else Collection()
         collection.version = validated_data.get('version', collection.version) or HEAD
         collection.mnemonic = validated_data.get(self.Meta.lookup_field, collection.mnemonic)
-        collection.name = validated_data.get('name', collection.name)
-        collection.full_name = validated_data.get('full_name', collection.full_name) or collection.name
-        collection.description = validated_data.get('description', collection.description)
-        collection.collection_type = validated_data.get('collection_type', collection.collection_type)
-        collection.custom_validation_schema = validated_data.get(
-            'custom_validation_schema', collection.custom_validation_schema
-        )
         collection.public_access = validated_data.get('public_access', collection.public_access or DEFAULT_ACCESS_TYPE)
         collection.default_locale = validated_data.get('default_locale', collection.default_locale or DEFAULT_LOCALE)
-        collection.website = validated_data.get('website', collection.website)
-        collection.custom_resources_linked_source = validated_data.get(
-            'custom_resources_linked_source', collection.custom_resources_linked_source
-        )
-        collection.repository_type = validated_data.get('repository_type', collection.repository_type)
-        collection.preferred_source = validated_data.get('preferred_source', collection.preferred_source)
         supported_locales = validated_data.get('supported_locales')
         if not supported_locales:
             supported_locales = collection.supported_locales
@@ -82,25 +69,17 @@ class CollectionCreateOrUpdateSerializer(ModelSerializer):
             supported_locales = supported_locales.split(',')
 
         collection.supported_locales = supported_locales or [collection.default_locale]
-        collection.extras = validated_data.get('extras', collection.extras)
-        collection.external_id = validated_data.get('external_id', collection.external_id)
-        collection.user_id = validated_data.get('user_id', collection.user_id)
-        collection.organization_id = validated_data.get('organization_id', collection.organization_id)
-        collection.user = validated_data.get('user', collection.user)
-        collection.organization = validated_data.get('organization', collection.organization)
-        collection.released = validated_data.get('released', collection.released)
-        collection.retired = validated_data.get('retired', collection.retired)
 
-        collection.canonical_url = validated_data.get('canonical_url', collection.canonical_url)
-        collection.identifier = validated_data.get('identifier', collection.identifier)
-        collection.publisher = validated_data.get('publisher', collection.publisher)
-        collection.contact = validated_data.get('contact', collection.contact)
-        collection.jurisdiction = validated_data.get('jurisdiction', collection.jurisdiction)
-        collection.purpose = validated_data.get('purpose', collection.purpose)
-        collection.copyright = validated_data.get('copyright', collection.copyright)
-        collection.immutable = validated_data.get('immutable', collection.immutable)
-        collection.revision_date = validated_data.get('revision_date', collection.revision_date)
-        collection.text = validated_data.get('text', collection.text)
+        for attr in [
+            'experimental', 'locked_date', 'text', 'revision_date', 'immutable', 'copyright', 'purpose', 'jurisdiction',
+            'contact', 'publisher', 'identifier', 'canonical_url', 'retired', 'released', 'organization', 'user',
+            'organization_id', 'user_id', 'external_id', 'extras', 'preferred_source', 'repository_type',
+            'custom_resources_linked_source', 'website', 'custom_validation_schema', 'collection_type', 'description',
+            'name'
+        ]:
+            setattr(collection, attr, validated_data.get(attr, get(collection, attr)))
+
+        collection.full_name = validated_data.get('full_name', collection.full_name) or collection.name
 
         return collection
 
@@ -154,6 +133,8 @@ class CollectionCreateSerializer(CollectionCreateOrUpdateSerializer):
     publisher = CharField(required=False, allow_null=True, allow_blank=True)
     purpose = CharField(required=False, allow_null=True, allow_blank=True)
     copyright = CharField(required=False, allow_null=True, allow_blank=True)
+    experimental = BooleanField(required=False, allow_null=True, default=None)
+    locked_date = DateTimeField(required=False, allow_null=True)
 
     def create(self, validated_data):
         collection = self.prepare_object(validated_data)
@@ -235,6 +216,7 @@ class CollectionDetailSerializer(CollectionCreateOrUpdateSerializer):
             'custom_resources_linked_source', 'repository_type', 'preferred_source', 'references',
             'canonical_url', 'identifier', 'publisher', 'contact', 'jurisdiction', 'purpose', 'copyright',
             'immutable', 'revision_date', 'logo_url', 'summary', 'text', 'client_configs',
+            'experimental', 'locked_date'
 
         )
 
@@ -305,7 +287,7 @@ class CollectionVersionDetailSerializer(CollectionCreateOrUpdateSerializer):
             'created_on', 'updated_on', 'created_by', 'updated_by', 'extras', 'external_id', 'version',
             'version', 'concepts_url', 'mappings_url', 'is_processing', 'released', 'retired',
             'canonical_url', 'identifier', 'publisher', 'contact', 'jurisdiction', 'purpose', 'copyright',
-            'immutable', 'revision_date', 'summary', 'text'
+            'immutable', 'revision_date', 'summary', 'text', 'experimental', 'locked_date',
         )
 
     def __init__(self, *args, **kwargs):
