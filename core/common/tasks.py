@@ -273,10 +273,10 @@ def seed_children(self, resource, obj_id, export=True):
 
 
 @app.task
-def import_v1_content(importer_class, file_url):  # pragma: no cover
+def import_v1_content(importer_class, file_url, drop_version_if_version_missing=False):  # pragma: no cover
     from core.v1_importers.models import V1BaseImporter
     klass = V1BaseImporter.get_importer_class_from_string(importer_class)
     if klass:
-        return klass(file_url).run()
+        return klass(file_url, drop_version_if_version_missing=drop_version_if_version_missing).run()
 
     return None

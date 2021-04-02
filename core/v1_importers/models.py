@@ -8,7 +8,7 @@ from core.collections.models import CollectionReference, Collection
 from core.collections.utils import is_concept
 from core.common.constants import HEAD
 from core.common.tasks import populate_indexes
-from core.common.utils import generate_temp_version
+from core.common.utils import generate_temp_version, drop_version
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept, LocalizedText
 from core.mappings.documents import MappingDocument
@@ -27,6 +27,7 @@ class V1BaseImporter:
     existed = []
     failed = []
     not_found = []
+    not_found_references = []
 
     elapsed_seconds = 0
     start_time = None
@@ -41,7 +42,7 @@ class V1BaseImporter:
     concepts = dict()
     mappings = dict()
 
-    def __init__(self, file_url):
+    def __init__(self, file_url, **kwargs):  # pylint: disable=unused-argument
         self.file_url = file_url
         self.lines = []
         self.read_file()
@@ -199,6 +200,8 @@ class V1BaseImporter:
             return V1MappingVersionImporter
         if name in ['web_user_credential']:
             return V1WebUserCredentialsImporter
+        if name in ['collection_reference']:
+            return V1CollectionReferencesImporter
 
         return None
 
@@ -858,6 +861,84 @@ class V1CollectionVersionImporter(V1BaseImporter):
             collection.mappings.set(mappings)
             collection.batch_index(collection.concepts, ConceptDocument)
             collection.batch_index(collection.mappings, MappingDocument)
+
+
+class V1CollectionReferencesImporter(V1BaseImporter):
+    start_message = 'STARTING COLLECTION REFERENCES IMPORTER'
+    result_attrs = ['created', 'not_found', 'existed', 'not_found_references']
+
+    def __init__(self, file_url, **kwargs):
+        self.data = dict()
+        self.drop_version_if_version_missing = kwargs.get('drop_version_if_version_missing', False)
+        super().__init__(file_url)
+
+    def read_file(self):
+        if self.file_url:
+            print("***", self.file_url)
+            file = urllib.request.urlopen(self.file_url)
+
+            self.data = json.loads(file.read())
+            self.total = len(self.data.keys())
+
+    def run(self):
+        self.start_time = time.time()
+        if not isinstance(self.lines, list):
+            return None
+
+        self.log(self.start_message)
+        self.log('TOTAL: {}'.format(self.total))
+
+        for collection_uri, expressions in self.data.items():
+            self.process(collection_uri, expressions)
+
+        self.elapsed_seconds = time.time() - self.start_time
+
+        return self.total_result
+
+    def process(self, collection_uri, expressions):
+        self.processed += 1
+        self.log("Processing: {} ({}/{})".format(collection_uri, self.processed, self.total))
+
+        collection = Collection.objects.filter(uri=collection_uri).first()
+        saved_references = []
+        concepts = []
+        mappings = []
+
+        if collection:
+            for expression in expressions:
+                self.log("Processing Expression: {} ".format(expression))
+                if is_concept(expression):
+                    model = Concept
+                    _instances = concepts
+                else:
+                    model = Mapping
+                    _instances = mappings
+
+                instance = model.objects.filter(uri=expression).first()
+                if self.drop_version_if_version_missing and not instance:
+                    instance = model.objects.filter(uri=drop_version(expression)).first()
+                if not instance:
+                    self.not_found_references.append(expression)
+                    continue
+
+                latest_version = instance.get_latest_version()
+                if not latest_version:
+                    self.not_found_references.append(expression)
+                reference = CollectionReference(expression=latest_version.uri)
+                reference.save()
+                saved_references.append(reference)
+                _instances.append(latest_version)
+                self.created.append(expression)
+            collection.references.add(*saved_references)
+            if concepts:
+                collection.concepts.add(*concepts)
+                collection.batch_index(collection.concepts, ConceptDocument)
+            if mappings:
+                collection.mappings.add(*mappings)
+                collection.batch_index(collection.mappings, MappingDocument)
+
+        else:
+            self.not_found.append(collection_uri)
 
 
 class V1WebUserCredentialsImporter(V1BaseImporter):

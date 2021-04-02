@@ -13,10 +13,12 @@ class BaseImporterView(APIView):
 
     def post(self, request):
         file_url = request.data.get('file_url', None)
+        drop_version_if_version_missing = request.data.get(
+            'drop_version_if_version_missing', None) in [True, 'true', 'True']
         if not file_url:
             return Response(dict(error=['Export File URL is mandatory']), status=status.HTTP_400_BAD_REQUEST)
 
-        task = import_v1_content.apply_async((self.importer, file_url, ), )
+        task = import_v1_content.apply_async((self.importer, file_url, drop_version_if_version_missing, ), )
         return Response(dict(task=task.id, state=task.state, queue=task.queue), status=status.HTTP_202_ACCEPTED)
 
 
@@ -74,3 +76,7 @@ class MappingVersionsImporterView(BaseImporterView):
 
 class WebUserCredentialsImporterView(BaseImporterView):
     importer = 'web_user_credential'
+
+
+class CollectionReferenceImporterView(BaseImporterView):
+    importer = 'collection_reference'
