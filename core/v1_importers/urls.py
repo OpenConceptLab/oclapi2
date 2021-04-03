@@ -17,5 +17,5 @@ urlpatterns = [
     path('collection-versions/', views.CollectionVersionsImporterView.as_view(), name='v1-collection-versions-import'),
     path('collection-ids/', views.CollectionIdsImporterView.as_view(), name='v1-collection-ids-import'),
     path('web-user-credentials/', views.WebUserCredentialsImporterView.as_view(), name='v1-web-credentials-import'),
-    path('collection-references/', views.CollectionReferenceImporterView.as_view(), name='v1-references-import'),
+    path('references/', views.CollectionReferenceImporterView.as_view(), name='v1-references-import'),
 ]

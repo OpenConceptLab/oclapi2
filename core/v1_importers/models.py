@@ -907,7 +907,8 @@ class V1CollectionReferencesImporter(V1BaseImporter):
         if collection:
             for expression in expressions:
                 self.log("Processing Expression: {} ".format(expression))
-                if is_concept(expression):
+                __is_concept = is_concept(expression)
+                if __is_concept:
                     model = Concept
                     _instances = concepts
                 else:
@@ -923,7 +924,13 @@ class V1CollectionReferencesImporter(V1BaseImporter):
 
                 latest_version = instance.get_latest_version()
                 if not latest_version:
-                    self.not_found_references.append(expression)
+                    latest_version = model.create_initial_version(instance)
+                    if __is_concept:
+                        latest_version.cloned_names = [name.clone() for name in instance.names.all()]
+                        latest_version.cloned_descriptions = [desc.clone() for desc in instance.descriptions.all()]
+                        latest_version.set_locales()
+                    parent = instance.parent
+                    latest_version.sources.set([parent, parent.head])
                 reference = CollectionReference(expression=latest_version.uri)
                 reference.save()
                 saved_references.append(reference)
