@@ -44,7 +44,8 @@ class CollectionVersionListSerializer(ModelSerializer):
         model = Collection
         fields = (
             'short_code', 'name', 'url', 'owner', 'owner_type', 'owner_url', 'version', 'created_at', 'id',
-            'collection_type', 'updated_at', 'canonical_url', 'version_url', 'previous_version_url',
+            'collection_type', 'updated_at', 'canonical_url', 'released', 'retired', 'version_url',
+            'previous_version_url',
         )
 
 
