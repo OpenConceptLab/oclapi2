@@ -391,8 +391,8 @@ class CollectionVersionListView(CollectionVersionBaseView, mixins.CreateModelMix
     default_qs_sort_attr = '-created_at'
 
     def get_serializer_class(self):
-        if self.request.method in ['GET', 'HEAD']:
-            return CollectionVersionDetailSerializer if self.is_verbose() else CollectionListSerializer
+        if self.request.method in ['GET', 'HEAD'] and self.is_verbose():
+            return CollectionVersionDetailSerializer
         if self.request.method == 'POST':
             return CollectionCreateSerializer
 
