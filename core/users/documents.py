@@ -23,7 +23,9 @@ class UserProfileDocument(Document):
     class Django:
         model = UserProfile
         fields = [
-            'is_active'
+            'is_active',
+            'is_superuser',
+            'is_staff',
         ]
 
     @staticmethod

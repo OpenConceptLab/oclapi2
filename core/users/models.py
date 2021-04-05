@@ -35,6 +35,9 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
         'date_joined': {'sortable': True, 'default': 'asc', 'filterable': False},
         'company': {'sortable': True, 'filterable': True, 'exact': True},
         'location': {'sortable': True, 'filterable': True, 'exact': True},
+        'is_superuser': {'sortable': False, 'filterable': True, 'exact': True, 'facet': True},
+        'is_staff': {'sortable': False, 'filterable': False, 'exact': True, 'facet': True},
+        'is_admin': {'sortable': False, 'filterable': False, 'exact': True, 'facet': True}
     }
 
     @property

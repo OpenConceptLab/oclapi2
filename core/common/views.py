@@ -269,8 +269,10 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         facets = dict()
 
         if self.should_include_facets() and self.facet_class:
-            default_filters = self.default_filters.copy()
+            if self.is_user_document():
+                return facets
             is_source_child_document_model = self.is_source_child_document_model()
+            default_filters = self.default_filters.copy()
 
             if is_source_child_document_model and 'collection' not in self.kwargs and 'version' not in self.kwargs:
                 default_filters['is_latest_version'] = True
