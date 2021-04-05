@@ -150,6 +150,7 @@ class SourceRetrieveUpdateDestroyView(SourceBaseView, ConceptDictionaryUpdateMix
         if not instance:
             raise Http404()
 
+        self.check_object_permissions(self.request, instance)
         return instance
 
     def get_permissions(self):
@@ -256,7 +257,9 @@ class SourceVersionRetrieveUpdateDestroyView(SourceVersionBaseView, RetrieveAPIV
     serializer_class = SourceVersionDetailSerializer
 
     def get_object(self, queryset=None):
-        return get_object_or_404(self.get_queryset())
+        instance = get_object_or_404(self.get_queryset())
+        self.check_object_permissions(self.request, instance)
+        return instance
 
     def update(self, request, *args, **kwargs):
         self.object = self.get_object()
@@ -369,7 +372,9 @@ class SourceSummaryView(SourceBaseView, RetrieveAPIView):
     permission_classes = (CanViewConceptDictionary,)
 
     def get_object(self, queryset=None):
-        return get_object_or_404(self.get_queryset())
+        instance = get_object_or_404(self.get_queryset())
+        self.check_object_permissions(self.request, instance)
+        return instance
 
 
 class SourceVersionSummaryView(SourceVersionBaseView, RetrieveAPIView):
@@ -377,7 +382,9 @@ class SourceVersionSummaryView(SourceVersionBaseView, RetrieveAPIView):
     permission_classes = (CanViewConceptDictionary,)
 
     def get_object(self, queryset=None):
-        return get_object_or_404(self.get_queryset())
+        instance = get_object_or_404(self.get_queryset())
+        self.check_object_permissions(self.request, instance)
+        return instance
 
 
 class SourceLatestVersionSummaryView(SourceVersionBaseView, RetrieveAPIView, UpdateAPIView):

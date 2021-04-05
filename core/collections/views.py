@@ -190,6 +190,8 @@ class CollectionRetrieveUpdateDestroyView(CollectionBaseView, ConceptDictionaryU
         instance = self.get_queryset().filter(is_active=True).order_by('-created_at').first()
         if not instance:
             raise Http404()
+
+        self.check_object_permissions(self.request, instance)
         return instance
 
     def get_permissions(self):
@@ -224,6 +226,8 @@ class CollectionReferencesView(
 
         if not instance:
             raise Http404(NO_MATCH)
+
+        self.check_object_permissions(self.request, instance)
 
         return instance
 
@@ -475,7 +479,9 @@ class CollectionVersionRetrieveUpdateDestroyView(CollectionBaseView, RetrieveAPI
     serializer_class = CollectionVersionDetailSerializer
 
     def get_object(self, queryset=None):
-        return get_object_or_404(self.get_queryset())
+        instance = get_object_or_404(self.get_queryset())
+        self.check_object_permissions(self.request, instance)
+        return instance
 
     def update(self, request, *args, **kwargs):
         self.object = self.get_object()
@@ -585,7 +591,9 @@ class CollectionSummaryView(CollectionBaseView, RetrieveAPIView):
     permission_classes = (CanViewConceptDictionary,)
 
     def get_object(self, queryset=None):
-        return get_object_or_404(self.get_queryset())
+        instance = get_object_or_404(self.get_queryset())
+        self.check_object_permissions(self.request, instance)
+        return instance
 
 
 class CollectionVersionSummaryView(CollectionBaseView, RetrieveAPIView):
@@ -593,7 +601,9 @@ class CollectionVersionSummaryView(CollectionBaseView, RetrieveAPIView):
     permission_classes = (CanViewConceptDictionary,)
 
     def get_object(self, queryset=None):
-        return get_object_or_404(self.get_queryset())
+        instance = get_object_or_404(self.get_queryset())
+        self.check_object_permissions(self.request, instance)
+        return instance
 
 
 class CollectionLatestVersionSummaryView(CollectionVersionBaseView, RetrieveAPIView, UpdateAPIView):
