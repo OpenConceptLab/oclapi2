@@ -393,7 +393,7 @@ class UserDetailViewTest(OCLAPITestCase):
         response = self.client.put(
             '/users/{}/'.format(self.user.username),
             dict(password='newpassword123', email='user@user.com'),
-            HTTP_AUTHORIZATION='Token ' + self.token,
+            HTTP_AUTHORIZATION='Token ' + self.user.get_token(),
             format='json'
         )
 
