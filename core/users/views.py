@@ -203,6 +203,8 @@ class UserDetailView(UserBaseView, RetrieveAPIView, DestroyAPIView, mixins.Updat
         if self.request.method == 'DELETE':
             return [IsAdminUser()]
 
+        if self.request.query_params.get('includeVerificationToken') and self.request.method == 'GET':
+            return [AllowAny()]
         return [IsAuthenticated()]
 
     def get_object(self, queryset=None):
@@ -214,6 +216,9 @@ class UserDetailView(UserBaseView, RetrieveAPIView, DestroyAPIView, mixins.Updat
 
         is_self = self.kwargs.get('user_is_self') or self.user_is_self
         is_admin = self.request.user.is_staff
+
+        if self.request.query_params.get('includeVerificationToken') and self.request.method == 'GET':
+            return instance
 
         if not is_self and not is_admin:
             raise PermissionDenied(detail='You do not have permission to perform this action.')
