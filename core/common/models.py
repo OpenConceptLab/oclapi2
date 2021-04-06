@@ -75,45 +75,7 @@ class BaseModel(models.Model):
     def save(self, force_insert=False, force_update=False, using=None, update_fields=None):
         if not self.internal_reference_id and self.id:
             self.internal_reference_id = str(self.id)
-        self.is_being_saved = True
-        self.encode_extras()
         super().save(force_insert, force_update, using, update_fields)
-        self.is_being_saved = False
-
-    def encode_extras(self):
-        if self.extras is not None and not self.extras_have_been_encoded:
-            self.encode_extras_recursively(self.extras)
-            self.extras_have_been_encoded = True
-
-    def encode_extras_recursively(self, extras):
-        if isinstance(extras, dict):
-            for old_key in extras.copy():
-                key = old_key
-                key = key.replace('%', '%25')
-                key = key.replace('.', '%2E')
-                value = extras.get(old_key)
-                self.encode_extras_recursively(value)
-                if key is not old_key:
-                    extras.pop(old_key)
-                    extras[key] = value
-        elif isinstance(extras, list):
-            for item in extras:
-                self.encode_extras_recursively(item)
-
-    def decode_extras(self, extras):
-        if isinstance(extras, dict):
-            for old_key in extras.copy():
-                key = old_key
-                key = key.replace('%25', '%')
-                key = key.replace('%2E', '.')
-                value = extras.get(old_key)
-                self.decode_extras(value)
-                if key is not old_key:
-                    extras.pop(old_key)
-                    extras[key] = value
-        elif isinstance(extras, list):
-            for item in extras:
-                self.decode_extras(item)
 
     def soft_delete(self):
         if self.is_active:
