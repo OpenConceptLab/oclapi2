@@ -1,0 +1,1 @@
+SELECT row_to_json (r) FROM ( SELECT username, password, last_login FROM users_user ) r;

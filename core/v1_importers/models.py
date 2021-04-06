@@ -1,6 +1,7 @@
 import json
 import time
 import urllib
+from datetime import datetime
 
 from pydash import get
 
@@ -28,6 +29,7 @@ class V1BaseImporter:
     failed = []
     not_found = []
     not_found_references = []
+    old_users = []
 
     elapsed_seconds = 0
     start_time = None
@@ -200,6 +202,8 @@ class V1BaseImporter:
             return V1MappingVersionImporter
         if name in ['web_user_credential']:
             return V1WebUserCredentialsImporter
+        if name in ['tokens']:
+            return V1UserTokensImporter
         if name in ['collection_reference']:
             return V1CollectionReferencesImporter
 
@@ -948,6 +952,26 @@ class V1CollectionReferencesImporter(V1BaseImporter):
             self.not_found.append(collection_uri)
 
 
+class V1UserTokensImporter(V1BaseImporter):
+    start_message = 'STARTING TOKEN IMPORT'
+    result_attrs = ['updated', 'not_found', 'old_users']
+
+    def process_line(self, line):
+        self.processed += 1
+        data = json.loads(line)
+        original_data = data.copy()
+        username = data.get('username')
+        token = data.get('token')
+        self.log("Processing: {} ({}/{})".format(username, self.processed, self.total))
+        user = UserProfile.objects.filter(username=username).first()
+        oct_1_2020 = datetime(2020, 10, 1).timestamp()
+        if user and (not user.last_login or user.last_login.timestamp() >= oct_1_2020):
+            user.set_token(token)
+            self.updated.append(original_data)
+        else:
+            self.not_found.append(original_data)
+
+
 class V1WebUserCredentialsImporter(V1BaseImporter):
     start_message = 'STARTING WEB USER CREDENTIALS IMPORT'
     result_attrs = ['updated', 'not_found']
@@ -958,10 +982,12 @@ class V1WebUserCredentialsImporter(V1BaseImporter):
         original_data = data.copy()
         username = data.get('username')
         password = data.get('password')
+        last_login = data.get('last_login')
         self.log("Processing: {} ({}/{})".format(username, self.processed, self.total))
         user = UserProfile.objects.filter(username=username).first()
         if user:
             user.password = password
+            user.last_login = last_login
             user.save()
             self.updated.append(original_data)
         else:

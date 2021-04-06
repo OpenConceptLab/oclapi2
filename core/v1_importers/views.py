@@ -78,5 +78,9 @@ class WebUserCredentialsImporterView(BaseImporterView):
     importer = 'web_user_credential'
 
 
+class UserTokensImporterView(BaseImporterView):
+    importer = 'tokens'
+
+
 class CollectionReferenceImporterView(BaseImporterView):
     importer = 'collection_reference'
