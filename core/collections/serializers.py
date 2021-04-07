@@ -217,7 +217,7 @@ class CollectionDetailSerializer(CollectionCreateOrUpdateSerializer):
             'custom_resources_linked_source', 'repository_type', 'preferred_source', 'references',
             'canonical_url', 'identifier', 'publisher', 'contact', 'jurisdiction', 'purpose', 'copyright',
             'immutable', 'revision_date', 'logo_url', 'summary', 'text', 'client_configs',
-            'experimental', 'locked_date'
+            'experimental', 'locked_date', 'internal_reference_id'
 
         )
 
@@ -288,7 +288,7 @@ class CollectionVersionDetailSerializer(CollectionCreateOrUpdateSerializer):
             'created_on', 'updated_on', 'created_by', 'updated_by', 'extras', 'external_id', 'version',
             'version', 'concepts_url', 'mappings_url', 'is_processing', 'released', 'retired',
             'canonical_url', 'identifier', 'publisher', 'contact', 'jurisdiction', 'purpose', 'copyright',
-            'immutable', 'revision_date', 'summary', 'text', 'experimental', 'locked_date',
+            'immutable', 'revision_date', 'summary', 'text', 'experimental', 'locked_date', 'internal_reference_id',
         )
 
     def __init__(self, *args, **kwargs):

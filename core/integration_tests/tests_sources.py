@@ -120,7 +120,7 @@ class SourceListViewTest(OCLAPITestCase):
                 'canonical_url', 'identifier', 'publisher', 'contact',
                 'jurisdiction', 'purpose', 'copyright', 'content_type', 'revision_date', 'logo_url', 'text',
                 'experimental', 'case_sensitive', 'collection_reference', 'hierarchy_meaning', 'compositional',
-                'version_needed',
+                'version_needed', 'internal_reference_id'
             ]
         )
         source = Source.objects.last()
@@ -198,7 +198,7 @@ class SourceCreateUpdateDestroyViewTest(OCLAPITestCase):
                 'canonical_url', 'identifier', 'publisher', 'contact',
                 'jurisdiction', 'purpose', 'copyright', 'content_type', 'revision_date', 'logo_url', 'text',
                 'experimental', 'case_sensitive', 'collection_reference', 'hierarchy_meaning', 'compositional',
-                'version_needed',
+                'version_needed', 'internal_reference_id'
             ]
         )
         source = Source.objects.last()

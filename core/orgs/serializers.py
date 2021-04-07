@@ -90,7 +90,7 @@ class OrganizationDetailSerializer(serializers.ModelSerializer):
             'type', 'uuid', 'id', 'public_access', 'name', 'company', 'website', 'location', 'members',
             'created_on', 'updated_on', 'url', 'extras', 'members_url', 'created_by', 'updated_by', 'location',
             'sources_url', 'public_sources', 'collections_url', 'public_collections', 'logo_url', 'description',
-            'client_configs', 'text',
+            'client_configs', 'text', 'internal_reference_id',
         )
 
     def __init__(self, *args, **kwargs):

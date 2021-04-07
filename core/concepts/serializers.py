@@ -260,7 +260,8 @@ class ConceptVersionDetailSerializer(ModelSerializer):
             'type', 'uuid', 'id', 'external_id', 'concept_class', 'datatype', 'display_name', 'display_locale',
             'names', 'descriptions', 'extras', 'retired', 'source', 'source_url', 'owner', 'owner_name', 'owner_url',
             'version', 'created_on', 'updated_on', 'version_created_on', 'version_created_by', 'update_comment',
-            'is_latest_version', 'locale', 'url', 'owner_type', 'version_url', 'mappings', 'previous_version_url'
+            'is_latest_version', 'locale', 'url', 'owner_type', 'version_url', 'mappings', 'previous_version_url',
+            'internal_reference_id',
         )
 
     def get_mappings(self, obj):

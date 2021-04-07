@@ -101,7 +101,7 @@ class MappingDetailSerializer(MappingListSerializer):
         model = Mapping
         fields = MappingListSerializer.Meta.fields + (
             'type', 'uuid', 'extras', 'created_on', 'updated_on',
-            'created_by', 'updated_by', 'parent_id', 'previous_version_url',
+            'created_by', 'updated_by', 'parent_id', 'previous_version_url', 'internal_reference_id',
         )
         extra_kwargs = {'parent_id': {'write_only': True}}
 
