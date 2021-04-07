@@ -64,7 +64,7 @@ class V1BaseImporter:
     def log(msg):
         print("*******{}*******".format(msg))
 
-    @@property
+    @property
     def v1_api_base_url(self):
         v1_api_base_url = None
         if settings.ENV == 'production':
