@@ -3,13 +3,16 @@ import time
 import urllib
 from datetime import datetime
 
+import requests
+from django.conf import settings
+from django.db.models import Q
 from pydash import get
 
 from core.collections.models import CollectionReference, Collection
 from core.collections.utils import is_concept
 from core.common.constants import HEAD
 from core.common.tasks import populate_indexes
-from core.common.utils import generate_temp_version, drop_version
+from core.common.utils import generate_temp_version, drop_version, to_parent_uri
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept, LocalizedText
 from core.mappings.documents import MappingDocument
@@ -30,6 +33,7 @@ class V1BaseImporter:
     not_found = []
     not_found_references = []
     old_users = []
+    not_found_matching_mapping = []
 
     elapsed_seconds = 0
     start_time = None
@@ -222,6 +226,8 @@ class V1BaseImporter:
             return V1UserTokensImporter
         if name in ['collection_reference']:
             return V1CollectionReferencesImporter
+        if name in ['mapping_reference']:
+            return V1CollectionMappingReferencesImporter
 
         return None
 
@@ -890,6 +896,109 @@ class V1CollectionVersionImporter(V1BaseImporter):
             collection.mappings.set(mappings)
             collection.batch_index(collection.concepts, ConceptDocument)
             collection.batch_index(collection.mappings, MappingDocument)
+
+
+class V1CollectionMappingReferencesImporter(V1BaseImporter):
+    start_message = 'STARTING COLLECTION MAPPING REFERENCES IMPORTER'
+    result_attrs = ['created', 'not_found', 'existed', 'not_found_references', 'not_found_matching_mapping']
+
+    def __init__(self, file_url, **kwargs):
+        self.data = dict()
+        self.drop_version_if_version_missing = kwargs.get('drop_version_if_version_missing', False)
+        super().__init__(file_url)
+
+    def read_file(self):
+        if self.file_url:
+            print("***", self.file_url)
+            file = urllib.request.urlopen(self.file_url)
+
+            self.data = json.loads(file.read())
+            self.total = len(self.data.keys())
+
+    def run(self):
+        self.start_time = time.time()
+        if not isinstance(self.lines, list):
+            return None
+
+        self.log(self.start_message)
+        self.log('TOTAL: {}'.format(self.total))
+
+        for collection_uri, expressions in self.data.items():
+            self.process(collection_uri, expressions)
+
+        self.elapsed_seconds = time.time() - self.start_time
+
+        return self.total_result
+
+    def process(self, collection_uri, expressions):  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
+        self.processed += 1
+        self.log("Processing: {} ({}/{})".format(collection_uri, self.processed, self.total))
+
+        collection = Collection.objects.filter(uri=collection_uri).first()
+        saved_references = []
+        mappings = []
+
+        if collection:
+            for expression in expressions:
+                self.log("Processing Expression: {} ".format(expression))
+                versionless_expression = drop_version(expression)
+                if collection.references.filter(expression__contains=versionless_expression).exists():
+                    self.log("Existed as reference. Skipping...: {} ".format(expression))
+                    self.existed.append(expression)
+                    continue
+                response = requests.get("{}{}".format(settings.API_BASE_URL, expression))
+
+                if response.status_code == 404:
+                    self.log("Expression not found. Skipping...: {} ".format(expression))
+                    self.not_found_references.append(expression)
+                    continue
+                if response.status_code == 200:
+                    self.log("Found Expression. Skipping...: {} ".format(expression))
+                    v1_data = response.json()
+                else:
+                    self.log("Failed Expression GET. Skipping...: {}".format(expression))
+                    continue
+
+                map_type = v1_data.get('map_type')
+                from_concept_uri = v1_data.get('from_concept_url')
+                to_concept_uri = v1_data.get('to_concept_url')
+                to_concept_code = v1_data.get('to_concept_code')
+                parent_uri = to_parent_uri(versionless_expression)
+
+                to_concept_criteria = None
+                if to_concept_code:
+                    to_concept_criteria = Q(to_concept_code=to_concept_code)
+                if to_concept_uri:
+                    criteria = Q(to_concept__uri=to_concept_uri)
+                    if not to_concept_criteria:
+                        to_concept_criteria = criteria
+                    else:
+                        to_concept_criteria |= criteria
+
+                mapping = Mapping.objects.filter(
+                    map_type=map_type, parent__uri=parent_uri, from_concept__uri=from_concept_uri
+                ).filter(to_concept_criteria).first()
+                if not mapping:
+                    self.log("Matching mapping not found. Skipping...: {}".format(expression))
+                    self.not_found_matching_mapping.append(expression)
+                    continue
+
+                latest_version = mapping.get_latest_version()
+                if not latest_version:
+                    latest_version = Mapping.create_initial_version(mapping)
+                    parent = mapping.parent
+                    latest_version.sources.set([parent, parent.head])
+                reference = CollectionReference(expression=latest_version.uri)
+                reference.save()
+                saved_references.append(reference)
+                mappings.append(latest_version)
+                self.created.append(expression)
+            collection.references.add(*saved_references)
+            if mappings:
+                collection.mappings.add(*mappings)
+                collection.batch_index(collection.mappings, MappingDocument)
+        else:
+            self.not_found.append(collection_uri)
 
 
 class V1CollectionReferencesImporter(V1BaseImporter):

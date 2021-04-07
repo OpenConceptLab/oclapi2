@@ -84,3 +84,7 @@ class UserTokensImporterView(BaseImporterView):
 
 class CollectionReferenceImporterView(BaseImporterView):
     importer = 'collection_reference'
+
+
+class CollectionMappingReferenceImporterView(BaseImporterView):
+    importer = 'mapping_reference'

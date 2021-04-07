@@ -18,5 +18,9 @@ urlpatterns = [
     path('collection-ids/', views.CollectionIdsImporterView.as_view(), name='v1-collection-ids-import'),
     path('web-user-credentials/', views.WebUserCredentialsImporterView.as_view(), name='v1-web-credentials-import'),
     path('references/', views.CollectionReferenceImporterView.as_view(), name='v1-references-import'),
+    path(
+        'mapping-references/', views.CollectionMappingReferenceImporterView.as_view(),
+        name='v1-mapping-references-import'
+    ),
     path('tokens/', views.UserTokensImporterView.as_view(), name='v1-tokens-import'),
 ]
