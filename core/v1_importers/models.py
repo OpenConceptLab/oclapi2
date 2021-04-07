@@ -64,6 +64,20 @@ class V1BaseImporter:
     def log(msg):
         print("*******{}*******".format(msg))
 
+    @@property
+    def v1_api_base_url(self):
+        v1_api_base_url = None
+        if settings.ENV == 'production':
+            v1_api_base_url = 'https://api.openconceptlab.org'
+        if settings.ENV == 'staging':
+            v1_api_base_url = 'https://api.staging.openconceptlab.org'
+        if settings.ENV == 'qa':
+            v1_api_base_url = 'https://api.qa.openconceptlab.org'
+        if settings.ENV == 'demo':
+            v1_api_base_url = 'https://api.demo.openconceptlab.org'
+
+        return v1_api_base_url
+
     @property
     def common_result(self):
         return dict(
@@ -937,6 +951,8 @@ class V1CollectionMappingReferencesImporter(V1BaseImporter):
         collection = Collection.objects.filter(uri=collection_uri).first()
         saved_references = []
         mappings = []
+        v1_api_base_url = self.v1_api_base_url
+        self.log("V1 API BASE URL: {}".format(v1_api_base_url))
 
         if collection:
             for expression in expressions:
@@ -946,7 +962,7 @@ class V1CollectionMappingReferencesImporter(V1BaseImporter):
                     self.log("Existed as reference. Skipping...: {} ".format(expression))
                     self.existed.append(expression)
                     continue
-                response = requests.get("{}{}".format(settings.API_BASE_URL, expression))
+                response = requests.get("{}{}".format(v1_api_base_url, expression))
 
                 if response.status_code == 404:
                     self.log("Expression not found. Skipping...: {} ".format(expression))
