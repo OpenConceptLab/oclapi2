@@ -90,12 +90,28 @@ class V1BaseImporter:
         result_details = self.details
         return dict(report=result_details, json=result_details, detailed_summary=self.summary)
 
-    def get_user(self, username):
-        if username not in self.users:
-            user = UserProfile.objects.filter(username=username).first()
-            self.users[username] = user
+    def get_user(self, username=None, internal_reference_id=None):
+        filters = dict()
+        key = username or internal_reference_id
+        if not key:
+            return None
 
-        return self.users[username]
+        if username:
+            filters['username'] = key
+        else:
+            filters['internal_reference_id'] = key
+
+        if key not in self.users:
+            user = UserProfile.objects.filter(**filters).first()
+            if user:
+                _internal_reference_id = user.internal_reference_id
+                _username = user.username
+                self.users[_username] = user
+                self.users[_internal_reference_id] = user
+            else:
+                self.users[key] = user
+
+        return self.users[key]
 
     def get_org(self, mnemonic=None, internal_reference_id=None):
         filters = dict()
@@ -321,8 +337,8 @@ class V1SourceImporter(V1BaseImporter):
         updated_at = data.pop('updated_at')
         created_by = data.get('created_by')
         updated_by = data.get('updated_by')
-        creator = self.get_user(created_by)
-        updater = self.get_user(updated_by)
+        creator = self.get_user(username=created_by)
+        updater = self.get_user(username=updated_by)
 
         if creator:
             data['created_by'] = creator
@@ -337,6 +353,9 @@ class V1SourceImporter(V1BaseImporter):
         if '/orgs/' in uri:
             org = self.get_org(internal_reference_id=parent_id)
             data['organization'] = org
+        else:
+            user = self.get_user(internal_reference_id=parent_id)
+            data['user'] = user
 
         self.log("Processing: {} ({}/{})".format(mnemonic, self.processed, self.total))
         if Source.objects.filter(uri=uri).exists():
@@ -377,8 +396,8 @@ class V1SourceVersionImporter(V1BaseImporter):
         updated_at = data.pop('updated_at')
         created_by = data.get('created_by')
         updated_by = data.get('updated_by')
-        creator = self.get_user(created_by)
-        updater = self.get_user(updated_by)
+        creator = self.get_user(username=created_by)
+        updater = self.get_user(username=updated_by)
 
         if creator:
             data['created_by'] = creator
@@ -425,8 +444,8 @@ class V1ConceptImporter(V1BaseImporter):
         data['internal_reference_id'] = get(_id, '$oid')
         data['created_at'] = get(created_at, '$date')
         data['updated_at'] = get(updated_at, '$date')
-        creator = self.get_user(created_by)
-        updater = self.get_user(updated_by)
+        creator = self.get_user(username=created_by)
+        updater = self.get_user(username=updated_by)
 
         if creator:
             data['created_by'] = creator
@@ -500,8 +519,8 @@ class V1ConceptVersionImporter(V1BaseImporter):
         data['created_at'] = get(created_at, '$date')
         data['updated_at'] = get(updated_at, '$date')
 
-        creator = self.get_user(created_by)
-        updater = self.get_user(updated_by)
+        creator = self.get_user(username=created_by)
+        updater = self.get_user(username=updated_by)
 
         if creator:
             data['created_by'] = creator
@@ -577,8 +596,8 @@ class V1MappingImporter(V1BaseImporter):
         data['created_at'] = get(created_at, '$date')
         data['updated_at'] = get(updated_at, '$date')
 
-        creator = self.get_user(created_by)
-        updater = self.get_user(updated_by)
+        creator = self.get_user(username=created_by)
+        updater = self.get_user(username=updated_by)
 
         if creator:
             data['created_by'] = creator
@@ -650,8 +669,8 @@ class V1MappingVersionImporter(V1BaseImporter):
         if to_source_id:
             to_source = self.get_source(to_source_id)
 
-        creator = self.get_user(created_by)
-        updater = self.get_user(updated_by)
+        creator = self.get_user(username=created_by)
+        updater = self.get_user(username=updated_by)
 
         if creator:
             data['created_by'] = creator
@@ -722,8 +741,8 @@ class V1CollectionImporter(V1BaseImporter):
         updated_by = data.get('updated_by')
         references = data.pop('references') or []
 
-        creator = self.get_user(created_by)
-        updater = self.get_user(updated_by)
+        creator = self.get_user(username=created_by)
+        updater = self.get_user(username=updated_by)
         if creator:
             data['created_by'] = creator
         if updater:
@@ -733,7 +752,13 @@ class V1CollectionImporter(V1BaseImporter):
         data['created_at'] = get(created_at, '$date')
         data['updated_at'] = get(updated_at, '$date')
         mnemonic = data.get('mnemonic')
-        data['organization'] = self.get_org(internal_reference_id=parent_id)
+        uri = data['uri']
+        if '/orgs/' in uri:
+            org = self.get_org(internal_reference_id=parent_id)
+            data['organization'] = org
+        else:
+            user = self.get_user(internal_reference_id=parent_id)
+            data['user'] = user
 
         self.log("Processing: {} ({}/{})".format(mnemonic, self.processed, self.total))
         uri = data['uri']
@@ -811,8 +836,8 @@ class V1CollectionVersionImporter(V1BaseImporter):
         updated_at = data.pop('updated_at')
         created_by = data.get('created_by')
         updated_by = data.get('updated_by')
-        creator = self.get_user(created_by)
-        updater = self.get_user(updated_by)
+        creator = self.get_user(username=created_by)
+        updater = self.get_user(username=updated_by)
         if creator:
             data['created_by'] = creator
         if updater:
