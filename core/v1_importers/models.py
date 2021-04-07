@@ -988,6 +988,10 @@ class V1CollectionMappingReferencesImporter(V1BaseImporter):
                     latest_version = Mapping.create_initial_version(mapping)
                     parent = mapping.parent
                     latest_version.sources.set([parent, parent.head])
+                if collection.references.filter(expression__contains=drop_version(latest_version.uri)).exists():
+                    self.log("Existed as matching reference. Skipping...: {} ".format(expression))
+                    self.existed.append(expression)
+                    continue
                 reference = CollectionReference(expression=latest_version.uri)
                 reference.save()
                 saved_references.append(reference)
@@ -1069,6 +1073,10 @@ class V1CollectionReferencesImporter(V1BaseImporter):
                         latest_version.set_locales()
                     parent = instance.parent
                     latest_version.sources.set([parent, parent.head])
+                if collection.references.filter(expression__contains=drop_version(latest_version.uri)).exists():
+                    self.log("Existed as matching reference. Skipping...: {} ".format(expression))
+                    self.existed.append(expression)
+                    continue
                 reference = CollectionReference(expression=latest_version.uri)
                 reference.save()
                 saved_references.append(reference)
