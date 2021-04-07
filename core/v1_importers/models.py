@@ -914,7 +914,7 @@ class V1CollectionVersionImporter(V1BaseImporter):
 
 class V1CollectionMappingReferencesImporter(V1BaseImporter):
     start_message = 'STARTING COLLECTION MAPPING REFERENCES IMPORTER'
-    result_attrs = ['created', 'not_found', 'existed', 'not_found_references', 'not_found_matching_mapping']
+    result_attrs = ['created', 'not_found', 'existed', 'not_found_references', 'not_found_matching_mapping', 'failed']
 
     def __init__(self, file_url, **kwargs):
         self.data = dict()
@@ -973,6 +973,7 @@ class V1CollectionMappingReferencesImporter(V1BaseImporter):
                     v1_data = response.json()
                 else:
                     self.log("Failed Expression GET. Skipping...: {}".format(expression))
+                    self.failed.append(expression)
                     continue
 
                 map_type = v1_data.get('map_type')
