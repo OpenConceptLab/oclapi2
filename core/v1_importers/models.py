@@ -963,18 +963,24 @@ class V1CollectionMappingReferencesImporter(V1BaseImporter):
                     self.existed.append(expression)
                     continue
                 response = requests.get("{}{}".format(v1_api_base_url, expression))
+                if response.status_code != 200:
+                    self.log("Expression GET failed: {} ".format(expression))
+                    if self.drop_version_if_version_missing:
+                        self.log("Trying Versionless expression...: {} ".format(versionless_expression))
+                        response = requests.get("{}{}".format(v1_api_base_url, versionless_expression))
+                        if response.status_code != 200:
+                            self.log(
+                                "Versionless Expression GET failed. Skipping...: {} ".format(versionless_expression)
+                            )
+                            self.failed.append(expression)
+                            continue
+                    else:
+                        self.log('Skipping...: {}'.format(expression))
+                        self.failed.append(expression)
+                        continue
 
-                if response.status_code == 404:
-                    self.log("Expression not found. Skipping...: {} ".format(expression))
-                    self.not_found_references.append(expression)
-                    continue
-                if response.status_code == 200:
-                    self.log("Found Expression. Skipping...: {} ".format(expression))
-                    v1_data = response.json()
-                else:
-                    self.log("Failed Expression GET. Skipping...: {}".format(expression))
-                    self.failed.append(expression)
-                    continue
+                self.log("Found Expression. Skipping...: {} ".format(expression))
+                v1_data = response.json()
 
                 map_type = v1_data.get('map_type')
                 from_concept_uri = v1_data.get('from_concept_url')
