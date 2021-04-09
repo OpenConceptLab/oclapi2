@@ -108,47 +108,55 @@ class V1BaseImporter:
         result_details = self.details
         return dict(report=result_details, json=result_details, detailed_summary=self.summary)
 
-    def get_user(self, username=None, internal_reference_id=None):
+    def get_user(self, username=None, internal_reference_id=None, uri=None):
         filters = dict()
-        key = username or internal_reference_id
+        key = username or internal_reference_id or uri
         if not key:
             return None
 
         if username:
             filters['username'] = key
-        else:
+        elif internal_reference_id:
             filters['internal_reference_id'] = key
+        else:
+            filters['uri'] = key
 
         if key not in self.users:
             user = UserProfile.objects.filter(**filters).first()
             if user:
                 _internal_reference_id = user.internal_reference_id
                 _username = user.username
+                _uri = user.uri
                 self.users[_username] = user
                 self.users[_internal_reference_id] = user
+                self.users[_uri] = user
             else:
                 self.users[key] = user
 
         return self.users[key]
 
-    def get_org(self, mnemonic=None, internal_reference_id=None):
+    def get_org(self, mnemonic=None, internal_reference_id=None, uri=None):
         filters = dict()
-        key = mnemonic or internal_reference_id
+        key = mnemonic or internal_reference_id or uri
         if not key:
             return None
 
         if mnemonic:
             filters['mnemonic'] = key
-        else:
+        elif internal_reference_id:
             filters['internal_reference_id'] = key
+        else:
+            filters['uri'] = key
 
         if key not in self.orgs:
             org = Organization.objects.filter(**filters).first()
             if org:
                 _internal_reference_id = org.internal_reference_id
                 _mnemonic = org.mnemonic
+                _uri = org.uri
                 self.orgs[_mnemonic] = org
                 self.orgs[_internal_reference_id] = org
+                self.orgs[_uri] = org
             else:
                 self.orgs[key] = org
 
@@ -351,8 +359,10 @@ class V1SourceImporter(V1BaseImporter):
         original_data = data.copy()
         self.processed += 1
         _id = data.pop('_id')
+        data.pop('parent_id')
         data.pop('parent_type_id')
-        parent_id = data.pop('parent_id')
+        uri = data['uri']
+        owner_uri = uri.split('/sources/')[0] + '/'
         created_at = data.pop('created_at')
         updated_at = data.pop('updated_at')
         created_by = data.get('created_by')
@@ -369,12 +379,11 @@ class V1SourceImporter(V1BaseImporter):
         data['updated_at'] = get(updated_at, '$date')
         mnemonic = data.get('mnemonic')
 
-        uri = data['uri']
         if '/orgs/' in uri:
-            org = self.get_org(internal_reference_id=parent_id)
+            org = self.get_org(uri=owner_uri)
             data['organization'] = org
         else:
-            user = self.get_user(internal_reference_id=parent_id)
+            user = self.get_user(uri=owner_uri)
             data['user'] = user
 
         self.log("Processing: {} ({}/{})".format(mnemonic, self.processed, self.total))
@@ -754,7 +763,9 @@ class V1CollectionImporter(V1BaseImporter):
         for attr in ['parent_type_id', 'concepts', 'mappings']:
             data.pop(attr, None)
 
-        parent_id = data.pop('parent_id')
+        data.pop('parent_id')
+        uri = data['uri']
+        owner_uri = uri.split('/collections/')[0] + '/'
         created_at = data.pop('created_at')
         updated_at = data.pop('updated_at')
         created_by = data.get('created_by')
@@ -772,12 +783,11 @@ class V1CollectionImporter(V1BaseImporter):
         data['created_at'] = get(created_at, '$date')
         data['updated_at'] = get(updated_at, '$date')
         mnemonic = data.get('mnemonic')
-        uri = data['uri']
         if '/orgs/' in uri:
-            org = self.get_org(internal_reference_id=parent_id)
+            org = self.get_org(uri=owner_uri)
             data['organization'] = org
         else:
-            user = self.get_user(internal_reference_id=parent_id)
+            user = self.get_user(uri=owner_uri)
             data['user'] = user
 
         self.log("Processing: {} ({}/{})".format(mnemonic, self.processed, self.total))
