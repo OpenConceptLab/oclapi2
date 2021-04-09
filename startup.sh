@@ -18,5 +18,8 @@ python manage.py setup_superuser
 echo "Importing lookup values"
 python manage.py import_lookup_values
 
+echo "Populating text from extras.about"
+python manage.py populate_text_from_extras_about
+
 echo "Starting up the server"
 python manage.py runserver 0.0.0.0:${API_PORT:-8000}
