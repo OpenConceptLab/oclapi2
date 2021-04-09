@@ -6,8 +6,9 @@ db.export.mappingversions.drop();
 
 
 org_ids = db.orgs_organization.find({mnemonic: {$in: ["OHRITechGroup", "OMRSCOVIDSquad", "EthiopiaNHDD", "MSF-OCB", "MOH-DM", "IAD", "integrated-impact", "SSAS", "DSME-Test", "GFPVAN", "im", "Kuunika", "DSME", "DSME-CDD", "MOH", "mTOMADY", "IRDO", "ibwighane", "mw-terminology-service", "mw-product-master", "ICI", "mw-terminology-service-development", "mw-product-master-ocl-instance", "mw-product-master-ocl", "malawi-diseases-diagnosis", "TestOrg", "DWB", "CMDF", "MUDHC", "MSF", "MU", "MUDH", "nproto", "MSFTW", "TWABC", "kuunika-registries", "UNIMED", "SHC", "MSFOCP", "SELF", "OpenSandbox", "sandbox", "ATH", "Reverton"]}}, {_id: 1}).map(doc => doc._id.str);
-source_oids = db.sources_source.find({parent_id: {$in: org_ids}}, {_id: 1}).map(doc => doc._id);
-source_ids = db.sources_source.find({parent_id: {$in: org_ids}}, {_id: 1}).map(doc => doc._id.str);
+user_ids = db.users_userprofile.find({mnemonic: {$in: ["gpotma"]}}, {_id: 1}).map(doc => doc._id.str);
+source_oids = db.sources_source.find({ $or: [{parent_id: {$in: org_ids}}, {parent_id: {$in: user_ids}}]}, {_id: 1}).map(doc => doc._id);
+source_ids = db.sources_source.find({ $or: [{parent_id: {$in: org_ids}}, {parent_id: {$in: user_ids}}]}, {_id: 1}).map(doc => doc._id.str);
 
 concept_ids = db.concepts_concept.find({parent_id: {$in: source_ids}}).map(doc => doc._id.str)
 db.export.concepts.insertMany(db.concepts_concept.find({parent_id: {$in: source_ids}}).map(doc => doc));
