@@ -22,5 +22,9 @@ urlpatterns = [
         'mapping-references/', views.CollectionMappingReferenceImporterView.as_view(),
         name='v1-mapping-references-import'
     ),
+    path(
+        'collection-parent-connector/', views.CollectionParentConnectorView.as_view(),
+        name='collection-parent-connector'
+    ),
     path('tokens/', views.UserTokensImporterView.as_view(), name='v1-tokens-import'),
 ]
