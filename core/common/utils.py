@@ -500,7 +500,10 @@ def web_url():
         return 'http://localhost:4000'
 
     if env == 'production':
-        return "https://app.aws.openconceptlab.org"
+        return "https://app.openconceptlab.org"
+
+    if env == 'staging':
+        return "https://app.staging.openconceptlab.org"
 
     return "https://app.{}.aws.openconceptlab.org".format(env)
 
