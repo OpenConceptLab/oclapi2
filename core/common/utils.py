@@ -502,10 +502,7 @@ def web_url():
     if env == 'production':
         return "https://app.openconceptlab.org"
 
-    if env == 'staging':
-        return "https://app.staging.openconceptlab.org"
-
-    return "https://app.{}.aws.openconceptlab.org".format(env)
+    return "https://app.{}.openconceptlab.org".format(env)
 
 
 def get_resource_class_from_resource_name(resource):  # pylint: disable=too-many-return-statements
