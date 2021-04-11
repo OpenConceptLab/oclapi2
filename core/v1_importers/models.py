@@ -68,13 +68,13 @@ class V1BaseImporter:
     def v1_api_base_url(self):
         v1_api_base_url = None
         if settings.ENV == 'production':
-            v1_api_base_url = 'https://api.openconceptlab.org'
+            v1_api_base_url = 'https://api.v1.openconceptlab.org'
         if settings.ENV == 'staging':
-            v1_api_base_url = 'https://api.staging.openconceptlab.org'
+            v1_api_base_url = 'https://api.staging.v1.openconceptlab.org'
         if settings.ENV == 'qa':
-            v1_api_base_url = 'https://api.qa.openconceptlab.org'
+            v1_api_base_url = 'https://api.qa.v1.openconceptlab.org'
         if settings.ENV == 'demo':
-            v1_api_base_url = 'https://api.demo.openconceptlab.org'
+            v1_api_base_url = 'https://api.demo.v1.openconceptlab.org'
 
         return v1_api_base_url
 
