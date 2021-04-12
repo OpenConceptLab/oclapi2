@@ -253,8 +253,12 @@ class SourceLatestVersionRetrieveUpdateView(SourceVersionBaseView, RetrieveAPIVi
 
 
 class SourceVersionRetrieveUpdateDestroyView(SourceVersionBaseView, RetrieveAPIView, UpdateAPIView):
-    permission_classes = (HasAccessToVersionedObject,)
     serializer_class = SourceVersionDetailSerializer
+
+    def get_permissions(self):
+        if self.request.method == 'GET':
+            return [CanViewConceptDictionaryVersion()]
+        return [HasAccessToVersionedObject()]
 
     def get_object(self, queryset=None):
         instance = get_object_or_404(self.get_queryset())
