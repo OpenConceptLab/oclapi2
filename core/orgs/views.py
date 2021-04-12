@@ -9,7 +9,7 @@ from rest_framework.views import APIView
 
 from core.client_configs.views import ResourceClientConfigsView
 from core.collections.views import CollectionListView
-from core.common.constants import NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY
+from core.common.constants import NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY, HEAD
 from core.common.mixins import ListWithHeadersMixin
 from core.common.permissions import HasPrivateAccess, CanViewConceptDictionary
 from core.common.tasks import delete_organization
@@ -225,7 +225,7 @@ class OrganizationResourceAbstractListView:
         if not user:
             raise Http404()
 
-        return self.queryset.filter(organization__in=user.organizations.all())
+        return self.queryset.filter(organization__in=user.organizations.all(), version=HEAD)
 
 
 class OrganizationSourceListView(OrganizationResourceAbstractListView, SourceListView):
