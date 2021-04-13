@@ -989,7 +989,7 @@ class V1CollectionMappingReferencesImporter(V1BaseImporter):
                         self.failed.append(expression)
                         continue
 
-                self.log("Found Expression. Skipping...: {} ".format(expression))
+                self.log("Found Expression: {} ".format(expression))
                 v1_data = response.json()
 
                 map_type = v1_data.get('map_type')
