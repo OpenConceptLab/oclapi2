@@ -136,3 +136,16 @@ class ConceptView(APIView):
             concept.delete()
 
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class MappingView(APIView):
+    def delete(self, _):
+        uris = self.request.data.get('uris', [])
+        if not isinstance(uris, list):
+            return Response(status=status.HTTP_400_BAD_REQUEST)
+
+        from core.mappings.models import Mapping
+        for concept in Mapping.objects.filter(uri__in=uris):
+            concept.delete()
+
+        return Response(status=status.HTTP_204_NO_CONTENT)
