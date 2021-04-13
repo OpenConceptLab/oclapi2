@@ -123,3 +123,16 @@ class CollectionParentConnectorView(APIView):
 
         collection.save()
         return Response(status=status.HTTP_200_OK)
+
+
+class ConceptView(APIView):
+    def delete(self, _):
+        uris = self.request.data.get('uris', [])
+        if not isinstance(uris, list):
+            return Response(status=status.HTTP_400_BAD_REQUEST)
+
+        from core.concepts.models import Concept
+        for concept in Concept.objects.filter(uri__in=uris):
+            concept.delete()
+
+        return Response(status=status.HTTP_204_NO_CONTENT)

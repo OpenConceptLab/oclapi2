@@ -27,4 +27,5 @@ urlpatterns = [
         name='collection-parent-connector'
     ),
     path('tokens/', views.UserTokensImporterView.as_view(), name='v1-tokens-import'),
+    path('concept/', views.ConceptView.as_view(), name='v1-concept'),
 ]
