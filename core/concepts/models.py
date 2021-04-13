@@ -345,7 +345,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         if uri:
             queryset = queryset.filter(uri__icontains=uri)
 
-        if distinct_by:
+        if collection and not source and distinct_by:
             queryset = queryset.distinct(distinct_by)
 
         return queryset
