@@ -149,6 +149,11 @@ class MappingRetrieveUpdateDestroyView(MappingBaseView, RetrieveAPIView, UpdateA
     def destroy(self, request, *args, **kwargs):
         mapping = self.get_object()
         comment = request.data.get('update_comment', None) or request.data.get('comment', None)
+        hard_delete = request.query_params.get('hardDelete', None) in ['true', True, 'True']
+        if hard_delete:
+            mapping.delete()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+
         errors = mapping.retire(request.user, comment)
 
         if errors:
