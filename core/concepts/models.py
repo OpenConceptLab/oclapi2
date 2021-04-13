@@ -4,7 +4,7 @@ from django.db import models, IntegrityError, transaction
 from django.db.models import F
 from pydash import get, compact
 
-from core.common.constants import ISO_639_1, INCLUDE_RETIRED_PARAM, LATEST
+from core.common.constants import ISO_639_1, INCLUDE_RETIRED_PARAM, LATEST, HEAD
 from core.common.mixins import SourceChildMixin
 from core.common.models import VersionedModel
 from core.common.utils import reverse_resource, parse_updated_since_param, generate_temp_version
@@ -276,9 +276,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         return unsaved_names
 
     @classmethod
-    def get_base_queryset(  # pylint: disable=too-many-branches,too-many-locals,too-many-statements
-            cls, params, distinct_by='updated_at'
-    ):
+    def get_base_queryset(cls, params):  # pylint: disable=too-many-branches,too-many-locals,too-many-statements
         queryset = cls.objects.filter(is_active=True)
         user = params.get('user', None)
         org = params.get('org', None)
@@ -308,7 +306,11 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                 return cls.objects.none()
 
         if collection:
-            queryset = queryset.filter(cls.get_iexact_or_criteria('collection_set__mnemonic', collection))
+            mnemonic_criteria = cls.get_iexact_or_criteria('collection_set__mnemonic', collection)
+            if not container_version and not is_latest_released:
+                queryset = queryset.filter(mnemonic_criteria, collection_set__version=HEAD)
+            else:
+                queryset = queryset.filter(mnemonic_criteria)
             if user:
                 queryset = queryset.filter(cls.get_iexact_or_criteria('collection_set__user__username', user))
             if org:
@@ -320,7 +322,11 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             if container_version and not is_latest_released:
                 queryset = queryset.filter(cls.get_iexact_or_criteria('collection_set__version', container_version))
         if source:
-            queryset = queryset.filter(cls.get_iexact_or_criteria('sources__mnemonic', source))
+            mnemonic_criteria = cls.get_iexact_or_criteria('sources__mnemonic', source)
+            if not container_version and not is_latest_released:
+                queryset = queryset.filter(mnemonic_criteria, sources__version=HEAD)
+            else:
+                queryset = queryset.filter(mnemonic_criteria)
             if user:
                 queryset = queryset.filter(cls.get_iexact_or_criteria('parent__user__username', user))
             if org:
@@ -331,7 +337,6 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                 )
             if container_version and not is_latest_released:
                 queryset = queryset.filter(cls.get_iexact_or_criteria('sources__version', container_version))
-
         if concept:
             queryset = queryset.filter(mnemonic__exact=concept)
         if concept_version:
@@ -344,9 +349,6 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             queryset = queryset.filter(updated_at__gte=updated_since)
         if uri:
             queryset = queryset.filter(uri__icontains=uri)
-
-        if collection and not source and distinct_by:
-            queryset = queryset.distinct(distinct_by)
 
         return queryset
 

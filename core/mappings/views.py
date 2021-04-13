@@ -36,8 +36,8 @@ class MappingBaseView(SourceChildCommonBaseView):
     def get_detail_serializer(obj, data=None, files=None, partial=False):
         return MappingDetailSerializer(obj, data, files, partial)
 
-    def get_queryset(self, distinct_by='updated_at'):  # pylint: disable=arguments-differ
-        return Mapping.get_base_queryset(self.params, distinct_by)
+    def get_queryset(self):
+        return Mapping.get_base_queryset(self.params)
 
 
 class MappingListView(MappingBaseView, ListWithHeadersMixin, CreateModelMixin):
@@ -55,7 +55,7 @@ class MappingListView(MappingBaseView, ListWithHeadersMixin, CreateModelMixin):
 
         return MappingListSerializer
 
-    def get_queryset(self, _=None):
+    def get_queryset(self):
         is_latest_version = 'collection' not in self.kwargs and 'version' not in self.kwargs
         queryset = super().get_queryset()
         if is_latest_version:
@@ -101,7 +101,7 @@ class MappingRetrieveUpdateDestroyView(MappingBaseView, RetrieveAPIView, UpdateA
     serializer_class = MappingDetailSerializer
 
     def get_object(self, queryset=None):
-        queryset = self.get_queryset(None)
+        queryset = self.get_queryset()
         filters = dict(id=F('versioned_object_id'))
         if 'collection' in self.kwargs:
             filters = dict()
@@ -161,7 +161,7 @@ class MappingReactivateView(MappingBaseView, UpdateAPIView):
     serializer_class = MappingDetailSerializer
 
     def get_object(self, queryset=None):
-        return get_object_or_404(self.get_queryset(None), id=F('versioned_object_id'))
+        return get_object_or_404(self.get_queryset(), id=F('versioned_object_id'))
 
     def get_permissions(self):
         if self.request.method in ['GET']:
@@ -183,7 +183,7 @@ class MappingReactivateView(MappingBaseView, UpdateAPIView):
 class MappingVersionsView(MappingBaseView, ConceptDictionaryMixin, ListWithHeadersMixin):
     permission_classes = (CanViewParentDictionary,)
 
-    def get_queryset(self, _=None):
+    def get_queryset(self):
         return super().get_queryset().exclude(id=F('versioned_object_id'))
 
     def get_serializer_class(self):
@@ -198,7 +198,7 @@ class MappingVersionRetrieveView(MappingBaseView, RetrieveAPIView):
     permission_classes = (CanViewParentDictionary,)
 
     def get_object(self, queryset=None):
-        instance = self.get_queryset(None).first()
+        instance = self.get_queryset().first()
         if not instance:
             raise Http404()
         return instance
@@ -210,7 +210,7 @@ class MappingVersionListAllView(MappingBaseView, ListWithHeadersMixin):
     def get_serializer_class(self):
         return MappingDetailSerializer if self.is_verbose() else MappingListSerializer
 
-    def get_queryset(self, _=None):
+    def get_queryset(self):
         return Mapping.global_listing_queryset(
             self.get_filter_params(), self.request.user
         ).select_related(

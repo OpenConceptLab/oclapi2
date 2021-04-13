@@ -44,8 +44,8 @@ class ConceptBaseView(SourceChildCommonBaseView):
     def get_detail_serializer(self, obj, data=None, files=None, partial=False):
         return ConceptDetailSerializer(obj, data, files, partial, context=dict(request=self.request))
 
-    def get_queryset(self, distinct_by='updated_at'):  # pylint: disable=arguments-differ
-        return Concept.get_base_queryset(self.params, distinct_by)
+    def get_queryset(self):
+        return Concept.get_base_queryset(self.params)
 
 
 class ConceptVersionListAllView(ConceptBaseView, ListWithHeadersMixin):
@@ -54,7 +54,7 @@ class ConceptVersionListAllView(ConceptBaseView, ListWithHeadersMixin):
     def get_serializer_class(self):
         return ConceptDetailSerializer if self.is_verbose() else ConceptListSerializer
 
-    def get_queryset(self, _=None):
+    def get_queryset(self):
         return Concept.global_listing_queryset(
             self.get_filter_params(), self.request.user
         ).select_related(
@@ -87,7 +87,7 @@ class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
 
         return ConceptListSerializer
 
-    def get_queryset(self, _=None):
+    def get_queryset(self):
         is_latest_version = 'collection' not in self.kwargs and 'version' not in self.kwargs
         queryset = super().get_queryset()
         if is_latest_version:
@@ -132,7 +132,7 @@ class ConceptRetrieveUpdateDestroyView(ConceptBaseView, RetrieveAPIView, UpdateA
     serializer_class = ConceptDetailSerializer
 
     def get_object(self, queryset=None):
-        queryset = self.get_queryset(None)
+        queryset = self.get_queryset()
         filters = dict(id=F('versioned_object_id'))
         if 'collection' in self.kwargs:
             filters = dict()
@@ -192,7 +192,7 @@ class ConceptReactivateView(ConceptBaseView, UpdateAPIView):
     serializer_class = ConceptDetailSerializer
 
     def get_object(self, queryset=None):
-        return get_object_or_404(self.get_queryset(None), id=F('versioned_object_id'))
+        return get_object_or_404(self.get_queryset(), id=F('versioned_object_id'))
 
     def get_permissions(self):
         if self.request.method in ['GET']:
@@ -214,7 +214,7 @@ class ConceptReactivateView(ConceptBaseView, UpdateAPIView):
 class ConceptVersionsView(ConceptBaseView, ConceptDictionaryMixin, ListWithHeadersMixin):
     permission_classes = (CanViewParentDictionary,)
 
-    def get_queryset(self, _=None):
+    def get_queryset(self):
         return super().get_queryset().exclude(id=F('versioned_object_id'))
 
     def get_serializer_class(self):
@@ -228,8 +228,8 @@ class ConceptMappingsView(ConceptBaseView, ListWithHeadersMixin):
     serializer_class = MappingListSerializer
     permission_classes = (CanViewParentDictionary,)
 
-    def get_queryset(self, _=None):
-        concept = super().get_queryset(None).first()
+    def get_queryset(self):
+        concept = super().get_queryset().first()
         include_retired = self.request.query_params.get(INCLUDE_RETIRED_PARAM, False)
         include_indirect_mappings = self.request.query_params.get(INCLUDE_INVERSE_MAPPINGS_PARAM, 'false') == 'true'
         if include_indirect_mappings:
@@ -251,7 +251,7 @@ class ConceptVersionRetrieveView(ConceptBaseView, RetrieveAPIView):
     permission_classes = (CanViewParentDictionary,)
 
     def get_object(self, queryset=None):
-        instance = self.get_queryset(None).first()
+        instance = self.get_queryset().first()
         if not instance:
             raise Http404()
         return instance
@@ -269,12 +269,12 @@ class ConceptLabelListCreateView(ConceptBaseView, ListWithHeadersMixin, ListCrea
         return [CanEditParentDictionary()]
 
     def get_object(self, queryset=None):
-        instance = super().get_queryset(None).first()
+        instance = super().get_queryset().first()
         if not instance:
             raise Http404()
         return instance
 
-    def get_queryset(self, _=None):
+    def get_queryset(self):
         if not self.parent_list_attribute:
             return None
 
@@ -309,7 +309,7 @@ class ConceptLabelRetrieveUpdateDestroyView(ConceptBaseView, RetrieveUpdateDestr
     permission_classes = (IsAuthenticatedOrReadOnly,)
     default_qs_sort_attr = '-created_at'
 
-    def get_queryset(self, _=None):
+    def get_queryset(self):
         if not self.parent_list_attribute:
             return None
 
@@ -317,7 +317,7 @@ class ConceptLabelRetrieveUpdateDestroyView(ConceptBaseView, RetrieveUpdateDestr
         return getattr(instance, self.parent_list_attribute).all()
 
     def get_resource_object(self):
-        instance = super().get_queryset(None).first()
+        instance = super().get_queryset().first()
         if not instance:
             raise Http404()
         return instance

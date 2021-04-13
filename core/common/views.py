@@ -516,7 +516,7 @@ class SourceChildExtrasBaseView:
     default_qs_sort_attr = '-created_at'
 
     def get_object(self):
-        queryset = self.get_queryset(None)
+        queryset = self.get_queryset()
 
         if 'concept_version' in self.kwargs or 'mapping_version' in self.kwargs:
             return queryset.first()
