@@ -1,9 +1,10 @@
 from pydash import get
 from rest_framework.fields import CharField, DateTimeField, BooleanField, URLField, JSONField, SerializerMethodField, \
-    UUIDField
+    UUIDField, ListField
 from rest_framework.serializers import ModelSerializer
 
-from core.common.constants import INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_MAPPINGS_PARAM, INCLUDE_EXTRAS_PARAM
+from core.common.constants import INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_MAPPINGS_PARAM, INCLUDE_EXTRAS_PARAM, \
+    INCLUDE_PARENT_CONCEPTS, INCLUDE_CHILD_CONCEPTS
 from core.concepts.models import Concept, LocalizedText
 
 
@@ -179,16 +180,30 @@ class ConceptDetailSerializer(ModelSerializer):
     owner_url = URLField(read_only=True)
     extras = JSONField(required=False, allow_null=True)
     update_comment = CharField(required=False, source='comment', allow_null=True, allow_blank=True)
-    mappings = SerializerMethodField()
     url = CharField(required=False, source='versioned_object_url')
     updated_by = DateTimeField(source='updated_by.username', read_only=True)
     created_by = DateTimeField(source='created_by.username', read_only=True)
+    parent_concept_urls = ListField(allow_null=True, required=False, allow_empty=True)
+    child_concept_urls = ListField(read_only=True)
+    mappings = SerializerMethodField()
+    parent_concepts = SerializerMethodField()
+    child_concepts = SerializerMethodField()
 
     def __init__(self, *args, **kwargs):
         params = get(kwargs, 'context.request.query_params')
         self.query_params = params.dict() if params else dict()
         self.include_indirect_mappings = self.query_params.get(INCLUDE_INVERSE_MAPPINGS_PARAM) in ['true', True]
         self.include_direct_mappings = self.query_params.get(INCLUDE_MAPPINGS_PARAM) in ['true', True]
+        self.include_parent_concepts = self.query_params.get(INCLUDE_PARENT_CONCEPTS) in ['true', True]
+        self.include_child_concepts = self.query_params.get(INCLUDE_CHILD_CONCEPTS) in ['true', True]
+
+        try:
+            if not self.include_parent_concepts:
+                self.fields.pop('parent_concepts', None)
+            if not self.include_child_concepts:
+                self.fields.pop('child_concepts', None)
+        except:  # pylint: disable=bare-except
+            pass
 
         super().__init__(*args, **kwargs)
 
@@ -198,7 +213,8 @@ class ConceptDetailSerializer(ModelSerializer):
             'uuid', 'id', 'external_id', 'concept_class', 'datatype', 'url', 'retired', 'source',
             'owner', 'owner_type', 'owner_url', 'display_name', 'display_locale', 'names', 'descriptions',
             'created_on', 'updated_on', 'versions_url', 'version', 'extras', 'parent_id', 'name', 'type',
-            'update_comment', 'version_url', 'mappings', 'updated_by', 'created_by', 'internal_reference_id'
+            'update_comment', 'version_url', 'mappings', 'updated_by', 'created_by', 'internal_reference_id',
+            'parent_concept_urls', 'child_concept_urls', 'parent_concepts', 'child_concepts'
         )
 
     def get_mappings(self, obj):
@@ -222,6 +238,16 @@ class ConceptDetailSerializer(ModelSerializer):
         if errors:
             self._errors.update(errors)
         return instance
+
+    def get_child_concepts(self, obj):
+        if self.include_child_concepts:
+            return ConceptDetailSerializer(obj.child_concepts.all(), many=True).data
+        return None
+
+    def get_parent_concepts(self, obj):
+        if self.include_parent_concepts:
+            return ConceptDetailSerializer(obj.parent_concepts.all(), many=True).data
+        return None
 
 
 class ConceptVersionDetailSerializer(ModelSerializer):

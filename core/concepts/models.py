@@ -98,6 +98,11 @@ class LocalizedText(models.Model):
         return self.type in LOCALES_SEARCH_INDEX_TERM
 
 
+class HierarchicalConcepts(models.Model):
+    child = models.ForeignKey('concepts.Concept', related_name='child_parent', on_delete=models.CASCADE)
+    parent = models.ForeignKey('concepts.Concept', related_name='parent_child', on_delete=models.CASCADE)
+
+
 class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pylint: disable=too-many-public-methods
     class Meta:
         db_table = 'concepts'
@@ -113,6 +118,9 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     sources = models.ManyToManyField('sources.Source', related_name='concepts')
     versioned_object = models.ForeignKey(
         'self', related_name='versions_set', null=True, blank=True, on_delete=models.CASCADE
+    )
+    parent_concepts = models.ManyToManyField(
+        'self', through='HierarchicalConcepts', symmetrical=False, related_name='child_concepts'
     )
     logo_path = None
 
@@ -458,6 +466,8 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                 desc, 'description'
             ) for desc in data.pop('descriptions', []) or []
         ]
+
+        parent_concept_uris = data.pop('parent_concept_urls', None)
         concept = Concept(**data)
         concept.version = generate_temp_version()
         if user:
@@ -486,6 +496,8 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                 initial_version.sources.set([parent_resource, parent_resource_head])
 
             concept.sources.set([parent_resource, parent_resource_head])
+            if parent_concept_uris:
+                concept.parent_concepts.set(Concept.objects.filter(uri__in=parent_concept_uris))
             concept.update_mappings()
         except ValidationError as ex:
             concept.errors.update(ex.message_dict)
@@ -623,3 +635,11 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         ):
             mapping.from_concept = self
             mapping.save()
+
+    @property
+    def parent_concept_urls(self):
+        return list(self.parent_concepts.values_list('uri', flat=True))
+
+    @property
+    def child_concept_urls(self):
+        return list(self.child_concepts.values_list('uri', flat=True))
