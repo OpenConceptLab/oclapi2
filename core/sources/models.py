@@ -1,3 +1,4 @@
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import UniqueConstraint
 from django.urls import resolve
@@ -7,7 +8,7 @@ from core.common.constants import HEAD, ACCESS_TYPE_NONE
 from core.common.models import ConceptContainerModel
 from core.common.utils import reverse_resource, get_query_params_from_url_string
 from core.concepts.models import LocalizedText
-from core.sources.constants import SOURCE_TYPE, SOURCE_VERSION_TYPE
+from core.sources.constants import SOURCE_TYPE, SOURCE_VERSION_TYPE, HIERARCHY_ROOT_MUST_BELONG_TO_SAME_SOURCE
 
 
 class Source(ConceptContainerModel):
@@ -45,6 +46,7 @@ class Source(ConceptContainerModel):
     case_sensitive = models.BooleanField(null=True, blank=True, default=None)
     compositional = models.BooleanField(null=True, blank=True, default=None)
     version_needed = models.BooleanField(null=True, blank=True, default=None)
+    hierarchy_root = models.ForeignKey('concepts.Concept', null=True, blank=True, on_delete=models.SET_NULL)
 
     OBJECT_TYPE = SOURCE_TYPE
     OBJECT_VERSION_TYPE = SOURCE_VERSION_TYPE
@@ -94,6 +96,8 @@ class Source(ConceptContainerModel):
         if obj:
             self.source_type = obj.source_type
             self.custom_validation_schema = obj.custom_validation_schema
+            self.hierarchy_meaning = obj.hierarchy_meaning
+            self.hierarchy_root_id = obj.hierarchy_root_id
 
     def get_concept_name_locales(self):
         return LocalizedText.objects.filter(name_locales__in=self.get_active_concepts())
@@ -131,3 +135,13 @@ class Source(ConceptContainerModel):
         for mapping in Mapping.objects.filter(from_source__isnull=True, from_source_url__in=uris):
             mapping.from_source = self
             mapping.save()
+
+    def is_hierarchy_root_belonging_to_self(self):
+        hierarchy_root = self.hierarchy_root
+        if self.is_head:
+            return hierarchy_root.parent_id == self.id
+        return hierarchy_root.parent_id == self.head.id
+
+    def clean(self):
+        if self.hierarchy_root_id and not self.is_hierarchy_root_belonging_to_self():
+            raise ValidationError({'hierarchy_root': [HIERARCHY_ROOT_MUST_BELONG_TO_SAME_SOURCE]})

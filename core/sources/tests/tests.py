@@ -1,3 +1,4 @@
+from django.core.exceptions import ValidationError
 from django.db import transaction, IntegrityError
 from mock import patch, Mock
 
@@ -458,6 +459,20 @@ class SourceTest(OCLTestCase):
 
         source.refresh_from_db()
         self.assertEqual(source._background_process_ids, ['123', '123', 'abc'])  # pylint: disable=protected-access
+
+    def test_hierarchy_root(self):
+        source = OrganizationSourceFactory()
+        source_concept = ConceptFactory(parent=source)
+        other_concept = ConceptFactory()
+
+        source.hierarchy_root = other_concept
+        with self.assertRaises(ValidationError) as ex:
+            source.full_clean()
+        self.assertEqual(
+            ex.exception.message_dict, dict(hierarchy_root=['Hierarchy Root must belong to the same Source.'])
+        )
+        source.hierarchy_root = source_concept
+        source.full_clean()
 
 
 class TasksTest(OCLTestCase):

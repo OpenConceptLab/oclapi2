@@ -7,7 +7,7 @@ from rest_framework.serializers import ModelSerializer
 
 from core.client_configs.serializers import ClientConfigSerializer
 from core.common.constants import DEFAULT_ACCESS_TYPE, NAMESPACE_REGEX, ACCESS_TYPE_CHOICES, HEAD, \
-    INCLUDE_SUMMARY, INCLUDE_CLIENT_CONFIGS
+    INCLUDE_SUMMARY, INCLUDE_CLIENT_CONFIGS, INCLUDE_HIERARCHY_ROOT
 from core.orgs.models import Organization
 from core.settings import DEFAULT_LOCALE
 from core.sources.models import Source
@@ -81,6 +81,13 @@ class SourceCreateOrUpdateSerializer(ModelSerializer):
 
         source.full_name = validated_data.get('full_name', source.full_name) or source.name
 
+        if 'hierarchy_root' in validated_data or 'hierarchy_root_url' in validated_data:
+            hierarchy_root_url = get(validated_data, 'hierarchy_root.url') or get(
+                validated_data, 'hierarchy_root_url')
+            from core.concepts.models import Concept
+            source.hierarchy_root = Concept.objects.filter(
+                uri=hierarchy_root_url).first() if hierarchy_root_url else None
+
         return source
 
     def update(self, instance, validated_data):
@@ -137,6 +144,7 @@ class SourceCreateSerializer(SourceCreateOrUpdateSerializer):
     version_needed = BooleanField(required=False, allow_null=True, default=None)
     hierarchy_meaning = CharField(required=False, allow_null=True, allow_blank=True)
     collection_reference = CharField(required=False, allow_null=True, allow_blank=True)
+    hierarchy_root_url = CharField(allow_null=True, allow_blank=True, required=False)
 
     def create(self, validated_data):
         source = self.prepare_object(validated_data)
@@ -204,6 +212,8 @@ class SourceDetailSerializer(SourceCreateOrUpdateSerializer):
     updated_by = DateTimeField(source='updated_by.username', read_only=True)
     summary = SerializerMethodField()
     client_configs = SerializerMethodField()
+    hierarchy_root = SerializerMethodField()
+    hierarchy_root_url = CharField(source='hierarchy_root.url', required=False, allow_blank=True, allow_null=True)
 
     class Meta:
         model = Source
@@ -217,7 +227,7 @@ class SourceDetailSerializer(SourceCreateOrUpdateSerializer):
             'canonical_url', 'identifier', 'publisher', 'contact', 'jurisdiction', 'purpose', 'copyright',
             'content_type', 'revision_date', 'logo_url', 'summary', 'text', 'client_configs',
             'experimental', 'case_sensitive', 'collection_reference', 'hierarchy_meaning', 'compositional',
-            'version_needed', 'internal_reference_id'
+            'version_needed', 'internal_reference_id', 'hierarchy_root_url', 'hierarchy_root'
         )
 
     def __init__(self, *args, **kwargs):
@@ -225,12 +235,15 @@ class SourceDetailSerializer(SourceCreateOrUpdateSerializer):
         self.query_params = params.dict() if params else dict()
         self.include_summary = self.query_params.get(INCLUDE_SUMMARY) in ['true', True]
         self.include_client_configs = self.query_params.get(INCLUDE_CLIENT_CONFIGS) in ['true', True]
+        self.include_hierarchy_root = self.query_params.get(INCLUDE_HIERARCHY_ROOT) in ['true', True]
 
         try:
             if not self.include_summary:
                 self.fields.pop('summary', None)
             if not self.include_client_configs:
                 self.fields.pop('client_configs')
+            if not self.include_hierarchy_root:
+                self.fields.pop('hierarchy_root')
         except:  # pylint: disable=bare-except
             pass
 
@@ -248,6 +261,12 @@ class SourceDetailSerializer(SourceCreateOrUpdateSerializer):
         if self.include_client_configs:
             return ClientConfigSerializer(obj.client_configs.filter(is_active=True), many=True).data
 
+        return None
+
+    def get_hierarchy_root(self, obj):
+        if self.include_hierarchy_root:
+            from core.concepts.serializers import ConceptDetailSerializer
+            return ConceptDetailSerializer(obj.hierarchy_root).data
         return None
 
 

@@ -120,7 +120,7 @@ class SourceListViewTest(OCLAPITestCase):
                 'canonical_url', 'identifier', 'publisher', 'contact',
                 'jurisdiction', 'purpose', 'copyright', 'content_type', 'revision_date', 'logo_url', 'text',
                 'experimental', 'case_sensitive', 'collection_reference', 'hierarchy_meaning', 'compositional',
-                'version_needed', 'internal_reference_id'
+                'version_needed', 'internal_reference_id', 'hierarchy_root_url'
             ]
         )
         source = Source.objects.last()
@@ -198,7 +198,7 @@ class SourceCreateUpdateDestroyViewTest(OCLAPITestCase):
                 'canonical_url', 'identifier', 'publisher', 'contact',
                 'jurisdiction', 'purpose', 'copyright', 'content_type', 'revision_date', 'logo_url', 'text',
                 'experimental', 'case_sensitive', 'collection_reference', 'hierarchy_meaning', 'compositional',
-                'version_needed', 'internal_reference_id'
+                'version_needed', 'internal_reference_id', 'hierarchy_root_url'
             ]
         )
         source = Source.objects.last()
@@ -207,6 +207,59 @@ class SourceCreateUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(source.versions.count(), 1)
         self.assertEqual(response.data['full_name'], source.full_name)
         self.assertEqual(response.data['full_name'], 'Full name')
+
+    def test_put_hierarchy_root(self):
+        source = OrganizationSourceFactory(organization=self.organization)
+        self.assertTrue(source.is_head)
+        self.assertEqual(source.versions.count(), 1)
+        concept = ConceptFactory(parent=source)
+
+        sources_url = "/orgs/{}/sources/{}/".format(self.organization.mnemonic, source.mnemonic)
+
+        response = self.client.put(
+            sources_url,
+            dict(hierarchy_root_url=concept.uri),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['hierarchy_root_url'], concept.uri)
+        source.refresh_from_db()
+        self.assertEqual(source.hierarchy_root_id, concept.id)
+
+        concept2 = ConceptFactory(parent=source)
+
+        sources_url = "/orgs/{}/sources/{}/".format(self.organization.mnemonic, source.mnemonic)
+
+        response = self.client.put(
+            sources_url,
+            dict(hierarchy_root_url=concept2.uri),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['hierarchy_root_url'], concept2.uri)
+        source.refresh_from_db()
+        self.assertEqual(source.hierarchy_root_id, concept2.id)
+
+        unknown_concept = ConceptFactory()
+
+        sources_url = "/orgs/{}/sources/{}/".format(self.organization.mnemonic, source.mnemonic)
+
+        response = self.client.put(
+            sources_url,
+            dict(hierarchy_root_url=unknown_concept.uri),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data, {'hierarchy_root': ['Hierarchy Root must belong to the same Source.']})
+
+        source.refresh_from_db()
+        self.assertEqual(source.hierarchy_root_id, concept2.id)
 
     def test_delete_204(self):
         source = OrganizationSourceFactory(organization=self.organization)
