@@ -36,4 +36,5 @@ class MappingSearch(CommonSearch):
         'ownerType': TermsFacet(field='owner_type'),
         'is_active': TermsFacet(field='is_active'),
         'is_latest_version': TermsFacet(field='is_latest_version'),
+        'collection_owner_url': TermsFacet(field='collection_owner_url'),
     }

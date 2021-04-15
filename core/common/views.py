@@ -210,16 +210,21 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     def get_facet_filters_from_kwargs(self):
         kwargs = self.kwargs
         filters = dict()
-        if 'user' in kwargs:
-            filters['ownerType'] = USER_OBJECT_TYPE
-            filters['owner'] = kwargs['user']
-        if 'org' in kwargs:
-            filters['ownerType'] = ORG_OBJECT_TYPE
-            filters['owner'] = kwargs['org']
-        if 'source' in kwargs:
-            filters['source'] = kwargs['source']
-        if 'collection' in kwargs:
+        is_collection_specified = 'collection' in self.kwargs
+        is_user_specified = 'user' in kwargs
+        if is_collection_specified:
             filters['collection'] = kwargs['collection']
+            filters['collection_owner_url'] = '/users/{}/'.format(
+                kwargs['user']) if is_user_specified else '/orgs/{}/'.format(kwargs['org'])
+        else:
+            if is_user_specified:
+                filters['ownerType'] = USER_OBJECT_TYPE
+                filters['owner'] = kwargs['user']
+            if 'org' in kwargs:
+                filters['ownerType'] = ORG_OBJECT_TYPE
+                filters['owner'] = kwargs['org']
+            if 'source' in kwargs:
+                filters['source'] = kwargs['source']
 
         return filters
 
