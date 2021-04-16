@@ -416,7 +416,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         new_descriptions = LocalizedText.build_locales(data.get('descriptions', []), 'description')
         parent_concept_uris = data.pop('parent_concept_urls', None)
         if parent_concept_uris:
-            instance._parent_concepts = cls.objects.filter(
+            instance._parent_concepts = cls.objects.filter(  # pylint: disable=protected-access
                 uri__in=parent_concept_uris)
 
         instance.cloned_names = compact(new_names)
