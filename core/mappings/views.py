@@ -5,6 +5,7 @@ from drf_yasg.utils import swagger_auto_schema
 from rest_framework import status
 from rest_framework.generics import DestroyAPIView, UpdateAPIView, RetrieveAPIView
 from rest_framework.mixins import CreateModelMixin
+from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
 
 from core.common.constants import HEAD
@@ -123,6 +124,9 @@ class MappingRetrieveUpdateDestroyView(MappingBaseView, RetrieveAPIView, UpdateA
         if self.request.method in ['GET']:
             return [CanViewParentDictionary(), ]
 
+        if self.request.method == 'DELETE' and self.is_hard_delete_requested():
+            return [IsAdminUser(), ]
+
         return [CanEditParentDictionary(), ]
 
     def update(self, request, *args, **kwargs):
@@ -146,11 +150,13 @@ class MappingRetrieveUpdateDestroyView(MappingBaseView, RetrieveAPIView, UpdateA
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+    def is_hard_delete_requested(self):
+        return self.request.query_params.get('hardDelete', None) in ['true', True, 'True']
+
     def destroy(self, request, *args, **kwargs):
         mapping = self.get_object()
         comment = request.data.get('update_comment', None) or request.data.get('comment', None)
-        hard_delete = request.query_params.get('hardDelete', None) in ['true', True, 'True']
-        if hard_delete:
+        if self.is_hard_delete_requested():
             mapping.delete()
             return Response(status=status.HTTP_204_NO_CONTENT)
 
