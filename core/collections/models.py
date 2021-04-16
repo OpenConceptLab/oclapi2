@@ -37,6 +37,7 @@ class Collection(ConceptContainerModel):
         'owner_type': {'sortable': False, 'filterable': True, 'facet': True},
         'custom_validation_schema': {'sortable': False, 'filterable': True, 'facet': True},
         'canonical_url': {'sortable': True, 'filterable': True},
+        'experimental': {'sortable': False, 'filterable': True, 'facet': True},
     }
 
     class Meta:
