@@ -414,11 +414,21 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
         new_names = LocalizedText.build_locales(data.get('names', []))
         new_descriptions = LocalizedText.build_locales(data.get('descriptions', []), 'description')
+        parent_concept_uris = data.pop('parent_concept_urls', None)
+        if parent_concept_uris:
+            instance._parent_concepts = cls.objects.filter(
+                uri__in=parent_concept_uris)
 
         instance.cloned_names = compact(new_names)
         instance.cloned_descriptions = compact(new_descriptions)
 
         return cls.persist_clone(instance, user)
+
+    def set_parent_concepts_from_uris(self):
+        parent_concepts = get(self, '_parent_concepts', None)
+        if parent_concepts:
+            self.parent_concepts.set(parent_concepts)
+            self._parent_concepts = None
 
     def set_locales(self):
         if not self.id:
@@ -511,6 +521,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         concept.extras = self.extras
         concept.names.set(self.names.all())
         concept.descriptions.set(self.descriptions.all())
+        concept.parent_concepts.set(self.parent_concepts.all())
         concept.concept_class = self.concept_class
         concept.datatype = self.datatype
         concept.retired = self.retired
@@ -539,6 +550,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                 if obj.id:
                     obj.version = str(obj.id)
                     obj.save()
+                    obj.set_parent_concepts_from_uris()
                     obj.set_locales()
                     obj.clean()  # clean here to validate locales that can only be saved after obj is saved
                     obj.update_versioned_object()
