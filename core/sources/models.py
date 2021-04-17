@@ -8,7 +8,8 @@ from core.common.constants import HEAD, ACCESS_TYPE_NONE
 from core.common.models import ConceptContainerModel
 from core.common.utils import reverse_resource, get_query_params_from_url_string
 from core.concepts.models import LocalizedText
-from core.sources.constants import SOURCE_TYPE, SOURCE_VERSION_TYPE, HIERARCHY_ROOT_MUST_BELONG_TO_SAME_SOURCE
+from core.sources.constants import SOURCE_TYPE, SOURCE_VERSION_TYPE, HIERARCHY_ROOT_MUST_BELONG_TO_SAME_SOURCE, \
+    HIERARCHY_MEANINGS
 
 
 class Source(ConceptContainerModel):
@@ -44,7 +45,7 @@ class Source(ConceptContainerModel):
     source_type = models.TextField(blank=True, null=True)
     content_type = models.TextField(blank=True, null=True)
     collection_reference = models.CharField(null=True, blank=True, max_length=100)
-    hierarchy_meaning = models.CharField(null=True, blank=True, max_length=50)
+    hierarchy_meaning = models.CharField(null=True, blank=True, max_length=50, choices=HIERARCHY_MEANINGS)
     case_sensitive = models.BooleanField(null=True, blank=True, default=None)
     compositional = models.BooleanField(null=True, blank=True, default=None)
     version_needed = models.BooleanField(null=True, blank=True, default=None)
