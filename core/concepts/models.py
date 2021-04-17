@@ -521,7 +521,6 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         concept.extras = self.extras
         concept.names.set(self.names.all())
         concept.descriptions.set(self.descriptions.all())
-        concept.parent_concepts.set(self.parent_concepts.all())
         concept.concept_class = self.concept_class
         concept.datatype = self.datatype
         concept.retired = self.retired
@@ -650,8 +649,16 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
     @property
     def parent_concept_urls(self):
-        return list(self.parent_concepts.values_list('uri', flat=True))
+        if self.is_latest_version:
+            queryset = self.parent_concepts
+        else:
+            queryset = self.parent_concepts.all() | self.get_latest_version().parent_concepts.all()
+        return list(queryset.values_list('uri', flat=True))
 
     @property
     def child_concept_urls(self):
-        return list(self.child_concepts.values_list('uri', flat=True))
+        if self.is_latest_version:
+            queryset = self.child_concepts
+        else:
+            queryset = self.child_concepts.all() | self.get_latest_version().child_concepts.all()
+        return list(queryset.values_list('uri', flat=True))
