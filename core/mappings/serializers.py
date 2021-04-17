@@ -85,7 +85,7 @@ class MappingDetailSerializer(MappingListSerializer):
     extras = JSONField(required=False, allow_null=True)
     created_by = CharField(source='created_by.username', read_only=True)
     updated_by = CharField(source='created_by.username', read_only=True)
-    parent_id = IntegerField(required=True)
+    parent_id = IntegerField(required=True, write_only=True)
     map_type = CharField(required=True)
     to_concept_url = CharField(required=False)
     from_concept_url = CharField(required=False)
@@ -103,7 +103,6 @@ class MappingDetailSerializer(MappingListSerializer):
             'type', 'uuid', 'extras', 'created_on', 'updated_on',
             'created_by', 'updated_by', 'parent_id', 'previous_version_url', 'internal_reference_id',
         )
-        extra_kwargs = {'parent_id': {'write_only': True}}
 
     def create(self, validated_data):
         mapping = Mapping.persist_new(data=validated_data, user=self.context.get('request').user)

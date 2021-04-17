@@ -86,7 +86,6 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
                 'versions_url',
                 'version',
                 'extras',
-                'parent_id',
                 'name',
                 'type',
                 'update_comment',
@@ -124,7 +123,6 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.data['versions_url'], concept.uri + 'versions/')
         self.assertEqual(response.data['version'], str(concept.id))
         self.assertEqual(response.data['extras'], dict(foo='bar'))
-        self.assertEqual(response.data['parent_id'], str(self.source.id))
         self.assertEqual(response.data['name'], 'c1')
         self.assertEqual(response.data['type'], 'Concept')
         self.assertEqual(response.data['version_url'], latest_version.uri)
@@ -192,7 +190,6 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
              'versions_url',
              'version',
              'extras',
-             'parent_id',
              'name',
              'type',
              'update_comment',
@@ -228,7 +225,6 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.data['versions_url'], concept.uri + 'versions/')
         self.assertEqual(response.data['version'], str(version.id))
         self.assertEqual(response.data['extras'], dict(foo='bar'))
-        self.assertEqual(response.data['parent_id'], str(self.source.id))
         self.assertEqual(response.data['type'], 'Concept')
         self.assertEqual(response.data['version_url'], version.uri)
         self.assertEqual(response.data['mappings'], [])
@@ -271,7 +267,6 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
              'versions_url',
              'version',
              'extras',
-             'parent_id',
              'name',
              'type',
              'update_comment',
@@ -309,7 +304,6 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.data['versions_url'], concept.uri + 'versions/')
         self.assertEqual(response.data['version'], str(version.id))
         self.assertEqual(response.data['extras'], dict(foo='bar'))
-        self.assertEqual(response.data['parent_id'], str(source.id))
         self.assertEqual(response.data['type'], 'Concept')
         self.assertEqual(response.data['version_url'], version.uri)
         self.assertEqual(response.data['mappings'], [])
