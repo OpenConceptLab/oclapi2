@@ -34,6 +34,7 @@ class ConceptDocument(Document):
         model = Concept
         fields = [
             'version',
+            'external_id',
         ]
 
     @staticmethod

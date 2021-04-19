@@ -38,6 +38,7 @@ class CollectionDocument(Document):
             'retired',
             'experimental',
             'locked_date',
+            'external_id',
         ]
 
     @staticmethod

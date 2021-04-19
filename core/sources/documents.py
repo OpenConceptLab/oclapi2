@@ -42,6 +42,7 @@ class SourceDocument(Document):
             'case_sensitive',
             'compositional',
             'version_needed',
+            'external_id',
         ]
 
     @staticmethod
