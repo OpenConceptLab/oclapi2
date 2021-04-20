@@ -637,7 +637,7 @@ class ConceptContainerModel(VersionedModel):
         offset = 0
         limit = batch_size
         while offset < count:
-            document().update(queryset.all()[offset:limit], parallel=True)
+            document().update(queryset.order_by('-id')[offset:limit], parallel=True)
             offset = limit
             limit += batch_size
 
