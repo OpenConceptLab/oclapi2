@@ -654,7 +654,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             queryset = self.parent_concepts
         else:
             queryset = self.parent_concepts.all() | self.get_latest_version().parent_concepts.all()
-        return list(queryset.values_list('uri', flat=True))
+        return list(set(list(queryset.values_list('uri', flat=True))))
 
     @property
     def child_concept_urls(self):
@@ -662,4 +662,4 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             queryset = self.child_concepts
         else:
             queryset = self.child_concepts.all() | self.get_latest_version().child_concepts.all()
-        return list(queryset.values_list('uri', flat=True))
+        return list(set(list(queryset.values_list('uri', flat=True))))
