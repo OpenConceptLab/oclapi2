@@ -224,7 +224,7 @@ def write_export_file(
         for start in range(0, total_concepts, batch_size):
             end = min(start + batch_size, total_concepts)
             logger.info('Serializing concepts %d - %d...' % (start+1, end))
-            concept_versions = concepts_qs.prefetch_related(
+            concept_versions = concepts_qs.order_by('-id').prefetch_related(
                 'names', 'descriptions').select_related('parent__organization', 'parent__user')[start:end]
             concept_serializer = concept_serializer_class(concept_versions, many=True)
             concept_data = concept_serializer.data
@@ -253,7 +253,7 @@ def write_export_file(
             for start in range(0, total_references, batch_size):
                 end = min(start + batch_size, total_references)
                 logger.info('Serializing references %d - %d...' % (start + 1, end))
-                references = references_qs.filter()[start:end]
+                references = references_qs.order_by('-id').filter()[start:end]
                 reference_serializer = reference_serializer_class(references, many=True)
                 reference_string = json.dumps(reference_serializer.data, cls=encoders.JSONEncoder)
                 reference_string = reference_string[1:-1]
@@ -276,7 +276,7 @@ def write_export_file(
         for start in range(0, total_mappings, batch_size):
             end = min(start + batch_size, total_mappings)
             logger.info('Serializing mappings %d - %d...' % (start+1, end))
-            mappings = mappings_qs.select_related(
+            mappings = mappings_qs.order_by('-id').select_related(
                 'parent__organization', 'parent__user', 'from_concept', 'to_concept',
                 'from_source__organization', 'from_source__user',
                 'to_source__organization', 'to_source__user',
