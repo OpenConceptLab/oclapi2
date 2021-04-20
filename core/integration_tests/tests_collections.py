@@ -1003,7 +1003,9 @@ class ExportCollectionTaskTest(OCLAPITestCase):
         expected_references = CollectionReferenceSerializer(collection.references.all(), many=True).data
 
         self.assertEqual(len(exported_references), 3)
-        self.assertEqual(expected_references, exported_references)
+        self.assertIn(exported_references[0], expected_references)
+        self.assertIn(exported_references[1], expected_references)
+        self.assertIn(exported_references[2], expected_references)
 
         s3_upload_key = collection.export_path
         s3_mock.upload_file.assert_called_once_with(
