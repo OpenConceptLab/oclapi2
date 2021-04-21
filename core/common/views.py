@@ -148,6 +148,9 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
     def get_sort_attr(self):
         sort_field, desc = self.get_sort_and_desc()
+        if sort_field and sort_field.lower() in ['score', '_score', 'best match']:
+            return dict(_score=dict(order="desc" if desc else "asc"))
+
         if self.is_valid_sort(sort_field):
             if desc:
                 sort_field = '-' + sort_field
@@ -382,8 +385,14 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             if self.is_exact_match_on():
                 results = results.query(self.get_exact_search_criterion())
             else:
-                results = results.filter(
-                    "query_string", query=self.get_wildcard_search_string(), fields=self.get_searchable_fields()
+                results = results.query(
+                    Q(
+                        "query_string", query=self.get_wildcard_search_string(), fields=self.get_searchable_fields()
+                    ) | Q(
+                        "prefix", id=dict(value=self.get_search_string(), boost=4)
+                    ) | Q(
+                        "prefix", name=dict(value=self.get_search_string(), boost=3)
+                    )
                 )
 
             updated_since = parse_updated_since_param(self.request.query_params)
