@@ -131,7 +131,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     WAS_UNRETIRED = CONCEPT_WAS_UNRETIRED
 
     es_fields = {
-        'id': {'sortable': True, 'filterable': True},
+        'id': {'sortable': True, 'filterable': True, 'exact': True},
         'name': {'sortable': True, 'filterable': True, 'exact': True},
         'last_update': {'sortable': True, 'filterable': False, 'default': 'desc'},
         'is_latest_version': {'sortable': False, 'filterable': True},

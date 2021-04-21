@@ -71,7 +71,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
     WAS_UNRETIRED = MAPPING_WAS_UNRETIRED
 
     es_fields = {
-        'id': {'sortable': True, 'filterable': True},
+        'id': {'sortable': True, 'filterable': True, 'exact': True},
         'last_update': {'sortable': True, 'filterable': False, 'facet': False, 'default': 'desc'},
         'concept': {'sortable': False, 'filterable': True, 'facet': False, 'exact': True},
         'from_concept': {'sortable': False, 'filterable': True, 'facet': True, 'exact': True},
