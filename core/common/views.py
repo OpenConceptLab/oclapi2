@@ -389,9 +389,9 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                     Q(
                         "query_string", query=self.get_wildcard_search_string(), fields=self.get_searchable_fields()
                     ) | Q(
-                        "prefix", id=dict(value=self.get_search_string(), boost=4)
+                        "prefix", id=dict(value=self.get_search_string(), boost=5)
                     ) | Q(
-                        "prefix", name=dict(value=self.get_search_string(), boost=3)
+                        "prefix", name=dict(value=self.get_search_string(), boost=4)
                     )
                 )
 
