@@ -385,15 +385,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             if self.is_exact_match_on():
                 results = results.query(self.get_exact_search_criterion())
             else:
-                results = results.query(
-                    Q(
-                        "prefix", id=dict(value=self.get_search_string(), boost=5)
-                    ) | Q(
-                        "prefix", name=dict(value=self.get_search_string(), boost=4)
-                    ) | Q(
-                        "query_string", query=self.get_wildcard_search_string(), fields=self.get_searchable_fields()
-                    )
-                )
+                results = results.query(self.get_wildcard_search_criterion())
 
             updated_since = parse_updated_since_param(self.request.query_params)
             if updated_since:
@@ -443,6 +435,15 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                 results = results.sort(sort_field)
 
         return results
+
+    def get_wildcard_search_criterion(self):
+        return Q(
+            "wildcard", id=dict(value=self.get_search_string(), boost=2)
+        ) | Q(
+            "wildcard", name=dict(value=self.get_search_string(), boost=5)
+        ) | Q(
+            "query_string", query=self.get_wildcard_search_string(), fields=self.get_searchable_fields()
+        )
 
     def get_search_results_qs(self):
         if not self.should_perform_es_search():
