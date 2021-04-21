@@ -40,6 +40,11 @@ urlpatterns = [
         name='userprofile-orgs'
     ),
     re_path(
+        r'^(?P<user>' + NAMESPACE_PATTERN + ')/extras/$',
+        views.UserExtrasView.as_view(),
+        name='user-extras'
+    ),
+    re_path(
         r'^(?P<user>' + NAMESPACE_PATTERN + ')/orgs/sources/$',
         org_views.OrganizationSourceListView.as_view(),
         name='userprofile-organization-source-list'
@@ -48,6 +53,11 @@ urlpatterns = [
         r'^(?P<user>' + NAMESPACE_PATTERN + ')/orgs/collections/$',
         org_views.OrganizationCollectionListView.as_view(),
         name='userprofile-organization-collection-list'
+    ),
+    re_path(
+        r"^(?P<user>{pattern})/extras/(?P<extra>{pattern})/$".format(pattern=NAMESPACE_PATTERN),
+        views.UserExtraRetrieveUpdateDestroyView.as_view(),
+        name='user-extra'
     ),
     re_path(r'^(?P<user>' + NAMESPACE_PATTERN + ')/sources/', include('core.sources.urls')),
     re_path(r'^(?P<user>' + NAMESPACE_PATTERN + ')/collections/', include('core.collections.urls')),

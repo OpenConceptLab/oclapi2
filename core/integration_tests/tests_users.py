@@ -466,3 +466,117 @@ class UserReactivateViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 204)
         inactive_user.refresh_from_db()
         self.assertTrue(inactive_user.is_active)
+
+
+class UserExtrasViewTest(OCLAPITestCase):
+    def setUp(self):
+        self.user = UserProfileFactory(extras=dict())
+        self.token = self.user.get_token()
+
+    def test_get(self):
+        response = self.client.get(
+            '/users/{}/extras/'.format(self.user.username),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, {})
+
+        extras = dict(foo='bar')
+        self.user.extras = extras
+        self.user.save()
+
+        response = self.client.get(
+            '/users/{}/extras/'.format(self.user.username),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, extras)
+
+        response = self.client.get(
+            '/user/extras/',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, extras)
+
+
+class UserExtraRetrieveUpdateDestroyViewTest(OCLAPITestCase):
+    def setUp(self):
+        self.user = UserProfileFactory(extras=dict())
+        self.token = self.user.get_token()
+
+    def test_put(self):
+        self.assertEqual(self.user.extras, {})
+
+        response = self.client.put(
+            '/users/{}/extras/foo/'.format(self.user.username),
+            dict(foo='bar'),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, dict(foo='bar'))
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.extras, dict(foo='bar'))
+
+        response = self.client.put(
+            '/users/{}/extras/bar/'.format(self.user.username),
+            dict(foo='bar'),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data, ['Must specify bar param in body.'])
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.extras, dict(foo='bar'))
+
+        response = self.client.put(
+            '/users/random/extras/foo/',
+            dict(foo='bar'),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_get(self):
+        response = self.client.get(
+            '/users/{}/extras/foo/'.format(self.user.username),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+        self.assertEqual(response.status_code, 404)
+
+        self.user.extras = dict(foo='bar')
+        self.user.save()
+
+        response = self.client.get(
+            '/users/{}/extras/foo/'.format(self.user.username),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, dict(foo='bar'))
+
+    def test_delete(self):
+        response = self.client.delete(
+            '/users/{}/extras/foo/'.format(self.user.username),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+        self.assertEqual(response.status_code, 404)
+
+        self.user.extras = dict(foo='bar', tao='ching')
+        self.user.save()
+
+        response = self.client.delete(
+            '/users/{}/extras/foo/'.format(self.user.username),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+        self.assertEqual(response.status_code, 204)
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.extras, dict(tao='ching'))

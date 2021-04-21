@@ -1,5 +1,6 @@
 from django.urls import re_path, include
 
+from core.common.constants import NAMESPACE_PATTERN
 from core.orgs import views as orgs_views
 from core.users import views
 
@@ -15,6 +16,12 @@ urlpatterns = [
         r'^orgs/$', orgs_views.OrganizationListView.as_view(), extra_kwargs, name='user-organization-list'
     ),
     re_path(
+        r'^extras/$',
+        views.UserExtrasView.as_view(),
+        extra_kwargs,
+        name='user-extras'
+    ),
+    re_path(
         r'^orgs/sources/$',
         orgs_views.OrganizationSourceListView.as_view(),
         extra_kwargs,
@@ -23,7 +30,14 @@ urlpatterns = [
     re_path(
         r'^orgs/collections/$',
         orgs_views.OrganizationCollectionListView.as_view(),
-        extra_kwargs, name='user-organization-collection-list'
+        extra_kwargs,
+        name='user-organization-collection-list'
+    ),
+    re_path(
+        r"^extras/(?P<extra>{pattern})/$".format(pattern=NAMESPACE_PATTERN),
+        views.UserExtraRetrieveUpdateDestroyView.as_view(),
+        extra_kwargs,
+        name='user-extra'
     ),
     re_path(r'^sources/', include('core.sources.urls'), extra_kwargs),
     re_path(r'^collections/', include('core.collections.urls'), extra_kwargs),
