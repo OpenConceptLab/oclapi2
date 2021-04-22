@@ -76,7 +76,7 @@ class CollectionCreateOrUpdateSerializer(ModelSerializer):
                 'jurisdiction', 'contact', 'publisher', 'identifier', 'canonical_url', 'retired', 'released',
                 'organization', 'user', 'organization_id', 'user_id', 'external_id', 'extras', 'preferred_source',
                 'repository_type', 'custom_resources_linked_source', 'website', 'custom_validation_schema',
-                'collection_type', 'description', 'name'
+                'collection_type', 'description', 'name', 'meta',
         ]:
             setattr(collection, attr, validated_data.get(attr, get(collection, attr)))
 
@@ -131,6 +131,7 @@ class CollectionCreateSerializer(CollectionCreateOrUpdateSerializer):
     identifier = JSONField(required=False, allow_null=True)
     contact = JSONField(required=False, allow_null=True)
     jurisdiction = JSONField(required=False, allow_null=True)
+    meta = JSONField(required=False, allow_null=True)
     publisher = CharField(required=False, allow_null=True, allow_blank=True)
     purpose = CharField(required=False, allow_null=True, allow_blank=True)
     copyright = CharField(required=False, allow_null=True, allow_blank=True)
@@ -215,7 +216,7 @@ class CollectionDetailSerializer(CollectionCreateOrUpdateSerializer):
             'created_on', 'updated_on', 'created_by', 'updated_by', 'extras', 'external_id', 'versions_url',
             'version', 'concepts_url', 'mappings_url',
             'custom_resources_linked_source', 'repository_type', 'preferred_source', 'references',
-            'canonical_url', 'identifier', 'publisher', 'contact', 'jurisdiction', 'purpose', 'copyright',
+            'canonical_url', 'identifier', 'publisher', 'contact', 'jurisdiction', 'purpose', 'copyright', 'meta',
             'immutable', 'revision_date', 'logo_url', 'summary', 'text', 'client_configs',
             'experimental', 'locked_date', 'internal_reference_id'
 
@@ -287,7 +288,7 @@ class CollectionVersionDetailSerializer(CollectionCreateOrUpdateSerializer):
             'url', 'owner', 'owner_type', 'owner_url', 'version_url', 'previous_version_url',
             'created_on', 'updated_on', 'created_by', 'updated_by', 'extras', 'external_id', 'version',
             'version', 'concepts_url', 'mappings_url', 'is_processing', 'released', 'retired',
-            'canonical_url', 'identifier', 'publisher', 'contact', 'jurisdiction', 'purpose', 'copyright',
+            'canonical_url', 'identifier', 'publisher', 'contact', 'jurisdiction', 'purpose', 'copyright', 'meta',
             'immutable', 'revision_date', 'summary', 'text', 'experimental', 'locked_date', 'internal_reference_id',
         )
 

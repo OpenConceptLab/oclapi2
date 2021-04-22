@@ -75,7 +75,7 @@ class SourceCreateOrUpdateSerializer(ModelSerializer):
                 'retired', 'released', 'organization', 'user', 'organization_id', 'user_id', 'external_id', 'extras',
                 'experimental', 'case_sensitive', 'collection_reference', 'hierarchy_meaning', 'compositional',
                 'version_needed', 'canonical_url', 'identifier', 'publisher', 'contact', 'jurisdiction', 'purpose',
-                'copyright', 'content_type', 'revision_date', 'text',
+                'copyright', 'content_type', 'revision_date', 'text', 'meta',
         ]:
             setattr(source, attr, validated_data.get(attr, get(source, attr)))
 
@@ -134,6 +134,7 @@ class SourceCreateSerializer(SourceCreateOrUpdateSerializer):
     identifier = JSONField(required=False, allow_null=True)
     contact = JSONField(required=False, allow_null=True)
     jurisdiction = JSONField(required=False, allow_null=True)
+    meta = JSONField(required=False, allow_null=True)
     publisher = CharField(required=False, allow_null=True, allow_blank=True)
     purpose = CharField(required=False, allow_null=True, allow_blank=True)
     copyright = CharField(required=False, allow_null=True, allow_blank=True)
@@ -227,7 +228,7 @@ class SourceDetailSerializer(SourceCreateOrUpdateSerializer):
             'canonical_url', 'identifier', 'publisher', 'contact', 'jurisdiction', 'purpose', 'copyright',
             'content_type', 'revision_date', 'logo_url', 'summary', 'text', 'client_configs',
             'experimental', 'case_sensitive', 'collection_reference', 'hierarchy_meaning', 'compositional',
-            'version_needed', 'internal_reference_id', 'hierarchy_root_url', 'hierarchy_root'
+            'version_needed', 'internal_reference_id', 'hierarchy_root_url', 'hierarchy_root', 'meta'
         )
 
     def __init__(self, *args, **kwargs):
@@ -300,7 +301,7 @@ class SourceVersionDetailSerializer(SourceCreateOrUpdateSerializer):
             'created_on', 'updated_on', 'created_by', 'updated_by', 'extras', 'external_id',
             'version', 'concepts_url', 'mappings_url', 'is_processing', 'released',
             'canonical_url', 'identifier', 'publisher', 'contact', 'jurisdiction', 'purpose', 'copyright',
-            'content_type', 'revision_date', 'summary', 'text',
+            'content_type', 'revision_date', 'summary', 'text', 'meta',
             'experimental', 'case_sensitive', 'collection_reference', 'hierarchy_meaning', 'compositional',
             'version_needed', 'internal_reference_id'
         )

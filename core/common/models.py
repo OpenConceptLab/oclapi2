@@ -311,6 +311,7 @@ class ConceptContainerModel(VersionedModel):
     )
     snapshot = models.JSONField(null=True, blank=True, default=dict)
     experimental = models.BooleanField(null=True, blank=True, default=None)
+    meta = models.JSONField(null=True, blank=True)
 
     class Meta:
         abstract = True

@@ -111,17 +111,17 @@ class SourceListViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 201)
         self.assertListEqual(
-            list(response.data.keys()),
-            [
+            sorted(list(response.data.keys())),
+            sorted([
                 'type', 'uuid', 'id', 'short_code', 'name', 'full_name', 'description', 'source_type',
                 'custom_validation_schema', 'public_access', 'default_locale', 'supported_locales', 'website',
                 'url', 'owner', 'owner_type', 'owner_url', 'created_on', 'updated_on', 'created_by',
                 'updated_by', 'extras', 'external_id', 'versions_url', 'version', 'concepts_url', 'mappings_url',
-                'canonical_url', 'identifier', 'publisher', 'contact',
+                'canonical_url', 'identifier', 'publisher', 'contact', 'meta',
                 'jurisdiction', 'purpose', 'copyright', 'content_type', 'revision_date', 'logo_url', 'text',
                 'experimental', 'case_sensitive', 'collection_reference', 'hierarchy_meaning', 'compositional',
                 'version_needed', 'internal_reference_id', 'hierarchy_root_url'
-            ]
+            ])
         )
         source = Source.objects.last()
 
@@ -189,17 +189,17 @@ class SourceCreateUpdateDestroyViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertListEqual(
-            list(response.data.keys()),
-            [
+            sorted(list(response.data.keys())),
+            sorted([
                 'type', 'uuid', 'id', 'short_code', 'name', 'full_name', 'description', 'source_type',
                 'custom_validation_schema', 'public_access', 'default_locale', 'supported_locales', 'website',
                 'url', 'owner', 'owner_type', 'owner_url', 'created_on', 'updated_on', 'created_by',
                 'updated_by', 'extras', 'external_id', 'versions_url', 'version', 'concepts_url', 'mappings_url',
-                'canonical_url', 'identifier', 'publisher', 'contact',
+                'canonical_url', 'identifier', 'publisher', 'contact', 'meta',
                 'jurisdiction', 'purpose', 'copyright', 'content_type', 'revision_date', 'logo_url', 'text',
                 'experimental', 'case_sensitive', 'collection_reference', 'hierarchy_meaning', 'compositional',
                 'version_needed', 'internal_reference_id', 'hierarchy_root_url'
-            ]
+            ])
         )
         source = Source.objects.last()
 
