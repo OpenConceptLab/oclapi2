@@ -141,7 +141,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         return [field for field, config in get(self, 'es_fields', dict()).items() if config.get('exact', False)]
 
     def get_search_string(self):
-        return self.request.query_params.dict().get(SEARCH_PARAM, '')
+        return self.request.query_params.dict().get(SEARCH_PARAM, '').strip()
 
     def get_wildcard_search_string(self):
         return "*{}*".format(self.get_search_string())
@@ -437,12 +437,15 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         return results
 
     def get_wildcard_search_criterion(self):
+        search_string = self.get_search_string()
+        wildcard_search_string = self.get_wildcard_search_string()
+
         return Q(
-            "wildcard", id=dict(value=self.get_search_string(), boost=2)
+            "wildcard", id=dict(value=search_string, boost=2)
         ) | Q(
-            "wildcard", name=dict(value=self.get_search_string(), boost=5)
+            "wildcard", name=dict(value=search_string, boost=5)
         ) | Q(
-            "query_string", query=self.get_wildcard_search_string(), fields=self.get_searchable_fields()
+            "query_string", query=wildcard_search_string, fields=self.get_searchable_fields()
         )
 
     def get_search_results_qs(self):
