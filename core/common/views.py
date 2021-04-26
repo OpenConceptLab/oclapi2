@@ -156,6 +156,9 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         if sort_field and sort_field.lower() in ['score', '_score', 'best match']:
             return dict(_score=dict(order="desc" if desc else "asc"))
 
+        if self.is_concept_document() and sort_field == 'name':
+            sort_field = '_name'
+
         if self.is_valid_sort(sort_field):
             if desc:
                 sort_field = '-' + sort_field
