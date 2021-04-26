@@ -140,8 +140,12 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     def get_exact_search_fields(self):
         return [field for field, config in get(self, 'es_fields', dict()).items() if config.get('exact', False)]
 
-    def get_search_string(self):
-        return self.request.query_params.dict().get(SEARCH_PARAM, '').strip()
+    def get_search_string(self, lower=True):
+        search_str = self.request.query_params.dict().get(SEARCH_PARAM, '').strip()
+        if lower:
+            search_str = search_str.lower()
+
+        return search_str
 
     def get_wildcard_search_string(self):
         return "*{}*".format(self.get_search_string())
@@ -159,7 +163,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         return dict(_score=dict(order="desc"))
 
     def get_exact_search_criterion(self):
-        search_str = self.get_search_string()
+        search_str = self.get_search_string(False)
 
         def get_query(attr):
             return Q('match', **{attr: search_str})
@@ -290,8 +294,9 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             if not self._should_exclude_retired_from_search_results() or not is_source_child_document_model:
                 filters.pop('retired')
 
+            is_exact_match_on = self.is_exact_match_on()
             facets = self.facet_class(  # pylint: disable=not-callable
-                self.get_search_string(), filters=filters, exact_match=self.is_exact_match_on()
+                self.get_search_string(lower=not is_exact_match_on), filters=filters, exact_match=is_exact_match_on
             ).execute().facets.to_dict()
 
         return facets
