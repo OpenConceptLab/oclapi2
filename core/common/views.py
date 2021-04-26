@@ -142,6 +142,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
     def get_search_string(self, lower=True):
         search_str = self.request.query_params.dict().get(SEARCH_PARAM, '').strip()
+        search_str = search_str.replace('-', '_')
         if lower:
             search_str = search_str.lower()
 
@@ -340,6 +341,10 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         from core.users.documents import UserProfileDocument
         return self.document_model == UserProfileDocument
 
+    def is_concept_document(self):
+        from core.concepts.documents import ConceptDocument
+        return self.document_model == ConceptDocument
+
     def is_owner_document_model(self):
         from core.orgs.documents import OrganizationDocument
         from core.users.documents import UserProfileDocument
@@ -448,13 +453,16 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     def get_wildcard_search_criterion(self):
         search_string = self.get_search_string()
         wildcard_search_string = self.get_wildcard_search_string()
+        name_attr = 'name'
+        if self.is_concept_document():
+            name_attr = '_name'
 
         return Q(
             "wildcard", id=dict(value=search_string, boost=2)
         ) | Q(
-            "wildcard", name=dict(value=search_string, boost=5)
+            "wildcard", **{name_attr: dict(value=search_string, boost=5)}
         ) | Q(
-            "query_string", query=wildcard_search_string, fields=self.get_searchable_fields()
+            "query_string", query=wildcard_search_string
         )
 
     def get_search_results_qs(self):
