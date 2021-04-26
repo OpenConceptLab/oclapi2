@@ -136,9 +136,7 @@ class S3:
     def __fetch_keys(cls, prefix='/', delimiter='/'):  # pragma: no cover
         prefix = prefix[1:] if prefix.startswith(delimiter) else prefix
         s3_resource = cls.resource()
-        objects = s3_resource.meta.client.list_objects(
-            Bucket=settings.AWS_STORAGE_BUCKET_NAME, Prefix=prefix
-        )
+        objects = s3_resource.meta.client.list_objects(Bucket=settings.AWS_STORAGE_BUCKET_NAME, Prefix=prefix)
         return [{'Key': k} for k in [obj['Key'] for obj in objects.get('Contents', [])]]
 
     @classmethod

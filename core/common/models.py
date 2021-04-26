@@ -420,7 +420,7 @@ class ConceptContainerModel(VersionedModel):
         if self.is_content_privately_referred():
             raise ValidationError(dict(detail=CONTENT_REFERRED_PRIVATELY.format(self.mnemonic)))
 
-        generic_export_path = self.generic_export_path()
+        generic_export_path = self.generic_export_path(suffix=None)
 
         if self.is_head:
             self.versions.exclude(id=self.id).delete()
