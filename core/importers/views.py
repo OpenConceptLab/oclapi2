@@ -13,7 +13,7 @@ from rest_framework.views import APIView
 from core.celery import app
 from core.common.services import RedisService
 from core.common.swagger_parameters import update_if_exists_param, task_param, result_param, username_param, \
-    file_upload_param, file_url_param, parallel_threads_param
+    file_upload_param, file_url_param, parallel_threads_param, verbose_param
 from core.common.utils import parse_bulk_import_task_id, task_exists, flower_get, queue_bulk_import
 from core.importers.constants import ALREADY_QUEUED, INVALID_UPDATE_IF_EXISTS, NO_CONTENT_TO_IMPORT
 
@@ -96,13 +96,14 @@ class BulkImportView(APIView):
     def post(self, request, import_queue=None):
         return import_response(self.request, import_queue, request.body)
 
-    @swagger_auto_schema(manual_parameters=[task_param, result_param, username_param])
+    @swagger_auto_schema(manual_parameters=[task_param, result_param, username_param, verbose_param])
     def get(
             self, request, import_queue=None
     ):  # pylint: disable=too-many-return-statements,too-many-locals,too-many-branches
         task_id = request.GET.get('task')
         result_format = request.GET.get('result')
         username = request.GET.get('username')
+        is_verbose = request.GET.get('verbose') in ['true', True]
         user = self.request.user
 
         if task_id:
@@ -161,9 +162,10 @@ class BulkImportView(APIView):
             if user.is_staff or user.username == task['username']:
                 if (not import_queue or task['queue'] == import_queue) and \
                         (not username or task['username'] == username):
-                    tasks.append(
-                        dict(task=task_id, state=value['state'], queue=task['queue'], username=task['username'])
-                    )
+                    details = dict(task=task_id, state=value['state'], queue=task['queue'], username=task['username'])
+                    if is_verbose:
+                        details['details'] = value
+                    tasks.append(details)
 
         return Response(tasks)
 
