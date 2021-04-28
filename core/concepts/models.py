@@ -7,7 +7,7 @@ from pydash import get, compact
 from core.common.constants import ISO_639_1, INCLUDE_RETIRED_PARAM, LATEST, HEAD
 from core.common.mixins import SourceChildMixin
 from core.common.models import VersionedModel
-from core.common.utils import reverse_resource, parse_updated_since_param, generate_temp_version
+from core.common.utils import reverse_resource, parse_updated_since_param, generate_temp_version, drop_version
 from core.concepts.constants import CONCEPT_TYPE, LOCALES_FULLY_SPECIFIED, LOCALES_SHORT, LOCALES_SEARCH_INDEX_TERM, \
     CONCEPT_WAS_RETIRED, CONCEPT_IS_ALREADY_RETIRED, CONCEPT_IS_ALREADY_NOT_RETIRED, CONCEPT_WAS_UNRETIRED, \
     PERSIST_CLONE_ERROR, PERSIST_CLONE_SPECIFY_USER_ERROR, ALREADY_EXISTS
@@ -31,6 +31,12 @@ class LocalizedText(models.Model):
         if not self.internal_reference_id and self.id:
             self.internal_reference_id = str(self.id)
         super().save(force_insert, force_update, using, update_fields)
+
+    def to_dict(self):
+        return dict(
+            external_id=self.external_id, name=self.name, type=self.type, locale=self.locale,
+            locale_preferred=self.locale_preferred,
+        )
 
     def clone(self):
         return LocalizedText(
@@ -380,6 +386,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         )
         concept_version.cloned_names = self.__clone_name_locales()
         concept_version.cloned_descriptions = self.__clone_description_locales()
+        concept_version._parent_concepts = self.parent_concepts.all()  # pylint: disable=protected-access
 
         return concept_version
 
@@ -403,10 +410,11 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         initial_version.released = True
         initial_version.is_latest_version = True
         initial_version.save()
+        initial_version.set_parent_concepts_from_uris(False)
         return initial_version
 
     @classmethod
-    def create_new_version_for(cls, instance, data, user):
+    def create_new_version_for(cls, instance, data, user, create_parent_version=True):
         instance.concept_class = data.get('concept_class', instance.concept_class)
         instance.datatype = data.get('datatype', instance.datatype)
         instance.extras = data.get('extras', instance.extras)
@@ -416,21 +424,63 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
         new_names = LocalizedText.build_locales(data.get('names', []))
         new_descriptions = LocalizedText.build_locales(data.get('descriptions', []), 'description')
+        has_parent_concept_uris_attr = 'parent_concept_urls' in data
         parent_concept_uris = data.pop('parent_concept_urls', None)
         if parent_concept_uris:
             instance._parent_concepts = cls.objects.filter(  # pylint: disable=protected-access
                 uri__in=parent_concept_uris)
+        elif has_parent_concept_uris_attr:
+            instance._parent_concepts = cls.objects.none()  # pylint: disable=protected-access
 
         instance.cloned_names = compact(new_names)
         instance.cloned_descriptions = compact(new_descriptions)
 
-        return cls.persist_clone(instance, user)
+        return cls.persist_clone(instance, user, create_parent_version)
 
-    def set_parent_concepts_from_uris(self):
+    def set_parent_concepts_from_uris(self, create_parent_version=True):
         parent_concepts = get(self, '_parent_concepts', None)
+        if create_parent_version:
+            for parent in parent_concepts:
+                current_latest_version = parent.get_latest_version()
+                Concept.create_new_version_for(
+                    parent.clone(),
+                    dict(
+                        names=[name.to_dict() for name in parent.names.all()],
+                        descriptions=[desc.to_dict() for desc in parent.descriptions.all()]
+                    ),
+                    self.created_by,
+                    create_parent_version=False
+                )
+                new_latest_version = parent.get_latest_version()
+                for uri in current_latest_version.child_concept_urls:
+                    Concept.objects.filter(
+                        uri__contains=uri, is_latest_version=True
+                    ).first().parent_concepts.add(new_latest_version)
+
         if parent_concepts:
-            self.parent_concepts.set(parent_concepts)
+            self.parent_concepts.set([parent.get_latest_version() for parent in parent_concepts])
             self._parent_concepts = None
+
+    def create_new_versions_for_removed_parents(self, uris):
+        if uris:
+            concepts = Concept.objects.filter(uri__in=uris)
+            child_versioned_object_uri = drop_version(self.uri)
+            for concept in concepts:
+                current_latest_version = concept.get_latest_version()
+                Concept.create_new_version_for(
+                    concept.clone(),
+                    dict(
+                        names=[name.to_dict() for name in concept.names.all()],
+                        descriptions=[desc.to_dict() for desc in concept.descriptions.all()]
+                    ),
+                    concept.created_by,
+                    create_parent_version=False
+                )
+                new_latest_version = concept.get_latest_version()
+                for uri in current_latest_version.child_concept_urls:
+                    if uri != child_versioned_object_uri:
+                        child = Concept.objects.filter(uri__contains=uri, is_latest_version=True).first()
+                        child.parent_concepts.add(new_latest_version)
 
     def set_locales(self):
         if not self.id:
@@ -502,14 +552,18 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             parent_resource = concept.parent
             parent_resource_head = parent_resource.head
 
+            if parent_concept_uris:
+                concept._parent_concepts = Concept.objects.filter(  # pylint: disable=protected-access
+                    uri__in=parent_concept_uris
+                )
+                concept.set_parent_concepts_from_uris()
+
             if create_initial_version:
                 initial_version = cls.create_initial_version(concept)
                 initial_version.set_locales()
                 initial_version.sources.set([parent_resource, parent_resource_head])
 
             concept.sources.set([parent_resource, parent_resource_head])
-            if parent_concept_uris:
-                concept.parent_concepts.set(Concept.objects.filter(uri__in=parent_concept_uris))
             concept.update_mappings()
         except ValidationError as ex:
             concept.errors.update(ex.message_dict)
@@ -523,6 +577,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         concept.extras = self.extras
         concept.names.set(self.names.all())
         concept.descriptions.set(self.descriptions.all())
+        concept.parent_concepts.set(self.parent_concepts.all())
         concept.concept_class = self.concept_class
         concept.datatype = self.datatype
         concept.retired = self.retired
@@ -530,7 +585,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         concept.save()
 
     @classmethod
-    def persist_clone(cls, obj, user=None, **kwargs):  # pylint: disable=too-many-statements
+    def persist_clone(cls, obj, user=None, create_parent_version=True, **kwargs):  # pylint: disable=too-many-statements
         errors = dict()
         if not user:
             errors['version_created_by'] = PERSIST_CLONE_SPECIFY_USER_ERROR
@@ -541,7 +596,9 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         parent = obj.parent
         parent_head = parent.head
         persisted = False
-        prev_latest_version = None
+        versioned_object = obj.versioned_object
+        prev_latest_version = versioned_object.versions.exclude(id=obj.id).filter(is_latest_version=True).first()
+        old_parents = prev_latest_version.parent_concept_urls
         try:
             with transaction.atomic():
                 cls.pause_indexing()
@@ -551,14 +608,16 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                 if obj.id:
                     obj.version = str(obj.id)
                     obj.save()
-                    obj.set_parent_concepts_from_uris()
+                    obj.set_parent_concepts_from_uris(create_parent_version)
                     obj.set_locales()
                     obj.clean()  # clean here to validate locales that can only be saved after obj is saved
                     obj.update_versioned_object()
-                    versioned_object = obj.versioned_object
-                    prev_latest_version = versioned_object.versions.exclude(id=obj.id).filter(
-                        is_latest_version=True).first()
                     if prev_latest_version:
+                        removed_parent_urls = [
+                            url for url in old_parents if url not in list(obj.parent_concept_urls)
+                        ]
+                        obj.create_new_versions_for_removed_parents(removed_parent_urls)
+
                         prev_latest_version.is_latest_version = False
                         prev_latest_version.save()
 
@@ -652,15 +711,21 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     @property
     def parent_concept_urls(self):
         queryset = self.parent_concepts.all()
+        if self.is_latest_version:
+            queryset |= self.versioned_object.parent_concepts.all()
         if self.is_versioned_object:
             queryset |= self.get_latest_version().parent_concepts.all()
-
-        return queryset.values_list('uri', flat=True)
+        return self.__format_hierarchy_uris(queryset.values_list('uri', flat=True))
 
     @property
     def child_concept_urls(self):
         queryset = self.child_concepts.all()
+        if self.is_latest_version:
+            queryset |= self.versioned_object.child_concepts.all()
         if self.is_versioned_object:
             queryset |= self.get_latest_version().child_concepts.all()
+        return self.__format_hierarchy_uris(queryset.values_list('uri', flat=True))
 
-        return queryset.values_list('uri', flat=True)
+    @staticmethod
+    def __format_hierarchy_uris(uris):
+        return list({drop_version(uri) for uri in uris})

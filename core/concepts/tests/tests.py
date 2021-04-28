@@ -158,6 +158,260 @@ class ConceptTest(OCLTestCase):
             )
         )
 
+    def test_hierarchy_one_parent_child(self):
+        parent_concept = ConceptFactory(
+            names=[LocalizedTextFactory(locale='en', name='English', locale_preferred=True)])
+        source = parent_concept.parent
+        child_concept = Concept.persist_new({
+            **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'c1', 'parent': source,
+            'names': [LocalizedTextFactory.build(locale='en', name='English', locale_preferred=True)],
+            'parent_concept_urls': [parent_concept.uri]
+        })
+
+        parent_concept_latest_version = parent_concept.get_latest_version()
+        self.assertEqual(child_concept.errors, {})
+        self.assertIsNotNone(child_concept.id)
+        self.assertEqual(list(child_concept.parent_concept_urls), [parent_concept.uri])
+        self.assertEqual(list(child_concept.get_latest_version().parent_concept_urls), [parent_concept.uri])
+        self.assertEqual(list(child_concept.child_concept_urls), [])
+        self.assertEqual(list(parent_concept.child_concept_urls), [child_concept.uri])
+        self.assertEqual(list(parent_concept_latest_version.child_concept_urls), [child_concept.uri])
+        self.assertEqual(list(parent_concept_latest_version.prev_version.child_concept_urls), [])
+
+        another_child_concept = Concept.persist_new({
+            **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'c2', 'parent': source,
+            'names': [LocalizedTextFactory.build(locale='en', name='English', locale_preferred=True)],
+            'parent_concept_urls': [parent_concept.uri]
+        })
+
+        parent_concept_latest_version = parent_concept.get_latest_version()
+        self.assertEqual(another_child_concept.errors, {})
+        self.assertIsNotNone(another_child_concept.id)
+        self.assertEqual(list(child_concept.parent_concept_urls), [parent_concept.uri])
+        self.assertEqual(list(child_concept.get_latest_version().parent_concept_urls), [parent_concept.uri])
+        self.assertEqual(list(child_concept.child_concept_urls), [])
+        self.assertEqual(list(another_child_concept.parent_concept_urls), [parent_concept.uri])
+        self.assertEqual(list(another_child_concept.get_latest_version().parent_concept_urls), [parent_concept.uri])
+        self.assertEqual(list(another_child_concept.child_concept_urls), [])
+        self.assertEqual(
+            sorted(list(parent_concept.child_concept_urls)),
+            sorted([child_concept.uri, another_child_concept.uri])
+        )
+        self.assertEqual(
+            sorted(list(parent_concept_latest_version.child_concept_urls)),
+            sorted([child_concept.uri, another_child_concept.uri])
+        )
+        self.assertEqual(list(parent_concept_latest_version.prev_version.child_concept_urls), [child_concept.uri])
+
+    def test_hierarchy(self):  # pylint: disable=too-many-statements
+        # Av1
+        parent_concept = ConceptFactory(
+            names=[LocalizedTextFactory(locale='en', name='English', locale_preferred=True)])
+        self.assertEqual(parent_concept.versions.count(), 1)
+        source = parent_concept.parent
+
+        # Av1 -> None and Av2 -> Bv1
+        child_concept = Concept.persist_new({
+            **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'c1', 'parent': source,
+            'names': [LocalizedTextFactory.build(locale='en', name='English', locale_preferred=True)],
+            'parent_concept_urls': [parent_concept.uri]
+        })
+
+        parent_concept_latest_version = parent_concept.get_latest_version()
+        self.assertEqual(child_concept.errors, {})
+        self.assertIsNotNone(child_concept.id)
+        self.assertEqual(parent_concept.versions.count(), 2)
+        self.assertEqual(child_concept.versions.count(), 1)
+        self.assertEqual(list(child_concept.parent_concept_urls), [parent_concept.uri])
+        self.assertEqual(list(child_concept.child_concept_urls), [])
+        self.assertEqual(list(parent_concept.child_concept_urls), [child_concept.uri])
+        self.assertEqual(list(parent_concept_latest_version.child_concept_urls), [child_concept.uri])
+        self.assertEqual(list(parent_concept_latest_version.prev_version.child_concept_urls), [])
+
+        # Av1 -> None and Av2 -> Bv1, Bv2 and Bv2 -> Cv1
+        child_child_concept = Concept.persist_new({
+            **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'c2', 'parent': source,
+            'names': [LocalizedTextFactory.build(locale='en', name='English', locale_preferred=True)],
+            'parent_concept_urls': [child_concept.uri]
+        })
+
+        self.assertEqual(child_child_concept.errors, {})
+        self.assertIsNotNone(child_child_concept.id)
+        self.assertEqual(parent_concept.versions.count(), 2)
+        self.assertEqual(child_concept.versions.count(), 2)
+        self.assertEqual(child_child_concept.versions.count(), 1)
+        self.assertEqual(list(child_child_concept.parent_concept_urls), [child_concept.uri])
+        self.assertEqual(list(child_child_concept.get_latest_version().parent_concept_urls), [child_concept.uri])
+        self.assertEqual(list(child_child_concept.child_concept_urls), [])
+        self.assertEqual(list(child_concept.child_concept_urls), [child_child_concept.uri])
+        self.assertEqual(list(child_concept.parent_concept_urls), [parent_concept.uri])
+        self.assertEqual(list(child_concept.get_latest_version().child_concept_urls), [child_child_concept.uri])
+        self.assertEqual(list(child_concept.get_latest_version().parent_concept_urls), [parent_concept.uri])
+        self.assertEqual(list(parent_concept.child_concept_urls), [child_concept.uri])
+        # Av1 -> None and Av2 -> Bv1,Bv2 -> Cv1 and Av3 -> Bv3,Cv2
+        Concept.create_new_version_for(
+            instance=child_child_concept.clone(),
+            data=dict(
+                parent_concept_urls=[parent_concept.uri],
+                names=[dict(locale='en', name='English', locale_preferred=True)]
+            ),
+            user=child_child_concept.created_by
+        )
+
+        self.assertEqual(parent_concept.versions.count(), 3)
+        self.assertEqual(child_concept.versions.count(), 3)
+        self.assertEqual(child_child_concept.versions.count(), 2)
+
+        child_child_latest_version = child_child_concept.get_latest_version()
+        self.assertEqual(list(child_child_concept.parent_concept_urls), [parent_concept.uri])
+        self.assertEqual(list(child_child_latest_version.parent_concept_urls), [parent_concept.uri])
+        self.assertEqual(list(child_child_latest_version.prev_version.parent_concept_urls), [child_concept.url])
+
+        parent_concept_latest_version = parent_concept.get_latest_version()
+        self.assertListEqual(
+            sorted(list(parent_concept.child_concept_urls)),
+            sorted([child_concept.uri, child_child_concept.uri])
+        )
+        self.assertEqual(
+            sorted(list(parent_concept_latest_version.child_concept_urls)),
+            sorted([child_concept.uri, child_child_concept.uri])
+        )
+        self.assertEqual(list(parent_concept_latest_version.prev_version.child_concept_urls), [child_concept.url])
+
+        child_latest_version = child_concept.get_latest_version()
+
+        self.assertEqual(list(child_concept.child_concept_urls), [])
+        self.assertEqual(list(child_latest_version.child_concept_urls), [])
+
+        self.assertEqual(list(child_latest_version.prev_version.child_concept_urls), [child_child_concept.uri])
+
+        # Av1 -> None and Av2 -> Bv1,Bv2 -> Cv1 and Av3 -> Bv3,Cv2 and Av4 -> Bv4 -> Cv3
+        Concept.create_new_version_for(
+            instance=child_child_concept.clone(),
+            data=dict(
+                parent_concept_urls=[child_concept.uri],
+                names=[dict(locale='en', name='English', locale_preferred=True)]
+            ),
+            user=child_child_concept.created_by
+        )
+
+        self.assertEqual(parent_concept.versions.count(), 4)
+        self.assertEqual(child_concept.versions.count(), 4)
+        self.assertEqual(child_child_concept.versions.count(), 3)
+
+        child_child_latest_version = child_child_concept.get_latest_version()
+        self.assertEqual(
+            list(child_child_concept.parent_concept_urls), [child_concept.uri])
+        self.assertEqual(
+            list(child_child_latest_version.parent_concept_urls), [child_concept.uri])
+        self.assertEqual(
+            list(child_child_latest_version.prev_version.parent_concept_urls), [parent_concept.url])
+        self.assertEqual(
+            list(child_child_latest_version.prev_version.prev_version.parent_concept_urls), [child_concept.url])
+
+        child_latest_version = child_concept.get_latest_version()
+        self.assertEqual(list(child_concept.child_concept_urls), [child_child_concept.uri])
+        self.assertEqual(list(child_latest_version.child_concept_urls), [child_child_concept.uri])
+        self.assertEqual(
+            list(child_latest_version.prev_version.child_concept_urls), []
+        )
+        self.assertEqual(
+            list(child_latest_version.prev_version.prev_version.child_concept_urls),
+            [child_child_concept.uri]
+        )
+        self.assertEqual(
+            list(child_latest_version.prev_version.prev_version.prev_version.child_concept_urls),
+            []
+        )
+
+        parent_concept_latest_version = parent_concept.get_latest_version()
+        self.assertListEqual(
+            sorted(list(parent_concept.child_concept_urls)),
+            sorted([child_concept.uri])
+        )
+        self.assertEqual(
+            sorted(list(parent_concept_latest_version.child_concept_urls)),
+            sorted([child_concept.uri])
+        )
+        self.assertEqual(
+            sorted(list(parent_concept_latest_version.prev_version.child_concept_urls)),
+            sorted([child_concept.uri, child_child_concept.uri])
+        )
+        self.assertEqual(
+            list(parent_concept_latest_version.prev_version.prev_version.child_concept_urls),
+            [child_concept.uri]
+        )
+        self.assertEqual(
+            list(parent_concept_latest_version.prev_version.prev_version.prev_version.child_concept_urls),
+            []
+        )
+
+        # Av1 -> None and Av2 -> Bv1,Bv2 -> Cv1 and Av3 -> Bv3,Cv2 and Av4 -> Bv4 -> Cv3 and Av4 -> Bv5 -> None and Cv4
+        Concept.create_new_version_for(
+            instance=child_child_concept.clone(),
+            data=dict(
+                parent_concept_urls=[],
+                names=[dict(locale='en', name='English', locale_preferred=True)]
+            ),
+            user=child_child_concept.created_by
+        )
+
+        self.assertEqual(parent_concept.versions.count(), 4)
+        self.assertEqual(child_concept.versions.count(), 5)
+        self.assertEqual(child_child_concept.versions.count(), 4)
+
+        child_child_latest_version = child_child_concept.get_latest_version()
+        self.assertEqual(
+            list(child_child_concept.parent_concept_urls), [])
+        self.assertEqual(
+            list(child_child_latest_version.parent_concept_urls), [])
+        self.assertEqual(
+            list(child_child_latest_version.prev_version.parent_concept_urls), [child_concept.uri])
+        self.assertEqual(
+            list(child_child_latest_version.prev_version.prev_version.parent_concept_urls), [parent_concept.url])
+        self.assertEqual(
+            list(child_child_latest_version.prev_version.prev_version.prev_version.parent_concept_urls),
+            [child_concept.url]
+        )
+
+        child_latest_version = child_concept.get_latest_version()
+        self.assertEqual(list(child_concept.child_concept_urls), [])
+        self.assertEqual(list(child_latest_version.child_concept_urls), [])
+        self.assertEqual(list(child_latest_version.prev_version.child_concept_urls), [child_child_concept.uri])
+        self.assertEqual(
+            list(child_latest_version.prev_version.prev_version.child_concept_urls), []
+        )
+        self.assertEqual(
+            list(child_latest_version.prev_version.prev_version.prev_version.child_concept_urls),
+            [child_child_concept.uri]
+        )
+        self.assertEqual(
+            list(child_latest_version.prev_version.prev_version.prev_version.prev_version.child_concept_urls),
+            []
+        )
+
+        parent_concept_latest_version = parent_concept.get_latest_version()
+        self.assertListEqual(
+            sorted(list(parent_concept.child_concept_urls)),
+            sorted([child_concept.uri])
+        )
+        self.assertEqual(
+            sorted(list(parent_concept_latest_version.child_concept_urls)),
+            sorted([child_concept.uri])
+        )
+        self.assertEqual(
+            sorted(list(parent_concept_latest_version.prev_version.child_concept_urls)),
+            sorted([child_concept.uri, child_child_concept.uri])
+        )
+        self.assertEqual(
+            list(parent_concept_latest_version.prev_version.prev_version.child_concept_urls),
+            [child_concept.uri]
+        )
+        self.assertEqual(
+            list(parent_concept_latest_version.prev_version.prev_version.prev_version.child_concept_urls),
+            []
+        )
+
     def test_clone(self):
         es_locale = LocalizedTextFactory(locale='es', name='Not English')
         en_locale = LocalizedTextFactory(locale='en', name='English')
