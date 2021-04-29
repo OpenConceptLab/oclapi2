@@ -144,8 +144,11 @@ class BulkImportView(APIView):
             )
 
         try:
-            response = flower_get('api/tasks')
-            flower_tasks = response.json()
+            flower_tasks = {
+                **flower_get('api/tasks?taskname=core.common.tasks.bulk_import').json(),
+                **flower_get('api/tasks?taskname=core.common.tasks.bulk_import_parallel_inline').json(),
+                **flower_get('api/tasks?taskname=core.common.tasks.bulk_import_inline').json()
+            }
         except Exception as ex:
             return Response(
                 dict(detail='Flower service returned unexpected result. Maybe check healthcheck.', exception=str(ex)),
@@ -154,9 +157,6 @@ class BulkImportView(APIView):
 
         tasks = []
         for task_id, value in flower_tasks.items():
-            if not value.get('name', None) or not value['name'].startswith('core.common.tasks.bulk_import'):
-                continue
-
             task = parse_bulk_import_task_id(task_id)
 
             if user.is_staff or user.username == task['username']:

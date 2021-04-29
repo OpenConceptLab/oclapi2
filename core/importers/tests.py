@@ -6,7 +6,7 @@ import uuid
 from celery_once import AlreadyQueued
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db.models import F
-from mock import patch, Mock, ANY
+from mock import patch, Mock, ANY, call
 
 from core.collections.models import Collection
 from core.common.tests import OCLAPITestCase, OCLTestCase
@@ -533,14 +533,10 @@ class BulkImportViewTest(OCLAPITestCase):
     @patch('core.importers.views.flower_get')
     def test_get_without_task_id(self, flower_get_mock):
         task_id1 = "{}-{}~{}".format(str(uuid.uuid4()), 'ocladmin', 'priority')
-        task_id2 = "{}-{}~{}".format(str(uuid.uuid4()), 'ocladmin', 'priority')
-        task_id3 = "{}-{}~{}".format(str(uuid.uuid4()), 'foobar', 'normal')
-        task_id4 = "{}-{}".format(str(uuid.uuid4()), 'foobar')
+        task_id2 = "{}-{}~{}".format(str(uuid.uuid4()), 'foobar', 'normal')
         flower_tasks = {
             task_id1: dict(name='core.common.tasks.bulk_import', state='success'),
-            task_id2: dict(name='foo-task', state='failed'),
-            task_id3: dict(name='core.common.tasks.bulk_import', state='failed'),
-            task_id4: dict(name='foo-task', state='pending')
+            task_id2: dict(name='core.common.tasks.bulk_import', state='failed'),
         }
         flower_get_mock.return_value = Mock(json=Mock(return_value=flower_tasks))
 
@@ -560,7 +556,7 @@ class BulkImportViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data, [dict(queue='normal', state='failed', task=task_id3, username='foobar')])
+        self.assertEqual(response.data, [dict(queue='normal', state='failed', task=task_id2, username='foobar')])
 
         response = self.client.get(
             '/importers/bulk-import/priority/?username=ocladmin',
@@ -579,7 +575,10 @@ class BulkImportViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data, [])
-        flower_get_mock.assert_called_with('api/tasks')
+        calls = flower_get_mock.mock_calls
+        self.assertTrue(call('api/tasks?taskname=core.common.tasks.bulk_import') in calls)
+        self.assertTrue(call('api/tasks?taskname=core.common.tasks.bulk_import_parallel_inline') in calls)
+        self.assertTrue(call('api/tasks?taskname=core.common.tasks.bulk_import_inline') in calls)
 
     @patch('core.importers.views.AsyncResult')
     def test_get_with_task_id_success(self, async_result_klass_mock):

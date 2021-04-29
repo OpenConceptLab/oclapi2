@@ -193,12 +193,6 @@ def bulk_import_parts_inline(self, input_list, username, update_if_exists):
     ).run()
 
 
-@app.task(base=QueueOnce)
-def bulk_priority_import(to_import, username, update_if_exists):
-    from core.importers.models import BulkImport
-    return BulkImport(content=to_import, username=username, update_if_exists=update_if_exists).run()
-
-
 @app.task
 def send_user_verification_email(user_id):
     from core.users.models import UserProfile
