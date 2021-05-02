@@ -163,6 +163,10 @@ class BulkImportView(APIView):
                 if (not import_queue or task['queue'] == import_queue) and \
                         (not username or task['username'] == username):
                     details = dict(task=task_id, state=value['state'], queue=task['queue'], username=task['username'])
+                    if value['state'] in ['RECEIVED', 'PENDING']:
+                        result = AsyncResult(task_id)
+                        if result.state and result.state != value['state']:
+                            details['state'] = result.state
                     if is_verbose:
                         details['details'] = value
                     tasks.append(details)
