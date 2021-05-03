@@ -14,6 +14,11 @@ urlpatterns = [
         views.BulkImportParallelInlineView.as_view(),
         name='bulk-import-inline'
     ),
+    re_path(
+        r'^bulk-import-parallel-inline/(?P<import_queue>{pattern})/$'.format(pattern=NAMESPACE_PATTERN),
+        views.BulkImportParallelInlineView.as_view(),
+        name='bulk-import-inline'
+    ),
     re_path(r'^bulk-import/file-url/$', views.BulkImportFileURLView.as_view(), name='bulk-import-file-url'),
     re_path(
         r"^bulk-import/(?P<import_queue>{pattern})/file-url/$".format(pattern=NAMESPACE_PATTERN),
