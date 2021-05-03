@@ -4,10 +4,11 @@ import random
 import tempfile
 import uuid
 import zipfile
-from collections import MutableMapping  # pylint: disable=no-name-in-module
+from collections import MutableMapping, OrderedDict  # pylint: disable=no-name-in-module
 from urllib import parse
 
 import requests
+from celery_once.helpers import queue_once_key
 from dateutil import parser
 from django.conf import settings
 from django.urls import NoReverseMatch, reverse, get_resolver, resolve, Resolver404
@@ -557,3 +558,17 @@ def flatten_dict(dikt, parent_key='', sep='__'):
         else:
             items.append((new_key, str(val)))
     return dict(items)
+
+
+def get_bulk_import_celery_once_lock_key(async_result):
+    result_args = async_result.args
+    args = [('to_import', result_args[0]), ('username', result_args[1]), ('update_if_exists', result_args[2])]
+
+    if async_result.name == 'core.common.tasks.bulk_import_parallel_inline':
+        args.append(('threads', result_args[3]))
+
+    return get_celery_once_lock_key(async_result.name, args)
+
+
+def get_celery_once_lock_key(name, args):
+    return queue_once_key(name, OrderedDict(args), None)

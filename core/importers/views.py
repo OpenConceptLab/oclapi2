@@ -1,9 +1,10 @@
 import urllib
 
 from celery.result import AsyncResult
-from celery_once import AlreadyQueued
+from celery_once import AlreadyQueued, QueueOnce
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
+from pydash import get
 from rest_framework import status
 from rest_framework.parsers import MultiPartParser
 from rest_framework.permissions import IsAuthenticated, IsAdminUser
@@ -14,7 +15,8 @@ from core.celery import app
 from core.common.services import RedisService
 from core.common.swagger_parameters import update_if_exists_param, task_param, result_param, username_param, \
     file_upload_param, file_url_param, parallel_threads_param, verbose_param
-from core.common.utils import parse_bulk_import_task_id, task_exists, flower_get, queue_bulk_import
+from core.common.utils import parse_bulk_import_task_id, task_exists, flower_get, queue_bulk_import, \
+    get_bulk_import_celery_once_lock_key
 from core.importers.constants import ALREADY_QUEUED, INVALID_UPDATE_IF_EXISTS, NO_CONTENT_TO_IMPORT
 
 
@@ -193,6 +195,15 @@ class BulkImportView(APIView):
 
         try:
             app.control.revoke(task_id, terminate=True, signal=signal)
+
+            # Below code is needed for removing the lock from QueueOnce
+            result = AsyncResult(task_id)
+            if (get(result, 'name') or '').startswith('core.common.tasks.bulk_import'):
+                celery_once_key = get_bulk_import_celery_once_lock_key(result)
+                if celery_once_key:
+                    celery_once = QueueOnce()
+                    celery_once.name = result.name
+                    celery_once.once_backend.clear_lock(celery_once_key)
         except Exception as ex:
             return Response(dict(errors=ex.args), status=status.HTTP_400_BAD_REQUEST)
 
