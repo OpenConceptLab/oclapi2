@@ -80,6 +80,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         'map_type': {'sortable': True, 'filterable': True, 'facet': True, 'exact': True},
         'source': {'sortable': True, 'filterable': True, 'facet': True, 'exact': True},
         'collection': {'sortable': False, 'filterable': True, 'facet': True},
+        'collection_owner_url': {'sortable': False, 'filterable': False, 'facet': True},
         'owner': {'sortable': True, 'filterable': True, 'facet': True, 'exact': True},
         'owner_type': {'sortable': False, 'filterable': True, 'facet': True},
         'concept_source': {'sortable': False, 'filterable': True, 'facet': True, 'exact': True},

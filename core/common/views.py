@@ -377,6 +377,13 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
         return criteria
 
+    def __should_query_latest_version(self):
+        kwargs = {**self.get_faceted_filters(), **self.kwargs}
+        collection = kwargs.get('collection', '')
+        version = kwargs.get('version', '')
+
+        return (not collection or collection.startswith('!')) and (not version or version.startswith('!'))
+
     @property
     def __search_results(self):  # pylint: disable=too-many-branches,too-many-locals
         results = None
@@ -384,8 +391,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         if self.should_perform_es_search():
             results = self.document_model.search()
             default_filters = self.default_filters.copy()
-            if self.is_source_child_document_model() and 'collection' not in self.kwargs and \
-                    'version' not in self.kwargs:
+            if self.is_source_child_document_model() and self.__should_query_latest_version():
                 default_filters['is_latest_version'] = True
 
             for field, value in default_filters.items():
