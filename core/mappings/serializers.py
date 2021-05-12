@@ -1,5 +1,5 @@
 from pydash import get
-from rest_framework.fields import CharField, JSONField, IntegerField, DateTimeField
+from rest_framework.fields import CharField, JSONField, IntegerField, DateTimeField, ListField
 from rest_framework.serializers import ModelSerializer
 
 from core.common.constants import MAPPING_LOOKUP_CONCEPTS, MAPPING_LOOKUP_SOURCES, MAPPING_LOOKUP_FROM_CONCEPT, \
@@ -73,10 +73,14 @@ class MappingListSerializer(ModelSerializer):
 
 class MappingVersionListSerializer(MappingListSerializer):
     previous_version_url = CharField(read_only=True, source='prev_version_uri')
+    source_versions_associated_with = ListField(read_only=True)
+    collection_versions_associated_with = ListField(read_only=True)
 
     class Meta:
         model = Mapping
-        fields = MappingListSerializer.Meta.fields + ('previous_version_url',)
+        fields = MappingListSerializer.Meta.fields + (
+            'previous_version_url', 'source_versions_associated_with', 'collection_versions_associated_with',
+        )
 
 
 class MappingDetailSerializer(MappingListSerializer):
