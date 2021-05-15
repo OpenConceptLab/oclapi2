@@ -150,13 +150,13 @@ class ConceptListSerializer(ModelSerializer):
 
 class ConceptVersionListSerializer(ConceptListSerializer):
     previous_version_url = CharField(read_only=True, source='prev_version_uri')
-    source_versions_associated_with = ListField(read_only=True)
-    collection_versions_associated_with = ListField(read_only=True)
+    source_versions = ListField(read_only=True)
+    collection_versions = ListField(read_only=True)
 
     class Meta:
         model = Concept
         fields = ConceptListSerializer.Meta.fields + (
-            'previous_version_url', 'source_versions_associated_with', 'collection_versions_associated_with'
+            'previous_version_url', 'source_versions', 'collection_versions'
         )
 
 
@@ -274,8 +274,8 @@ class ConceptVersionDetailSerializer(ModelSerializer):
     child_concepts = SerializerMethodField()
     parent_concept_urls = ListField(read_only=True)
     child_concept_urls = ListField(read_only=True)
-    source_versions_associated_with = ListField(read_only=True)
-    collection_versions_associated_with = ListField(read_only=True)
+    source_versions = ListField(read_only=True)
+    collection_versions = ListField(read_only=True)
 
     def __init__(self, *args, **kwargs):
         params = get(kwargs, 'context.request.query_params')
@@ -306,7 +306,7 @@ class ConceptVersionDetailSerializer(ModelSerializer):
             'version', 'created_on', 'updated_on', 'version_created_on', 'version_created_by', 'update_comment',
             'is_latest_version', 'locale', 'url', 'owner_type', 'version_url', 'mappings', 'previous_version_url',
             'internal_reference_id', 'parent_concepts', 'child_concepts', 'parent_concept_urls', 'child_concept_urls',
-            'source_versions_associated_with', 'collection_versions_associated_with'
+            'source_versions', 'collection_versions'
         )
 
     def get_mappings(self, obj):

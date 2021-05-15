@@ -73,13 +73,13 @@ class MappingListSerializer(ModelSerializer):
 
 class MappingVersionListSerializer(MappingListSerializer):
     previous_version_url = CharField(read_only=True, source='prev_version_uri')
-    source_versions_associated_with = ListField(read_only=True)
-    collection_versions_associated_with = ListField(read_only=True)
+    source_versions = ListField(read_only=True)
+    collection_versions = ListField(read_only=True)
 
     class Meta:
         model = Mapping
         fields = MappingListSerializer.Meta.fields + (
-            'previous_version_url', 'source_versions_associated_with', 'collection_versions_associated_with',
+            'previous_version_url', 'source_versions', 'collection_versions',
         )
 
 

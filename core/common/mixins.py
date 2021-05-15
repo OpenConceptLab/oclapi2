@@ -374,11 +374,11 @@ class SourceContainerMixin:
 
 class SourceChildMixin:
     @property
-    def source_versions_associated_with(self):
+    def source_versions(self):
         return self.sources.exclude(version=HEAD).values_list('uri', flat=True)
 
     @property
-    def collection_versions_associated_with(self):
+    def collection_versions(self):
         return self.collection_set.exclude(version=HEAD).values_list('uri', flat=True)
 
     @property
