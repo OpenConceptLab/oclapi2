@@ -9,8 +9,8 @@ from core.concepts.constants import (
     OPENMRS_NAMES_EXCEPT_SHORT_MUST_BE_UNIQUE,
     OPENMRS_ONE_FULLY_SPECIFIED_NAME_PER_LOCALE, OPENMRS_NO_MORE_THAN_ONE_SHORT_NAME_PER_LOCALE, OPENMRS_CONCEPT_CLASS,
     OPENMRS_DATATYPE, OPENMRS_NAME_TYPE, OPENMRS_DESCRIPTION_TYPE, OPENMRS_NAME_LOCALE,
-    OPENMRS_DESCRIPTION_LOCALE
-)
+    OPENMRS_DESCRIPTION_LOCALE,
+    LOCALES_SEARCH_INDEX_TERM, INDEX_TERM, FULLY_SPECIFIED, SHORT)
 from core.concepts.validators import BaseConceptValidator, message_with_name_details
 
 
@@ -85,7 +85,7 @@ class OpenMRSConceptValidator(BaseConceptValidator):
 
         return not self.repo.concepts_set.exclude(
             versioned_object_id=versioned_object_id
-        ).exclude(names__type__in=LOCALES_SHORT).filter(
+        ).exclude(names__type__in=LOCALES_SHORT).exclude(names__type__in=LOCALES_SEARCH_INDEX_TERM).filter(
             is_active=True, retired=False, is_latest_version=True, names__locale=name.locale, names__name=name.name
         ).exists()
 
@@ -158,7 +158,7 @@ class OpenMRSConceptValidator(BaseConceptValidator):
             return
 
         for name in names:
-            if name.type in ['FULLY_SPECIFIED', 'SHORT']:
+            if name.type in [FULLY_SPECIFIED, SHORT, INDEX_TERM]:
                 continue
 
             if (name.type or 'None') in self.reference_values['NameTypes']:
