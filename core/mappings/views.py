@@ -14,7 +14,7 @@ from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryMixin
 from core.common.swagger_parameters import (
     q_param, limit_param, sort_desc_param, page_param, exact_match_param, sort_asc_param, verbose_param,
     include_facets_header, updated_since_param, include_retired_param,
-    compress_header)
+    compress_header, include_source_versions_param, include_collection_versions_param)
 from core.common.views import SourceChildCommonBaseView, SourceChildExtrasView, \
     SourceChildExtraRetrieveUpdateDestroyView
 from core.concepts.permissions import CanEditParentDictionary, CanViewParentDictionary
@@ -201,6 +201,11 @@ class MappingVersionsView(MappingBaseView, ConceptDictionaryMixin, ListWithHeade
     def get_serializer_class(self):
         return MappingVersionDetailSerializer if self.is_verbose() else MappingVersionListSerializer
 
+    @swagger_auto_schema(
+        manual_parameters=[
+            include_source_versions_param, include_collection_versions_param
+        ]
+    )
     def get(self, request, *args, **kwargs):
         return self.list(request, *args, **kwargs)
 

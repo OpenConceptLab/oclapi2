@@ -1,7 +1,7 @@
 from drf_yasg import openapi
 
 from core.common.constants import RELEASED_PARAM, VERBOSE_PARAM, INCLUDE_RETIRED_PARAM, PROCESSING_PARAM, \
-    INCLUDE_INVERSE_MAPPINGS_PARAM, UPDATED_SINCE_PARAM
+    INCLUDE_INVERSE_MAPPINGS_PARAM, UPDATED_SINCE_PARAM, INCLUDE_SOURCE_VERSIONS, INCLUDE_COLLECTION_VERSIONS
 
 # HEADERS
 include_facets_header = openapi.Parameter(
@@ -35,6 +35,12 @@ include_retired_param = openapi.Parameter(
 )
 include_inverse_mappings_param = openapi.Parameter(
     INCLUDE_INVERSE_MAPPINGS_PARAM, openapi.IN_QUERY, type=openapi.TYPE_BOOLEAN, default=False,
+)
+include_source_versions_param = openapi.Parameter(
+    INCLUDE_SOURCE_VERSIONS, openapi.IN_QUERY, type=openapi.TYPE_BOOLEAN, default=False,
+)
+include_collection_versions_param = openapi.Parameter(
+    INCLUDE_COLLECTION_VERSIONS, openapi.IN_QUERY, type=openapi.TYPE_BOOLEAN, default=False,
 )
 updated_since_param = openapi.Parameter(
     UPDATED_SINCE_PARAM, openapi.IN_QUERY, description="format: YYYY-MM-DD HH:MM:SS", type=openapi.TYPE_STRING,
