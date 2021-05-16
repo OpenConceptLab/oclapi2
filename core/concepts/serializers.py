@@ -4,7 +4,7 @@ from rest_framework.fields import CharField, DateTimeField, BooleanField, URLFie
 from rest_framework.serializers import ModelSerializer
 
 from core.common.constants import INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_MAPPINGS_PARAM, INCLUDE_EXTRAS_PARAM, \
-    INCLUDE_PARENT_CONCEPTS, INCLUDE_CHILD_CONCEPTS
+    INCLUDE_PARENT_CONCEPTS, INCLUDE_CHILD_CONCEPTS, INCLUDE_SOURCE_VERSIONS, INCLUDE_COLLECTION_VERSIONS
 from core.concepts.models import Concept, LocalizedText
 
 
@@ -158,6 +158,22 @@ class ConceptVersionListSerializer(ConceptListSerializer):
         fields = ConceptListSerializer.Meta.fields + (
             'previous_version_url', 'source_versions', 'collection_versions'
         )
+
+    def __init__(self, *args, **kwargs):
+        params = get(kwargs, 'context.request.query_params')
+        self.query_params = params.dict() if params else dict()
+        self.include_source_versions = self.query_params.get(INCLUDE_SOURCE_VERSIONS) in ['true', True]
+        self.include_collection_versions = self.query_params.get(INCLUDE_COLLECTION_VERSIONS) in ['true', True]
+
+        try:
+            if not self.include_source_versions:
+                self.fields.pop('source_versions', None)
+            if not self.include_collection_versions:
+                self.fields.pop('collection_versions', None)
+        except:  # pylint: disable=bare-except
+            pass
+
+        super().__init__(*args, **kwargs)
 
 
 class ConceptDetailSerializer(ModelSerializer):
