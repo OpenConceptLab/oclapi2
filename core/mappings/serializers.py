@@ -93,7 +93,6 @@ class MappingDetailSerializer(MappingListSerializer):
     map_type = CharField(required=True)
     to_concept_url = CharField(required=False)
     from_concept_url = CharField(required=False)
-    previous_version_url = CharField(read_only=True, source='prev_version_uri')
     from_concept = ConceptDetailSerializer()
     to_concept = ConceptDetailSerializer()
     from_source = SourceDetailSerializer()
@@ -105,7 +104,7 @@ class MappingDetailSerializer(MappingListSerializer):
         model = Mapping
         fields = MappingListSerializer.Meta.fields + (
             'type', 'uuid', 'extras', 'created_on', 'updated_on',
-            'created_by', 'updated_by', 'parent_id', 'previous_version_url', 'internal_reference_id',
+            'created_by', 'updated_by', 'parent_id', 'internal_reference_id',
         )
 
     def create(self, validated_data):
@@ -119,3 +118,15 @@ class MappingDetailSerializer(MappingListSerializer):
         if errors:
             self._errors.update(errors)
         return instance
+
+
+class MappingVersionDetailSerializer(MappingDetailSerializer):
+    previous_version_url = CharField(read_only=True, source='prev_version_uri')
+    source_versions = ListField(read_only=True)
+    collection_versions = ListField(read_only=True)
+
+    class Meta:
+        model = Mapping
+        fields = MappingDetailSerializer.Meta.fields + (
+            'previous_version_url', 'source_versions', 'collection_versions',
+        )

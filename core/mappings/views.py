@@ -22,7 +22,8 @@ from core.mappings.constants import PARENT_VERSION_NOT_LATEST_CANNOT_UPDATE_MAPP
 from core.mappings.documents import MappingDocument
 from core.mappings.models import Mapping
 from core.mappings.search import MappingSearch
-from core.mappings.serializers import MappingDetailSerializer, MappingListSerializer, MappingVersionListSerializer
+from core.mappings.serializers import MappingDetailSerializer, MappingListSerializer, MappingVersionListSerializer, \
+    MappingVersionDetailSerializer
 
 
 class MappingBaseView(SourceChildCommonBaseView):
@@ -198,14 +199,14 @@ class MappingVersionsView(MappingBaseView, ConceptDictionaryMixin, ListWithHeade
         return super().get_queryset().exclude(id=F('versioned_object_id'))
 
     def get_serializer_class(self):
-        return MappingDetailSerializer if self.is_verbose() else MappingVersionListSerializer
+        return MappingVersionDetailSerializer if self.is_verbose() else MappingVersionListSerializer
 
     def get(self, request, *args, **kwargs):
         return self.list(request, *args, **kwargs)
 
 
 class MappingVersionRetrieveView(MappingBaseView, RetrieveAPIView):
-    serializer_class = MappingDetailSerializer
+    serializer_class = MappingVersionDetailSerializer
     permission_classes = (CanViewParentDictionary,)
 
     def get_object(self, queryset=None):
@@ -240,9 +241,9 @@ class MappingVersionListAllView(MappingBaseView, ListWithHeadersMixin):
 
 
 class MappingExtrasView(SourceChildExtrasView, MappingBaseView):
-    serializer_class = MappingDetailSerializer
+    serializer_class = MappingVersionDetailSerializer
 
 
 class MappingExtraRetrieveUpdateDestroyView(SourceChildExtraRetrieveUpdateDestroyView, MappingBaseView):
-    serializer_class = MappingDetailSerializer
+    serializer_class = MappingVersionDetailSerializer
     model = Mapping
