@@ -42,7 +42,10 @@ def write_csv_to_s3(data, is_owner, **kwargs):  # pragma: no cover
         zip_file.write(csv_file.name)
 
     key = get_downloads_path(is_owner) + zip_file.filename
-    S3.upload_file(key=key, file_path=os.path.abspath(zip_file.filename), binary=True)
+    S3.upload_file(
+        key=key, file_path=os.path.abspath(zip_file.filename), binary=True,
+        metadata=dict(ContentType='application/zip'), headers={'content-type': 'application/zip'}
+    )
     os.chdir(cwd)
     return S3.url_for(key)
 
