@@ -260,7 +260,7 @@ class S3Test(TestCase):
             file_path = "path/to/file.ext"
             res = S3.upload_file(key=file_path, headers={'header1': 'val1'})
             self.assertEqual(res, 200)
-            S3.upload.assert_called_once_with(file_path, 'file-content', {'header1': 'val1'})
+            S3.upload.assert_called_once_with(file_path, 'file-content', {'header1': 'val1'}, None)
             mock_file.assert_called_once_with(file_path, 'r')
 
     @patch('core.common.services.S3.upload')

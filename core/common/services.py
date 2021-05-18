@@ -33,23 +33,25 @@ class S3:
         )
 
     @classmethod
-    def generate_signed_url(cls, accessor, key):
+    def generate_signed_url(cls, accessor, key, metadata=None):
+        params = {
+            'Bucket': settings.AWS_STORAGE_BUCKET_NAME,
+            'Key': key,
+            **(metadata or {})
+        }
         try:
             _conn = cls._conn()
             return _conn.generate_presigned_url(
                 accessor,
-                Params={
-                    'Bucket': settings.AWS_STORAGE_BUCKET_NAME,
-                    'Key': key
-                },
+                Params=params,
                 ExpiresIn=60*60*24*7,  # a week
             )
         except NoCredentialsError:  # pragma: no cover
             pass
 
     @classmethod
-    def upload(cls, file_path, file_content, headers=None):
-        url = cls.generate_signed_url(cls.PUT, file_path)
+    def upload(cls, file_path, file_content, headers=None, metadata=None):
+        url = cls.generate_signed_url(cls.PUT, file_path, metadata)
         result = None
         if url:
             res = requests.put(
@@ -60,10 +62,12 @@ class S3:
         return result
 
     @classmethod
-    def upload_file(cls, key, file_path=None, headers=None, binary=False):
+    def upload_file(
+            cls, key, file_path=None, headers=None, binary=False, metadata=None
+    ):  # pylint: disable=too-many-arguments
         read_directive = 'rb' if binary else 'r'
         file_path = file_path if file_path else key
-        return cls.upload(key, open(file_path, read_directive).read(), headers)
+        return cls.upload(key, open(file_path, read_directive).read(), headers, metadata)
 
     @classmethod
     def upload_public(cls, file_path, file_content):

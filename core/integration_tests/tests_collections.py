@@ -1009,7 +1009,8 @@ class ExportCollectionTaskTest(OCLAPITestCase):
 
         s3_upload_key = collection.export_path
         s3_mock.upload_file.assert_called_once_with(
-            key=s3_upload_key, file_path=latest_temp_dir + '/export.zip', binary=True
+            key=s3_upload_key, file_path=latest_temp_dir + '/export.zip', binary=True,
+            metadata={'ContentType': 'application/zip'}, headers={'content-type': 'application/zip'}
         )
         s3_mock.url_for.assert_called_once_with(s3_upload_key)
 
