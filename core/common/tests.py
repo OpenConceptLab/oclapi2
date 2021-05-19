@@ -6,7 +6,7 @@ import boto3
 from botocore.exceptions import ClientError
 from colour_runner.django_runner import ColourRunnerMixin
 from django.conf import settings
-from django.core.files.base import ContentFile
+from django.core.files.base import ContentFile, File
 from django.core.management import call_command
 from django.test import TestCase
 from django.test.runner import DiscoverRunner
@@ -20,7 +20,7 @@ from core.common.utils import (
     compact_dict_by_values, to_snake_case, flower_get, task_exists, parse_bulk_import_task_id,
     to_camel_case,
     drop_version, is_versioned_uri, separate_version, to_parent_uri, jsonify_safe, es_get,
-    get_resource_class_from_resource_name, flatten_dict)
+    get_resource_class_from_resource_name, flatten_dict, is_csv_file)
 from core.concepts.models import Concept, LocalizedText
 from core.mappings.models import Mapping
 from core.orgs.models import Organization
@@ -691,6 +691,22 @@ class UtilsTest(OCLTestCase):
         #         'questionnaire_choice_value': 'LA27919-2',
         #     }
         # )
+
+    def test_is_csv_file(self):
+        self.assertFalse(is_csv_file(name='foo/bar'))
+        self.assertTrue(is_csv_file(name='foo/bar.csv'))
+        self.assertFalse(is_csv_file(name='foo.zip'))
+
+        file_mock = Mock(spec=File)
+
+        file_mock.name = 'unknown_file'
+        self.assertFalse(is_csv_file(file=file_mock))
+
+        file_mock.name = 'unknown_file.json'
+        self.assertFalse(is_csv_file(file=file_mock))
+
+        file_mock.name = 'unknown_file.csv'
+        self.assertTrue(is_csv_file(file=file_mock))
 
 
 class BaseModelTest(OCLTestCase):

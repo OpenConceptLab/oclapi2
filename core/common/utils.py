@@ -1,4 +1,5 @@
 import json
+import mimetypes
 import os
 import random
 import tempfile
@@ -578,3 +579,24 @@ def get_bulk_import_celery_once_lock_key(async_result):
 
 def get_celery_once_lock_key(name, args):
     return queue_once_key(name, OrderedDict(args), None)
+
+
+def guess_extension(file=None, name=None):
+    if not file and not name:
+        return None
+    if file:
+        name = file.name
+    _, extension = os.path.splitext(name)
+
+    if not extension:
+        extension = mimetypes.guess_extension(name)
+    return extension
+
+
+def is_csv_file(file=None, name=None):
+    if not file and not name:
+        return None
+
+    extension = guess_extension(file=file, name=name)
+
+    return extension and extension.endswith('csv')
