@@ -7,7 +7,7 @@ from drf_yasg.utils import swagger_auto_schema
 from pydash import get
 from rest_framework import status
 from rest_framework.parsers import MultiPartParser
-from rest_framework.permissions import IsAuthenticated, IsAdminUser
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -85,12 +85,6 @@ class BulkImportFileURLView(APIView):
 
 
 class BulkImportView(APIView):
-    def get_permissions(self):
-        if self.request.method == 'DELETE':
-            return [IsAdminUser(), ]
-
-        return [IsAuthenticated(), ]
-
     @swagger_auto_schema(
         manual_parameters=[update_if_exists_param],
         request_body=openapi.Schema(type=openapi.TYPE_OBJECT)
@@ -187,17 +181,26 @@ class BulkImportView(APIView):
             ),
         }
     ))
-    def delete(request, import_queue=None):  # pylint: disable=unused-argument
+    def delete(request, _=None):  # pylint: disable=unused-argument
         task_id = request.data.get('task_id', None)
         signal = request.data.get('signal', None) or 'SIGKILL'
         if not task_id:
             return Response(status=status.HTTP_400_BAD_REQUEST)
 
+        result = AsyncResult(task_id)
+        user = request.user
+        if not user.is_staff:  # non-admin users should be able to cancel their own tasks
+            task_info = parse_bulk_import_task_id(task_id)
+            username = task_info.get('username', None)
+            if not username:
+                username = get(result, 'args.1')  # for parallel child tasks
+            if username != user.username:
+                return Response(status=status.HTTP_403_FORBIDDEN)
+
         try:
             app.control.revoke(task_id, terminate=True, signal=signal)
 
             # Below code is needed for removing the lock from QueueOnce
-            result = AsyncResult(task_id)
             if (get(result, 'name') or '').startswith('core.common.tasks.bulk_import'):
                 celery_once_key = get_bulk_import_celery_once_lock_key(result)
                 if celery_once_key:
