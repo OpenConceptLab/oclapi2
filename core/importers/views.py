@@ -61,7 +61,12 @@ class BulkImportFileUploadView(APIView):
         if not file:
             return Response(dict(exception=NO_CONTENT_TO_IMPORT), status=status.HTTP_400_BAD_REQUEST)
 
-        return import_response(self.request, import_queue, file.read())
+        if is_csv_file(file):
+            data = OclStandardCsvToJsonConverter(csv_filename=file.name).process()
+        else:
+            data = file.read()
+
+        return import_response(self.request, import_queue, data)
 
 
 class BulkImportFileURLView(APIView):
@@ -82,7 +87,12 @@ class BulkImportFileURLView(APIView):
         if not file:
             return Response(dict(exception=NO_CONTENT_TO_IMPORT), status=status.HTTP_400_BAD_REQUEST)
 
-        return import_response(self.request, import_queue, file.read())
+        if is_csv_file(file):
+            data = OclStandardCsvToJsonConverter(csv_filename=file.name).process()
+        else:
+            data = file.read()
+
+        return import_response(self.request, import_queue, data)
 
 
 class BulkImportView(APIView):
@@ -235,9 +245,10 @@ class BulkImportParallelInlineView(APIView):  # pragma: no cover
         if not file:
             return Response(dict(exception=NO_CONTENT_TO_IMPORT), status=status.HTTP_400_BAD_REQUEST)
 
-        data = file.read()
         if is_csv_file(file):
             data = OclStandardCsvToJsonConverter(csv_filename=file.name).process()
+        else:
+            data = file.read()
 
         return import_response(self.request, import_queue, data, parallel_threads, True)
 
@@ -262,4 +273,9 @@ class BulkImportInlineView(APIView):  # pragma: no cover
         if not file:
             return Response(dict(exception=NO_CONTENT_TO_IMPORT), status=status.HTTP_400_BAD_REQUEST)
 
-        return import_response(self.request, import_queue, file.read(), None, True)
+        if is_csv_file(file):
+            data = OclStandardCsvToJsonConverter(csv_filename=file.name).process()
+        else:
+            data = file.read()
+
+        return import_response(self.request, import_queue, data, None, True)
