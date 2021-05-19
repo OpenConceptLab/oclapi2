@@ -193,7 +193,7 @@ class OrganizationImporter(BaseResourceImporter):
 
 
 class SourceImporter(BaseResourceImporter):
-    mandatory_fields = {'id', 'short_code', 'name', 'full_name', 'owner_type', 'owner', 'source_type'}
+    mandatory_fields = {'id', 'short_code', 'name', 'full_name', 'owner_type', 'owner'}
     allowed_fields = [
         "id", "short_code", "name", "full_name", "description", "source_type", "custom_validation_schema",
         "public_access", "default_locale", "supported_locales", "website", "extras", "external_id",
@@ -271,7 +271,7 @@ class SourceVersionImporter(BaseResourceImporter):
 
 
 class CollectionImporter(BaseResourceImporter):
-    mandatory_fields = {'id', 'short_code', 'name', 'full_name', 'owner_type', 'owner', 'collection_type'}
+    mandatory_fields = {'id', 'short_code', 'name', 'full_name', 'owner_type', 'owner'}
     allowed_fields = [
         "id", "short_code", "name", "full_name", "description", "collection_type", "custom_validation_schema",
         "public_access", "default_locale", "supported_locales", "website", "extras", "external_id",
@@ -681,14 +681,14 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
         self._json_result = None
         self.redis_service = RedisService()
         if self.content:
-            self.input_list = self.content.splitlines()
+            self.input_list = self.content if isinstance(self.content, list) else self.content.splitlines()
             self.total = len(self.input_list)
         self.make_resource_distribution()
         self.make_parts()
 
     def make_resource_distribution(self):
         for line in self.input_list:
-            data = json.loads(line)
+            data = line if isinstance(line, dict) else json.loads(line)
             data_type = data['type']
             if data_type not in self.resource_distribution:
                 self.resource_distribution[data_type] = []
@@ -711,7 +711,7 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
         self.parts.append([])
 
         for data in self.input_list:
-            line = json.loads(data)
+            line = data if isinstance(data, dict) else json.loads(data)
             data_type = line.get('type', None).lower()
             if data_type not in ['organization', 'source', 'collection']:
                 if prev_line:
