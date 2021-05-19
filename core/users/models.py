@@ -10,7 +10,7 @@ from core.common.mixins import SourceContainerMixin
 from core.common.models import BaseModel, CommonLogoModel
 from core.common.tasks import send_user_verification_email, send_user_reset_password_email
 from core.common.utils import web_url
-from core.users.constants import SERVER_GROUPS
+from core.users.constants import AUTH_GROUPS
 from .constants import USER_OBJECT_TYPE
 
 
@@ -137,11 +137,12 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
         return False
 
     @staticmethod
-    def is_valid_server_group(*names):
-        return all(name in SERVER_GROUPS for name in names)
+    def is_valid_auth_group(*names):
+        return all(name in AUTH_GROUPS for name in names)
 
     @property
-    def server_groups(self):
-        return self.groups.filter(name__in=SERVER_GROUPS).values_list('name', flat=True)
+    def auth_groups(self):
+        return self.groups.values_list('name', flat=True)
+
 
 admin.site.register(UserProfile)

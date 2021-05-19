@@ -9,8 +9,8 @@ from rest_framework import serializers
 from rest_framework.validators import UniqueValidator
 
 from core.common.constants import NAMESPACE_REGEX, INCLUDE_SUBSCRIBED_ORGS, INCLUDE_VERIFICATION_TOKEN, \
-    INCLUDE_SERVER_GROUPS
-from core.users.constants import INVALID_SERVER_GROUPS_NAME
+    INCLUDE_AUTH_GROUPS
+from core.users.constants import INVALID_AUTH_GROUP_NAME
 from .models import UserProfile
 
 
@@ -120,7 +120,7 @@ class UserDetailSerializer(serializers.ModelSerializer):
     updated_by = serializers.CharField(read_only=True)
     extras = serializers.JSONField(required=False, allow_null=True)
     subscribed_orgs = serializers.SerializerMethodField()
-    server_groups = serializers.ListField(required=False, allow_null=True, allow_empty=True)
+    auth_groups = serializers.ListField(required=False, allow_null=True, allow_empty=True)
 
     class Meta:
         model = UserProfile
@@ -129,7 +129,7 @@ class UserDetailSerializer(serializers.ModelSerializer):
             'public_collections', 'public_sources', 'created_on', 'updated_on', 'created_by', 'updated_by',
             'url', 'organizations_url', 'extras', 'sources_url', 'collections_url', 'website', 'last_login',
             'logo_url', 'subscribed_orgs', 'is_superuser', 'is_staff', 'first_name', 'last_name', 'verified',
-            'verification_token', 'date_joined', 'internal_reference_id', 'server_groups'
+            'verification_token', 'date_joined', 'internal_reference_id', 'auth_groups'
         )
 
     def __init__(self, *args, **kwargs):
@@ -137,14 +137,14 @@ class UserDetailSerializer(serializers.ModelSerializer):
         self.query_params = params.dict() if params else dict()
         self.include_subscribed_orgs = self.query_params.get(INCLUDE_SUBSCRIBED_ORGS) in ['true', True]
         self.include_verification_token = self.query_params.get(INCLUDE_VERIFICATION_TOKEN) in ['true', True]
-        self.include_server_groups = self.query_params.get(INCLUDE_SERVER_GROUPS) in ['true', True]
+        self.include_auth_groups = self.query_params.get(INCLUDE_AUTH_GROUPS) in ['true', True]
 
         if not self.include_subscribed_orgs:
             self.fields.pop('subscribed_orgs')
         if not self.include_verification_token:
             self.fields.pop('verification_token')
-        if not self.include_server_groups:
-            self.fields.pop('server_groups')
+        if not self.include_auth_groups:
+            self.fields.pop('auth_groups')
 
         super().__init__(*args, **kwargs)
 
@@ -167,15 +167,15 @@ class UserDetailSerializer(serializers.ModelSerializer):
         instance.preferred_locale = validated_data.get('preferred_locale', instance.preferred_locale)
         instance.extras = validated_data.get('extras', instance.extras)
         instance.updated_by = request_user
-        server_groups = validated_data.get('server_groups', None)
-        if isinstance(server_groups, list):
-            if len(server_groups) == 0:
+        auth_groups = validated_data.get('auth_groups', None)
+        if isinstance(auth_groups, list):
+            if len(auth_groups) == 0:
                 instance.groups.set([])
             else:
-                if instance.is_valid_server_group(*server_groups):
-                    instance.groups.set(Group.objects.filter(name__in=server_groups))
+                if instance.is_valid_auth_group(*auth_groups):
+                    instance.groups.set(Group.objects.filter(name__in=auth_groups))
                 else:
-                    self._errors.update(dict(server_groups=[INVALID_SERVER_GROUPS_NAME]))
+                    self._errors.update(dict(auth_groups=[INVALID_AUTH_GROUP_NAME]))
                     return instance
 
         instance.save()
