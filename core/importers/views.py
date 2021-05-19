@@ -4,6 +4,7 @@ from celery.result import AsyncResult
 from celery_once import AlreadyQueued, QueueOnce
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
+from ocldev.oclcsvtojsonconverter import OclStandardCsvToJsonConverter
 from pydash import get
 from rest_framework import status
 from rest_framework.parsers import MultiPartParser
@@ -16,7 +17,7 @@ from core.common.services import RedisService
 from core.common.swagger_parameters import update_if_exists_param, task_param, result_param, username_param, \
     file_upload_param, file_url_param, parallel_threads_param, verbose_param
 from core.common.utils import parse_bulk_import_task_id, task_exists, flower_get, queue_bulk_import, \
-    get_bulk_import_celery_once_lock_key
+    get_bulk_import_celery_once_lock_key, is_csv_file
 from core.importers.constants import ALREADY_QUEUED, INVALID_UPDATE_IF_EXISTS, NO_CONTENT_TO_IMPORT
 
 
@@ -234,7 +235,11 @@ class BulkImportParallelInlineView(APIView):  # pragma: no cover
         if not file:
             return Response(dict(exception=NO_CONTENT_TO_IMPORT), status=status.HTTP_400_BAD_REQUEST)
 
-        return import_response(self.request, import_queue, file.read(), parallel_threads, True)
+        data = file.read()
+        if is_csv_file(file):
+            data = OclStandardCsvToJsonConverter(csv_filename=file.name).process()
+
+        return import_response(self.request, import_queue, data, parallel_threads, True)
 
 
 class BulkImportInlineView(APIView):  # pragma: no cover
