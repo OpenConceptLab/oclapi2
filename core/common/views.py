@@ -148,8 +148,8 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
         return search_str
 
-    def get_wildcard_search_string(self):
-        return "*{}*".format(self.get_search_string())
+    def get_wildcard_search_string(self, _str):
+        return "*{}*".format(_str or self.get_search_string())
 
     def get_sort_attr(self):
         sort_field, desc = self.get_sort_and_desc()
@@ -461,18 +461,27 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
     def get_wildcard_search_criterion(self):
         search_string = self.get_search_string()
-        wildcard_search_string = self.get_wildcard_search_string()
         name_attr = 'name'
         if self.is_concept_document():
             name_attr = '_name'
 
-        return Q(
-            "wildcard", id=dict(value=search_string, boost=2)
-        ) | Q(
-            "wildcard", **{name_attr: dict(value=search_string, boost=5)}
-        ) | Q(
-            "query_string", query=wildcard_search_string
-        )
+        def get_query(_str):
+            return Q(
+                "wildcard", id=dict(value=_str, boost=2)
+            ) | Q(
+                "wildcard", **{name_attr: dict(value=_str, boost=5)}
+            ) | Q(
+                "query_string", query=self.get_wildcard_search_string(_str)
+            )
+
+        if not search_string:
+            return get_query(search_string)
+        words = search_string.split()
+        criterion = get_query(words[0])
+        for word in words[1:]:
+            criterion |= get_query(word)
+
+        return criterion
 
     def get_search_results_qs(self):
         if not self.should_perform_es_search():
