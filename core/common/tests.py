@@ -20,7 +20,7 @@ from core.common.utils import (
     compact_dict_by_values, to_snake_case, flower_get, task_exists, parse_bulk_import_task_id,
     to_camel_case,
     drop_version, is_versioned_uri, separate_version, to_parent_uri, jsonify_safe, es_get,
-    get_resource_class_from_resource_name, flatten_dict, is_csv_file)
+    get_resource_class_from_resource_name, flatten_dict, is_csv_file, is_url_encoded_string)
 from core.concepts.models import Concept, LocalizedText
 from core.mappings.models import Mapping
 from core.orgs.models import Organization
@@ -707,6 +707,11 @@ class UtilsTest(OCLTestCase):
 
         file_mock.name = 'unknown_file.csv'
         self.assertTrue(is_csv_file(file=file_mock))
+
+    def test_is_url_encoded_string(self):
+        self.assertTrue(is_url_encoded_string('foo'))
+        self.assertFalse(is_url_encoded_string('foo/bar'))
+        self.assertTrue(is_url_encoded_string('foo%2Fbar'))
 
 
 class BaseModelTest(OCLTestCase):

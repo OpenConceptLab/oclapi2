@@ -1,7 +1,7 @@
 from django.urls import re_path
 
-from core.common.constants import NAMESPACE_PATTERN
 from core.concepts.feeds import ConceptFeed
+from .constants import CONCEPT_PATTERN as NAMESPACE_PATTERN
 from . import views
 
 urlpatterns = [

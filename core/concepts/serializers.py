@@ -5,6 +5,7 @@ from rest_framework.serializers import ModelSerializer
 
 from core.common.constants import INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_MAPPINGS_PARAM, INCLUDE_EXTRAS_PARAM, \
     INCLUDE_PARENT_CONCEPTS, INCLUDE_CHILD_CONCEPTS, INCLUDE_SOURCE_VERSIONS, INCLUDE_COLLECTION_VERSIONS
+from core.common.fields import EncodedDecodedCharField
 from core.concepts.models import Concept, LocalizedText
 
 
@@ -99,7 +100,7 @@ class ConceptDescriptionSerializer(ConceptLabelSerializer):
 
 class ConceptListSerializer(ModelSerializer):
     uuid = CharField(source='id', read_only=True)
-    id = CharField(source='mnemonic')
+    id = EncodedDecodedCharField(source='mnemonic')
     source = CharField(source='parent_resource')
     owner = CharField(source='owner_name')
     update_comment = CharField(source='comment', required=False, allow_null=True, allow_blank=True)
@@ -180,7 +181,7 @@ class ConceptDetailSerializer(ModelSerializer):
     uuid = CharField(source='id', read_only=True)
     version = CharField(read_only=True)
     type = CharField(source='versioned_resource_type', read_only=True)
-    id = CharField(source='mnemonic', required=True)
+    id = EncodedDecodedCharField(source='mnemonic', required=True)
     source = CharField(source='parent_resource', read_only=True)
     parent_id = UUIDField(write_only=True)
     owner = CharField(source='owner_name', read_only=True)
@@ -271,7 +272,7 @@ class ConceptDetailSerializer(ModelSerializer):
 class ConceptVersionDetailSerializer(ModelSerializer):
     type = CharField(source='resource_type')
     uuid = CharField(source='id')
-    id = CharField(source='mnemonic')
+    id = EncodedDecodedCharField(source='mnemonic')
     names = LocalizedNameSerializer(many=True)
     descriptions = LocalizedDescriptionSerializer(many=True, required=False, allow_null=True)
     source = CharField(source='parent_resource')

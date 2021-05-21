@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.core.exceptions import ValidationError
+from django.core.validators import RegexValidator
 from django.db import models, IntegrityError, transaction
 from django.db.models import F
 from pydash import get, compact
@@ -10,7 +11,7 @@ from core.common.models import VersionedModel
 from core.common.utils import reverse_resource, parse_updated_since_param, generate_temp_version, drop_version
 from core.concepts.constants import CONCEPT_TYPE, LOCALES_FULLY_SPECIFIED, LOCALES_SHORT, LOCALES_SEARCH_INDEX_TERM, \
     CONCEPT_WAS_RETIRED, CONCEPT_IS_ALREADY_RETIRED, CONCEPT_IS_ALREADY_NOT_RETIRED, CONCEPT_WAS_UNRETIRED, \
-    PERSIST_CLONE_ERROR, PERSIST_CLONE_SPECIFY_USER_ERROR, ALREADY_EXISTS
+    PERSIST_CLONE_ERROR, PERSIST_CLONE_SPECIFY_USER_ERROR, ALREADY_EXISTS, CONCEPT_REGEX
 from core.concepts.mixins import ConceptValidationMixin
 
 
@@ -129,6 +130,10 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         'self', through='HierarchicalConcepts', symmetrical=False, related_name='child_concepts'
     )
     logo_path = None
+    mnemonic = models.CharField(
+        max_length=255, validators=[RegexValidator(regex=CONCEPT_REGEX)],
+        db_index=True
+    )
 
     OBJECT_TYPE = CONCEPT_TYPE
     ALREADY_RETIRED = CONCEPT_IS_ALREADY_RETIRED

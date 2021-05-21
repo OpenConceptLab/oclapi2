@@ -600,3 +600,20 @@ def is_csv_file(file=None, name=None):
     extension = guess_extension(file=file, name=name)
 
     return extension and extension.endswith('csv')
+
+
+def is_url_encoded_string(string, lower=True):
+    encoded_string = parse.quote_plus(parse.unquote_plus(string))
+
+    if lower:
+        return string.lower() == encoded_string.lower()
+
+    return string == encoded_string
+
+
+def decode_string(string):
+    return parse.unquote_plus(string)
+
+
+def encode_string(string):
+    return parse.quote_plus(string)

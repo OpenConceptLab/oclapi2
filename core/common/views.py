@@ -1,4 +1,5 @@
 import base64
+import urllib.parse
 from email.mime.image import MIMEImage
 
 from django.conf import settings
@@ -19,7 +20,8 @@ from core.common.constants import SEARCH_PARAM, LIST_DEFAULT_LIMIT, CSV_DEFAULT_
     LIMIT_PARAM, NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY, INCLUDE_RETIRED_PARAM, VERBOSE_PARAM, HEAD, LATEST
 from core.common.mixins import PathWalkerMixin
 from core.common.serializers import RootSerializer
-from core.common.utils import compact_dict_by_values, to_snake_case, to_camel_case, parse_updated_since_param
+from core.common.utils import compact_dict_by_values, to_snake_case, to_camel_case, parse_updated_since_param, \
+    is_url_encoded_string
 from core.concepts.permissions import CanViewParentDictionary, CanEditParentDictionary
 from core.orgs.constants import ORG_OBJECT_TYPE
 from core.users.constants import USER_OBJECT_TYPE
@@ -145,6 +147,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         search_str = search_str.replace('-', '_')
         if lower:
             search_str = search_str.lower()
+            search_str = search_str if is_url_encoded_string(search_str) else urllib.parse.quote_plus(search_str)
 
         return search_str
 

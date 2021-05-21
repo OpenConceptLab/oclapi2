@@ -1,3 +1,5 @@
+import re
+
 INDEX_TERM = "INDEX_TERM"
 CONCEPT_TYPE = 'Concept'
 SHORT = "SHORT"
@@ -32,3 +34,5 @@ PERSIST_CLONE_SPECIFY_USER_ERROR = "Must specify which user is attempting to cre
 PERSIST_CLONE_ERROR = 'An error occurred while saving new concept version.'
 COULD_NOT_FIND_CONCEPT_TO_UPDATE = 'Could not find concept to update'
 PARENT_VERSION_NOT_LATEST_CANNOT_UPDATE_CONCEPT = 'Parent version is not the latest. Cannot update concept.'
+CONCEPT_PATTERN = r'[a-zA-Z0-9\-\.\_\@\+\%]+'
+CONCEPT_REGEX = re.compile(r'^' + CONCEPT_PATTERN + '$')

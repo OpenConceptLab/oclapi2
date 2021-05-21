@@ -5,6 +5,7 @@ from rest_framework.serializers import ModelSerializer
 from core.common.constants import MAPPING_LOOKUP_CONCEPTS, MAPPING_LOOKUP_SOURCES, MAPPING_LOOKUP_FROM_CONCEPT, \
     MAPPING_LOOKUP_TO_CONCEPT, MAPPING_LOOKUP_FROM_SOURCE, MAPPING_LOOKUP_TO_SOURCE, INCLUDE_EXTRAS_PARAM, \
     INCLUDE_SOURCE_VERSIONS, INCLUDE_COLLECTION_VERSIONS
+from core.common.fields import EncodedDecodedCharField
 from core.concepts.serializers import ConceptListSerializer, ConceptDetailSerializer
 from core.mappings.models import Mapping
 from core.sources.serializers import SourceListSerializer, SourceDetailSerializer
@@ -25,6 +26,8 @@ class MappingListSerializer(ModelSerializer):
     to_source = SourceListSerializer()
     from_concept_name_resolved = CharField(source='from_concept.display_name', read_only=True)
     to_concept_name_resolved = CharField(source='to_concept.display_name', read_only=True)
+    to_concept_code = EncodedDecodedCharField(required=False)
+    from_concept_code = EncodedDecodedCharField(required=False)
 
     class Meta:
         model = Mapping
