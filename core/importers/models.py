@@ -13,7 +13,7 @@ from core.collections.models import Collection
 from core.common.constants import HEAD
 from core.common.services import RedisService
 from core.common.tasks import bulk_import_parts_inline, delete_organization
-from core.common.utils import drop_version
+from core.common.utils import drop_version, is_url_encoded_string, encode_string
 from core.concepts.models import Concept
 from core.mappings.models import Mapping
 from core.orgs.models import Organization
@@ -379,6 +379,8 @@ class ConceptImporter(BaseResourceImporter):
         super().parse()
         self.data['parent'] = source
         self.data['name'] = self.data['mnemonic'] = self.data.pop('id')
+        if not is_url_encoded_string(self.data['mnemonic']):
+            self.data['mnemonic'] = encode_string(self.data['mnemonic'])
 
     def clean(self):
         if not self.is_valid():
@@ -449,6 +451,13 @@ class MappingImporter(BaseResourceImporter):
 
         if self.get('id'):
             self.data['mnemonic'] = self.data.pop('id')
+
+        from_concept_code = self.data.get('from_concept_code')
+        to_concept_code = self.data.get('to_concept_code')
+        if from_concept_code and not is_url_encoded_string(from_concept_code):
+            self.data['from_concept_code'] = encode_string(from_concept_code)
+        if to_concept_code and not is_url_encoded_string(to_concept_code):
+            self.data['to_concept_code'] = encode_string(to_concept_code)
 
     def clean(self):
         if not self.is_valid():
