@@ -28,7 +28,7 @@ from core.collections.serializers import (
     CollectionDetailSerializer, CollectionListSerializer,
     CollectionCreateSerializer, CollectionReferenceSerializer, CollectionVersionDetailSerializer,
     CollectionVersionListSerializer, CollectionVersionExportSerializer, CollectionSummaryDetailSerializer,
-    CollectionVersionSummaryDetailSerializer)
+    CollectionVersionSummaryDetailSerializer, CollectionReferenceDetailSerializer)
 from core.collections.utils import is_concept, is_version_specified
 from core.common.constants import (
     HEAD, RELEASED_PARAM, PROCESSING_PARAM, OK_MESSAGE, NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY
@@ -210,10 +210,29 @@ class CollectionRetrieveUpdateDestroyView(CollectionBaseView, ConceptDictionaryU
         return Response({'detail': DELETE_SUCCESS}, status=status.HTTP_204_NO_CONTENT)
 
 
+class CollectionReferenceView(CollectionBaseView, RetrieveAPIView):
+    serializer_class = CollectionReferenceDetailSerializer
+    permission_classes = (CanViewConceptDictionary, )
+
+    def get_object(self, queryset=None):
+        collection = super().get_queryset().filter(is_active=True).order_by('-created_at').first()
+
+        if not collection:
+            raise Http404()
+
+        self.check_object_permissions(self.request, collection)
+
+        reference = CollectionReference.objects.filter(id=self.kwargs.get('reference')).first()
+        if not reference:
+            raise Http404()
+
+        return reference
+
+
 class CollectionReferencesView(
         CollectionBaseView, ConceptDictionaryUpdateMixin, RetrieveAPIView, DestroyAPIView, ListWithHeadersMixin
 ):
-    serializer_class = CollectionDetailSerializer
+    serializer_class = CollectionReferenceSerializer
 
     def get_permissions(self):
         if self.request.method in ['GET', 'HEAD']:
@@ -248,7 +267,6 @@ class CollectionReferencesView(
         return queryset.all()
 
     def retrieve(self, request, *args, **kwargs):
-        self.serializer_class = CollectionReferenceSerializer
         return self.list(request, *args, **kwargs)
 
     def destroy(self, request, *args, **kwargs):

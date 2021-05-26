@@ -55,6 +55,11 @@ urlpatterns = [
         name='collection-references'
     ),
     re_path(
+        r'^(?P<collection>{pattern})/references/(?P<reference>{pattern})/$'.format(pattern=NAMESPACE_PATTERN),
+        views.CollectionReferenceView.as_view(),
+        name='collection-reference'
+    ),
+    re_path(
         r"^(?P<collection>{pattern})/extras/$".format(pattern=NAMESPACE_PATTERN),
         views.CollectionExtrasView.as_view(),
         name='collection-extras'

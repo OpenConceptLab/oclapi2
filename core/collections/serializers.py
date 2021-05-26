@@ -324,6 +324,15 @@ class CollectionReferenceSerializer(ModelSerializer):
         fields = ('expression', 'reference_type', 'id')
 
 
+class CollectionReferenceDetailSerializer(CollectionReferenceSerializer):
+    class Meta:
+        model = CollectionReference
+        fields = (
+            *CollectionReferenceSerializer.Meta.fields, 'last_resolved_at', 'created_at', 'updated_at',
+            'internal_reference_id'
+        )
+
+
 class CollectionVersionExportSerializer(CollectionVersionDetailSerializer):
     collection = JSONField(source='snapshot')
 
