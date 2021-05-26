@@ -388,7 +388,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         return (not collection or collection.startswith('!')) and (not version or version.startswith('!'))
 
     @property
-    def __search_results(self):  # pylint: disable=too-many-branches,too-many-locals
+    def __search_results(self):  # pylint: disable=too-many-branches,too-many-locals,too-many-statements
         results = None
 
         if self.should_perform_es_search():
@@ -419,16 +419,14 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
             if extras_fields:
                 for field, value in extras_fields.items():
-                    results = results.filter(
-                        "query_string", query=value, fields=[field]
-                    )
+                    value = value.replace('/', '\\/')
+                    results = results.filter("query_string", query=value, fields=[field])
             if extras_fields_exists:
                 for field in extras_fields_exists:
-                    results = results.query(
-                        "exists", field="extras.{}".format(field)
-                    )
+                    results = results.query("exists", field="extras.{}".format(field))
             if extras_fields_exact:
                 for field, value in extras_fields_exact.items():
+                    value = value.replace('/', '\\/')
                     results = results.query("match", **{field: value}, _expand__to_dot=False)
 
             if self._should_exclude_retired_from_search_results():
