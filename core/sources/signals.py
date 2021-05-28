@@ -11,3 +11,8 @@ def propagate_parent_attributes(sender, instance=None, created=False, **kwargs):
         instance.concepts_set.exclude(public_access=instance.public_access).update(public_access=instance.public_access)
         instance.mappings_set.exclude(is_active=instance.is_active).update(is_active=instance.is_active)
         instance.mappings_set.exclude(public_access=instance.public_access).update(public_access=instance.public_access)
+
+        from core.concepts.documents import ConceptDocument
+        from core.mappings.documents import MappingDocument
+        instance.batch_index(instance.concepts_set, ConceptDocument)
+        instance.batch_index(instance.mappings_set, MappingDocument)

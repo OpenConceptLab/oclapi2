@@ -7,9 +7,14 @@ class CanAccessParentDictionary(BasePermission):
     parent_permission_class = None
 
     def has_object_permission(self, request, view, obj):
-        if hasattr(obj, 'versioned_object'):
-            obj = obj.versioned_object
-        parent = obj.parent
+        from core.collections.models import Collection
+        from core.sources.models import Source
+        if isinstance(obj, (Source, Collection)):
+            parent = obj
+        else:
+            if hasattr(obj, 'versioned_object'):
+                obj = obj.versioned_object
+            parent = obj.parent
         parent_view_perm = self.parent_permission_class()  # pylint: disable=not-callable
         return parent_view_perm.has_object_permission(request, view, parent)
 

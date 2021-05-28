@@ -329,9 +329,10 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
             mapping.is_latest_version = False
             if mapping.mnemonic == temp_version:
                 mapping.mnemonic = str(mapping.id)
-            mapping.save()
             parent = mapping.parent
             parent_head = parent.head
+            mapping.public_access = parent.public_access
+            mapping.save()
             initial_version = cls.create_initial_version(mapping)
             initial_version.sources.set([parent, parent_head])
             mapping.sources.set([parent, parent_head])

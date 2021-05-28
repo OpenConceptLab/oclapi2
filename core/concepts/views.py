@@ -98,20 +98,27 @@ class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
         ).prefetch_related('names')
 
     def get(self, request, *args, **kwargs):
+        self.set_parent_resource(False)
+        if self.parent_resource:
+            self.check_object_permissions(request, self.parent_resource)
         return self.list(request, *args, **kwargs)
 
-    def set_parent_resource(self):
-        from core.sources.models import Source
+    def set_parent_resource(self, __pop=True):
         parent_resource = None
-        source = self.kwargs.pop('source', None)
-        source_version = self.kwargs.pop('version', HEAD)
+        source = self.kwargs.pop('source', None) if __pop else self.kwargs.get('source', None)
+        collection = self.kwargs.pop('collection', None) if __pop else self.kwargs.get('collection', None)
+        container_version = self.kwargs.pop('version', HEAD) if __pop else self.kwargs.get('version', HEAD)
         if 'org' in self.kwargs:
             filters = dict(organization__mnemonic=self.kwargs['org'])
         else:
             username = self.request.user.username if self.user_is_self else self.kwargs.get('user')
             filters = dict(user__username=username)
         if source:
-            parent_resource = Source.get_version(source, source_version, filters)
+            from core.sources.models import Source
+            parent_resource = Source.get_version(source, container_version or HEAD, filters)
+        if collection:
+            from core.collections.models import Collection
+            parent_resource = Collection.get_version(source, container_version or HEAD, filters)
         self.kwargs['parent_resource'] = self.parent_resource = parent_resource
 
     def post(self, request, **kwargs):  # pylint: disable=unused-argument

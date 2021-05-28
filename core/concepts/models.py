@@ -553,10 +553,11 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             concept.versioned_object_id = concept.id
             concept.version = str(concept.id)
             concept.is_latest_version = not create_initial_version
-            concept.save()
-            concept.set_locales()
             parent_resource = concept.parent
             parent_resource_head = parent_resource.head
+            concept.public_access = parent_resource.public_access
+            concept.save()
+            concept.set_locales()
 
             if parent_concept_uris:
                 concept._parent_concepts = Concept.objects.filter(  # pylint: disable=protected-access
