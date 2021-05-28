@@ -23,7 +23,7 @@ class Source(ConceptContainerModel):
         'owner_type': {'sortable': False, 'filterable': True, 'facet': True},
         'custom_validation_schema': {'sortable': False, 'filterable': True, 'facet': True},
         'canonical_url': {'sortable': True, 'filterable': True},
-        'experimental': {'sortable': False, 'filterable': True, 'facet': True},
+        'experimental': {'sortable': False, 'filterable': False, 'facet': True},
         'hierarchy_meaning': {'sortable': False, 'filterable': True, 'facet': True},
         'external_id': {'sortable': False, 'filterable': True, 'facet': False, 'exact': False},
     }
