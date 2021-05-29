@@ -8,7 +8,8 @@ from pydash import get, compact
 from core.common.constants import INCLUDE_RETIRED_PARAM, NAMESPACE_REGEX, HEAD, LATEST
 from core.common.mixins import SourceChildMixin
 from core.common.models import VersionedModel
-from core.common.utils import parse_updated_since_param, separate_version, to_parent_uri, generate_temp_version
+from core.common.utils import parse_updated_since_param, separate_version, to_parent_uri, generate_temp_version, \
+    encode_string
 from core.mappings.constants import MAPPING_TYPE, MAPPING_IS_ALREADY_RETIRED, MAPPING_WAS_RETIRED, \
     MAPPING_IS_ALREADY_NOT_RETIRED, MAPPING_WAS_UNRETIRED, PERSIST_CLONE_ERROR, PERSIST_CLONE_SPECIFY_USER_ERROR, \
     ALREADY_EXISTS
@@ -262,6 +263,16 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
                 version, uri = separate_version(to_parent_uri(child_uri))
 
             return version or existing_version, uri or get(concept, 'parent.uri')
+
+        if not to_concept_url and not get(self, 'to_concept') and to_source_url and (
+                data.get('to_concept_code') or self.to_concept_code):
+            to_concept_code = encode_string(data.get('to_concept_code') or self.to_concept_code)
+            to_concept_url = to_source_url + 'concepts/' + to_concept_code + '/'
+
+        if not from_concept_url and not get(self, 'from_concept') and from_source_url and (
+                data.get('from_concept_code') or self.from_concept_code):
+            from_concept_code = encode_string(data.get('from_concept_code') or self.from_concept_code)
+            from_concept_url = from_source_url + 'concepts/' + from_concept_code + '/'
 
         from_concept = get_concept(from_concept_url) if from_concept_url else get(self, 'from_concept')
         to_concept = get_concept(to_concept_url) if to_concept_url else get(self, 'to_concept')
