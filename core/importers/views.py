@@ -78,16 +78,17 @@ class BulkImportFileURLView(APIView):
     )
     def post(self, request, import_queue=None):
         file = None
+        file_url = request.data.get('file_url')
 
         try:
-            file = urllib.request.urlopen(request.data.get('file_url'))
+            file = urllib.request.urlopen(file_url)
         except:  # pylint: disable=bare-except
             pass
 
         if not file:
             return Response(dict(exception=NO_CONTENT_TO_IMPORT), status=status.HTTP_400_BAD_REQUEST)
 
-        if is_csv_file(file):
+        if is_csv_file(name=file_url):
             data = OclStandardCsvToJsonConverter(csv_filename=file.name).process()
         else:
             data = file.read()
