@@ -89,7 +89,7 @@ class BulkImportFileURLView(APIView):
             return Response(dict(exception=NO_CONTENT_TO_IMPORT), status=status.HTTP_400_BAD_REQUEST)
 
         if is_csv_file(name=file_url):
-            data = OclStandardCsvToJsonConverter(csv_filename=file.name).process()
+            data = OclStandardCsvToJsonConverter(input_list=file.read()).process()
         else:
             data = file.read()
 
@@ -235,19 +235,23 @@ class BulkImportParallelInlineView(APIView):  # pragma: no cover
     def post(self, request, import_queue=None):
         parallel_threads = request.data.get('parallel') or 5
         file = None
+        file_name = None
         try:
             if 'file' in request.data:
                 file = request.data['file']
+                file_name = file.name
             elif 'file_url' in request.data:
-                file = urllib.request.urlopen(request.data['file_url'])
+                file_name = request.data['file_url']
+                file = urllib.request.urlopen(file_name)
         except:  # pylint: disable=bare-except
             pass
 
         if not file:
             return Response(dict(exception=NO_CONTENT_TO_IMPORT), status=status.HTTP_400_BAD_REQUEST)
 
-        if is_csv_file(file):
-            data = OclStandardCsvToJsonConverter(csv_filename=file.name).process()
+        if is_csv_file(name=file_name):
+            params = dict(csv_filename=file_name) if 'file' in request.data else dict(input_list=file.read())
+            data = OclStandardCsvToJsonConverter(**params).process()
         else:
             data = file.read()
 
@@ -263,19 +267,23 @@ class BulkImportInlineView(APIView):  # pragma: no cover
     )
     def post(self, request, import_queue=None):
         file = None
+        file_name = None
         try:
             if 'file' in request.data:
                 file = request.data['file']
+                file_name = file.name
             elif 'file_url' in request.data:
-                file = urllib.request.urlopen(request.data['file_url'])
+                file_name = request.data['file_url']
+                file = urllib.request.urlopen(file_name)
         except:  # pylint: disable=bare-except
             pass
 
         if not file:
             return Response(dict(exception=NO_CONTENT_TO_IMPORT), status=status.HTTP_400_BAD_REQUEST)
 
-        if is_csv_file(file):
-            data = OclStandardCsvToJsonConverter(csv_filename=file.name).process()
+        if is_csv_file(name=file_name):
+            params = dict(csv_filename=file_name) if 'file' in request.data else dict(input_list=file.read())
+            data = OclStandardCsvToJsonConverter(**params).process()
         else:
             data = file.read()
 
