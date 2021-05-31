@@ -155,6 +155,8 @@ class ConceptRetrieveUpdateDestroyView(ConceptBaseView, RetrieveAPIView, UpdateA
         if not instance:
             raise Http404()
 
+        self.check_object_permissions(self.request, instance)
+
         return instance
 
     def get_permissions(self):
@@ -209,7 +211,9 @@ class ConceptReactivateView(ConceptBaseView, UpdateAPIView):
     serializer_class = ConceptDetailSerializer
 
     def get_object(self, queryset=None):
-        return get_object_or_404(self.get_queryset(), id=F('versioned_object_id'))
+        instance = get_object_or_404(self.get_queryset(), id=F('versioned_object_id'))
+        self.check_object_permissions(self.request, instance)
+        return instance
 
     def get_permissions(self):
         if self.request.method in ['GET']:
@@ -232,7 +236,9 @@ class ConceptVersionsView(ConceptBaseView, ConceptDictionaryMixin, ListWithHeade
     permission_classes = (CanViewParentDictionary,)
 
     def get_queryset(self):
-        return super().get_queryset().exclude(id=F('versioned_object_id'))
+        queryset = super().get_queryset()
+        self.check_object_permissions(self.request, queryset.first())
+        return queryset.exclude(id=F('versioned_object_id'))
 
     def get_serializer_class(self):
         return ConceptVersionDetailSerializer if self.is_verbose() else ConceptVersionListSerializer
@@ -252,6 +258,7 @@ class ConceptMappingsView(ConceptBaseView, ListWithHeadersMixin):
 
     def get_queryset(self):
         concept = super().get_queryset().first()
+        self.check_object_permissions(self.request, concept)
         include_retired = self.request.query_params.get(INCLUDE_RETIRED_PARAM, False)
         include_indirect_mappings = self.request.query_params.get(INCLUDE_INVERSE_MAPPINGS_PARAM, 'false') == 'true'
         if include_indirect_mappings:
@@ -276,6 +283,7 @@ class ConceptVersionRetrieveView(ConceptBaseView, RetrieveAPIView):
         instance = self.get_queryset().first()
         if not instance:
             raise Http404()
+        self.check_object_permissions(self.request, instance)
         return instance
 
 
@@ -294,6 +302,7 @@ class ConceptLabelListCreateView(ConceptBaseView, ListWithHeadersMixin, ListCrea
         instance = super().get_queryset().first()
         if not instance:
             raise Http404()
+        self.check_object_permissions(self.request, instance)
         return instance
 
     def get_queryset(self):
@@ -342,6 +351,7 @@ class ConceptLabelRetrieveUpdateDestroyView(ConceptBaseView, RetrieveUpdateDestr
         instance = super().get_queryset().first()
         if not instance:
             raise Http404()
+        self.check_object_permissions(self.request, instance)
         return instance
 
     def get_object(self, queryset=None):

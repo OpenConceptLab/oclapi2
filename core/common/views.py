@@ -573,9 +573,13 @@ class SourceChildExtrasBaseView:
         queryset = self.get_queryset()
 
         if 'concept_version' in self.kwargs or 'mapping_version' in self.kwargs:
-            return queryset.first()
+            instance = queryset.first()
+        else:
+            instance = queryset.filter(is_latest_version=True).first()
 
-        return queryset.filter(is_latest_version=True).first()
+        self.check_object_permissions(self.request, instance)
+
+        return instance
 
     def get_permissions(self):
         if self.request.method in ['GET', 'HEAD']:

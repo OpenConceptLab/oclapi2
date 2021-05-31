@@ -126,6 +126,8 @@ class MappingRetrieveUpdateDestroyView(MappingBaseView, RetrieveAPIView, UpdateA
         if not instance:
             raise Http404()
 
+        self.check_object_permissions(self.request, instance)
+
         return instance
 
     def get_permissions(self):
@@ -180,7 +182,9 @@ class MappingReactivateView(MappingBaseView, UpdateAPIView):
     serializer_class = MappingDetailSerializer
 
     def get_object(self, queryset=None):
-        return get_object_or_404(self.get_queryset(), id=F('versioned_object_id'))
+        instance = get_object_or_404(self.get_queryset(), id=F('versioned_object_id'))
+        self.check_object_permissions(self.request, instance)
+        return instance
 
     def get_permissions(self):
         if self.request.method in ['GET']:
@@ -203,7 +207,12 @@ class MappingVersionsView(MappingBaseView, ConceptDictionaryMixin, ListWithHeade
     permission_classes = (CanViewParentDictionary,)
 
     def get_queryset(self):
-        return super().get_queryset().exclude(id=F('versioned_object_id'))
+        queryset = super().get_queryset()
+        instance = queryset.first()
+
+        self.check_object_permissions(self.request, instance)
+
+        return queryset.exclude(id=F('versioned_object_id'))
 
     def get_serializer_class(self):
         return MappingVersionDetailSerializer if self.is_verbose() else MappingVersionListSerializer
@@ -225,6 +234,8 @@ class MappingVersionRetrieveView(MappingBaseView, RetrieveAPIView):
         instance = self.get_queryset().first()
         if not instance:
             raise Http404()
+
+        self.check_object_permissions(self.request, instance)
         return instance
 
 
