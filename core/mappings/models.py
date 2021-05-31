@@ -9,7 +9,7 @@ from core.common.constants import INCLUDE_RETIRED_PARAM, NAMESPACE_REGEX, HEAD, 
 from core.common.mixins import SourceChildMixin
 from core.common.models import VersionedModel
 from core.common.utils import parse_updated_since_param, separate_version, to_parent_uri, generate_temp_version, \
-    encode_string
+    encode_string, is_url_encoded_string
 from core.mappings.constants import MAPPING_TYPE, MAPPING_IS_ALREADY_RETIRED, MAPPING_WAS_RETIRED, \
     MAPPING_IS_ALREADY_NOT_RETIRED, MAPPING_WAS_UNRETIRED, PERSIST_CLONE_ERROR, PERSIST_CLONE_SPECIFY_USER_ERROR, \
     ALREADY_EXISTS
@@ -248,6 +248,9 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
             concept = Concept.objects.filter(uri=expression).first()
             if concept:
                 return concept
+            concept = Concept.objects.filter(uri=encode_string(expression, safe='/')).first()
+            if concept:
+                return concept
 
             parent_uri = to_parent_uri(expression)
             code = expression.replace(parent_uri, '').replace('concepts/', '').split('/')[0]
@@ -264,14 +267,21 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
 
             return version or existing_version, uri or get(concept, 'parent.uri')
 
+        to_concept_code = data.get('to_concept_code')
+        from_concept_code = data.get('from_concept_code')
+        if to_concept_code and not is_url_encoded_string(to_concept_code):
+            to_concept_code = encode_string(to_concept_code)
+        if from_concept_code and not is_url_encoded_string(from_concept_code):
+            from_concept_code = encode_string(from_concept_code)
+
         if not to_concept_url and not get(self, 'to_concept') and to_source_url and (
-                data.get('to_concept_code') or self.to_concept_code):
-            to_concept_code = encode_string(data.get('to_concept_code') or self.to_concept_code)
+                to_concept_code or self.to_concept_code):
+            to_concept_code = to_concept_code or self.to_concept_code
             to_concept_url = to_source_url + 'concepts/' + to_concept_code + '/'
 
         if not from_concept_url and not get(self, 'from_concept') and from_source_url and (
-                data.get('from_concept_code') or self.from_concept_code):
-            from_concept_code = encode_string(data.get('from_concept_code') or self.from_concept_code)
+                from_concept_code or self.from_concept_code):
+            from_concept_code = from_concept_code or self.from_concept_code
             from_concept_url = from_source_url + 'concepts/' + from_concept_code + '/'
 
         from_concept = get_concept(from_concept_url) if from_concept_url else get(self, 'from_concept')

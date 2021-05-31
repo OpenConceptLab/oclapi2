@@ -62,7 +62,7 @@ class BulkImportFileUploadView(APIView):
             return Response(dict(exception=NO_CONTENT_TO_IMPORT), status=status.HTTP_400_BAD_REQUEST)
 
         if is_csv_file(file):
-            data = OclStandardCsvToJsonConverter(csv_filename=file.name).process()
+            data = OclStandardCsvToJsonConverter(csv_filename=file.name, allow_special_characters=True).process()
         else:
             data = file.read()
 
@@ -89,7 +89,7 @@ class BulkImportFileURLView(APIView):
             return Response(dict(exception=NO_CONTENT_TO_IMPORT), status=status.HTTP_400_BAD_REQUEST)
 
         if is_csv_file(name=file_url):
-            data = OclStandardCsvToJsonConverter(input_list=file.read()).process()
+            data = OclStandardCsvToJsonConverter(input_list=file.read(), allow_special_characters=True).process()
         else:
             data = file.read()
 
@@ -251,7 +251,7 @@ class BulkImportParallelInlineView(APIView):  # pragma: no cover
 
         if is_csv_file(name=file_name):
             params = dict(csv_filename=file_name) if 'file' in request.data else dict(input_list=file.read())
-            data = OclStandardCsvToJsonConverter(**params).process()
+            data = OclStandardCsvToJsonConverter(**params, allow_special_characters=True).process()
         else:
             data = file.read()
 
@@ -283,7 +283,7 @@ class BulkImportInlineView(APIView):  # pragma: no cover
 
         if is_csv_file(name=file_name):
             params = dict(csv_filename=file_name) if 'file' in request.data else dict(input_list=file.read())
-            data = OclStandardCsvToJsonConverter(**params).process()
+            data = OclStandardCsvToJsonConverter(**params, allow_special_characters=True).process()
         else:
             data = file.read()
 

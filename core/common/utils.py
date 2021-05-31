@@ -615,5 +615,5 @@ def decode_string(string):
     return parse.unquote_plus(string)
 
 
-def encode_string(string):
-    return parse.quote_plus(string)
+def encode_string(string, **kwargs):
+    return parse.quote_plus(string, **kwargs)
