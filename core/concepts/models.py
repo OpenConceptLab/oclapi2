@@ -182,8 +182,12 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
     @property
     def preferred_locale(self):
-        return self.__get_parent_default_locale_name() or self.__get_parent_supported_locale_name() or \
-               self.__get_system_default_locale() or self.__get_preferred_locale() or self.__get_last_created_locale()
+        try:
+            return self.__get_parent_default_locale_name() or self.__get_parent_supported_locale_name() or \
+                   self.__get_system_default_locale() or self.__get_preferred_locale() or \
+                   self.__get_last_created_locale()
+        except:  # pylint: disable=bare-except
+            pass
 
     def __get_system_default_locale(self):
         system_default_locale = settings.DEFAULT_LOCALE
