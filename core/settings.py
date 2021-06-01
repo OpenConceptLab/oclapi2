@@ -46,7 +46,8 @@ CORS_EXPOSE_HEADERS = (
     'previous',
     'offset',
     'Content-Length',
-    'Content-Range'
+    'Content-Range',
+    'X-OCL-API-VERSION',
 )
 
 CORS_ORIGIN_ALLOW_ALL = True
@@ -132,6 +133,7 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'core.middlewares.middlewares.FixMalformedLimitParamMiddleware',
     'core.middlewares.middlewares.RequestLogMiddleware',
+    'core.middlewares.middlewares.VersionHeaderMiddleware',
 ]
 
 ROOT_URLCONF = 'core.urls'
@@ -357,3 +359,7 @@ if not ENV or ENV in ['development', 'ci']:
     EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
 else:
     EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+
+API_VERSION = os.environ.get('API_VERSION', '2.0.1')
+API_BUILD = os.environ.get('API_BUILD', 'dev')
+VERSION = API_VERSION + '-' + API_BUILD
