@@ -54,7 +54,7 @@ class ConceptDocument(Document):
                 name = name.replace('-', '_')
             return name
         except:  # pylint: disable=bare-except
-            pass
+            return ''
 
     @staticmethod
     def prepare_locale(instance):
