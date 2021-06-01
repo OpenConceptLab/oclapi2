@@ -85,9 +85,10 @@ class CollectionCreateOrUpdateSerializer(ModelSerializer):
         return collection
 
     def update(self, instance, validated_data):
+        original_schema = instance.custom_validation_schema
         collection = self.prepare_object(validated_data, instance)
         user = self.context['request'].user
-        errors = Collection.persist_changes(collection, user)
+        errors = Collection.persist_changes(collection, user, original_schema)
         self._errors.update(errors)
         return collection
 

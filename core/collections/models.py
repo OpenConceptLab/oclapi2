@@ -289,16 +289,16 @@ class Collection(ConceptContainerModel):
             head = self.head
             ref_hash = {'col_reference': reference}
 
-            error = Collection.persist_changes(head, user, **ref_hash)
+            error = Collection.persist_changes(head, user, None, **ref_hash)
             if error:
                 errors[expression] = error
 
         return errors
 
     @classmethod
-    def persist_changes(cls, obj, updated_by, **kwargs):
+    def persist_changes(cls, obj, updated_by, original_schema, **kwargs):
         col_reference = kwargs.pop('col_reference', False)
-        errors = super().persist_changes(obj, updated_by, **kwargs)
+        errors = super().persist_changes(obj, updated_by, original_schema, **kwargs)
         if col_reference and not errors:
             obj.fill_data_from_reference(col_reference)
         return errors

@@ -89,7 +89,7 @@ class SourceTest(OCLTestCase):
         self.new_source.name = "%s_prime" % name
         self.new_source.source_type = 'Reference'
 
-        errors = Source.persist_changes(self.new_source, self.user, **kwargs)
+        errors = Source.persist_changes(self.new_source, self.user, None, **kwargs)
         updated_source = Source.objects.get(mnemonic=self.new_source.mnemonic)
 
         self.assertEqual(len(errors), 0)
@@ -112,7 +112,7 @@ class SourceTest(OCLTestCase):
         source2.mnemonic = source1.mnemonic
 
         with transaction.atomic():
-            errors = Source.persist_changes(source2, self.user, **kwargs)
+            errors = Source.persist_changes(source2, self.user, None, **kwargs)
         self.assertEqual(len(errors), 1)
         self.assertTrue('__all__' in errors)
 

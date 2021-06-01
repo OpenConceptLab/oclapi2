@@ -21,7 +21,7 @@ from .constants import (
     ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT, SUPER_ADMIN_USER_ID,
     HEAD, PERSIST_NEW_ERROR_MESSAGE, SOURCE_PARENT_CANNOT_BE_NONE, PARENT_RESOURCE_CANNOT_BE_NONE,
     CREATOR_CANNOT_BE_NONE, CANNOT_DELETE_ONLY_VERSION, CUSTOM_VALIDATION_SCHEMA_OPENMRS)
-from .tasks import handle_save, handle_m2m_changed, seed_children
+from .tasks import handle_save, handle_m2m_changed, seed_children, update_validation_schema
 
 
 class BaseModel(models.Model):
@@ -533,16 +533,13 @@ class ConceptContainerModel(VersionedModel):
         return errors
 
     @classmethod
-    def persist_changes(cls, obj, updated_by, **kwargs):
+    def persist_changes(cls, obj, updated_by, original_schema, **kwargs):
         errors = dict()
         parent_resource = kwargs.pop('parent_resource', obj.parent)
         if not parent_resource:
             errors['parent'] = SOURCE_PARENT_CANNOT_BE_NONE
 
-        if obj.is_validation_necessary():
-            failed_concept_validations = obj.validate_child_concepts() or []
-            if len(failed_concept_validations) > 0:
-                errors.update({'failed_concept_validations': failed_concept_validations})
+        queue_schema_update_task = obj.is_validation_necessary()
 
         try:
             obj.full_clean()
@@ -555,7 +552,14 @@ class ConceptContainerModel(VersionedModel):
         if updated_by:
             obj.updated_by = updated_by
         try:
+            if queue_schema_update_task:
+                target_schema = obj.custom_validation_schema
+                obj.custom_validation_schema = original_schema
+
             obj.save(**kwargs)
+
+            if queue_schema_update_task:
+                update_validation_schema.delay(obj.app_name, obj.id, target_schema)
         except IntegrityError as ex:
             errors.update({'__all__': ex.args})
 

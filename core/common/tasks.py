@@ -12,7 +12,7 @@ from pydash import get
 
 from core.celery import app
 from core.common.constants import CONFIRM_EMAIL_ADDRESS_MAIL_SUBJECT, PASSWORD_RESET_MAIL_SUBJECT
-from core.common.utils import write_export_file, web_url
+from core.common.utils import write_export_file, web_url, get_resource_class_from_resource_name
 
 logger = get_task_logger(__name__)
 
@@ -272,5 +272,24 @@ def import_v1_content(importer_class, file_url, drop_version_if_version_missing=
     klass = V1BaseImporter.get_importer_class_from_string(importer_class)
     if klass:
         return klass(file_url, drop_version_if_version_missing=drop_version_if_version_missing).run()
+
+    return None
+
+
+@app.task
+def update_validation_schema(instance_type, instance_id, target_schema):
+    klass = get_resource_class_from_resource_name(instance_type)
+    instance = klass.objects.get(id=instance_id)
+    instance.custom_validation_schema = target_schema
+    errors = dict()
+
+    failed_concept_validations = instance.validate_child_concepts() or []
+    if failed_concept_validations:
+        errors.update({'failed_concept_validations': failed_concept_validations})
+
+    if errors:
+        return errors
+
+    instance.save()
 
     return None
