@@ -48,10 +48,13 @@ class ConceptDocument(Document):
 
     @staticmethod
     def prepare_name(instance):
-        name = instance.display_name
-        if name:
-            name = name.replace('-', '_')
-        return name
+        try:
+            name = instance.display_name
+            if name:
+                name = name.replace('-', '_')
+            return name
+        except:  # pylint: disable=bare-except
+            pass
 
     @staticmethod
     def prepare_locale(instance):
