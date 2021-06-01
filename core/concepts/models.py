@@ -143,6 +143,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
     es_fields = {
         'id': {'sortable': True, 'filterable': True, 'exact': True},
+        'numeric_id': {'sortable': True, 'filterable': False, 'exact': False},
         'name': {'sortable': False, 'filterable': True, 'exact': True},
         '_name': {'sortable': True, 'filterable': False, 'exact': False},
         'last_update': {'sortable': True, 'filterable': False, 'default': 'desc'},

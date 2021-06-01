@@ -12,6 +12,7 @@ class ConceptDocument(Document):
         settings = {'number_of_shards': 1, 'number_of_replicas': 0}
 
     id = fields.KeywordField(attr='mnemonic', normalizer="lowercase")
+    numeric_id = fields.IntegerField()
     name = fields.TextField()
     _name = fields.KeywordField(attr='display_name', normalizer='lowercase')
     last_update = fields.DateField(attr='updated_at')
@@ -37,6 +38,13 @@ class ConceptDocument(Document):
             'version',
             'external_id',
         ]
+
+    @staticmethod
+    def prepare_numeric_id(instance):
+        try:
+            return int(instance.mnemonic)
+        except:  # pylint: disable=bare-except
+            return 0
 
     @staticmethod
     def prepare_name(instance):
