@@ -411,7 +411,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             if self.is_exact_match_on():
                 results = results.query(self.get_exact_search_criterion())
             else:
-                results = results.query(self.get_wildcard_search_criterion())
+                results = results.query(self.get_wildcard_search_criterion() | self.get_exact_search_criterion())
 
             updated_since = parse_updated_since_param(self.request.query_params)
             if updated_since:
