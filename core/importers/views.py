@@ -1,5 +1,7 @@
-import urllib
+import csv
+import io
 
+import requests
 from celery.result import AsyncResult
 from celery_once import AlreadyQueued, QueueOnce
 from drf_yasg import openapi
@@ -19,6 +21,10 @@ from core.common.swagger_parameters import update_if_exists_param, task_param, r
 from core.common.utils import parse_bulk_import_task_id, task_exists, flower_get, queue_bulk_import, \
     get_bulk_import_celery_once_lock_key, is_csv_file
 from core.importers.constants import ALREADY_QUEUED, INVALID_UPDATE_IF_EXISTS, NO_CONTENT_TO_IMPORT
+
+
+def csv_file_data_to_input_list(file_content):
+    return [row for row in csv.DictReader(io.StringIO(file_content))]  # pylint: disable=unnecessary-comprehension
 
 
 def import_response(request, import_queue, data, threads=None, inline=False):
@@ -81,7 +87,7 @@ class BulkImportFileURLView(APIView):
         file_url = request.data.get('file_url')
 
         try:
-            file = urllib.request.urlopen(file_url)
+            file = requests.get(file_url)
         except:  # pylint: disable=bare-except
             pass
 
@@ -89,9 +95,10 @@ class BulkImportFileURLView(APIView):
             return Response(dict(exception=NO_CONTENT_TO_IMPORT), status=status.HTTP_400_BAD_REQUEST)
 
         if is_csv_file(name=file_url):
-            data = OclStandardCsvToJsonConverter(input_list=file.read(), allow_special_characters=True).process()
+            data = OclStandardCsvToJsonConverter(
+                input_list=csv_file_data_to_input_list(file.text), allow_special_characters=True).process()
         else:
-            data = file.read()
+            data = file.text
 
         return import_response(self.request, import_queue, data)
 
@@ -236,13 +243,15 @@ class BulkImportParallelInlineView(APIView):  # pragma: no cover
         parallel_threads = request.data.get('parallel') or 5
         file = None
         file_name = None
+        is_upload = 'file' in request.data
+        is_file_url = 'file_url' in request.data
         try:
-            if 'file' in request.data:
+            if is_upload:
                 file = request.data['file']
                 file_name = file.name
-            elif 'file_url' in request.data:
+            elif is_file_url:
                 file_name = request.data['file_url']
-                file = urllib.request.urlopen(file_name)
+                file = requests.get(file_name)
         except:  # pylint: disable=bare-except
             pass
 
@@ -250,10 +259,11 @@ class BulkImportParallelInlineView(APIView):  # pragma: no cover
             return Response(dict(exception=NO_CONTENT_TO_IMPORT), status=status.HTTP_400_BAD_REQUEST)
 
         if is_csv_file(name=file_name):
-            params = dict(csv_filename=file_name) if 'file' in request.data else dict(input_list=file.read())
+            params = dict(csv_filename=file_name) if is_upload else dict(
+                input_list=csv_file_data_to_input_list(file.text))
             data = OclStandardCsvToJsonConverter(**params, allow_special_characters=True).process()
         else:
-            data = file.read()
+            data = file.text if is_file_url else file.read()
 
         return import_response(self.request, import_queue, data, parallel_threads, True)
 
@@ -268,13 +278,15 @@ class BulkImportInlineView(APIView):  # pragma: no cover
     def post(self, request, import_queue=None):
         file = None
         file_name = None
+        is_upload = 'file' in request.data
+        is_file_url = 'file_url' in request.data
         try:
-            if 'file' in request.data:
+            if is_upload:
                 file = request.data['file']
                 file_name = file.name
-            elif 'file_url' in request.data:
+            elif is_file_url:
                 file_name = request.data['file_url']
-                file = urllib.request.urlopen(file_name)
+                file = requests.get(file_name)
         except:  # pylint: disable=bare-except
             pass
 
@@ -282,9 +294,10 @@ class BulkImportInlineView(APIView):  # pragma: no cover
             return Response(dict(exception=NO_CONTENT_TO_IMPORT), status=status.HTTP_400_BAD_REQUEST)
 
         if is_csv_file(name=file_name):
-            params = dict(csv_filename=file_name) if 'file' in request.data else dict(input_list=file.read())
+            params = dict(csv_filename=file_name) if is_upload else dict(
+                input_list=csv_file_data_to_input_list(file.text))
             data = OclStandardCsvToJsonConverter(**params, allow_special_characters=True).process()
         else:
-            data = file.read()
+            data = file.text if is_file_url else file.read()
 
         return import_response(self.request, import_queue, data, None, True)
