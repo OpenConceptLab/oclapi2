@@ -223,7 +223,7 @@ class UserDetailView(UserBaseView, RetrieveAPIView, DestroyAPIView, mixins.Updat
             return instance
 
         if not is_self and not is_admin:
-            raise PermissionDenied(detail='You do not have permission to perform this action.')
+            raise PermissionDenied()
 
         return instance
 

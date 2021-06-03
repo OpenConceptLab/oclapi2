@@ -14,13 +14,15 @@ class ClientConfig(models.Model):
         db_table = 'client_configurations'
 
     name = models.TextField(default='View Configuration')
+    description = models.TextField(null=True, blank=True)
     type = models.CharField(choices=CONFIG_TYPES, default=HOME_TYPE, max_length=255)
     is_default = models.BooleanField(default=False)
     config = models.JSONField()
     resource_type = models.ForeignKey(ContentType, on_delete=models.CASCADE)
     resource_id = models.PositiveIntegerField()
     resource = GenericForeignKey('resource_type', 'resource_id')
-
+    public = models.BooleanField(default=True)
+    is_template = models.BooleanField(default=False)
     created_by = models.ForeignKey(
         'users.UserProfile', default=SUPER_ADMIN_USER_ID, on_delete=models.SET_DEFAULT,
         related_name='%(app_label)s_%(class)s_related_created_by',

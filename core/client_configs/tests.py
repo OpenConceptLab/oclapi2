@@ -3,6 +3,7 @@ from django.core.exceptions import ValidationError
 from core.client_configs.models import ClientConfig
 from core.common.tests import OCLTestCase, OCLAPITestCase
 from core.orgs.tests.factories import OrganizationFactory
+from core.users.tests.factories import UserProfileFactory
 
 
 class ClientConfigTest(OCLTestCase):
@@ -244,3 +245,34 @@ class ClientConfigViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 200)
         self.config.refresh_from_db()
         self.assertTrue(response.data['name'] == self.config.name == 'updated')
+
+    def test_delete(self):
+        random_user1 = UserProfileFactory()
+        random_user2 = UserProfileFactory()
+        response = self.client.delete(
+            self.config.uri,
+            HTTP_AUTHORIZATION='Token ' + random_user1.get_token(),
+            format='json'
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(ClientConfig.objects.count(), 1)
+
+        template = ClientConfig(
+            is_template=True, config=self.dummy_config, name='foobar', resource=self.org, created_by=random_user1
+        )
+        template.save()
+        response = self.client.delete(
+            template.uri,
+            HTTP_AUTHORIZATION='Token ' + random_user2.get_token(),
+            format='json'
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(ClientConfig.objects.count(), 2)
+
+        response = self.client.delete(
+            template.uri,
+            HTTP_AUTHORIZATION='Token ' + random_user1.get_token(),
+            format='json'
+        )
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(ClientConfig.objects.count(), 1)
