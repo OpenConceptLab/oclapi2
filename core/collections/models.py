@@ -353,6 +353,18 @@ class Collection(ConceptContainerModel):
 
         return all_related_mappings
 
+    def get_cascaded_mapping_uris_from_concept_expressions(self, expressions):
+        mapping_uris = []
+
+        for expression in expressions:
+            if is_concept(expression):
+                mapping_uris += list(
+                    self.mappings.filter(
+                        from_concept__uri__icontains=drop_version(expression)).values_list('uri', flat=True)
+                )
+
+        return mapping_uris
+
 
 class CollectionReference(models.Model):
     class Meta:

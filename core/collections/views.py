@@ -29,7 +29,7 @@ from core.collections.serializers import (
     CollectionCreateSerializer, CollectionReferenceSerializer, CollectionVersionDetailSerializer,
     CollectionVersionListSerializer, CollectionVersionExportSerializer, CollectionSummaryDetailSerializer,
     CollectionVersionSummaryDetailSerializer, CollectionReferenceDetailSerializer)
-from core.collections.utils import is_concept, is_version_specified
+from core.collections.utils import is_version_specified
 from core.common.constants import (
     HEAD, RELEASED_PARAM, PROCESSING_PARAM, OK_MESSAGE, NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY
 )
@@ -278,7 +278,7 @@ class CollectionReferencesView(
         if expressions == '*':
             expressions = list(instance.references.values_list('expression', flat=True))
         if self.should_cascade_mappings():
-            expressions += self.get_related_mappings_with_version_information(expressions)
+            expressions += instance.get_cascaded_mapping_uris_from_concept_expressions(expressions)
 
         instance.delete_references(expressions)
         return Response({'message': OK_MESSAGE}, status=status.HTTP_204_NO_CONTENT)
@@ -380,18 +380,6 @@ class CollectionReferencesView(
         if resource_type == 'concepts':
             return CONCEPT_ADDED_TO_COLLECTION_FMT.format(resource_name, collection_name)
         return MAPPING_ADDED_TO_COLLECTION_FMT.format(resource_name, collection_name)
-
-    @staticmethod
-    def get_related_mappings_with_version_information(expressions):
-        related_mappings = []
-
-        for expression in expressions:
-            if is_concept(expression):
-                concepts = CollectionReference.get_concept_heads_from_expression(expression)
-                for concept in concepts:
-                    related_mappings += concept.get_latest_unidirectional_mappings()
-
-        return [mapping.uri for mapping in related_mappings]
 
 
 class CollectionVersionReferencesView(CollectionVersionBaseView, ListWithHeadersMixin):
