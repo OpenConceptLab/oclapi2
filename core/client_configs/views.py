@@ -32,7 +32,7 @@ class ResourceClientConfigsView(BaseAPIView, RetrieveAPIView):
 
     def get(self, request, *args, **kwargs):
         instance = self.get_object()
-        configs = instance.client_configs.filter(is_active=True)
+        configs = instance.client_configs.filter(is_active=True, is_template=False)
 
         return Response(self.get_serializer(configs, many=True).data, status=status.HTTP_200_OK)
 

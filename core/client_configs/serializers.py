@@ -15,7 +15,7 @@ class ClientConfigTemplateSerializer(serializers.ModelSerializer):
     class Meta:
         model = ClientConfig
         fields = (
-            'id', 'name', 'description', 'type', 'is_default', 'config', 'url', 'scope', 'public'
+            'id', 'name', 'description', 'type', 'is_default', 'config', 'url', 'scope', 'public', 'is_template'
         )
 
     def __init__(self, *args, **kwargs):
