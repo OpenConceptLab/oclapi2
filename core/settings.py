@@ -16,6 +16,8 @@ import os
 from corsheaders.defaults import default_headers
 from kombu import Queue, Exchange
 
+from core import __version__
+
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 API_BASE_URL = os.environ.get('API_BASE_URL', 'http://localhost:8000')
@@ -360,6 +362,4 @@ if not ENV or ENV in ['development', 'ci']:
 else:
     EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 
-API_VERSION = os.environ.get('API_VERSION', '2.0.1')
-API_BUILD = os.environ.get('API_BUILD', 'dev')
-VERSION = API_VERSION + '-' + API_BUILD
+VERSION = __version__

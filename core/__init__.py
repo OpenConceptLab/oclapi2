@@ -1,4 +1,4 @@
-from django.conf import settings
-
-
-__version__ = settings.VERSION
+API_VERSION = '2.0.1'
+API_BUILD = 'dev'
+VERSION = API_VERSION + '-' + API_BUILD
+__version__ = VERSION
