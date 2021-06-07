@@ -16,5 +16,14 @@ def stamp_uri(sender, instance, **kwargs):  # pylint: disable=unused-argument
 @receiver(post_save, sender=UserProfile)
 def propagate_owner_status(sender, instance=None, created=False, **kwargs):  # pylint: disable=unused-argument
     if not created and instance:
-        instance.source_set.exclude(is_active=instance.is_active).update(is_active=instance.is_active)
-        instance.collection_set.exclude(is_active=instance.is_active).update(is_active=instance.is_active)
+        updated_sources = 0
+        updated_collections = 0
+        updated_sources += instance.source_set.exclude(is_active=instance.is_active).update(is_active=instance.is_active)
+        updated_collections += instance.collection_set.exclude(is_active=instance.is_active).update(is_active=instance.is_active)
+
+        if updated_sources:
+            from core.sources.documents import SourceDocument
+            instance.batch_index(instance.source_set, SourceDocument)
+        if updated_collections:
+            from core.collections.documents import CollectionDocument
+            instance.batch_index(instance.collection_set, CollectionDocument)
