@@ -157,6 +157,17 @@ class BaseModel(models.Model):
 
         return criteria
 
+    @staticmethod
+    def batch_index(queryset, document):
+        count = queryset.count()
+        batch_size = 1000
+        offset = 0
+        limit = batch_size
+        while offset < count:
+            document().update(queryset.order_by('-id')[offset:limit], parallel=True)
+            offset = limit
+            limit += batch_size
+
 
 class CommonLogoModel(models.Model):
     logo_path = models.TextField(null=True, blank=True)
@@ -634,17 +645,6 @@ class ConceptContainerModel(VersionedModel):
             if index:
                 from core.mappings.documents import MappingDocument
                 self.batch_index(self.mappings, MappingDocument)
-
-    @staticmethod
-    def batch_index(queryset, document):
-        count = queryset.count()
-        batch_size = 1000
-        offset = 0
-        limit = batch_size
-        while offset < count:
-            document().update(queryset.order_by('-id')[offset:limit], parallel=True)
-            offset = limit
-            limit += batch_size
 
     def index_children(self):
         from core.concepts.documents import ConceptDocument
