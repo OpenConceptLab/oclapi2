@@ -18,8 +18,10 @@ def propagate_owner_status(sender, instance=None, created=False, **kwargs):  # p
     if not created and instance:
         updated_sources = 0
         updated_collections = 0
-        updated_sources += instance.source_set.exclude(is_active=instance.is_active).update(is_active=instance.is_active)
-        updated_collections += instance.collection_set.exclude(is_active=instance.is_active).update(is_active=instance.is_active)
+        updated_sources += instance.source_set.exclude(
+            is_active=instance.is_active).update(is_active=instance.is_active)
+        updated_collections += instance.collection_set.exclude(
+            is_active=instance.is_active).update(is_active=instance.is_active)
 
         if updated_sources:
             from core.sources.documents import SourceDocument
