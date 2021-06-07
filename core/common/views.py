@@ -25,6 +25,7 @@ from core.common.utils import compact_dict_by_values, to_snake_case, to_camel_ca
 from core.concepts.permissions import CanViewParentDictionary, CanEditParentDictionary
 from core.orgs.constants import ORG_OBJECT_TYPE
 from core.users.constants import USER_OBJECT_TYPE
+from core import __version__
 
 
 class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
@@ -629,13 +630,22 @@ class SourceChildExtraRetrieveUpdateDestroyView(SourceChildExtrasBaseView, Retri
         return Response(dict(detail=NOT_FOUND), status=status.HTTP_404_NOT_FOUND)
 
 
+class APIVersionView(APIView):
+    permission_classes = (AllowAny,)
+    swagger_schema = None
+
+    @staticmethod
+    def get(_):
+        return Response(__version__)
+
+
 class RootView(BaseAPIView):  # pragma: no cover
     permission_classes = (AllowAny,)
     serializer_class = RootSerializer
 
     def get(self, _):
         from core.urls import urlpatterns
-        data = dict(version='2.0.0.beta.1', routes={})
+        data = dict(version=__version__, routes={})
         for pattern in urlpatterns:
             name = getattr(pattern, 'name', None) or getattr(pattern, 'app_name', None)
             if name in ['admin']:

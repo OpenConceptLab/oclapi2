@@ -16,6 +16,8 @@ import os
 from corsheaders.defaults import default_headers
 from kombu import Queue, Exchange
 
+from core import __version__
+
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 API_BASE_URL = os.environ.get('API_BASE_URL', 'http://localhost:8000')
@@ -46,7 +48,8 @@ CORS_EXPOSE_HEADERS = (
     'previous',
     'offset',
     'Content-Length',
-    'Content-Range'
+    'Content-Range',
+    'X-OCL-API-VERSION',
 )
 
 CORS_ORIGIN_ALLOW_ALL = True
@@ -132,6 +135,7 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'core.middlewares.middlewares.FixMalformedLimitParamMiddleware',
     'core.middlewares.middlewares.RequestLogMiddleware',
+    'core.middlewares.middlewares.VersionHeaderMiddleware',
 ]
 
 ROOT_URLCONF = 'core.urls'
@@ -357,3 +361,5 @@ if not ENV or ENV in ['development', 'ci']:
     EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
 else:
     EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+
+VERSION = __version__

@@ -4,6 +4,8 @@ from time import time
 from django.utils.termcolors import colorize
 from rest_framework.authtoken.models import Token
 
+from core.common.constants import VERSION_HEADER
+
 request_logger = logging.getLogger('request_logger')
 MAX_BODY_LENGTH = 50000
 
@@ -92,3 +94,11 @@ class FixMalformedLimitParamMiddleware(BaseMiddleware):
                 request.GET = query_dict_copy
 
         return self.get_response(request)
+
+
+class VersionHeaderMiddleware(BaseMiddleware):
+    def __call__(self, request):
+        response = self.get_response(request)
+        from django.conf import settings
+        response[VERSION_HEADER] = settings.VERSION
+        return response
