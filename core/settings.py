@@ -311,11 +311,11 @@ CELERY_RESULT_BACKEND_TRANSPORT_OPTIONS = {
         'timeout': 10.0
     }
 }
-CELERY_RESULT_EXPIRES = 360000  # 100 hours
+CELERY_RESULT_EXPIRES = 120*60*60  # 120 hours
 CELERY_BROKER_URL = CELERY_RESULT_BACKEND
 CELERY_BROKER_POOL_LIMIT = 50  # should be adjusted considering the number of threads
 CELERY_BROKER_CONNECTION_TIMEOUT = 10.0
-CELERY_BROKER_TRANSPORT_OPTIONS = {'visibility_timeout': CELERY_RESULT_EXPIRES}  # 100 hours, the lon
+CELERY_BROKER_TRANSPORT_OPTIONS = {'visibility_timeout': CELERY_RESULT_EXPIRES}
 CELERY_ACCEPT_CONTENT = ['application/json']
 CELERY_ONCE = {
     'backend': 'celery_once.backends.Redis',
