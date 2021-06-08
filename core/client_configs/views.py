@@ -10,7 +10,6 @@ from .models import ClientConfig
 
 
 class ClientConfigBaseView(generics.GenericAPIView):
-    swagger_schema = None
     lookup_field = 'id'
     pk_field = 'id'
     queryset = ClientConfig.objects.filter(is_active=True)
