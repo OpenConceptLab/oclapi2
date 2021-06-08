@@ -228,7 +228,7 @@ class ConceptTest(OCLTestCase):
         self.assertEqual(list(parent_concept_latest_version.child_concept_urls), [child_concept.uri])
         self.assertEqual(list(parent_concept_latest_version.prev_version.child_concept_urls), [])
 
-        # Av1 -> None and Av2 -> Bv1, Bv2 and Bv2 -> Cv1
+        # Av1 -> None and Av2 -> Bv1,Bv2 and Bv2 -> Cv1
         child_child_concept = Concept.persist_new({
             **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'c2', 'parent': source,
             'names': [LocalizedTextFactory.build(locale='en', name='English', locale_preferred=True)],

@@ -293,3 +293,46 @@ def update_validation_schema(instance_type, instance_id, target_schema):
     instance.save()
 
     return None
+
+
+@app.task(ignore_result=True)
+def process_hierarchy_for_new_concept(concept_id, initial_version_id, parent_concept_uris):
+    from core.concepts.models import Concept
+    concept = Concept.objects.filter(id=concept_id).first()
+
+    initial_version = None
+    if initial_version_id:
+        initial_version = Concept.objects.filter(id=initial_version_id).first()
+
+    parent_concepts = Concept.objects.filter(uri__in=parent_concept_uris)
+    concept._parent_concepts = parent_concepts  # pylint: disable=protected-access
+    concept.set_parent_concepts_from_uris(create_parent_version=True)
+
+    if initial_version:
+        initial_version._parent_concepts = parent_concepts  # pylint: disable=protected-access
+        initial_version.set_parent_concepts_from_uris(create_parent_version=False)
+
+
+@app.task(ignore_result=True)
+def process_hierarchy_for_concept_version(
+        latest_version_id, prev_version_id, parent_concept_uris, create_parent_version):
+    from core.concepts.models import Concept
+    latest_version = Concept.objects.filter(id=latest_version_id).first()
+
+    prev_version = None
+    old_parents = None
+    if prev_version_id:
+        prev_version = Concept.objects.filter(id=prev_version_id).first()
+        old_parents = prev_version.parent_concept_urls
+
+    parent_concepts = Concept.objects.filter(
+        uri__in=parent_concept_uris) if parent_concept_uris else Concept.objects.none()
+    latest_version._parent_concepts = parent_concepts  # pylint: disable=protected-access
+    latest_version.set_parent_concepts_from_uris(create_parent_version)
+    latest_version.versioned_object.parent_concepts.set(latest_version.parent_concepts.all())
+
+    if prev_version:
+        removed_parent_urls = [
+            url for url in old_parents if url not in list(latest_version.parent_concept_urls)
+        ]
+        latest_version.create_new_versions_for_removed_parents(removed_parent_urls)
