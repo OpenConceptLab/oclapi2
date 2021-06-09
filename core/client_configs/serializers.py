@@ -113,9 +113,8 @@ class ClientConfigSerializer(serializers.ModelSerializer):
 
     def update(self, instance, validated_data):
         user = self.context['request'].user
-        instance.name = validated_data.get('name', instance.name)
-        instance.config = validated_data.get('config', instance.config)
-        instance.type = validated_data.get('type', instance.type)
+        for attr in ['name', 'description', 'config', 'type']:
+            setattr(instance, attr, validated_data.get(attr, get(instance, attr)))
         instance.is_default = bool(validated_data.get('is_default', instance.is_default))
         instance.updated_by = user
 
