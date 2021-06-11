@@ -67,8 +67,11 @@ class BulkImportFileUploadView(APIView):
         if not file:
             return Response(dict(exception=NO_CONTENT_TO_IMPORT), status=status.HTTP_400_BAD_REQUEST)
 
-        if is_csv_file(file):
-            data = OclStandardCsvToJsonConverter(csv_filename=file.name, allow_special_characters=True).process()
+        if is_csv_file(name=file.name):
+            data = OclStandardCsvToJsonConverter(
+                input_list=csv_file_data_to_input_list(file.read().decode('utf-8')),
+                allow_special_characters=True
+            ).process()
         else:
             data = file.read()
 
@@ -246,25 +249,29 @@ class BulkImportParallelInlineView(APIView):  # pragma: no cover
         is_upload = 'file' in request.data
         is_file_url = 'file_url' in request.data
         is_data = 'data' in request.data
+        file_content = None
         try:
             if is_upload:
                 file = request.data['file']
                 file_name = file.name
+                file_content = file.read().decode('utf-8')
             elif is_file_url:
                 file_name = request.data['file_url']
                 file = requests.get(file_name)
+                file_content = file.text
         except:  # pylint: disable=bare-except
             pass
 
-        if not file and not is_data:
+        if not file_content and not is_data:
             return Response(dict(exception=NO_CONTENT_TO_IMPORT), status=status.HTTP_400_BAD_REQUEST)
 
         if file_name and is_csv_file(name=file_name):
-            params = dict(csv_filename=file_name) if is_upload else dict(
-                input_list=csv_file_data_to_input_list(file.text))
-            data = OclStandardCsvToJsonConverter(**params, allow_special_characters=True).process()
+            data = OclStandardCsvToJsonConverter(
+                input_list=csv_file_data_to_input_list(file_content),
+                allow_special_characters=True
+            ).process()
         elif file:
-            data = file.text if is_file_url else file.read()
+            data = file_content
         else:
             data = request.data.get('data')
 
@@ -273,7 +280,7 @@ class BulkImportParallelInlineView(APIView):  # pragma: no cover
 
 class BulkImportInlineView(APIView):  # pragma: no cover
     permission_classes = (IsAuthenticated, )
-    parser_classes = (MultiPartParser, )
+    parser_classes = (MultiPartParser, FormParser)
 
     @swagger_auto_schema(
         manual_parameters=[update_if_exists_param, file_url_param, file_upload_param],
@@ -283,24 +290,31 @@ class BulkImportInlineView(APIView):  # pragma: no cover
         file_name = None
         is_upload = 'file' in request.data
         is_file_url = 'file_url' in request.data
+        is_data = 'data' in request.data
+        file_content = None
         try:
             if is_upload:
                 file = request.data['file']
                 file_name = file.name
+                file_content = file.read().decode('utf-8')
             elif is_file_url:
                 file_name = request.data['file_url']
                 file = requests.get(file_name)
+                file_content = file.text
         except:  # pylint: disable=bare-except
             pass
 
-        if not file:
+        if not file_content and not is_data:
             return Response(dict(exception=NO_CONTENT_TO_IMPORT), status=status.HTTP_400_BAD_REQUEST)
 
-        if is_csv_file(name=file_name):
-            params = dict(csv_filename=file_name) if is_upload else dict(
-                input_list=csv_file_data_to_input_list(file.text))
-            data = OclStandardCsvToJsonConverter(**params, allow_special_characters=True).process()
+        if file_name and is_csv_file(name=file_name):
+            data = OclStandardCsvToJsonConverter(
+                input_list=csv_file_data_to_input_list(file_content),
+                allow_special_characters=True
+            ).process()
+        elif file:
+            data = file_content
         else:
-            data = file.text if is_file_url else file.read()
+            data = request.data.get('data')
 
         return import_response(self.request, import_queue, data, None, True)
