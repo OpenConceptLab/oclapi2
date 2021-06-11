@@ -9,7 +9,7 @@ from drf_yasg.utils import swagger_auto_schema
 from ocldev.oclcsvtojsonconverter import OclStandardCsvToJsonConverter
 from pydash import get
 from rest_framework import status
-from rest_framework.parsers import MultiPartParser
+from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -234,7 +234,7 @@ class BulkImportView(APIView):
 
 class BulkImportParallelInlineView(APIView):  # pragma: no cover
     permission_classes = (IsAuthenticated, )
-    parser_classes = (MultiPartParser, )
+    parser_classes = (MultiPartParser, FormParser)
 
     @swagger_auto_schema(
         manual_parameters=[update_if_exists_param, file_url_param, file_upload_param, parallel_threads_param],
@@ -245,6 +245,7 @@ class BulkImportParallelInlineView(APIView):  # pragma: no cover
         file_name = None
         is_upload = 'file' in request.data
         is_file_url = 'file_url' in request.data
+        is_data = 'data' in request.data
         try:
             if is_upload:
                 file = request.data['file']
@@ -255,15 +256,17 @@ class BulkImportParallelInlineView(APIView):  # pragma: no cover
         except:  # pylint: disable=bare-except
             pass
 
-        if not file:
+        if not file and not is_data:
             return Response(dict(exception=NO_CONTENT_TO_IMPORT), status=status.HTTP_400_BAD_REQUEST)
 
-        if is_csv_file(name=file_name):
+        if file_name and is_csv_file(name=file_name):
             params = dict(csv_filename=file_name) if is_upload else dict(
                 input_list=csv_file_data_to_input_list(file.text))
             data = OclStandardCsvToJsonConverter(**params, allow_special_characters=True).process()
-        else:
+        elif file:
             data = file.text if is_file_url else file.read()
+        else:
+            data = request.data.get('data')
 
         return import_response(self.request, import_queue, data, parallel_threads, True)
 
