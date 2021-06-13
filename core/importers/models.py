@@ -193,7 +193,7 @@ class OrganizationImporter(BaseResourceImporter):
 
 
 class SourceImporter(BaseResourceImporter):
-    mandatory_fields = {'id', 'short_code', 'name', 'full_name', 'owner_type', 'owner'}
+    mandatory_fields = {'id', 'name', 'owner_type', 'owner'}
     allowed_fields = [
         "id", "short_code", "name", "full_name", "description", "source_type", "custom_validation_schema",
         "public_access", "default_locale", "supported_locales", "website", "extras", "external_id",
@@ -271,7 +271,7 @@ class SourceVersionImporter(BaseResourceImporter):
 
 
 class CollectionImporter(BaseResourceImporter):
-    mandatory_fields = {'id', 'short_code', 'name', 'full_name', 'owner_type', 'owner'}
+    mandatory_fields = {'id', 'name', 'owner_type', 'owner'}
     allowed_fields = [
         "id", "short_code", "name", "full_name", "description", "collection_type", "custom_validation_schema",
         "public_access", "default_locale", "supported_locales", "website", "extras", "external_id",
