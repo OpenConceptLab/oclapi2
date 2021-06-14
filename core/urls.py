@@ -54,6 +54,7 @@ urlpatterns = [
     path('collections/', include('core.collections.urls'), name='collections_urls'),
     path('concepts/', concept_views.ConceptVersionListAllView.as_view(), name='all_concepts_urls'),
     path('mappings/', mapping_views.MappingVersionListAllView.as_view(), name='all_mappings_urls'),
+    path('mappings/debug/', mapping_views.MappingDebugRetrieveDestroyView.as_view(), name='mapping-debug'),
     path('importers/', include('core.importers.urls'), name='importer_urls'),
     path('v1-importers/', include('core.v1_importers.urls'), name='v1_importer_urls'),
     path('indexes/', include('core.indexes.urls'), name='indexes_urls'),
