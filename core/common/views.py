@@ -376,7 +376,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             from core.orgs.documents import OrganizationDocument
             if self.document_model in [OrganizationDocument]:
                 criteria |= (Q('match', public_can_view=False) & Q('match', user=username))
-            if self.is_concept_container_document_model():
+            if self.is_concept_container_document_model() or self.is_source_child_document_model():
                 criteria |= (Q('match', public_can_view=False) & Q('match', created_by=username))
 
         return criteria

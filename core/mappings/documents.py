@@ -45,6 +45,7 @@ class MappingDocument(Document):
     public_can_view = fields.BooleanField(attr='public_can_view')
     id = fields.KeywordField(attr='mnemonic', normalizer="lowercase")
     extras = fields.ObjectField(dynamic=True)
+    created_by = fields.KeywordField(attr='created_by.username')
 
     @staticmethod
     def prepare_from_concept(instance):

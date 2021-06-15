@@ -31,6 +31,7 @@ class ConceptDocument(Document):
     is_active = fields.KeywordField(attr='is_active')
     is_latest_version = fields.KeywordField(attr='is_latest_version')
     extras = fields.ObjectField(dynamic=True)
+    created_by = fields.KeywordField(attr='created_by.username')
 
     class Django:
         model = Concept
