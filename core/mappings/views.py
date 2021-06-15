@@ -289,8 +289,3 @@ class MappingDebugRetrieveDestroyView(ListAPIView):
             filters['from_concept_code__icontains'] = from_concept_code
 
         return Mapping.objects.filter(**filters)
-
-    def delete(self, request):  # pylint: disable=unused-argument
-        queryset = self.get_queryset()
-        queryset.delete()
-        return Response(status=status.HTTP_204_NO_CONTENT)
