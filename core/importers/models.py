@@ -224,7 +224,7 @@ class SourceImporter(BaseResourceImporter):
         if isinstance(supported_locales, str):
             self.data['supported_locales'] = supported_locales.split(',')
 
-        self.data.pop('short_code')
+        self.data.pop('short_code', None)
 
     def process(self):
         source = Source(**self.data)
@@ -301,7 +301,7 @@ class CollectionImporter(BaseResourceImporter):
         if isinstance(supported_locales, str):
             self.data['supported_locales'] = supported_locales.split(',')
 
-        self.data.pop('short_code')
+        self.data.pop('short_code', None)
 
     def process(self):
         coll = Collection(**self.data)
@@ -394,10 +394,12 @@ class ConceptImporter(BaseResourceImporter):
     def process(self):
         if self.version:
             instance = self.get_queryset().first().clone()
-            errors = Concept.create_new_version_for(instance, self.data, self.user)
+            errors = Concept.create_new_version_for(
+                instance=instance, data=self.data, user=self.user, create_parent_version=False
+            )
             return errors or UPDATED
 
-        instance = Concept.persist_new(self.data, self.user)
+        instance = Concept.persist_new(data=self.data, user=self.user, create_parent_version=False)
         if instance.id:
             return CREATED
         return instance.errors or FAILED

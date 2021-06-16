@@ -529,7 +529,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         return self.parent.concepts_set.filter(mnemonic__exact=self.mnemonic).exists()
 
     @classmethod
-    def persist_new(cls, data, user=None, create_initial_version=True):
+    def persist_new(cls, data, user=None, create_initial_version=True, create_parent_version=True):
         names = [
             name if isinstance(name, LocalizedText) else LocalizedText.build(
                 name
@@ -575,9 +575,11 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             concept.update_mappings()
             if parent_concept_uris:
                 if get(settings, 'TEST_MODE', False):
-                    process_hierarchy_for_new_concept(concept.id, get(initial_version, 'id'), parent_concept_uris)
+                    process_hierarchy_for_new_concept(
+                        concept.id, get(initial_version, 'id'), parent_concept_uris, create_parent_version)
                 else:
-                    process_hierarchy_for_new_concept.delay(concept.id, get(initial_version, 'id'), parent_concept_uris)
+                    process_hierarchy_for_new_concept.delay(
+                        concept.id, get(initial_version, 'id'), parent_concept_uris, create_parent_version)
         except ValidationError as ex:
             concept.errors.update(ex.message_dict)
         except IntegrityError as ex:

@@ -4,7 +4,8 @@ from rest_framework.fields import CharField, DateTimeField, BooleanField, URLFie
 from rest_framework.serializers import ModelSerializer
 
 from core.common.constants import INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_MAPPINGS_PARAM, INCLUDE_EXTRAS_PARAM, \
-    INCLUDE_PARENT_CONCEPTS, INCLUDE_CHILD_CONCEPTS, INCLUDE_SOURCE_VERSIONS, INCLUDE_COLLECTION_VERSIONS
+    INCLUDE_PARENT_CONCEPTS, INCLUDE_CHILD_CONCEPTS, INCLUDE_SOURCE_VERSIONS, INCLUDE_COLLECTION_VERSIONS, \
+    CREATE_PARENT_VERSION_QUERY_PARAM
 from core.common.fields import EncodedDecodedCharField
 from core.concepts.models import Concept, LocalizedText
 
@@ -215,6 +216,10 @@ class ConceptDetailSerializer(ModelSerializer):
         self.include_direct_mappings = self.query_params.get(INCLUDE_MAPPINGS_PARAM) in ['true', True]
         self.include_parent_concepts = self.query_params.get(INCLUDE_PARENT_CONCEPTS) in ['true', True]
         self.include_child_concepts = self.query_params.get(INCLUDE_CHILD_CONCEPTS) in ['true', True]
+        if CREATE_PARENT_VERSION_QUERY_PARAM in self.query_params:
+            self.create_parent_version = self.query_params.get(CREATE_PARENT_VERSION_QUERY_PARAM) in ['true', True]
+        else:
+            self.create_parent_version = True
 
         try:
             if not self.include_parent_concepts:
@@ -247,13 +252,19 @@ class ConceptDetailSerializer(ModelSerializer):
         return []
 
     def create(self, validated_data):
-        concept = Concept.persist_new(data=validated_data, user=self.context.get('request').user)
+        concept = Concept.persist_new(
+            data=validated_data, user=self.context.get('request').user,
+            create_parent_version=self.create_parent_version
+        )
         if concept.errors:
             self._errors.update(concept.errors)
         return concept
 
     def update(self, instance, validated_data):
-        errors = Concept.create_new_version_for(instance, validated_data, self.context.get('request').user)
+        errors = Concept.create_new_version_for(
+            instance=instance, data=validated_data, user=self.context.get('request').user,
+            create_parent_version=self.create_parent_version
+        )
         if errors:
             self._errors.update(errors)
         return instance
