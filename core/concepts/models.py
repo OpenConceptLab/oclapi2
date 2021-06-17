@@ -8,7 +8,8 @@ from pydash import get, compact
 from core.common.constants import ISO_639_1, INCLUDE_RETIRED_PARAM, LATEST, HEAD
 from core.common.mixins import SourceChildMixin
 from core.common.models import VersionedModel
-from core.common.tasks import process_hierarchy_for_new_concept, process_hierarchy_for_concept_version
+from core.common.tasks import process_hierarchy_for_new_concept, process_hierarchy_for_concept_version, \
+    process_hierarchy_for_new_parent_concept_version
 from core.common.utils import reverse_resource, parse_updated_since_param, generate_temp_version, drop_version
 from core.concepts.constants import CONCEPT_TYPE, LOCALES_FULLY_SPECIFIED, LOCALES_SHORT, LOCALES_SEARCH_INDEX_TERM, \
     CONCEPT_WAS_RETIRED, CONCEPT_IS_ALREADY_RETIRED, CONCEPT_IS_ALREADY_NOT_RETIRED, CONCEPT_WAS_UNRETIRED, \
@@ -425,7 +426,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         return initial_version
 
     @classmethod
-    def create_new_version_for(cls, instance, data, user, create_parent_version=True):
+    def create_new_version_for(cls, instance, data, user, create_parent_version=True, add_prev_version_children=True):  # pylint: disable=too-many-arguments
         instance.concept_class = data.get('concept_class', instance.concept_class)
         instance.datatype = data.get('datatype', instance.datatype)
         instance.extras = data.get('extras', instance.extras)
@@ -444,7 +445,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         if not parent_concept_uris and has_parent_concept_uris_attr:
             parent_concept_uris = []
 
-        return cls.persist_clone(instance, user, create_parent_version, parent_concept_uris)
+        return cls.persist_clone(instance, user, create_parent_version, parent_concept_uris, add_prev_version_children)
 
     def set_parent_concepts_from_uris(self, create_parent_version=True):
         parent_concepts = get(self, '_parent_concepts', None)
@@ -486,7 +487,8 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                         parent_concept_urls=concept.parent_concept_urls
                     ),
                     concept.created_by,
-                    create_parent_version=False
+                    create_parent_version=False,
+                    add_prev_version_children=False
                 )
                 new_latest_version = concept.get_latest_version()
                 for uri in current_latest_version.child_concept_urls:
@@ -600,7 +602,10 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         concept.save()
 
     @classmethod
-    def persist_clone(cls, obj, user=None, create_parent_version=True, parent_concept_uris=None, **kwargs):  # pylint: disable=too-many-statements
+    def persist_clone(
+            cls, obj, user=None, create_parent_version=True, parent_concept_uris=None, add_prev_version_children=True,
+            **kwargs
+    ):  # pylint: disable=too-many-statements,too-many-branches,too-many-arguments
         errors = dict()
         if not user:
             errors['version_created_by'] = PERSIST_CLONE_SPECIFY_USER_ERROR
@@ -628,6 +633,11 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                     if prev_latest_version:
                         prev_latest_version.is_latest_version = False
                         prev_latest_version.save()
+                        if add_prev_version_children:
+                            if get(settings, 'TEST_MODE', False):
+                                process_hierarchy_for_new_parent_concept_version(prev_latest_version.id, obj.id)
+                            else:
+                                process_hierarchy_for_new_parent_concept_version.delay(prev_latest_version.id, obj.id)
 
                     obj.sources.set(compact([parent, parent_head]))
                     persisted = True

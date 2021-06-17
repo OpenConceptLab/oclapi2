@@ -420,7 +420,7 @@ class ConceptTest(OCLTestCase):
         self.assertEqual(list(parent_concept.get_latest_version().child_concept_urls), [])
         source = parent_concept.parent
 
-        # Av1 -> Bv1
+        # Av1 to Av1 -> Bv1
         child_concept = Concept.persist_new(data={
             **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'c1', 'parent': source,
             'names': [LocalizedTextFactory.build(locale='en', name='English', locale_preferred=True)],
@@ -437,7 +437,7 @@ class ConceptTest(OCLTestCase):
         self.assertEqual(list(parent_concept.child_concept_urls), [child_concept.uri])
         self.assertEqual(list(parent_concept_latest_version.child_concept_urls), [child_concept.uri])
 
-        # Av1 -> Bv1 -> Cv1
+        # Av1 to Av1 -> Bv1 to Av1 -> Bv1 -> Cv1
         child_child_concept = Concept.persist_new(data={
             **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'c2', 'parent': source,
             'names': [LocalizedTextFactory.build(locale='en', name='English', locale_preferred=True)],
@@ -458,7 +458,7 @@ class ConceptTest(OCLTestCase):
         self.assertEqual(list(child_concept.get_latest_version().parent_concept_urls), [parent_concept.uri])
         self.assertEqual(list(parent_concept.child_concept_urls), [child_concept.uri])
 
-        # Av1 -> Bv1 -> Cv1 to Av1 -> Bv2,Cv2 and Bv1 -> Cv1
+        # Av1 to Av1 -> Bv1 to Av1 -> Bv1 -> Cv1 to Av1 -> Bv2,Cv2 and Bv1 -> Cv1
         Concept.create_new_version_for(
             instance=child_child_concept.clone(),
             data=dict(

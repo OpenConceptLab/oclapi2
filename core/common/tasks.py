@@ -342,3 +342,16 @@ def process_hierarchy_for_concept_version(
             url for url in old_parents if url not in list(latest_version.parent_concept_urls)
         ]
         latest_version.create_new_versions_for_removed_parents(removed_parent_urls)
+
+
+@app.task(
+    ignore_result=True, autoretry_for=(Exception, WorkerLostError, ), retry_kwargs={'max_retries': 2, 'countdown': 2},
+    acks_late=True, reject_on_worker_lost=True
+)
+def process_hierarchy_for_new_parent_concept_version(prev_version_id, latest_version_id):
+    from core.concepts.models import Concept
+    prev_version = Concept.objects.filter(id=prev_version_id).first()
+    latest_version = Concept.objects.filter(id=latest_version_id).first()
+    if prev_version and latest_version:
+        for concept in Concept.objects.filter(parent_concepts__uri=prev_version.uri):
+            concept.parent_concepts.add(latest_version)
