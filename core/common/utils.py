@@ -603,7 +603,7 @@ def is_csv_file(file=None, name=None):
 
 
 def is_url_encoded_string(string, lower=True):
-    encoded_string = encode_string(decode_string(string))
+    encoded_string = encode_string(decode_string(string), safe=' ')
 
     if lower:
         return string.lower() == encoded_string.lower()
@@ -612,8 +612,8 @@ def is_url_encoded_string(string, lower=True):
 
 
 def decode_string(string):
-    return parse.unquote(string)
+    return parse.unquote_plus(string)
 
 
 def encode_string(string, **kwargs):
-    return parse.quote_plus(string, **kwargs)
+    return parse.quote(string, **kwargs)
