@@ -16,6 +16,11 @@ urlpatterns = [
         views.ConceptReactivateView.as_view(),
         name='concept-reactivate'
     ),
+    re_path(
+        r"^(?P<concept>{pattern})/children/$".format(pattern=NAMESPACE_PATTERN),
+        views.ConceptChildrenView.as_view(),
+        name='concept-children'
+    ),
     re_path(r'^(?P<concept>{pattern})/atom/$'.format(pattern=NAMESPACE_PATTERN), ConceptFeed()),
     re_path(
         r"^(?P<concept>{pattern})/descriptions/$".format(pattern=NAMESPACE_PATTERN),

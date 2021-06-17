@@ -1,11 +1,13 @@
+import factory
 from django.core.exceptions import ValidationError
 from django.db import transaction, IntegrityError
-from mock import patch, Mock
+from mock import patch, Mock, ANY
 
 from core.common.constants import HEAD
 from core.common.tasks import seed_children
 from core.common.tests import OCLTestCase
-from core.concepts.tests.factories import ConceptFactory
+from core.concepts.models import Concept
+from core.concepts.tests.factories import ConceptFactory, LocalizedTextFactory
 from core.mappings.tests.factories import MappingFactory
 from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory
@@ -473,6 +475,60 @@ class SourceTest(OCLTestCase):
         )
         source.hierarchy_root = source_concept
         source.full_clean()
+
+    def test_hierarchy_with_hierarchy_root(self):
+        source = OrganizationSourceFactory()
+        root_concept = ConceptFactory(parent=source, mnemonic='root')
+        source.hierarchy_root = root_concept
+        source.save()
+        child_concept = Concept.persist_new({
+            **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'root-kid',
+            'parent': source,
+            'names': [LocalizedTextFactory.build(locale='en', name='English', locale_preferred=True)],
+            'parent_concept_urls': [root_concept.uri]
+        })
+        parentless_concept = ConceptFactory(parent=source, mnemonic='parentless')
+        parentless_concept_child = Concept.persist_new({
+            **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'parentless-kid',
+            'parent': source,
+            'names': [LocalizedTextFactory.build(locale='en', name='English', locale_preferred=True)],
+            'parent_concept_urls': [parentless_concept.uri]
+        })
+
+        hierarchy = source.hierarchy()
+        self.assertEqual(hierarchy, dict(id=source.mnemonic, count=2, children=ANY))
+        hierarchy_children = hierarchy['children']
+        self.assertEqual(len(hierarchy_children), 2)
+        self.assertEqual(
+            hierarchy_children[1],
+            dict(uuid=str(root_concept.id), id=root_concept.mnemonic, url=root_concept.uri,
+                 name=root_concept.display_name, children=[child_concept.uri], root=True)
+        )
+        self.assertEqual(
+            hierarchy_children[0],
+            dict(uuid=str(parentless_concept.id), id=parentless_concept.mnemonic, url=parentless_concept.uri,
+                 name=parentless_concept.display_name, children=[parentless_concept_child.uri])
+        )
+
+    def test_hierarchy_without_hierarchy_root(self):
+        source = OrganizationSourceFactory()
+        parentless_concept = ConceptFactory(parent=source, mnemonic='parentless')
+        parentless_concept_child = Concept.persist_new({
+            **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'parentless-kid',
+            'parent': source,
+            'names': [LocalizedTextFactory.build(locale='en', name='English', locale_preferred=True)],
+            'parent_concept_urls': [parentless_concept.uri]
+        })
+
+        hierarchy = source.hierarchy()
+        self.assertEqual(hierarchy, dict(id=source.mnemonic, count=1, children=ANY))
+        hierarchy_children = hierarchy['children']
+        self.assertEqual(len(hierarchy_children), 1)
+        self.assertEqual(
+            hierarchy_children[0],
+            dict(uuid=str(parentless_concept.id), id=parentless_concept.mnemonic, url=parentless_concept.uri,
+                 name=parentless_concept.display_name, children=[parentless_concept_child.uri])
+        )
 
 
 class TasksTest(OCLTestCase):

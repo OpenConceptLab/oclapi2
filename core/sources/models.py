@@ -1,6 +1,6 @@
 from django.core.exceptions import ValidationError
 from django.db import models
-from django.db.models import UniqueConstraint
+from django.db.models import UniqueConstraint, F
 from django.urls import resolve
 from pydash import get, compact
 
@@ -149,3 +149,26 @@ class Source(ConceptContainerModel):
     def clean(self):
         if self.hierarchy_root_id and not self.is_hierarchy_root_belonging_to_self():
             raise ValidationError({'hierarchy_root': [HIERARCHY_ROOT_MUST_BELONG_TO_SAME_SOURCE]})
+
+    def get_parentless_concepts(self):
+        return self.concepts.filter(parent_concepts__isnull=True, id=F('versioned_object_id'))
+
+    def hierarchy(self):
+        from core.concepts.serializers import ConceptHierarchySerializer
+        hierarchy_root = self.hierarchy_root
+        parent_less_children = self.get_parentless_concepts()
+        if hierarchy_root:
+            parent_less_children = parent_less_children.exclude(mnemonic=hierarchy_root.mnemonic)
+
+        total_count = parent_less_children.count()
+        parent_less_children = parent_less_children.order_by('mnemonic')[0:100]
+        children = ConceptHierarchySerializer(compact(parent_less_children), many=True).data
+
+        if hierarchy_root:
+            children.append({**ConceptHierarchySerializer(hierarchy_root).data, 'root': True})
+
+        return dict(
+            id=self.mnemonic,
+            children=children,
+            count=total_count + (1 if hierarchy_root else 0)
+        )

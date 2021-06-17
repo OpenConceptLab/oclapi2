@@ -22,6 +22,11 @@ urlpatterns = [
         name='source-summary'
     ),
     re_path(
+        r"^(?P<source>{pattern})/hierarchy/$".format(pattern=NAMESPACE_PATTERN),
+        views.SourceHierarchyView.as_view(),
+        name='source-hierarchy'
+    ),
+    re_path(
         r"^(?P<source>{pattern})/logo/$".format(pattern=NAMESPACE_PATTERN),
         views.SourceLogoView.as_view(),
         name='source-logo'

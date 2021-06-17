@@ -750,6 +750,22 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             queryset |= self.get_latest_version().child_concepts.all()
         return self.__format_hierarchy_uris(queryset.values_list('uri', flat=True))
 
+    def child_concept_queryset(self):
+        urls = self.child_concept_urls
+        if urls:
+            return Concept.objects.filter(uri__in=urls)
+        return Concept.objects.none()
+
     @staticmethod
     def __format_hierarchy_uris(uris):
         return list({drop_version(uri) for uri in uris})
+
+    def get_hierarchy_path(self):
+        result = []
+        parent_concept = self.parent_concepts.first()
+        while parent_concept is not None:
+            result.append(drop_version(parent_concept.uri))
+            parent_concept = parent_concept.parent_concepts.first()
+
+        result.reverse()
+        return result

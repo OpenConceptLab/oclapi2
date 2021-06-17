@@ -371,6 +371,20 @@ class SourceVersionExportView(ConceptContainerExportMixin, SourceVersionBaseView
             return status.HTTP_409_CONFLICT
 
 
+class SourceHierarchyView(SourceBaseView, RetrieveAPIView):
+    serializer_class = SourceSummaryDetailSerializer
+    permission_classes = (CanViewConceptDictionary,)
+
+    def get_object(self, queryset=None):
+        instance = get_object_or_404(self.get_queryset())
+        self.check_object_permissions(self.request, instance)
+        return instance
+
+    def retrieve(self, request, *args, **kwargs):
+        instance = self.get_object()
+        return Response(instance.hierarchy())
+
+
 class SourceSummaryView(SourceBaseView, RetrieveAPIView):
     serializer_class = SourceSummaryDetailSerializer
     permission_classes = (CanViewConceptDictionary,)

@@ -879,6 +879,58 @@ class ConceptTest(OCLTestCase):
             dict(parent__mnemonic='bar', parent__organization__mnemonic='foo')
         )
 
+    def test_get_hierarchy_path(self):
+        parent_concept = ConceptFactory()
+        self.assertEqual(parent_concept.get_hierarchy_path(), [])
+
+        child_concept = Concept.persist_new({
+            **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'c1', 'parent': parent_concept.parent,
+            'names': [LocalizedTextFactory.build(locale='en', name='English', locale_preferred=True)],
+            'parent_concept_urls': [parent_concept.uri]
+        })
+
+        self.assertEqual(parent_concept.get_hierarchy_path(), [])
+        self.assertEqual(child_concept.get_hierarchy_path(), [parent_concept.uri])
+
+        child_child_concept = Concept.persist_new({
+            **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'c2', 'parent': parent_concept.parent,
+            'names': [LocalizedTextFactory.build(locale='en', name='English', locale_preferred=True)],
+            'parent_concept_urls': [child_concept.uri]
+        })
+
+        self.assertEqual(parent_concept.get_hierarchy_path(), [])
+        self.assertEqual(child_concept.get_hierarchy_path(), [parent_concept.uri])
+        self.assertEqual(child_child_concept.get_hierarchy_path(), [parent_concept.uri, child_concept.uri])
+
+    def test_child_concept_queryset(self):
+        parent_concept = ConceptFactory()
+        self.assertEqual(parent_concept.child_concept_queryset().count(), 0)
+        self.assertEqual(parent_concept.parent_concept_urls, [])
+
+        child_concept = Concept.persist_new({
+            **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'c1', 'parent': parent_concept.parent,
+            'names': [LocalizedTextFactory.build(locale='en', name='English', locale_preferred=True)],
+            'parent_concept_urls': [parent_concept.uri]
+        })
+        self.assertEqual(
+            list(parent_concept.child_concept_queryset().values_list('uri', flat=True)), [child_concept.uri])
+        self.assertEqual(
+            list(child_concept.child_concept_queryset().values_list('uri', flat=True)), [])
+        self.assertEqual(child_concept.parent_concept_urls, [parent_concept.uri])
+
+        child_child_concept = Concept.persist_new({
+            **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'c2', 'parent': parent_concept.parent,
+            'names': [LocalizedTextFactory.build(locale='en', name='English', locale_preferred=True)],
+            'parent_concept_urls': [child_concept.uri]
+        })
+        self.assertEqual(
+            list(parent_concept.child_concept_queryset().values_list('uri', flat=True)), [child_concept.uri])
+        self.assertEqual(
+            list(child_concept.child_concept_queryset().values_list('uri', flat=True)), [child_child_concept.uri])
+        self.assertEqual(
+            list(child_child_concept.child_concept_queryset().values_list('uri', flat=True)), [])
+        self.assertEqual(child_child_concept.parent_concept_urls, [child_concept.uri])
+
 
 class OpenMRSConceptValidatorTest(OCLTestCase):
     def setUp(self):

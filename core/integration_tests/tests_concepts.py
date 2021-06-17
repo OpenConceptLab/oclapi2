@@ -96,6 +96,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
                 'internal_reference_id',
                 'parent_concept_urls',
                 'child_concept_urls',
+                'hierarchy_path',
             ]
         )
 
@@ -199,7 +200,8 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
              'created_by',
              'internal_reference_id',
              'parent_concept_urls',
-             'child_concept_urls']
+             'child_concept_urls',
+             'hierarchy_path']
         )
 
         version = Concept.objects.last()
@@ -276,7 +278,8 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
              'created_by',
              'internal_reference_id',
              'parent_concept_urls',
-             'child_concept_urls']
+             'child_concept_urls',
+             'hierarchy_path']
         )
 
         names = response.data['names']

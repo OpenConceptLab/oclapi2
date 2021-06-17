@@ -5,7 +5,7 @@ from drf_yasg.utils import swagger_auto_schema
 from pydash import get
 from rest_framework import status
 from rest_framework.generics import RetrieveAPIView, DestroyAPIView, ListCreateAPIView, RetrieveUpdateDestroyAPIView, \
-    UpdateAPIView
+    UpdateAPIView, ListAPIView
 from rest_framework.mixins import CreateModelMixin
 from rest_framework.permissions import IsAuthenticatedOrReadOnly, IsAdminUser
 from rest_framework.response import Response
@@ -28,7 +28,7 @@ from core.concepts.search import ConceptSearch
 from core.concepts.serializers import (
     ConceptDetailSerializer, ConceptListSerializer, ConceptDescriptionSerializer, ConceptNameSerializer,
     ConceptVersionDetailSerializer,
-    ConceptVersionListSerializer)
+    ConceptVersionListSerializer, ConceptHierarchySerializer)
 from core.mappings.serializers import MappingListSerializer
 
 
@@ -205,6 +205,15 @@ class ConceptRetrieveUpdateDestroyView(ConceptBaseView, RetrieveAPIView, UpdateA
             return Response(errors, status=status.HTTP_400_BAD_REQUEST)
 
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class ConceptChildrenView(ConceptBaseView, ListAPIView):
+    serializer_class = ConceptHierarchySerializer
+
+    def get_queryset(self):
+        instance = get_object_or_404(super().get_queryset(), id=F('versioned_object_id'))
+        self.check_object_permissions(self.request, instance)
+        return instance.child_concept_queryset()
 
 
 class ConceptReactivateView(ConceptBaseView, UpdateAPIView):

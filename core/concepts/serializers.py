@@ -5,7 +5,7 @@ from rest_framework.serializers import ModelSerializer
 
 from core.common.constants import INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_MAPPINGS_PARAM, INCLUDE_EXTRAS_PARAM, \
     INCLUDE_PARENT_CONCEPTS, INCLUDE_CHILD_CONCEPTS, INCLUDE_SOURCE_VERSIONS, INCLUDE_COLLECTION_VERSIONS, \
-    CREATE_PARENT_VERSION_QUERY_PARAM
+    CREATE_PARENT_VERSION_QUERY_PARAM, INCLUDE_HIERARCHY_PATH
 from core.common.fields import EncodedDecodedCharField
 from core.concepts.models import Concept, LocalizedText
 
@@ -208,6 +208,7 @@ class ConceptDetailSerializer(ModelSerializer):
     mappings = SerializerMethodField()
     parent_concepts = SerializerMethodField()
     child_concepts = SerializerMethodField()
+    hierarchy_path = SerializerMethodField()
 
     def __init__(self, *args, **kwargs):
         params = get(kwargs, 'context.request.query_params')
@@ -216,6 +217,7 @@ class ConceptDetailSerializer(ModelSerializer):
         self.include_direct_mappings = self.query_params.get(INCLUDE_MAPPINGS_PARAM) in ['true', True]
         self.include_parent_concepts = self.query_params.get(INCLUDE_PARENT_CONCEPTS) in ['true', True]
         self.include_child_concepts = self.query_params.get(INCLUDE_CHILD_CONCEPTS) in ['true', True]
+        self.include_hierarchy_path = self.query_params.get(INCLUDE_HIERARCHY_PATH) in ['true', True]
         if CREATE_PARENT_VERSION_QUERY_PARAM in self.query_params:
             self.create_parent_version = self.query_params.get(CREATE_PARENT_VERSION_QUERY_PARAM) in ['true', True]
         else:
@@ -238,7 +240,7 @@ class ConceptDetailSerializer(ModelSerializer):
             'owner', 'owner_type', 'owner_url', 'display_name', 'display_locale', 'names', 'descriptions',
             'created_on', 'updated_on', 'versions_url', 'version', 'extras', 'parent_id', 'name', 'type',
             'update_comment', 'version_url', 'mappings', 'updated_by', 'created_by', 'internal_reference_id',
-            'parent_concept_urls', 'child_concept_urls', 'parent_concepts', 'child_concepts'
+            'parent_concept_urls', 'child_concept_urls', 'parent_concepts', 'child_concepts', 'hierarchy_path'
         )
 
     def get_mappings(self, obj):
@@ -277,6 +279,11 @@ class ConceptDetailSerializer(ModelSerializer):
     def get_parent_concepts(self, obj):
         if self.include_parent_concepts:
             return ConceptDetailSerializer(obj.parent_concepts.all(), many=True).data
+        return None
+
+    def get_hierarchy_path(self, obj):
+        if self.include_hierarchy_path:
+            return obj.get_hierarchy_path()
         return None
 
 
@@ -356,3 +363,15 @@ class ConceptVersionDetailSerializer(ModelSerializer):
         if self.include_parent_concepts:
             return ConceptDetailSerializer(obj.parent_concepts.all(), many=True).data
         return None
+
+
+class ConceptHierarchySerializer(ModelSerializer):
+    uuid = CharField(source='id')
+    id = EncodedDecodedCharField(source='mnemonic')
+    url = CharField(source='uri')
+    children = ListField(source='child_concept_urls')
+    name = CharField(source='display_name')
+
+    class Meta:
+        model = Concept
+        fields = ('uuid', 'id', 'url', 'children', 'name')
