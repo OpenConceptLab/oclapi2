@@ -395,7 +395,8 @@ class ConceptImporter(BaseResourceImporter):
         if self.version:
             instance = self.get_queryset().first().clone()
             errors = Concept.create_new_version_for(
-                instance=instance, data=self.data, user=self.user, create_parent_version=False
+                instance=instance, data=self.data, user=self.user, create_parent_version=False,
+                add_prev_version_children=False
             )
             return errors or UPDATED
 
