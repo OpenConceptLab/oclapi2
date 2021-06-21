@@ -42,6 +42,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     default_filters = dict(is_active=True)
     sort_asc_param = 'sortAsc'
     sort_desc_param = 'sortDesc'
+    sort_param = 'sort'
     default_qs_sort_attr = '-updated_at'
     exact_match = 'exact_match'
     facet_class = None
@@ -107,13 +108,17 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     def get_sort_and_desc(self):
         query_params = self.request.query_params.dict()
 
-        sort_field = query_params.get(self.sort_desc_param)
-        if sort_field is not None:
-            return sort_field, True
+        sort_fields = query_params.get(self.sort_desc_param)
+        if sort_fields is not None:
+            return sort_fields, True
 
-        sort_field = query_params.get(self.sort_asc_param)
-        if sort_field is not None:
-            return sort_field, False
+        sort_fields = query_params.get(self.sort_asc_param)
+        if sort_fields is not None:
+            return sort_fields, False
+
+        sort_fields = query_params.get(self.sort_param)
+        if sort_fields is not None:
+            return sort_fields, None
 
         return None, None
 
@@ -155,20 +160,35 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     def get_wildcard_search_string(self, _str):
         return "*{}*".format(_str or self.get_search_string())
 
-    def get_sort_attr(self):
-        sort_field, desc = self.get_sort_and_desc()
-        if sort_field and sort_field.lower() in ['score', '_score', 'best match']:
-            return dict(_score=dict(order="desc" if desc else "asc"))
+    @staticmethod
+    def __get_order_by(is_desc):
+        return dict(order='desc') if is_desc else dict(order='asc')
 
-        if self.is_concept_document() and sort_field == 'name':
-            sort_field = '_name'
+    def get_sort_attributes(self):
+        sort_fields, desc = self.get_sort_and_desc()
+        result = []
+        if sort_fields:
+            order_by = None if desc is None else self.__get_order_by(desc)
+            fields = sort_fields.lower().split(',')
+            for field in fields.copy():
+                field = field.strip()
+                is_desc = field.startswith('-')
+                field = field.replace('-', '', 1) if is_desc else field
+                order_details = order_by
+                if order_details is None:
+                    order_details = self.__get_order_by(is_desc)
 
-        if self.is_valid_sort(sort_field):
-            if desc:
-                sort_field = '-' + sort_field
-            return sort_field
+                current_result = None
+                if field in ['score', '_score', 'best_match', 'best match']:
+                    current_result = dict(_score=order_details)
+                if self.is_concept_document() and field == 'name':
+                    current_result = dict(_name=order_details)
+                if self.is_valid_sort(field):
+                    current_result = {field: order_details}
+                if current_result is not None:
+                    result.append(current_result)
 
-        return dict(_score=dict(order="desc"))
+        return result
 
     def get_exact_search_criterion(self):
         search_str = self.get_search_string(False)
@@ -455,9 +475,11 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             for key, value in kwargs_filters.items():
                 results = results.query('match', **{to_snake_case(key): value})
 
-            sort_field = self.get_sort_attr()
-            if sort_field:
-                results = results.sort(sort_field)
+            sort_by = self.get_sort_attributes()
+            if sort_by:
+                results = results.sort(*sort_by)
+            else:
+                results = results.sort(dict(_score=dict(order="desc")))
 
         return results
 
@@ -512,10 +534,9 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         else:
             result = SEARCH_PARAM in self.request.query_params
 
-        sort_field, _ = self.get_sort_and_desc()
         return result or self.has_searchable_extras_fields() or bool(
             self.get_faceted_filters()
-        ) or self.is_valid_sort(sort_field)
+        ) or len(self.get_sort_attributes()) > 0
 
     def has_searchable_extras_fields(self):
         return bool(
