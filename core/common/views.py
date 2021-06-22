@@ -134,14 +134,6 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     def is_exact_match_on(self):
         return self.request.query_params.dict().get(self.exact_match, None) == 'on'
 
-    def get_default_sort(self):
-        for field in self.es_fields:
-            attrs = self.es_fields[field]
-            if 'sortable' in attrs and 'default' in attrs:
-                prefix = '-' if attrs['default'] == 'desc' else ''
-                return prefix + field
-        return None
-
     def get_searchable_fields(self):
         return [field for field, config in get(self, 'es_fields', dict()).items() if config.get('filterable', False)]
 
