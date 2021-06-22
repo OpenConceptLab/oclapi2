@@ -197,8 +197,7 @@ def write_export_file(
     logger.info('Writing export file to tmp directory: %s' % cwd)
 
     logger.info('Found %s version %s.  Looking up resource...' % (resource_type, version.version))
-    resource = version.head
-    logger.info('Found %s %s.  Serializing attributes...' % (resource_type, resource.mnemonic))
+    logger.info('Found %s %s.  Serializing attributes...' % (resource_type, version.mnemonic))
 
     resource_serializer = get_class(resource_serializer_type)(version)
     data = resource_serializer.data
@@ -212,6 +211,10 @@ def write_export_file(
     if not is_collection:
         concepts_qs = concepts_qs.filter(is_active=True)
         mappings_qs = mappings_qs.filter(is_active=True)
+
+    if version.is_head:
+        concepts_qs = concepts_qs.filter(is_latest_version=True)
+        mappings_qs = mappings_qs.filter(is_latest_version=True)
 
     total_concepts = concepts_qs.count()
     total_mappings = mappings_qs.count()
