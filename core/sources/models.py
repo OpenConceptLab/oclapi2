@@ -153,15 +153,21 @@ class Source(ConceptContainerModel):
     def get_parentless_concepts(self):
         return self.concepts.filter(parent_concepts__isnull=True, id=F('versioned_object_id'))
 
-    def hierarchy(self):
+    def hierarchy(self, offset=0, limit=100):
         from core.concepts.serializers import ConceptHierarchySerializer
-        hierarchy_root = self.hierarchy_root
+        hierarchy_root = None
+        if offset == 0:
+            hierarchy_root = self.hierarchy_root
+
         parent_less_children = self.get_parentless_concepts()
         if hierarchy_root:
             parent_less_children = parent_less_children.exclude(mnemonic=hierarchy_root.mnemonic)
 
         total_count = parent_less_children.count()
-        parent_less_children = parent_less_children.order_by('mnemonic')[0:100]
+        adjusted_limit = limit
+        if hierarchy_root:
+            adjusted_limit -= 1
+        parent_less_children = parent_less_children.order_by('mnemonic')[offset:limit+offset]
         children = ConceptHierarchySerializer(compact(parent_less_children), many=True).data
 
         if hierarchy_root:
@@ -170,5 +176,7 @@ class Source(ConceptContainerModel):
         return dict(
             id=self.mnemonic,
             children=children,
-            count=total_count + (1 if hierarchy_root else 0)
+            count=total_count + (1 if hierarchy_root else 0),
+            offset=offset,
+            limit=limit
         )

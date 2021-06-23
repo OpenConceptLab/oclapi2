@@ -382,7 +382,14 @@ class SourceHierarchyView(SourceBaseView, RetrieveAPIView):
 
     def retrieve(self, request, *args, **kwargs):
         instance = self.get_object()
-        return Response(instance.hierarchy())
+        params = self.request.query_params.dict()
+        limit = 100
+        offset = 0
+        if 'limit' in params:
+            limit = int(params.get('limit'))
+        if 'offset' in params:
+            offset = int(params.get('offset'))
+        return Response(instance.hierarchy(offset=offset, limit=limit))
 
 
 class SourceSummaryView(SourceBaseView, RetrieveAPIView):

@@ -496,7 +496,7 @@ class SourceTest(OCLTestCase):
         })
 
         hierarchy = source.hierarchy()
-        self.assertEqual(hierarchy, dict(id=source.mnemonic, count=2, children=ANY))
+        self.assertEqual(hierarchy, dict(id=source.mnemonic, count=2, children=ANY, offset=0, limit=100))
         hierarchy_children = hierarchy['children']
         self.assertEqual(len(hierarchy_children), 2)
         self.assertEqual(
@@ -521,7 +521,7 @@ class SourceTest(OCLTestCase):
         })
 
         hierarchy = source.hierarchy()
-        self.assertEqual(hierarchy, dict(id=source.mnemonic, count=1, children=ANY))
+        self.assertEqual(hierarchy, dict(id=source.mnemonic, count=1, children=ANY, offset=0, limit=100))
         hierarchy_children = hierarchy['children']
         self.assertEqual(len(hierarchy_children), 1)
         self.assertEqual(
