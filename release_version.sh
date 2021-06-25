@@ -19,7 +19,9 @@ git add core/__init__.py
 git commit -m "Set build version"
 
 git tag "$TAG"
-git push --tags
+
+git remote set-url origin ${GIT_REPO_URL}
+git push origin --tags
 
 docker pull $DOCKER_IMAGE_ID
 docker tag $DOCKER_IMAGE_ID $DOCKER_IMAGE_NAME:$TAG
