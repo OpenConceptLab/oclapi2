@@ -1,8 +1,6 @@
 #!/bin/bash
 set -e
 
-DOCKER_IMAGE_ID=${bamboo.docker.image.id}
-DOCKER_IMAGE_NAME=${bamboo.docker.image.name}
 SOURCE_COMMIT=$(git rev-parse HEAD)
 export SOURCE_COMMIT=${SOURCE_COMMIT:0:8}
 
