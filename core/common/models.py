@@ -333,11 +333,11 @@ class ConceptContainerModel(VersionedModel):
 
     @property
     def active_concepts(self):
-        return self.concepts.filter(retired=False, is_active=True).distinct('versioned_object_id').count()
+        return self.concepts.filter(retired=False, is_active=True).count()
 
     @property
     def active_mappings(self):
-        return self.mappings.filter(retired=False, is_active=True).distinct('versioned_object_id').count()
+        return self.mappings.filter(retired=False, is_active=True).count()
 
     @property
     def last_concept_update(self):
