@@ -271,10 +271,7 @@ class CollectionReferenceTest(OCLTestCase):
 
         self.assertEqual(
             ex.exception.message_dict,
-            {
-                'expression': ['This field cannot be blank.'],
-                'detail': ['Expression specified is not valid.']
-            }
+            {'expression': ['This field cannot be blank.']}
         )
 
     def test_reference_type(self):

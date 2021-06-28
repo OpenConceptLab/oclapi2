@@ -7,7 +7,7 @@ from django.utils import timezone
 from rest_framework.test import APIRequestFactory
 
 from core.collections.constants import (
-    COLLECTION_TYPE, EXPRESSION_INVALID, CONCEPTS_EXPRESSIONS,
+    COLLECTION_TYPE, CONCEPTS_EXPRESSIONS,
     MAPPINGS_EXPRESSIONS,
     REFERENCE_ALREADY_EXISTS, CONCEPT_FULLY_SPECIFIED_NAME_UNIQUE_PER_COLLECTION_AND_LOCALE,
     CONCEPT_PREFERRED_NAME_UNIQUE_PER_COLLECTION_AND_LOCALE, ALL_SYMBOL, COLLECTION_VERSION_TYPE)
@@ -214,7 +214,7 @@ class Collection(ConceptContainerModel):
 
         return self.add_references_in_bulk(expressions, user)
 
-    def add_references_in_bulk(self, expressions, user=None):  # pylint: disable=too-many-locals  # Fixme: Sny
+    def add_references_in_bulk(self, expressions, user=None):  # pylint: disable=too-many-locals,too-many-branches  # Fixme: Sny
         errors = {}
         collection_version = self.head
 
@@ -260,6 +260,8 @@ class Collection(ConceptContainerModel):
                     added = True
             if ref.mappings:
                 collection_version.mappings.add(*ref.mappings.all())
+                added = True
+            if not added and ref.id:
                 added = True
 
             if added:
@@ -379,7 +381,7 @@ class CollectionReference(models.Model):
     expression = models.TextField()
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    last_resolved_at = models.DateTimeField(default=timezone.now)
+    last_resolved_at = models.DateTimeField(default=timezone.now, null=True)
 
     @staticmethod
     def get_concept_heads_from_expression(expression):
@@ -417,10 +419,10 @@ class CollectionReference(models.Model):
     def clean(self):
         self.original_expression = str(self.expression)
 
-        if not self.is_valid_expression:
-            raise ValidationError(dict(detail=[EXPRESSION_INVALID]))
-
         self.create_entities_from_expressions()
+        is_resolved = bool((self.mappings and self.mappings.count()) or (self.concepts and self.concepts.count()))
+        if not is_resolved:
+            self.last_resolved_at = None
 
     def save(self, force_insert=False, force_update=False, using=None, update_fields=None):
         if not self.internal_reference_id and self.id:
@@ -435,12 +437,9 @@ class CollectionReference(models.Model):
         elif __is_mapping:
             self.mappings = self.get_mappings()
 
-        if (not self.concepts or not self.concepts.exists()) and (not self.mappings or not self.mappings.exists()):
-            raise ValidationError({'detail': [EXPRESSION_INVALID]})
-
-        if __is_concept:
+        if self.concepts and self.concepts.exists():
             self.expression = self.concepts.first().uri
-        elif __is_mapping:
+        elif self.mappings and self.mappings.exists():
             self.expression = self.mappings.first().uri
 
     def get_related_mappings(self, exclude_mapping_uris):
