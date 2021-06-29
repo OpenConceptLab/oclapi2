@@ -5,7 +5,7 @@ from rest_framework.serializers import ModelSerializer
 
 from core.common.constants import INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_MAPPINGS_PARAM, INCLUDE_EXTRAS_PARAM, \
     INCLUDE_PARENT_CONCEPTS, INCLUDE_CHILD_CONCEPTS, INCLUDE_SOURCE_VERSIONS, INCLUDE_COLLECTION_VERSIONS, \
-    CREATE_PARENT_VERSION_QUERY_PARAM, INCLUDE_HIERARCHY_PATH
+    CREATE_PARENT_VERSION_QUERY_PARAM, INCLUDE_HIERARCHY_PATH, INCLUDE_PARENT_CONCEPT_URLS, INCLUDE_CHILD_CONCEPT_URLS
 from core.common.fields import EncodedDecodedCharField
 from core.concepts.models import Concept, LocalizedText
 
@@ -215,6 +215,8 @@ class ConceptDetailSerializer(ModelSerializer):
         self.query_params = params.dict() if params else dict()
         self.include_indirect_mappings = self.query_params.get(INCLUDE_INVERSE_MAPPINGS_PARAM) in ['true', True]
         self.include_direct_mappings = self.query_params.get(INCLUDE_MAPPINGS_PARAM) in ['true', True]
+        self.include_parent_concept_urls = self.query_params.get(INCLUDE_PARENT_CONCEPT_URLS) in ['true', True]
+        self.include_child_concept_urls = self.query_params.get(INCLUDE_CHILD_CONCEPT_URLS) in ['true', True]
         self.include_parent_concepts = self.query_params.get(INCLUDE_PARENT_CONCEPTS) in ['true', True]
         self.include_child_concepts = self.query_params.get(INCLUDE_CHILD_CONCEPTS) in ['true', True]
         self.include_hierarchy_path = self.query_params.get(INCLUDE_HIERARCHY_PATH) in ['true', True]
@@ -228,6 +230,10 @@ class ConceptDetailSerializer(ModelSerializer):
                 self.fields.pop('parent_concepts', None)
             if not self.include_child_concepts:
                 self.fields.pop('child_concepts', None)
+            if not self.include_child_concept_urls:
+                self.fields.pop('child_concept_urls')
+            if not self.include_parent_concept_urls:
+                self.fields.pop('parent_concept_urls')
         except:  # pylint: disable=bare-except
             pass
 
@@ -322,12 +328,18 @@ class ConceptVersionDetailSerializer(ModelSerializer):
         self.include_direct_mappings = self.query_params.get(INCLUDE_MAPPINGS_PARAM) == 'true'
         self.include_parent_concepts = self.query_params.get(INCLUDE_PARENT_CONCEPTS) in ['true', True]
         self.include_child_concepts = self.query_params.get(INCLUDE_CHILD_CONCEPTS) in ['true', True]
+        self.include_parent_concept_urls = self.query_params.get(INCLUDE_PARENT_CONCEPT_URLS) in ['true', True]
+        self.include_child_concept_urls = self.query_params.get(INCLUDE_CHILD_CONCEPT_URLS) in ['true', True]
 
         try:
             if not self.include_parent_concepts:
                 self.fields.pop('parent_concepts', None)
             if not self.include_child_concepts:
                 self.fields.pop('child_concepts', None)
+            if not self.include_child_concept_urls:
+                self.fields.pop('child_concept_urls')
+            if not self.include_parent_concept_urls:
+                self.fields.pop('parent_concept_urls')
         except:  # pylint: disable=bare-except
             pass
 
