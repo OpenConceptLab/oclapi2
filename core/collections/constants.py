@@ -21,6 +21,7 @@ HEAD_OF_MAPPING_ADDED_TO_COLLECTION = 'Added the latest versions of mapping to t
                                       'Future updates will not be added automatically.'
 CONCEPT_ADDED_TO_COLLECTION_FMT = 'The concept {} is successfully added to collection {}'
 MAPPING_ADDED_TO_COLLECTION_FMT = 'The mapping {} is successfully added to collection {}'
+UNKNOWN_REFERENCE_ADDED_TO_COLLECTION_FMT = 'The reference is successfully added to collection {}'
 
 DELETE_FAILURE = 'Could not delete Collection.'
 DELETE_SUCCESS = 'Successfully deleted Collection.'
