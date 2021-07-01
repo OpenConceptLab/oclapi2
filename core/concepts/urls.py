@@ -1,108 +1,108 @@
-from django.urls import re_path
+from django.urls import path
 
 from core.concepts.feeds import ConceptFeed
-from .constants import CONCEPT_PATTERN as NAMESPACE_PATTERN
 from . import views
+from .constants import CONCEPT_PATTERN as NAMESPACE_PATTERN
 
 urlpatterns = [
-    re_path(r'^$', views.ConceptListView.as_view(), name='concept-list'),
-    re_path(
-        r"^(?P<concept>{pattern})/$".format(pattern=NAMESPACE_PATTERN),
+    path('', views.ConceptListView.as_view(), name='concept-list'),
+    path(
+        "<str:concept>/",
         views.ConceptRetrieveUpdateDestroyView.as_view(),
         name='concept-detail'
     ),
-    re_path(
-        r"^(?P<concept>{pattern})/reactivate/$".format(pattern=NAMESPACE_PATTERN),
+    path(
+        "<str:concept>/reactivate/",
         views.ConceptReactivateView.as_view(),
         name='concept-reactivate'
     ),
-    re_path(
-        r"^(?P<concept>{pattern})/children/$".format(pattern=NAMESPACE_PATTERN),
+    path(
+        "<str:concept>/children/",
         views.ConceptChildrenView.as_view(),
         name='concept-children'
     ),
-    re_path(r'^(?P<concept>{pattern})/atom/$'.format(pattern=NAMESPACE_PATTERN), ConceptFeed()),
-    re_path(
-        r"^(?P<concept>{pattern})/descriptions/$".format(pattern=NAMESPACE_PATTERN),
+    path('<str:concept>/atom/', ConceptFeed()),
+    path(
+        "<str:concept>/descriptions/",
         views.ConceptDescriptionListCreateView.as_view(),
         name='concept-descriptions'
     ),
-    re_path(
-        r'^(?P<concept>{pattern})/descriptions/(?P<uuid>{pattern})/$'.format(pattern=NAMESPACE_PATTERN),
+    path(
+        '<str:concept>/descriptions/<str:uuid>/',
         views.ConceptDescriptionRetrieveUpdateDestroyView.as_view(),
         name='concept-description'
     ),
-    re_path(
-        r"^(?P<concept>{pattern})/names/$".format(pattern=NAMESPACE_PATTERN),
+    path(
+        "<str:concept>/names/",
         views.ConceptNameListCreateView.as_view(),
         name='concept-names'
     ),
-    re_path(
-        r'^(?P<concept>{pattern})/names/(?P<uuid>{pattern})/$'.format(pattern=NAMESPACE_PATTERN),
+    path(
+        '<str:concept>/names/<str:uuid>/',
         views.ConceptNameRetrieveUpdateDestroyView.as_view(),
         name='concept-name'
     ),
-    re_path(
-        r'^(?P<concept>{pattern})/extras/$'.format(pattern=NAMESPACE_PATTERN),
+    path(
+        '<str:concept>/extras/',
         views.ConceptExtrasView.as_view(),
         name='concept-extras'
     ),
-    re_path(
-        r'^(?P<concept>{pattern})/extras/(?P<extra>{pattern})/$'.format(pattern=NAMESPACE_PATTERN),
+    path(
+        '<str:concept>/extras/<str:extra>/',
         views.ConceptExtraRetrieveUpdateDestroyView.as_view(),
         name='concept-extra'
     ),
-    re_path(
-        r"^(?P<concept>{pattern})/versions/$".format(pattern=NAMESPACE_PATTERN),
+    path(
+        "<str:concept>/versions/",
         views.ConceptVersionsView.as_view(),
         name='concept-version-list'
     ),
-    re_path(
-        r"^(?P<concept>{pattern})/mappings/$".format(pattern=NAMESPACE_PATTERN),
+    path(
+        "<str:concept>/mappings/",
         views.ConceptMappingsView.as_view(),
         name='concept-mapping-list'
     ),
-    re_path(
-        r'^(?P<concept>{pattern})/(?P<concept_version>{pattern})/$'.format(pattern=NAMESPACE_PATTERN),
+    path(
+        '<str:concept>/<str:concept_version>/',
         views.ConceptVersionRetrieveView.as_view(),
         name='concept-version-detail'
     ),
-    re_path(
-        r'^(?P<concept>{pattern})/(?P<concept_version>{pattern})/mappings/$'.format(pattern=NAMESPACE_PATTERN),
+    path(
+        '<str:concept>/<str:concept_version>/mappings/',
         views.ConceptMappingsView.as_view(),
         name='concept-version-mapping-list'
     ),
-    re_path(
-        r'^(?P<concept>{pattern})/(?P<concept_version>{pattern})/descriptions/$'.format(pattern=NAMESPACE_PATTERN),
+    path(
+        '<str:concept>/<str:concept_version>/descriptions/',
         views.ConceptDescriptionListCreateView.as_view(),
         name='concept-descriptions'
     ),
-    re_path(
-        r'^(?P<concept>{pattern})/(?P<concept_version>{pattern})/descriptions/(?P<uuid>{pattern})/$'.format(
+    path(
+        '<str:concept>/<str:concept_version>/descriptions/<str:uuid>/'.format(
             pattern=NAMESPACE_PATTERN
         ),
         views.ConceptDescriptionRetrieveUpdateDestroyView.as_view(),
         name='concept-name'
     ),
-    re_path(
-        r'^(?P<concept>{pattern})/(?P<concept_version>{pattern})/extras/$'.format(pattern=NAMESPACE_PATTERN),
+    path(
+        '<str:concept>/<str:concept_version>/extras/',
         views.ConceptExtrasView.as_view(),
         name='concept-extras'
     ),
-    re_path(
-        r'^(?P<concept>{pattern})/(?P<concept_version>{pattern})/extras/(?P<extra>{pattern})/$'.format(
+    path(
+        '<str:concept>/<str:concept_version>/extras/<str:extra>/'.format(
             pattern=NAMESPACE_PATTERN
         ),
         views.ConceptExtraRetrieveUpdateDestroyView.as_view(),
         name='concept-extra'
     ),
-    re_path(
-        r'^(?P<concept>{pattern})/(?P<concept_version>{pattern})/names/$'.format(pattern=NAMESPACE_PATTERN),
+    path(
+        '<str:concept>/<str:concept_version>/names/',
         views.ConceptNameListCreateView.as_view(),
         name='concept-names'
     ),
-    re_path(
-        r'^(?P<concept>{pattern})/(?P<concept_version>{pattern})/names/(?P<uuid>{pattern})/$'.format(
+    path(
+        '<str:concept>/<str:concept_version>/names/<str:uuid>/'.format(
             pattern=NAMESPACE_PATTERN
         ),
         views.ConceptNameRetrieveUpdateDestroyView.as_view(),
