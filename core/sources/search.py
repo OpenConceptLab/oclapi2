@@ -9,7 +9,7 @@ class SourceSearch(CommonSearch):
     doc_types = [Source]
     fields = [
         'source_type', 'locale', 'owner', 'owner_type', 'is_active', 'version', 'custom_validation_schema',
-        'experimental', 'hierarchy_meaning',
+        'hierarchy_meaning',
     ]
 
     facets = {
@@ -20,6 +20,5 @@ class SourceSearch(CommonSearch):
         'is_active': TermsFacet(field='is_active'),
         'version': TermsFacet(field='version'),
         'customValidationSchema': TermsFacet(field='custom_validation_schema'),
-        'experimental': TermsFacet(field='experimental'),
         'hierarchyMeaning': TermsFacet(field='hierarchy_meaning'),
     }

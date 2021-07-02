@@ -142,7 +142,8 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
     def get_search_string(self, lower=True):
         search_str = self.request.query_params.dict().get(SEARCH_PARAM, '').strip()
-        search_str = search_str.replace('-', '_')
+        if self.is_concept_document():
+            search_str = search_str.replace('-', '_')
         if lower:
             search_str = search_str.lower()
             search_str = search_str if is_url_encoded_string(search_str) else urllib.parse.quote_plus(search_str)

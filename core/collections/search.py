@@ -9,7 +9,6 @@ class CollectionSearch(CommonSearch):
     doc_types = [Collection]
     fields = [
         'collection_type', 'locale', 'owner', 'owner_type', 'is_active', 'version', 'custom_validation_schema',
-        'experimental',
     ]
 
     facets = {
@@ -20,5 +19,4 @@ class CollectionSearch(CommonSearch):
         'is_active': TermsFacet(field='is_active'),
         'version': TermsFacet(field='version'),
         'customValidationSchema': TermsFacet(field='custom_validation_schema'),
-        'experimental': TermsFacet(field='experimental'),
     }
