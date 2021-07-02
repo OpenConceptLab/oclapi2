@@ -34,7 +34,7 @@ if [[ "$INCREASE_MAINTENANCE_VERSION" = true ]]; then
   git checkout master
 
   NEW_PROJECT_VERSION=$(echo "${PROJECT_VERSION}" | awk -F. -v OFS=. '{$NF++;print}')
-  sed -i "s/API_VERSION = \"$PROJECT_VERSION\"/API_VERSION = \"$NEW_PROJECT_VERSION\"/" $VERSION_FILE
+  sed -i "s/API_VERSION = '$PROJECT_VERSION'/API_VERSION = '$NEW_PROJECT_VERSION'/" $VERSION_FILE
 
   git add $VERSION_FILE
   git commit -m "Increase maintenance version to $NEW_PROJECT_VERSION"
