@@ -368,8 +368,9 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             if container_version and not is_latest_released:
                 queryset = queryset.filter(cls.get_iexact_or_criteria('sources__version', container_version))
         if concept:
-            queryset = queryset.filter(
-                mnemonic__in=[concept, encode_string(concept, safe='+'), encode_string(concept, safe='+%')])
+            mnemonics = [concept, encode_string(concept, safe=' '), encode_string(concept, safe='+'),
+                         encode_string(concept, safe='+%'), encode_string(concept, safe='% +')]
+            queryset = queryset.filter(mnemonic__in=mnemonics)
         if concept_version:
             queryset = queryset.filter(cls.get_iexact_or_criteria('version', concept_version))
         if is_latest:
