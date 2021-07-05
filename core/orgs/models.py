@@ -57,5 +57,12 @@ class Organization(BaseResourceModel, SourceContainerMixin):
     def get_public(cls):
         return cls.objects.filter(public_access__in=[ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT])
 
+    def save(self, force_insert=False, force_update=False, using=None, update_fields=None):
+        super().save(force_insert=force_insert, force_update=force_update, using=using, update_fields=update_fields)
+        if self.id:
+            self.members.add(self.created_by)
+            if self.updated_by_id:
+                self.members.add(self.updated_by)
+
 
 admin.site.register(Organization)

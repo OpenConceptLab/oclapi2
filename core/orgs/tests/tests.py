@@ -9,6 +9,7 @@ from core.orgs.models import Organization
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.tests.factories import OrganizationSourceFactory
 from core.collections.tests.factories import OrganizationCollectionFactory
+from core.users.tests.factories import UserProfileFactory
 
 
 class OrganizationTest(OCLTestCase):
@@ -25,6 +26,20 @@ class OrganizationTest(OCLTestCase):
     def test_members(self):
         org = Organization(id=123)
         self.assertEqual(org.members.count(), 0)
+
+        creator = UserProfileFactory(username='creator')
+        org = OrganizationFactory.build(created_by=creator, updated_by=creator)
+        org.save()
+
+        self.assertEqual(org.members.count(), 1)
+        self.assertEqual(list(org.members.values_list('username', flat=True)), ['creator'])
+
+        updater = UserProfileFactory(username='updater')
+        org.updated_by = updater
+        org.save()
+
+        self.assertEqual(org.members.count(), 2)
+        self.assertEqual(sorted(list(org.members.values_list('username', flat=True))), sorted(['creator', 'updater']))
 
     def test_create_organization_negative__no_name(self):
         with self.assertRaises(ValidationError):
