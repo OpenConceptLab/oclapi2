@@ -1,5 +1,6 @@
 import logging
 from math import ceil
+from urllib import parse
 
 from django.conf import settings
 from django.core.paginator import Paginator
@@ -456,6 +457,8 @@ class SourceChildMixin:
             kwargs = get(resolve(uri), 'kwargs', dict())
             query_params = get_query_params_from_url_string(uri)  # parsing query parameters
             kwargs.update(query_params)
+            if 'concept' in kwargs:
+                kwargs['concept'] = parse.unquote(kwargs['concept'])
             queryset = cls.get_base_queryset(kwargs)
             if queryset.count() > 1 and \
                     ('concept_version' not in kwargs or 'mapping_version' not in kwargs) and \
