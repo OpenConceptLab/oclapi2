@@ -11,7 +11,7 @@ from core.common.models import VersionedModel
 from core.common.tasks import process_hierarchy_for_new_concept, process_hierarchy_for_concept_version, \
     process_hierarchy_for_new_parent_concept_version
 from core.common.utils import reverse_resource, parse_updated_since_param, generate_temp_version, drop_version, \
-    encode_string
+    encode_string, decode_string
 from core.concepts.constants import CONCEPT_TYPE, LOCALES_FULLY_SPECIFIED, LOCALES_SHORT, LOCALES_SEARCH_INDEX_TERM, \
     CONCEPT_WAS_RETIRED, CONCEPT_IS_ALREADY_RETIRED, CONCEPT_IS_ALREADY_NOT_RETIRED, CONCEPT_WAS_UNRETIRED, \
     PERSIST_CLONE_ERROR, PERSIST_CLONE_SPECIFY_USER_ERROR, ALREADY_EXISTS, CONCEPT_REGEX
@@ -369,7 +369,8 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                 queryset = queryset.filter(cls.get_iexact_or_criteria('sources__version', container_version))
         if concept:
             mnemonics = [concept, encode_string(concept, safe=' '), encode_string(concept, safe='+'),
-                         encode_string(concept, safe='+%'), encode_string(concept, safe='% +')]
+                         encode_string(concept, safe='+%'), encode_string(concept, safe='% +'),
+                         decode_string(concept), decode_string(concept, False)]
             queryset = queryset.filter(mnemonic__in=mnemonics)
         if concept_version:
             queryset = queryset.filter(cls.get_iexact_or_criteria('version', concept_version))

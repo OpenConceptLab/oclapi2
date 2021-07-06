@@ -614,8 +614,8 @@ def is_url_encoded_string(string, lower=True):
     return string == encoded_string
 
 
-def decode_string(string):
-    return parse.unquote_plus(string)
+def decode_string(string, plus=True):
+    return parse.unquote_plus(string) if plus else parse.unquote(string)
 
 
 def encode_string(string, **kwargs):
