@@ -428,7 +428,7 @@ class SourceLatestVersionSummaryView(SourceVersionBaseView, RetrieveAPIView, Upd
         return queryset.order_by('-created_at')
 
 
-class SourceClientConfigsView(ResourceClientConfigsView):
+class SourceClientConfigsView(SourceBaseView, ResourceClientConfigsView):
     lookup_field = 'source'
     model = Source
     queryset = Source.objects.filter(is_active=True, version='HEAD')

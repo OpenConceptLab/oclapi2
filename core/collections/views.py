@@ -636,7 +636,7 @@ class CollectionLatestVersionSummaryView(CollectionVersionBaseView, RetrieveAPIV
         return queryset.order_by('-created_at')
 
 
-class CollectionClientConfigsView(ResourceClientConfigsView):
+class CollectionClientConfigsView(CollectionBaseView, ResourceClientConfigsView):
     lookup_field = 'collection'
     model = Collection
     queryset = Collection.objects.filter(is_active=True, version='HEAD')
