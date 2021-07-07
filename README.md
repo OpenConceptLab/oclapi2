@@ -20,8 +20,7 @@ In order to release please trigger the release build step in [our CI](https://ci
 that the maintenance version will be automatically increased after a successful release. It is desired only, if you are releasing the latest build and
 should be turned off by setting the increaseMaintenanceRelease variable to false on the Run stage "Release" popup in other cases.
 
-You also need to create a deployment release [here](https://ci.openmrs.org/deploy/createDeploymentVersion.action?deploymentProjectId=205619201).
-Please make sure the release version matches the version defined in core/__init__.py (except the extended GIT SHA in the release version).
+A deployment release will be automatically created and pushed to the staging environment.
 
 ### Deployment
 
