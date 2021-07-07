@@ -13,9 +13,11 @@ from rest_framework.permissions import IsAdminUser, IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from core.common.constants import NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY
+from core.common.constants import NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY, LAST_LOGIN_SINCE_PARAM, \
+    LAST_LOGIN_BEFORE_PARAM
 from core.common.mixins import ListWithHeadersMixin
-from core.common.utils import parse_updated_since_param
+from core.common.swagger_parameters import last_login_before_param, last_login_since_param, updated_since_param
+from core.common.utils import parse_updated_since_param, parse_updated_since
 from core.common.views import BaseAPIView, BaseLogoView
 from core.orgs.models import Organization
 from core.users.constants import VERIFICATION_TOKEN_MISMATCH, VERIFY_EMAIL_MESSAGE
@@ -58,8 +60,14 @@ class UserBaseView(BaseAPIView):
 
     def get_queryset(self):
         updated_since = parse_updated_since_param(self.request.query_params)
+        last_login_since = self.request.query_params.get(LAST_LOGIN_SINCE_PARAM, None)
+        last_login_before = self.request.query_params.get(LAST_LOGIN_BEFORE_PARAM, None)
         if updated_since:
             self.queryset = self.queryset.filter(updated_at__gte=updated_since)
+        if last_login_since:
+            self.queryset = self.queryset.filter(last_login__gte=parse_updated_since(last_login_since))
+        if last_login_before:
+            self.queryset = self.queryset.filter(last_login__lt=parse_updated_since(last_login_before))
         return self.queryset
 
 
@@ -89,6 +97,7 @@ class UserListView(UserBaseView,
         user = self.request.user
         return organization.public_can_view or user.is_staff or organization.is_member(user)
 
+    @swagger_auto_schema(manual_parameters=[last_login_before_param, last_login_since_param, updated_since_param])
     def get(self, request, *args, **kwargs):
         org = kwargs.pop('org', None)
         if org:

@@ -1,7 +1,8 @@
 from drf_yasg import openapi
 
 from core.common.constants import RELEASED_PARAM, VERBOSE_PARAM, INCLUDE_RETIRED_PARAM, PROCESSING_PARAM, \
-    INCLUDE_INVERSE_MAPPINGS_PARAM, UPDATED_SINCE_PARAM, INCLUDE_SOURCE_VERSIONS, INCLUDE_COLLECTION_VERSIONS
+    INCLUDE_INVERSE_MAPPINGS_PARAM, UPDATED_SINCE_PARAM, INCLUDE_SOURCE_VERSIONS, INCLUDE_COLLECTION_VERSIONS, \
+    LAST_LOGIN_BEFORE_PARAM, LAST_LOGIN_SINCE_PARAM
 
 # HEADERS
 include_facets_header = openapi.Parameter(
@@ -52,6 +53,12 @@ released_param = openapi.Parameter(
 processing_param = openapi.Parameter(
     PROCESSING_PARAM, openapi.IN_QUERY, type=openapi.TYPE_BOOLEAN, default=False,
 )
+
+last_login_before_param = openapi.Parameter(
+    LAST_LOGIN_BEFORE_PARAM, openapi.IN_QUERY, description='YYYY-MM-DD (optional)', type=openapi.TYPE_STRING)
+
+last_login_since_param = openapi.Parameter(
+    LAST_LOGIN_SINCE_PARAM, openapi.IN_QUERY, description='YYYY-MM-DD (optional)', type=openapi.TYPE_STRING)
 
 # bulk import params
 task_param = openapi.Parameter(
