@@ -5,8 +5,10 @@ from rest_framework.serializers import ModelSerializer
 
 from core.common.constants import INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_MAPPINGS_PARAM, INCLUDE_EXTRAS_PARAM, \
     INCLUDE_PARENT_CONCEPTS, INCLUDE_CHILD_CONCEPTS, INCLUDE_SOURCE_VERSIONS, INCLUDE_COLLECTION_VERSIONS, \
-    CREATE_PARENT_VERSION_QUERY_PARAM, INCLUDE_HIERARCHY_PATH, INCLUDE_PARENT_CONCEPT_URLS, INCLUDE_CHILD_CONCEPT_URLS
+    CREATE_PARENT_VERSION_QUERY_PARAM, INCLUDE_HIERARCHY_PATH, INCLUDE_PARENT_CONCEPT_URLS, \
+    INCLUDE_CHILD_CONCEPT_URLS, HEAD
 from core.common.fields import EncodedDecodedCharField
+from core.common.utils import to_parent_uri_from_kwargs
 from core.concepts.models import Concept, LocalizedText
 
 
@@ -113,6 +115,7 @@ class ConceptListSerializer(ModelSerializer):
 
     def __init__(self, *args, **kwargs):
         params = get(kwargs, 'context.request.query_params')
+        self.view_kwargs = get(kwargs, 'context.view.kwargs', dict())
         self.query_params = params.dict() if params else dict()
         self.include_indirect_mappings = self.query_params.get(INCLUDE_INVERSE_MAPPINGS_PARAM) in ['true', True]
         self.include_direct_mappings = self.query_params.get(INCLUDE_MAPPINGS_PARAM) in ['true', True]
@@ -142,10 +145,18 @@ class ConceptListSerializer(ModelSerializer):
     def get_mappings(self, obj):
         from core.mappings.serializers import MappingDetailSerializer
         context = get(self, 'context')
-        if self.include_direct_mappings:
-            return MappingDetailSerializer(obj.get_unidirectional_mappings(), many=True, context=context).data
+        is_collection = 'collection' in self.view_kwargs
+        collection_version = self.view_kwargs.get('version', HEAD) if is_collection else None
+        parent_uri = to_parent_uri_from_kwargs(self.view_kwargs) if is_collection else None
         if self.include_indirect_mappings:
-            return MappingDetailSerializer(obj.get_bidirectional_mappings(), many=True, context=context).data
+            mappings = obj.get_bidirectional_mappings_for_collection(
+                parent_uri, collection_version
+            ) if is_collection else obj.get_bidirectional_mappings()
+            return MappingDetailSerializer(mappings, many=True, context=context).data
+        if self.include_direct_mappings:
+            mappings = obj.get_unidirectional_mappings_for_collection(
+                parent_uri, collection_version) if is_collection else obj.get_unidirectional_mappings()
+            return MappingDetailSerializer(mappings, many=True, context=context).data
 
         return []
 
@@ -212,6 +223,8 @@ class ConceptDetailSerializer(ModelSerializer):
 
     def __init__(self, *args, **kwargs):
         params = get(kwargs, 'context.request.query_params')
+        self.view_kwargs = get(kwargs, 'context.view.kwargs', dict())
+
         self.query_params = params.dict() if params else dict()
         self.include_indirect_mappings = self.query_params.get(INCLUDE_INVERSE_MAPPINGS_PARAM) in ['true', True]
         self.include_direct_mappings = self.query_params.get(INCLUDE_MAPPINGS_PARAM) in ['true', True]
@@ -252,10 +265,18 @@ class ConceptDetailSerializer(ModelSerializer):
     def get_mappings(self, obj):
         from core.mappings.serializers import MappingDetailSerializer
         context = get(self, 'context')
+        is_collection = 'collection' in self.view_kwargs
+        collection_version = self.view_kwargs.get('version', HEAD) if is_collection else None
+        parent_uri = to_parent_uri_from_kwargs(self.view_kwargs) if is_collection else None
         if self.include_indirect_mappings:
-            return MappingDetailSerializer(obj.get_bidirectional_mappings(), many=True, context=context).data
+            mappings = obj.get_bidirectional_mappings_for_collection(
+                parent_uri, collection_version
+            ) if is_collection else obj.get_bidirectional_mappings()
+            return MappingDetailSerializer(mappings, many=True, context=context).data
         if self.include_direct_mappings:
-            return MappingDetailSerializer(obj.get_unidirectional_mappings(), many=True, context=context).data
+            mappings = obj.get_unidirectional_mappings_for_collection(
+                parent_uri, collection_version) if is_collection else obj.get_unidirectional_mappings()
+            return MappingDetailSerializer(mappings, many=True, context=context).data
 
         return []
 
@@ -320,6 +341,7 @@ class ConceptVersionDetailSerializer(ModelSerializer):
 
     def __init__(self, *args, **kwargs):
         params = get(kwargs, 'context.request.query_params')
+        self.view_kwargs = get(kwargs, 'context.view.kwargs', dict())
 
         self.include_indirect_mappings = False
         self.include_direct_mappings = False
@@ -359,10 +381,18 @@ class ConceptVersionDetailSerializer(ModelSerializer):
     def get_mappings(self, obj):
         from core.mappings.serializers import MappingDetailSerializer
         context = get(self, 'context')
-        if self.include_direct_mappings:
-            return MappingDetailSerializer(obj.get_unidirectional_mappings(), many=True, context=context).data
+        is_collection = 'collection' in self.view_kwargs
+        collection_version = self.view_kwargs.get('version', HEAD) if is_collection else None
+        parent_uri = to_parent_uri_from_kwargs(self.view_kwargs) if is_collection else None
         if self.include_indirect_mappings:
-            return MappingDetailSerializer(obj.get_bidirectional_mappings(), many=True, context=context).data
+            mappings = obj.get_bidirectional_mappings_for_collection(
+                parent_uri, collection_version
+            ) if is_collection else obj.get_bidirectional_mappings()
+            return MappingDetailSerializer(mappings, many=True, context=context).data
+        if self.include_direct_mappings:
+            mappings = obj.get_unidirectional_mappings_for_collection(
+                parent_uri, collection_version) if is_collection else obj.get_unidirectional_mappings()
+            return MappingDetailSerializer(mappings, many=True, context=context).data
 
         return []
 

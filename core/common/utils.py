@@ -14,7 +14,7 @@ from dateutil import parser
 from django.conf import settings
 from django.urls import NoReverseMatch, reverse, get_resolver, resolve, Resolver404
 from djqscsv import csv_file_for
-from pydash import flatten
+from pydash import flatten, compact
 from requests.auth import HTTPBasicAuth
 from rest_framework.utils import encoders
 
@@ -620,3 +620,26 @@ def decode_string(string, plus=True):
 
 def encode_string(string, **kwargs):
     return parse.quote(string, **kwargs)
+
+
+def to_parent_uri_from_kwargs(params):
+    if not params:
+        return None
+
+    owner_type, owner, parent_type, parent = None, None, None, None
+
+    if 'org' in params:
+        owner_type = 'orgs'
+        owner = params.get('org')
+    elif 'user' in params:
+        owner_type = 'users'
+        owner = params.get('user')
+
+    if 'source' in params:
+        parent_type = 'sources'
+        parent = params.get('source')
+    elif 'collection' in params:
+        parent_type = 'collections'
+        parent = params.get('collection')
+
+    return '/' + '/'.join(compact([owner_type, owner, parent_type, parent, params.get('version', None)])) + '/'

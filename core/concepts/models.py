@@ -675,6 +675,20 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
         return errors
 
+    def get_unidirectional_mappings_for_collection(self, collection_url, collection_version=HEAD):
+        from core.mappings.models import Mapping
+        return Mapping.objects.filter(
+            from_concept__uri__icontains=drop_version(self.uri), collection_set__uri__icontains=collection_url,
+            collection_set__version=collection_version
+        )
+
+    def get_indirect_mappings_for_collection(self, collection_url, collection_version=HEAD):
+        from core.mappings.models import Mapping
+        return Mapping.objects.filter(
+            to_concept__uri__icontains=drop_version(self.uri), collection_set__uri__icontains=collection_url,
+            collection_set__version=collection_version
+        )
+
     def get_unidirectional_mappings(self):
         return self.__get_mappings_from_relation('mappings_from')
 
@@ -703,6 +717,15 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
     def get_bidirectional_mappings(self):
         queryset = self.get_unidirectional_mappings() | self.get_indirect_mappings()
+
+        return queryset.distinct()
+
+    def get_bidirectional_mappings_for_collection(self, collection_url, collection_version=HEAD):
+        queryset = self.get_unidirectional_mappings_for_collection(
+            collection_url, collection_version
+        ) | self.get_indirect_mappings_for_collection(
+            collection_url, collection_version
+        )
 
         return queryset.distinct()
 

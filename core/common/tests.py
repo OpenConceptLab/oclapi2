@@ -20,7 +20,7 @@ from core.common.utils import (
     compact_dict_by_values, to_snake_case, flower_get, task_exists, parse_bulk_import_task_id,
     to_camel_case,
     drop_version, is_versioned_uri, separate_version, to_parent_uri, jsonify_safe, es_get,
-    get_resource_class_from_resource_name, flatten_dict, is_csv_file, is_url_encoded_string)
+    get_resource_class_from_resource_name, flatten_dict, is_csv_file, is_url_encoded_string, to_parent_uri_from_kwargs)
 from core.concepts.models import Concept, LocalizedText
 from core.mappings.models import Mapping
 from core.orgs.models import Organization
@@ -712,6 +712,41 @@ class UtilsTest(OCLTestCase):
         self.assertTrue(is_url_encoded_string('foo'))
         self.assertFalse(is_url_encoded_string('foo/bar'))
         self.assertTrue(is_url_encoded_string('foo%2Fbar'))
+
+    def test_to_parent_uri_from_kwargs(self):
+        self.assertEqual(
+            to_parent_uri_from_kwargs({'org': 'OCL', 'collection': 'c1'}),
+            '/orgs/OCL/collections/c1/'
+        )
+        self.assertEqual(
+            to_parent_uri_from_kwargs({'org': 'OCL', 'collection': 'c1', 'version': 'v1'}),
+            '/orgs/OCL/collections/c1/v1/'
+        )
+        self.assertEqual(
+            to_parent_uri_from_kwargs({'user': 'admin', 'collection': 'c1', 'version': 'v1'}),
+            '/users/admin/collections/c1/v1/'
+        )
+        self.assertEqual(
+            to_parent_uri_from_kwargs({'user': 'admin', 'source': 's1', 'version': 'v1'}),
+            '/users/admin/sources/s1/v1/'
+        )
+        self.assertEqual(
+            to_parent_uri_from_kwargs({'org': 'OCL', 'source': 's1'}),
+            '/orgs/OCL/sources/s1/'
+        )
+        self.assertEqual(
+            to_parent_uri_from_kwargs({'org': 'OCL', 'source': 's1', 'concept': 'c1', 'concept_version': 'v1'}),
+            '/orgs/OCL/sources/s1/'
+        )
+        self.assertEqual(
+            to_parent_uri_from_kwargs(
+                {'org': 'OCL', 'source': 's1', 'version': 'v1', 'concept': 'c1', 'concept_version': 'v1'}),
+            '/orgs/OCL/sources/s1/v1/'
+        )
+        self.assertEqual(to_parent_uri_from_kwargs({'org': 'OCL'}), '/orgs/OCL/')
+        self.assertEqual(to_parent_uri_from_kwargs({'user': 'admin'}), '/users/admin/')
+        self.assertIsNone(to_parent_uri_from_kwargs({}))
+        self.assertIsNone(to_parent_uri_from_kwargs(None))
 
 
 class BaseModelTest(OCLTestCase):
