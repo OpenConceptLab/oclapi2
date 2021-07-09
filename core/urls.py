@@ -24,7 +24,7 @@ import core.concepts.views as concept_views
 import core.mappings.views as mapping_views
 from core.common.constants import NAMESPACE_PATTERN
 from core.common.utils import get_api_base_url
-from core.common.views import RootView, FeedbackView, APIVersionView
+from core.common.views import RootView, FeedbackView, APIVersionView, ChangeLogView
 from core.importers.views import BulkImportView
 
 SchemaView = get_schema_view(
@@ -41,6 +41,7 @@ SchemaView = get_schema_view(
 urlpatterns = [
     path('', RootView.as_view(), name='root'),
     path('version/', APIVersionView.as_view(), name='api-version'),
+    path('changelog/', ChangeLogView.as_view(), name='changelog'),
     path('feedback/', FeedbackView.as_view(), name='feedback'),
     url(r'^swagger(?P<format>\.json|\.yaml)$', SchemaView.without_ui(cache_timeout=0), name='schema-json'),
     url(r'^swagger/$', SchemaView.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui'),

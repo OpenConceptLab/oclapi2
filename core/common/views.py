@@ -1,10 +1,12 @@
 import base64
+import os
 import urllib.parse
 from email.mime.image import MIMEImage
 
+import markdown
 from django.conf import settings
 from django.core.mail import EmailMessage
-from django.http import Http404
+from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
@@ -16,6 +18,7 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from core import __version__
 from core.common.constants import SEARCH_PARAM, LIST_DEFAULT_LIMIT, CSV_DEFAULT_LIMIT, \
     LIMIT_PARAM, NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY, INCLUDE_RETIRED_PARAM, VERBOSE_PARAM, HEAD, LATEST
 from core.common.mixins import PathWalkerMixin
@@ -25,7 +28,6 @@ from core.common.utils import compact_dict_by_values, to_snake_case, to_camel_ca
 from core.concepts.permissions import CanViewParentDictionary, CanEditParentDictionary
 from core.orgs.constants import ORG_OBJECT_TYPE
 from core.users.constants import USER_OBJECT_TYPE
-from core import __version__
 
 
 class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
@@ -651,6 +653,16 @@ class APIVersionView(APIView):
     @staticmethod
     def get(_):
         return Response(__version__)
+
+
+class ChangeLogView(APIView):
+    permission_classes = (AllowAny, )
+    swagger_schema = None
+
+    @staticmethod
+    def get(_):
+        markdown_content = open(os.path.join(os.path.dirname(__file__), '../../changelog.md'), 'r').read()
+        return HttpResponse(markdown.markdown(markdown_content), content_type="text/html")
 
 
 class RootView(BaseAPIView):  # pragma: no cover
