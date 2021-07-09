@@ -8,6 +8,7 @@ from django.db import models, IntegrityError
 from django.db.models import Value, Q
 from django.db.models.expressions import CombinedExpression, F
 from django.utils import timezone
+from django.utils.functional import cached_property
 from django_elasticsearch_dsl.registries import registry
 from django_elasticsearch_dsl.signals import RealTimeSignalProcessor
 from pydash import get
@@ -703,7 +704,7 @@ class ConceptContainerModel(VersionedModel):
 
         return False
 
-    @property
+    @cached_property
     def export_path(self):
         last_update = self.last_child_update.strftime('%Y%m%d%H%M%S')
         return self.generic_export_path(suffix="{}.zip".format(last_update))
