@@ -50,10 +50,12 @@ def get_commits(from_sha, to_sha, verbose=True, remove_system_commits=True):
     else:
         commits_list_cmd += " " + commits_with_issue_number_grep_statement()
 
-    return run_shell_cmd(commits_list_cmd).split('\n')
+    return format_commits(run_shell_cmd(commits_list_cmd).split('\n'))
+
 
 def get_issue_url(issue_number):
     return "https://github.com/OpenConceptLab/ocl_issues/issues/{}".format(issue_number)
+
 
 def format_commits(commits):
     issue_number_regex = re.compile('\#\d+')
@@ -98,8 +100,8 @@ def run():
         if not from_message or not to_message:
             throw_error()
 
-        commits = format_commits(get_commits(
-            get_commit_sha_from_message(from_message), get_commit_sha_from_message(to_message), is_verbose))
+        commits = get_commits(
+            get_commit_sha_from_message(from_message), get_commit_sha_from_message(to_message), is_verbose)
         release_date = get_release_date(to_message)
 
         print(format_md(value="{} - {}".format(to_message, release_date), heading_level=5))
