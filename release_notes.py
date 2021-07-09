@@ -1,4 +1,5 @@
 import os
+import re
 import subprocess
 import sys
 
@@ -51,6 +52,27 @@ def get_commits(from_sha, to_sha, verbose=True, remove_system_commits=True):
 
     return run_shell_cmd(commits_list_cmd).split('\n')
 
+def get_issue_url(issue_number):
+    return "https://github.com/OpenConceptLab/ocl_issues/issues/{}".format(issue_number)
+
+def format_commits(commits):
+    issue_number_regex = re.compile('\#\d+')
+    result = []
+    for commit in commits:
+        if commit.startswith('OpenConceptLab/ocl_issues'):
+            issue_number = issue_number_regex.search(commit).group()
+            if issue_number:
+                prefix = 'OpenConceptLab/ocl_issues' + issue_number
+                suffix = commit.split(prefix)[1]
+                issue_number = issue_number.replace('#', '')
+                result.append("[{}]({}){}".format(prefix, get_issue_url(issue_number), suffix))
+            else:
+                result.append(commit)
+
+        else:
+            result.append(commit)
+    return result
+
 
 def format_md(value, heading_level=None):
     if isinstance(value, list):
@@ -76,8 +98,8 @@ def run():
         if not from_message or not to_message:
             throw_error()
 
-        commits = get_commits(
-            get_commit_sha_from_message(from_message), get_commit_sha_from_message(to_message), is_verbose)
+        commits = format_commits(get_commits(
+            get_commit_sha_from_message(from_message), get_commit_sha_from_message(to_message), is_verbose))
         release_date = get_release_date(to_message)
 
         print(format_md(value="{} - {}".format(to_message, release_date), heading_level=5))
