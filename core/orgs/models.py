@@ -13,6 +13,8 @@ from core.orgs.constants import ORG_OBJECT_TYPE
 class Organization(BaseResourceModel, SourceContainerMixin):
     class Meta:
         db_table = 'organizations'
+        indexes = [] + BaseResourceModel.Meta.indexes
+
 
     OBJECT_TYPE = ORG_OBJECT_TYPE
     es_fields = {

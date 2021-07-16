@@ -32,6 +32,11 @@ class BaseModel(models.Model):
     """
     class Meta:
         abstract = True
+        indexes = [
+            models.Index(fields=['uri']),
+            models.Index(fields=['-updated_at']),
+            models.Index(fields=['-created_at'])
+        ]
 
     id = models.BigAutoField(primary_key=True)
     internal_reference_id = models.CharField(max_length=255, null=True, blank=True)
@@ -204,6 +209,9 @@ class BaseResourceModel(BaseModel, CommonLogoModel):
 
     class Meta:
         abstract = True
+        indexes = [
+            models.Index(fields=['mnemonic']),
+        ] + BaseModel.Meta.indexes
 
     def __str__(self):
         return str(self.mnemonic)
@@ -225,6 +233,11 @@ class VersionedModel(BaseResourceModel):
 
     class Meta:
         abstract = True
+        indexes = [
+            models.Index(fields=['version']),
+            models.Index(fields=['retired']),
+            models.Index(fields=['is_latest_version']),
+        ] + BaseResourceModel.Meta.indexes
 
     @property
     def is_versioned(self):
@@ -327,6 +340,7 @@ class ConceptContainerModel(VersionedModel):
 
     class Meta:
         abstract = True
+        indexes = [] + VersionedModel.Meta.indexes
 
     @property
     def is_openmrs_schema(self):

@@ -42,6 +42,7 @@ class Source(ConceptContainerModel):
                 condition=models.Q(organization=None),
             )
         ]
+        indexes = [] + ConceptContainerModel.Meta.indexes
 
     source_type = models.TextField(blank=True, null=True)
     content_type = models.TextField(blank=True, null=True)

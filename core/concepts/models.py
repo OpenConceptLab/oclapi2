@@ -117,9 +117,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     class Meta:
         db_table = 'concepts'
         unique_together = ('mnemonic', 'version', 'parent')
-        indexes = [
-            models.Index(fields=['-updated_at']),
-        ]
+        indexes = [] + VersionedModel.Meta.indexes
 
     external_id = models.TextField(null=True, blank=True)
     concept_class = models.TextField()

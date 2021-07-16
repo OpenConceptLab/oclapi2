@@ -55,6 +55,7 @@ class Collection(ConceptContainerModel):
                 condition=models.Q(organization=None),
             )
         ]
+        indexes = [] + ConceptContainerModel.Meta.indexes
 
     collection_type = models.TextField(blank=True)
     preferred_source = models.TextField(blank=True)

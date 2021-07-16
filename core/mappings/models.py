@@ -20,9 +20,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
     class Meta:
         db_table = 'mappings'
         unique_together = ('mnemonic', 'version', 'parent')
-        indexes = [
-            models.Index(fields=['-updated_at']),
-        ]
+        indexes = [] + VersionedModel.Meta.indexes
 
     parent = models.ForeignKey('sources.Source', related_name='mappings_set', on_delete=models.CASCADE)
     map_type = models.TextField(db_index=True)
