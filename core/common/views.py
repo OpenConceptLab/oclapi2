@@ -1,5 +1,4 @@
 import base64
-import os
 import urllib.parse
 from email.mime.image import MIMEImage
 
