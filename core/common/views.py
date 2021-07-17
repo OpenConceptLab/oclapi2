@@ -4,6 +4,7 @@ import urllib.parse
 from email.mime.image import MIMEImage
 
 import markdown
+import requests
 from django.conf import settings
 from django.core.mail import EmailMessage
 from django.http import Http404, HttpResponse
@@ -661,8 +662,8 @@ class ChangeLogView(APIView):
 
     @staticmethod
     def get(_):
-        markdown_content = open(os.path.join(os.path.dirname(__file__), '../../changelog.md'), 'r').read()
-        return HttpResponse(markdown.markdown(markdown_content), content_type="text/html")
+        resp = requests.get('https://raw.githubusercontent.com/OpenConceptLab/oclapi2/master/changelog.md')
+        return HttpResponse(markdown.markdown(resp.text), content_type="text/html")
 
 
 class RootView(BaseAPIView):  # pragma: no cover
