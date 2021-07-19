@@ -107,7 +107,7 @@ class ConceptListSerializer(ModelSerializer):
     source = CharField(source='parent_resource')
     owner = CharField(source='owner_name')
     update_comment = CharField(source='comment', required=False, allow_null=True, allow_blank=True)
-    locale = SerializerMethodField()
+    locale = CharField(source='iso_639_1_locale', read_only=True)
     url = CharField(required=False, source='versioned_object_url')
     version_created_on = DateTimeField(source='created_at', read_only=True)
     version_created_by = DateTimeField(source='created_by.username', read_only=True)
@@ -137,10 +137,6 @@ class ConceptListSerializer(ModelSerializer):
             'locale', 'version_created_by', 'version_created_on', 'mappings', 'is_latest_version', 'versions_url',
             'version_url', 'extras',
         )
-
-    @staticmethod
-    def get_locale(obj):
-        return obj.iso_639_1_locale
 
     def get_mappings(self, obj):
         from core.mappings.serializers import MappingDetailSerializer

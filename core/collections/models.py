@@ -16,7 +16,7 @@ from core.common.constants import (
     DEFAULT_REPOSITORY_TYPE, ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT
 )
 from core.common.models import ConceptContainerModel
-from core.common.utils import reverse_resource, is_valid_uri, drop_version
+from core.common.utils import is_valid_uri, drop_version
 from core.concepts.constants import LOCALES_FULLY_SPECIFIED
 from core.concepts.models import Concept
 from core.concepts.views import ConceptListView
@@ -91,10 +91,6 @@ class Collection(ConceptContainerModel):
     @staticmethod
     def get_resource_url_kwarg():
         return 'collection'
-
-    @property
-    def versions_url(self):
-        return reverse_resource(self, 'collection-version-list')
 
     def update_version_data(self, obj=None):
         super().update_version_data(obj)

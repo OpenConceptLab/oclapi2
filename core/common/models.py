@@ -312,6 +312,10 @@ class VersionedModel(BaseResourceModel):
             return self.get_resource_url_kwarg()
         return self.get_version_url_kwarg()
 
+    @property
+    def versions_url(self):
+        return drop_version(self.uri) + 'versions/'
+
 
 class ConceptContainerModel(VersionedModel):
     """

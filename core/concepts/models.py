@@ -10,7 +10,7 @@ from core.common.mixins import SourceChildMixin
 from core.common.models import VersionedModel
 from core.common.tasks import process_hierarchy_for_new_concept, process_hierarchy_for_concept_version, \
     process_hierarchy_for_new_parent_concept_version
-from core.common.utils import reverse_resource, parse_updated_since_param, generate_temp_version, drop_version, \
+from core.common.utils import parse_updated_since_param, generate_temp_version, drop_version, \
     encode_string, decode_string
 from core.concepts.constants import CONCEPT_TYPE, LOCALES_FULLY_SPECIFIED, LOCALES_SHORT, LOCALES_SEARCH_INDEX_TERM, \
     CONCEPT_WAS_RETIRED, CONCEPT_IS_ALREADY_RETIRED, CONCEPT_IS_ALREADY_NOT_RETIRED, CONCEPT_WAS_UNRETIRED, \
@@ -281,10 +281,6 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     @property
     def custom_validation_schema(self):
         return get(self, 'parent.custom_validation_schema')
-
-    @property
-    def versions_url(self):
-        return reverse_resource(self, 'concept-version-list')
 
     @property
     def all_names(self):

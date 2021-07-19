@@ -6,7 +6,7 @@ from pydash import get, compact
 
 from core.common.constants import HEAD, ACCESS_TYPE_NONE
 from core.common.models import ConceptContainerModel
-from core.common.utils import reverse_resource, get_query_params_from_url_string
+from core.common.utils import get_query_params_from_url_string
 from core.concepts.models import LocalizedText
 from core.sources.constants import SOURCE_TYPE, SOURCE_VERSION_TYPE, HIERARCHY_ROOT_MUST_BELONG_TO_SAME_SOURCE, \
     HIERARCHY_MEANINGS
@@ -88,10 +88,6 @@ class Source(ConceptContainerModel):
     @property
     def source(self):
         return self.mnemonic
-
-    @property
-    def versions_url(self):
-        return reverse_resource(self, 'source-version-list')
 
     def update_version_data(self, obj=None):
         super().update_version_data(obj)
