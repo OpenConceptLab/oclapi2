@@ -2,7 +2,6 @@
 set -e
 
 VERSION_FILE="core/__init__.py"
-CHANGELOG_FILE="changelog.md"
 
 SOURCE_COMMIT=$(git rev-parse HEAD)
 export SOURCE_COMMIT=${SOURCE_COMMIT:0:8}
@@ -37,9 +36,7 @@ if [[ "$INCREASE_MAINTENANCE_VERSION" = true ]]; then
   NEW_PROJECT_VERSION=$(echo "${PROJECT_VERSION}" | awk -F. -v OFS=. '{$NF++;print}')
   sed -i "s/API_VERSION = '$PROJECT_VERSION'/API_VERSION = '$NEW_PROJECT_VERSION'/" $VERSION_FILE
 
-  python release_notes.py $PROJECT_VERSION $NEW_PROJECT_VERSION True | cat - $CHANGELOG_FILE > temp && mv temp $CHANGELOG_FILE
-
-  git add $VERSION_FILE $CHANGELOG_FILE
+  git add $VERSION_FILE
   git commit -m "[skip ci] Increase maintenance version to $NEW_PROJECT_VERSION"
 
   git push origin master
