@@ -495,6 +495,26 @@ class SourceChildMixin:
 
         return compact_dict_by_values(filters)
 
+    @classmethod
+    def get_filter_by_container_criterion(  # pylint: disable=too-many-arguments
+            cls, container_prefix, parent, org, user, container_version, is_latest_released, latest_released_version
+    ):
+        criteria = cls.get_iexact_or_criteria('{}__mnemonic'.format(container_prefix), parent)
+
+        if not container_version and not is_latest_released:
+            criteria &= Q(**{'{}__version'.format(container_prefix): HEAD})
+        if user:
+            criteria &= cls.get_iexact_or_criteria('{}__user__username'.format(container_prefix), user)
+        if org:
+            criteria &= cls.get_iexact_or_criteria('{}__organization__mnemonic'.format(container_prefix), org)
+        if is_latest_released:
+            criteria &= cls.get_iexact_or_criteria(
+                '{}__version'.format(container_prefix), get(latest_released_version, 'version'))
+        if container_version and not is_latest_released:
+            criteria &= cls.get_iexact_or_criteria('{}__version'.format(container_prefix), container_version)
+
+        return criteria
+
 
 class ConceptContainerExportMixin:
     def get_object(self):

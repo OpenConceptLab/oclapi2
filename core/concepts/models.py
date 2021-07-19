@@ -337,37 +337,20 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                 return cls.objects.none()
 
         if collection:
-            mnemonic_criteria = cls.get_iexact_or_criteria('collection_set__mnemonic', collection)
-            if not container_version and not is_latest_released:
-                queryset = queryset.filter(mnemonic_criteria, collection_set__version=HEAD)
-            else:
-                queryset = queryset.filter(mnemonic_criteria)
-            if user:
-                queryset = queryset.filter(cls.get_iexact_or_criteria('collection_set__user__username', user))
-            if org:
-                queryset = queryset.filter(cls.get_iexact_or_criteria('collection_set__organization__mnemonic', org))
-            if is_latest_released:
-                queryset = queryset.filter(
-                    cls.get_iexact_or_criteria('collection_set__version', get(latest_released_version, 'version'))
+            queryset = queryset.filter(
+                cls.get_filter_by_container_criterion(
+                    'collection_set', collection, org, user, container_version,
+                    is_latest_released, latest_released_version,
                 )
-            if container_version and not is_latest_released:
-                queryset = queryset.filter(cls.get_iexact_or_criteria('collection_set__version', container_version))
+            )
         if source:
-            mnemonic_criteria = cls.get_iexact_or_criteria('sources__mnemonic', source)
-            if not container_version and not is_latest_released:
-                queryset = queryset.filter(mnemonic_criteria, sources__version=HEAD)
-            else:
-                queryset = queryset.filter(mnemonic_criteria)
-            if user:
-                queryset = queryset.filter(cls.get_iexact_or_criteria('parent__user__username', user))
-            if org:
-                queryset = queryset.filter(cls.get_iexact_or_criteria('parent__organization__mnemonic', org))
-            if is_latest_released:
-                queryset = queryset.filter(
-                    cls.get_iexact_or_criteria('sources__version', get(latest_released_version, 'version'))
+            queryset = queryset.filter(
+                cls.get_filter_by_container_criterion(
+                    'sources', source, org, user, container_version,
+                    is_latest_released, latest_released_version
                 )
-            if container_version and not is_latest_released:
-                queryset = queryset.filter(cls.get_iexact_or_criteria('sources__version', container_version))
+            )
+
         if concept:
             mnemonics = [concept, encode_string(concept, safe=' '), encode_string(concept, safe='+'),
                          encode_string(concept, safe='+%'), encode_string(concept, safe='% +'),

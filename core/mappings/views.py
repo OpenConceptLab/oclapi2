@@ -2,6 +2,7 @@ from django.db.models import F
 from django.http import QueryDict, Http404
 from django.shortcuts import get_object_or_404
 from drf_yasg.utils import swagger_auto_schema
+from pydash import get
 from rest_framework import status
 from rest_framework.generics import DestroyAPIView, UpdateAPIView, RetrieveAPIView, ListAPIView
 from rest_framework.mixins import CreateModelMixin
@@ -58,7 +59,8 @@ class MappingListView(MappingBaseView, ListWithHeadersMixin, CreateModelMixin):
         return MappingListSerializer
 
     def get_queryset(self):
-        is_latest_version = 'collection' not in self.kwargs and 'version' not in self.kwargs
+        is_latest_version = 'collection' not in self.kwargs and 'version' not in self.kwargs or \
+                            get(self.kwargs, 'version') == HEAD
         queryset = super().get_queryset()
         if is_latest_version:
             queryset = queryset.filter(is_latest_version=True)
