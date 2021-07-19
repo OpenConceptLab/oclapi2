@@ -1,6 +1,3 @@
-Bad args...
-Usage:
-python release_notes.py <from_version> <to_version> <verbose>
 ##### 2.0.13 - Mon Jul 19 08:54:47 2021 +0000
 - [OpenConceptLab/ocl_issues#846](https://github.com/OpenConceptLab/ocl_issues/issues/846) | Concept/Mapping queryset (without search) | refactoring and combining filters in criterion | removes duplicate results
 - unused import
