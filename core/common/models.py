@@ -36,7 +36,8 @@ class BaseModel(models.Model):
             models.Index(fields=['uri']),
             models.Index(fields=['-updated_at']),
             models.Index(fields=['-created_at']),
-            models.Index(fields=['is_active'])
+            models.Index(fields=['is_active']),
+            models.Index(fields=['public_access'])
         ]
 
     id = models.BigAutoField(primary_key=True)
