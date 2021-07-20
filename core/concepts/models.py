@@ -22,6 +22,13 @@ class LocalizedText(models.Model):
     class Meta:
         db_table = 'localized_texts'
 
+        indexes = [
+            models.Index(fields=['name']),
+            models.Index(fields=['type']),
+            models.Index(fields=['locale']),
+            models.Index(fields=['locale_preferred']),
+        ]
+
     id = models.BigAutoField(primary_key=True)
     internal_reference_id = models.CharField(max_length=255, null=True, blank=True)
     external_id = models.TextField(null=True, blank=True)

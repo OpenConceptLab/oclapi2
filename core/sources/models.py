@@ -43,6 +43,7 @@ class Source(ConceptContainerModel):
             )
         ]
         indexes = [] + ConceptContainerModel.Meta.indexes
+        # + index on UPPER(mnemonic) in custom migration 0022
 
     source_type = models.TextField(blank=True, null=True)
     content_type = models.TextField(blank=True, null=True)
