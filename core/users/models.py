@@ -165,7 +165,10 @@ class UserReport:  # pragma: no cover
         self.last_login_monthly_distribution = None
         self.organizations_created_by_month = None
         self.sources_created_by_month = None
+        self.source_versions_created_by_month = None
         self.collections_created_by_month = None
+        self.collection_versions_created_by_month = None
+        self.collection_references_created_by_month = None
         self.concepts_created_by_month = None
         self.mappings_created_by_month = None
         self.result = dict()
@@ -205,11 +208,24 @@ class UserReport:  # pragma: no cover
         from core.sources.models import Source
         self.sources_created_by_month = self.get_distribution(Source.objects.filter(version=HEAD))
 
+    def set_source_versions_created_by_month(self):
+        from core.sources.models import Source
+        self.source_versions_created_by_month = self.get_distribution(Source.objects.exclude(version=HEAD))
+
+    def set_collection_versions_created_by_month(self):
+        from core.collections.models import Collection
+        self.collection_versions_created_by_month = self.get_distribution(Collection.objects.exclude(version=HEAD))
+
+    def set_collection_references_created_by_month(self):
+        from core.collections.models import CollectionReference
+        self.collection_references_created_by_month = self.get_distribution(
+            CollectionReference.objects.filter(collections__version=HEAD))
+
     def set_organizations_created_by_month(self):
         from core.orgs.models import Organization
         self.organizations_created_by_month = self.get_distribution(Organization.objects)
 
-    def get_distribution(self, queryset, date_attr='created_at', count_by='mnemonic'):
+    def get_distribution(self, queryset, date_attr='created_at', count_by='id'):
         return self.set_date_range(queryset).annotate(
             month=TruncMonth(date_attr)
         ).filter(
@@ -238,6 +254,9 @@ class UserReport:  # pragma: no cover
         self.set_sources_created_by_month()
         self.set_collections_created_by_month()
         if self.verbose:
+            self.set_source_versions_created_by_month()
+            self.set_collection_versions_created_by_month()
+            self.set_collection_references_created_by_month()
             self.set_concepts_created_by_month()
             self.set_mappings_created_by_month()
 
@@ -253,8 +272,16 @@ class UserReport:  # pragma: no cover
             new_collections=self.__format_distribution(self.collections_created_by_month),
         )
         if self.verbose:
-            self.result['concepts_created_by_month'] = self.__format_distribution(self.concepts_created_by_month)
-            self.result['mappings_created_by_month'] = self.__format_distribution(self.mappings_created_by_month)
+            self.result['new_source_versions'] = self.__format_distribution(
+                self.source_versions_created_by_month)
+            self.result['new_collection_versions'] = self.__format_distribution(
+                self.collection_versions_created_by_month)
+            self.result['new_collection_references'] = self.__format_distribution(
+                self.collection_references_created_by_month)
+            self.result['new_concepts'] = self.__format_distribution(
+                self.concepts_created_by_month)
+            self.result['new_mappings'] = self.__format_distribution(
+                self.mappings_created_by_month)
 
     def generate(self):
         self.prepare()
