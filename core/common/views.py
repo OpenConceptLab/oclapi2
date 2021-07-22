@@ -60,7 +60,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         return not include_retired
 
     def _should_include_private(self):
-        return self.is_user_document() or self.request.user.is_staff
+        return self.is_user_document() or self.request.user.is_staff or self.is_user_scope()
 
     def is_verbose(self):
         return self.request.query_params.get(VERBOSE_PARAM, False) in ['true', True]
@@ -381,6 +381,20 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         from core.collections.documents import CollectionDocument
         from core.sources.documents import SourceDocument
         return self.document_model in [SourceDocument, CollectionDocument]
+
+    def is_user_scope(self):
+        org = self.kwargs.get('org', None)
+        user = self.kwargs.get('user', None)
+
+        request_user = self.request.user
+
+        if request_user.is_authenticated:
+            if user:
+                return user == request_user.username
+            if org:
+                return request_user.organizations.filter(mnemonic=org).exists()
+
+        return False
 
     def get_public_criteria(self):
         criteria = Q('match', public_can_view=True)
