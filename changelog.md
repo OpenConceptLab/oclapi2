@@ -1,3 +1,5 @@
+##### 2.0.19 - Fri Jul 23 03:09:59 2021 +0000
+- [OpenConceptLab/ocl_issues#853](https://github.com/OpenConceptLab/ocl_issues/issues/853) | search results to also consider org and user scope permissions
 ##### 2.0.18 - Thu Jul 22 09:55:18 2021 +0000
 - [OpenConceptLab/ocl_issues#852](https://github.com/OpenConceptLab/ocl_issues/issues/852) | user monthly report | added collection/source versions and collection references in verbose mode
 - [OpenConceptLab/ocl_issues#852](https://github.com/OpenConceptLab/ocl_issues/issues/852) | users monthly report API
