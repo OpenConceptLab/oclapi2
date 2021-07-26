@@ -1,3 +1,5 @@
+##### 2.0.20 - Mon Jul 26 10:28:11 2021 +0000
+- [OpenConceptLab/ocl_issues#845](https://github.com/OpenConceptLab/ocl_issues/issues/845) | performance | merging excludes
 ##### 2.0.19 - Fri Jul 23 03:09:59 2021 +0000
 - [OpenConceptLab/ocl_issues#853](https://github.com/OpenConceptLab/ocl_issues/issues/853) | search results to also consider org and user scope permissions
 ##### 2.0.18 - Thu Jul 22 09:55:18 2021 +0000
