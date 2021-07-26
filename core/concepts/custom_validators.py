@@ -85,7 +85,7 @@ class OpenMRSConceptValidator(BaseConceptValidator):
 
         return not self.repo.concepts_set.exclude(
             versioned_object_id=versioned_object_id
-        ).exclude(names__type__in=LOCALES_SHORT).exclude(names__type__in=LOCALES_SEARCH_INDEX_TERM).filter(
+        ).exclude(names__type__in=(*LOCALES_SHORT, *LOCALES_SEARCH_INDEX_TERM)).filter(
             is_active=True, retired=False, is_latest_version=True, names__locale=name.locale, names__name=name.name
         ).exists()
 
