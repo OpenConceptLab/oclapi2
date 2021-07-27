@@ -5,6 +5,7 @@ omit =
     core/asgi.py
     core/celery.py
     core/common/healthcheck/*
+    core/reports/*
     core/wsgi.py
     */v1_dump/*
     */management/commands/*

@@ -1,17 +1,11 @@
-from datetime import datetime
-
-from dateutil.relativedelta import relativedelta
 from django.contrib import admin
 from django.contrib.auth.models import AbstractUser
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
 from django.db import models
-from django.db.models import Count, F
-from django.db.models.functions import TruncMonth
 from django.urls import reverse
 from rest_framework.authtoken.models import Token
 
-from core.common.constants import HEAD
 from core.common.mixins import SourceContainerMixin
 from core.common.models import BaseModel, CommonLogoModel
 from core.common.tasks import send_user_verification_email, send_user_reset_password_email
@@ -150,142 +144,6 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
     @property
     def auth_groups(self):
         return self.groups.values_list('name', flat=True)
-
-
-class UserReport:  # pragma: no cover
-    def __init__(self, verbose=False, start=None, end=None):
-        self.verbose = verbose
-        now = datetime.now()
-        self.start = start or (now - relativedelta(months=6))
-        self.end = end or now
-        self.total = 0
-        self.active = 0
-        self.inactive = 0
-        self.joining_monthly_distribution = None
-        self.last_login_monthly_distribution = None
-        self.organizations_created_by_month = None
-        self.sources_created_by_month = None
-        self.source_versions_created_by_month = None
-        self.collections_created_by_month = None
-        self.collection_versions_created_by_month = None
-        self.collection_references_created_by_month = None
-        self.concepts_created_by_month = None
-        self.mappings_created_by_month = None
-        self.result = dict()
-        self.queryset = self.set_date_range(UserProfile.objects)
-
-    def set_date_range(self, queryset):
-        return queryset.filter(created_at__gte=self.start, created_at__lte=self.end)
-
-    def set_total(self):
-        self.total = self.queryset.count()
-
-    def set_active(self):
-        self.active = self.queryset.filter(is_active=True).count()
-
-    def set_inactive(self):
-        self.inactive = self.queryset.filter(is_active=False).count()
-
-    def set_joining_monthly_distribution(self):
-        self.joining_monthly_distribution = self.get_distribution(self.queryset, 'created_at', 'username')
-
-    def set_last_login_monthly_distribution(self):
-        self.last_login_monthly_distribution = self.get_distribution(self.queryset, 'last_login', 'username')
-
-    def set_mappings_created_by_month(self):
-        from core.mappings.models import Mapping
-        self.mappings_created_by_month = self.get_distribution(Mapping.objects.filter(id=F('versioned_object_id')))
-
-    def set_concepts_created_by_month(self):
-        from core.concepts.models import Concept
-        self.concepts_created_by_month = self.get_distribution(Concept.objects.filter(id=F('versioned_object_id')))
-
-    def set_collections_created_by_month(self):
-        from core.collections.models import Collection
-        self.collections_created_by_month = self.get_distribution(Collection.objects.filter(version=HEAD))
-
-    def set_sources_created_by_month(self):
-        from core.sources.models import Source
-        self.sources_created_by_month = self.get_distribution(Source.objects.filter(version=HEAD))
-
-    def set_source_versions_created_by_month(self):
-        from core.sources.models import Source
-        self.source_versions_created_by_month = self.get_distribution(Source.objects.exclude(version=HEAD))
-
-    def set_collection_versions_created_by_month(self):
-        from core.collections.models import Collection
-        self.collection_versions_created_by_month = self.get_distribution(Collection.objects.exclude(version=HEAD))
-
-    def set_collection_references_created_by_month(self):
-        from core.collections.models import CollectionReference
-        self.collection_references_created_by_month = self.get_distribution(
-            CollectionReference.objects.filter(collections__version=HEAD))
-
-    def set_organizations_created_by_month(self):
-        from core.orgs.models import Organization
-        self.organizations_created_by_month = self.get_distribution(Organization.objects)
-
-    def get_distribution(self, queryset, date_attr='created_at', count_by='id'):
-        return self.set_date_range(queryset).annotate(
-            month=TruncMonth(date_attr)
-        ).filter(
-            month__gte=self.start, month__lte=self.end
-        ).values('month').annotate(total=Count(count_by)).values('month', 'total').order_by('-month')
-
-    @staticmethod
-    def __format_distribution(queryset):
-        formatted = list()
-        for item in queryset:
-            month = item['month']
-            if month:
-                result = dict()
-                result[item['month'].strftime('%b %Y')] = item['total']
-                formatted.append(result)
-
-        return formatted
-
-    def prepare(self):
-        self.set_total()
-        self.set_active()
-        self.set_inactive()
-        self.set_joining_monthly_distribution()
-        self.set_last_login_monthly_distribution()
-        self.set_organizations_created_by_month()
-        self.set_sources_created_by_month()
-        self.set_collections_created_by_month()
-        if self.verbose:
-            self.set_source_versions_created_by_month()
-            self.set_collection_versions_created_by_month()
-            self.set_collection_references_created_by_month()
-            self.set_concepts_created_by_month()
-            self.set_mappings_created_by_month()
-
-    def make_result(self):
-        self.result = dict(
-            total=self.total,
-            active=self.active,
-            inactive=self.inactive,
-            new_users=self.__format_distribution(self.joining_monthly_distribution),
-            users_last_login=self.__format_distribution(self.last_login_monthly_distribution),
-            new_organizations=self.__format_distribution(self.organizations_created_by_month),
-            new_sources=self.__format_distribution(self.sources_created_by_month),
-            new_collections=self.__format_distribution(self.collections_created_by_month),
-        )
-        if self.verbose:
-            self.result['new_source_versions'] = self.__format_distribution(
-                self.source_versions_created_by_month)
-            self.result['new_collection_versions'] = self.__format_distribution(
-                self.collection_versions_created_by_month)
-            self.result['new_collection_references'] = self.__format_distribution(
-                self.collection_references_created_by_month)
-            self.result['new_concepts'] = self.__format_distribution(
-                self.concepts_created_by_month)
-            self.result['new_mappings'] = self.__format_distribution(
-                self.mappings_created_by_month)
-
-    def generate(self):
-        self.prepare()
-        self.make_result()
 
 
 admin.site.register(UserProfile)

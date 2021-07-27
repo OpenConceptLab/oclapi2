@@ -23,7 +23,6 @@ from core.common.views import BaseAPIView, BaseLogoView
 from core.orgs.models import Organization
 from core.users.constants import VERIFICATION_TOKEN_MISMATCH, VERIFY_EMAIL_MESSAGE
 from core.users.documents import UserProfileDocument
-from core.users.models import UserReport
 from core.users.search import UserProfileSearch
 from core.users.serializers import UserDetailSerializer, UserCreateSerializer, UserListSerializer
 from .models import UserProfile
@@ -325,17 +324,3 @@ class UserExtraRetrieveUpdateDestroyView(UserExtrasBaseView, RetrieveUpdateDestr
             return Response(status=status.HTTP_204_NO_CONTENT)
 
         return Response(dict(detail=NOT_FOUND), status=status.HTTP_404_NOT_FOUND)
-
-
-class UserReportView(BaseAPIView):  # pragma: no cover
-    permission_classes = (IsAdminUser, )
-
-    def get(self, request):
-        report = UserReport(
-            verbose=self.is_verbose(),
-            start=request.query_params.get('start', None),
-            end=request.query_params.get('end', None)
-        )
-        report.generate()
-
-        return Response(report.result)

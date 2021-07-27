@@ -26,6 +26,7 @@ from core.common.constants import NAMESPACE_PATTERN
 from core.common.utils import get_api_base_url
 from core.common.views import RootView, FeedbackView, APIVersionView, ChangeLogView
 from core.importers.views import BulkImportView
+import core.reports.views as report_views
 
 SchemaView = get_schema_view(
     openapi.Info(
@@ -48,6 +49,7 @@ urlpatterns = [
     url(r'^redoc/$', SchemaView.with_ui('redoc', cache_timeout=0), name='schema-redoc'),
     path('healthcheck/', include('core.common.healthcheck.urls')),
     path('admin/', admin.site.urls, name='admin_urls'),
+    path('admin/reports/monthly-usage/', report_views.MonthlyUsageView.as_view(), name='monthly-usage-report'),
     path('users/', include('core.users.urls'), name='users_urls'),
     path('user/', include('core.users.user_urls'), name='current_user_urls'),
     path('orgs/', include('core.orgs.urls'), name='orgs_url'),
