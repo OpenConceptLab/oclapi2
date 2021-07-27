@@ -704,14 +704,14 @@ class SourceVersionExportViewTest(OCLAPITestCase):
     def test_post_202(self, s3_exists_mock, export_source_mock):
         s3_exists_mock.return_value = False
         response = self.client.post(
-            self.source_v1.uri + 'export/',
+            self.source_v1.uri + 'export/?includeRetired=False',
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
 
         self.assertEqual(response.status_code, 202)
         s3_exists_mock.assert_called_once_with(f"username/source1_v1.{self.v1_updated_at}.zip")
-        export_source_mock.delay.assert_called_once_with(self.source_v1.id)
+        export_source_mock.delay.assert_called_once_with(self.source_v1.id, False)
 
     @patch('core.sources.views.export_source')
     @patch('core.common.services.S3.exists')
@@ -719,14 +719,14 @@ class SourceVersionExportViewTest(OCLAPITestCase):
         s3_exists_mock.return_value = False
         export_source_mock.delay.side_effect = AlreadyQueued('already-queued')
         response = self.client.post(
-            self.source_v1.uri + 'export/',
+            self.source_v1.uri + 'export/?includeRetired=False',
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
 
         self.assertEqual(response.status_code, 409)
         s3_exists_mock.assert_called_once_with(f"username/source1_v1.{self.v1_updated_at}.zip")
-        export_source_mock.delay.assert_called_once_with(self.source_v1.id)
+        export_source_mock.delay.assert_called_once_with(self.source_v1.id, False)
 
 
 class ExportSourceTaskTest(OCLAPITestCase):
@@ -768,6 +768,53 @@ class ExportSourceTaskTest(OCLAPITestCase):
         self.assertEqual(expected_mappings, exported_mappings)
 
         s3_upload_key = source_v1.export_path
+        s3_mock.upload_file.assert_called_once_with(
+            key=s3_upload_key, file_path=latest_temp_dir + '/export.zip', binary=True,
+            metadata={'ContentType': 'application/zip'}, headers={'content-type': 'application/zip'}
+        )
+        s3_mock.url_for.assert_called_once_with(s3_upload_key)
+
+        import shutil
+        shutil.rmtree(latest_temp_dir)
+
+    @patch('core.common.utils.S3')
+    def test_unretired_export_source(self, s3_mock):  # pylint: disable=too-many-locals
+        s3_mock.url_for = Mock(return_value='https://s3-url')
+        s3_mock.upload_file = Mock()
+        source = OrganizationSourceFactory()
+        concept1 = ConceptFactory(parent=source)
+        concept2 = ConceptFactory(parent=source)
+        mapping = MappingFactory(from_concept=concept2, to_concept=concept1, parent=source)
+
+        source_v1 = OrganizationSourceFactory(mnemonic=source.mnemonic, organization=source.organization, version='v1')
+        concept1.sources.add(source_v1)
+        concept2.sources.add(source_v1)
+        mapping.sources.add(source_v1)
+
+        export_source(source_v1.id, include_retired=False)  # pylint: disable=no-value-for-parameter
+
+        latest_temp_dir = get_latest_dir_in_path('/tmp/')
+        zipped_file = zipfile.ZipFile(latest_temp_dir + '/export.zip')
+        exported_data = json.loads(zipped_file.read('export.json').decode('utf-8'))
+
+        self.assertEqual(
+            exported_data, {**SourceVersionExportSerializer(source_v1).data, 'concepts': ANY, 'mappings': ANY}
+        )
+
+        exported_concepts = exported_data['concepts']
+        expected_concepts = ConceptVersionExportSerializer([concept2, concept1], many=True).data
+
+        self.assertEqual(len(exported_concepts), 2)
+        self.assertIn(expected_concepts[0], exported_concepts)
+        self.assertIn(expected_concepts[1], exported_concepts)
+
+        exported_mappings = exported_data['mappings']
+        expected_mappings = MappingDetailSerializer([mapping], many=True).data
+
+        self.assertEqual(len(exported_mappings), 1)
+        self.assertEqual(expected_mappings, exported_mappings)
+
+        s3_upload_key = source_v1.exclude_retired_export_path
         s3_mock.upload_file.assert_called_once_with(
             key=s3_upload_key, file_path=latest_temp_dir + '/export.zip', binary=True,
             metadata={'ContentType': 'application/zip'}, headers={'content-type': 'application/zip'}

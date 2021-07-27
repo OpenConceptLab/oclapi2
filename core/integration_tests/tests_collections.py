@@ -857,14 +857,14 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
     def test_post_202(self, s3_exists_mock, export_collection_mock):
         s3_exists_mock.return_value = False
         response = self.client.post(
-            self.collection_v1.uri + 'export/',
+            self.collection_v1.uri + 'export/?includeRetired=False',
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
 
         self.assertEqual(response.status_code, 202)
         s3_exists_mock.assert_called_once_with(f"username/coll_v1.{self.v1_updated_at}.zip")
-        export_collection_mock.delay.assert_called_once_with(self.collection_v1.id)
+        export_collection_mock.delay.assert_called_once_with(self.collection_v1.id, False)
 
     @patch('core.collections.views.export_collection')
     @patch('core.common.services.S3.exists')
@@ -872,14 +872,14 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
         s3_exists_mock.return_value = False
         export_collection_mock.delay.side_effect = AlreadyQueued('already-queued')
         response = self.client.post(
-            self.collection_v1.uri + 'export/',
+            self.collection_v1.uri + 'export/?includeRetired=False',
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
 
         self.assertEqual(response.status_code, 409)
         s3_exists_mock.assert_called_once_with(f"username/coll_v1.{self.v1_updated_at}.zip")
-        export_collection_mock.delay.assert_called_once_with(self.collection_v1.id)
+        export_collection_mock.delay.assert_called_once_with(self.collection_v1.id, False)
 
 
 class CollectionVersionListViewTest(OCLAPITestCase):
@@ -990,6 +990,62 @@ class ExportCollectionTaskTest(OCLAPITestCase):
         self.assertIn(exported_references[2], expected_references)
 
         s3_upload_key = collection.export_path
+        s3_mock.upload_file.assert_called_once_with(
+            key=s3_upload_key, file_path=latest_temp_dir + '/export.zip', binary=True,
+            metadata={'ContentType': 'application/zip'}, headers={'content-type': 'application/zip'}
+        )
+        s3_mock.url_for.assert_called_once_with(s3_upload_key)
+
+        import shutil
+        shutil.rmtree(latest_temp_dir)
+
+    @patch('core.common.utils.S3')
+    def test_unretired_export_collection(self, s3_mock):  # pylint: disable=too-many-locals
+        s3_mock.url_for = Mock(return_value='https://s3-url')
+        s3_mock.upload_file = Mock()
+        source = OrganizationSourceFactory()
+        concept1 = ConceptFactory(parent=source)
+        concept2 = ConceptFactory(parent=source)
+        mapping = MappingFactory(from_concept=concept2, to_concept=concept1, parent=source)
+        collection = OrganizationCollectionFactory()
+        collection.add_references([concept1.uri, concept2.uri, mapping.uri])
+        collection.refresh_from_db()
+
+        export_collection(collection.id, include_retired=False)  # pylint: disable=no-value-for-parameter
+
+        latest_temp_dir = get_latest_dir_in_path('/tmp/')
+        zipped_file = zipfile.ZipFile(latest_temp_dir + '/export.zip')
+        exported_data = json.loads(zipped_file.read('export.json').decode('utf-8'))
+
+        self.assertEqual(
+            exported_data,
+            {**CollectionVersionExportSerializer(collection).data, 'concepts': ANY, 'mappings': ANY, 'references': ANY}
+        )
+
+        exported_concepts = exported_data['concepts']
+        expected_concepts = ConceptVersionExportSerializer(
+            [concept2.get_latest_version(), concept1.get_latest_version()], many=True
+        ).data
+
+        self.assertEqual(len(exported_concepts), 2)
+        self.assertIn(expected_concepts[0], exported_concepts)
+        self.assertIn(expected_concepts[1], exported_concepts)
+
+        exported_mappings = exported_data['mappings']
+        expected_mappings = MappingDetailSerializer([mapping.get_latest_version()], many=True).data
+
+        self.assertEqual(len(exported_mappings), 1)
+        self.assertEqual(expected_mappings, exported_mappings)
+
+        exported_references = exported_data['references']
+        expected_references = CollectionReferenceSerializer(collection.references.all(), many=True).data
+
+        self.assertEqual(len(exported_references), 3)
+        self.assertIn(exported_references[0], expected_references)
+        self.assertIn(exported_references[1], expected_references)
+        self.assertIn(exported_references[2], expected_references)
+
+        s3_upload_key = collection.exclude_retired_export_path
         s3_mock.upload_file.assert_called_once_with(
             key=s3_upload_key, file_path=latest_temp_dir + '/export.zip', binary=True,
             metadata={'ContentType': 'application/zip'}, headers={'content-type': 'application/zip'}

@@ -722,6 +722,11 @@ class ConceptContainerModel(VersionedModel):
     def export_path(self):
         last_update = self.last_child_update.strftime('%Y%m%d%H%M%S')
         return self.generic_export_path(suffix=f"{last_update}.zip")
+    
+    @cached_property
+    def exclude_retired_export_path(self):
+        last_update = self.last_child_update.strftime('%Y%m%d%H%M%S')
+        return self.generic_export_path(suffix=f"{last_update}_unretired.zip")
 
     def generic_export_path(self, suffix='*'):
         path = f"{self.parent_resource}/{self.mnemonic}_{self.version}."
@@ -733,8 +738,14 @@ class ConceptContainerModel(VersionedModel):
     def get_export_url(self):
         return S3.url_for(self.export_path)
 
+    def get_unretired_export_url(self):
+        return S3.url_for(self.exclude_retired_export_path)
+
     def has_export(self):
         return S3.exists(self.export_path)
+    
+    def has_unretired_export(self):
+        return S3.exists(self.exclude_retired_export_path)
 
     def can_view_all_content(self, user):
         if get(user, 'is_anonymous'):

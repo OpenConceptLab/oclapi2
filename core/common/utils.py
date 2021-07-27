@@ -192,7 +192,7 @@ def get_class(kls):
 
 
 def write_export_file(
-        version, resource_type, resource_serializer_type, logger
+        version, include_retired, resource_type, resource_serializer_type, logger
 ):  # pylint: disable=too-many-statements,too-many-locals,too-many-branches
     from core.concepts.models import Concept
     from core.mappings.models import Mapping
@@ -208,6 +208,13 @@ def write_export_file(
     logger.info('Done serializing attributes.')
 
     batch_size = 100
+    concepts_qs = version.concepts
+    mappings_qs = version.mappings
+
+    if not include_retired:
+        concepts_qs = concepts_qs.filter(retired=False)
+        mappings_qs = mappings_qs.filter(retired=False)
+    
     is_collection = resource_type == 'collection'
 
     if is_collection:
@@ -329,7 +336,7 @@ def write_export_file(
     logger.info(file_path)
     logger.info('Done compressing.  Uploading...')
 
-    s3_key = version.export_path
+    s3_key = version.export_path if include_retired else version.exclude_retired_export_path
     S3.upload_file(
         key=s3_key, file_path=file_path, binary=True, metadata=dict(ContentType='application/zip'),
         headers={'content-type': 'application/zip'}
