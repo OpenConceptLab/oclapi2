@@ -1,3 +1,7 @@
+##### 2.0.21 - Wed Jul 28 05:30:54 2021 +0000
+- [OpenConceptLab/ocl_issues#845](https://github.com/OpenConceptLab/ocl_issues/issues/845) | exports | reducing batch size to 100
+- [OpenConceptLab/ocl_issues#852](https://github.com/OpenConceptLab/ocl_issues/issues/852) | monthly usage report under admin/report/ namespace
+- [OpenConceptLab/ocl_issues#838](https://github.com/OpenConceptLab/ocl_issues/issues/838) | User List can be filtered by dateJoinedBefore and dateJoinedSince
 ##### 2.0.20 - Mon Jul 26 10:28:11 2021 +0000
 - [OpenConceptLab/ocl_issues#845](https://github.com/OpenConceptLab/ocl_issues/issues/845) | performance | merging excludes
 ##### 2.0.19 - Fri Jul 23 03:09:59 2021 +0000
