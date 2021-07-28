@@ -26,7 +26,7 @@ class CollectionListSerializer(ModelSerializer):
         model = Collection
         fields = (
             'short_code', 'name', 'url', 'owner', 'owner_type', 'owner_url', 'version', 'created_at', 'id',
-            'collection_type', 'updated_at', 'canonical_url',
+            'collection_type', 'updated_at', 'canonical_url', 'autoexpand_head'
         )
 
 
@@ -39,14 +39,19 @@ class CollectionVersionListSerializer(ModelSerializer):
     version_url = CharField(source='uri')
     url = CharField(source='versioned_object_url')
     previous_version_url = CharField(source='prev_version_uri')
+    autoexpand = SerializerMethodField()
 
     class Meta:
         model = Collection
         fields = (
             'short_code', 'name', 'url', 'owner', 'owner_type', 'owner_url', 'version', 'created_at', 'id',
             'collection_type', 'updated_at', 'canonical_url', 'released', 'retired', 'version_url',
-            'previous_version_url',
+            'previous_version_url', 'autoexpand'
         )
+
+    @staticmethod
+    def get_autoexpand(obj):
+        return obj.autoexpand_head if obj.is_head else obj.autoexpand
 
 
 class CollectionCreateOrUpdateSerializer(ModelSerializer):
@@ -81,6 +86,8 @@ class CollectionCreateOrUpdateSerializer(ModelSerializer):
             setattr(collection, attr, validated_data.get(attr, get(collection, attr)))
 
         collection.full_name = validated_data.get('full_name', collection.full_name) or collection.name
+        collection.autoexpand_head = validated_data.get('autoexpand_head', collection.autoexpand_head)
+        collection.autoexpand = validated_data.get('autoexpand', collection.autoexpand)
 
         return collection
 
@@ -138,6 +145,7 @@ class CollectionCreateSerializer(CollectionCreateOrUpdateSerializer):
     copyright = CharField(required=False, allow_null=True, allow_blank=True)
     experimental = BooleanField(required=False, allow_null=True, default=None)
     locked_date = DateTimeField(required=False, allow_null=True)
+    autoexpand_head = BooleanField(required=False, default=True)
 
     def create(self, validated_data):
         collection = self.prepare_object(validated_data)
@@ -219,7 +227,7 @@ class CollectionDetailSerializer(CollectionCreateOrUpdateSerializer):
             'custom_resources_linked_source', 'repository_type', 'preferred_source', 'references',
             'canonical_url', 'identifier', 'publisher', 'contact', 'jurisdiction', 'purpose', 'copyright', 'meta',
             'immutable', 'revision_date', 'logo_url', 'summary', 'text', 'client_configs',
-            'experimental', 'locked_date', 'internal_reference_id'
+            'experimental', 'locked_date', 'internal_reference_id', 'autoexpand_head'
 
         )
 
@@ -279,6 +287,7 @@ class CollectionVersionDetailSerializer(CollectionCreateOrUpdateSerializer):
     created_by = CharField(read_only=True, source='created_by.username')
     updated_by = CharField(read_only=True, source='updated_by.username')
     summary = SerializerMethodField()
+    autoexpand = SerializerMethodField()
 
     class Meta:
         model = Collection
@@ -291,6 +300,7 @@ class CollectionVersionDetailSerializer(CollectionCreateOrUpdateSerializer):
             'version', 'concepts_url', 'mappings_url', 'is_processing', 'released', 'retired',
             'canonical_url', 'identifier', 'publisher', 'contact', 'jurisdiction', 'purpose', 'copyright', 'meta',
             'immutable', 'revision_date', 'summary', 'text', 'experimental', 'locked_date', 'internal_reference_id',
+            'autoexpand',
         )
 
     def __init__(self, *args, **kwargs):
@@ -315,6 +325,10 @@ class CollectionVersionDetailSerializer(CollectionCreateOrUpdateSerializer):
             summary = CollectionVersionSummarySerializer(obj).data
 
         return summary
+
+    @staticmethod
+    def get_autoexpand(obj):
+        return obj.autoexpand_head if obj.is_head else obj.autoexpand
 
 
 class CollectionReferenceSerializer(ModelSerializer):

@@ -306,7 +306,7 @@ class CollectionReferencesView(
 
         added_expressions = [reference.expression for reference in added_references]
         added_original_expressions = set(
-            [reference.original_expression for reference in added_references] + all_expressions
+            [reference.original_expression or reference.expression for reference in added_references] + all_expressions
         )
 
         response = []
@@ -318,11 +318,11 @@ class CollectionReferencesView(
 
         for ref in added_references:
             if ref.concepts:
-                for concept in ref.concepts:
-                    concept.index()
+                from core.concepts.documents import ConceptDocument
+                collection.batch_index(ref.concepts, ConceptDocument)
             if ref.mappings:
-                for mapping in ref.mappings:
-                    mapping.index()
+                from core.mappings.documents import MappingDocument
+                collection.batch_index(ref.mappings, MappingDocument)
 
         return Response(response, status=status.HTTP_200_OK)
 

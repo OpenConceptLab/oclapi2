@@ -66,6 +66,8 @@ class Collection(ConceptContainerModel):
     references = models.ManyToManyField('collections.CollectionReference', blank=True, related_name='collections')
     immutable = models.BooleanField(null=True, blank=True, default=None)
     locked_date = models.DateTimeField(null=True, blank=True)
+    autoexpand_head = models.BooleanField(default=True)
+    autoexpand = models.BooleanField(default=True)
 
     @classmethod
     def get_base_queryset(cls, params):
@@ -205,7 +207,7 @@ class Collection(ConceptContainerModel):
                 mapping_expressions, self.__get_children_list_url('mappings', host_url, data), MappingListView
             )
         )
-        if cascade_mappings:
+        if not self.autoexpand_head and cascade_mappings:
             all_related_mappings = self.get_all_related_mappings(expressions)
             expressions += all_related_mappings
 
@@ -228,7 +230,10 @@ class Collection(ConceptContainerModel):
         for expression in new_expressions:
             ref = CollectionReference(expression=expression)
             try:
-                ref.clean()
+                if self.autoexpand_head:
+                    ref.clean()
+                else:
+                    ref.last_resolved_at = None
                 ref.save()
             except Exception as ex:
                 errors[expression] = ex.messages if hasattr(ex, 'messages') else ex
