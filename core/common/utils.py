@@ -223,6 +223,10 @@ def write_export_file(
         out.write('%s, "concepts": [' % resource_string[:-1])
 
     resource_name = resource_type.title()
+    if is_collection:
+        owner_relation = ['parent__organization', 'parent__user']
+    else:
+        owner_relation = ['parent__organization'] if version.organization_id else ['parent__user']
 
     if total_concepts:
         logger.info(
@@ -233,7 +237,7 @@ def write_export_file(
             end = min(start + batch_size, total_concepts)
             logger.info('Serializing concepts %d - %d...' % (start+1, end))
             concept_versions = concepts_qs.order_by('-id').prefetch_related(
-                'names', 'descriptions').select_related('parent__organization', 'parent__user')[start:end]
+                'names', 'descriptions').select_related(*owner_relation)[start:end]
             concept_serializer = concept_serializer_class(concept_versions, many=True)
             concept_data = concept_serializer.data
             concept_string = json.dumps(concept_data, cls=encoders.JSONEncoder)
@@ -285,9 +289,9 @@ def write_export_file(
             end = min(start + batch_size, total_mappings)
             logger.info('Serializing mappings %d - %d...' % (start+1, end))
             mappings = mappings_qs.order_by('-id').select_related(
-                'parent__organization', 'parent__user', 'from_concept', 'to_concept',
+                'from_concept', 'to_concept',
                 'from_source__organization', 'from_source__user',
-                'to_source__organization', 'to_source__user',
+                'to_source__organization', 'to_source__user', *owner_relation
             )[start:end]
             reference_serializer = mapping_serializer_class(mappings, many=True)
             reference_data = reference_serializer.data
@@ -299,7 +303,7 @@ def write_export_file(
                     out.write(', ')
         logger.info('Done serializing mappings.')
     else:
-        logger.info('%s has no mappings to serialize.' % (resource_name))
+        logger.info('%s has no mappings to serialize.' % resource_name)
 
     with open('export.json', 'a') as out:
         out.write(']}')
