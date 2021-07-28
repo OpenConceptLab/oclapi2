@@ -204,7 +204,7 @@ def write_export_file(
     resource_string = json.dumps(data, cls=encoders.JSONEncoder)
     logger.info('Done serializing attributes.')
 
-    batch_size = 1000
+    batch_size = 100
     concepts_qs = version.concepts
     mappings_qs = version.mappings
     is_collection = resource_type == 'collection'
