@@ -146,6 +146,7 @@ class CollectionCreateSerializer(CollectionCreateOrUpdateSerializer):
     experimental = BooleanField(required=False, allow_null=True, default=None)
     locked_date = DateTimeField(required=False, allow_null=True)
     autoexpand_head = BooleanField(required=False, default=True)
+    autoexpand = BooleanField(required=False, default=True)
 
     def create(self, validated_data):
         collection = self.prepare_object(validated_data)

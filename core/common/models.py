@@ -547,14 +547,16 @@ class ConceptContainerModel(VersionedModel):
         if user:
             obj.created_by = user
             obj.updated_by = user
-        serializer = SourceDetailSerializer if obj.__class__.__name__ == 'Source' else CollectionDetailSerializer
+        is_source = obj.__class__.__name__ == 'Source'
+        serializer = SourceDetailSerializer if is_source else CollectionDetailSerializer
         obj.snapshot = serializer(obj.head).data
         obj.update_version_data()
         obj.save(**kwargs)
 
         if get(settings, 'TEST_MODE', False):
-            obj.seed_concepts()
-            obj.seed_mappings()
+            if is_source or obj.autoexpand:
+                obj.seed_concepts()
+                obj.seed_mappings()
             obj.seed_references()
         else:
             seed_children.delay(obj.resource_type.lower(), obj.id)

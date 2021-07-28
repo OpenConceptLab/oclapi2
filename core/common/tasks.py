@@ -238,6 +238,7 @@ def send_user_reset_password_email(user_id):
 def seed_children(self, resource, obj_id, export=True):
     instance = None
     export_task = None
+    autoexpand = True
 
     if resource == 'source':
         from core.sources.models import Source
@@ -247,6 +248,7 @@ def seed_children(self, resource, obj_id, export=True):
         from core.collections.models import Collection
         instance = Collection.objects.filter(id=obj_id).first()
         export_task = export_collection
+        autoexpand = instance.autoexpand
 
     if instance:
         task_id = self.request.id
@@ -255,13 +257,15 @@ def seed_children(self, resource, obj_id, export=True):
 
         try:
             instance.add_processing(task_id)
-            instance.seed_concepts(index=index)
-            instance.seed_mappings(index=index)
+            if autoexpand:
+                instance.seed_concepts(index=index)
+                instance.seed_mappings(index=index)
             instance.seed_references()
 
             if export:
                 export_task.delay(obj_id)
-                instance.index_children()
+                if autoexpand:
+                    instance.index_children()
         finally:
             instance.remove_processing(task_id)
 
