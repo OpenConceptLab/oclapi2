@@ -364,14 +364,14 @@ class ConceptContainerModel(VersionedModel):
     def last_concept_update(self):
         updated_at = None
         if self.concepts.exists():
-            updated_at = self.concepts.latest('updated_at').updated_at
+            updated_at = self.concepts.only('updated_at').latest('updated_at').updated_at
         return updated_at
 
     @property
     def last_mapping_update(self):
         updated_at = None
         if self.mappings.exists():
-            updated_at = self.mappings.latest('updated_at').updated_at
+            updated_at = self.mappings.only('updated_at').latest('updated_at').updated_at
         return updated_at
 
     @property

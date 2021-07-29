@@ -255,7 +255,8 @@ class ConceptDetailSerializer(ModelSerializer):
             'owner', 'owner_type', 'owner_url', 'display_name', 'display_locale', 'names', 'descriptions',
             'created_on', 'updated_on', 'versions_url', 'version', 'extras', 'parent_id', 'name', 'type',
             'update_comment', 'version_url', 'mappings', 'updated_by', 'created_by', 'internal_reference_id',
-            'parent_concept_urls', 'child_concept_urls', 'parent_concepts', 'child_concepts', 'hierarchy_path'
+            'parent_concept_urls', 'child_concept_urls', 'parent_concepts', 'child_concepts', 'hierarchy_path',
+            'public_can_view',
         )
 
     def get_mappings(self, obj):

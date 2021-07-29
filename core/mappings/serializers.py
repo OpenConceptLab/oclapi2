@@ -125,6 +125,7 @@ class MappingDetailSerializer(MappingListSerializer):
         fields = MappingListSerializer.Meta.fields + (
             'type', 'uuid', 'extras', 'created_on', 'updated_on',
             'created_by', 'updated_by', 'parent_id', 'internal_reference_id',
+            'public_can_view',
         )
 
     def create(self, validated_data):
