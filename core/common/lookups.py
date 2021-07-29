@@ -10,4 +10,4 @@ class InValues(In):
     def get_rhs_op(self, connection, rhs):
         if self.rhs_is_direct_value() and len(self.rhs) > 100:
             return 'IN (SELECT unnest(%s))' % rhs
-        return super().get_rhs_op(self, connection, rhs)
+        return super().get_rhs_op(connection, rhs)
