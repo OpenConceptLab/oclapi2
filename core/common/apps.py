@@ -1,7 +1,11 @@
+import logging
+
 from django.apps import AppConfig
+from django.db.models.fields import Field
 from health_check.plugins import plugin_dir
 
 from core.common.healthcheck import healthcheck
+from core.common.lookups import InValues
 
 
 class CommonConfig(AppConfig):
@@ -19,5 +23,7 @@ class CommonConfig(AppConfig):
         plugin_dir.register(healthcheck.CeleryBulkImport2QueueHealthCheck)
         plugin_dir.register(healthcheck.CeleryBulkImport3QueueHealthCheck)
         plugin_dir.register(healthcheck.CeleryBulkImportRootQueueHealthCheck)
+
+        Field.register_lookup(InValues)
 
         from core.common import signals  # pylint: disable=unused-variable, unused-import
