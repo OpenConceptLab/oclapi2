@@ -275,7 +275,8 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
              'updated_by',
              'created_by',
              'internal_reference_id',
-             'hierarchy_path']
+             'hierarchy_path',
+             'public_can_view']
         )
 
         names = response.data['names']
