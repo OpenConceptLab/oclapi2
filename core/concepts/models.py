@@ -27,6 +27,7 @@ class LocalizedText(models.Model):
             models.Index(fields=['type']),
             models.Index(fields=['locale']),
             models.Index(fields=['locale_preferred']),
+            models.Index(fields=['created_at']),
         ]
 
     id = models.BigAutoField(primary_key=True)
@@ -124,7 +125,9 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     class Meta:
         db_table = 'concepts'
         unique_together = ('mnemonic', 'version', 'parent')
-        indexes = [] + VersionedModel.Meta.indexes
+        indexes = [
+                      models.Index(fields=['is_active', 'retired', 'is_latest_version', 'public_access']),
+                  ] + VersionedModel.Meta.indexes
 
     external_id = models.TextField(null=True, blank=True)
     concept_class = models.TextField()
