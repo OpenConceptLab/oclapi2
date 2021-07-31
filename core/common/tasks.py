@@ -355,3 +355,28 @@ def process_hierarchy_for_new_parent_concept_version(prev_version_id, latest_ver
     if prev_version and latest_version:
         for concept in Concept.objects.filter(parent_concepts__uri=prev_version.uri):
             concept.parent_concepts.add(latest_version)
+
+
+@app.task
+def delete_duplicate_locales():  # pragma: no cover
+    from core.concepts.models import Concept
+    from django.db.models import Count
+    from django.db.models import Q
+    for concept in Concept.objects.annotate(
+            names_count=Count('names'), desc_count=Count('descriptions')
+    ).filter(
+        Q(names_count__gt=1) | Q(desc_count__gt=1)
+    ):
+        logger.info('Cleaning up %s', concept.mnemonic)
+        for name in concept.names.all().reverse():
+            if concept.names.filter(
+                    type=name.type, name=name.name, locale=name.locale, locale_preferred=name.locale_preferred,
+                    external_id=name.external_id
+            ).count() > 1:
+                name.delete()
+        for desc in concept.descriptions.all().reverse():
+            if concept.descriptions.filter(
+                    type=desc.type, name=desc.name, locale=desc.locale, locale_preferred=desc.locale_preferred,
+                    external_id=desc.external_id
+            ).count() > 1:
+                desc.delete()

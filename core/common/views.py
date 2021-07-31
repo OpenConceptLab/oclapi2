@@ -14,7 +14,7 @@ from elasticsearch_dsl import Q
 from pydash import get
 from rest_framework import response, generics, status
 from rest_framework.generics import ListAPIView, RetrieveUpdateDestroyAPIView
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -769,4 +769,14 @@ class FeedbackView(APIView):  # pragma: no cover
 
         mail.send()
 
+        return Response(status=status.HTTP_200_OK)
+
+
+class LocalesCleanupView(APIView):  # pragma: no cover
+    permission_classes = (IsAdminUser,)
+
+    @staticmethod
+    def get(_):
+        from core.common.tasks import delete_duplicate_locales
+        delete_duplicate_locales.delay()
         return Response(status=status.HTTP_200_OK)
