@@ -395,7 +395,7 @@ def delete_dormant_locales():  # pragma: no cover
     from core.concepts.models import LocalizedText
 
     deleted, _ = LocalizedText.objects.filter(name_locales__isnull=True, description_locales__isnull=True).delete()
-    logger.info('%s Dormant locales deleted' % deleted)
+    logger.info('%s Dormant locales deleted' % deleted)  # pylint: disable=logging-not-lazy
 
     return 1
 
