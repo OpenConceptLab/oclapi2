@@ -18,6 +18,7 @@ from core.common.swagger_parameters import (
     q_param, limit_param, sort_desc_param, page_param, exact_match_param, sort_asc_param, verbose_param,
     include_facets_header, updated_since_param, include_inverse_mappings_param, include_retired_param,
     compress_header, include_source_versions_param, include_collection_versions_param)
+from core.common.tasks import delete_concept
 from core.common.utils import to_parent_uri_from_kwargs
 from core.common.views import SourceChildCommonBaseView, SourceChildExtrasView, \
     SourceChildExtraRetrieveUpdateDestroyView
@@ -194,13 +195,20 @@ class ConceptRetrieveUpdateDestroyView(ConceptBaseView, RetrieveAPIView, UpdateA
     def is_hard_delete_requested(self):
         return self.request.query_params.get('hardDelete', None) in ['true', True, 'True']
 
+    def is_async_hard_delete_requested(self):
+        return self.request.query_params.get('async', None) in ['true', True, 'True']
+
     def destroy(self, request, *args, **kwargs):
         concept = self.get_object()
-        comment = request.data.get('update_comment', None) or request.data.get('comment', None)
+
         if self.is_hard_delete_requested():
+            if self.is_async_hard_delete_requested():
+                delete_concept(concept.id)
+                return Response(status=status.HTTP_204_NO_CONTENT)
             concept.delete()
             return Response(status=status.HTTP_204_NO_CONTENT)
 
+        comment = request.data.get('update_comment', None) or request.data.get('comment', None)
         errors = concept.retire(request.user, comment)
 
         if errors:

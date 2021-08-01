@@ -387,3 +387,12 @@ def delete_duplicate_locales():  # pragma: no cover
                         external_id=desc.external_id
                 ).count() > 1:
                     desc.delete()
+
+
+@app.task
+def delete_concept(concept_id):  # pragma: no cover
+    from core.concepts.models import Concept, LocalizedText
+    concept = Concept.objects.filter(id=concept_id).first()
+    LocalizedText.objects.filter(name_locales=concept).delete()
+    LocalizedText.objects.filter(description_locales=concept).delete()
+    concept.delete()
