@@ -22,6 +22,7 @@ from rest_framework import permissions
 
 import core.concepts.views as concept_views
 import core.mappings.views as mapping_views
+from core import VERSION
 from core.common.constants import NAMESPACE_PATTERN
 from core.common.utils import get_api_base_url
 from core.common.views import RootView, FeedbackView, APIVersionView, ChangeLogView, LocalesCleanupView
@@ -31,8 +32,8 @@ import core.reports.views as report_views
 SchemaView = get_schema_view(
     openapi.Info(
         title="OCL API",
-        default_version='v2',
-        description="OCL API v2",
+        default_version=VERSION,
+        description="OCL API ({})".format(VERSION),
     ),
     public=True,
     permission_classes=(permissions.AllowAny,),
