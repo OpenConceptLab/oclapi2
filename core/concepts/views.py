@@ -203,7 +203,7 @@ class ConceptRetrieveUpdateDestroyView(ConceptBaseView, RetrieveAPIView, UpdateA
 
         if self.is_hard_delete_requested():
             if self.is_async_hard_delete_requested():
-                delete_concept(concept.id)
+                delete_concept.delay(concept.id)
                 return Response(status=status.HTTP_204_NO_CONTENT)
             concept.delete()
             return Response(status=status.HTTP_204_NO_CONTENT)
