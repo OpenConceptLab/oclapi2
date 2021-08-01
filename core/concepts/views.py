@@ -478,6 +478,11 @@ class ConceptDormantLocalesView(APIView):  # pragma: no cover
     permission_classes = (IsAdminUser, )
 
     @staticmethod
+    def get(_, **kwargs):  # pylint: disable=unused-argument
+        count = LocalizedText.objects.filter(name_locales__isnull=True, description_locales__isnull=True).count()
+        return Response(count, status=status.HTTP_200_OK)
+
+    @staticmethod
     def delete(_, **kwargs):  # pylint: disable=unused-argument
         delete_dormant_locales.delay()
         return Response(status=status.HTTP_204_NO_CONTENT)
