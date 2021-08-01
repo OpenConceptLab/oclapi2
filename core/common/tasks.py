@@ -390,9 +390,22 @@ def delete_duplicate_locales():  # pragma: no cover
 
 
 @app.task
+def delete_dormant_locales():  # pragma: no cover
+    from core.concepts.models import LocalizedText
+
+    LocalizedText.objects.filter(name_locales__isnull=True).delete()
+    LocalizedText.objects.filter(description_locales__isnull=True).delete()
+
+    return 1
+
+
+@app.task
 def delete_concept(concept_id):  # pragma: no cover
     from core.concepts.models import Concept, LocalizedText
+
     concept = Concept.objects.filter(id=concept_id).first()
     LocalizedText.objects.filter(name_locales=concept).delete()
     LocalizedText.objects.filter(description_locales=concept).delete()
     concept.delete()
+
+    return 1

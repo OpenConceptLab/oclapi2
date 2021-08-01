@@ -6,6 +6,7 @@ from .constants import CONCEPT_PATTERN as NAMESPACE_PATTERN
 
 urlpatterns = [
     path('', views.ConceptListView.as_view(), name='concept-list'),
+    path('locales/dormant/', views.ConceptDormantLocalesView.as_view(), name='concept-locales'),
     path(
         "<str:concept>/",
         views.ConceptRetrieveUpdateDestroyView.as_view(),
