@@ -31,7 +31,7 @@ from core.concepts.search import ConceptSearch
 from core.concepts.serializers import (
     ConceptDetailSerializer, ConceptListSerializer, ConceptDescriptionSerializer, ConceptNameSerializer,
     ConceptVersionDetailSerializer,
-    ConceptVersionListSerializer, ConceptHierarchySerializer)
+    ConceptVersionListSerializer, ConceptHierarchySerializer, ConceptSummarySerializer)
 from core.mappings.serializers import MappingListSerializer
 
 
@@ -137,6 +137,28 @@ class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
                 serializer = ConceptDetailSerializer(self.object, context=dict(request=request))
                 return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class ConceptSummaryView(ConceptBaseView, RetrieveAPIView):
+    serializer_class = ConceptSummarySerializer
+
+    def get_object(self, queryset=None):
+        if 'collection' in self.kwargs:
+            return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
+
+        queryset = self.get_queryset()
+
+        if 'concept_version' not in self.kwargs:
+            queryset = queryset.filter(is_latest_version=True)
+
+        instance = queryset.first()
+
+        if not instance:
+            raise Http404()
+
+        self.check_object_permissions(self.request, instance)
+
+        return instance
 
 
 class ConceptRetrieveUpdateDestroyView(ConceptBaseView, RetrieveAPIView, UpdateAPIView, DestroyAPIView):

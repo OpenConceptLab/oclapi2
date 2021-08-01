@@ -385,8 +385,8 @@ class SourceChildMixin:
     @property
     def versions(self):
         if self.is_versioned_object:
-            self.versions_set.exclude(id=F('versioned_object_id')).all()
-        return self.versioned_object.versions_set.exclude(id=F('versioned_object_id')).all()
+            self.versions_set.exclude(id=F('versioned_object_id'))
+        return self.versioned_object.versions_set.exclude(id=F('versioned_object_id'))
 
     @property
     def is_versioned_object(self):

@@ -185,6 +185,30 @@ class ConceptVersionListSerializer(ConceptListSerializer):
         super().__init__(*args, **kwargs)
 
 
+class ConceptSummarySerializer(ModelSerializer):
+    uuid = CharField(source='id', read_only=True)
+    id = EncodedDecodedCharField(source='mnemonic', read_only=True)
+    names = SerializerMethodField()
+    descriptions = SerializerMethodField()
+    versions = SerializerMethodField()
+
+    class Meta:
+        model = Concept
+        fields = ('names', 'descriptions', 'versions', 'id', 'uuid', 'versioned_object_id')
+
+    @staticmethod
+    def get_names(obj):
+        return obj.names.count()
+
+    @staticmethod
+    def get_descriptions(obj):
+        return obj.descriptions.count()
+
+    @staticmethod
+    def get_versions(obj):
+        return obj.versions.count()
+
+
 class ConceptDetailSerializer(ModelSerializer):
     uuid = CharField(source='id', read_only=True)
     version = CharField(read_only=True)

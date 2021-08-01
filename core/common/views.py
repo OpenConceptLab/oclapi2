@@ -776,7 +776,7 @@ class LocalesCleanupView(APIView):  # pragma: no cover
     permission_classes = (IsAdminUser,)
 
     @staticmethod
-    def get(_):
+    def get(request):
         from core.common.tasks import delete_duplicate_locales
-        delete_duplicate_locales.delay()
+        delete_duplicate_locales.delay(int(request.query_params.get('start', 0)))
         return Response(status=status.HTTP_200_OK)

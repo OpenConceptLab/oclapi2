@@ -358,10 +358,11 @@ def process_hierarchy_for_new_parent_concept_version(prev_version_id, latest_ver
 
 
 @app.task
-def delete_duplicate_locales():  # pragma: no cover
+def delete_duplicate_locales(start_from=None):  # pragma: no cover
     from core.concepts.models import Concept
     from django.db.models import Count
     from django.db.models import Q
+    start_from = start_from or 0
     queryset = Concept.objects.annotate(
         names_count=Count('names'), desc_count=Count('descriptions')).filter(Q(names_count__gt=1) | Q(desc_count__gt=1))
     total = queryset.count()
@@ -369,7 +370,7 @@ def delete_duplicate_locales():  # pragma: no cover
 
     logger.info('%d concepts with duplicate locales. Getting them in batches of %d...' % (total, batch_size))  # pylint: disable=logging-not-lazy
 
-    for start in range(0, total, batch_size):
+    for start in range(start_from, total, batch_size):
         end = min(start + batch_size, total)
         logger.info('Iterating concepts %d - %d...' % (start + 1, end))  # pylint: disable=logging-not-lazy
         concepts = queryset.order_by('id')[start:end]
@@ -393,8 +394,7 @@ def delete_duplicate_locales():  # pragma: no cover
 def delete_dormant_locales():  # pragma: no cover
     from core.concepts.models import LocalizedText
 
-    LocalizedText.objects.filter(name_locales__isnull=True).delete()
-    LocalizedText.objects.filter(description_locales__isnull=True).delete()
+    LocalizedText.objects.filter(name_locales__isnull=True, description_locales__isnull=True).delete()
 
     return 1
 
