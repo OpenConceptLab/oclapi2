@@ -394,7 +394,8 @@ def delete_duplicate_locales(start_from=None):  # pragma: no cover
 def delete_dormant_locales():  # pragma: no cover
     from core.concepts.models import LocalizedText
 
-    LocalizedText.objects.filter(name_locales__isnull=True, description_locales__isnull=True).delete()
+    deleted, _ = LocalizedText.objects.filter(name_locales__isnull=True, description_locales__isnull=True).delete()
+    logger.info('%s Dormant locales deleted' % deleted)
 
     return 1
 
