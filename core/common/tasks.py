@@ -401,7 +401,7 @@ def delete_dormant_locales():  # pragma: no cover
     for start in range(0, total, batch_size):
         end = min(start + batch_size, total)
         logger.info('Iterating locales %d - %d to delete...' % (start + 1, end))  # pylint: disable=logging-not-lazy
-        queryset.order_by('id')[start:end].delete()
+        LocalizedText.objects.filter(id__in=queryset.order_by('id')[start:end].values('id')).delete()
 
     return 1
 
