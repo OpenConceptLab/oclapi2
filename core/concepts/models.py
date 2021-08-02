@@ -363,7 +363,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                          decode_string(concept), decode_string(concept, False)]
             queryset = queryset.filter(mnemonic__in=mnemonics)
         if concept_version:
-            queryset = queryset.filter(cls.get_iexact_or_criteria('version', concept_version))
+            queryset = queryset.filter(version=concept_version)
         if is_latest:
             queryset = queryset.filter(is_latest_version=True)
         if not include_retired and not concept:

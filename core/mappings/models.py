@@ -491,7 +491,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         if mapping:
             queryset = queryset.filter(mnemonic__exact=mapping)
         if mapping_version:
-            queryset = queryset.filter(cls.get_iexact_or_criteria('version', mapping_version))
+            queryset = queryset.filter(version=mapping_version)
         if is_latest:
             queryset = queryset.filter(is_latest_version=True)
         if not include_retired and not mapping:
