@@ -362,17 +362,20 @@ class ConceptContainerModel(VersionedModel):
 
     @property
     def last_concept_update(self):
-        updated_at = None
-        if self.concepts.exists():
-            updated_at = self.concepts.only('updated_at').latest('updated_at').updated_at
-        return updated_at
+        # Use 'values_list' instead of 'first' so as not load any concepts...
+        updated_at = self.concepts.order_by('-updated_at').values_list('updated_at', flat=True)[:1]
+        if updated_at:
+            return updated_at[0]
+        return None
 
     @property
     def last_mapping_update(self):
-        updated_at = None
-        if self.mappings.exists():
-            updated_at = self.mappings.only('updated_at').latest('updated_at').updated_at
-        return updated_at
+        # Use 'values_list' instead of 'first' so as not load any mappings...
+        updated_at = self.mappings.order_by('-updated_at').values_list('updated_at', flat=True)[:1]
+        if updated_at:
+            return updated_at[0]
+
+        return None
 
     @property
     def last_child_update(self):
