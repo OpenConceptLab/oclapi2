@@ -34,6 +34,8 @@ class MonthlyUsageReport:
             self.resources.append(MappingReport(start=self.start, end=self.end, verbose=self.verbose))
 
     def prepare(self):
+        self.result['start'] = self.resources[0].start
+        self.result['end'] = self.resources[0].end
         for resource in self.resources:
             self.result[resource.resource] = resource.get_monthly_report()
 
@@ -45,8 +47,8 @@ class ResourceReport:
     def __init__(self, start=None, end=None, verbose=False):
         self.verbose = verbose
         now = timezone.now()
-        self.start = start or (now - relativedelta(months=6))
-        self.end = end or now
+        self.start = start or (now - relativedelta(months=6)).date()
+        self.end = end or now.date()
         self.total = 0
         self.active = 0
         self.inactive = 0

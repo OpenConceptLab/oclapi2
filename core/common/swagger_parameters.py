@@ -31,6 +31,12 @@ sort_asc_param = openapi.Parameter(
 verbose_param = openapi.Parameter(
     VERBOSE_PARAM, openapi.IN_QUERY, type=openapi.TYPE_BOOLEAN, default=False,
 )
+start_date_param = openapi.Parameter(
+    'start', openapi.IN_QUERY, type=openapi.TYPE_STRING, format='YYYY-MM-DD', required=False
+)
+end_date_param = openapi.Parameter(
+    'end', openapi.IN_QUERY, type=openapi.TYPE_STRING, format='YYYY-MM-DD', required=False
+)
 include_retired_param = openapi.Parameter(
     INCLUDE_RETIRED_PARAM, openapi.IN_QUERY, type=openapi.TYPE_BOOLEAN, default=False,
 )
