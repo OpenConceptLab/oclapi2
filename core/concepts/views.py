@@ -149,7 +149,7 @@ class ConceptSummaryView(ConceptBaseView, RetrieveAPIView):
         queryset = self.get_queryset()
 
         if 'concept_version' not in self.kwargs:
-            queryset = queryset.filter(is_latest_version=True)
+            queryset = queryset.filter(id=F('versioned_object_id'))
 
         instance = queryset.first()
 
