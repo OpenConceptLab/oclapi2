@@ -18,9 +18,8 @@ class MonthlyUsageView(BaseAPIView, RetrieveAPIView):  # pragma: no cover
         return context
 
     def get_object(self, _=None):
-        is_verbose = self.is_verbose()
         report = MonthlyUsageReport(
-            verbose=is_verbose,
+            verbose=self.is_verbose(),
             start=self.request.query_params.get('start', None),
             end=self.request.query_params.get('end', None)
         )

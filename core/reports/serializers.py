@@ -14,6 +14,7 @@ class MonthlyUsageReportSerializer(serializers.Serializer):  # pylint: disable=a
     collections = JSONField(read_only=True)
     source_versions = JSONField(read_only=True)
     collection_versions = JSONField(read_only=True)
+    collection_references = JSONField(read_only=True)
     concepts = JSONField(read_only=True)
     mappings = JSONField(read_only=True)
 
