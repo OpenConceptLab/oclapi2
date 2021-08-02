@@ -242,7 +242,8 @@ class ConceptDetailSerializer(ModelSerializer):
     hierarchy_path = SerializerMethodField()
 
     def __init__(self, *args, **kwargs):
-        params = get(kwargs, 'context.request.query_params')
+        request = get(kwargs, 'context.request')
+        params = get(request, 'query_params')
         self.view_kwargs = get(kwargs, 'context.view.kwargs', dict())
 
         self.query_params = params.dict() if params else dict()
@@ -265,7 +266,7 @@ class ConceptDetailSerializer(ModelSerializer):
                 self.fields.pop('child_concepts', None)
             if not self.include_child_concept_urls:
                 self.fields.pop('child_concept_urls')
-            if not self.include_parent_concept_urls:
+            if not self.include_parent_concept_urls and get(request, 'method') == 'GET':
                 self.fields.pop('parent_concept_urls')
         except:  # pylint: disable=bare-except
             pass

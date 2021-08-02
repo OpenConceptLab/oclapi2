@@ -94,6 +94,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
                 'updated_by',
                 'created_by',
                 'internal_reference_id',
+                'parent_concept_urls',
                 'hierarchy_path',
                 'public_can_view',
             ]
@@ -198,6 +199,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
              'updated_by',
              'created_by',
              'internal_reference_id',
+             'parent_concept_urls',
              'hierarchy_path',
              'public_can_view']
         )
@@ -275,6 +277,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
              'updated_by',
              'created_by',
              'internal_reference_id',
+             'parent_concept_urls',
              'hierarchy_path',
              'public_can_view']
         )
