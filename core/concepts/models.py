@@ -786,3 +786,8 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
         result.reverse()
         return result
+
+    def delete(self, using=None, keep_parents=False):
+        LocalizedText.objects.filter(name_locales=self).delete()
+        LocalizedText.objects.filter(description_locales=self).delete()
+        return super().delete(using=using, keep_parents=keep_parents)

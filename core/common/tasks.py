@@ -408,11 +408,9 @@ def delete_dormant_locales():  # pragma: no cover
 
 @app.task
 def delete_concept(concept_id):  # pragma: no cover
-    from core.concepts.models import Concept, LocalizedText
+    from core.concepts.models import Concept
 
     concept = Concept.objects.filter(id=concept_id).first()
-    LocalizedText.objects.filter(name_locales=concept).delete()
-    LocalizedText.objects.filter(description_locales=concept).delete()
     concept.delete()
 
     return 1
