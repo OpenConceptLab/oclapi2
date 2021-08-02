@@ -4,7 +4,7 @@ from django.core.exceptions import ValidationError
 from core.sources.models import Source
 from .constants import (
     MUST_SPECIFY_TO_CONCEPT_OR_TO_SOURCE,
-    CANNOT_MAP_CONCEPT_TO_SELF, MUST_SPECIFY_FROM_CONCEPT, TO_SOURCE_UNIQUE_ATTRIBUTES_ERROR_MESSAGE
+    MUST_SPECIFY_FROM_CONCEPT, TO_SOURCE_UNIQUE_ATTRIBUTES_ERROR_MESSAGE
 )
 from .custom_validators import OpenMRSMappingValidator
 
@@ -17,8 +17,6 @@ class MappingValidationMixin:
             errors.append(MUST_SPECIFY_FROM_CONCEPT)
         if not self.to_concept_code:
             errors.append(MUST_SPECIFY_TO_CONCEPT_OR_TO_SOURCE)
-        if self.is_from_same_as_to():
-            errors.append(CANNOT_MAP_CONCEPT_TO_SELF)
         if Mapping.objects.exclude(
                 versioned_object_id=self.versioned_object_id
         ).filter(

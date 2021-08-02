@@ -112,8 +112,10 @@ class MappingListViewTest(OCLAPITestCase):
             dict(map_type='same as', from_concept_url=concept2.uri, to_concept_url=concept2.uri),
             HTTP_AUTHORIZATION='Token ' + self.token,
         )
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.data, {'__all__': ['Cannot map concept to itself.']})
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data['map_type'], 'same as')
+        self.assertEqual(response.data['from_concept_code'], concept2.mnemonic)
+        self.assertEqual(response.data['to_concept_code'], concept2.mnemonic)
 
     def test_post_to_concept_does_not_exists_201(self):
         source = UserSourceFactory(user=self.user)
