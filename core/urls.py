@@ -25,7 +25,8 @@ import core.mappings.views as mapping_views
 from core import VERSION
 from core.common.constants import NAMESPACE_PATTERN
 from core.common.utils import get_api_base_url
-from core.common.views import RootView, FeedbackView, APIVersionView, ChangeLogView, LocalesCleanupView
+from core.common.views import RootView, FeedbackView, APIVersionView, ChangeLogView, ConceptDuplicateLocalesView, \
+    ConceptDormantLocalesView
 from core.importers.views import BulkImportView
 import core.reports.views as report_views
 
@@ -45,13 +46,15 @@ urlpatterns = [
     path('version/', APIVersionView.as_view(), name='api-version'),
     path('changelog/', ChangeLogView.as_view(), name='changelog'),
     path('feedback/', FeedbackView.as_view(), name='feedback'),
-    path('locales-cleanup/', LocalesCleanupView.as_view(), name='locales-cleanup'),
     url(r'^swagger(?P<format>\.json|\.yaml)$', SchemaView.without_ui(cache_timeout=0), name='schema-json'),
     url(r'^swagger/$', SchemaView.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui'),
     url(r'^redoc/$', SchemaView.with_ui('redoc', cache_timeout=0), name='schema-redoc'),
     path('healthcheck/', include('core.common.healthcheck.urls')),
     path('admin/', admin.site.urls, name='admin_urls'),
     path('admin/reports/monthly-usage/', report_views.MonthlyUsageView.as_view(), name='monthly-usage-report'),
+    path('admin/concepts/locales/duplicate/', ConceptDuplicateLocalesView.as_view(), name='concept-duplicate-locales'),
+    path('admin/concepts/locales/dormant/', ConceptDormantLocalesView.as_view(), name='concept-dormant-locales'),
+    path('admin/mappings/debug/', mapping_views.MappingDebugRetrieveDestroyView.as_view(), name='mapping-debug'),
     path('users/', include('core.users.urls'), name='users_urls'),
     path('user/', include('core.users.user_urls'), name='current_user_urls'),
     path('orgs/', include('core.orgs.urls'), name='orgs_url'),
@@ -59,7 +62,6 @@ urlpatterns = [
     path('collections/', include('core.collections.urls'), name='collections_urls'),
     path('concepts/', concept_views.ConceptVersionListAllView.as_view(), name='all_concepts_urls'),
     path('mappings/', mapping_views.MappingVersionListAllView.as_view(), name='all_mappings_urls'),
-    path('mappings/debug/', mapping_views.MappingDebugRetrieveDestroyView.as_view(), name='mapping-debug'),
     path('importers/', include('core.importers.urls'), name='importer_urls'),
     path('v1-importers/', include('core.v1_importers.urls'), name='v1_importer_urls'),
     path('indexes/', include('core.indexes.urls'), name='indexes_urls'),

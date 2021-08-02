@@ -9,7 +9,6 @@ from rest_framework.generics import RetrieveAPIView, DestroyAPIView, ListCreateA
 from rest_framework.mixins import CreateModelMixin
 from rest_framework.permissions import IsAuthenticatedOrReadOnly, IsAdminUser
 from rest_framework.response import Response
-from rest_framework.views import APIView
 
 from core.common.constants import (
     HEAD, INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_RETIRED_PARAM)
@@ -19,7 +18,7 @@ from core.common.swagger_parameters import (
     q_param, limit_param, sort_desc_param, page_param, exact_match_param, sort_asc_param, verbose_param,
     include_facets_header, updated_since_param, include_inverse_mappings_param, include_retired_param,
     compress_header, include_source_versions_param, include_collection_versions_param)
-from core.common.tasks import delete_concept, delete_dormant_locales
+from core.common.tasks import delete_concept
 from core.common.utils import to_parent_uri_from_kwargs
 from core.common.views import SourceChildCommonBaseView, SourceChildExtrasView, \
     SourceChildExtraRetrieveUpdateDestroyView
@@ -472,17 +471,3 @@ class ConceptExtrasView(SourceChildExtrasView, ConceptBaseView):
 class ConceptExtraRetrieveUpdateDestroyView(SourceChildExtraRetrieveUpdateDestroyView, ConceptBaseView):
     serializer_class = ConceptDetailSerializer
     model = Concept
-
-
-class ConceptDormantLocalesView(APIView):  # pragma: no cover
-    permission_classes = (IsAdminUser, )
-
-    @staticmethod
-    def get(_, **kwargs):  # pylint: disable=unused-argument
-        count = LocalizedText.objects.filter(name_locales__isnull=True, description_locales__isnull=True).count()
-        return Response(count, status=status.HTTP_200_OK)
-
-    @staticmethod
-    def delete(_, **kwargs):  # pylint: disable=unused-argument
-        delete_dormant_locales.delay()
-        return Response(status=status.HTTP_204_NO_CONTENT)

@@ -693,6 +693,8 @@ class RootView(BaseAPIView):  # pragma: no cover
             route = str(pattern.pattern)
             if route in ['v1-importers/']:
                 continue
+            if isinstance(route, str) and route.startswith('admin/'):
+                continue
             if route and name is None:
                 name = route.split('/')[0] + '_urls'
                 if name == 'user_urls':
@@ -772,7 +774,7 @@ class FeedbackView(APIView):  # pragma: no cover
         return Response(status=status.HTTP_200_OK)
 
 
-class LocalesCleanupView(APIView):  # pragma: no cover
+class ConceptDuplicateLocalesView(APIView):  # pragma: no cover
     permission_classes = (IsAdminUser,)
 
     @staticmethod
@@ -780,3 +782,19 @@ class LocalesCleanupView(APIView):  # pragma: no cover
         from core.common.tasks import delete_duplicate_locales
         delete_duplicate_locales.delay(int(request.query_params.get('start', 0)))
         return Response(status=status.HTTP_200_OK)
+
+
+class ConceptDormantLocalesView(APIView):  # pragma: no cover
+    permission_classes = (IsAdminUser, )
+
+    @staticmethod
+    def get(_, **kwargs):  # pylint: disable=unused-argument
+        from core.concepts.models import LocalizedText
+        count = LocalizedText.objects.filter(name_locales__isnull=True, description_locales__isnull=True).count()
+        return Response(count, status=status.HTTP_200_OK)
+
+    @staticmethod
+    def delete(_, **kwargs):  # pylint: disable=unused-argument
+        from core.common.tasks import delete_dormant_locales
+        delete_dormant_locales.delay()
+        return Response(status=status.HTTP_204_NO_CONTENT)
