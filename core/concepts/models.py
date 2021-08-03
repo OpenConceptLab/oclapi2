@@ -564,7 +564,8 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             initial_version = None
             if create_initial_version:
                 initial_version = cls.create_initial_version(concept)
-                initial_version.set_locales()
+                initial_version.names.set(concept.names.all())
+                initial_version.descriptions.set(concept.descriptions.all())
                 initial_version.sources.set([parent_resource, parent_resource_head])
 
             concept.sources.set([parent_resource, parent_resource_head])
