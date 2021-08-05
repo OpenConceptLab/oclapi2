@@ -30,7 +30,7 @@ from core.concepts.search import ConceptSearch
 from core.concepts.serializers import (
     ConceptDetailSerializer, ConceptListSerializer, ConceptDescriptionSerializer, ConceptNameSerializer,
     ConceptVersionDetailSerializer,
-    ConceptVersionListSerializer, ConceptHierarchySerializer, ConceptSummarySerializer)
+    ConceptVersionListSerializer, ConceptHierarchySerializer, ConceptSummarySerializer, ConceptMinimalSerializer)
 from core.mappings.serializers import MappingListSerializer
 
 
@@ -54,14 +54,19 @@ class ConceptVersionListAllView(ConceptBaseView, ListWithHeadersMixin):
     permission_classes = (CanViewParentDictionary,)
 
     def get_serializer_class(self):
-        return ConceptDetailSerializer if self.is_verbose() else ConceptListSerializer
+        if self.is_verbose():
+            return ConceptDetailSerializer
+        if self.is_brief():
+            return ConceptMinimalSerializer
+        return ConceptListSerializer
 
     def get_queryset(self):
-        return Concept.global_listing_queryset(
-            self.get_filter_params(), self.request.user
-        ).select_related(
-            'parent__organization', 'parent__user',
-        ).prefetch_related('names', 'descriptions')
+        queryset = Concept.global_listing_queryset(self.get_filter_params(), self.request.user)
+        if self.is_brief():
+            return queryset
+
+        return queryset.select_related(
+            'parent__organization', 'parent__user',).prefetch_related('names', 'descriptions')
 
     @swagger_auto_schema(
         manual_parameters=[
@@ -84,7 +89,12 @@ class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
         return [CanViewParentDictionary(), ]
 
     def get_serializer_class(self):
-        if (self.request.method == 'GET' and self.is_verbose()) or self.request.method == 'POST':
+        method = self.request.method
+        is_get = method == 'GET'
+
+        if is_get and self.is_brief():
+            return ConceptMinimalSerializer
+        if (is_get and self.is_verbose()) or method == 'POST':
             return ConceptDetailSerializer
 
         return ConceptListSerializer
@@ -96,9 +106,10 @@ class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
         if is_latest_version:
             queryset = queryset.filter(is_latest_version=True)
 
-        return queryset.select_related(
-            'parent__organization', 'parent__user', 'created_by'
-        ).prefetch_related('names')
+        if self.is_brief():
+            return queryset
+
+        return queryset.select_related('parent__organization', 'parent__user', 'created_by').prefetch_related('names')
 
     def get(self, request, *args, **kwargs):
         self.set_parent_resource(False)

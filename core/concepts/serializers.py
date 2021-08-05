@@ -209,6 +209,15 @@ class ConceptSummarySerializer(ModelSerializer):
         return obj.versions.count()
 
 
+class ConceptMinimalSerializer(ModelSerializer):
+    uuid = CharField(source='id', read_only=True)
+    id = CharField(source='mnemonic', read_only=True)
+
+    class Meta:
+        model = Concept
+        fields = ('uuid', 'id')
+
+
 class ConceptDetailSerializer(ModelSerializer):
     uuid = CharField(source='id', read_only=True)
     version = CharField(read_only=True)

@@ -20,7 +20,8 @@ from rest_framework.views import APIView
 
 from core import __version__
 from core.common.constants import SEARCH_PARAM, LIST_DEFAULT_LIMIT, CSV_DEFAULT_LIMIT, \
-    LIMIT_PARAM, NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY, INCLUDE_RETIRED_PARAM, VERBOSE_PARAM, HEAD, LATEST
+    LIMIT_PARAM, NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY, INCLUDE_RETIRED_PARAM, VERBOSE_PARAM, HEAD, LATEST, \
+    BRIEF_PARAM
 from core.common.mixins import PathWalkerMixin
 from core.common.serializers import RootSerializer
 from core.common.utils import compact_dict_by_values, to_snake_case, to_camel_case, parse_updated_since_param, \
@@ -64,6 +65,9 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
     def is_verbose(self):
         return self.request.query_params.get(VERBOSE_PARAM, False) in ['true', True]
+
+    def is_brief(self):
+        return self.request.query_params.get(BRIEF_PARAM, False) in ['true', True]
 
     def initial(self, request, *args, **kwargs):
         super().initial(request, *args, **kwargs)
