@@ -68,7 +68,7 @@ class ConceptTest(OCLTestCase):
             parent=source,
             names=[
                 LocalizedTextFactory(locale_preferred=True, locale='en', name='MALARIA SMEAR, QUALITATIVE'),
-                LocalizedTextFactory(type='SHORT', locale_preferred=False, locale='en', name='malaria sm, qual'),
+                LocalizedTextFactory(type=SHORT, locale_preferred=False, locale='en', name='malaria sm, qual'),
                 LocalizedTextFactory(locale_preferred=False, locale='en', name='Jungle fever smear'),
                 LocalizedTextFactory(locale_preferred=True, locale='fr', name='FROTTIS POUR DÉTECTER PALUDISME'),
                 LocalizedTextFactory(locale_preferred=False, locale='ht', name='tès MALARYA , kalitatif'),
@@ -1078,8 +1078,8 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
             dict(
                 mnemonic='concept', version=HEAD, name='concept', parent=source,
                 concept_class='Diagnosis', datatype='None', names=[
-                    LocalizedTextFactory.build(name='Fully Specified Name 1', locale='tr', type='Short'),
-                    LocalizedTextFactory.build(name='Fully Specified Name 2', locale='en', type='Short')
+                    LocalizedTextFactory.build(name='Fully Specified Name 1', locale='tr', type=SHORT),
+                    LocalizedTextFactory.build(name='Fully Specified Name 2', locale='en', type=SHORT)
                 ]
             )
         )
@@ -1096,7 +1096,7 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
                 concept_class='Diagnosis', datatype='None', names=[
                     LocalizedTextFactory.build(
                         name='Concept Non Unique Preferred Name', locale='en',
-                        locale_preferred=True, type='Fully Specified'
+                        locale_preferred=True, type=FULLY_SPECIFIED
                     ),
                 ]
             )
@@ -1109,7 +1109,7 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
                         name='Concept Non Unique Preferred Name', locale='en', locale_preferred=True, type='None'
                     ),
                     LocalizedTextFactory.build(
-                        name='any name', locale='en', locale_preferred=False, type='Fully Specified'
+                        name='any name', locale='en', locale_preferred=False, type=FULLY_SPECIFIED
                     ),
                 ]
             )
@@ -1154,7 +1154,7 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
             dict(
                 mnemonic='concept', version=HEAD, name='concept', parent=source,
                 concept_class='Diagnosis', datatype='None', names=[
-                    LocalizedTextFactory.build(name="ShortName", locale_preferred=True, type="Short", locale='fr'),
+                    LocalizedTextFactory.build(name="ShortName", locale_preferred=True, type=SHORT, locale='fr'),
                     LocalizedTextFactory.build(name='Fully Specified Name'),
                 ]
             )
@@ -1239,8 +1239,8 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
             dict(
                 mnemonic='concept', version=HEAD, name='concept', parent=source,
                 concept_class='Diagnosis', datatype='None', names=[
-                    LocalizedTextFactory.build(name="fully specified name1", locale='en', type='Short'),
-                    LocalizedTextFactory.build(name='fully specified name2', locale='en', type='Short'),
+                    LocalizedTextFactory.build(name="fully specified name1", locale='en', type=SHORT),
+                    LocalizedTextFactory.build(name='fully specified name2', locale='en', type=SHORT),
                     LocalizedTextFactory.build(name='fully specified name3', locale='fr'),
                 ]
             )
@@ -1259,7 +1259,7 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
                 mnemonic='concept', version=HEAD, name='concept', parent=source,
                 concept_class='Diagnosis', datatype='None', names=[
                     LocalizedTextFactory.build(name="mg", locale='en', locale_preferred=True),
-                    LocalizedTextFactory.build(name='mg', locale='en', type='Short'),
+                    LocalizedTextFactory.build(name='mg', locale='en', type=SHORT),
                 ]
             )
         )

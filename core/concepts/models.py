@@ -92,9 +92,9 @@ class LocalizedText(models.Model):
         if not name_type or name_type == 'ConceptName':
             name_type = _type
 
-        return cls(
-            **{**params, 'type': name_type}
-        )
+        instance = cls(**{**params, 'type': name_type})
+        instance.format_type()
+        return instance
 
     @classmethod
     def build_description(cls, params):
