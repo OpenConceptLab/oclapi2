@@ -21,6 +21,8 @@ class OpenMRSConceptValidator(BaseConceptValidator):
         self.reference_values = kwargs.pop('reference_values')
 
     def validate_concept_based(self, concept):
+        if concept.retired:
+            return
         self.must_have_exactly_one_preferred_name(concept)
         self.all_non_short_names_must_be_unique(concept)
         self.no_more_than_one_short_name_per_locale(concept)
@@ -30,6 +32,8 @@ class OpenMRSConceptValidator(BaseConceptValidator):
         self.lookup_attributes_should_be_valid(concept)
 
     def validate_source_based(self, concept):
+        if concept.retired:
+            return
         self.fully_specified_name_should_be_unique_for_source_and_locale(concept)
         self.preferred_name_should_be_unique_for_source_and_locale(concept)
 

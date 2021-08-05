@@ -83,6 +83,8 @@ class BaseConceptValidator:
 
 class BasicConceptValidator(BaseConceptValidator):
     def validate_concept_based(self, concept):
+        if concept.retired:
+            return
         self.description_cannot_be_null(concept)
         self.must_have_at_least_one_name(concept)
 
