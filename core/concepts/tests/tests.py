@@ -9,8 +9,9 @@ from core.concepts.constants import (
     OPENMRS_PREFERRED_NAME_UNIQUE_PER_SOURCE_LOCALE, OPENMRS_SHORT_NAME_CANNOT_BE_PREFERRED,
     SHORT, INDEX_TERM, OPENMRS_NAMES_EXCEPT_SHORT_MUST_BE_UNIQUE, OPENMRS_ONE_FULLY_SPECIFIED_NAME_PER_LOCALE,
     OPENMRS_NO_MORE_THAN_ONE_SHORT_NAME_PER_LOCALE, CONCEPT_IS_ALREADY_RETIRED, CONCEPT_IS_ALREADY_NOT_RETIRED,
-    OPENMRS_CONCEPT_CLASS, OPENMRS_DATATYPE, OPENMRS_DESCRIPTION_TYPE, OPENMRS_NAME_LOCALE, OPENMRS_DESCRIPTION_LOCALE)
-from core.concepts.models import Concept
+    OPENMRS_CONCEPT_CLASS, OPENMRS_DATATYPE, OPENMRS_DESCRIPTION_TYPE, OPENMRS_NAME_LOCALE, OPENMRS_DESCRIPTION_LOCALE,
+    FULLY_SPECIFIED)
+from core.concepts.models import Concept, LocalizedText
 from core.concepts.tests.factories import LocalizedTextFactory, ConceptFactory
 from core.concepts.validators import ValidatorSpecifier
 from core.mappings.tests.factories import MappingFactory
@@ -27,6 +28,23 @@ class LocalizedTextTest(OCLTestCase):
         )
         self.assertNotEqual(saved_locale.id, cloned_locale.id)
         self.assertIsNone(cloned_locale.internal_reference_id)
+
+    def test_formatted_type(self):
+        for locale_type in [
+                'fully specified', 'Fully Specified', 'fully_specified', 'Fully_Specified', 'FULLY_SPECIFIED']:
+            locale = LocalizedText(name='foo', locale='bar', type=locale_type)
+            locale.full_clean()
+            self.assertEqual(locale.type, FULLY_SPECIFIED)
+
+        for locale_type in ['short', 'SHORT']:
+            locale = LocalizedText(name='foo', locale='bar', type=locale_type)
+            locale.full_clean()
+            self.assertEqual(locale.type, SHORT)
+
+        for locale_type in ['index term', 'index_term', 'Index Term', 'Index_Term', 'INDEX_TERM']:
+            locale = LocalizedText(name='foo', locale='bar', type=locale_type)
+            locale.full_clean()
+            self.assertEqual(locale.type, INDEX_TERM)
 
 
 class ConceptTest(OCLTestCase):

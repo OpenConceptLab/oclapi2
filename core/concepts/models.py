@@ -12,9 +12,10 @@ from core.common.tasks import process_hierarchy_for_new_concept, process_hierarc
     process_hierarchy_for_new_parent_concept_version
 from core.common.utils import parse_updated_since_param, generate_temp_version, drop_version, \
     encode_string, decode_string
-from core.concepts.constants import CONCEPT_TYPE, LOCALES_FULLY_SPECIFIED, LOCALES_SHORT, LOCALES_SEARCH_INDEX_TERM, \
-    CONCEPT_WAS_RETIRED, CONCEPT_IS_ALREADY_RETIRED, CONCEPT_IS_ALREADY_NOT_RETIRED, CONCEPT_WAS_UNRETIRED, \
-    PERSIST_CLONE_ERROR, PERSIST_CLONE_SPECIFY_USER_ERROR, ALREADY_EXISTS, CONCEPT_REGEX
+from core.concepts.constants import CONCEPT_TYPE, CONCEPT_WAS_RETIRED, CONCEPT_IS_ALREADY_RETIRED, \
+    CONCEPT_IS_ALREADY_NOT_RETIRED, CONCEPT_WAS_UNRETIRED, \
+    PERSIST_CLONE_ERROR, PERSIST_CLONE_SPECIFY_USER_ERROR, ALREADY_EXISTS, CONCEPT_REGEX, FULLY_SPECIFIED, SHORT, \
+    INDEX_TERM, DEFINITION
 from core.concepts.mixins import ConceptValidationMixin
 
 
@@ -40,6 +41,7 @@ class LocalizedText(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     def save(self, force_insert=False, force_update=False, using=None, update_fields=None):
+        self.format_type()
         if not self.internal_reference_id and self.id:
             self.internal_reference_id = str(self.id)
         super().save(force_insert, force_update, using, update_fields)
@@ -58,6 +60,20 @@ class LocalizedText(models.Model):
             locale=self.locale,
             locale_preferred=self.locale_preferred
         )
+
+    def clean(self):
+        self.format_type()
+        super().clean()
+
+    def format_type(self):
+        if self.type and self.type not in ['None', DEFINITION]:
+            self.type = self.get_formatted_type(self.type)
+
+    @staticmethod
+    def get_formatted_type(locale_type):
+        if not locale_type:
+            return locale_type
+        return locale_type.upper().replace(' ', '_')
 
     @classmethod
     def build(cls, params, used_as='name'):
@@ -105,15 +121,15 @@ class LocalizedText(models.Model):
 
     @property
     def is_fully_specified(self):
-        return self.type in LOCALES_FULLY_SPECIFIED
+        return self.type == FULLY_SPECIFIED
 
     @property
     def is_short(self):
-        return self.type in LOCALES_SHORT
+        return self.type == SHORT
 
     @property
     def is_search_index_term(self):
-        return self.type in LOCALES_SEARCH_INDEX_TERM
+        return self.type == INDEX_TERM
 
 
 class HierarchicalConcepts(models.Model):

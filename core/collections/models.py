@@ -17,7 +17,7 @@ from core.common.constants import (
 )
 from core.common.models import ConceptContainerModel
 from core.common.utils import is_valid_uri, drop_version
-from core.concepts.constants import LOCALES_FULLY_SPECIFIED
+from core.concepts.constants import FULLY_SPECIFIED
 from core.concepts.models import Concept
 from core.concepts.views import ConceptListView
 from core.mappings.models import Mapping
@@ -139,7 +139,7 @@ class Collection(ConceptContainerModel):
 
             concept = reference.concepts[0]
             self.check_concept_uniqueness_in_collection_and_locale_by_name_attribute(
-                concept, attribute='type__in', value=LOCALES_FULLY_SPECIFIED,
+                concept, attribute='type', value=FULLY_SPECIFIED,
                 error_message=CONCEPT_FULLY_SPECIFIED_NAME_UNIQUE_PER_COLLECTION_AND_LOCALE
             )
             self.check_concept_uniqueness_in_collection_and_locale_by_name_attribute(
@@ -240,7 +240,7 @@ class Collection(ConceptContainerModel):
                     for concept in ref.concepts:
                         try:
                             self.check_concept_uniqueness_in_collection_and_locale_by_name_attribute(
-                                concept, attribute='type__in', value=LOCALES_FULLY_SPECIFIED,
+                                concept, attribute='type', value=FULLY_SPECIFIED,
                                 error_message=CONCEPT_FULLY_SPECIFIED_NAME_UNIQUE_PER_COLLECTION_AND_LOCALE
                             )
                             self.check_concept_uniqueness_in_collection_and_locale_by_name_attribute(
