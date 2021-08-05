@@ -14,7 +14,8 @@ from core.common.utils import parse_updated_since_param, generate_temp_version, 
     encode_string, decode_string
 from core.concepts.constants import CONCEPT_TYPE, LOCALES_FULLY_SPECIFIED, LOCALES_SHORT, LOCALES_SEARCH_INDEX_TERM, \
     CONCEPT_WAS_RETIRED, CONCEPT_IS_ALREADY_RETIRED, CONCEPT_IS_ALREADY_NOT_RETIRED, CONCEPT_WAS_UNRETIRED, \
-    PERSIST_CLONE_ERROR, PERSIST_CLONE_SPECIFY_USER_ERROR, ALREADY_EXISTS, CONCEPT_REGEX
+    PERSIST_CLONE_ERROR, PERSIST_CLONE_SPECIFY_USER_ERROR, ALREADY_EXISTS, CONCEPT_REGEX, MAX_LOCALES_LIMIT, \
+    MAX_NAMES_LIMIT, MAX_DESCRIPTIONS_LIMIT
 from core.concepts.mixins import ConceptValidationMixin
 
 
@@ -548,6 +549,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             return concept
 
         try:
+            concept.validate_locales_limit(names, descriptions)
             concept.cloned_names = names
             concept.cloned_descriptions = descriptions
             concept.full_clean()
@@ -615,6 +617,8 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         prev_latest_version = versioned_object.versions.exclude(id=obj.id).filter(is_latest_version=True).first()
         try:
             with transaction.atomic():
+                cls.validate_locales_limit(obj.cloned_names, obj.cloned_descriptions)
+
                 cls.pause_indexing()
 
                 obj.is_latest_version = True
@@ -665,6 +669,13 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                 errors['non_field_errors'] = [PERSIST_CLONE_ERROR]
 
         return errors
+
+    @staticmethod
+    def validate_locales_limit(names, descriptions):
+        if len(names) > MAX_LOCALES_LIMIT:
+            raise ValidationError({'names': [MAX_NAMES_LIMIT]})
+        if len(descriptions) > MAX_LOCALES_LIMIT:
+            raise ValidationError({'descriptions': [MAX_DESCRIPTIONS_LIMIT]})
 
     def get_unidirectional_mappings_for_collection(self, collection_url, collection_version=HEAD):
         from core.mappings.models import Mapping
