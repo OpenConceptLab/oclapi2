@@ -5,12 +5,12 @@ from core.common.constants import LOOKUP_CONCEPT_CLASSES
 from core.concepts.constants import (
     OPENMRS_MUST_HAVE_EXACTLY_ONE_PREFERRED_NAME,
     OPENMRS_AT_LEAST_ONE_FULLY_SPECIFIED_NAME, OPENMRS_PREFERRED_NAME_UNIQUE_PER_SOURCE_LOCALE,
-    OPENMRS_FULLY_SPECIFIED_NAME_UNIQUE_PER_SOURCE_LOCALE, LOCALES_SHORT, OPENMRS_SHORT_NAME_CANNOT_BE_PREFERRED,
+    OPENMRS_FULLY_SPECIFIED_NAME_UNIQUE_PER_SOURCE_LOCALE, OPENMRS_SHORT_NAME_CANNOT_BE_PREFERRED,
     OPENMRS_NAMES_EXCEPT_SHORT_MUST_BE_UNIQUE,
     OPENMRS_ONE_FULLY_SPECIFIED_NAME_PER_LOCALE, OPENMRS_NO_MORE_THAN_ONE_SHORT_NAME_PER_LOCALE, OPENMRS_CONCEPT_CLASS,
     OPENMRS_DATATYPE, OPENMRS_NAME_TYPE, OPENMRS_DESCRIPTION_TYPE, OPENMRS_NAME_LOCALE,
     OPENMRS_DESCRIPTION_LOCALE,
-    LOCALES_SEARCH_INDEX_TERM, INDEX_TERM, FULLY_SPECIFIED, SHORT)
+    INDEX_TERM, FULLY_SPECIFIED, SHORT)
 from core.concepts.validators import BaseConceptValidator, message_with_name_details
 
 
@@ -89,8 +89,9 @@ class OpenMRSConceptValidator(BaseConceptValidator):
 
         return not self.repo.concepts_set.exclude(
             versioned_object_id=versioned_object_id
-        ).exclude(names__type__in=(*LOCALES_SHORT, *LOCALES_SEARCH_INDEX_TERM)).filter(
-            is_active=True, retired=False, is_latest_version=True, names__locale=name.locale, names__name=name.name
+        ).filter(
+            names__type=FULLY_SPECIFIED, names__locale=name.locale, names__name=name.name,
+            is_active=True, retired=False, is_latest_version=True,
         ).exists()
 
     @staticmethod
@@ -102,8 +103,8 @@ class OpenMRSConceptValidator(BaseConceptValidator):
 
         if short_preferred_names_in_concept:
             raise ValidationError({
-                'names': [message_with_name_details(OPENMRS_SHORT_NAME_CANNOT_BE_PREFERRED,
-                                                    short_preferred_names_in_concept[0])]
+                'names': [message_with_name_details(
+                    OPENMRS_SHORT_NAME_CANNOT_BE_PREFERRED, short_preferred_names_in_concept[0])]
             })
 
     @staticmethod

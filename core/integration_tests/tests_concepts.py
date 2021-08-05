@@ -617,7 +617,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
                 "locale": 'en',
                 "locale_preferred": False,
                 "name": 'foo',
-                "name_type": "Fully Specified"
+                "name_type": "FULLY_SPECIFIED"
             }
         )
         self.assertEqual(concept.names.count(), 2)
