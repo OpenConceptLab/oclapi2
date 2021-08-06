@@ -419,9 +419,7 @@ def delete_concept(concept_id):  # pragma: no cover
 @app.task
 def batch_index_resources(resource, filters):
     model = get_resource_class_from_resource_name(resource)
-    if not model:
-        return
-
-    model.batch_index(model.objects.filter(**filters), model.get_search_document())
+    if model:
+        model.batch_index(model.objects.filter(**filters), model.get_search_document())
 
     return 1
