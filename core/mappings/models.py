@@ -97,6 +97,11 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         'external_id': {'sortable': False, 'filterable': True, 'facet': False, 'exact': False},
     }
 
+    @staticmethod
+    def get_search_document():
+        from core.mappings.documents import MappingDocument
+        return MappingDocument
+
     @property
     def mapping(self):  # for url kwargs
         return self.mnemonic

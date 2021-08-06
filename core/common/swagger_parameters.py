@@ -98,6 +98,9 @@ apps_param = openapi.Parameter(
 ids_param = openapi.Parameter(
     'ids', openapi.IN_FORM, description="Resource Ids", type=openapi.TYPE_STRING
 )
+uri_param = openapi.Parameter(
+    'uri', openapi.IN_FORM, description="Relative URI", type=openapi.TYPE_STRING
+)
 resources_body_param = openapi.Parameter(
     'resource', openapi.IN_PATH, type=openapi.TYPE_STRING,
     enum=['mappings', 'concepts', 'sources', 'orgs', 'users', 'collections']

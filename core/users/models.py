@@ -42,6 +42,11 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
         'is_admin': {'sortable': False, 'filterable': False, 'exact': False, 'facet': True}
     }
 
+    @staticmethod
+    def get_search_document():
+        from core.users.documents import UserProfileDocument
+        return UserProfileDocument
+
     @property
     def user(self):
         return self.username

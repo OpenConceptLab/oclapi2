@@ -57,6 +57,11 @@ class Source(ConceptContainerModel):
     OBJECT_TYPE = SOURCE_TYPE
     OBJECT_VERSION_TYPE = SOURCE_VERSION_TYPE
 
+    @staticmethod
+    def get_search_document():
+        from core.sources.documents import SourceDocument
+        return SourceDocument
+
     @classmethod
     def head_from_uri(cls, uri):
         queryset = cls.objects.none()

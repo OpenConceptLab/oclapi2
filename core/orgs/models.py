@@ -36,6 +36,11 @@ class Organization(BaseResourceModel, SourceContainerMixin):
     client_configs = GenericRelation(ClientConfig, object_id_field='resource_id', content_type_field='resource_type')
     text = models.TextField(null=True, blank=True)  # for about description (markup)
 
+    @staticmethod
+    def get_search_document():
+        from core.orgs.documents import OrganizationDocument
+        return OrganizationDocument
+
     @property
     def org(self):
         return self.mnemonic

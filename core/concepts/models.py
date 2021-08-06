@@ -175,6 +175,11 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         'external_id': {'sortable': False, 'filterable': True, 'facet': False, 'exact': False},
     }
 
+    @staticmethod
+    def get_search_document():
+        from core.concepts.documents import ConceptDocument
+        return ConceptDocument
+
     @property
     def concept(self):  # for url kwargs
         return self.mnemonic  # pragma: no cover

@@ -67,6 +67,11 @@ class Collection(ConceptContainerModel):
     immutable = models.BooleanField(null=True, blank=True, default=None)
     locked_date = models.DateTimeField(null=True, blank=True)
 
+    @staticmethod
+    def get_search_document():
+        from core.collections.documents import CollectionDocument
+        return CollectionDocument
+
     @classmethod
     def get_base_queryset(cls, params):
         collection = params.pop('collection', None)
