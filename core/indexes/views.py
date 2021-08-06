@@ -1,5 +1,6 @@
+from django.conf import settings
 from drf_yasg.utils import swagger_auto_schema
-from pydash import compact
+from pydash import compact, get
 from rest_framework import status
 from rest_framework.parsers import MultiPartParser
 from rest_framework.permissions import IsAdminUser
@@ -51,14 +52,20 @@ class ResourceIndexView(APIView):
         ids = self.request.data.get('ids', None)
         uri = self.request.data.get('uri', None)
 
+        filters = None
+
         if ids:
             ids = compact([i.strip() for i in compact(ids.split(','))])
-            filters = {"{}__in".format(model.mnemonic_attr): ids}
+            if ids:
+                filters = {"{}__in".format(model.mnemonic_attr): ids}
         elif uri:
             filters = dict(uri__icontains=uri)
-        else:
+        if not filters:
             return Response(status=status.HTTP_400_BAD_REQUEST)
 
-        batch_index_resources.delay(resource, filters)
+        if get(settings, 'TEST_MODE', False):
+            batch_index_resources(resource, filters)
+        else:
+            batch_index_resources.delay(resource, filters)
 
         return Response(status=status.HTTP_202_ACCEPTED)
