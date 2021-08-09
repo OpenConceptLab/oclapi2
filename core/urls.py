@@ -51,6 +51,7 @@ urlpatterns = [
     url(r'^redoc/$', SchemaView.with_ui('redoc', cache_timeout=0), name='schema-redoc'),
     path('healthcheck/', include('core.common.healthcheck.urls')),
     path('admin/', admin.site.urls, name='admin_urls'),
+    path('admin/reports/authored/', report_views.AuthoredView.as_view(), name='authored-report'),
     path('admin/reports/monthly-usage/', report_views.MonthlyUsageView.as_view(), name='monthly-usage-report'),
     path('admin/concepts/locales/duplicate/', ConceptDuplicateLocalesView.as_view(), name='concept-duplicate-locales'),
     path('admin/concepts/locales/dormant/', ConceptDormantLocalesView.as_view(), name='concept-dormant-locales'),
