@@ -1,3 +1,34 @@
+##### 2.0.34 - Mon Aug 9 11:28:23 2021 +0000
+- user(s) authoring report | counts of resources created/updated
+- Indexing | making sure re-run of delete job doesn't fail if the instance is already deleted
+##### 2.0.33 - Fri Aug 6 08:19:53 2021 +0000
+- delete duplicate locales task | Updated log statement
+- Indexes API | can index resources by uri filter
+- Limiting locales for each concept to max 500
+- integration test for different concept response modes (verbose/standard/brief)
+- Concept brief response '?brief=true' | returns uuid and id only
+- [OpenConceptLab/ocl_issues#45](https://github.com/OpenConceptLab/ocl_issues/issues/45) | not validating retired concept locales
+- Fixing concept new/version leaving dormant locales
+- [OpenConceptLab/ocl_issues#860](https://github.com/OpenConceptLab/ocl_issues/issues/860) | self mappings | mappings can be created with same from/to concept
+- [OpenConceptLab/ocl_issues#857](https://github.com/OpenConceptLab/ocl_issues/issues/857) Frequent 504 gateway timeout when requesting export on staging
+- [OpenConceptLab/ocl_issues#852](https://github.com/OpenConceptLab/ocl_issues/issues/852) | Monthly usage report | added collection references in serializer
+- [OpenConceptLab/ocl_issues#852](https://github.com/OpenConceptLab/ocl_issues/issues/852) | added date range in monthly usage report
+- locales dormant/duplicate routes under admin namespace
+- Concept/Mapping | simplifying version get criteria
+- Concept summary API to return concept and not latest version when no version is specified
+- Concept hard delete to not leave any dormant locales behind
+- Concept POST/PUT | fixing parent concept urls not accepted
+- api to delete dormant locales in batches
+- Added version info in swagger UI
+- api to get count of dormant locales
+- logging count of dormant locales deleted
+- api/task to get concept/version summary, clean dormant locales
+- api/task for sys admin to delete dormant locales
+- async concept hard delete sys admin api
+- Task to cleanup duplicate locales | processing in batches
+- [OpenConceptLab/ocl_issues#845](https://github.com/OpenConceptLab/ocl_issues/issues/845) Adding missing indexes
+- [OpenConceptLab/ocl_issues#857](https://github.com/OpenConceptLab/ocl_issues/issues/857) | Source/collection child max updated at to select only updated_at field
+- Source concept/mapping export to eager load source's parent correctly
 ##### 2.0.21 - Wed Jul 28 05:30:54 2021 +0000
 - [OpenConceptLab/ocl_issues#845](https://github.com/OpenConceptLab/ocl_issues/issues/845) | exports | reducing batch size to 100
 - [OpenConceptLab/ocl_issues#852](https://github.com/OpenConceptLab/ocl_issues/issues/852) | monthly usage report under admin/report/ namespace
