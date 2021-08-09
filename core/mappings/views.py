@@ -228,9 +228,14 @@ class MappingVersionsView(MappingBaseView, ConceptDictionaryMixin, ListWithHeade
         return self.list(request, *args, **kwargs)
 
 
-class MappingVersionRetrieveView(MappingBaseView, RetrieveAPIView):
+class MappingVersionRetrieveView(MappingBaseView, RetrieveAPIView, DestroyAPIView):
     serializer_class = MappingVersionDetailSerializer
-    permission_classes = (CanViewParentDictionary,)
+
+    def get_permissions(self):
+        if self.request.method == 'DELETE':
+            return [IsAdminUser()]
+
+        return [CanViewParentDictionary(), ]
 
     def get_object(self, queryset=None):
         instance = self.get_queryset().first()

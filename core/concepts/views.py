@@ -333,9 +333,14 @@ class ConceptMappingsView(ConceptBaseView, ListWithHeadersMixin):
         return self.list(request, *args, **kwargs)
 
 
-class ConceptVersionRetrieveView(ConceptBaseView, RetrieveAPIView):
+class ConceptVersionRetrieveView(ConceptBaseView, RetrieveAPIView, DestroyAPIView):
     serializer_class = ConceptVersionDetailSerializer
-    permission_classes = (CanViewParentDictionary,)
+
+    def get_permissions(self):
+        if self.request.method == 'DELETE':
+            return [IsAdminUser()]
+
+        return [CanViewParentDictionary(), ]
 
     def get_object(self, queryset=None):
         instance = self.get_queryset().first()
