@@ -1,5 +1,4 @@
 from django.apps import AppConfig
-from django.db.models.fields import Field
 from health_check.plugins import plugin_dir
 
 from core.common.healthcheck import healthcheck
