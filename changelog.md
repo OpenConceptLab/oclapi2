@@ -1,3 +1,5 @@
+##### 2.0.35 - Tue Aug 10 03:33:12 2021 +0000
+- [OpenConceptLab/ocl_issues#895](https://github.com/OpenConceptLab/ocl_issues/issues/895) | concept/mapping | Admin API to delete (hard) a version
 ##### 2.0.34 - Mon Aug 9 11:28:23 2021 +0000
 - user(s) authoring report | counts of resources created/updated
 - Indexing | making sure re-run of delete job doesn't fail if the instance is already deleted
