@@ -3,31 +3,6 @@
 from django.db import migrations
 
 
-def standardize_locale_type(apps, _):
-    LocalizeText = apps.get_model('concepts', 'LocalizedText')
-
-    def batch_update(values_from, value_to):
-        batch_size = 1000
-        queryset = LocalizeText.objects.filter(type__in=values_from)
-        total = queryset.count()
-        for start in range(0, total, batch_size):
-            end = min(start + batch_size, total)
-            locales = LocalizeText.objects.filter(
-                id__in=queryset.order_by('id')[start:end].only('id').values_list('id', flat=True))
-            locales.update(type=value_to)
-
-    batch_update(
-        values_from=['Fully Specified', 'Fully_Specified', 'fully_specified',
-                     'fully specified', 'full-specified', 'FULLY-SPECIFIED'],
-        value_to='FULLY_SPECIFIED'
-    )
-    batch_update(
-        values_from=['index term', 'index_term', 'index-term', 'Index Term', 'Index_Term', 'Index-Term'],
-        value_to='INDEX_TERM'
-    )
-    batch_update(values_from=['short', 'Short'], value_to='SHORT')
-
-
 class Migration(migrations.Migration):
 
     dependencies = [
@@ -35,5 +10,9 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.RunPython(standardize_locale_type)
+        migrations.RunSQL(
+            sql=r"UPDATE localized_texts SET type='FULLY_SPECIFIED' WHERE type IN "
+                r"('Fully Specified','Fully_Specified','fully_specified',"
+                r"'fully specified','full-specified','FULLY-SPECIFIED');",
+        ),
     ]
