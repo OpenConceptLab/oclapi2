@@ -12,6 +12,13 @@ The new and improved OCL terminology service v2
 2. Coverage -- `docker exec -it oclapi2_api_1 bash coverage.sh`
 2. Tests --- `docker exec -it oclapi2_api_1  python manage.py test --keepdb -v3`
 
+### DB migrations
+After modifying model you need to create migration files. Run:
+
+`docker-compose run --rm api python manage.py makemigrations`
+
+Make sure to commit newly created migration files.
+
 ### Release
 
 Every build is a candidate for release.
