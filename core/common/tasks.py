@@ -432,9 +432,10 @@ def batch_index_resources(resource, filters):
 def make_hierarchy(concept_map):  # pragma: no cover
     from core.concepts.models import Concept
 
-    for concept_uri, parent_concept_urls in concept_map.items():
-        concept = Concept.objects.filter(uri=concept_uri).first()
-        if concept:
-            for parent_concept in Concept.objects.filter(uri__in=parent_concept_urls):
-                concept.parent_concepts.add(parent_concept.get_latest_version())
-                concept.get_latest_version().parent_concepts.add(parent_concept.get_latest_version())
+    for parent_concept_uri, child_concept_urls in concept_map.items():
+        parent_concept = Concept.objects.filter(uri=parent_concept_uri).first()
+        if parent_concept:
+            latest_version = parent_concept.get_latest_version()
+            for child_concept in Concept.objects.filter(uri__in=child_concept_urls):
+                child_concept.parent_concepts.add(latest_version)
+                child_concept.get_latest_version().parent_concepts.add(latest_version)
