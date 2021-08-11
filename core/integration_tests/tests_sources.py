@@ -10,7 +10,7 @@ from core.collections.tests.factories import OrganizationCollectionFactory
 from core.common.tasks import export_source
 from core.common.tests import OCLAPITestCase
 from core.common.utils import get_latest_dir_in_path
-from core.concepts.serializers import ConceptVersionDetailSerializer
+from core.concepts.serializers import ConceptVersionExportSerializer
 from core.concepts.tests.factories import ConceptFactory
 from core.mappings.serializers import MappingDetailSerializer
 from core.mappings.tests.factories import MappingFactory
@@ -756,7 +756,7 @@ class ExportSourceTaskTest(OCLAPITestCase):
         )
 
         exported_concepts = exported_data['concepts']
-        expected_concepts = ConceptVersionDetailSerializer([concept2, concept1], many=True).data
+        expected_concepts = ConceptVersionExportSerializer([concept2, concept1], many=True).data
 
         self.assertEqual(len(exported_concepts), 2)
         self.assertIn(expected_concepts[0], exported_concepts)

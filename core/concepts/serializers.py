@@ -345,6 +345,37 @@ class ConceptDetailSerializer(ModelSerializer):
         return None
 
 
+class ConceptVersionExportSerializer(ModelSerializer):
+    type = CharField(source='resource_type')
+    uuid = CharField(source='id')
+    id = EncodedDecodedCharField(source='mnemonic')
+    names = LocalizedNameSerializer(many=True)
+    descriptions = LocalizedDescriptionSerializer(many=True, required=False, allow_null=True)
+    source = CharField(source='parent_resource')
+    source_url = URLField(source='parent_url')
+    owner = CharField(source='owner_name')
+    created_on = DateTimeField(source='created_at', read_only=True)
+    updated_on = DateTimeField(source='updated_at', read_only=True)
+    version_created_on = DateTimeField(source='created_at')
+    version_created_by = CharField(source='created_by')
+    locale = CharField(source='iso_639_1_locale')
+    url = CharField(source='versioned_object_url', read_only=True)
+    previous_version_url = CharField(source='prev_version_uri', read_only=True)
+    update_comment = CharField(source='comment', required=False, allow_null=True, allow_blank=True)
+    parent_concept_urls = ListField(read_only=True)
+    child_concept_urls = ListField(read_only=True)
+
+    class Meta:
+        model = Concept
+        fields = (
+            'type', 'uuid', 'id', 'external_id', 'concept_class', 'datatype', 'display_name', 'display_locale',
+            'names', 'descriptions', 'extras', 'retired', 'source', 'source_url', 'owner', 'owner_name', 'owner_url',
+            'version', 'created_on', 'updated_on', 'version_created_on', 'version_created_by', 'update_comment',
+            'is_latest_version', 'locale', 'url', 'owner_type', 'version_url', 'previous_version_url',
+            'internal_reference_id', 'parent_concept_urls', 'child_concept_urls',
+        )
+
+
 class ConceptVersionDetailSerializer(ModelSerializer):
     type = CharField(source='resource_type')
     uuid = CharField(source='id')

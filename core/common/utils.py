@@ -232,7 +232,7 @@ def write_export_file(
         logger.info(
             '%s has %d concepts. Getting them in batches of %d...' % (resource_name, total_concepts, batch_size)
         )
-        concept_serializer_class = get_class('core.concepts.serializers.ConceptVersionDetailSerializer')
+        concept_serializer_class = get_class('core.concepts.serializers.ConceptVersionExportSerializer')
         for start in range(0, total_concepts, batch_size):
             end = min(start + batch_size, total_concepts)
             logger.info('Serializing concepts %d - %d...' % (start+1, end))
