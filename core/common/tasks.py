@@ -426,3 +426,15 @@ def batch_index_resources(resource, filters):
         model.batch_index(model.objects.filter(**filters), model.get_search_document())
 
     return 1
+
+
+@app.task
+def make_hierarchy(concept_map):  # pragma: no cover
+    from core.concepts.models import Concept
+
+    for concept_uri, parent_concept_urls in concept_map.items():
+        concept = Concept.objects.filter(uri=concept_uri).first()
+        if concept:
+            for parent_concept in Concept.objects.filter(uri__in=parent_concept_urls):
+                concept.parent_concepts.add(parent_concept.get_latest_version())
+                concept.get_latest_version().parent_concepts.add(parent_concept.get_latest_version())

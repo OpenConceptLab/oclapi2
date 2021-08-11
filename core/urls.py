@@ -27,6 +27,7 @@ from core.common.constants import NAMESPACE_PATTERN
 from core.common.utils import get_api_base_url
 from core.common.views import RootView, FeedbackView, APIVersionView, ChangeLogView, ConceptDuplicateLocalesView, \
     ConceptDormantLocalesView
+from core.concepts.views import ConceptsHierarchyAmendAdminView
 from core.importers.views import BulkImportView
 import core.reports.views as report_views
 
@@ -55,6 +56,7 @@ urlpatterns = [
     path('admin/reports/monthly-usage/', report_views.MonthlyUsageView.as_view(), name='monthly-usage-report'),
     path('admin/concepts/locales/duplicate/', ConceptDuplicateLocalesView.as_view(), name='concept-duplicate-locales'),
     path('admin/concepts/locales/dormant/', ConceptDormantLocalesView.as_view(), name='concept-dormant-locales'),
+    path('admin/concepts/amend-hierarchy/', ConceptsHierarchyAmendAdminView.as_view(), name='concepts-amend-hierarchy'),
     path('admin/mappings/debug/', mapping_views.MappingDebugRetrieveDestroyView.as_view(), name='mapping-debug'),
     path('users/', include('core.users.urls'), name='users_urls'),
     path('user/', include('core.users.user_urls'), name='current_user_urls'),

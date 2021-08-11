@@ -9,6 +9,7 @@ from rest_framework.generics import RetrieveAPIView, DestroyAPIView, ListCreateA
 from rest_framework.mixins import CreateModelMixin
 from rest_framework.permissions import IsAuthenticatedOrReadOnly, IsAdminUser
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from core.common.constants import (
     HEAD, INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_RETIRED_PARAM)
@@ -18,7 +19,7 @@ from core.common.swagger_parameters import (
     q_param, limit_param, sort_desc_param, page_param, exact_match_param, sort_asc_param, verbose_param,
     include_facets_header, updated_since_param, include_inverse_mappings_param, include_retired_param,
     compress_header, include_source_versions_param, include_collection_versions_param)
-from core.common.tasks import delete_concept
+from core.common.tasks import delete_concept, make_hierarchy
 from core.common.utils import to_parent_uri_from_kwargs
 from core.common.views import SourceChildCommonBaseView, SourceChildExtrasView, \
     SourceChildExtraRetrieveUpdateDestroyView
@@ -487,3 +488,18 @@ class ConceptExtrasView(SourceChildExtrasView, ConceptBaseView):
 class ConceptExtraRetrieveUpdateDestroyView(SourceChildExtraRetrieveUpdateDestroyView, ConceptBaseView):
     serializer_class = ConceptDetailSerializer
     model = Concept
+
+
+class ConceptsHierarchyAmendAdminView(APIView):  # pragma: no cover
+    swagger_schema = None
+    permission_classes = (IsAdminUser, )
+
+    @staticmethod
+    def post(request):
+        concept_map = request.data
+        if not concept_map:
+            return Response(status=status.HTTP_400_BAD_REQUEST)
+
+        make_hierarchy.delay(concept_map)
+
+        return Response(status=status.HTTP_202_ACCEPTED)
