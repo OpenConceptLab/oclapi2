@@ -794,7 +794,7 @@ class ConceptDormantLocalesView(APIView):  # pragma: no cover
     @staticmethod
     def get(_, **kwargs):  # pylint: disable=unused-argument
         from core.concepts.models import LocalizedText
-        count = LocalizedText.objects.filter(name_locales__isnull=True, description_locales__isnull=True).count()
+        count = LocalizedText.dormants()
         return Response(count, status=status.HTTP_200_OK)
 
     @staticmethod

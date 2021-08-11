@@ -1,7 +1,7 @@
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator
-from django.db import models, IntegrityError, transaction
+from django.db import models, IntegrityError, transaction, connection
 from django.db.models import F
 from pydash import get, compact
 
@@ -39,6 +39,28 @@ class LocalizedText(models.Model):
     locale = models.TextField()
     locale_preferred = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
+
+    @classmethod
+    def get_dormant_queryset(cls):
+        return cls.objects.filter(name_locales__isnull=True, description_locales__isnull=True)
+
+    @classmethod
+    def dormants(cls, raw=True):
+        if raw:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT COUNT("localized_texts"."id") FROM "localized_texts"
+                    WHERE NOT EXISTS (SELECT 1 FROM "concepts_names" WHERE
+                    "concepts_names"."localizedtext_id" = "localized_texts"."id")
+                    AND NOT EXISTS (SELECT 1 FROM "concepts_descriptions"
+                    WHERE "concepts_descriptions"."localizedtext_id" = "localized_texts"."id")
+                    """
+                )
+                count, = cursor.fetchone()
+                return count
+
+        return cls.get_dormant_queryset().count()
 
     def save(self, force_insert=False, force_update=False, using=None, update_fields=None):
         if not self.internal_reference_id and self.id:
