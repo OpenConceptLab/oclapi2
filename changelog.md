@@ -1,3 +1,15 @@
+##### 2.0.38 - Thu Aug 12 01:45:01 2021 +0000
+- concept/mappings | Removed uri LIKE criteria
+- Update README.md
+- Amend hierarchy api to take input as parent->child uri map
+- pylint | Fixing indentation
+- [OpenConceptLab/ocl_issues#845](https://github.com/OpenConceptLab/ocl_issues/issues/845) Adding missing composite index
+##### 2.0.37 - Wed Aug 11 08:47:34 2021 +0000
+- using raw query for dormant locales count
+- Source exports | concepts to have child and parent concept urls
+- Admin API amend the concept hierarchy
+- Fixing unsued import
+- [OpenConceptLab/ocl_issues#845](https://github.com/OpenConceptLab/ocl_issues/issues/845) Reverting IN unnest custom lookups
 ##### 2.0.35 - Tue Aug 10 03:33:12 2021 +0000
 - [OpenConceptLab/ocl_issues#895](https://github.com/OpenConceptLab/ocl_issues/issues/895) | concept/mapping | Admin API to delete (hard) a version
 ##### 2.0.34 - Mon Aug 9 11:28:23 2021 +0000
