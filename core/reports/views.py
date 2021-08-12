@@ -39,14 +39,16 @@ class AuthoredView(BaseAPIView):  # pragma: no cover
     permission_classes = (IsAdminUser, )
 
     @staticmethod
-    @swagger_auto_schema(request_body=openapi.Schema(
-        type=openapi.TYPE_OBJECT,
-        properties={
-            'usernames': openapi.Schema(
-                type=openapi.TYPE_STRING, description='usernames comma separated',
-            )
-        }
-    ))
+    @swagger_auto_schema(
+        operation_description='Returns count of content created/updated by the user(s)',
+        operation_summary='Resources Authored Summary for user(s)',
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            properties={
+                'usernames': openapi.Schema(type=openapi.TYPE_STRING, description='usernames comma separated')
+            }
+        )
+    )
     def post(request):
         usernames = request.data.get('usernames', None)
         if not usernames:
