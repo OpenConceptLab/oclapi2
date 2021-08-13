@@ -206,7 +206,7 @@ def write_export_file(
     resource_string = json.dumps(data, cls=encoders.JSONEncoder)
     logger.info('Done serializing attributes.')
 
-    batch_size = 2
+    batch_size = 100
     is_collection = resource_type == 'collection'
 
     if is_collection:
@@ -237,7 +237,8 @@ def write_export_file(
 
         while batch_queryset.exists():
             logger.info('Serializing concepts %d - %d...' % (start + 1, end))
-            queryset = Concept.objects.filter(id__in=batch_queryset.values_list('concept_id')).filter(**filters)
+            queryset = Concept.objects.filter(
+                id__in=batch_queryset.values_list('concept_id')).filter(**filters).order_by('-id')
             if queryset.exists():
                 if start > 0:
                     with open('export.json', 'a') as out:
@@ -297,7 +298,8 @@ def write_export_file(
 
         while batch_queryset.exists():
             logger.info('Serializing mappings %d - %d...' % (start + 1, start + batch_size))
-            queryset = Mapping.objects.filter(id__in=batch_queryset.values_list('mapping_id')).filter(**filters)
+            queryset = Mapping.objects.filter(
+                id__in=batch_queryset.values_list('mapping_id')).filter(**filters).order_by('-id')
             if queryset.exists():
                 if start > 0:
                     with open('export.json', 'a') as out:
