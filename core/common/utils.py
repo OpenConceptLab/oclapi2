@@ -193,6 +193,8 @@ def get_class(kls):
 def write_export_file(
         version, resource_type, resource_serializer_type, logger
 ):  # pylint: disable=too-many-statements,too-many-locals,too-many-branches
+    from core.concepts.models import Concept
+    from core.mappings.models import Mapping
     cwd = cd_temp()
     logger.info('Writing export file to tmp directory: %s' % cwd)
 
@@ -205,28 +207,37 @@ def write_export_file(
     logger.info('Done serializing attributes.')
 
     batch_size = 100
-    concepts_qs = version.concepts
-    mappings_qs = version.mappings
+    concepts_qs = Concept.sources.through.objects.filter(source_id=version.id)
+    mappings_qs = Mapping.sources.through.objects.filter(source_id=version.id)
+
+    all_concepts = Concept.objects.filter(id__in=concepts_qs.values('concept_id'))
+    all_mappings = Mapping.objects.filter(id__in=mappings_qs.values('mapping_id'))
     is_collection = resource_type == 'collection'
+
+    filters = dict()
+
     if not is_collection:
-        concepts_qs = concepts_qs.filter(is_active=True)
-        mappings_qs = mappings_qs.filter(is_active=True)
+        filters['is_active'] = True
+        if version.is_head:
+            filters['is_latest_version'] = True
 
-    if version.is_head:
-        concepts_qs = concepts_qs.filter(is_latest_version=True)
-        mappings_qs = mappings_qs.filter(is_latest_version=True)
+    if filters:
+        all_concepts = all_concepts.filter(**filters)
+        all_mappings = all_mappings.filter(**filters)
 
-    total_concepts = concepts_qs.count()
-    total_mappings = mappings_qs.count()
+    total_concepts = all_concepts.count()
+    total_mappings = all_mappings.count()
+
+    def get_batch(queryset, offset, limit):
+        _queryset = queryset.order_by('-id')
+        if filters:
+            _queryset = _queryset.filter(**filters)
+        return _queryset[offset:limit]
 
     with open('export.json', 'w') as out:
         out.write('%s, "concepts": [' % resource_string[:-1])
 
     resource_name = resource_type.title()
-    if is_collection:
-        owner_relation = ['parent__organization', 'parent__user']
-    else:
-        owner_relation = ['parent__organization'] if version.organization_id else ['parent__user']
 
     if total_concepts:
         logger.info(
@@ -236,8 +247,7 @@ def write_export_file(
         for start in range(0, total_concepts, batch_size):
             end = min(start + batch_size, total_concepts)
             logger.info('Serializing concepts %d - %d...' % (start+1, end))
-            concept_versions = concepts_qs.order_by('-id').prefetch_related(
-                'names', 'descriptions').select_related(*owner_relation)[start:end]
+            concept_versions = get_batch(all_concepts, start, end).prefetch_related('names', 'descriptions')
             concept_serializer = concept_serializer_class(concept_versions, many=True)
             concept_data = concept_serializer.data
             concept_string = json.dumps(concept_data, cls=encoders.JSONEncoder)
@@ -288,11 +298,11 @@ def write_export_file(
         for start in range(0, total_mappings, batch_size):
             end = min(start + batch_size, total_mappings)
             logger.info('Serializing mappings %d - %d...' % (start+1, end))
-            mappings = mappings_qs.order_by('-id').select_related(
+            mappings = get_batch(all_mappings, start, end).select_related(
                 'from_concept', 'to_concept',
                 'from_source__organization', 'from_source__user',
-                'to_source__organization', 'to_source__user', *owner_relation
-            )[start:end]
+                'to_source__organization', 'to_source__user'
+            )
             reference_serializer = mapping_serializer_class(mappings, many=True)
             reference_data = reference_serializer.data
             reference_string = json.dumps(reference_data, cls=encoders.JSONEncoder)
