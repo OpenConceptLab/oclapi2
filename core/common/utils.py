@@ -207,12 +207,17 @@ def write_export_file(
     logger.info('Done serializing attributes.')
 
     batch_size = 100
-    concepts_qs = Concept.sources.through.objects.filter(source_id=version.id)
-    mappings_qs = Mapping.sources.through.objects.filter(source_id=version.id)
+    is_collection = resource_type == 'collection'
+
+    if is_collection:
+        concepts_qs = Concept.collection_set.through.objects.filter(collection_id=version.id)
+        mappings_qs = Mapping.collection_set.through.objects.filter(collection_id=version.id)
+    else:
+        concepts_qs = Concept.sources.through.objects.filter(source_id=version.id)
+        mappings_qs = Mapping.sources.through.objects.filter(source_id=version.id)
 
     all_concepts = Concept.objects.filter(id__in=concepts_qs.values('concept_id'))
     all_mappings = Mapping.objects.filter(id__in=mappings_qs.values('mapping_id'))
-    is_collection = resource_type == 'collection'
 
     filters = dict()
 
