@@ -305,10 +305,7 @@ def write_export_file(
                     with open('export.json', 'a') as out:
                         out.write(', ')
 
-                mapping_versions = queryset.select_related(
-                    'from_concept', 'to_concept', 'from_source__organization', 'from_source__user',
-                    'to_source__organization', 'to_source__user')
-                data = mapping_serializer_class(mapping_versions, many=True).data
+                data = mapping_serializer_class(queryset, many=True).data
                 mapping_string = json.dumps(data, cls=encoders.JSONEncoder)
                 mapping_string = mapping_string[1:-1]
                 with open('export.json', 'a') as out:
