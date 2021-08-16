@@ -2,55 +2,55 @@ version: '3'
 
 services:
   db:
-    restart: "no"
+    restart: 'no'
   redis:
     ports:
       - 6379:6379
-    restart: "no"
+    restart: 'no'
   api:
     build: .
     ports:
       - 8000:8000
     volumes:
       - .:/code:z
-    restart: "no"
+    restart: 'no'
     environment:
       - ENVIRONMENT=development
   celery:
     build: .
     volumes:
       - .:/code:z
-    restart: "no"
+    restart: 'no'
   celery_indexing:
     build: .
     volumes:
       - .:/code:z
-    restart: "no"
+    restart: 'no'
   celery_concurrent:
     build: .
     volumes:
       - .:/code:z
-    restart: "no"
+    restart: 'no'
   celery_bulk_import_0_1:
     volumes:
       - .:/code:z
-    restart: "no"
+    restart: 'no'
   celery_bulk_import_2_3:
     volumes:
       - .:/code:z
-    restart: "no"
+    restart: 'no'
   celery_bulk_import_root:
     volumes:
       - .:/code:z
-    restart: "no"
+    restart: 'no'
   flower:
     build: .
     volumes:
       - .:/code:z
     ports:
       - 5555:5555
-    restart: "no"
+    restart: 'no'
   es:
     ports:
       - 9200:9200
-    restart: "no"
+    restart: 'no'

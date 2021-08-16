@@ -94,6 +94,7 @@ REST_FRAMEWORK = {
     ),
     'DEFAULT_RENDERER_CLASSES': (
         'rest_framework.renderers.JSONRenderer',
+        'rest_framework.renderers.TemplateHTMLRenderer',
         'core.common.renderers.ZippedJSONRenderer',
     ),
     'COERCE_DECIMAL_TO_STRING': False,
@@ -143,7 +144,7 @@ ROOT_URLCONF = 'core.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],
+        'DIRS': [os.path.join(BASE_DIR, '/core/common/templates/'),],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [

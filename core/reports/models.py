@@ -14,7 +14,7 @@ from core.users.models import UserProfile
 
 
 class MonthlyUsageReport:
-    def __init__(self, verbose=False, start=None, end=None):
+    def __init__(self, verbose=False,html=False, start=None, end=None):
         self.verbose = verbose
         self.start = start
         self.end = end
