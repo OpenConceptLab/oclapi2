@@ -57,6 +57,15 @@ class CollectionBaseView(BaseAPIView):
     permission_classes = (CanViewConceptDictionary,)
     queryset = Collection.objects.filter(is_active=True)
 
+    def verify_scope(self):
+        has_owner_scope = self.has_owner_scope()
+        has_no_kwargs = self.has_no_kwargs()
+        if has_no_kwargs:
+            if self.request.method not in ['GET', 'HEAD']:
+                raise Http404()
+        elif not has_owner_scope:
+            raise Http404()
+
     def set_parent_resource(self):
         from core.orgs.models import Organization
         from core.users.models import UserProfile
