@@ -3,6 +3,7 @@ from django.db import IntegrityError
 from rest_framework import serializers
 from rest_framework.fields import SerializerMethodField
 
+from core.common.constants import INCLUDE_SUMMARY
 from core.pins.models import Pin
 
 
@@ -13,10 +14,12 @@ def build_resource_data(obj):
     resource_type = resource.resource_type.lower()
     if resource_type == 'source':
         from core.sources.serializers import SourceDetailSerializer
-        return SourceDetailSerializer(resource).data
+        return SourceDetailSerializer(
+            resource, context=dict(request=dict(query_params={INCLUDE_SUMMARY: True}))).data
     if resource_type == 'collection':
         from core.collections.serializers import CollectionDetailSerializer
-        return CollectionDetailSerializer(resource).data
+        return CollectionDetailSerializer(
+            resource, context=dict(request=dict(query_params={INCLUDE_SUMMARY: True}))).data
     if resource_type == 'organization':
         from core.orgs.serializers import OrganizationDetailSerializer
         return OrganizationDetailSerializer(resource).data

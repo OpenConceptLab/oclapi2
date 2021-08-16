@@ -1,6 +1,7 @@
 from django.shortcuts import get_object_or_404
 from rest_framework import status
-from rest_framework.generics import RetrieveAPIView, DestroyAPIView, UpdateAPIView
+from rest_framework.generics import ListAPIView, \
+    RetrieveUpdateDestroyAPIView
 from rest_framework.permissions import IsAuthenticatedOrReadOnly
 from rest_framework.response import Response
 
@@ -15,6 +16,9 @@ from core.users.models import UserProfile
 class PinBaseView(BaseAPIView):
     serializer_class = PinSerializer
     permission_classes = (IsAuthenticatedOrReadOnly,)
+
+    def filter_queryset(self, queryset):
+        return queryset
 
     def get_parent_type(self):
         if self.kwargs.get('user_is_self') or 'user' in self.kwargs:
@@ -47,10 +51,7 @@ class PinBaseView(BaseAPIView):
         ).select_related('organization', 'user').prefetch_related('resource')
 
 
-class PinListView(PinBaseView):
-    def get(self, request, *args, **kwargs):  # pylint: disable=unused-argument
-        return Response(self.get_serializer(self.get_queryset(), many=True).data)
-
+class PinListView(PinBaseView, ListAPIView):
     def post(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         parent = self.get_parent()
         if not parent:
@@ -69,7 +70,7 @@ class PinListView(PinBaseView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
-class PinRetrieveUpdateDestroyView(PinBaseView, UpdateAPIView, RetrieveAPIView, DestroyAPIView):
+class PinRetrieveUpdateDestroyView(PinBaseView, RetrieveUpdateDestroyAPIView):
     def get_serializer_class(self):
         if self.request.method == 'PUT':
             return PinUpdateSerializer

@@ -225,7 +225,10 @@ class CollectionDetailSerializer(CollectionCreateOrUpdateSerializer):
 
     def __init__(self, *args, **kwargs):
         params = get(kwargs, 'context.request.query_params')
-        self.query_params = params.dict() if params else dict()
+
+        self.query_params = dict()
+        if params:
+            self.query_params = params if isinstance(params, dict) else params.dict()
         self.include_summary = self.query_params.get(INCLUDE_SUMMARY) in ['true', True]
         self.include_client_configs = self.query_params.get(INCLUDE_CLIENT_CONFIGS) in ['true', True]
 
