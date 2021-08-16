@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title> OCL | Monthly Usage Report</title>
+    <style>
+        body{
+            background-color: #f3f3f3;
+            color: #444;
+            font-family: sans-serif;
+            padding: 2rem 3rem;
+        }
+
+        *{
+            padding: 0;
+            margin: 0;
+            box-sizing: border-box;
+        }
+
+        .main-heading{
+            text-align: center;
+            font-size: 2.5rem;
+
+        }
+
+        h2{
+            text-align: center;
+            border-bottom: 1px solid #0002;
+            padding: 1rem;
+            opacity: .8;
+            margin-bottom: 1.5rem;
+        }
+
+        .flex{
+            display: flex;
+        }
+
+        .flex *{
+                flex:1;
+        }
+
+        section{
+            background-color: #eee;
+            min-height: 500px;
+            margin: 1rem;
+            padding: 2rem;
+            text-align: center;
+            padding: 2rem 3.5rem;
+            background-color: #fff;
+            border-radius: 10px;
+        }
+
+        section.user{
+            margin: 1rem 0;
+            transform: translateX(1rem);
+            border-bottom: 1px solid #0002;
+        }
+
+        .chart{
+            width: 500px;
+        }
+
+        .chart-label{
+            display: inline-block;
+            margin-top: .75rem;
+            font-size: 1.4rem;
+        }
+
+        section h3{
+            font-size: 1.8rem;
+            margin-top: 1.35rem;
+        }
+
+        section.user aside{
+            display: flex;
+            justify-content: space-between;
+        }
+
+        @media (max-width:1250px) {
+            .flex{
+                flex-direction: column;
+            }
+
+            section.user aside{
+                flex-direction: column;
+            }
+
+            section.user .left{
+                margin-bottom: 1.5rem;
+            }
+
+            section{
+                min-height: max-content;
+            }
+        }
+
+        @media (max-width:700px) {
+            .chart-label{
+                font-size: 1.2rem;
+            }
+
+
+            section h3{
+                font-size: 1.4rem;
+            }
+        }
+
+        @media (max-width:600px) {
+            .chart-label{
+                font-size: 1rem;
+            }
+
+            section h3{
+                font-size: 1.2rem;
+            }
+
+            body{
+                padding: 2rem 1rem;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <h1 class="main-heading" >Monthly Usage Report</h1>
+    <h2>{{start}} to {{end}}</h2>
+    <main>
+        <div class="flex">
+            <section>
+                <canvas id="concepts_created_monthly" class="chart"></canvas>
+                <label class="chart-label" >Concepts created monthly</label>
+            <h3>{{concepts.total | safe}} Total Concepts • {% widthratio concepts.active concepts.total 100 %}% Active</h3>
+            </section>
+            <section>    
+                <canvas id="mappings_created_monthly" class="chart"></canvas>
+                <label class="chart-label" >Mappings created monthly</label>
+            <h3>{{mappings.total | safe}} Total Mappings • {% widthratio mappings.active mappings.total 100 %}% Active</h3>
+            </section>
+        </div>
+        <section class="user" >
+            <aside>
+                <div class="left">
+                    <canvas id="users_created_monthly" class="chart"></canvas>
+                    <label class="chart-label" >Users registered monthly</label>
+                </div>
+                <div class="right">
+                    <canvas id="users_last_login_monthly" class="chart"></canvas>
+                    <label class="chart-label" >Monthly active Users</label>
+                </div>
+            </aside>
+            <h3>{{users.total | safe}} Total Users • {% widthratio users.active users.total 100 %}% Active</h3>
+        </section>
+        <div class="flex">
+            <section>
+                <canvas id="sources_created_monthly" class="chart"></canvas>
+                <label class="chart-label" >Sources created monthly</label>
+                <h3>{{sources.total | safe}} Total Sources • {% widthratio sources.active sources.total 100 %}% Active</h3>
+            </section>
+            <section>    
+                <canvas id="source_versions_created_monthly" class="chart"></canvas>
+                <label class="chart-label" >Source Versions created monthly</label>
+                <h3>{{source_versions.total | safe}} Total Source Versions • {% widthratio source_versions.active source_versions.total 100 %}% Active</h3>
+            </section>
+        </div>
+        <div class="flex">
+            <section>
+                <canvas id="collections_created_monthly" class="chart"></canvas>
+                <label class="chart-label" >Collections created monthly</label>
+                <h3>{{collections.total | safe}} Total Collections • {% widthratio collections.active collections.total 100 %}% Active</h3>
+            </section>
+            <section>    
+                <canvas id="collection_versions_created_monthly" class="chart"></canvas>
+                <label class="chart-label" >Collection Versions created monthly</label>
+                <h3>{{collection_versions.total | safe}} Total Collection Versions • {% widthratio collection_versions.active collection_versions.total 100 %}% Active</h3>
+            </section>
+        </div>
+        <div class="flex">
+            <section>
+                <canvas id="organizations_created_monthly" class="chart"></canvas>
+                <label class="chart-label" >Organizations created monthly</label>
+            <h3>{{organizations.total | safe}} Total Organizations • {% widthratio organizations.active organizations.total 100 %}% Active</h3>
+            </section>
+            <section>    
+                <canvas id="collection_references_created_monthly" class="chart"></canvas>
+                <label class="chart-label" >Collection References created monthly</label>
+            <h3>{{collection_references.total | safe}} Total Collection References • {% widthratio collection_references.active collection_references.total 100 %}% Active</h3>
+            </section>
+        </div>
+    </main>
+   
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@3.5.0/dist/chart.min.js"></script>
+    <script>
+            const makeChart=(id, label, graphData, rgbArray) => {
+            const ctx = document.getElementById(id).getContext('2d');
+            const labels= [];
+            const data= [];
+            const color = "rgba("+[...rgbArray,"1"].join(",")+")";
+            const colorLight = "rgba("+[...rgbArray,"0.2"].join(",")+")";
+            graphData.forEach((ele) => {
+                const key = Object.keys(ele)[0];
+                labels.push(key);
+                data.push(ele[key]);
+            })
+
+            return new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels,
+                datasets: [{
+                    label,
+                    data,
+                    backgroundColor: [colorLight],
+                    borderColor: [color],
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                scales: {
+                    y: {
+                        beginAtZero: true
+                    }
+                }
+            }
+        });
+        }
+    </script>
+    <script>
+        makeChart('users_created_monthly',"Number of Users",{{users.created_monthly | safe}},['255', '99', '132'])
+        makeChart('users_last_login_monthly',"Number Of Users",{{users.last_login_monthly | safe}},['54', '162', '235'])
+        makeChart('concepts_created_monthly',"Number of Concepts",{{concepts.created_monthly | safe}},['75', '192', '192'])
+        makeChart('mappings_created_monthly',"number of users",{{mappings.created_monthly | safe}},['153', '102', '255'])
+        makeChart('sources_created_monthly',"Number of Sources",{{sources.created_monthly | safe}},['153', '102', '255'])
+        makeChart('source_versions_created_monthly',"Number of Source Versions",{{source_versions.created_monthly | safe}},['153', '102', '255'])
+        makeChart('collections_created_monthly',"Number of Collections",{{collections.created_monthly | safe}},['153', '102', '255'])
+        makeChart('collection_versions_created_monthly',"Number of Collection Versions",{{collection_versions.created_monthly | safe}},['153', '102', '255'])
+        makeChart('organizations_created_monthly',"Number of Organizations",{{organizations.created_monthly | safe}},['153', '102', '255'])
+        makeChart('collection_references_created_monthly',"Number of Collection References",{{collection_references.created_monthly | safe}},['153', '102', '255'])
+    </script>
+</body>
+</html>
