@@ -1,3 +1,11 @@
+##### 2.0.41 - Mon Aug 16 04:19:11 2021 +0000
+- Including source/collection summaries in user/org pins listing
+- [OpenConceptLab/ocl_issues#910](https://github.com/OpenConceptLab/ocl_issues/issues/910) | export mappings | not loading relations eagerly
+- [OpenConceptLab/ocl_issues#910](https://github.com/OpenConceptLab/ocl_issues/issues/910) | ordering concepts/mappings | fixing batch size typo
+- [OpenConceptLab/ocl_issues#910](https://github.com/OpenConceptLab/ocl_issues/issues/910) | Export queries | limit/offset on lookup table only
+- [OpenConceptLab/ocl_issues#910](https://github.com/OpenConceptLab/ocl_issues/issues/910) | Fixing collection export concepts/mappings queryset
+- [OpenConceptLab/ocl_issues#910](https://github.com/OpenConceptLab/ocl_issues/issues/910) | Slow Query | concept/mapping exports to use less joins
+- Authoring Report | Added summary and description in swagger
 ##### 2.0.38 - Thu Aug 12 01:45:01 2021 +0000
 - concept/mappings | Removed uri LIKE criteria
 - Update README.md
