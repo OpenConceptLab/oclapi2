@@ -435,6 +435,8 @@ class MappingImporter(BaseResourceImporter):
             'map_type': self.get('map_type'),
             'from_concept__uri__icontains': drop_version(from_concept_url),
         }
+        if self.get('id'):
+            filters['mnemonic'] = self.get('id')
         if to_concept_url:
             filters['to_concept__uri__icontains'] = drop_version(to_concept_url)
         if to_concept_code and to_source_url:
