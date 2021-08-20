@@ -51,20 +51,6 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     facet_class = None
     total_count = 0
 
-    def has_no_kwargs(self):
-        return len(self.kwargs.values()) == 0
-
-    def has_owner_scope(self):
-        kwargs = self.kwargs.keys()
-        return 'org' in kwargs or 'user' in kwargs
-
-    def has_concept_container_scope(self):
-        kwargs = self.kwargs.keys()
-        return 'source' in kwargs or 'collection' in kwargs
-
-    def has_parent_scope(self):
-        return self.has_owner_scope() and self.has_concept_container_scope()
-
     def _should_exclude_retired_from_search_results(self):
         if self.is_owner_document_model():
             return False
@@ -83,12 +69,8 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     def is_brief(self):
         return self.request.query_params.get(BRIEF_PARAM, False) in ['true', True]
 
-    def verify_scope(self):
-        pass
-
     def initial(self, request, *args, **kwargs):
         super().initial(request, *args, **kwargs)
-        self.verify_scope()
         self.initialize(request, request.path_info, **kwargs)
 
     def initialize(self, request, path_info_segment, **kwargs):  # pylint: disable=unused-argument
@@ -594,15 +576,6 @@ class SourceChildCommonBaseView(BaseAPIView):
     def initial(self, request, *args, **kwargs):
         super().initial(request, *args, **kwargs)
         self.__set_params()
-
-    def verify_scope(self):
-        has_parent_scope = self.has_parent_scope()
-        has_no_kwargs = self.has_no_kwargs()
-        if has_no_kwargs:
-            if self.request.method not in ['GET', 'HEAD']:
-                raise Http404()
-        elif not has_parent_scope:
-            raise Http404()
 
     def get_filter_params(self):
         if self.params:
