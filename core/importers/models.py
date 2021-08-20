@@ -267,7 +267,7 @@ class SourceVersionImporter(BaseResourceImporter):
     def process(self):
         source = Source(**self.data)
         errors = Source.persist_new_version(source, self.user)
-        return errors or UPDATED
+        return errors or CREATED
 
 
 class CollectionImporter(BaseResourceImporter):
@@ -344,7 +344,7 @@ class CollectionVersionImporter(BaseResourceImporter):
     def process(self):
         coll = Collection(**self.data)
         errors = Collection.persist_new_version(coll, self.user)
-        return errors or UPDATED
+        return errors or CREATED
 
 
 class ConceptImporter(BaseResourceImporter):
