@@ -22,6 +22,7 @@ from core.orgs.serializers import OrganizationDetailSerializer, OrganizationList
 from core.sources.views import SourceListView
 from core.users.models import UserProfile
 from core.users.serializers import UserDetailSerializer
+from django.db.models import Count
 
 
 class OrganizationListView(BaseAPIView,
@@ -36,6 +37,7 @@ class OrganizationListView(BaseAPIView,
 
     def get_queryset(self):
         username = self.kwargs.get('user')
+        only_empty = self.request.query_params.get('empty', None) in ['true', True]
         if not username and self.user_is_self:
             username = get(self.request.user, 'username')
 
@@ -51,6 +53,9 @@ class OrganizationListView(BaseAPIView,
         updated_since = parse_updated_since_param(self.request.query_params)
         if updated_since:
             self.queryset = self.queryset.filter(updated_at__gte=updated_since)
+
+        if only_empty:
+            self.queryset = self.queryset.annotate(mem_count=Count('members')).filter(mem_count=0)
 
         return self.queryset.distinct()
 
@@ -73,7 +78,6 @@ class OrganizationListView(BaseAPIView,
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
-
         if serializer.is_valid():
             instance = serializer.save(force_insert=True)
             if serializer.is_valid():
