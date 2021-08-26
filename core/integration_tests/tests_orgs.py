@@ -84,17 +84,40 @@ class OrganizationListViewTest(OCLAPITestCase):
 
     def test_get_200_staff_user(self):
         staff_user = UserProfileFactory(is_staff=True)
+
         response = self.client.get(
             '/orgs/',
             HTTP_AUTHORIZATION='Token ' + staff_user.get_token(),
             format='json'
         )
+
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 6)
         self.assertEqual(
             [org['id'] for org in response.data],
             ['user-private-org', 'user-public-view-org', 'public-edit-org', 'public-view-org', 'private-org', 'OCL']
         )
+
+    def test_get_200_with_no_members(self):
+        org1 = OrganizationFactory(mnemonic='org-1')
+        org2 = OrganizationFactory(mnemonic='org-2')
+        org1.members.set([])
+        org2.members.set([])
+        org3 = OrganizationFactory(mnemonic='org-3')
+        self.user.organizations.add(org3)
+
+        response = self.client.get(
+            '/orgs/?noMembers=true',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        found_mnemonics = [org['id'] for org in response.data]
+        for mnemonic in ['org-1', 'org-2']:
+            self.assertTrue(mnemonic in found_mnemonics)
+        for mnemonic in ['org-3']:
+            self.assertFalse(mnemonic in found_mnemonics)
 
     def test_post_201(self):
         response = self.client.post(

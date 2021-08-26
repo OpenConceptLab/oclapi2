@@ -1,5 +1,7 @@
 from celery_once import AlreadyQueued
+from django.db.models import Count
 from django.http import Http404
+from drf_yasg.utils import swagger_auto_schema
 from pydash import get
 from rest_framework import mixins, status, generics
 from rest_framework.generics import RetrieveAPIView, DestroyAPIView, RetrieveUpdateDestroyAPIView
@@ -12,10 +14,11 @@ from core.collections.views import CollectionListView
 from core.common.constants import NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY, HEAD
 from core.common.mixins import ListWithHeadersMixin
 from core.common.permissions import HasPrivateAccess, CanViewConceptDictionary
+from core.common.swagger_parameters import org_no_members_param
 from core.common.tasks import delete_organization
 from core.common.utils import parse_updated_since_param
 from core.common.views import BaseAPIView, BaseLogoView
-from core.orgs.constants import DELETE_ACCEPTED
+from core.orgs.constants import DELETE_ACCEPTED, NO_MEMBERS
 from core.orgs.documents import OrganizationDocument
 from core.orgs.models import Organization
 from core.orgs.serializers import OrganizationDetailSerializer, OrganizationListSerializer, OrganizationCreateSerializer
@@ -36,6 +39,8 @@ class OrganizationListView(BaseAPIView,
 
     def get_queryset(self):
         username = self.kwargs.get('user')
+        no_members = self.request.query_params.get(NO_MEMBERS, False) in ['true', True]
+
         if not username and self.user_is_self:
             username = get(self.request.user, 'username')
 
@@ -51,6 +56,8 @@ class OrganizationListView(BaseAPIView,
         updated_since = parse_updated_since_param(self.request.query_params)
         if updated_since:
             self.queryset = self.queryset.filter(updated_at__gte=updated_since)
+        if no_members:
+            self.queryset = self.queryset.annotate(mem_count=Count('members')).filter(mem_count=0)
 
         return self.queryset.distinct()
 
@@ -62,6 +69,7 @@ class OrganizationListView(BaseAPIView,
 
         return OrganizationListSerializer
 
+    @swagger_auto_schema(manual_parameters=[org_no_members_param])
     def get(self, request, *args, **kwargs):
         return self.list(request, *args, **kwargs)
 

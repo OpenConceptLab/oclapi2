@@ -5,6 +5,8 @@ from core.common.constants import RELEASED_PARAM, VERBOSE_PARAM, INCLUDE_RETIRED
     LAST_LOGIN_BEFORE_PARAM, LAST_LOGIN_SINCE_PARAM, DATE_JOINED_SINCE_PARAM, DATE_JOINED_BEFORE_PARAM
 
 # HEADERS
+from core.orgs.constants import NO_MEMBERS
+
 include_facets_header = openapi.Parameter(
     'INCLUDEFACETS', openapi.IN_HEADER, type=openapi.TYPE_BOOLEAN, default=False
 )
@@ -107,4 +109,8 @@ resources_body_param = openapi.Parameter(
 )
 parallel_threads_param = openapi.Parameter(
     'parallel', openapi.IN_FORM, description="Parallel threads count (default: 5, max: 10)", type=openapi.TYPE_INTEGER
+)
+org_no_members_param = openapi.Parameter(
+    NO_MEMBERS, openapi.IN_QUERY, description="Get all orgs without any members", type=openapi.TYPE_BOOLEAN,
+    default=False
 )
