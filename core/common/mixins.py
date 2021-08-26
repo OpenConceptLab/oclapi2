@@ -15,7 +15,7 @@ from rest_framework.mixins import ListModelMixin, CreateModelMixin
 from rest_framework.response import Response
 
 from core.common.constants import HEAD, ACCESS_TYPE_EDIT, ACCESS_TYPE_VIEW, ACCESS_TYPE_NONE, INCLUDE_FACETS, \
-    LIST_DEFAULT_LIMIT, HTTP_COMPRESS_HEADER, CSV_DEFAULT_LIMIT
+    LIST_DEFAULT_LIMIT, HTTP_COMPRESS_HEADER, CSV_DEFAULT_LIMIT, FACETS_ONLY
 from core.common.permissions import HasPrivateAccess, HasOwnership, CanViewConceptDictionary
 from core.common.services import S3
 from .utils import write_csv_to_s3, get_csv_from_s3, get_query_params_from_url_string, compact_dict_by_values
@@ -109,6 +109,9 @@ class ListWithHeadersMixin(ListModelMixin):
         if is_csv and not search_string:
             return self.get_csv(request)
 
+        if self.only_facets():
+            return Response(dict(facets=dict(fields=self.get_facets())))
+
         if self.object_list is None:
             self.object_list = self.filter_queryset(self.get_queryset())
 
@@ -149,6 +152,9 @@ class ListWithHeadersMixin(ListModelMixin):
 
     def should_include_facets(self):
         return self.request.META.get(INCLUDE_FACETS, False) in ['true', True]
+
+    def only_facets(self):
+        return self.request.query_params.get(FACETS_ONLY, False) in ['true', True]
 
     def should_compress(self):
         return self.request.META.get(HTTP_COMPRESS_HEADER, False) in ['true', True]

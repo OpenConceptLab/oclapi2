@@ -311,7 +311,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     def get_facets(self):
         facets = dict()
 
-        if self.should_include_facets() and self.facet_class:
+        if self.facet_class:
             if self.is_user_document():
                 return facets
             is_source_child_document_model = self.is_source_child_document_model()
