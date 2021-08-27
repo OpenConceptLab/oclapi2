@@ -365,10 +365,10 @@ class ConceptImporter(BaseResourceImporter):
         if self.queryset:
             return self.queryset
 
+        parent_uri = '/{}/{}/sources/{}/'.format(
+            'users' if self.is_user_owner() else 'orgs', self.get('owner'), self.get('source'))
         self.queryset = Concept.objects.filter(
-            **{'parent__' + self.get_owner_type_filter(): self.get('owner'),
-               'parent__mnemonic': self.get('source'),
-               'mnemonic': self.get('id'), 'id': F('versioned_object_id')}
+            parent__uri=parent_uri, mnemonic=self.get('id'), id=F('versioned_object_id')
         )
         return self.queryset
 
@@ -427,21 +427,32 @@ class MappingImporter(BaseResourceImporter):
         from_concept_url = self.get('from_concept_url')
         to_concept_url = self.get('to_concept_url')
         to_concept_code = self.get('to_concept_code')
+        from_concept_code = self.get('from_concept_code')
         to_source_url = self.get('to_source_url')
+        parent_uri = '/{}/{}/sources/{}/'.format(
+            'users' if self.is_user_owner() else 'orgs', self.get('owner'), self.get('source'))
         filters = {
-            'parent__' + self.get_owner_type_filter(): self.get('owner'),
-            'parent__mnemonic': self.get('source'),
+            'parent__uri': parent_uri,
             'id': F('versioned_object_id'),
             'map_type': self.get('map_type'),
-            'from_concept__uri__icontains': drop_version(from_concept_url),
         }
+        if from_concept_code:
+            filters['from_concept_code'] = from_concept_code
+
+        from_concept = Concept.objects.filter(id=F('versioned_object_id'), uri=drop_version(from_concept_url)).first()
+        if from_concept:
+            filters['from_concept__versioned_object_id'] = from_concept.versioned_object_id
+        if to_concept_url:
+            to_concept = Concept.objects.filter(id=F('versioned_object_id'), uri=drop_version(to_concept_url)).first()
+            if to_concept:
+                filters['to_concept__versioned_object_id'] = to_concept.versioned_object_id
+
         if self.get('id'):
             filters['mnemonic'] = self.get('id')
-        if to_concept_url:
-            filters['to_concept__uri__icontains'] = drop_version(to_concept_url)
+
         if to_concept_code and to_source_url:
             filters['to_concept_code'] = to_concept_code
-            filters['to_source__uri__icontains'] = drop_version(to_source_url)
+            filters['to_source__uri'] = drop_version(to_source_url)
 
         self.queryset = Mapping.objects.filter(**filters)
 
