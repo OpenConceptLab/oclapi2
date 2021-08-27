@@ -5,7 +5,7 @@ from django.contrib.postgres.fields import ArrayField
 from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator
 from django.db import models, IntegrityError
-from django.db.models import Value, Q
+from django.db.models import Value, Q, Max
 from django.db.models.expressions import CombinedExpression, F
 from django.utils import timezone
 from django.utils.functional import cached_property
@@ -362,20 +362,11 @@ class ConceptContainerModel(VersionedModel):
 
     @property
     def last_concept_update(self):
-        # Use 'values_list' instead of 'first' so as not load any concepts...
-        updated_at = self.concepts.order_by('-updated_at').values_list('updated_at', flat=True)[:1]
-        if updated_at:
-            return updated_at[0]
-        return None
+        return get(self.concepts.aggregate(max_updated_at=Max('updated_at')), 'max_updated_at', None)
 
     @property
     def last_mapping_update(self):
-        # Use 'values_list' instead of 'first' so as not load any mappings...
-        updated_at = self.mappings.order_by('-updated_at').values_list('updated_at', flat=True)[:1]
-        if updated_at:
-            return updated_at[0]
-
-        return None
+        return get(self.mappings.aggregate(max_updated_at=Max('updated_at')), 'max_updated_at', None)
 
     @property
     def last_child_update(self):
