@@ -10,6 +10,7 @@ from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
+from elasticsearch import RequestError
 from elasticsearch_dsl import Q
 from pydash import get
 from rest_framework import response, generics, status
@@ -22,6 +23,7 @@ from core import __version__
 from core.common.constants import SEARCH_PARAM, LIST_DEFAULT_LIMIT, CSV_DEFAULT_LIMIT, \
     LIMIT_PARAM, NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY, INCLUDE_RETIRED_PARAM, VERBOSE_PARAM, HEAD, LATEST, \
     BRIEF_PARAM
+from core.common.exceptions import Http400
 from core.common.mixins import PathWalkerMixin
 from core.common.serializers import RootSerializer
 from core.common.utils import compact_dict_by_values, to_snake_case, to_camel_case, parse_updated_since_param, \
@@ -535,8 +537,13 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         page = int(self.request.GET.get('page', '1'))
         start = (page - 1) * self.limit
         end = start + self.limit
-
-        return search_results[start:end].to_queryset()
+        try:
+            return search_results[start:end].to_queryset()
+        except RequestError as ex:
+            if get(ex, 'info.error.caused_by.reason', '').startswith('Result window is too large'):
+                raise Http400(detail='Only 10000 results are available. Please apply additional filters'
+                                     ' or fine tune your query to get more accurate results.')
+            raise ex
 
     def is_head(self):
         return self.request.method.lower() == 'head'
