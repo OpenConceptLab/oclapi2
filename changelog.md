@@ -1,3 +1,13 @@
+##### 2.0.45 - Fri Aug 27 03:37:30 2021 +0000
+- [OpenConceptLab/ocl_issues#949](https://github.com/OpenConceptLab/ocl_issues/issues/949) | Source/collection last child updated at | using max query
+- [OpenConceptLab/ocl_issues#949](https://github.com/OpenConceptLab/ocl_issues/issues/949) | Concept hierarchy | avoiding join
+- [OpenConceptLab/ocl_issues#949](https://github.com/OpenConceptLab/ocl_issues/issues/949) | Mapping import | removed like query | reduced parent/owner joins
+- [OpenConceptLab/ocl_issues#911](https://github.com/OpenConceptLab/ocl_issues/issues/911) | +@akhilkala | Orgs List with no members using query parameter
+- [OpenConceptLab/ocl_issues#936](https://github.com/OpenConceptLab/ocl_issues/issues/936) | can request facets only from search routes
+- Importers | Added deleted count and details in results
+- [OpenConceptLab/ocl_issues#935](https://github.com/OpenConceptLab/ocl_issues/issues/935) | Parallel Importer | Mapping Importer to consider id (mnemonic) attribute for exists check
+- [OpenConceptLab/ocl_issues#935](https://github.com/OpenConceptLab/ocl_issues/issues/935) | Parallel Importer | Fixing tests
+- [OpenConceptLab/ocl_issues#935](https://github.com/OpenConceptLab/ocl_issues/issues/935) | Parallel Importer | Source/Collection version create to append results in created and not updated
 ##### 2.0.41 - Mon Aug 16 04:19:11 2021 +0000
 - Including source/collection summaries in user/org pins listing
 - [OpenConceptLab/ocl_issues#910](https://github.com/OpenConceptLab/ocl_issues/issues/910) | export mappings | not loading relations eagerly
