@@ -1,3 +1,6 @@
+##### 2.0.46 - Fri Aug 27 09:14:25 2021 +0000
+- Org delete to use bulk_delete
+- [OpenConceptLab/ocl_issues#947](https://github.com/OpenConceptLab/ocl_issues/issues/947) | Handling ES error of max pagination
 ##### 2.0.45 - Fri Aug 27 03:37:30 2021 +0000
 - [OpenConceptLab/ocl_issues#949](https://github.com/OpenConceptLab/ocl_issues/issues/949) | Source/collection last child updated at | using max query
 - [OpenConceptLab/ocl_issues#949](https://github.com/OpenConceptLab/ocl_issues/issues/949) | Concept hierarchy | avoiding join
