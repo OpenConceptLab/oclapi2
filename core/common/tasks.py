@@ -22,15 +22,17 @@ def delete_organization(org_id):
     from core.orgs.models import Organization
     logger.info('Finding org...')
 
-    org = Organization.objects.filter(id=org_id).first()
+    queryset = Organization.objects.filter(id=org_id)
 
-    if not org:  # pragma: no cover
+    if not queryset.exists():
         logger.info('Not found org %s', org_id)
         return
 
+    org = queryset.first()
+
     try:
         logger.info('Found org %s.  Beginning purge...', org.mnemonic)
-        org.delete()
+        queryset.delete()
         from core.pins.models import Pin
         Pin.objects.filter(resource_type__model='organization', resource_id=org.id).delete()
         from core.client_configs.models import ClientConfig
