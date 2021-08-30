@@ -7,7 +7,7 @@ from rest_framework.serializers import ModelSerializer
 
 from core.client_configs.serializers import ClientConfigSerializer
 from core.collections.constants import INCLUDE_REFERENCES_PARAM
-from core.collections.models import Collection, CollectionReference
+from core.collections.models import Collection, CollectionReference, Expansion
 from core.common.constants import HEAD, DEFAULT_ACCESS_TYPE, NAMESPACE_REGEX, ACCESS_TYPE_CHOICES, INCLUDE_SUMMARY, \
     INCLUDE_CLIENT_CONFIGS
 from core.orgs.models import Organization
@@ -40,13 +40,14 @@ class CollectionVersionListSerializer(ModelSerializer):
     url = CharField(source='versioned_object_url')
     previous_version_url = CharField(source='prev_version_uri')
     autoexpand = SerializerMethodField()
+    expansion_url = CharField(source='latest_expansion_url', read_only=True)
 
     class Meta:
         model = Collection
         fields = (
             'short_code', 'name', 'url', 'owner', 'owner_type', 'owner_url', 'version', 'created_at', 'id',
             'collection_type', 'updated_at', 'canonical_url', 'released', 'retired', 'version_url',
-            'previous_version_url', 'autoexpand'
+            'previous_version_url', 'autoexpand', 'expansion_url',
         )
 
     @staticmethod
@@ -357,3 +358,9 @@ class CollectionVersionExportSerializer(CollectionVersionDetailSerializer):
         fields = (
             *CollectionVersionDetailSerializer.Meta.fields, 'collection'
         )
+
+
+class ExpansionSerializer(ModelSerializer):
+    class Meta:
+        model = Expansion
+        fields = ('id', 'parameters', 'canonical_url', 'uri')

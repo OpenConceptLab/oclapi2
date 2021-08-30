@@ -239,12 +239,14 @@ def seed_children(self, resource, obj_id, export=True):
     instance = None
     export_task = None
     autoexpand = True
+    is_source = resource == 'source'
+    is_collection = resource == 'collection'
 
-    if resource == 'source':
+    if is_source:
         from core.sources.models import Source
         instance = Source.objects.filter(id=obj_id).first()
         export_task = export_source
-    if resource == 'collection':
+    if is_collection:
         from core.collections.models import Collection
         instance = Collection.objects.filter(id=obj_id).first()
         export_task = export_collection
@@ -257,10 +259,11 @@ def seed_children(self, resource, obj_id, export=True):
 
         try:
             instance.add_processing(task_id)
-            if autoexpand:
+            if is_source:
                 instance.seed_concepts(index=index)
                 instance.seed_mappings(index=index)
-            instance.seed_references()
+            elif autoexpand:
+                instance.cascade_children_to_expansion(index=index)
 
             if export:
                 export_task.delay(obj_id)

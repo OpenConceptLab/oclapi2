@@ -422,17 +422,24 @@ class TasksTest(OCLTestCase):
         collection_v1 = OrganizationCollectionFactory(
             organization=collection.organization, version='v1', mnemonic=collection.mnemonic
         )
+        self.assertEqual(collection_v1.expansions.count(), 0)
         self.assertEqual(collection_v1.references.count(), 0)
         self.assertEqual(collection_v1.concepts.count(), 0)
         self.assertEqual(collection_v1.mappings.count(), 0)
 
         seed_children('collection', collection_v1.id, False)  # pylint: disable=no-value-for-parameter
 
-        self.assertEqual(collection_v1.references.count(), 2)
-        self.assertEqual(collection_v1.concepts.count(), 1)
-        self.assertEqual(collection_v1.mappings.count(), 1)
+        self.assertEqual(collection_v1.expansions.count(), 1)
+        expansion = collection_v1.expansions.first()
+
+        self.assertEqual(collection_v1.references.count(), 0)
+        self.assertEqual(collection_v1.concepts.count(), 0)
+        self.assertEqual(collection_v1.mappings.count(), 0)
+        self.assertEqual(expansion.references.count(), 2)
+        self.assertEqual(expansion.concepts.count(), 1)
+        self.assertEqual(expansion.mappings.count(), 1)
         self.assertEqual(
-            list(collection_v1.references.values_list('expression', flat=True)),
+            list(expansion.references.values_list('expression', flat=True)),
             list(collection.references.values_list('expression', flat=True)),
         )
         export_collection_task.delay.assert_not_called()
@@ -455,17 +462,20 @@ class TasksTest(OCLTestCase):
         collection_v1 = OrganizationCollectionFactory(
             organization=collection.organization, version='v1', mnemonic=collection.mnemonic
         )
+        self.assertEqual(collection_v1.expansions.count(), 0)
         self.assertEqual(collection_v1.references.count(), 0)
         self.assertEqual(collection_v1.concepts.count(), 0)
         self.assertEqual(collection_v1.mappings.count(), 0)
 
         seed_children('collection', collection_v1.id)  # pylint: disable=no-value-for-parameter
 
-        self.assertEqual(collection_v1.references.count(), 2)
-        self.assertEqual(collection_v1.concepts.count(), 1)
-        self.assertEqual(collection_v1.mappings.count(), 1)
+        self.assertEqual(collection_v1.expansions.count(), 1)
+        expansion = collection_v1.expansions.first()
+        self.assertEqual(expansion.references.count(), 2)
+        self.assertEqual(expansion.concepts.count(), 1)
+        self.assertEqual(expansion.mappings.count(), 1)
         self.assertEqual(
-            list(collection_v1.references.values_list('expression', flat=True)),
+            list(expansion.references.values_list('expression', flat=True)),
             list(collection.references.values_list('expression', flat=True)),
         )
         export_collection_task.delay.assert_called_once_with(collection_v1.id)

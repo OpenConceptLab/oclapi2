@@ -953,11 +953,16 @@ class CollectionVersionListViewTest(OCLAPITestCase):
         self.assertEqual(self.collection.versions.count(), 2)
 
         last_created_version = self.collection.versions.order_by('created_at').last()
+        self.assertEqual(last_created_version, self.collection.get_latest_version())
         self.assertEqual(last_created_version.version, 'v1')
         self.assertEqual(last_created_version.description, 'version1')
-        self.assertEqual(last_created_version.concepts.count(), 1)
-        self.assertEqual(last_created_version.references.count(), 1)
-        self.assertEqual(last_created_version, self.collection.get_latest_version())
+        self.assertEqual(last_created_version.expansions.count(), 1)
+        self.assertEqual(last_created_version.concepts.count(), 0)
+        self.assertEqual(last_created_version.references.count(), 0)
+
+        expansion = last_created_version.expansions.first()
+        self.assertEqual(expansion.concepts.count(), 1)
+        self.assertEqual(expansion.references.count(), 1)
 
 
 class ExportCollectionTaskTest(OCLAPITestCase):

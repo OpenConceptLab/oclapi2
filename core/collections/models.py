@@ -15,7 +15,7 @@ from core.collections.utils import is_concept, is_mapping
 from core.common.constants import (
     DEFAULT_REPOSITORY_TYPE, ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT
 )
-from core.common.models import ConceptContainerModel
+from core.common.models import ConceptContainerModel, BaseResourceModel
 from core.common.utils import is_valid_uri, drop_version
 from core.concepts.constants import LOCALES_FULLY_SPECIFIED
 from core.concepts.models import Concept
@@ -207,7 +207,7 @@ class Collection(ConceptContainerModel):
                 mapping_expressions, self.__get_children_list_url('mappings', host_url, data), MappingListView
             )
         )
-        if not self.autoexpand_head and cascade_mappings:
+        if self.autoexpand_head and cascade_mappings:
             all_related_mappings = self.get_all_related_mappings(expressions)
             expressions += all_related_mappings
 
@@ -369,6 +369,18 @@ class Collection(ConceptContainerModel):
 
         return mapping_uris
 
+    def cascade_children_to_expansion(self, index=True):
+        expansion = self.expansions.create()
+        expansion.mnemonic = expansion.id
+        expansion.save()
+        expansion.seed_concepts(index=index)
+        expansion.seed_mappings(index=index)
+        expansion.seed_references()
+
+    @property
+    def latest_expansion_url(self):
+        return self.expansions.order_by('-created_at').values_list('uri', flat=True).first()
+
 
 class CollectionReference(models.Model):
     class Meta:
@@ -456,3 +468,80 @@ class CollectionReference(models.Model):
                 )
 
         return mappings
+
+
+def default_expansion_parameters():
+    return {
+        "filter": "",
+        "date": "",
+        "count": 0,
+        "offset": 0,
+        "includeDesignations": True,
+        "activeOnly": False,
+        "includeDefinition": False,
+        "excludeNested": True,
+        "excludeNotForUI": True,
+        "excludePostCoordinated": True,
+        "exclude - system": "",
+        "system - version": "",
+        "check - system - version": "",
+        "force - system - version": ""
+    }
+
+
+class Expansion(BaseResourceModel):
+    class Meta:
+        db_table = 'collection_expansions'
+        indexes = [] + BaseResourceModel.Meta.indexes
+
+    parameters = models.JSONField(default=default_expansion_parameters)
+    canonical_url = models.URLField(null=True, blank=True)
+    text = models.TextField(null=True, blank=True)
+    concepts = models.ManyToManyField('concepts.Concept', blank=True, related_name='expansion_set')
+    mappings = models.ManyToManyField('mappings.Mapping', blank=True, related_name='expansion_set')
+    references = models.ManyToManyField('collections.CollectionReference', blank=True, related_name='expansion_set')
+    collection_version = models.ForeignKey(
+        'collections.Collection', related_name='expansions', on_delete=models.CASCADE)
+
+    @staticmethod
+    def default_parameters():
+        return default_expansion_parameters()
+
+    @property
+    def expansion(self):
+        return self.mnemonic
+
+    @staticmethod
+    def get_resource_url_kwarg():
+        return 'expansion'
+
+    @staticmethod
+    def get_url_kwarg():
+        return 'expansion'
+
+    def seed_concepts(self, index=True):
+        head = self.collection_version.head
+        if head:
+            self.concepts.set(head.concepts.all())
+            if index:
+                from core.concepts.documents import ConceptDocument
+                self.batch_index(self.concepts, ConceptDocument)
+
+    def seed_mappings(self, index=True):
+        head = self.collection_version.head
+        if head:
+            self.mappings.set(head.mappings.all())
+            if index:
+                from core.mappings.documents import MappingDocument
+                self.batch_index(self.mappings, MappingDocument)
+
+    def seed_references(self):
+        head = self.collection_version.head
+        if head:
+            references = CollectionReference.objects.bulk_create(
+                [CollectionReference(expression=ref.expression) for ref in head.references.all()]
+            )
+            self.references.set(references)
+
+    def calculate_uri(self):
+        return self.collection_version.uri + 'expansions/{}/'.format(self.mnemonic)

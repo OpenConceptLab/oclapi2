@@ -28,7 +28,7 @@ from core.collections.serializers import (
     CollectionDetailSerializer, CollectionListSerializer,
     CollectionCreateSerializer, CollectionReferenceSerializer, CollectionVersionDetailSerializer,
     CollectionVersionListSerializer, CollectionVersionExportSerializer, CollectionSummaryDetailSerializer,
-    CollectionVersionSummaryDetailSerializer, CollectionReferenceDetailSerializer)
+    CollectionVersionSummaryDetailSerializer, CollectionReferenceDetailSerializer, ExpansionSerializer)
 from core.collections.utils import is_version_specified
 from core.common.constants import (
     HEAD, RELEASED_PARAM, PROCESSING_PARAM, OK_MESSAGE, NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY
@@ -521,6 +521,40 @@ class CollectionVersionRetrieveUpdateDestroyView(CollectionBaseView, RetrieveAPI
             return Response(ex.message_dict, status=status.HTTP_400_BAD_REQUEST)
 
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class CollectionVersionExpansionsView(CollectionBaseView, ListWithHeadersMixin):
+    serializer_class = ExpansionSerializer
+
+    def get_permissions(self):
+        if self.request.method == 'GET':
+            return [CanViewConceptDictionaryVersion()]
+        return [HasAccessToVersionedObject()]
+
+    def get_queryset(self):
+        instance = get_object_or_404(super().get_queryset())
+        self.check_object_permissions(self.request, instance)
+        return instance.expansions.all()
+
+    def get(self, request, *args, **kwargs):
+        return self.list(request, *args, **kwargs)
+
+
+class CollectionVersionExpansionView(CollectionBaseView, RetrieveAPIView):
+    serializer_class = ExpansionSerializer
+
+    def get_permissions(self):
+        if self.request.method == 'GET':
+            return [CanViewConceptDictionaryVersion()]
+        return [HasAccessToVersionedObject()]
+
+    def get_object(self, queryset=None):
+        version = get_object_or_404(self.get_queryset())
+        self.check_object_permissions(self.request, version)
+        expansion = version.expansions.filter(mnemonic=self.kwargs.get('expansion')).first()
+        if not expansion:
+            raise Http404()
+        return expansion
 
 
 class CollectionExtrasBaseView(CollectionBaseView):
