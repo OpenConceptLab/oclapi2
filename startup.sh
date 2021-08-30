@@ -21,10 +21,5 @@ python manage.py import_lookup_values
 echo "Populating text from extras.about"
 python manage.py populate_text_from_extras_about
 
-if [[ "$ENVIRONMENT" = "development" ]]; then
-  echo "Starting up the development server"
-  python manage.py runserver 0.0.0.0:${API_PORT:-8000}
-else
-  echo "Starting up the production server"
-  gunicorn core.wsgi:application --bind 0.0.0.0:${API_PORT:-8000}
-fi
+echo "Starting up the server"
+python manage.py runserver 0.0.0.0:${API_PORT:-8000}
