@@ -32,7 +32,7 @@ def delete_organization(org_id):
 
     try:
         logger.info('Found org %s.  Beginning purge...', org.mnemonic)
-        queryset.delete()
+        queryset.delete()  # not using org.delete() to use django's bulk delete
         from core.pins.models import Pin
         Pin.objects.filter(resource_type__model='organization', resource_id=org.id).delete()
         from core.client_configs.models import ClientConfig
