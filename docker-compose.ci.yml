@@ -6,10 +6,6 @@ services:
       - ENVIRONMENT=ci
     volumes:
       - .:/code
-    deploy:
-      resources:
-        limits:
-          memory: 400m
   celery:
     build: .
     volumes:

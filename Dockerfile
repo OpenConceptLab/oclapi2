@@ -18,7 +18,7 @@ FROM python:3.9.6-alpine
 
 RUN addgroup -S ocl && adduser -S ocl -G ocl
 
-ENV APP_HOME=/home/ocl/code
+ENV APP_HOME=/code
 
 RUN mkdir -p $APP_HOME
 WORKDIR $APP_HOME
@@ -33,14 +33,10 @@ ADD --chown=ocl:ocl . $APP_HOME
 
 USER ocl
 
-RUN chmod +x set_build_version.sh
+RUN chmod +x set_build_version.sh wait_for_it.sh startup.sh start_celery_worker.sh ping_celery_worker.sh start_flower.sh
+
 RUN ["bash", "-c", "./set_build_version.sh"]
 
-RUN chmod +x wait_for_it.sh
-RUN chmod +x startup.sh
-RUN chmod +x start_celery_worker.sh
-RUN chmod +x ping_celery_worker.sh
-RUN chmod +x start_flower.sh
 EXPOSE 8000
 
 CMD ["bash", "-c", "./startup.sh"]
