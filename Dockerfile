@@ -26,7 +26,7 @@ RUN chown -R ocl:ocl /code
 
 WORKDIR $APP_HOME
 
-RUN apk update && apk add --no-cache libpq bash
+RUN apk update && apk add --no-cache libpq bash curl
 COPY --from=builder /code/wheels /wheels
 COPY --from=builder /code/requirements.txt .
 RUN pip install --no-cache /wheels/*
