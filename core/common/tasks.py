@@ -22,23 +22,18 @@ def delete_organization(org_id):
     from core.orgs.models import Organization
     logger.info('Finding org...')
 
-    queryset = Organization.objects.filter(id=org_id)
+    org = Organization.objects.filter(id=org_id).first()
 
-    if not queryset.exists():
+    if not org:
         logger.info('Not found org %s', org_id)
         return
 
-    org = queryset.first()
-
     try:
         logger.info('Found org %s.  Beginning purge...', org.mnemonic)
-        queryset.delete()  # not using org.delete() to use django's bulk delete
-        from core.pins.models import Pin
-        Pin.objects.filter(resource_type__model='organization', resource_id=org.id).delete()
-        from core.client_configs.models import ClientConfig
-        ClientConfig.objects.filter(resource_type__model='organization', resource_id=org.id).delete()
+        org.delete()
         logger.info('Purge complete!')
     except Exception as ex:
+        print("****", ex)
         logger.info('Org delete failed for %s with exception %s', org.mnemonic, ex.args)
 
 
@@ -415,8 +410,9 @@ def delete_dormant_locales():  # pragma: no cover
 def delete_concept(concept_id):  # pragma: no cover
     from core.concepts.models import Concept
 
-    concept = Concept.objects.filter(id=concept_id).first()
-    concept.delete()
+    queryset = Concept.objects.filter(id=concept_id)
+    if queryset.exists():
+        queryset.delete()
 
     return 1
 

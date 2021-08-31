@@ -176,6 +176,11 @@ class BaseModel(models.Model):
             offset = limit
             limit += batch_size
 
+    @staticmethod
+    def batch_delete(queryset):
+        for batch in queryset.iterator(chunk_size=200):
+            batch.delete()
+
 
 class CommonLogoModel(models.Model):
     logo_path = models.TextField(null=True, blank=True)
