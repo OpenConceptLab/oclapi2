@@ -21,6 +21,9 @@ RUN addgroup -S ocl && adduser -S ocl -G ocl
 ENV APP_HOME=/code
 
 RUN mkdir -p $APP_HOME
+
+RUN chown -R ocl:ocl /code
+
 WORKDIR $APP_HOME
 
 RUN apk update && apk add --no-cache libpq bash
