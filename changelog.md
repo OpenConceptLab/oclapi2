@@ -1,3 +1,5 @@
+##### 2.0.47 - Tue Aug 31 07:27:09 2021 +0000
+- Org delete to delete children first
 ##### 2.0.46 - Fri Aug 27 09:14:25 2021 +0000
 - Org delete to use bulk_delete
 - [OpenConceptLab/ocl_issues#947](https://github.com/OpenConceptLab/ocl_issues/issues/947) | Handling ES error of max pagination
