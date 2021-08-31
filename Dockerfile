@@ -15,6 +15,9 @@ ADD requirements.txt /code/
 RUN pip wheel --no-cache-dir --wheel-dir /code/wheels -r requirements.txt
 
 FROM python:3.9.6-alpine
+ENV PYTHONUNBUFFERED 1
+ENV PYTHONDONTWRITEBYTECODE 1
+ARG SOURCE_COMMIT
 
 RUN addgroup -S ocl && adduser -S ocl -G ocl
 
