@@ -5,14 +5,18 @@ import uuid
 
 from celery_once import AlreadyQueued
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.core.management import call_command
 from django.db.models import F
 from mock import patch, Mock, ANY, call
+from ocldev.oclcsvtojsonconverter import OclStandardCsvToJsonConverter
 
 from core.collections.models import Collection
+from core.common.constants import CUSTOM_VALIDATION_SCHEMA_OPENMRS
 from core.common.tests import OCLAPITestCase, OCLTestCase
 from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory
 from core.importers.models import BulkImport, BulkImportInline, BulkImportParallelRunner
+from core.importers.views import csv_file_data_to_input_list
 from core.mappings.models import Mapping
 from core.orgs.models import Organization
 from core.orgs.tests.factories import OrganizationFactory
@@ -383,6 +387,27 @@ class BulkImportInlineTest(OCLTestCase):
         self.assertEqual(len(importer.failed), 0)
         self.assertEqual(len(importer.invalid), 0)
         self.assertEqual(len(importer.others), 0)
+
+    @unittest.skip('[Skipped] OPENMRS CSV Import Sample')
+    def test_openmrs_schema_csv_import(self):
+        call_command('import_lookup_values')
+        org = OrganizationFactory(mnemonic='MSFOCP')
+        OrganizationSourceFactory(
+            mnemonic='Implementationtest', organization=org, custom_validation_schema=CUSTOM_VALIDATION_SCHEMA_OPENMRS)
+        file_content = open(
+            os.path.join(os.path.dirname(__file__), '..', 'samples/msfocp_concepts.csv'), 'r').read()
+        data = OclStandardCsvToJsonConverter(
+            input_list=csv_file_data_to_input_list(file_content),
+            allow_special_characters=True
+        ).process()
+        importer = BulkImportInline(data, 'ocladmin', True)
+        importer.run()
+
+        self.assertEqual(importer.processed, 31)
+        self.assertEqual(len(importer.created), 21)
+        self.assertEqual(len(importer.updated), 0)
+        self.assertEqual(len(importer.invalid), 0)
+        self.assertEqual(len(importer.failed), 10)
 
     @unittest.skip('[Skipped] PEPFAR (small) Import Sample')
     def test_pepfar_import(self):
