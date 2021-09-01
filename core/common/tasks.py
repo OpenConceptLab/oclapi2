@@ -33,7 +33,6 @@ def delete_organization(org_id):
         org.delete()
         logger.info('Purge complete!')
     except Exception as ex:
-        print("****", ex)
         logger.info('Org delete failed for %s with exception %s', org.mnemonic, ex.args)
 
 

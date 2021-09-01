@@ -75,10 +75,10 @@ class Organization(BaseResourceModel, SourceContainerMixin):
             for source in self.source_set.all():
                 self.batch_delete(source.concepts_set)
                 self.batch_delete(source.mappings_set)
-                source.delete()
+                source.delete(force=True)
             for collection in self.collection_set.all():
                 self.batch_delete(collection.references)
-                collection.delete()
+                collection.delete(force=True)
             self.delete_pins()
             self.delete_client_configs()
 
