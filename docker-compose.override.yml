@@ -32,14 +32,17 @@ services:
       - .:/code:z
     restart: "no"
   celery_bulk_import_0_1:
+    build: .
     volumes:
       - .:/code:z
     restart: "no"
   celery_bulk_import_2_3:
+    build: .
     volumes:
       - .:/code:z
     restart: "no"
   celery_bulk_import_root:
+    build: .
     volumes:
       - .:/code:z
     restart: "no"
