@@ -710,6 +710,7 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
             self.total = len(self.input_list)
         self.make_resource_distribution()
         self.make_parts()
+        self.content = None  # memory optimization
         self.input_list = []  # memory optimization
 
     def make_resource_distribution(self):
