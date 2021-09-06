@@ -483,6 +483,10 @@ def to_parent_uri(expression):
     return expression
 
 
+def to_owner_uri(expression):
+    return '/' + '/'.join(compact(expression.split('/'))[:2]) + '/'
+
+
 def separate_version(expression):
     versionless_expression = drop_version(expression)
     if expression != versionless_expression:

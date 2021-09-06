@@ -9,8 +9,8 @@ from drf_yasg.utils import swagger_auto_schema
 from pydash import get
 from rest_framework import status, mixins
 from rest_framework.generics import (
-    RetrieveAPIView, DestroyAPIView, UpdateAPIView, ListAPIView, RetrieveUpdateDestroyAPIView
-)
+    RetrieveAPIView, DestroyAPIView, UpdateAPIView, ListAPIView, RetrieveUpdateDestroyAPIView,
+    CreateAPIView)
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
@@ -46,6 +46,10 @@ from core.common.swagger_parameters import q_param, compress_header, page_param,
 from core.common.tasks import add_references, export_collection
 from core.common.utils import compact_dict_by_values, parse_boolean_query_param
 from core.common.views import BaseAPIView, BaseLogoView
+from core.concepts.documents import ConceptDocument
+from core.concepts.models import Concept
+from core.mappings.documents import MappingDocument
+from core.mappings.models import Mapping
 
 logger = logging.getLogger('oclapi')
 
@@ -98,6 +102,9 @@ class CollectionBaseView(BaseAPIView):
         }
 
     def get_queryset(self):
+        return self.get_base_queryset()
+
+    def get_base_queryset(self):
         queryset = Collection.get_base_queryset(
             compact_dict_by_values(self.get_filter_params())
         ).select_related(
@@ -318,10 +325,8 @@ class CollectionReferencesView(
 
         for ref in added_references:
             if ref.concepts:
-                from core.concepts.documents import ConceptDocument
                 collection.batch_index(ref.concepts, ConceptDocument)
             if ref.mappings:
-                from core.mappings.documents import MappingDocument
                 collection.batch_index(ref.mappings, MappingDocument)
 
         return Response(response, status=status.HTTP_200_OK)
@@ -523,7 +528,7 @@ class CollectionVersionRetrieveUpdateDestroyView(CollectionBaseView, RetrieveAPI
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
-class CollectionVersionExpansionsView(CollectionBaseView, ListWithHeadersMixin):
+class CollectionVersionExpansionsView(CollectionBaseView, ListWithHeadersMixin, CreateAPIView):
     serializer_class = ExpansionSerializer
 
     def get_permissions(self):
@@ -536,11 +541,24 @@ class CollectionVersionExpansionsView(CollectionBaseView, ListWithHeadersMixin):
         self.check_object_permissions(self.request, instance)
         return instance.expansions.all()
 
+    def get_object(self, queryset=None):
+        instance = get_object_or_404(self.get_base_queryset())
+        self.check_object_permissions(self.request, instance)
+        return instance
+
     def get(self, request, *args, **kwargs):
         return self.list(request, *args, **kwargs)
 
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        version = self.get_object()
+        expansion = version.cascade_children_to_expansion(expansion_data=serializer.data)
+        headers = self.get_success_headers(serializer.data)
+        return Response(ExpansionSerializer(expansion).data, status=status.HTTP_201_CREATED, headers=headers)
 
-class CollectionVersionExpansionView(CollectionBaseView, RetrieveAPIView):
+
+class CollectionVersionExpansionBaseView(CollectionBaseView):
     serializer_class = ExpansionSerializer
 
     def get_permissions(self):
@@ -549,12 +567,72 @@ class CollectionVersionExpansionView(CollectionBaseView, RetrieveAPIView):
         return [HasAccessToVersionedObject()]
 
     def get_object(self, queryset=None):
-        version = get_object_or_404(self.get_queryset())
-        self.check_object_permissions(self.request, version)
-        expansion = version.expansions.filter(mnemonic=self.kwargs.get('expansion')).first()
+        expansion = self.get_queryset().first()
         if not expansion:
             raise Http404()
+
         return expansion
+
+    def get_queryset(self):
+        version = get_object_or_404(super().get_queryset())
+        self.check_object_permissions(self.request, version)
+        return version.expansions.filter(mnemonic=self.kwargs.get('expansion'))
+
+
+class CollectionVersionExpansionView(CollectionVersionExpansionBaseView, RetrieveAPIView, DestroyAPIView):
+    serializer_class = ExpansionSerializer
+    permission_classes = (CanViewConceptDictionary, )
+
+    def destroy(self, request, *args, **kwargs):  # pylint: disable=unused-argument
+        obj = self.get_object()
+        obj.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class CollectionVersionExpansionChildrenView(CollectionVersionExpansionBaseView, ListWithHeadersMixin):
+    def get_queryset(self):
+        expansion = super().get_queryset().first()
+
+        if not expansion:
+            raise Http404()
+
+        return expansion
+
+    def get(self, request, *args, **kwargs):
+        return self.list(request, *args, **kwargs)
+
+
+class CollectionVersionExpansionReferencesView(CollectionVersionExpansionChildrenView):
+    serializer_class = CollectionReferenceSerializer
+
+    def get_queryset(self):
+        return super().get_queryset().references.order_by('-id')
+
+
+class CollectionVersionExpansionConceptsView(CollectionVersionExpansionChildrenView):
+    is_searchable = True
+    document_model = ConceptDocument
+    es_fields = Concept.es_fields
+
+    def get_serializer_class(self):
+        from core.concepts.serializers import ConceptDetailSerializer, ConceptListSerializer
+        return ConceptDetailSerializer if self.is_verbose() else ConceptListSerializer
+
+    def get_queryset(self):
+        return super().get_queryset().concepts
+
+
+class CollectionVersionExpansionMappingsView(CollectionVersionExpansionChildrenView):
+    is_searchable = True
+    document_model = MappingDocument
+    es_fields = Mapping.es_fields
+
+    def get_serializer_class(self):
+        from core.mappings.serializers import MappingDetailSerializer, MappingListSerializer
+        return MappingDetailSerializer if self.is_verbose() else MappingListSerializer
+
+    def get_queryset(self):
+        return super().get_queryset().mappings
 
 
 class CollectionExtrasBaseView(CollectionBaseView):

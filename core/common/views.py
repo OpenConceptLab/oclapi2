@@ -51,7 +51,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     total_count = 0
 
     def _should_exclude_retired_from_search_results(self):
-        if self.is_owner_document_model():
+        if self.is_owner_document_model() or 'expansion' in self.kwargs:
             return False
 
         params = get(self, 'params') or self.request.query_params.dict()
@@ -262,7 +262,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
         return filters
 
-    def get_kwargs_filters(self):
+    def get_kwargs_filters(self):  # pylint: disable=too-many-branches
         filters = self.get_facet_filters_from_kwargs()
         is_source_child_document_model = self.is_source_child_document_model()
         is_version_specified = 'version' in self.kwargs
@@ -300,6 +300,8 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                     filters['collection_owner_url'] = "/orgs/{}/".format(owner)
                 if not is_version_specified:
                     filters['collection_version'] = HEAD
+                if 'expansion' in self.kwargs:
+                    filters['expansion'] = self.kwargs.get('expansion')
             if is_source_specified and not is_version_specified:
                 filters['source_version'] = HEAD
         return filters

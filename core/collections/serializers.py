@@ -164,6 +164,22 @@ class CollectionCreateSerializer(CollectionCreateOrUpdateSerializer):
         return collection
 
 
+class ExpansionSummarySerializer(ModelSerializer):
+    concepts = IntegerField(source='active_concepts', read_only=True)
+    mappings = IntegerField(source='active_mappings', read_only=True)
+    references = IntegerField(source='active_references', read_only=True)
+
+    class Meta:
+        model = Expansion
+        fields = ('concepts', 'mappings', 'references')
+
+
+class ExpansionSummaryDetailSerializer(ExpansionSummarySerializer):
+    class Meta:
+        model = Expansion
+        fields = ExpansionSummarySerializer.Meta.fields + ('id', 'mnemonic')
+
+
 class CollectionSummarySerializer(ModelSerializer):
     versions = IntegerField(source='num_versions')
 
@@ -290,6 +306,7 @@ class CollectionVersionDetailSerializer(CollectionCreateOrUpdateSerializer):
     updated_by = CharField(read_only=True, source='updated_by.username')
     summary = SerializerMethodField()
     autoexpand = SerializerMethodField()
+    expansion_url = CharField(source='latest_expansion_url', read_only=True)
 
     class Meta:
         model = Collection
@@ -302,7 +319,7 @@ class CollectionVersionDetailSerializer(CollectionCreateOrUpdateSerializer):
             'version', 'concepts_url', 'mappings_url', 'is_processing', 'released', 'retired',
             'canonical_url', 'identifier', 'publisher', 'contact', 'jurisdiction', 'purpose', 'copyright', 'meta',
             'immutable', 'revision_date', 'summary', 'text', 'experimental', 'locked_date', 'internal_reference_id',
-            'autoexpand',
+            'autoexpand', 'expansion_url'
         )
 
     def __init__(self, *args, **kwargs):
@@ -361,6 +378,33 @@ class CollectionVersionExportSerializer(CollectionVersionDetailSerializer):
 
 
 class ExpansionSerializer(ModelSerializer):
+    summary = SerializerMethodField()
+    url = CharField(source='uri', read_only=True)
+    parameters = JSONField()
+
     class Meta:
         model = Expansion
-        fields = ('id', 'parameters', 'canonical_url', 'uri')
+        fields = ('mnemonic', 'id', 'parameters', 'canonical_url', 'url', 'summary')
+
+    def __init__(self, *args, **kwargs):
+        params = get(kwargs, 'context.request.query_params')
+        self.include_summary = False
+        if params:
+            self.query_params = params.dict()
+            self.include_summary = self.query_params.get(INCLUDE_SUMMARY) in ['true', True]
+
+        try:
+            if not self.include_summary:
+                self.fields.pop('summary', None)
+        except:  # pylint: disable=bare-except
+            pass
+
+        super().__init__(*args, **kwargs)
+
+    def get_summary(self, obj):
+        summary = None
+
+        if self.include_summary:
+            summary = ExpansionSummarySerializer(obj).data
+
+        return summary

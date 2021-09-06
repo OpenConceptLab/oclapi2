@@ -86,6 +86,24 @@ urlpatterns = [
         name='collection-version-expansion-detail'
     ),
     re_path(
+        r'^(?P<collection>{pattern})/(?P<version>{pattern})/expansions/(?P<expansion>{pattern})/references/$'.format(
+            pattern=NAMESPACE_PATTERN),
+        views.CollectionVersionExpansionReferencesView.as_view(),
+        name='collection-version-expansion-references'
+    ),
+    re_path(
+        r'^(?P<collection>{pattern})/(?P<version>{pattern})/expansions/(?P<expansion>{pattern})/concepts/$'.format(
+            pattern=NAMESPACE_PATTERN),
+        views.CollectionVersionExpansionConceptsView.as_view(),
+        name='collection-version-expansion-concepts'
+    ),
+    re_path(
+        r'^(?P<collection>{pattern})/(?P<version>{pattern})/expansions/(?P<expansion>{pattern})/mappings/$'.format(
+            pattern=NAMESPACE_PATTERN),
+        views.CollectionVersionExpansionMappingsView.as_view(),
+        name='collection-version-expansion-mappings'
+    ),
+    re_path(
         r"^(?P<collection>{pattern})/extras/(?P<extra>{pattern})/$".format(pattern=NAMESPACE_PATTERN),
         views.CollectionExtraRetrieveUpdateDestroyView.as_view(),
         name='collection-extra'

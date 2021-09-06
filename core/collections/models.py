@@ -16,7 +16,7 @@ from core.common.constants import (
     DEFAULT_REPOSITORY_TYPE, ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT
 )
 from core.common.models import ConceptContainerModel, BaseResourceModel
-from core.common.utils import is_valid_uri, drop_version
+from core.common.utils import is_valid_uri, drop_version, to_owner_uri, generate_temp_version
 from core.concepts.constants import LOCALES_FULLY_SPECIFIED
 from core.concepts.models import Concept
 from core.concepts.views import ConceptListView
@@ -369,13 +369,10 @@ class Collection(ConceptContainerModel):
 
         return mapping_uris
 
-    def cascade_children_to_expansion(self, index=True):
-        expansion = self.expansions.create()
-        expansion.mnemonic = expansion.id
-        expansion.save()
-        expansion.seed_concepts(index=index)
-        expansion.seed_mappings(index=index)
-        expansion.seed_references()
+    def cascade_children_to_expansion(self, expansion_data=None, index=True):
+        if not expansion_data:
+            expansion_data = dict()
+        return Expansion.persist(index=index, **expansion_data, collection_version=self)
 
     @property
     def latest_expansion_url(self):
@@ -443,12 +440,18 @@ class CollectionReference(models.Model):
             self.internal_reference_id = str(self.id)
         super().save(force_insert, force_update, using, update_fields)
 
+    @property
+    def is_concept(self):
+        return is_concept(self.expression)
+
+    @property
+    def is_mapping(self):
+        return is_mapping(self.expression)
+
     def create_entities_from_expressions(self):
-        __is_concept = is_concept(self.expression)
-        __is_mapping = is_mapping(self.expression)
-        if __is_concept:
+        if self.is_concept:
             self.concepts = self.get_concepts()
-        elif __is_mapping:
+        elif self.is_mapping:
             self.mappings = self.get_mappings()
 
         if self.concepts and self.concepts.exists():
@@ -507,10 +510,6 @@ class Expansion(BaseResourceModel):
     def default_parameters():
         return default_expansion_parameters()
 
-    @property
-    def expansion(self):
-        return self.mnemonic
-
     @staticmethod
     def get_resource_url_kwarg():
         return 'expansion'
@@ -519,29 +518,134 @@ class Expansion(BaseResourceModel):
     def get_url_kwarg():
         return 'expansion'
 
-    def seed_concepts(self, index=True):
-        head = self.collection_version.head
-        if head:
-            self.concepts.set(head.concepts.all())
-            if index:
-                from core.concepts.documents import ConceptDocument
-                self.batch_index(self.concepts, ConceptDocument)
+    @property
+    def expansion(self):
+        return self.mnemonic
 
-    def seed_mappings(self, index=True):
-        head = self.collection_version.head
-        if head:
-            self.mappings.set(head.mappings.all())
-            if index:
-                from core.mappings.documents import MappingDocument
-                self.batch_index(self.mappings, MappingDocument)
+    @property
+    def active_concepts(self):
+        return self.concepts.count()
+
+    @property
+    def active_mappings(self):
+        return self.mappings.count()
+
+    @property
+    def active_references(self):
+        return self.references.count()
+
+    @property
+    def owner_url(self):
+        return to_owner_uri(self.uri)
+
+    def apply_parameters(self, queryset):
+        parameters = ExpansionParameters(self.parameters)
+        return parameters.apply(queryset)
+
+    def populate(self, index=True):
+        self.seed_references()
+        self.seed_children(index=index)
+
+    def index_concepts(self):
+        if self.concepts.exists():
+            from core.concepts.documents import ConceptDocument
+            self.batch_index(self.concepts, ConceptDocument)
+
+    def index_mappings(self):
+        if self.mappings.exists():
+            from core.mappings.documents import MappingDocument
+            self.batch_index(self.mappings, MappingDocument)
+
+    def index_all(self):
+        self.index_concepts()
+        self.index_mappings()
+
+    def seed_children(self, index=True):
+        version = self.collection_version
+        for reference in version.references.all():
+            if reference.is_concept:
+                concepts = reference.get_concepts()
+                if concepts.exists():
+                    self.concepts.add(*self.apply_parameters(concepts))
+            elif reference.is_mapping:
+                mappings = reference.get_mappings()
+                if mappings.exists():
+                    self.mappings.add(*self.apply_parameters(mappings))
+
+        if index:
+            self.index_all()
 
     def seed_references(self):
-        head = self.collection_version.head
-        if head:
-            references = CollectionReference.objects.bulk_create(
-                [CollectionReference(expression=ref.expression) for ref in head.references.all()]
-            )
-            self.references.set(references)
+        version = self.collection_version
+        references = CollectionReference.objects.bulk_create(
+            [CollectionReference(expression=ref.expression) for ref in version.references.all()]
+        )
+        self.references.set(references)
 
     def calculate_uri(self):
         return self.collection_version.uri + 'expansions/{}/'.format(self.mnemonic)
+
+    def clean(self):
+        if not self.parameters:
+            self.parameters = default_expansion_parameters()
+
+        super().clean()
+
+    @classmethod
+    def persist(cls, index, **kwargs):
+        expansion = cls(**kwargs)
+        temp_version = not bool(expansion.mnemonic)
+        if temp_version:
+            expansion.mnemonic = generate_temp_version()
+        expansion.clean()
+        expansion.full_clean()
+        expansion.save()
+        if temp_version and expansion.id:
+            expansion.mnemonic = expansion.id
+            expansion.save()
+
+        expansion.populate(index=index)
+        return expansion
+
+
+class ExpansionParameters:
+    ACTIVE = 'activeOnly'
+
+    def __init__(self, parameters):
+        self.parameters = parameters
+        self.parameter_classes = dict()
+        self.filters = dict()
+        self.to_parameter_classes()
+        self.get_filters()
+
+    def to_parameter_classes(self):
+        for parameter, value in self.parameters.items():
+            if parameter == self.ACTIVE:
+                self.parameter_classes[parameter] = ExpansionActiveParameter(value=value)
+
+    def apply(self, queryset):
+        queryset = queryset.filter(**self.filters)
+        return queryset
+
+    def get_filters(self):
+        for _, klass in self.parameter_classes.items():
+            if klass.can_apply_filters:
+                self.filters = {**self.filters, **klass.filters}
+
+
+class ExpansionParameter:
+    can_apply_filters = True
+
+    def __init__(self, value):
+        self.value = value
+
+
+class ExpansionActiveParameter(ExpansionParameter):
+    default_filters = dict(is_active=True, retired=False)
+
+    @property
+    def filters(self):
+        if self.value is True:
+            return self.default_filters
+
+        return dict()

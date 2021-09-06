@@ -14,7 +14,8 @@ from django_elasticsearch_dsl.signals import RealTimeSignalProcessor
 from pydash import get
 
 from core.common.services import S3
-from core.common.utils import reverse_resource, reverse_resource_version, parse_updated_since_param, drop_version
+from core.common.utils import reverse_resource, reverse_resource_version, parse_updated_since_param, drop_version, \
+    to_owner_uri
 from core.settings import DEFAULT_LOCALE
 from core.sources.constants import CONTENT_REFERRED_PRIVATELY
 from .constants import (
@@ -428,7 +429,7 @@ class ConceptContainerModel(VersionedModel):
 
     @property
     def parent_url(self):
-        return get(self, 'parent.url')
+        return to_owner_uri(self.uri)
 
     @property
     def parent_resource(self):
