@@ -710,6 +710,7 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
             self.total = len(self.input_list)
         self.make_resource_distribution()
         self.make_parts()
+        self.input_list = []  # memory optimization
 
     def make_resource_distribution(self):
         for line in self.input_list:
@@ -812,13 +813,14 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
             print("****STARTED MAIN****")
             print("TASK ID: {}".format(self.self_task_id))
             print("***************")
-        for part_list in self.parts:
+        for part_list in list(self.parts):
             if part_list:
                 part_type = get(part_list, '0.type', '').lower()
                 if part_type:
                     is_child = part_type in ['concept', 'mapping', 'reference']
                     start_time = time.time()
                     self.queue_tasks(part_list, is_child)
+                    self.parts.remove(part_list)  # memory optimization
                     self.wait_till_tasks_alive()
                     if is_child:
                         if part_type not in self.resource_wise_time:
