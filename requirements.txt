@@ -4,7 +4,7 @@ gunicorn==20.1.0
 djangorestframework==3.12.4
 pylint==2.5.3
 pydash==4.8.0
-django-cors-headers==3.4.0
+django-cors-headers==3.8.0
 pyyaml==5.4.1
 colour_runner==0.1.1
 boto3==1.14.37
