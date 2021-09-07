@@ -9,7 +9,6 @@ pyyaml==5.4.1
 colour_runner==0.1.1
 boto3==1.14.37
 moto==2.2.6
-six==1.15.0
 python-dateutil==2.8.2
 requests==2.26.0
 factory_boy==3.2.0
