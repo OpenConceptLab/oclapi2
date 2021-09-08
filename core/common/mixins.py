@@ -11,11 +11,13 @@ from django.urls import resolve, reverse, Resolver404
 from django.utils.functional import cached_property
 from pydash import compact, get
 from rest_framework import status
+from rest_framework.generics import RetrieveUpdateDestroyAPIView
 from rest_framework.mixins import ListModelMixin, CreateModelMixin
 from rest_framework.response import Response
 
 from core.common.constants import HEAD, ACCESS_TYPE_EDIT, ACCESS_TYPE_VIEW, ACCESS_TYPE_NONE, INCLUDE_FACETS, \
-    LIST_DEFAULT_LIMIT, HTTP_COMPRESS_HEADER, CSV_DEFAULT_LIMIT, FACETS_ONLY
+    LIST_DEFAULT_LIMIT, HTTP_COMPRESS_HEADER, CSV_DEFAULT_LIMIT, FACETS_ONLY, NOT_FOUND, \
+    MUST_SPECIFY_EXTRA_PARAM_IN_BODY
 from core.common.permissions import HasPrivateAccess, HasOwnership, CanViewConceptDictionary
 from core.common.services import S3
 from .utils import write_csv_to_s3, get_csv_from_s3, get_query_params_from_url_string, compact_dict_by_values
@@ -128,7 +130,7 @@ class ListWithHeadersMixin(ListModelMixin):
 
         sorted_list = self.object_list
 
-        headers = dict()
+        headers = {}
         results = sorted_list
         if not compress:
             paginator = CustomPaginator(
@@ -460,7 +462,7 @@ class SourceChildMixin:
         queryset = cls.objects.none()
 
         try:
-            kwargs = get(resolve(uri), 'kwargs', dict())
+            kwargs = get(resolve(uri), 'kwargs', {})
             query_params = get_query_params_from_url_string(uri)  # parsing query parameters
             kwargs.update(query_params)
             if 'concept' in kwargs:
@@ -484,7 +486,7 @@ class SourceChildMixin:
 
     @staticmethod
     def get_parent_and_owner_filters_from_uri(uri):
-        filters = dict()
+        filters = {}
         if not uri:
             return filters
 
@@ -639,3 +641,47 @@ class ConceptContainerProcessingMixin:
         version.clear_processing()
 
         return Response(status=status.HTTP_200_OK)
+
+
+class ConceptContainerExtraRetrieveUpdateDestroyView(RetrieveUpdateDestroyAPIView):
+    def retrieve(self, request, *args, **kwargs):
+        key = kwargs.get('extra')
+        instance = self.get_object()
+        extras = get(instance, 'extras', {})
+        if key in extras:
+            return Response({key: extras[key]})
+
+        return Response(dict(detail=NOT_FOUND), status=status.HTTP_404_NOT_FOUND)
+
+    def update(self, request, **kwargs):  # pylint: disable=arguments-differ
+        key = kwargs.get('extra')
+        value = request.data.get(key)
+        if not value:
+            return Response([MUST_SPECIFY_EXTRA_PARAM_IN_BODY.format(key)], status=status.HTTP_400_BAD_REQUEST)
+
+        instance = self.get_object()
+        instance.extras = get(instance, 'extras', {})
+        instance.extras[key] = value
+        instance.comment = 'Updated extras: %s=%s.' % (key, value)
+        head = instance.get_head()
+        head.extras = get(head, 'extras', {})
+        head.extras.update(instance.extras)
+        instance.save()
+        head.save()
+        return Response({key: value})
+
+    def delete(self, request, *args, **kwargs):
+        key = kwargs.get('extra')
+        instance = self.get_object()
+        instance.extras = get(instance, 'extras', {})
+        if key in instance.extras:
+            del instance.extras[key]
+            instance.comment = 'Deleted extra %s.' % key
+            head = instance.get_head()
+            head.extras = get(head, 'extras', {})
+            del head.extras[key]
+            instance.save()
+            head.save()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+
+        return Response(dict(detail=NOT_FOUND), status=status.HTTP_404_NOT_FOUND)

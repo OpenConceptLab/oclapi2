@@ -280,7 +280,7 @@ def update_validation_schema(instance_type, instance_id, target_schema):
     klass = get_resource_class_from_resource_name(instance_type)
     instance = klass.objects.get(id=instance_id)
     instance.custom_validation_schema = target_schema
-    errors = dict()
+    errors = {}
 
     failed_concept_validations = instance.validate_child_concepts() or []
     if failed_concept_validations:

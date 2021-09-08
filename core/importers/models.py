@@ -694,13 +694,13 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
         self.self_task_id = self_task_id
         self.username = username
         self.total = 0
-        self.resource_distribution = dict()
+        self.resource_distribution = {}
         self.parallel = int(parallel) if parallel else 5
         self.tasks = []
         self.groups = []
         self.results = []
         self.elapsed_seconds = 0
-        self.resource_wise_time = dict()
+        self.resource_wise_time = {}
         self.parts = [[]]
         self.result = None
         self._json_result = None

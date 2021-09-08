@@ -368,7 +368,7 @@ class OrganizationMemberViewTest(OCLAPITestCase):
 
 class OrganizationExtrasViewTest(OCLAPITestCase):
     def test_get_200(self):
-        org = OrganizationFactory(extras=dict())
+        org = OrganizationFactory(extras={})
         user = UserProfileFactory(organizations=[org])
         token = user.get_token()
 
@@ -379,7 +379,7 @@ class OrganizationExtrasViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data, dict())
+        self.assertEqual(response.data, {})
 
         org = OrganizationFactory(extras=dict(foo='bar'))
 

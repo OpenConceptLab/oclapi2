@@ -235,7 +235,7 @@ class SourceDetailSerializer(SourceCreateOrUpdateSerializer):
     def __init__(self, *args, **kwargs):
         params = get(kwargs, 'context.request.query_params')
 
-        self.query_params = dict()
+        self.query_params = {}
         if params:
             self.query_params = params if isinstance(params, dict) else params.dict()
         self.include_summary = self.query_params.get(INCLUDE_SUMMARY) in ['true', True]

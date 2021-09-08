@@ -261,7 +261,7 @@ class S3Test(TestCase):
             res = S3.upload_file(key=file_path, headers={'header1': 'val1'})
             self.assertEqual(res, 200)
             S3.upload.assert_called_once_with(file_path, 'file-content', {'header1': 'val1'}, None)
-            mock_file.assert_called_once_with(file_path, 'r')
+            mock_file.assert_called_once_with(file_path, 'r', encoding='utf-8')
 
     @patch('core.common.services.S3.upload')
     def test_upload_base64(self, s3_upload_mock):
@@ -380,30 +380,12 @@ class S3Test(TestCase):
 
 class UtilsTest(OCLTestCase):
     def test_compact_dict_by_values(self):
-        self.assertEqual(
-            compact_dict_by_values(dict()),
-            dict()
-        )
-        self.assertEqual(
-            compact_dict_by_values(dict(foo=None)),
-            dict()
-        )
-        self.assertEqual(
-            compact_dict_by_values(dict(foo=None, bar=None)),
-            dict()
-        )
-        self.assertEqual(
-            compact_dict_by_values(dict(foo=None, bar=1)),
-            dict(bar=1)
-        )
-        self.assertEqual(
-            compact_dict_by_values(dict(foo=2, bar=1)),
-            dict(foo=2, bar=1)
-        )
-        self.assertEqual(
-            compact_dict_by_values(dict(foo=2, bar='')),
-            dict(foo=2)
-        )
+        self.assertEqual(compact_dict_by_values({}), {})
+        self.assertEqual(compact_dict_by_values(dict(foo=None)), {})
+        self.assertEqual(compact_dict_by_values(dict(foo=None, bar=None)), {})
+        self.assertEqual(compact_dict_by_values(dict(foo=None, bar=1)), dict(bar=1))
+        self.assertEqual(compact_dict_by_values(dict(foo=2, bar=1)), dict(foo=2, bar=1))
+        self.assertEqual(compact_dict_by_values(dict(foo=2, bar='')), dict(foo=2))
 
     def test_to_snake_case(self):
         self.assertEqual(to_snake_case(""), "")
@@ -622,7 +604,7 @@ class UtilsTest(OCLTestCase):
 
     def test_jsonify_safe(self):
         self.assertEqual(jsonify_safe(None), None)
-        self.assertEqual(jsonify_safe(dict()), dict())
+        self.assertEqual(jsonify_safe({}), {})
         self.assertEqual(jsonify_safe(dict(a=1)), dict(a=1))
         self.assertEqual(jsonify_safe('foobar'), 'foobar')
         self.assertEqual(jsonify_safe('{"foo": "bar"}'), dict(foo='bar'))

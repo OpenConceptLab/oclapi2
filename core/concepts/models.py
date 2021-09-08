@@ -231,6 +231,8 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         except:  # pylint: disable=bare-except
             pass
 
+        return None
+
     def __get_system_default_locale(self):
         system_default_locale = settings.DEFAULT_LOCALE
 
@@ -257,7 +259,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         )
 
     def __get_last_created_locale(self):
-        return get(self.__names_qs(dict(), 'created_at', 'desc'), '0')
+        return get(self.__names_qs({}, 'created_at', 'desc'), '0')
 
     def __get_preferred_locale(self):
         return get(
@@ -285,7 +287,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
     def __names_from_prefetched_object_cache(self, filters, order_by=None, order='desc'):  # pragma: no cover
         def is_eligible(name):
-            return all([get(name, key) == value for key, value in filters.items()])
+            return all(get(name, key) == value for key, value in filters.items())
 
         names = list(filter(is_eligible, self.names.all()))
         if order_by:
@@ -410,7 +412,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             datatype=self.datatype,
             retired=self.retired,
             released=self.released,
-            extras=self.extras or dict(),
+            extras=self.extras or {},
             parent=self.parent,
             is_latest_version=self.is_latest_version,
             parent_id=self.parent_id,
@@ -567,7 +569,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         concept.version = generate_temp_version()
         if user:
             concept.created_by = concept.updated_by = user
-        concept.errors = dict()
+        concept.errors = {}
         if concept.is_existing_in_parent():
             concept.errors = dict(__all__=[ALREADY_EXISTS])
             return concept
@@ -627,7 +629,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             cls, obj, user=None, create_parent_version=True, parent_concept_uris=None, add_prev_version_children=True,
             **kwargs
     ):  # pylint: disable=too-many-statements,too-many-branches,too-many-arguments
-        errors = dict()
+        errors = {}
         if not user:
             errors['version_created_by'] = PERSIST_CLONE_SPECIFY_USER_ERROR
             return errors

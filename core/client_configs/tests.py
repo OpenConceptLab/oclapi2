@@ -17,7 +17,7 @@ class ClientConfigTest(OCLTestCase):
         self.assertFalse(ClientConfig(type='blah').is_home)
 
     def test_home_config_validation(self):
-        client_config = ClientConfig(config=dict())
+        client_config = ClientConfig(config={})
 
         with self.assertRaises(ValidationError) as ex:
             client_config.full_clean()
@@ -153,7 +153,7 @@ class ClientConfigsViewTest(OCLAPITestCase):
     def test_post(self):
         response = self.client.post(
             self.org.url + 'client-configs/',
-            dict(),
+            {},
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )

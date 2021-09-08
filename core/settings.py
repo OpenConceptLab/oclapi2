@@ -53,6 +53,7 @@ CORS_EXPOSE_HEADERS = (
 )
 
 CORS_ORIGIN_ALLOW_ALL = True
+DEFAULT_AUTO_FIELD = 'django.db.models.AutoField'
 # Application definition
 
 INSTALLED_APPS = [

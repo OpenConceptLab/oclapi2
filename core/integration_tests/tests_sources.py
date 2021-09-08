@@ -448,8 +448,8 @@ class SourceVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.data['version'], 'v1')
 
     def test_put_200(self):
-        self.assertEqual(self.source.extras, dict())
-        self.assertEqual(self.source_v1.extras, dict())
+        self.assertEqual(self.source.extras, {})
+        self.assertEqual(self.source_v1.extras, {})
 
         extras = dict(foo='bar')
         response = self.client.put(
@@ -463,7 +463,7 @@ class SourceVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.data['extras'], extras)
         self.source_v1.refresh_from_db()
         self.assertEqual(self.source_v1.extras, extras)
-        self.assertEqual(self.source.extras, dict())
+        self.assertEqual(self.source.extras, {})
 
     def test_put_400(self):
         response = self.client.put(

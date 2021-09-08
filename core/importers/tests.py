@@ -336,7 +336,8 @@ class BulkImportInlineTest(OCLTestCase):
     def test_reference_import(self):
         importer = BulkImportInline(
             open(
-                os.path.join(os.path.dirname(__file__), '..', 'samples/sample_collection_references.json'), 'r'
+                os.path.join(os.path.dirname(__file__), '..', 'samples/sample_collection_references.json'), 'r',
+                encoding='utf-8'
             ).read(),
             'ocladmin', True
         )
@@ -356,7 +357,8 @@ class BulkImportInlineTest(OCLTestCase):
         # duplicate run
         importer = BulkImportInline(
             open(
-                os.path.join(os.path.dirname(__file__), '..', 'samples/sample_collection_references.json'), 'r'
+                os.path.join(os.path.dirname(__file__), '..', 'samples/sample_collection_references.json'), 'r',
+                encoding='utf-8'
             ).read(),
             'ocladmin', True
         )
@@ -375,7 +377,9 @@ class BulkImportInlineTest(OCLTestCase):
 
     def test_sample_import(self):
         importer = BulkImportInline(
-            open(os.path.join(os.path.dirname(__file__), '..', 'samples/sample_ocldev.json'), 'r').read(),
+            open(
+                os.path.join(os.path.dirname(__file__), '..', 'samples/sample_ocldev.json'), 'r', encoding='utf-8'
+            ).read(),
             'ocladmin', True
         )
         importer.run()
@@ -395,7 +399,7 @@ class BulkImportInlineTest(OCLTestCase):
         OrganizationSourceFactory(
             mnemonic='Implementationtest', organization=org, custom_validation_schema=CUSTOM_VALIDATION_SCHEMA_OPENMRS)
         file_content = open(
-            os.path.join(os.path.dirname(__file__), '..', 'samples/msfocp_concepts.csv'), 'r').read()
+            os.path.join(os.path.dirname(__file__), '..', 'samples/msfocp_concepts.csv'), 'r', encoding='utf-8').read()
         data = OclStandardCsvToJsonConverter(
             input_list=csv_file_data_to_input_list(file_content),
             allow_special_characters=True
@@ -412,7 +416,9 @@ class BulkImportInlineTest(OCLTestCase):
     @unittest.skip('[Skipped] PEPFAR (small) Import Sample')
     def test_pepfar_import(self):
         importer = BulkImportInline(
-            open(os.path.join(os.path.dirname(__file__), '..', 'samples/pepfar_datim_moh_fy19.json'), 'r').read(),
+            open(
+                os.path.join(os.path.dirname(__file__), '..', 'samples/pepfar_datim_moh_fy19.json'), 'r',
+                encoding='utf-8').read(),
             'ocladmin', True
         )
         importer.run()
@@ -432,7 +438,9 @@ class BulkImportParallelRunnerTest(OCLTestCase):
         redis_service_mock.return_value = Mock()
 
         importer = BulkImportParallelRunner(
-            open(os.path.join(os.path.dirname(__file__), '..', 'samples/sample_ocldev.json'), 'r').read(),
+            open(
+                os.path.join(os.path.dirname(__file__), '..', 'samples/sample_ocldev.json'), 'r', encoding='utf-8'
+            ).read(),
             'ocladmin', True
         )
 
@@ -456,7 +464,9 @@ class BulkImportParallelRunnerTest(OCLTestCase):
     def test_is_any_process_alive(self, redis_service_mock):
         redis_service_mock.return_value = Mock()
         importer = BulkImportParallelRunner(
-            open(os.path.join(os.path.dirname(__file__), '..', 'samples/sample_ocldev.json'), 'r').read(),
+            open(
+                os.path.join(os.path.dirname(__file__), '..', 'samples/sample_ocldev.json'), 'r', encoding='utf-8'
+            ).read(),
             'ocladmin', True
         )
         self.assertFalse(importer.is_any_process_alive())
@@ -495,7 +505,9 @@ class BulkImportParallelRunnerTest(OCLTestCase):
         redis_instance_mock.get_int.side_effect = [100, 50]
         redis_service_mock.return_value = redis_instance_mock
         importer = BulkImportParallelRunner(
-            open(os.path.join(os.path.dirname(__file__), '..', 'samples/sample_ocldev.json'), 'r').read(),
+            open(
+                os.path.join(os.path.dirname(__file__), '..', 'samples/sample_ocldev.json'), 'r', encoding='utf-8'
+            ).read(),
             'ocladmin', True
         )
         self.assertEqual(importer.get_overall_tasks_progress(), 0)
@@ -507,7 +519,9 @@ class BulkImportParallelRunnerTest(OCLTestCase):
         redis_service_mock.return_value = Mock()
 
         importer = BulkImportParallelRunner(
-            open(os.path.join(os.path.dirname(__file__), '..', 'samples/sample_ocldev.json'), 'r').read(),
+            open(
+                os.path.join(os.path.dirname(__file__), '..', 'samples/sample_ocldev.json'), 'r', encoding='utf-8'
+            ).read(),
             'ocladmin', True
         )
         self.assertIsNotNone(importer.start_time)
@@ -520,7 +534,9 @@ class BulkImportParallelRunnerTest(OCLTestCase):
         redis_instance_mock = Mock(set_json=Mock())
         redis_service_mock.return_value = redis_instance_mock
         importer = BulkImportParallelRunner(
-            open(os.path.join(os.path.dirname(__file__), '..', 'samples/sample_ocldev.json'), 'r').read(),
+            open(
+                os.path.join(os.path.dirname(__file__), '..', 'samples/sample_ocldev.json'), 'r', encoding='utf-8'
+            ).read(),
             'ocladmin', True, None, 'task-id'
         )
         importer.tasks = [Mock(task_id='task-1'), Mock(task_id='task-2')]

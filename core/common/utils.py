@@ -5,7 +5,7 @@ import random
 import tempfile
 import uuid
 import zipfile
-from collections import MutableMapping, OrderedDict  # pylint: disable=no-name-in-module
+from collections import MutableMapping, OrderedDict  # pylint: disable=no-name-in-module,deprecated-class
 from urllib import parse
 
 import requests
@@ -168,7 +168,7 @@ def get_query_params_from_url_string(url):
     try:
         return dict(parse.parse_qsl(parse.urlsplit(url).query))
     except:  # pylint: disable=bare-except  # pragma: no cover
-        return dict()
+        return {}
 
 
 def is_valid_uri(uri):
@@ -216,14 +216,14 @@ def write_export_file(
         concepts_qs = Concept.sources.through.objects.filter(source_id=version.id)
         mappings_qs = Mapping.sources.through.objects.filter(source_id=version.id)
 
-    filters = dict()
+    filters = {}
 
     if not is_collection:
         filters['is_active'] = True
         if version.is_head:
             filters['is_latest_version'] = True
 
-    with open('export.json', 'w') as out:
+    with open('export.json', 'w', encoding='utf-8') as out:
         out.write('%s, "concepts": [' % resource_string[:-1])
 
     resource_name = resource_type.title()
@@ -241,14 +241,14 @@ def write_export_file(
                 id__in=batch_queryset.values_list('concept_id')).filter(**filters).order_by('-id')
             if queryset.exists():
                 if start > 0:
-                    with open('export.json', 'a') as out:
+                    with open('export.json', 'a', encoding='utf-8') as out:
                         out.write(', ')
                 concept_versions = queryset.prefetch_related('names', 'descriptions')
                 data = concept_serializer_class(concept_versions, many=True).data
                 concept_string = json.dumps(data, cls=encoders.JSONEncoder)
                 concept_string = concept_string[1:-1]
 
-                with open('export.json', 'a') as out:
+                with open('export.json', 'a', encoding='utf-8') as out:
                     out.write(concept_string)
 
             start += batch_size
@@ -263,7 +263,7 @@ def write_export_file(
         references_qs = version.references
         total_references = references_qs.count()
 
-        with open('export.json', 'a') as out:
+        with open('export.json', 'a', encoding='utf-8') as out:
             out.write('], "references": [')
         if total_references:
             logger.info(
@@ -278,7 +278,7 @@ def write_export_file(
                 reference_serializer = reference_serializer_class(references, many=True)
                 reference_string = json.dumps(reference_serializer.data, cls=encoders.JSONEncoder)
                 reference_string = reference_string[1:-1]
-                with open('export.json', 'a') as out:
+                with open('export.json', 'a', encoding='utf-8') as out:
                     out.write(reference_string)
                     if end != total_references:
                         out.write(', ')
@@ -286,7 +286,7 @@ def write_export_file(
         else:
             logger.info('%s has no references to serialize.' % resource_name)
 
-    with open('export.json', 'a') as out:
+    with open('export.json', 'a', encoding='utf-8') as out:
         out.write('], "mappings": [')
 
     if mappings_qs.exists():
@@ -302,13 +302,13 @@ def write_export_file(
                 id__in=batch_queryset.values_list('mapping_id')).filter(**filters).order_by('-id')
             if queryset.exists():
                 if start > 0:
-                    with open('export.json', 'a') as out:
+                    with open('export.json', 'a', encoding='utf-8') as out:
                         out.write(', ')
 
                 data = mapping_serializer_class(queryset, many=True).data
                 mapping_string = json.dumps(data, cls=encoders.JSONEncoder)
                 mapping_string = mapping_string[1:-1]
-                with open('export.json', 'a') as out:
+                with open('export.json', 'a', encoding='utf-8') as out:
                     out.write(mapping_string)
 
             start += batch_size
@@ -319,7 +319,7 @@ def write_export_file(
     else:
         logger.info('%s has no mappings to serialize.' % resource_name)
 
-    with open('export.json', 'a') as out:
+    with open('export.json', 'a', encoding='utf-8') as out:
         out.write(']}')
 
     with zipfile.ZipFile('export.zip', 'w', zipfile.ZIP_DEFLATED) as _zip:

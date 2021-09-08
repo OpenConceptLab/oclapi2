@@ -27,7 +27,7 @@ class FlowerHealthCheck(BaseHealthCheck):
             if not response.ok:
                 raise ServiceUnavailable('Flower Unavailable')
         except Exception as ex:
-            raise ServiceUnavailable(ex.args)
+            raise ServiceUnavailable(ex.args) from ex
 
     def identifier(self):
         return "Flower"
@@ -45,7 +45,7 @@ class ESHealthCheck(BaseHealthCheck):
             if not is_ok:
                 raise ServiceReturnedUnexpectedResult("Status {}".format(status))
         except Exception as ex:
-            raise ServiceReturnedUnexpectedResult(ex.args)
+            raise ServiceReturnedUnexpectedResult(ex.args) from ex
 
     def identifier(self):
         return 'ElasticSearch'

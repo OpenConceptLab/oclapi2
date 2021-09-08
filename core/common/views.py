@@ -143,10 +143,10 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         return self.request.query_params.dict().get(self.exact_match, None) == 'on'
 
     def get_searchable_fields(self):
-        return [field for field, config in get(self, 'es_fields', dict()).items() if config.get('filterable', False)]
+        return [field for field, config in get(self, 'es_fields', {}).items() if config.get('filterable', False)]
 
     def get_exact_search_fields(self):
-        return [field for field, config in get(self, 'es_fields', dict()).items() if config.get('exact', False)]
+        return [field for field, config in get(self, 'es_fields', {}).items() if config.get('exact', False)]
 
     def get_search_string(self, lower=True):
         search_str = self.request.query_params.dict().get(SEARCH_PARAM, '').strip()
@@ -235,7 +235,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             return criterion
 
     def get_faceted_filters(self, split=False):
-        faceted_filters = dict()
+        faceted_filters = {}
         faceted_fields = self.get_faceted_fields()
         query_params = {to_snake_case(k): v for k, v in self.request.query_params.dict().items()}
         for field in faceted_fields:
@@ -245,11 +245,11 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         return faceted_filters
 
     def get_faceted_fields(self):
-        return [field for field, config in get(self, 'es_fields', dict()).items() if config.get('facet', False)]
+        return [field for field, config in get(self, 'es_fields', {}).items() if config.get('facet', False)]
 
     def get_facet_filters_from_kwargs(self):
         kwargs = self.kwargs
-        filters = dict()
+        filters = {}
         is_collection_specified = 'collection' in self.kwargs
         is_user_specified = 'user' in kwargs
         if is_collection_specified:
@@ -311,7 +311,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         return filters
 
     def get_facets(self):
-        facets = dict()
+        facets = {}
 
         if self.facet_class:
             if self.is_user_document():
@@ -542,7 +542,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         except RequestError as ex:
             if get(ex, 'info.error.caused_by.reason', '').startswith('Result window is too large'):
                 raise Http400(detail='Only 10000 results are available. Please apply additional filters'
-                                     ' or fine tune your query to get more accurate results.')
+                                     ' or fine tune your query to get more accurate results.') from ex
             raise ex
 
     def is_head(self):
@@ -574,7 +574,7 @@ class SourceChildCommonBaseView(BaseAPIView):
     queryset = None
     params = None
     document_model = None
-    es_fields = dict()
+    es_fields = {}
     pk_field = 'mnemonic'
     permission_classes = (CanViewParentDictionary, )
     is_searchable = True
@@ -707,7 +707,7 @@ class RootView(BaseAPIView):  # pragma: no cover
             if isinstance(route, str) and route.startswith('admin/'):
                 continue
             if route and name is None:
-                name = route.split('/')[0] + '_urls'
+                name = route.split('/', maxsplit=1)[0] + '_urls'
                 if name == 'user_urls':
                     name = 'current_user_urls'
             data['routes'][name] = self.get_host_url() + '/' + route

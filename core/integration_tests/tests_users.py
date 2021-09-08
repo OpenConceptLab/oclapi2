@@ -92,7 +92,7 @@ class UserPasswordResetViewTest(OCLAPITestCase):
 
         response = self.client.post(
             '/users/password/reset/',
-            dict(),
+            {},
             format='json'
         )
         self.assertEqual(response.status_code, 400)
@@ -116,7 +116,7 @@ class UserPasswordResetViewTest(OCLAPITestCase):
 
         response = self.client.put(
             '/users/password/reset/',
-            dict(),
+            {},
             format='json'
         )
         self.assertEqual(response.status_code, 400)
@@ -207,7 +207,7 @@ class UserOrganizationListViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response['num_found'], '2')
+        self.assertEqual(response.get('num_found'), '2')
 
     def test_post_405(self):
         response = self.client.post(
@@ -470,7 +470,7 @@ class UserReactivateViewTest(OCLAPITestCase):
 
 class UserExtrasViewTest(OCLAPITestCase):
     def setUp(self):
-        self.user = UserProfileFactory(extras=dict())
+        self.user = UserProfileFactory(extras={})
         self.token = self.user.get_token()
 
     def test_get(self):
@@ -505,7 +505,7 @@ class UserExtrasViewTest(OCLAPITestCase):
 
 class UserExtraRetrieveUpdateDestroyViewTest(OCLAPITestCase):
     def setUp(self):
-        self.user = UserProfileFactory(extras=dict())
+        self.user = UserProfileFactory(extras={})
         self.token = self.user.get_token()
 
     def test_put(self):

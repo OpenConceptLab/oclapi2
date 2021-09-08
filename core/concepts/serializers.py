@@ -115,8 +115,8 @@ class ConceptListSerializer(ModelSerializer):
 
     def __init__(self, *args, **kwargs):
         params = get(kwargs, 'context.request.query_params')
-        self.view_kwargs = get(kwargs, 'context.view.kwargs', dict())
-        self.query_params = params.dict() if params else dict()
+        self.view_kwargs = get(kwargs, 'context.view.kwargs', {})
+        self.query_params = params.dict() if params else {}
         self.include_indirect_mappings = self.query_params.get(INCLUDE_INVERSE_MAPPINGS_PARAM) in ['true', True]
         self.include_direct_mappings = self.query_params.get(INCLUDE_MAPPINGS_PARAM) in ['true', True]
         self.include_extras = self.query_params.get(INCLUDE_EXTRAS_PARAM) in ['true', True]
@@ -170,7 +170,7 @@ class ConceptVersionListSerializer(ConceptListSerializer):
 
     def __init__(self, *args, **kwargs):
         params = get(kwargs, 'context.request.query_params')
-        self.query_params = params.dict() if params else dict()
+        self.query_params = params.dict() if params else {}
         self.include_source_versions = self.query_params.get(INCLUDE_SOURCE_VERSIONS) in ['true', True]
         self.include_collection_versions = self.query_params.get(INCLUDE_COLLECTION_VERSIONS) in ['true', True]
 
@@ -253,9 +253,9 @@ class ConceptDetailSerializer(ModelSerializer):
     def __init__(self, *args, **kwargs):
         request = get(kwargs, 'context.request')
         params = get(request, 'query_params')
-        self.view_kwargs = get(kwargs, 'context.view.kwargs', dict())
+        self.view_kwargs = get(kwargs, 'context.view.kwargs', {})
 
-        self.query_params = params.dict() if params else dict()
+        self.query_params = params.dict() if params else {}
         self.include_indirect_mappings = self.query_params.get(INCLUDE_INVERSE_MAPPINGS_PARAM) in ['true', True]
         self.include_direct_mappings = self.query_params.get(INCLUDE_MAPPINGS_PARAM) in ['true', True]
         self.include_parent_concept_urls = self.query_params.get(INCLUDE_PARENT_CONCEPT_URLS) in ['true', True]
@@ -403,11 +403,11 @@ class ConceptVersionDetailSerializer(ModelSerializer):
 
     def __init__(self, *args, **kwargs):
         params = get(kwargs, 'context.request.query_params')
-        self.view_kwargs = get(kwargs, 'context.view.kwargs', dict())
+        self.view_kwargs = get(kwargs, 'context.view.kwargs', {})
 
         self.include_indirect_mappings = False
         self.include_direct_mappings = False
-        self.query_params = params.dict() if params else dict()
+        self.query_params = params.dict() if params else {}
         self.include_indirect_mappings = self.query_params.get(INCLUDE_INVERSE_MAPPINGS_PARAM) == 'true'
         self.include_direct_mappings = self.query_params.get(INCLUDE_MAPPINGS_PARAM) == 'true'
         self.include_parent_concepts = self.query_params.get(INCLUDE_PARENT_CONCEPTS) in ['true', True]

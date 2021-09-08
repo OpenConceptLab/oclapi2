@@ -344,7 +344,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         temp_version = generate_temp_version()
         mapping.mnemonic = data.get('mnemonic', temp_version)
         mapping.version = temp_version
-        mapping.errors = dict()
+        mapping.errors = {}
         if mapping.is_existing_in_parent():
             mapping.errors = dict(__all__=[ALREADY_EXISTS])
             return mapping
@@ -397,7 +397,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
 
     @classmethod
     def persist_clone(cls, obj, user=None, **kwargs):
-        errors = dict()
+        errors = {}
         if not user:
             errors['version_created_by'] = PERSIST_CLONE_SPECIFY_USER_ERROR
             return errors

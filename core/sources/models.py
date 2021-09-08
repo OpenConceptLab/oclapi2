@@ -69,7 +69,7 @@ class Source(ConceptContainerModel):
             return queryset
 
         try:
-            kwargs = get(resolve(uri), 'kwargs', dict())
+            kwargs = get(resolve(uri), 'kwargs', {})
             query_params = get_query_params_from_url_string(uri)  # parsing query parameters
             kwargs.update(query_params)
             queryset = cls.get_base_queryset(kwargs).filter(version=HEAD)

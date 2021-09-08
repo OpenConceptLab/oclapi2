@@ -35,5 +35,5 @@ class MappingValidationMixin:
             if self.parent.is_openmrs_schema:
                 custom_validator = OpenMRSMappingValidator(self)
                 custom_validator.validate()
-        except Source.DoesNotExist:
-            raise ValidationError("There's no Source")
+        except Source.DoesNotExist as ex:
+            raise ValidationError("There's no Source") from ex

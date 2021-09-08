@@ -9,14 +9,14 @@ from drf_yasg.utils import swagger_auto_schema
 from pydash import get
 from rest_framework import status, mixins
 from rest_framework.generics import (
-    RetrieveAPIView, ListAPIView, RetrieveUpdateDestroyAPIView, UpdateAPIView
+    RetrieveAPIView, ListAPIView, UpdateAPIView
 )
 from rest_framework.response import Response
 
 from core.client_configs.views import ResourceClientConfigsView
-from core.common.constants import HEAD, RELEASED_PARAM, PROCESSING_PARAM, NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY
+from core.common.constants import HEAD, RELEASED_PARAM, PROCESSING_PARAM
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryCreateMixin, ConceptDictionaryUpdateMixin, \
-    ConceptContainerExportMixin, ConceptContainerProcessingMixin
+    ConceptContainerExportMixin, ConceptContainerProcessingMixin, ConceptContainerExtraRetrieveUpdateDestroyView
 from core.common.permissions import CanViewConceptDictionary, CanEditConceptDictionary, HasAccessToVersionedObject, \
     CanViewConceptDictionaryVersion
 from core.common.swagger_parameters import q_param, limit_param, sort_desc_param, sort_asc_param, exact_match_param, \
@@ -306,50 +306,8 @@ class SourceExtrasView(SourceExtrasBaseView, ListAPIView):
         return Response(get(self.get_object(), 'extras', {}))
 
 
-class SourceExtraRetrieveUpdateDestroyView(SourceExtrasBaseView, RetrieveUpdateDestroyAPIView):
+class SourceExtraRetrieveUpdateDestroyView(SourceExtrasBaseView, ConceptContainerExtraRetrieveUpdateDestroyView):
     serializer_class = SourceDetailSerializer
-
-    def retrieve(self, request, *args, **kwargs):
-        key = kwargs.get('extra')
-        instance = self.get_object()
-        extras = get(instance, 'extras', {})
-        if key in extras:
-            return Response({key: extras[key]})
-
-        return Response(dict(detail=NOT_FOUND), status=status.HTTP_404_NOT_FOUND)
-
-    def update(self, request, **kwargs):  # pylint: disable=arguments-differ
-        key = kwargs.get('extra')
-        value = request.data.get(key)
-        if not value:
-            return Response([MUST_SPECIFY_EXTRA_PARAM_IN_BODY.format(key)], status=status.HTTP_400_BAD_REQUEST)
-
-        instance = self.get_object()
-        instance.extras = get(instance, 'extras', {})
-        instance.extras[key] = value
-        instance.comment = 'Updated extras: %s=%s.' % (key, value)
-        head = instance.get_head()
-        head.extras = get(head, 'extras', {})
-        head.extras.update(instance.extras)
-        instance.save()
-        head.save()
-        return Response({key: value})
-
-    def delete(self, request, *args, **kwargs):
-        key = kwargs.get('extra')
-        instance = self.get_object()
-        instance.extras = get(instance, 'extras', {})
-        if key in instance.extras:
-            del instance.extras[key]
-            instance.comment = 'Deleted extra %s.' % key
-            head = instance.get_head()
-            head.extras = get(head, 'extras', {})
-            del head.extras[key]
-            instance.save()
-            head.save()
-            return Response(status=status.HTTP_204_NO_CONTENT)
-
-        return Response(dict(detail=NOT_FOUND), status=status.HTTP_404_NOT_FOUND)
 
 
 class SourceVersionProcessingView(SourceBaseView, ConceptContainerProcessingMixin):

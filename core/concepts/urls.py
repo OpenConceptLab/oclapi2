@@ -2,7 +2,6 @@ from django.urls import path
 
 from core.concepts.feeds import ConceptFeed
 from . import views
-from .constants import CONCEPT_PATTERN as NAMESPACE_PATTERN
 
 urlpatterns = [
     path('', views.ConceptListView.as_view(), name='concept-list'),
@@ -88,9 +87,7 @@ urlpatterns = [
         name='concept-descriptions'
     ),
     path(
-        '<str:concept>/<str:concept_version>/descriptions/<str:uuid>/'.format(
-            pattern=NAMESPACE_PATTERN
-        ),
+        '<str:concept>/<str:concept_version>/descriptions/<str:uuid>/',
         views.ConceptDescriptionRetrieveUpdateDestroyView.as_view(),
         name='concept-name'
     ),
@@ -100,9 +97,7 @@ urlpatterns = [
         name='concept-extras'
     ),
     path(
-        '<str:concept>/<str:concept_version>/extras/<str:extra>/'.format(
-            pattern=NAMESPACE_PATTERN
-        ),
+        '<str:concept>/<str:concept_version>/extras/<str:extra>/',
         views.ConceptExtraRetrieveUpdateDestroyView.as_view(),
         name='concept-extra'
     ),
@@ -112,9 +107,7 @@ urlpatterns = [
         name='concept-names'
     ),
     path(
-        '<str:concept>/<str:concept_version>/names/<str:uuid>/'.format(
-            pattern=NAMESPACE_PATTERN
-        ),
+        '<str:concept>/<str:concept_version>/names/<str:uuid>/',
         views.ConceptNameRetrieveUpdateDestroyView.as_view(),
         name='concept-name'
     ),

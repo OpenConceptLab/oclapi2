@@ -24,7 +24,7 @@ class ValidatorSpecifier:
         self.validator_map = {
             CUSTOM_VALIDATION_SCHEMA_OPENMRS: OpenMRSConceptValidator
         }
-        self.reference_values = dict()
+        self.reference_values = {}
         self.repo = None
         self.validation_schema = None
 
@@ -48,7 +48,7 @@ class ValidatorSpecifier:
 
         sources = cache.get('reference_sources')
 
-        self.reference_values = dict()
+        self.reference_values = {}
         for source in sources:
             if source.mnemonic not in cache:
                 cache.set(source.mnemonic, self._get_reference_values(source), FIVE_MINS)

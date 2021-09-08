@@ -159,7 +159,7 @@ class Collection(ConceptContainerModel):
         if not other_concepts_in_collection.exists():
             return
 
-        matching_names_in_concept = dict()
+        matching_names_in_concept = {}
         names = concept.names.filter(**{attribute: value})
 
         for name in names:
@@ -229,7 +229,7 @@ class Collection(ConceptContainerModel):
                 new_expressions.discard(existing_expression)
                 errors[existing_expression] = [REFERENCE_ALREADY_EXISTS]
 
-        added_references = list()
+        added_references = []
         for expression in new_expressions:
             ref = CollectionReference(expression=expression)
             try:

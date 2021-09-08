@@ -300,7 +300,7 @@ class VersionedModel(BaseResourceModel):
     @classmethod
     def get_version(cls, mnemonic, version=HEAD, filters=None):
         if not filters:
-            filters = dict()
+            filters = {}
         return cls.objects.filter(**{cls.mnemonic_attr: mnemonic, **filters}, version=version).first()
 
     def get_latest_version(self):
@@ -502,7 +502,7 @@ class ConceptContainerModel(VersionedModel):
 
     @classmethod
     def persist_new(cls, obj, created_by, **kwargs):
-        errors = dict()
+        errors = {}
         parent_resource = kwargs.pop('parent_resource', None) or obj.parent
         if not parent_resource:
             errors['parent'] = PARENT_RESOURCE_CANNOT_BE_NONE
@@ -541,7 +541,7 @@ class ConceptContainerModel(VersionedModel):
         from core.collections.serializers import CollectionDetailSerializer
         from core.sources.serializers import SourceDetailSerializer
 
-        errors = dict()
+        errors = {}
 
         obj.is_active = True
         if user:
@@ -566,7 +566,7 @@ class ConceptContainerModel(VersionedModel):
 
     @classmethod
     def persist_changes(cls, obj, updated_by, original_schema, **kwargs):
-        errors = dict()
+        errors = {}
         parent_resource = kwargs.pop('parent_resource', obj.parent)
         if not parent_resource:
             errors['parent'] = SOURCE_PARENT_CANNOT_BE_NONE
@@ -708,7 +708,7 @@ class ConceptContainerModel(VersionedModel):
         return False
 
     def clear_processing(self):
-        self._background_process_ids = list()
+        self._background_process_ids = []
         self.save(update_fields=['_background_process_ids'])
 
     @property

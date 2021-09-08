@@ -41,12 +41,12 @@ class V1BaseImporter:
     result_attrs = []
     start_message = None
 
-    users = dict()
-    orgs = dict()
-    sources = dict()
-    collections = dict()
-    concepts = dict()
-    mappings = dict()
+    users = {}
+    orgs = {}
+    sources = {}
+    collections = {}
+    concepts = {}
+    mappings = {}
 
     def __init__(self, file_url, **kwargs):  # pylint: disable=unused-argument
         self.file_url = file_url
@@ -109,7 +109,7 @@ class V1BaseImporter:
         return dict(report=result_details, json=result_details, detailed_summary=self.summary)
 
     def get_user(self, username=None, internal_reference_id=None, uri=None):
-        filters = dict()
+        filters = {}
         key = username or internal_reference_id or uri
         if not key:
             return None
@@ -136,7 +136,7 @@ class V1BaseImporter:
         return self.users[key]
 
     def get_org(self, mnemonic=None, internal_reference_id=None, uri=None):
-        filters = dict()
+        filters = {}
         key = mnemonic or internal_reference_id or uri
         if not key:
             return None
@@ -747,7 +747,7 @@ class V1MappingVersionImporter(V1BaseImporter):
 class V1CollectionImporter(V1BaseImporter):
     start_message = 'STARTING COLLECTION IMPORT'
     result_attrs = ['created', 'updated', 'existed', 'failed', 'not_found_expressions']
-    not_found_expressions = dict()
+    not_found_expressions = {}
 
     def add_in_not_found_expression(self, collection_uri, expression):
         if collection_uri not in self.not_found_expressions:
@@ -836,7 +836,7 @@ class V1CollectionImporter(V1BaseImporter):
 class V1CollectionVersionImporter(V1BaseImporter):
     start_message = 'STARTING COLLECTION VERSIONS IMPORT'
     result_attrs = ['created', 'updated', 'existed', 'failed', 'not_found_expressions']
-    not_found_expressions = dict()
+    not_found_expressions = {}
 
     def add_in_not_found_expression(self, collection_uri, expression):
         if collection_uri not in self.not_found_expressions:
@@ -927,7 +927,7 @@ class V1CollectionMappingReferencesImporter(V1BaseImporter):
     result_attrs = ['created', 'not_found', 'existed', 'not_found_references', 'not_found_matching_mapping', 'failed']
 
     def __init__(self, file_url, **kwargs):
-        self.data = dict()
+        self.data = {}
         self.drop_version_if_version_missing = kwargs.get('drop_version_if_version_missing', False)
         super().__init__(file_url)
 
@@ -1043,7 +1043,7 @@ class V1CollectionReferencesImporter(V1BaseImporter):
     result_attrs = ['created', 'not_found', 'existed', 'not_found_references']
 
     def __init__(self, file_url, **kwargs):
-        self.data = dict()
+        self.data = {}
         self.drop_version_if_version_missing = kwargs.get('drop_version_if_version_missing', False)
         super().__init__(file_url)
 

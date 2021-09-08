@@ -885,11 +885,11 @@ class ConceptTest(OCLTestCase):
         self.assertEqual(mappings.count(), 0)
 
     def test_get_parent_and_owner_filters_from_uri(self):
-        self.assertEqual(Concept.get_parent_and_owner_filters_from_uri(None), dict())
-        self.assertEqual(Concept.get_parent_and_owner_filters_from_uri(''), dict())
-        self.assertEqual(Concept.get_parent_and_owner_filters_from_uri('/bar/'), dict())
-        self.assertEqual(Concept.get_parent_and_owner_filters_from_uri('/concepts/'), dict())
-        self.assertEqual(Concept.get_parent_and_owner_filters_from_uri('/concepts/concept1/'), dict())
+        self.assertEqual(Concept.get_parent_and_owner_filters_from_uri(None), {})
+        self.assertEqual(Concept.get_parent_and_owner_filters_from_uri(''), {})
+        self.assertEqual(Concept.get_parent_and_owner_filters_from_uri('/bar/'), {})
+        self.assertEqual(Concept.get_parent_and_owner_filters_from_uri('/concepts/'), {})
+        self.assertEqual(Concept.get_parent_and_owner_filters_from_uri('/concepts/concept1/'), {})
 
         self.assertEqual(
             Concept.get_parent_and_owner_filters_from_uri('/users/foo/sources/bar/concepts/'),

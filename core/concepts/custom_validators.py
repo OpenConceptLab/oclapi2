@@ -39,7 +39,7 @@ class OpenMRSConceptValidator(BaseConceptValidator):
 
     @staticmethod
     def must_have_exactly_one_preferred_name(concept):
-        preferred_name_locales_in_concept = dict()
+        preferred_name_locales_in_concept = {}
 
         for name in concept.saved_unsaved_names:
             if not name.locale_preferred:
@@ -122,7 +122,7 @@ class OpenMRSConceptValidator(BaseConceptValidator):
 
     @staticmethod
     def only_one_fully_specified_name_per_locale(concept):
-        fully_specified_names_per_locale = dict()
+        fully_specified_names_per_locale = {}
 
         for name in concept.saved_unsaved_names:
             if not name.is_fully_specified:
@@ -136,7 +136,7 @@ class OpenMRSConceptValidator(BaseConceptValidator):
 
     @staticmethod
     def no_more_than_one_short_name_per_locale(concept):
-        short_names_per_locale = dict()
+        short_names_per_locale = {}
 
         for name in concept.saved_unsaved_names:
             if not name.is_short:
