@@ -1,3 +1,47 @@
+##### 2.0.50 - Wed Sep 8 03:27:52 2021 +0000
+- updated pydash to 5.0.2
+- Merge pull request #36 from OpenConceptLab/dependabot/pip/django-ordered-model-3.4.3
+- Merge pull request #37 from OpenConceptLab/dependabot/pip/boto3-1.18.36
+- Bump boto3 from 1.14.37 to 1.18.36
+- Bump django-ordered-model from 3.4.1 to 3.4.3
+- Merge pull request #33 from OpenConceptLab/dependabot/pip/django-cors-headers-3.8.0
+- removed six from requirements
+- Explicitly adding mock (python core) deps
+- [OpenConceptLab/ocl_issues#957](https://github.com/OpenConceptLab/ocl_issues/issues/957) | parallel importers | memory optimiztion | getting rid of content once queued
+- Bump django-cors-headers from 3.4.0 to 3.8.0
+- Merge pull request #34 from OpenConceptLab/dependabot/pip/django-elasticsearch-dsl-7.2.0
+- Bump django-elasticsearch-dsl from 7.1.4 to 7.2.0
+- Merge pull request #31 from OpenConceptLab/dependabot/pip/moto-2.2.6
+- Merge pull request #26 from OpenConceptLab/dependabot/pip/factory-boy-3.2.0
+- Bump moto from 1.3.14 to 2.2.6
+- Merge pull request #27 from OpenConceptLab/dependabot/pip/pyyaml-5.4.1
+- Merge pull request #29 from OpenConceptLab/dependabot/pip/psycopg2-2.9.1
+- [OpenConceptLab/ocl_issues#957](https://github.com/OpenConceptLab/ocl_issues/issues/957) | parallel importers | memory optimiztion | getting rid of content once queued
+- Bump psycopg2 from 2.8.5 to 2.9.1
+- Bump pyyaml from 5.4 to 5.4.1
+- Bump factory-boy from 2.12.0 to 3.2.0
+- Fixing celery permissions issue when running locally in dev mode
+- updated drf-yasg
+- Merge pull request #24 from OpenConceptLab/dependabot/pip/requests-2.26.0
+- Bump requests from 2.24.0 to 2.26.0
+- Merge pull request #25 from OpenConceptLab/dependabot/pip/django-3.2.7
+- Merge pull request #23 from OpenConceptLab/dependabot/pip/djangorestframework-3.12.4
+- Merge pull request #22 from OpenConceptLab/dependabot/pip/coverage-5.5
+- Merge pull request #21 from OpenConceptLab/dependabot/pip/python-dateutil-2.8.2
+- Create codeql-analysis.yml
+- Create SECURITY.md
+- Bump django from 3.1.12 to 3.2.7
+- Bump djangorestframework from 3.11.2 to 3.12.4
+- Bump coverage from 5.3.1 to 5.5
+- Bump python-dateutil from 2.8.1 to 2.8.2
+- Create dependabot.yml
+- Source/Collection last latest version force delete on org delete
+- [OpenConceptLab/ocl_issues#955](https://github.com/OpenConceptLab/ocl_issues/issues/955) | CSV importer test for OpenMRS schema
+- [OpenConceptLab/ocl_issues#897](https://github.com/OpenConceptLab/ocl_issues/issues/897) Adding envs and args to runtime docker image
+- [OpenConceptLab/ocl_issues#897](https://github.com/OpenConceptLab/ocl_issues/issues/897) Adding missing curl
+- [OpenConceptLab/ocl_issues#897](https://github.com/OpenConceptLab/ocl_issues/issues/897) Adding missing permissions
+- [OpenConceptLab/ocl_issues#897](https://github.com/OpenConceptLab/ocl_issues/issues/897) Fixing tests
+- Revert "Revert "OpenConceptLab/ocl_issues#897 Run OCL API using gunicorn""
 ##### 2.0.47 - Tue Aug 31 07:27:09 2021 +0000
 - Org delete to delete children first
 ##### 2.0.46 - Fri Aug 27 09:14:25 2021 +0000
