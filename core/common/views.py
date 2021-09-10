@@ -275,21 +275,27 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             filters['collection_version'] = self.kwargs['version']
 
         if is_source_child_document_model:
+            version = None
             if is_version_specified:
                 container_version = self.kwargs['version']
                 is_latest_released = container_version == LATEST
+                params = dict(user__username=self.kwargs.get('user'), organization__mnemonic=self.kwargs.get('org'))
                 if is_latest_released:
-                    params = dict(user__username=self.kwargs.get('user'), organization__mnemonic=self.kwargs.get('org'))
                     if is_source_specified:
                         from core.sources.models import Source
-                        latest_released_version = Source.find_latest_released_version_by(
+                        version = Source.find_latest_released_version_by(
                             {**params, 'mnemonic': self.kwargs['source']})
-                        filters['source_version'] = get(latest_released_version, 'version')
+                        filters['source_version'] = get(version, 'version')
                     elif is_collection_specified:
                         from core.collections.models import Collection
-                        latest_released_version = Collection.find_latest_released_version_by(
+                        version = Collection.find_latest_released_version_by(
                             {**params, 'mnemonic': self.kwargs['collection']})
-                        filters['collection_version'] = get(latest_released_version, 'version')
+                        filters['collection_version'] = get(version, 'version')
+                elif is_collection_specified and 'expansion' not in self.kwargs:
+                    from core.collections.models import Collection
+                    version = Collection.objects.filter(
+                        **params, mnemonic=self.kwargs['collection'], version=self.kwargs['version']
+                    ).first()
 
             if is_collection_specified:
                 owner_type = filters.pop('ownerType', None)
@@ -302,6 +308,8 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                     filters['collection_version'] = HEAD
                 if 'expansion' in self.kwargs:
                     filters['expansion'] = self.kwargs.get('expansion')
+                elif version:
+                    filters['expansion'] = get(version, 'expansion.mnemonic', 'NO_EXPANSION')
             if is_source_specified and not is_version_specified:
                 filters['source_version'] = HEAD
         return filters

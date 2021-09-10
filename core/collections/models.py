@@ -386,6 +386,13 @@ class Collection(ConceptContainerModel):
 
         return expansion
 
+    @property
+    def expansion(self):
+        if self.expansion_uri:
+            return self.expansions.filter(uri=self.expansion_uri).first()
+
+        return None
+
 
 class CollectionReference(models.Model):
     class Meta:

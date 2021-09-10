@@ -399,6 +399,8 @@ class CollectionVersionReferencesView(CollectionVersionBaseView, ListWithHeaders
         search_query = query_params.get('q', '')
         sort = query_params.get('search_sort', 'ASC')
         object_version = self.get_queryset().first()
+        if not object_version:
+            raise Http404()
         references = object_version.references.filter(expression__icontains=search_query)
         self.object_list = references if sort == 'ASC' else list(reversed(references))
         return self.list(request, *args, **kwargs)
@@ -626,6 +628,56 @@ class CollectionVersionExpansionMappingsView(CollectionVersionExpansionChildrenV
 
     def get_queryset(self):
         return super().get_queryset().mappings
+
+
+class CollectionVersionConceptsView(CollectionBaseView, ListWithHeadersMixin):
+    is_searchable = True
+    document_model = ConceptDocument
+    es_fields = Concept.es_fields
+
+    def get_object(self, queryset=None):
+        instance = get_object_or_404(self.get_base_queryset())
+        self.check_object_permissions(self.request, instance)
+        return instance.expansion
+
+    def get_serializer_class(self):
+        from core.concepts.serializers import ConceptDetailSerializer, ConceptListSerializer
+        return ConceptDetailSerializer if self.is_verbose() else ConceptListSerializer
+
+    def get_queryset(self):
+        expansion = self.get_object()
+        if expansion:
+            return expansion.concepts
+
+        return Concept.objects.none()
+
+    def get(self, request, *args, **kwargs):
+        return self.list(request, *args, **kwargs)
+
+
+class CollectionVersionMappingsView(CollectionBaseView, ListWithHeadersMixin):
+    is_searchable = True
+    document_model = MappingDocument
+    es_fields = Mapping.es_fields
+
+    def get_object(self, queryset=None):
+        instance = get_object_or_404(self.get_base_queryset())
+        self.check_object_permissions(self.request, instance)
+        return instance.expansion
+
+    def get_serializer_class(self):
+        from core.mappings.serializers import MappingDetailSerializer, MappingListSerializer
+        return MappingDetailSerializer if self.is_verbose() else MappingListSerializer
+
+    def get_queryset(self):
+        expansion = self.get_object()
+        if expansion:
+            return expansion.mappings
+
+        return Mapping.objects.none()
+
+    def get(self, request, *args, **kwargs):
+        return self.list(request, *args, **kwargs)
 
 
 class CollectionExtrasBaseView(CollectionBaseView):

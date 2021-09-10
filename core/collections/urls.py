@@ -122,13 +122,15 @@ urlpatterns = [
         r"^(?P<collection>{pattern})/(?P<version>{pattern})/concepts/".format(
             pattern=NAMESPACE_PATTERN
         ),
-        include('core.concepts.urls')
+        views.CollectionVersionConceptsView.as_view(),
+        name='concept-list'
     ),
     re_path(
         r"^(?P<collection>{pattern})/(?P<version>{pattern})/mappings/".format(
             pattern=NAMESPACE_PATTERN
         ),
-        include('core.mappings.urls')
+        views.CollectionVersionMappingsView.as_view(),
+        name='mapping-list'
     ),
     re_path(
         r'^(?P<collection>{pattern})/(?P<version>{pattern})/references/$'.format(pattern=NAMESPACE_PATTERN),
