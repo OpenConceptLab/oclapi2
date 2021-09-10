@@ -1,5 +1,6 @@
 import json
 import time
+from collections import deque
 from datetime import datetime
 
 from celery import group
@@ -701,7 +702,7 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
         self.results = []
         self.elapsed_seconds = 0
         self.resource_wise_time = {}
-        self.parts = [[]]
+        self.parts = deque([])
         self.result = None
         self._json_result = None
         self.redis_service = RedisService()
@@ -727,13 +728,11 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
         sources = self.resource_distribution.get('Source', None)
         collections = self.resource_distribution.get('Collection', None)
         if orgs:
-            self.parts = [orgs]
+            self.parts = deque([orgs])
         if sources:
             self.parts.append(sources)
         if collections:
             self.parts.append(collections)
-
-        self.parts = compact(self.parts)
 
         self.parts.append([])
 
@@ -752,8 +751,6 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
                 else:
                     self.parts[-1].append(line)
                 prev_line = line
-
-        self.parts = compact(self.parts)
 
     @staticmethod
     def chunker_list(seq, size):
@@ -814,14 +811,14 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
             print("****STARTED MAIN****")
             print("TASK ID: {}".format(self.self_task_id))
             print("***************")
-        for part_list in list(self.parts):
+        while len(self.parts) > 0:
+            part_list = self.parts.popleft()
             if part_list:
                 part_type = get(part_list, '0.type', '').lower()
                 if part_type:
                     is_child = part_type in ['concept', 'mapping', 'reference']
                     start_time = time.time()
                     self.queue_tasks(part_list, is_child)
-                    self.parts.remove(part_list)  # memory optimization
                     self.wait_till_tasks_alive()
                     if is_child:
                         if part_type not in self.resource_wise_time:
