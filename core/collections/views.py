@@ -602,13 +602,6 @@ class CollectionVersionExpansionChildrenView(CollectionVersionExpansionBaseView,
         return self.list(request, *args, **kwargs)
 
 
-class CollectionVersionExpansionReferencesView(CollectionVersionExpansionChildrenView):
-    serializer_class = CollectionReferenceSerializer
-
-    def get_queryset(self):
-        return super().get_queryset().references.order_by('-id')
-
-
 class CollectionVersionExpansionConceptsView(CollectionVersionExpansionChildrenView):
     is_searchable = True
     document_model = ConceptDocument

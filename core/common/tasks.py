@@ -250,7 +250,7 @@ def seed_children(self, resource, obj_id, export=True):
         from core.collections.models import Collection
         instance = Collection.objects.filter(id=obj_id).first()
         export_task = export_collection
-        autoexpand = instance.autoexpand
+        autoexpand = instance.autoexpand_head if instance.is_head else instance.autoexpand
 
     if instance:
         task_id = self.request.id
@@ -259,6 +259,7 @@ def seed_children(self, resource, obj_id, export=True):
 
         try:
             instance.add_processing(task_id)
+            instance.seed_references()
             if is_source:
                 instance.seed_concepts(index=index)
                 instance.seed_mappings(index=index)

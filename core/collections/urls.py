@@ -86,12 +86,6 @@ urlpatterns = [
         name='collection-version-expansion-detail'
     ),
     re_path(
-        r'^(?P<collection>{pattern})/(?P<version>{pattern})/expansions/(?P<expansion>{pattern})/references/$'.format(
-            pattern=NAMESPACE_PATTERN),
-        views.CollectionVersionExpansionReferencesView.as_view(),
-        name='collection-version-expansion-references'
-    ),
-    re_path(
         r'^(?P<collection>{pattern})/(?P<version>{pattern})/expansions/(?P<expansion>{pattern})/concepts/$'.format(
             pattern=NAMESPACE_PATTERN),
         views.CollectionVersionExpansionConceptsView.as_view(),

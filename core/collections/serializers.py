@@ -167,11 +167,10 @@ class CollectionCreateSerializer(CollectionCreateOrUpdateSerializer):
 class ExpansionSummarySerializer(ModelSerializer):
     concepts = IntegerField(source='active_concepts', read_only=True)
     mappings = IntegerField(source='active_mappings', read_only=True)
-    references = IntegerField(source='active_references', read_only=True)
 
     class Meta:
         model = Expansion
-        fields = ('concepts', 'mappings', 'references')
+        fields = ('concepts', 'mappings')
 
 
 class ExpansionSummaryDetailSerializer(ExpansionSummarySerializer):

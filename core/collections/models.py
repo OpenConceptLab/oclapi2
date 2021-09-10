@@ -502,7 +502,6 @@ class Expansion(BaseResourceModel):
     text = models.TextField(null=True, blank=True)
     concepts = models.ManyToManyField('concepts.Concept', blank=True, related_name='expansion_set')
     mappings = models.ManyToManyField('mappings.Mapping', blank=True, related_name='expansion_set')
-    references = models.ManyToManyField('collections.CollectionReference', blank=True, related_name='expansion_set')
     collection_version = models.ForeignKey(
         'collections.Collection', related_name='expansions', on_delete=models.CASCADE)
 
@@ -531,20 +530,12 @@ class Expansion(BaseResourceModel):
         return self.mappings.count()
 
     @property
-    def active_references(self):
-        return self.references.count()
-
-    @property
     def owner_url(self):
         return to_owner_uri(self.uri)
 
     def apply_parameters(self, queryset):
         parameters = ExpansionParameters(self.parameters)
         return parameters.apply(queryset)
-
-    def populate(self, index=True):
-        self.seed_references()
-        self.seed_children(index=index)
 
     def index_concepts(self):
         if self.concepts.exists():
@@ -575,13 +566,6 @@ class Expansion(BaseResourceModel):
         if index:
             self.index_all()
 
-    def seed_references(self):
-        version = self.collection_version
-        references = CollectionReference.objects.bulk_create(
-            [CollectionReference(expression=ref.expression) for ref in version.references.all()]
-        )
-        self.references.set(references)
-
     def calculate_uri(self):
         return self.collection_version.uri + 'expansions/{}/'.format(self.mnemonic)
 
@@ -604,7 +588,7 @@ class Expansion(BaseResourceModel):
             expansion.mnemonic = expansion.id
             expansion.save()
 
-        expansion.populate(index=index)
+        expansion.seed_children(index=index)
         return expansion
 
 

@@ -555,11 +555,7 @@ class ConceptContainerModel(VersionedModel):
         obj.save(**kwargs)
 
         if get(settings, 'TEST_MODE', False):
-            if is_source:
-                obj.seed_concepts()
-                obj.seed_mappings()
-            elif obj.autoexpand:
-                obj.cascade_children_to_expansion()
+            seed_children(obj.resource_type.lower(), obj.id, False)
         else:
             seed_children.delay(obj.resource_type.lower(), obj.id)
 
