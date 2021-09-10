@@ -68,6 +68,7 @@ class Collection(ConceptContainerModel):
     locked_date = models.DateTimeField(null=True, blank=True)
     autoexpand_head = models.BooleanField(default=True)
     autoexpand = models.BooleanField(default=True)
+    expansion_uri = models.TextField(null=True, blank=True)
 
     @classmethod
     def get_base_queryset(cls, params):
@@ -105,6 +106,11 @@ class Collection(ConceptContainerModel):
             self.custom_resources_linked_source = obj.custom_resources_linked_source
             self.repository_type = obj.repository_type
             self.preferred_source = obj.preferred_source
+
+    def should_default_set_expansion_url(self):
+        if self.is_head:
+            return self.autoexpand_head
+        return self.autoexpand
 
     def add_concept(self, concept):
         self.concepts.add(concept)
@@ -372,11 +378,13 @@ class Collection(ConceptContainerModel):
     def cascade_children_to_expansion(self, expansion_data=None, index=True):
         if not expansion_data:
             expansion_data = dict()
-        return Expansion.persist(index=index, **expansion_data, collection_version=self)
+        expansion = Expansion.persist(index=index, **expansion_data, collection_version=self)
 
-    @property
-    def latest_expansion_url(self):
-        return self.expansions.order_by('-created_at').values_list('uri', flat=True).first()
+        if self.should_default_set_expansion_url() and not self.expansion_uri:
+            self.expansion_uri = expansion.uri
+            self.save()
+
+        return expansion
 
 
 class CollectionReference(models.Model):

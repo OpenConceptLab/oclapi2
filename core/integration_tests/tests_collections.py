@@ -956,6 +956,7 @@ class CollectionVersionListViewTest(OCLAPITestCase):
         self.assertEqual(last_created_version, self.collection.get_latest_version())
         self.assertEqual(last_created_version.version, 'v1')
         self.assertEqual(last_created_version.description, 'version1')
+        self.assertIsNotNone(last_created_version.expansion_uri)
         self.assertEqual(last_created_version.expansions.count(), 1)
         self.assertEqual(last_created_version.references.count(), 1)
         self.assertEqual(last_created_version.concepts.count(), 0)
@@ -964,6 +965,28 @@ class CollectionVersionListViewTest(OCLAPITestCase):
         expansion = last_created_version.expansions.first()
         self.assertEqual(expansion.concepts.count(), 1)
         self.assertEqual(expansion.mappings.count(), 0)
+
+    def test_post_201_autoexpand_false(self):
+        response = self.client.post(
+            '/collections/coll/versions/',
+            dict(id='v1', description='version1', autoexpand=False),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data['version'], 'v1')
+        self.assertEqual(self.collection.versions.count(), 2)
+
+        last_created_version = self.collection.versions.order_by('created_at').last()
+        self.assertEqual(last_created_version, self.collection.get_latest_version())
+        self.assertEqual(last_created_version.version, 'v1')
+        self.assertEqual(last_created_version.description, 'version1')
+        self.assertIsNone(last_created_version.expansion_uri)
+        self.assertEqual(last_created_version.expansions.count(), 0)
+        self.assertEqual(last_created_version.references.count(), 1)
+        self.assertEqual(last_created_version.concepts.count(), 0)
+        self.assertEqual(last_created_version.mappings.count(), 0)
 
 
 class ExportCollectionTaskTest(OCLAPITestCase):

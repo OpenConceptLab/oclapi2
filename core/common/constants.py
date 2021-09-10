@@ -69,6 +69,7 @@ OK_MESSAGE = 'ok!'
 PERSIST_NEW_ERROR_MESSAGE = "An error occurred while trying to persist new {}."
 MUST_SPECIFY_EXTRA_PARAM_IN_BODY = 'Must specify {} param in body.'
 SOURCE_PARENT_CANNOT_BE_NONE = 'Source parent cannot be None.'
+INVALID_EXPANSION_URL = "Expansion URL doesn't exists"
 PARENT_RESOURCE_CANNOT_BE_NONE = 'Parent resource cannot be None.'
 CREATOR_CANNOT_BE_NONE = 'Creator cannot be None.'
 CANNOT_DELETE_ONLY_VERSION = 'Cannot delete only version.'

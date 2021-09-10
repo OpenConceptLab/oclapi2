@@ -9,7 +9,7 @@ from core.client_configs.serializers import ClientConfigSerializer
 from core.collections.constants import INCLUDE_REFERENCES_PARAM
 from core.collections.models import Collection, CollectionReference, Expansion
 from core.common.constants import HEAD, DEFAULT_ACCESS_TYPE, NAMESPACE_REGEX, ACCESS_TYPE_CHOICES, INCLUDE_SUMMARY, \
-    INCLUDE_CLIENT_CONFIGS
+    INCLUDE_CLIENT_CONFIGS, INVALID_EXPANSION_URL
 from core.orgs.models import Organization
 from core.settings import DEFAULT_LOCALE
 from core.users.models import UserProfile
@@ -40,7 +40,7 @@ class CollectionVersionListSerializer(ModelSerializer):
     url = CharField(source='versioned_object_url')
     previous_version_url = CharField(source='prev_version_uri')
     autoexpand = SerializerMethodField()
-    expansion_url = CharField(source='latest_expansion_url', read_only=True)
+    expansion_url = CharField(source='expansion_uri', read_only=True)
 
     class Meta:
         model = Collection
@@ -89,12 +89,18 @@ class CollectionCreateOrUpdateSerializer(ModelSerializer):
         collection.full_name = validated_data.get('full_name', collection.full_name) or collection.name
         collection.autoexpand_head = validated_data.get('autoexpand_head', collection.autoexpand_head)
         collection.autoexpand = validated_data.get('autoexpand', collection.autoexpand)
+        collection.expansion_uri = validated_data.get('expansion_uri', collection.expansion_uri)
+        if collection.id and collection.expansion_uri and not collection.expansions.filter(
+                uri=collection.expansion_uri).exists():
+            self._errors.update({'expansion_url': INVALID_EXPANSION_URL})
 
         return collection
 
     def update(self, instance, validated_data):
         original_schema = instance.custom_validation_schema
         collection = self.prepare_object(validated_data, instance)
+        if self._errors:
+            return collection
         user = self.context['request'].user
         errors = Collection.persist_changes(collection, user, original_schema)
         self._errors.update(errors)
@@ -305,7 +311,7 @@ class CollectionVersionDetailSerializer(CollectionCreateOrUpdateSerializer):
     updated_by = CharField(read_only=True, source='updated_by.username')
     summary = SerializerMethodField()
     autoexpand = SerializerMethodField()
-    expansion_url = CharField(source='latest_expansion_url', read_only=True)
+    expansion_url = CharField(source='expansion_uri', allow_null=True, allow_blank=True)
 
     class Meta:
         model = Collection
