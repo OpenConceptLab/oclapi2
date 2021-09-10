@@ -14,7 +14,6 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 from django.conf.urls import url
-from django.contrib import admin
 from django.urls import path, include, re_path
 from drf_yasg import openapi
 from drf_yasg.views import get_schema_view
@@ -22,6 +21,7 @@ from rest_framework import permissions
 
 import core.concepts.views as concept_views
 import core.mappings.views as mapping_views
+import core.reports.views as report_views
 from core import VERSION
 from core.common.constants import NAMESPACE_PATTERN
 from core.common.utils import get_api_base_url
@@ -29,7 +29,6 @@ from core.common.views import RootView, FeedbackView, APIVersionView, ChangeLogV
     ConceptDormantLocalesView
 from core.concepts.views import ConceptsHierarchyAmendAdminView
 from core.importers.views import BulkImportView
-import core.reports.views as report_views
 
 SchemaView = get_schema_view(
     openapi.Info(
@@ -51,7 +50,6 @@ urlpatterns = [
     url(r'^swagger/$', SchemaView.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui'),
     url(r'^redoc/$', SchemaView.with_ui('redoc', cache_timeout=0), name='schema-redoc'),
     path('healthcheck/', include('core.common.healthcheck.urls')),
-    path('admin/', admin.site.urls, name='admin_urls'),
     path('admin/reports/authored/', report_views.AuthoredView.as_view(), name='authored-report'),
     path('admin/reports/monthly-usage/', report_views.MonthlyUsageView.as_view(), name='monthly-usage-report'),
     path('admin/concepts/locales/duplicate/', ConceptDuplicateLocalesView.as_view(), name='concept-duplicate-locales'),

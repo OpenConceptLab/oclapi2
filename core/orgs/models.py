@@ -1,4 +1,3 @@
-from django.contrib import admin
 from django.contrib.contenttypes.fields import GenericRelation
 from django.core.validators import RegexValidator
 from django.db import models, transaction
@@ -93,6 +92,3 @@ class Organization(BaseResourceModel, SourceContainerMixin):
         Pin.objects.filter(resource_type__model='organization', resource_id=self.id).delete()
         # deletes pins for this org
         self.pins.all().delete()
-
-
-admin.site.register(Organization)

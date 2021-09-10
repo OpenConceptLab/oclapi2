@@ -57,7 +57,6 @@ DEFAULT_AUTO_FIELD = 'django.db.models.AutoField'
 # Application definition
 
 INSTALLED_APPS = [
-    'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
     'django.contrib.sessions',
@@ -266,6 +265,9 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/3.0/howto/static-files/
 
 STATIC_URL = '/static/'
+PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
+STATIC_ROOT = os.path.join(PROJECT_DIR, 'static')
+STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 AUTH_USER_MODEL = 'users.UserProfile'
 TEST_RUNNER = 'core.common.tests.CustomTestRunner'
 DEFAULT_LOCALE = os.environ.get('DEFAULT_LOCALE', 'en')
@@ -352,6 +354,10 @@ ACCOUNT_EMAIL_SUBJECT_PREFIX = '[openconceptlab.org] '
 ADMINS = (
     ('Jonathan Payne', 'paynejd@gmail.com'),
 )
+
+
+if ENV and ENV != 'development':
+    MIDDLEWARE.append('whitenoise.middleware.WhiteNoiseMiddleware')
 
 if not ENV or ENV in ['production']:
     EMAIL_SUBJECT_PREFIX = '[Openconceptlab.org] '

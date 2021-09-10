@@ -1,4 +1,3 @@
-from django.contrib import admin
 from django.contrib.auth.models import AbstractUser
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
@@ -149,6 +148,3 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
     @property
     def auth_groups(self):
         return self.groups.values_list('name', flat=True)
-
-
-admin.site.register(UserProfile)
