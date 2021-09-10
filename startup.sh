@@ -25,6 +25,8 @@ if [[ "$ENVIRONMENT" = "development" ]]; then
   echo "Starting up the development server"
   python manage.py runserver 0.0.0.0:${API_PORT:-8000}
 else
+  echo "Collect static files"
+  python manage.py collectstatic
   echo "Starting up the production server"
   gunicorn core.wsgi:application --bind 0.0.0.0:${API_PORT:-8000}
 fi

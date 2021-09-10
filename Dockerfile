@@ -23,10 +23,9 @@ RUN addgroup -S ocl && adduser -S ocl -G ocl
 
 ENV APP_HOME=/code
 
-RUN mkdir -p $APP_HOME
-RUN mkdir -p /temp
+RUN mkdir -p $APP_HOME /temp /staticfiles
 
-RUN chown -R ocl:ocl /code /temp
+RUN chown -R ocl:ocl $APP_HOME /temp /staticfiles
 
 WORKDIR $APP_HOME
 

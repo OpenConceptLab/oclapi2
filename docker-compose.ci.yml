@@ -1,39 +1,53 @@
 version: '3'
 services:
+  db:
+    restart: "no"
+  redis:
+    restart: "no"
   api:
     build: .
     environment:
       - ENVIRONMENT=ci
     volumes:
       - .:/code
+    restart: "no"
   celery:
     build: .
     volumes:
       - .:/code
     command: ["bash", "-c", "CELERY_WORKER_NAME=default ./start_celery_worker.sh -P prefork -Q default -c 1"]
+    restart: "no"
   celery_indexing:
     build: .
     volumes:
         - .:/code
     command: ["bash", "-c", "CELERY_WORKER_NAME=indexing ./start_celery_worker.sh -P prefork -Q indexing -c 1"]
+    restart: "no"
   celery_concurrent:
     build: .
     volumes:
       - .:/code
     command: ["bash", "-c", "CELERY_WORKER_NAME=concurrent ./start_celery_worker.sh -P prefork -Q concurrent -c 1"]
+    restart: "no"
   celery_bulk_import_0_1:
     build: .
     volumes:
       - .:/code
+    restart: "no"
   celery_bulk_import_0_2:
     build: .
     volumes:
       - .:/code
+    restart: "no"
   celery_bulk_import_root:
     build: .
     volumes:
       - .:/code
+    restart: "no"
   flower:
     build: .
     volumes:
       - .:/code
+    restart: "no"
+  es:
+    restart: "no"

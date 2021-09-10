@@ -31,7 +31,7 @@ API_INTERNAL_BASE_URL = os.environ.get('API_INTERNAL_BASE_URL', 'http://api:8000
 SECRET_KEY = '=q1%fd62$x!35xzzlc3lix3g!s&!2%-1d@5a=rm!n4lu74&6)p'
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.environ.get('DEBUG', True)
+DEBUG = os.environ.get('DEBUG') == 'TRUE'
 
 ALLOWED_HOSTS = ['*']
 
@@ -125,8 +125,8 @@ REDOC_SETTINGS = {
 }
 
 MIDDLEWARE = [
-    'django.middleware.gzip.GZipMiddleware',
     'django.middleware.security.SecurityMiddleware',
+    'django.middleware.gzip.GZipMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -263,9 +263,10 @@ USE_L10N = True
 USE_TZ = True
 
 # Static files (CSS, JavaScript, Images)
-# https://docs.djangoproject.com/en/3.0/howto/static-files/
-
 STATIC_URL = '/static/'
+STATIC_ROOT = '/staticfiles'
+STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+
 AUTH_USER_MODEL = 'users.UserProfile'
 TEST_RUNNER = 'core.common.tests.CustomTestRunner'
 DEFAULT_LOCALE = os.environ.get('DEFAULT_LOCALE', 'en')
@@ -352,6 +353,10 @@ ACCOUNT_EMAIL_SUBJECT_PREFIX = '[openconceptlab.org] '
 ADMINS = (
     ('Jonathan Payne', 'paynejd@gmail.com'),
 )
+
+if ENV and ENV != 'development':
+    # Serving swagger static files (inserted after SecurityMiddleware)
+    MIDDLEWARE.insert(1, 'whitenoise.middleware.WhiteNoiseMiddleware')
 
 if not ENV or ENV in ['production']:
     EMAIL_SUBJECT_PREFIX = '[Openconceptlab.org] '
