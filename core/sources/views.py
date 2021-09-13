@@ -43,6 +43,16 @@ class SourceBaseView(BaseAPIView):
     permission_classes = (CanViewConceptDictionary,)
     queryset = Source.objects.filter(is_active=True)
 
+    def verify_scope(self):
+        has_owner_scope = self.has_owner_scope()
+        has_no_kwargs = self.has_no_kwargs()
+        if not self.user_is_self:
+            if has_no_kwargs:
+                if self.request.method not in ['GET', 'HEAD']:
+                    raise Http404()
+            elif not has_owner_scope:
+                raise Http404()
+
     @staticmethod
     def get_detail_serializer(obj):
         return SourceDetailSerializer(obj)
