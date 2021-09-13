@@ -241,28 +241,39 @@ class CollectionTest(OCLTestCase):
 
     def test_last_concept_update(self):
         collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection)
+        collection.expansion_uri = expansion.uri
+        collection.save()
         self.assertIsNone(collection.last_concept_update)
         concept = ConceptFactory()
-        collection.concepts.add(concept)
+        collection.expansion.concepts.add(concept)
         self.assertEqual(collection.last_concept_update, concept.updated_at)
 
     def test_last_mapping_update(self):
         collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection)
+        collection.expansion_uri = expansion.uri
+        collection.save()
         self.assertIsNone(collection.last_mapping_update)
         mapping = MappingFactory()
-        collection.mappings.add(mapping)
+        collection.expansion.mappings.add(mapping)
         self.assertEqual(collection.last_mapping_update, mapping.updated_at)
 
     def test_last_child_update(self):
         collection = OrganizationCollectionFactory()
         self.assertEqual(collection.last_child_update, collection.updated_at)
 
+        expansion = ExpansionFactory(collection_version=collection)
+        collection.expansion_uri = expansion.uri
+        collection.save()
+        self.assertEqual(collection.last_child_update, collection.updated_at)
+
         mapping = MappingFactory()
-        collection.mappings.add(mapping)
+        collection.expansion.mappings.add(mapping)
         self.assertEqual(collection.last_child_update, mapping.updated_at)
 
         concept = ConceptFactory()
-        collection.concepts.add(concept)
+        collection.expansion.concepts.add(concept)
         self.assertEqual(collection.last_child_update, concept.updated_at)
 
 

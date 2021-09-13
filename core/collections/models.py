@@ -422,6 +422,20 @@ class Collection(ConceptContainerModel):
     def active_references(self):
         return self.references.count()
 
+    @property
+    def last_concept_update(self):
+        updated_at = None
+        if self.expansion_uri and self.expansion.concepts.exists():
+            updated_at = self.expansion.concepts.latest('updated_at').updated_at
+        return updated_at
+
+    @property
+    def last_mapping_update(self):
+        updated_at = None
+        if self.expansion_uri and self.expansion.mappings.exists():
+            updated_at = self.expansion.mappings.latest('updated_at').updated_at
+        return updated_at
+
 
 class CollectionReference(models.Model):
     class Meta:
