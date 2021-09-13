@@ -47,8 +47,16 @@ urlpatterns = [
         views.CollectionVersionExportView.as_view(),
         name='collectionversion-latest-export-detail'
     ),
-    re_path(r"^(?P<collection>{pattern})/concepts/".format(pattern=NAMESPACE_PATTERN), include('core.concepts.urls')),
-    re_path(r"^(?P<collection>{pattern})/mappings/".format(pattern=NAMESPACE_PATTERN), include('core.mappings.urls')),
+    re_path(
+        r"^(?P<collection>{pattern})/concepts/".format(pattern=NAMESPACE_PATTERN),
+        views.CollectionVersionConceptsView.as_view(),
+        name='concept-list'
+    ),
+    re_path(
+        r"^(?P<collection>{pattern})/mappings/".format(pattern=NAMESPACE_PATTERN),
+        views.CollectionVersionMappingsView.as_view(),
+        name='mapping-list'
+    ),
     re_path(
         r'^(?P<collection>{pattern})/references/$'.format(pattern=NAMESPACE_PATTERN),
         views.CollectionReferencesView.as_view(),

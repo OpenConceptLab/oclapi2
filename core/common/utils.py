@@ -205,16 +205,20 @@ def write_export_file(
     logger.info('Done serializing attributes.')
 
     batch_size = 100
-    concepts_qs = version.concepts
-    mappings_qs = version.mappings
     is_collection = resource_type == 'collection'
-    if not is_collection:
-        concepts_qs = concepts_qs.filter(is_active=True)
-        mappings_qs = mappings_qs.filter(is_active=True)
-
-    if version.is_head:
-        concepts_qs = concepts_qs.filter(is_latest_version=True)
-        mappings_qs = mappings_qs.filter(is_latest_version=True)
+    if is_collection:
+        if version.expansion_uri:
+            concepts_qs = version.expansion.concepts
+            mappings_qs = version.expansion.mappings
+        else:
+            concepts_qs = version.concepts
+            mappings_qs = version.mappings
+    else:
+        concepts_qs = version.concepts.filter(is_active=True)
+        mappings_qs = version.mappings.filter(is_active=True)
+        if version.is_head:
+            concepts_qs = concepts_qs.filter(is_latest_version=True)
+            mappings_qs = mappings_qs.filter(is_latest_version=True)
 
     total_concepts = concepts_qs.count()
     total_mappings = mappings_qs.count()

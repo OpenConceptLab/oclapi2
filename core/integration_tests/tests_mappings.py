@@ -1,6 +1,6 @@
 from rest_framework.exceptions import ErrorDetail
 
-from core.collections.tests.factories import OrganizationCollectionFactory
+from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
 from core.common.tests import OCLAPITestCase
 from core.concepts.tests.factories import ConceptFactory, LocalizedTextFactory
 from core.mappings.constants import SAME_AS
@@ -34,6 +34,9 @@ class MappingListViewTest(OCLAPITestCase):
         self.assertEqual(len(response.data), 1)
 
         collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection)
+        collection.expansion_uri = expansion.uri
+        collection.save()
 
         response = self.client.get(collection.mappings_url, format='json')
 

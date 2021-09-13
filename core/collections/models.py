@@ -2,8 +2,9 @@ import json
 
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
-from django.db.models import UniqueConstraint
+from django.db.models import UniqueConstraint, QuerySet
 from django.utils import timezone
+from pydash import flatten
 from rest_framework.test import APIRequestFactory
 
 from core.collections.constants import (
@@ -107,41 +108,44 @@ class Collection(ConceptContainerModel):
             self.repository_type = obj.repository_type
             self.preferred_source = obj.preferred_source
 
-    def should_default_set_expansion_url(self):
+    @property
+    def should_auto_expand(self):
         if self.is_head:
             return self.autoexpand_head
+
         return self.autoexpand
-
-    def add_concept(self, concept):
-        self.concepts.add(concept)
-
-    def add_mapping(self, mapping):
-        self.mappings.add(mapping)
 
     def get_concepts(self, start=None, end=None):
         """ Use for efficient iteration over paginated concepts. Note that any filter will be applied only to concepts
         from the given range. If you need to filter on all concepts, use get_concepts() without args.
         """
-        concepts = self.concepts.all()
-        if start and end:
-            concepts = concepts[start:end]
+        concepts = Concept.objects.none()
+
+        if self.expansion_uri:
+            concepts = self.expansion.concepts.all()
+            if start and end:
+                concepts = concepts[start:end]
 
         return concepts
 
     def fill_data_from_reference(self, reference):
         self.references.add(reference)
-        if reference.concepts:
-            self.concepts.add(*reference.concepts)
-        if reference.mappings:
-            self.mappings.add(*reference.mappings)
+        if self.should_auto_expand:
+            if reference.concepts:
+                self.expansion.concepts.add(*reference.concepts)
+            if reference.mappings:
+                self.expansion.mappings.add(*reference.mappings)
         self.save()  # update counts
 
     def validate(self, reference):
-        reference.full_clean()
+        if self.should_auto_expand:
+            reference.full_clean()
+        else:
+            reference.last_resolved_at = None
         if reference.without_version in [reference.without_version for reference in self.references.all()]:
             raise ValidationError({reference.expression: [REFERENCE_ALREADY_EXISTS]})
 
-        if self.is_openmrs_schema:
+        if self.is_openmrs_schema and self.expansion_uri:
             if reference.concepts and reference.concepts.count() == 0:
                 return
 
@@ -158,7 +162,7 @@ class Collection(ConceptContainerModel):
     def check_concept_uniqueness_in_collection_and_locale_by_name_attribute(
             self, concept, attribute, value, error_message
     ):
-        other_concepts_in_collection = self.concepts
+        other_concepts_in_collection = self.expansion.concepts
         if not other_concepts_in_collection.exists():
             return
 
@@ -213,7 +217,7 @@ class Collection(ConceptContainerModel):
                 mapping_expressions, self.__get_children_list_url('mappings', host_url, data), MappingListView
             )
         )
-        if self.autoexpand_head and cascade_mappings:
+        if cascade_mappings:
             all_related_mappings = self.get_all_related_mappings(expressions)
             expressions += all_related_mappings
 
@@ -261,13 +265,14 @@ class Collection(ConceptContainerModel):
                         except Exception as ex:
                             errors[expression] = ex.messages if hasattr(ex, 'messages') else ex
                             continue
-                        collection_version.add_concept(concept)
+                        collection_version.expansion.concepts.add(concept)
+                        concept.index()
                         added = True
                 else:
-                    collection_version.concepts.add(*ref.concepts.all())
+                    collection_version.expansion.add_references(ref)
                     added = True
             if ref.mappings:
-                collection_version.mappings.add(*ref.mappings.all())
+                collection_version.expansion.add_references(ref)
                 added = True
             if not added and ref.id:
                 added = True
@@ -292,6 +297,8 @@ class Collection(ConceptContainerModel):
             try:
                 self.validate(reference)
                 reference.save()
+                if self.should_auto_expand and reference.id:
+                    self.expansion.add_references(reference)
             except Exception as ex:
                 errors[expression] = ex.messages if hasattr(ex, 'messages') else ex
                 continue
@@ -326,15 +333,10 @@ class Collection(ConceptContainerModel):
         return False
 
     def delete_references(self, expressions):
-        head = self.head
-        head.concepts.set(head.concepts.exclude(uri__in=expressions))
-        head.mappings.set(head.mappings.exclude(uri__in=expressions))
-        head.references.set(head.references.exclude(expression__in=expressions))
+        if self.expansion_uri:
+            self.expansion.delete_expressions(expressions)
 
-        from core.concepts.documents import ConceptDocument
-        from core.mappings.documents import MappingDocument
-        self.batch_index(Concept.objects.filter(uri__in=expressions), ConceptDocument)
-        self.batch_index(Mapping.objects.filter(uri__in=expressions), MappingDocument)
+        self.references.set(self.references.exclude(expression__in=expressions))
 
     @staticmethod
     def __get_children_from_expressions(expressions):
@@ -366,10 +368,13 @@ class Collection(ConceptContainerModel):
     def get_cascaded_mapping_uris_from_concept_expressions(self, expressions):
         mapping_uris = []
 
+        if not self.expansion_uri:
+            return mapping_uris
+
         for expression in expressions:
             if is_concept(expression):
                 mapping_uris += list(
-                    self.mappings.filter(
+                    self.expansion.mappings.filter(
                         from_concept__uri__icontains=drop_version(expression)).values_list('uri', flat=True)
                 )
 
@@ -380,11 +385,19 @@ class Collection(ConceptContainerModel):
             expansion_data = dict()
         expansion = Expansion.persist(index=index, **expansion_data, collection_version=self)
 
-        if self.should_default_set_expansion_url() and not self.expansion_uri:
+        if self.should_auto_expand and not self.expansion_uri:
             self.expansion_uri = expansion.uri
             self.save()
 
         return expansion
+
+    def index_children(self):
+        if self.expansion_uri:
+            from core.concepts.documents import ConceptDocument
+            from core.mappings.documents import MappingDocument
+
+            self.batch_index(self.expansion.concepts, ConceptDocument)
+            self.batch_index(self.expansion.mappings, MappingDocument)
 
     @property
     def expansion(self):
@@ -392,6 +405,22 @@ class Collection(ConceptContainerModel):
             return self.expansions.filter(uri=self.expansion_uri).first()
 
         return None
+
+    @property
+    def active_concepts(self):
+        if self.expansion_uri:
+            return self.expansion.active_concepts
+        return 0
+
+    @property
+    def active_mappings(self):
+        if self.expansion_uri:
+            return self.expansion.active_mappings
+        return 0
+
+    @property
+    def active_references(self):
+        return self.references.count()
 
 
 class CollectionReference(models.Model):
@@ -566,20 +595,45 @@ class Expansion(BaseResourceModel):
         self.index_concepts()
         self.index_mappings()
 
-    def seed_children(self, index=True):
-        version = self.collection_version
-        for reference in version.references.all():
+    def delete_expressions(self, expressions):
+        self.concepts.set(self.concepts.exclude(uri__in=expressions))
+        self.mappings.set(self.mappings.exclude(uri__in=expressions))
+
+        from core.concepts.documents import ConceptDocument
+        from core.mappings.documents import MappingDocument
+        self.batch_index(Concept.objects.filter(uri__in=expressions), ConceptDocument)
+        self.batch_index(Mapping.objects.filter(uri__in=expressions), MappingDocument)
+
+    def add_references(self, references, index=True):
+        if isinstance(references, CollectionReference):
+            refs = [references]
+        elif isinstance(references, list):
+            refs = references
+        else:
+            refs = references.all()
+
+        index_concepts = False
+        index_mappings = False
+        for reference in refs:
             if reference.is_concept:
                 concepts = reference.get_concepts()
                 if concepts.exists():
+                    index_concepts = True
                     self.concepts.add(*self.apply_parameters(concepts))
             elif reference.is_mapping:
                 mappings = reference.get_mappings()
                 if mappings.exists():
+                    index_mappings = True
                     self.mappings.add(*self.apply_parameters(mappings))
 
         if index:
-            self.index_all()
+            if index_concepts:
+                self.index_concepts()
+            if index_mappings:
+                self.index_mappings()
+
+    def seed_children(self, index=True):
+        return self.add_references(self.collection_version.references, index)
 
     def calculate_uri(self):
         return self.collection_version.uri + 'expansions/{}/'.format(self.mnemonic)

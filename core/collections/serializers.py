@@ -39,7 +39,7 @@ class CollectionVersionListSerializer(ModelSerializer):
     version_url = CharField(source='uri')
     url = CharField(source='versioned_object_url')
     previous_version_url = CharField(source='prev_version_uri')
-    autoexpand = SerializerMethodField()
+    autoexpand = BooleanField(source='should_auto_expand')
     expansion_url = CharField(source='expansion_uri', read_only=True)
 
     class Meta:
@@ -49,10 +49,6 @@ class CollectionVersionListSerializer(ModelSerializer):
             'collection_type', 'updated_at', 'canonical_url', 'released', 'retired', 'version_url',
             'previous_version_url', 'autoexpand', 'expansion_url',
         )
-
-    @staticmethod
-    def get_autoexpand(obj):
-        return obj.autoexpand_head if obj.is_head else obj.autoexpand
 
 
 class CollectionCreateOrUpdateSerializer(ModelSerializer):
@@ -190,7 +186,7 @@ class CollectionSummarySerializer(ModelSerializer):
 
     class Meta:
         model = Collection
-        fields = ('active_mappings', 'active_concepts', 'versions')
+        fields = ('active_mappings', 'active_concepts', 'versions', 'active_references')
 
 
 class CollectionSummaryDetailSerializer(CollectionSummarySerializer):
@@ -207,7 +203,7 @@ class CollectionSummaryDetailSerializer(CollectionSummarySerializer):
 class CollectionVersionSummarySerializer(ModelSerializer):
     class Meta:
         model = Collection
-        fields = ('active_mappings', 'active_concepts')
+        fields = ('active_mappings', 'active_concepts', 'active_references')
 
 
 class CollectionVersionSummaryDetailSerializer(CollectionVersionSummarySerializer):
@@ -352,7 +348,7 @@ class CollectionVersionDetailSerializer(CollectionCreateOrUpdateSerializer):
 
     @staticmethod
     def get_autoexpand(obj):
-        return obj.autoexpand_head if obj.is_head else obj.autoexpand
+        return obj.should_auto_expand
 
 
 class CollectionReferenceSerializer(ModelSerializer):

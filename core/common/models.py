@@ -23,7 +23,7 @@ from .constants import (
     ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT, SUPER_ADMIN_USER_ID,
     HEAD, PERSIST_NEW_ERROR_MESSAGE, SOURCE_PARENT_CANNOT_BE_NONE, PARENT_RESOURCE_CANNOT_BE_NONE,
     CREATOR_CANNOT_BE_NONE, CANNOT_DELETE_ONLY_VERSION, CUSTOM_VALIDATION_SCHEMA_OPENMRS)
-from .tasks import handle_save, handle_m2m_changed, seed_children, update_validation_schema
+from .tasks import handle_save, handle_m2m_changed, seed_children_to_new_version, update_validation_schema
 
 
 class BaseModel(models.Model):
@@ -494,12 +494,20 @@ class ConceptContainerModel(VersionedModel):
             self.user = parent_resource
 
     @staticmethod
+    def cascade_children_to_expansion(**kwargs):
+        pass
+
+    @staticmethod
     def update_mappings():
         pass
 
     @staticmethod
     def seed_references():
         pass
+
+    @property
+    def should_auto_expand(self):
+        return True
 
     @classmethod
     def persist_new(cls, obj, created_by, **kwargs):
@@ -529,6 +537,8 @@ class ConceptContainerModel(VersionedModel):
         try:
             obj.save(**kwargs)
             obj.update_mappings()
+            if obj.should_auto_expand:
+                obj.cascade_children_to_expansion(index=False)
             persisted = True
         except IntegrityError as ex:
             errors.update({'__all__': ex.args})
@@ -555,9 +565,9 @@ class ConceptContainerModel(VersionedModel):
         obj.save(**kwargs)
 
         if get(settings, 'TEST_MODE', False):
-            seed_children(obj.resource_type.lower(), obj.id, False)
+            seed_children_to_new_version(obj.resource_type.lower(), obj.id, False)
         else:
-            seed_children.delay(obj.resource_type.lower(), obj.id)
+            seed_children_to_new_version.delay(obj.resource_type.lower(), obj.id)
 
         if obj.id:
             obj.sibling_versions.update(is_latest_version=False)
@@ -638,41 +648,6 @@ class ConceptContainerModel(VersionedModel):
             self.organization = obj.organization
             self.user = obj.user
             self.canonical_url = obj.canonical_url
-
-    def seed_concepts(self, index=True):
-        head = self.head
-        if head:
-            from core.sources.models import Source
-            if self.__class__ == Source:
-                concepts = head.concepts.filter(is_latest_version=True)
-            else:
-                concepts = head.concepts.all()
-
-            self.concepts.set(concepts)
-            if index:
-                from core.concepts.documents import ConceptDocument
-                self.batch_index(self.concepts, ConceptDocument)
-
-    def seed_mappings(self, index=True):
-        head = self.head
-        if head:
-            from core.sources.models import Source
-            if self.__class__ == Source:
-                mappings = head.mappings.filter(is_latest_version=True)
-            else:
-                mappings = head.mappings.all()
-
-            self.mappings.set(mappings)
-            if index:
-                from core.mappings.documents import MappingDocument
-                self.batch_index(self.mappings, MappingDocument)
-
-    def index_children(self):
-        from core.concepts.documents import ConceptDocument
-        from core.mappings.documents import MappingDocument
-
-        self.batch_index(self.concepts, ConceptDocument)
-        self.batch_index(self.mappings, MappingDocument)
 
     def add_processing(self, process_id):
         if self.id:

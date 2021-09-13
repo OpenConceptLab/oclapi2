@@ -3,11 +3,11 @@ from django.db.models import QuerySet
 from mock import patch
 
 from core.collections.models import CollectionReference, Collection
-from core.collections.tests.factories import OrganizationCollectionFactory
+from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
 from core.collections.utils import is_mapping, is_concept, is_version_specified, \
     get_concept_by_expression
 from core.common.constants import CUSTOM_VALIDATION_SCHEMA_OPENMRS
-from core.common.tasks import add_references, seed_children
+from core.common.tasks import add_references, seed_children_to_new_version
 from core.common.tests import OCLTestCase
 from core.common.utils import drop_version
 from core.concepts.models import Concept
@@ -32,8 +32,11 @@ class CollectionTest(OCLTestCase):
 
     def test_add_references(self):
         collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection)
+        collection.expansion_uri = expansion.uri
+        collection.save()
 
-        self.assertEqual(collection.concepts.count(), 0)
+        self.assertEqual(collection.expansion.concepts.count(), 0)
         self.assertEqual(collection.references.count(), 0)
         self.assertEqual(collection.active_concepts, 0)
 
@@ -44,10 +47,10 @@ class CollectionTest(OCLTestCase):
         collection.add_references([concept_expression])
         collection.refresh_from_db()
 
-        self.assertEqual(collection.concepts.count(), 1)
+        self.assertEqual(collection.expansion.concepts.count(), 1)
         self.assertEqual(collection.references.count(), 1)
         self.assertEqual(collection.references.first().expression, concept.get_latest_version().uri)
-        self.assertEqual(collection.concepts.first(), concept.get_latest_version())
+        self.assertEqual(collection.expansion.concepts.first(), concept.get_latest_version())
         self.assertEqual(collection.active_concepts, 1)
 
         result = collection.add_references([concept_expression])
@@ -55,14 +58,17 @@ class CollectionTest(OCLTestCase):
             result, {concept_expression: ['Concept or Mapping reference name must be unique in a collection.']}
         )
         collection.refresh_from_db()
-        self.assertEqual(collection.concepts.count(), 1)
+        self.assertEqual(collection.expansion.concepts.count(), 1)
         self.assertEqual(collection.references.count(), 1)
         self.assertEqual(collection.active_concepts, 1)
 
     def test_add_references_openmrs_schema(self):
         collection = OrganizationCollectionFactory(custom_validation_schema=CUSTOM_VALIDATION_SCHEMA_OPENMRS)
+        expansion = ExpansionFactory(collection_version=collection)
+        collection.expansion_uri = expansion.uri
+        collection.save()
 
-        self.assertEqual(collection.concepts.count(), 0)
+        self.assertEqual(collection.expansion.concepts.count(), 0)
         self.assertEqual(collection.references.count(), 0)
 
         source = OrganizationSourceFactory()
@@ -71,39 +77,45 @@ class CollectionTest(OCLTestCase):
 
         collection.add_references([concept_expression])
 
-        self.assertEqual(collection.concepts.count(), 1)
         self.assertEqual(collection.references.count(), 1)
         self.assertEqual(collection.references.first().expression, concept.get_latest_version().uri)
-        self.assertEqual(collection.concepts.first(), concept.get_latest_version())
+        self.assertEqual(collection.expansion.concepts.count(), 1)
+        self.assertEqual(collection.expansion.concepts.first(), concept.get_latest_version())
 
         concept2 = ConceptFactory(parent=source, sources=[source])
         collection.add_references([concept2.uri])
 
-        self.assertEqual(collection.concepts.count(), 2)
+        self.assertEqual(collection.expansion.concepts.count(), 2)
         self.assertEqual(collection.references.count(), 2)
 
     def test_delete_references(self):
         collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection)
+        collection.expansion_uri = expansion.uri
+        collection.save()
         source = OrganizationSourceFactory()
         concept1 = ConceptFactory(parent=source)
         concept2 = ConceptFactory(parent=source)
         mapping = MappingFactory(from_concept=concept1, to_concept=concept2, parent=source)
         collection.add_references([concept1.uri, concept2.uri, mapping.uri])
 
-        self.assertEqual(collection.concepts.count(), 2)
-        self.assertEqual(collection.mappings.count(), 1)
+        self.assertEqual(collection.expansion.concepts.count(), 2)
+        self.assertEqual(collection.expansion.mappings.count(), 1)
         self.assertEqual(collection.references.count(), 3)
 
         collection.delete_references([concept2.get_latest_version().uri, mapping.get_latest_version().uri])
 
-        self.assertEqual(collection.concepts.count(), 1)
-        self.assertEqual(collection.mappings.count(), 0)
+        self.assertEqual(collection.expansion.concepts.count(), 1)
+        self.assertEqual(collection.expansion.mappings.count(), 0)
         self.assertEqual(collection.references.count(), 1)
-        self.assertEqual(collection.concepts.first().uri, concept1.get_latest_version().uri)
+        self.assertEqual(collection.expansion.concepts.first().uri, concept1.get_latest_version().uri)
         self.assertEqual(collection.references.first().expression, concept1.get_latest_version().uri)
 
     def test_get_concepts(self):
         collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection)
+        collection.expansion_uri = expansion.uri
+        collection.save()
         source = OrganizationSourceFactory()
         concept = ConceptFactory(parent=source, sources=[source])
         concept_expression = concept.uri
@@ -116,34 +128,17 @@ class CollectionTest(OCLTestCase):
         self.assertEqual(collection.get_concepts(start=0, end=10).count(), 1)
         self.assertEqual(collection.get_concepts(start=1, end=2).count(), 0)
 
-    def test_seed_concepts(self):
-        collection1 = OrganizationCollectionFactory()
-        collection2 = OrganizationCollectionFactory(
-            version='v1', mnemonic=collection1.mnemonic, organization=collection1.organization
-        )
-
-        self.assertTrue(collection1.is_head)
-        self.assertFalse(collection2.is_head)
-
-        source = OrganizationSourceFactory()
-        concept = ConceptFactory(parent=source, sources=[source])
-        concept_expression = concept.uri
-
-        collection1.add_references([concept_expression])
-
-        self.assertEqual(collection1.concepts.count(), 1)
-        self.assertEqual(collection2.concepts.count(), 0)
-
-        collection2.seed_concepts()
-
-        self.assertEqual(collection1.concepts.count(), 1)
-        self.assertEqual(collection2.concepts.count(), 1)
-
     def test_seed_references(self):
         collection1 = OrganizationCollectionFactory()
+        expansion1 = ExpansionFactory(collection_version=collection1)
+        collection1.expansion_uri = expansion1.uri
+        collection1.save()
         collection2 = OrganizationCollectionFactory(
             version='v1', mnemonic=collection1.mnemonic, organization=collection1.organization
         )
+        expansion2 = ExpansionFactory(collection_version=collection2)
+        collection2.expansion_uri = expansion2.uri
+        collection2.save()
 
         self.assertTrue(collection1.is_head)
         self.assertFalse(collection2.is_head)
@@ -166,6 +161,9 @@ class CollectionTest(OCLTestCase):
 
     def test_validate_reference_already_exists(self):
         collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection)
+        collection.expansion_uri = expansion.uri
+        collection.save()
         ch_locale = LocalizedTextFactory(locale_preferred=True, locale='ch')
         en_locale = LocalizedTextFactory(locale_preferred=True, locale='en')
         concept = ConceptFactory(names=[ch_locale, en_locale])
@@ -192,7 +190,10 @@ class CollectionTest(OCLTestCase):
         en_locale = LocalizedTextFactory(locale_preferred=True, locale='en')
         concept1 = ConceptFactory(names=[ch_locale, en_locale])
         collection = OrganizationCollectionFactory(custom_validation_schema=CUSTOM_VALIDATION_SCHEMA_OPENMRS)
-        collection.concepts.add(concept1)
+        expansion = ExpansionFactory(collection_version=collection)
+        collection.expansion_uri = expansion.uri
+        collection.save()
+        expansion.concepts.add(concept1)
         concept1_reference = CollectionReference(expression=concept1.uri)
         concept1_reference.save()
         collection.references.add(concept1_reference)
@@ -212,7 +213,10 @@ class CollectionTest(OCLTestCase):
         ch_locale = LocalizedTextFactory(locale_preferred=False, locale='ch')
         concept1 = ConceptFactory(names=[ch_locale])
         collection = OrganizationCollectionFactory(custom_validation_schema=CUSTOM_VALIDATION_SCHEMA_OPENMRS)
-        collection.concepts.add(concept1)
+        expansion = ExpansionFactory(collection_version=collection)
+        collection.expansion_uri = expansion.uri
+        collection.save()
+        collection.expansion.concepts.add(concept1)
         concept1_reference = CollectionReference(expression=concept1.uri)
         concept1_reference.save()
         collection.references.add(concept1_reference)
@@ -374,6 +378,9 @@ class CollectionUtilsTest(OCLTestCase):
 class TasksTest(OCLTestCase):
     def test_add_references_task(self):
         collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection)
+        collection.expansion_uri = expansion.uri
+        collection.save()
         concept1 = ConceptFactory()
         concept2 = ConceptFactory()
         mapping1 = MappingFactory(
@@ -405,10 +412,13 @@ class TasksTest(OCLTestCase):
             ])
         )
 
-    @patch('core.common.models.ConceptContainerModel.index_children')
+    @patch('core.collections.models.Collection.index_children')
     @patch('core.common.tasks.export_collection')
     def test_seed_children_task(self, export_collection_task, index_children_mock):
         collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection)
+        collection.expansion_uri = expansion.uri
+        collection.save()
         concept = ConceptFactory()
         mapping = MappingFactory()
         concept_latest_version = concept.get_latest_version()
@@ -416,8 +426,8 @@ class TasksTest(OCLTestCase):
         collection.add_references([concept_latest_version.version_url, mapping_latest_version.version_url])
 
         self.assertEqual(collection.references.count(), 2)
-        self.assertEqual(collection.concepts.count(), 1)
-        self.assertEqual(collection.mappings.count(), 1)
+        self.assertEqual(collection.expansion.concepts.count(), 1)
+        self.assertEqual(collection.expansion.mappings.count(), 1)
 
         collection_v1 = OrganizationCollectionFactory(
             organization=collection.organization, version='v1', mnemonic=collection.mnemonic
@@ -427,22 +437,26 @@ class TasksTest(OCLTestCase):
         self.assertEqual(collection_v1.concepts.count(), 0)
         self.assertEqual(collection_v1.mappings.count(), 0)
 
-        seed_children('collection', collection_v1.id, False)  # pylint: disable=no-value-for-parameter
+        seed_children_to_new_version('collection', collection_v1.id, False)  # pylint: disable=no-value-for-parameter
+        collection_v1.refresh_from_db()
 
         self.assertEqual(collection_v1.expansions.count(), 1)
         self.assertEqual(collection_v1.references.count(), 2)
         self.assertEqual(collection_v1.concepts.count(), 0)
         self.assertEqual(collection_v1.mappings.count(), 0)
-        expansion = collection_v1.expansions.first()
+        expansion = collection_v1.expansion
         self.assertEqual(expansion.concepts.count(), 1)
         self.assertEqual(expansion.mappings.count(), 1)
         export_collection_task.delay.assert_not_called()
         index_children_mock.assert_not_called()
 
-    @patch('core.common.models.ConceptContainerModel.index_children')
+    @patch('core.collections.models.Collection.index_children')
     @patch('core.common.tasks.export_collection')
     def test_seed_children_task_with_export(self, export_collection_task, index_children_mock):
         collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection)
+        collection.expansion_uri = expansion.uri
+        collection.save()
         concept = ConceptFactory()
         mapping = MappingFactory()
         concept_latest_version = concept.get_latest_version()
@@ -450,18 +464,20 @@ class TasksTest(OCLTestCase):
         collection.add_references([concept_latest_version.version_url, mapping_latest_version.version_url])
 
         self.assertEqual(collection.references.count(), 2)
-        self.assertEqual(collection.concepts.count(), 1)
-        self.assertEqual(collection.mappings.count(), 1)
+        self.assertEqual(collection.expansion.concepts.count(), 1)
+        self.assertEqual(collection.expansion.mappings.count(), 1)
 
         collection_v1 = OrganizationCollectionFactory(
             organization=collection.organization, version='v1', mnemonic=collection.mnemonic
         )
+
         self.assertEqual(collection_v1.expansions.count(), 0)
         self.assertEqual(collection_v1.references.count(), 0)
         self.assertEqual(collection_v1.concepts.count(), 0)
         self.assertEqual(collection_v1.mappings.count(), 0)
 
-        seed_children('collection', collection_v1.id)  # pylint: disable=no-value-for-parameter
+        seed_children_to_new_version('collection', collection_v1.id)  # pylint: disable=no-value-for-parameter
+        collection_v1.refresh_from_db()
 
         self.assertEqual(collection_v1.expansions.count(), 1)
         self.assertEqual(collection_v1.references.count(), 2)

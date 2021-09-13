@@ -6,7 +6,7 @@ from django.db import transaction
 from mock import patch, Mock, ANY, PropertyMock
 from rest_framework.exceptions import ErrorDetail
 
-from core.collections.tests.factories import OrganizationCollectionFactory
+from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
 from core.common.tasks import export_source
 from core.common.tests import OCLAPITestCase
 from core.common.utils import get_latest_dir_in_path
@@ -492,12 +492,14 @@ class SourceVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
 
     @patch('core.common.services.S3.delete_objects', Mock())
     def test_version_delete_400(self):  # sources content referred in a private collection
-        concept = ConceptFactory(parent=self.source_v1)
+        concept = ConceptFactory(parent=self.source)
+        concept_latest_version = concept.get_latest_version()
+        concept_latest_version.sources.add(self.source_v1)
 
-        collection = OrganizationCollectionFactory(public_access='None')
+        collection = OrganizationCollectionFactory(public_access='None', autoexpand_head=False)
         collection.add_references([concept.uri])
-        self.assertEqual(collection.concepts.count(), 1)
-        self.assertEqual(collection.concepts.first(), concept.get_latest_version())
+        self.assertEqual(collection.concepts.count(), 0)  # no expansions
+        self.assertEqual(collection.references.count(), 1)
 
         response = self.client.delete(
             self.source_v1.uri,
@@ -505,10 +507,37 @@ class SourceVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
             format='json'
         )
 
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.data, {'detail': [CONTENT_REFERRED_PRIVATELY.format(self.source_v1.mnemonic)]})
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(self.source.versions.count(), 1)
+        self.assertFalse(self.source.versions.filter(version='v1').exists())
+
+        source_v2 = OrganizationSourceFactory(
+            mnemonic=self.source.mnemonic, organization=self.organization, version='v2',
+        )
         self.assertEqual(self.source.versions.count(), 2)
-        self.assertTrue(self.source.versions.filter(version='v1').exists())
+
+        concept2 = ConceptFactory(parent=self.source)
+        concept2_latest_version = concept2.get_latest_version()
+        concept2_latest_version.sources.add(source_v2)
+
+        expansion = ExpansionFactory(collection_version=collection)
+        collection.expansion_uri = expansion.uri
+        collection.autoexpand_head = True
+        collection.save()
+        collection.add_references([concept2.uri])
+        self.assertEqual(collection.expansion.concepts.count(), 1)
+        self.assertEqual(collection.references.count(), 2)
+
+        response = self.client.delete(
+            source_v2.uri,
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data, {'detail': [CONTENT_REFERRED_PRIVATELY.format(source_v2.mnemonic)]})
+        self.assertEqual(self.source.versions.count(), 2)
+        self.assertTrue(self.source.versions.filter(version='v2').exists())
 
 
 class SourceExtraRetrieveUpdateDestroyViewTest(OCLAPITestCase):

@@ -235,7 +235,7 @@ def send_user_reset_password_email(user_id):
 
 
 @app.task(bind=True)
-def seed_children(self, resource, obj_id, export=True):
+def seed_children_to_new_version(self, resource, obj_id, export=True):
     instance = None
     export_task = None
     autoexpand = True
@@ -250,7 +250,7 @@ def seed_children(self, resource, obj_id, export=True):
         from core.collections.models import Collection
         instance = Collection.objects.filter(id=obj_id).first()
         export_task = export_collection
-        autoexpand = instance.autoexpand_head if instance.is_head else instance.autoexpand
+        autoexpand = instance.should_auto_expand
 
     if instance:
         task_id = self.request.id

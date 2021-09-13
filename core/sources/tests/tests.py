@@ -4,7 +4,7 @@ from django.db import transaction, IntegrityError
 from mock import patch, Mock, ANY
 
 from core.common.constants import HEAD
-from core.common.tasks import seed_children
+from core.common.tasks import seed_children_to_new_version
 from core.common.tests import OCLTestCase
 from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory, LocalizedTextFactory
@@ -532,7 +532,7 @@ class SourceTest(OCLTestCase):
 
 
 class TasksTest(OCLTestCase):
-    @patch('core.common.models.ConceptContainerModel.index_children')
+    @patch('core.sources.models.Source.index_children')
     @patch('core.common.tasks.export_source')
     def test_seed_children_task(self, export_source_task, index_children_mock):
         source = OrganizationSourceFactory()
@@ -544,14 +544,14 @@ class TasksTest(OCLTestCase):
         self.assertEqual(source_v1.concepts.count(), 0)
         self.assertEqual(source_v1.mappings.count(), 0)
 
-        seed_children('source', source_v1.id, False)  # pylint: disable=no-value-for-parameter
+        seed_children_to_new_version('source', source_v1.id, False)  # pylint: disable=no-value-for-parameter
 
         self.assertEqual(source_v1.concepts.count(), 1)
         self.assertEqual(source_v1.mappings.count(), 1)
         export_source_task.delay.assert_not_called()
         index_children_mock.assert_not_called()
 
-    @patch('core.common.models.ConceptContainerModel.index_children')
+    @patch('core.sources.models.Source.index_children')
     @patch('core.common.tasks.export_source')
     def test_seed_children_task_with_export(self, export_source_task, index_children_mock):
         source = OrganizationSourceFactory()
@@ -563,7 +563,7 @@ class TasksTest(OCLTestCase):
         self.assertEqual(source_v1.concepts.count(), 0)
         self.assertEqual(source_v1.mappings.count(), 0)
 
-        seed_children('source', source_v1.id)  # pylint: disable=no-value-for-parameter
+        seed_children_to_new_version('source', source_v1.id)  # pylint: disable=no-value-for-parameter
 
         self.assertEqual(source_v1.concepts.count(), 1)
         self.assertEqual(source_v1.mappings.count(), 1)

@@ -345,8 +345,9 @@ class BulkImportInlineTest(OCLTestCase):
         self.assertEqual(len(importer.invalid), 0)
         self.assertEqual(len(importer.others), 0)
         collection = Collection.objects.filter(uri='/orgs/PEPFAR/collections/MER-R-MOH-Facility-FY19/').first()
-        self.assertEqual(collection.concepts.count(), 4)
-        self.assertEqual(collection.mappings.count(), 0)
+        self.assertEqual(collection.expansions.count(), 1)
+        self.assertEqual(collection.expansion.concepts.count(), 4)
+        self.assertEqual(collection.expansion.mappings.count(), 0)
         self.assertEqual(collection.references.count(), 4)
 
         # duplicate run
@@ -365,8 +366,9 @@ class BulkImportInlineTest(OCLTestCase):
         self.assertEqual(len(importer.invalid), 0)
         self.assertEqual(len(importer.others), 0)
         collection = Collection.objects.filter(uri='/orgs/PEPFAR/collections/MER-R-MOH-Facility-FY19/').first()
-        self.assertEqual(collection.concepts.count(), 4)
-        self.assertEqual(collection.mappings.count(), 0)
+        self.assertEqual(collection.expansions.count(), 1)
+        self.assertEqual(collection.expansion.concepts.count(), 4)
+        self.assertEqual(collection.expansion.mappings.count(), 0)
         self.assertEqual(collection.references.count(), 4)
 
     def test_sample_import(self):

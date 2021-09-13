@@ -113,16 +113,16 @@ class Source(ConceptContainerModel):
         return self.custom_validation_schema is not None and self.num_concepts > 0
 
     def any_concept_referred_privately(self):
-        from core.collections.models import Collection
-        return Collection.objects.filter(
-            public_access=ACCESS_TYPE_NONE
-        ).filter(concepts__in=self.concepts_set.all()).exists()
+        from core.collections.models import Expansion
+        return Expansion.objects.filter(
+            collection_version__public_access=ACCESS_TYPE_NONE
+        ).filter(concepts__in=self.concepts.all()).exists()
 
     def any_mapping_referred_privately(self):
-        from core.collections.models import Collection
-        return Collection.objects.filter(
-            public_access=ACCESS_TYPE_NONE
-        ).filter(mappings__in=self.mappings_set.all()).exists()
+        from core.collections.models import Expansion
+        return Expansion.objects.filter(
+            collection_version__public_access=ACCESS_TYPE_NONE
+        ).filter(mappings__in=self.mappings.all()).exists()
 
     def is_content_privately_referred(self):
         return self.any_concept_referred_privately() or self.any_mapping_referred_privately()
@@ -192,3 +192,27 @@ class Source(ConceptContainerModel):
         if self.is_head:
             queryset = queryset.filter(is_latest_version=True)
         return queryset.count()
+
+    def seed_concepts(self, index=True):
+        head = self.head
+        if head:
+            self.concepts.set(head.concepts.filter(is_latest_version=True))
+            if index:
+                from core.concepts.documents import ConceptDocument
+                self.batch_index(self.concepts, ConceptDocument)
+
+    def seed_mappings(self, index=True):
+        head = self.head
+        if head:
+            self.mappings.set(head.mappings.filter(is_latest_version=True))
+            if index:
+                from core.mappings.documents import MappingDocument
+                self.batch_index(self.mappings, MappingDocument)
+
+    def index_children(self):
+        from core.concepts.documents import ConceptDocument
+        from core.mappings.documents import MappingDocument
+
+        self.batch_index(self.concepts, ConceptDocument)
+        self.batch_index(self.mappings, MappingDocument)
+

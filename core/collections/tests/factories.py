@@ -1,7 +1,7 @@
 import factory
 from factory import Sequence, SubFactory
 
-from core.collections.models import Collection, CollectionReference
+from core.collections.models import Collection, CollectionReference, Expansion
 from core.common.constants import ACCESS_TYPE_EDIT, HEAD
 from core.orgs.tests.factories import OrganizationFactory
 from core.users.tests.factories import UserProfileFactory
@@ -42,3 +42,10 @@ class UserCollectionFactory(factory.django.DjangoModelFactory):
 class CollectionReferenceFactory(factory.django.DjangoModelFactory):
     class Meta:
         model = CollectionReference
+
+
+class ExpansionFactory(factory.django.DjangoModelFactory):
+    class Meta:
+        model = Expansion
+
+    mnemonic = Sequence("expansion{}".format)
