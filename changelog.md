@@ -1,3 +1,19 @@
+##### 2.0.52 - Mon Sep 13 11:57:24 2021 +0000
+- Adding capture output for gunicorn
+- Merge pull request #44 from OpenConceptLab/dependabot/pip/boto3-1.18.40
+- Bump boto3 from 1.18.39 to 1.18.40
+- data/file upload max memory size can be upto 200mb
+- [OpenConceptLab/ocl_issues#965](https://github.com/OpenConceptLab/ocl_issues/issues/965) Using Gunicorn for Swagger and disabling DEBUG mode
+- Merge pull request #42 from OpenConceptLab/dependabot/pip/boto3-1.18.39
+- Bump boto3 from 1.18.37 to 1.18.39
+- [OpenConceptLab/ocl_issues#957](https://github.com/OpenConceptLab/ocl_issues/issues/957) | parallel importers | using deque to manage parts list
+- CSV sample with special characters
+- [OpenConceptLab/ocl_issues#960](https://github.com/OpenConceptLab/ocl_issues/issues/960) | using Python 3 style super() without arguments
+- [OpenConceptLab/ocl_issues#960](https://github.com/OpenConceptLab/ocl_issues/issues/960) | fixed pylint warnings
+- Merge pull request #32 from OpenConceptLab/dependabot/pip/pylint-2.10.2
+- Merge pull request #40 from OpenConceptLab/dependabot/pip/boto3-1.18.37
+- Bump boto3 from 1.18.36 to 1.18.37
+- Bump pylint from 2.5.3 to 2.10.2
 ##### 2.0.50 - Wed Sep 8 03:27:52 2021 +0000
 - updated pydash to 5.0.2
 - Merge pull request #36 from OpenConceptLab/dependabot/pip/django-ordered-model-3.4.3
