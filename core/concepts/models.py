@@ -32,7 +32,6 @@ class LocalizedText(models.Model):
         ]
 
     id = models.BigAutoField(primary_key=True)
-    internal_reference_id = models.CharField(max_length=255, null=True, blank=True)
     external_id = models.TextField(null=True, blank=True)
     name = models.TextField()
     type = models.TextField(null=True, blank=True)
@@ -61,11 +60,6 @@ class LocalizedText(models.Model):
                 return count
 
         return cls.get_dormant_queryset().count()
-
-    def save(self, force_insert=False, force_update=False, using=None, update_fields=None):
-        if not self.internal_reference_id and self.id:
-            self.internal_reference_id = str(self.id)
-        super().save(force_insert, force_update, using, update_fields)
 
     def to_dict(self):
         return dict(

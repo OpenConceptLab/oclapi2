@@ -219,7 +219,7 @@ class CollectionDetailSerializer(CollectionCreateOrUpdateSerializer):
             'custom_resources_linked_source', 'repository_type', 'preferred_source', 'references',
             'canonical_url', 'identifier', 'publisher', 'contact', 'jurisdiction', 'purpose', 'copyright', 'meta',
             'immutable', 'revision_date', 'logo_url', 'summary', 'text', 'client_configs',
-            'experimental', 'locked_date', 'internal_reference_id'
+            'experimental', 'locked_date'
 
         )
 
@@ -293,7 +293,7 @@ class CollectionVersionDetailSerializer(CollectionCreateOrUpdateSerializer):
             'created_on', 'updated_on', 'created_by', 'updated_by', 'extras', 'external_id', 'version',
             'version', 'concepts_url', 'mappings_url', 'is_processing', 'released', 'retired',
             'canonical_url', 'identifier', 'publisher', 'contact', 'jurisdiction', 'purpose', 'copyright', 'meta',
-            'immutable', 'revision_date', 'summary', 'text', 'experimental', 'locked_date', 'internal_reference_id',
+            'immutable', 'revision_date', 'summary', 'text', 'experimental', 'locked_date'
         )
 
     def __init__(self, *args, **kwargs):
@@ -333,7 +333,6 @@ class CollectionReferenceDetailSerializer(CollectionReferenceSerializer):
         model = CollectionReference
         fields = (
             *CollectionReferenceSerializer.Meta.fields, 'last_resolved_at', 'created_at', 'updated_at',
-            'internal_reference_id'
         )
 
 

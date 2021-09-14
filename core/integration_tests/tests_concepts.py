@@ -93,7 +93,6 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
                 'mappings',
                 'updated_by',
                 'created_by',
-                'internal_reference_id',
                 'parent_concept_urls',
                 'hierarchy_path',
                 'public_can_view',
@@ -198,7 +197,6 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
              'mappings',
              'updated_by',
              'created_by',
-             'internal_reference_id',
              'parent_concept_urls',
              'hierarchy_path',
              'public_can_view']
@@ -276,7 +274,6 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
              'mappings',
              'updated_by',
              'created_by',
-             'internal_reference_id',
              'parent_concept_urls',
              'hierarchy_path',
              'public_can_view']
@@ -689,7 +686,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
             sorted(['uuid', 'id', 'external_id', 'concept_class', 'datatype', 'url', 'retired', 'source',
                     'owner', 'owner_type', 'owner_url', 'display_name', 'display_locale', 'names', 'descriptions',
                     'created_on', 'updated_on', 'versions_url', 'version', 'extras', 'name', 'type',
-                    'update_comment', 'version_url', 'mappings', 'updated_by', 'created_by', 'internal_reference_id',
+                    'update_comment', 'version_url', 'mappings', 'updated_by', 'created_by',
                     'hierarchy_path', 'public_can_view'])
         )
 

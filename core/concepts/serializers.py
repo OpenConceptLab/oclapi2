@@ -288,7 +288,7 @@ class ConceptDetailSerializer(ModelSerializer):
             'uuid', 'id', 'external_id', 'concept_class', 'datatype', 'url', 'retired', 'source',
             'owner', 'owner_type', 'owner_url', 'display_name', 'display_locale', 'names', 'descriptions',
             'created_on', 'updated_on', 'versions_url', 'version', 'extras', 'parent_id', 'name', 'type',
-            'update_comment', 'version_url', 'mappings', 'updated_by', 'created_by', 'internal_reference_id',
+            'update_comment', 'version_url', 'mappings', 'updated_by', 'created_by',
             'parent_concept_urls', 'child_concept_urls', 'parent_concepts', 'child_concepts', 'hierarchy_path',
             'public_can_view',
         )
@@ -372,7 +372,7 @@ class ConceptVersionExportSerializer(ModelSerializer):
             'names', 'descriptions', 'extras', 'retired', 'source', 'source_url', 'owner', 'owner_name', 'owner_url',
             'version', 'created_on', 'updated_on', 'version_created_on', 'version_created_by', 'update_comment',
             'is_latest_version', 'locale', 'url', 'owner_type', 'version_url', 'previous_version_url',
-            'internal_reference_id', 'parent_concept_urls', 'child_concept_urls',
+            'parent_concept_urls', 'child_concept_urls',
         )
 
 
@@ -436,7 +436,7 @@ class ConceptVersionDetailSerializer(ModelSerializer):
             'names', 'descriptions', 'extras', 'retired', 'source', 'source_url', 'owner', 'owner_name', 'owner_url',
             'version', 'created_on', 'updated_on', 'version_created_on', 'version_created_by', 'update_comment',
             'is_latest_version', 'locale', 'url', 'owner_type', 'version_url', 'mappings', 'previous_version_url',
-            'internal_reference_id', 'parent_concepts', 'child_concepts', 'parent_concept_urls', 'child_concept_urls',
+            'parent_concepts', 'child_concepts', 'parent_concept_urls', 'child_concept_urls',
             'source_versions', 'collection_versions'
         )
 
