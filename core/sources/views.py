@@ -21,7 +21,7 @@ from core.common.permissions import CanViewConceptDictionary, CanEditConceptDict
     CanViewConceptDictionaryVersion
 from core.common.swagger_parameters import q_param, limit_param, sort_desc_param, sort_asc_param, exact_match_param, \
     page_param, verbose_param, include_retired_param, updated_since_param, include_facets_header, compress_header
-from core.common.tasks import export_source
+from core.common.tasks import export_source, delete_source
 from core.common.utils import parse_boolean_query_param, compact_dict_by_values
 from core.common.views import BaseAPIView, BaseLogoView
 from core.sources.constants import DELETE_FAILURE, DELETE_SUCCESS, VERSION_ALREADY_EXISTS
@@ -159,14 +159,22 @@ class SourceRetrieveUpdateDestroyView(SourceBaseView, ConceptDictionaryUpdateMix
 
         return [CanEditConceptDictionary()]
 
+    def is_async_requested(self):
+        return self.request.query_params.get('async', None) in ['true', True, 'True']
+
     def delete(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         source = self.get_object()
-        try:
-            source.delete()
-        except Exception as ex:
-            return Response({'detail': get(ex, 'messages', [DELETE_FAILURE])}, status=status.HTTP_400_BAD_REQUEST)
 
-        return Response({'detail': DELETE_SUCCESS}, status=status.HTTP_204_NO_CONTENT)
+        if self.is_async_requested():
+            task = delete_source.delay(source.id)
+            return Response(dict(task=task.id), status=status.HTTP_202_ACCEPTED)
+
+        result = delete_source(source.id)
+
+        if result is True:
+            return Response({'detail': DELETE_SUCCESS}, status=status.HTTP_204_NO_CONTENT)
+
+        return Response({'detail': get(result, 'messages', [DELETE_FAILURE])}, status=status.HTTP_400_BAD_REQUEST)
 
 
 class SourceVersionListView(SourceVersionBaseView, mixins.CreateModelMixin, ListWithHeadersMixin):

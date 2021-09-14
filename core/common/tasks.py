@@ -36,6 +36,29 @@ def delete_organization(org_id):
         logger.info('Org delete failed for %s with exception %s', org.mnemonic, ex.args)
 
 
+@app.task(base=QueueOnce)
+def delete_source(source_id):
+    from core.sources.models import Source
+    logger.info('Finding source...')
+
+    source = Source.objects.filter(id=source_id).first()
+
+    if not source:
+        logger.info('Not found source %s', source_id)
+        return None
+
+    try:
+        logger.info('Found source %s.  Beginning purge...', source.mnemonic)
+        source.batch_delete(source.concepts_set)
+        source.batch_delete(source.mappings_set)
+        source.delete(force=True)
+        logger.info('Delete complete!')
+        return True
+    except Exception as ex:
+        logger.info('Source delete failed for %s with exception %s', source.mnemonic, ex.args)
+        return ex
+
+
 @app.task(base=QueueOnce, bind=True)
 def export_source(self, version_id):
     from core.sources.models import Source
