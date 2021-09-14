@@ -407,7 +407,8 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         parent = obj.parent
         parent_head = parent.head
         persisted = False
-        prev_latest_version = None
+        prev_latest_version = cls.objects.filter(
+            versioned_object_id=obj.versioned_object_id, is_latest_version=True).first()
         try:
             with transaction.atomic():
                 cls.pause_indexing()
@@ -418,12 +419,9 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
                     obj.version = str(obj.id)
                     obj.save()
                     obj.update_versioned_object()
-                    versioned_object = obj.versioned_object
-                    prev_latest_version = versioned_object.versions.exclude(id=obj.id).filter(
-                        is_latest_version=True).first()
                     if prev_latest_version:
                         prev_latest_version.is_latest_version = False
-                        prev_latest_version.save()
+                        prev_latest_version.save(update_fields=['is_latest_version'])
 
                     obj.sources.set(compact([parent, parent_head]))
                     persisted = True
@@ -444,7 +442,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
                     obj.sources.remove(parent_head)
                     if prev_latest_version:
                         prev_latest_version.is_latest_version = True
-                        prev_latest_version.save()
+                        prev_latest_version.save(update_fields=['is_latest_version'])
                     obj.delete()
                 errors['non_field_errors'] = [PERSIST_CLONE_ERROR]
 

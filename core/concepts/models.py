@@ -651,7 +651,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                     obj.update_versioned_object()
                     if prev_latest_version:
                         prev_latest_version.is_latest_version = False
-                        prev_latest_version.save()
+                        prev_latest_version.save(update_fields=['is_latest_version'])
                         if add_prev_version_children:
                             if get(settings, 'TEST_MODE', False):
                                 process_hierarchy_for_new_parent_concept_version(prev_latest_version.id, obj.id)
@@ -681,7 +681,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             if not persisted:
                 if prev_latest_version:
                     prev_latest_version.is_latest_version = True
-                    prev_latest_version.save()
+                    prev_latest_version.save(update_fields=['is_latest_version'])
                 if obj.id:
                     obj.remove_locales()
                     obj.sources.remove(parent_head)
