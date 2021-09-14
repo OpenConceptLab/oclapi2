@@ -7,9 +7,15 @@ def add_org_creator_as_member(apps, schema_editor):
     Organization = apps.get_model('orgs', 'Organization')
     UserProfile = apps.get_model('users', 'UserProfile')
     orgs = Organization.objects.exclude(
-        id__in=UserProfile.organizations.through.objects.values_list('organization_id', flat=True))
+        id__in=UserProfile.organizations.through.objects.values_list('organization_id', flat=True)).filter(
+        created_by__is_superuser=False
+    )
     for org in orgs:
-        org.members.set([org.created_by, org.updated_by])
+        members = [org.created_by]
+        updated_by = org.updated_by
+        if not updated_by.is_superuser:
+            members.append(updated_by)
+        org.members.set(members)
 
 
 class Migration(migrations.Migration):
