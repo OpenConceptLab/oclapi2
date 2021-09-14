@@ -596,7 +596,7 @@ class SourceVersionExportViewTest(OCLAPITestCase):
 
     def test_get_404(self):
         response = self.client.get(
-            '/users/foo/sources/source1/v2/export/',
+            '/sources/source1/v2/export/',
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -608,7 +608,7 @@ class SourceVersionExportViewTest(OCLAPITestCase):
         s3_exists_mock.return_value = False
 
         response = self.client.get(
-            self.source_v1.uri + 'export/',
+            '/sources/source1/v1/export/',
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -624,7 +624,7 @@ class SourceVersionExportViewTest(OCLAPITestCase):
         s3_exists_mock.return_value = True
 
         response = self.client.get(
-            self.source_v1.uri + 'export/',
+            '/sources/source1/v1/export/',
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -644,7 +644,7 @@ class SourceVersionExportViewTest(OCLAPITestCase):
         s3_exists_mock.return_value = True
 
         response = self.client.get(
-            self.source_v1.uri + 'export/?noRedirect=true',
+            '/sources/source1/v1/export/?noRedirect=true',
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -661,7 +661,7 @@ class SourceVersionExportViewTest(OCLAPITestCase):
         is_exporting_mock.return_value = True
 
         response = self.client.get(
-            self.source_v1.uri + 'export/',
+            '/sources/source1/v1/export/',
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -671,7 +671,7 @@ class SourceVersionExportViewTest(OCLAPITestCase):
 
     def test_get_405(self):
         response = self.client.get(
-            '/users/{}/sources/{}/{}/export/'.format(self.source.parent.mnemonic, self.source.mnemonic, 'HEAD'),
+            '/sources/source1/HEAD/export/',
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -680,7 +680,7 @@ class SourceVersionExportViewTest(OCLAPITestCase):
 
     def test_post_405(self):
         response = self.client.post(
-            '/users/{}/sources/{}/{}/export/'.format(self.source.parent.mnemonic, self.source.mnemonic, 'HEAD'),
+            '/sources/source1/HEAD/export/',
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -691,7 +691,7 @@ class SourceVersionExportViewTest(OCLAPITestCase):
     def test_post_303(self, s3_exists_mock):
         s3_exists_mock.return_value = True
         response = self.client.post(
-            self.source_v1.uri + 'export/',
+            '/sources/source1/v1/export/',
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -705,7 +705,7 @@ class SourceVersionExportViewTest(OCLAPITestCase):
     def test_post_202(self, s3_exists_mock, export_source_mock):
         s3_exists_mock.return_value = False
         response = self.client.post(
-            self.source_v1.uri + 'export/',
+            '/sources/source1/v1/export/',
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -720,7 +720,7 @@ class SourceVersionExportViewTest(OCLAPITestCase):
         s3_exists_mock.return_value = False
         export_source_mock.delay.side_effect = AlreadyQueued('already-queued')
         response = self.client.post(
-            self.source_v1.uri + 'export/',
+            '/sources/source1/v1/export/',
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )

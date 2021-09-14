@@ -155,7 +155,7 @@ class CollectionListViewTest(OCLAPITestCase):
 
     def test_post_405(self):
         response = self.client.post(
-            '/orgs/org/collections/',
+            '/collections/',
             dict(
                 default_locale='en', supported_locales='en,fr', id='coll',
             ),
@@ -169,7 +169,10 @@ class CollectionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
     def test_get_200(self):
         coll = OrganizationCollectionFactory(mnemonic='coll1')
 
-        response = self.client.get(coll.uri, format='json')
+        response = self.client.get(
+            '/collections/coll1/',
+            format='json'
+        )
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['uuid'], str(coll.id))
@@ -199,7 +202,7 @@ class CollectionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
 
     def test_get_404(self):
         response = self.client.get(
-            '/orgs/foobar/collections/coll1/',
+            '/collections/coll1/',
             format='json'
         )
 
@@ -208,7 +211,7 @@ class CollectionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
     @patch('core.common.services.S3.delete_objects', Mock())
     def test_delete(self):
         coll = OrganizationCollectionFactory(mnemonic='coll1')
-        coll_v1 = OrganizationCollectionFactory(
+        OrganizationCollectionFactory(
             version='v1', is_latest_version=True, mnemonic='coll1', organization=coll.organization
         )
         user = UserProfileFactory(organizations=[coll.organization])
@@ -216,7 +219,7 @@ class CollectionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(coll.versions.count(), 2)
 
         response = self.client.delete(
-            coll_v1.uri,
+            '/collections/coll1/v1/',
             HTTP_AUTHORIZATION='Token ' + user.get_token(),
             format='json'
         )
@@ -225,7 +228,7 @@ class CollectionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(coll.versions.count(), 1)
 
         response = self.client.delete(
-            coll.uri,
+            '/collections/coll1/',
             HTTP_AUTHORIZATION='Token ' + user.get_token(),
             format='json'
         )
@@ -239,12 +242,26 @@ class CollectionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(coll.versions.count(), 1)
 
         response = self.client.put(
-            coll.uri,
+            '/collections/coll1/',
             dict(name='Collection1'),
             format='json'
         )
 
         self.assertEqual(response.status_code, 401)
+
+    def test_put_405(self):
+        coll = OrganizationCollectionFactory(mnemonic='coll1', name='Collection')
+        user = UserProfileFactory(organizations=[coll.organization])
+        self.assertEqual(coll.versions.count(), 1)
+
+        response = self.client.put(
+            '/collections/coll1/',
+            dict(name='Collection1'),
+            HTTP_AUTHORIZATION='Token ' + user.get_token(),
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 405)
 
     def test_put_200(self):
         coll = OrganizationCollectionFactory(mnemonic='coll1', name='Collection')
@@ -283,7 +300,7 @@ class CollectionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
 class CollectionReferencesViewTest(OCLAPITestCase):
     def setUp(self):
         super().setUp()
-        self.user = UserProfileFactory(username='foobar')
+        self.user = UserProfileFactory()
         self.token = self.user.get_token()
         self.collection = UserCollectionFactory(mnemonic='coll', user=self.user)
         self.concept = ConceptFactory()
@@ -297,7 +314,7 @@ class CollectionReferencesViewTest(OCLAPITestCase):
 
     def test_get_404(self):
         response = self.client.get(
-            '/users/foobar/collections/foobar/references/',
+            '/collections/foobar/references/',
             format='json'
         )
 
@@ -305,7 +322,7 @@ class CollectionReferencesViewTest(OCLAPITestCase):
 
     def test_get_200(self):
         response = self.client.get(
-            self.collection.uri + 'references/',
+            '/collections/coll/references/',
             format='json'
         )
 
@@ -315,7 +332,7 @@ class CollectionReferencesViewTest(OCLAPITestCase):
         self.assertEqual(response.data[0]['reference_type'], 'concepts')
 
         response = self.client.get(
-            self.collection.uri + 'references/?q={}&search_sort=desc'.format(self.concept.get_latest_version().uri),
+            '/collections/coll/references/?q={}&search_sort=desc'.format(self.concept.get_latest_version().uri),
             format='json'
         )
 
@@ -325,7 +342,7 @@ class CollectionReferencesViewTest(OCLAPITestCase):
         self.assertEqual(response.data[0]['reference_type'], 'concepts')
 
         response = self.client.get(
-            self.collection.uri + 'references/?q=/concepts/&search_sort=desc',
+            '/collections/coll/references/?q=/concepts/&search_sort=desc',
             format='json'
         )
 
@@ -333,7 +350,7 @@ class CollectionReferencesViewTest(OCLAPITestCase):
         self.assertEqual(len(response.data), 1)
 
         response = self.client.get(
-            self.collection.uri + 'references/?q=/mappings/&search_sort=desc',
+            '/collections/coll/references/?q=/mappings/&search_sort=desc',
             format='json'
         )
 
@@ -342,7 +359,7 @@ class CollectionReferencesViewTest(OCLAPITestCase):
 
     def test_delete_400(self):
         response = self.client.delete(
-            self.collection.uri + 'references/',
+            '/collections/coll/references/',
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -351,7 +368,7 @@ class CollectionReferencesViewTest(OCLAPITestCase):
 
     def test_delete_204_random(self):
         response = self.client.delete(
-            self.collection.uri + 'references/',
+            '/collections/coll/references/',
             dict(expressions=['/foo/']),
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
@@ -363,7 +380,7 @@ class CollectionReferencesViewTest(OCLAPITestCase):
 
     def test_delete_204_all_expressions(self):
         response = self.client.delete(
-            self.collection.uri + 'references/',
+            '/collections/coll/references/',
             dict(expressions='*'),
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
@@ -375,7 +392,7 @@ class CollectionReferencesViewTest(OCLAPITestCase):
 
     def test_delete_204_specific_expression(self):
         response = self.client.delete(
-            self.collection.uri + 'references/',
+            '/collections/coll/references/',
             dict(expressions=[self.concept.get_latest_version().uri]),
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
@@ -389,7 +406,7 @@ class CollectionReferencesViewTest(OCLAPITestCase):
         latest_version = concept.get_latest_version()
         MappingFactory(from_concept=latest_version, parent=concept.parent)
         response = self.client.put(
-            self.collection.uri + 'references/?cascade=sourcemappings',
+            '/collections/coll/references/?cascade=sourcemappings',
             dict(data=dict(mappings=[latest_version.uri])),
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
@@ -401,7 +418,7 @@ class CollectionReferencesViewTest(OCLAPITestCase):
         self.assertEqual(self.collection.mappings.count(), 1)
 
         response = self.client.delete(
-            self.collection.uri + 'references/?cascade=sourcemappings',
+            '/collections/coll/references/?cascade=sourcemappings',
             dict(expressions=[latest_version.uri]),
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
@@ -417,7 +434,7 @@ class CollectionReferencesViewTest(OCLAPITestCase):
         add_references_mock.delay = Mock()
 
         response = self.client.put(
-            self.collection.uri + 'references/',
+            '/collections/coll/references/',
             dict(data=dict(concepts='*')),
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
@@ -431,7 +448,7 @@ class CollectionReferencesViewTest(OCLAPITestCase):
 
     def test_put_200_specific_expression(self):
         response = self.client.put(
-            self.collection.uri + 'references/',
+            '/collections/coll/references/',
             dict(data=dict(concepts=[self.concept.uri])),
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
@@ -450,7 +467,7 @@ class CollectionReferencesViewTest(OCLAPITestCase):
 
         concept2 = ConceptFactory()
         response = self.client.put(
-            self.collection.uri + 'references/',
+            '/collections/coll/references/',
             dict(data=dict(concepts=[concept2.uri])),
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
@@ -477,7 +494,7 @@ class CollectionReferencesViewTest(OCLAPITestCase):
         mapping = MappingFactory(from_concept=concept2, to_concept=self.concept, parent=self.concept.parent)
 
         response = self.client.put(
-            self.collection.uri + 'references/',
+            '/collections/coll/references/',
             dict(data=dict(mappings=[mapping.uri])),
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
@@ -507,7 +524,7 @@ class CollectionReferencesViewTest(OCLAPITestCase):
         mapping2 = MappingFactory(from_concept=latest_version, parent=concept3.parent)
 
         response = self.client.put(
-            self.collection.uri + 'references/?cascade=sourcemappings',
+            '/collections/coll/references/?cascade=sourcemappings',
             dict(data=dict(concepts=[latest_version.uri])),
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
@@ -533,7 +550,7 @@ class CollectionVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
 
     def test_get_200(self):
         response = self.client.get(
-            self.collection_v1.uri,
+            '/collections/coll/v1/',
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -546,7 +563,7 @@ class CollectionVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
 
     def test_get_404(self):
         response = self.client.get(
-            '/users/foobar/collections/coll/v2/',
+            '/collections/coll/v2/',
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -559,7 +576,7 @@ class CollectionVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
 
         external_id = 'EXT-123'
         response = self.client.put(
-            self.collection_v1.uri,
+            '/collections/coll/v1/',
             dict(external_id=external_id),
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
@@ -576,7 +593,7 @@ class CollectionVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
 
     def test_put_400(self):
         response = self.client.put(
-            self.collection_v1.uri,
+            '/collections/coll/v1/',
             dict(version=None),
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
@@ -588,7 +605,7 @@ class CollectionVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
     @patch('core.common.services.S3.delete_objects', Mock())
     def test_delete(self):
         response = self.client.delete(
-            self.collection_v1.uri,
+            '/collections/coll/v1/',
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -598,8 +615,7 @@ class CollectionVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertTrue(self.collection.versions.first().is_latest_version)
 
         response = self.client.delete(
-            '/users/{}/collections/{}/{}/'.format(
-                self.collection.parent.mnemonic, self.collection.mnemonic, self.collection.version),
+            '/collections/coll/{}/'.format(self.collection.version),
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -618,7 +634,7 @@ class CollectionLatestVersionRetrieveUpdateViewTest(OCLAPITestCase):
 
     def test_get_404(self):
         response = self.client.get(
-            '/users/foobar/collections/coll/latest/',
+            '/collections/coll/latest/',
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -630,7 +646,7 @@ class CollectionLatestVersionRetrieveUpdateViewTest(OCLAPITestCase):
         self.collection_v1.save()
 
         response = self.client.get(
-            self.collection.uri + 'latest/',
+            '/collections/coll/latest/',
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -648,7 +664,7 @@ class CollectionLatestVersionRetrieveUpdateViewTest(OCLAPITestCase):
 
         external_id = 'EXT-123'
         response = self.client.put(
-            self.collection.uri + 'latest/',
+            '/collections/coll/latest/',
             dict(external_id=external_id),
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
@@ -668,7 +684,7 @@ class CollectionLatestVersionRetrieveUpdateViewTest(OCLAPITestCase):
         self.collection_v1.save()
 
         response = self.client.put(
-            self.collection.uri + 'latest/',
+            '/collections/coll/latest/',
             dict(version=None),
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
@@ -688,7 +704,7 @@ class CollectionExtrasViewTest(OCLAPITestCase):
 
     def test_get_200(self):
         response = self.client.get(
-            self.collection.uri + 'extras/',
+            '/collections/coll/extras/',
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -697,7 +713,7 @@ class CollectionExtrasViewTest(OCLAPITestCase):
 
     def test_get_404(self):
         response = self.client.get(
-            '/users/foobar/collections/foobar/extras/',
+            '/collections/foobar/extras/',
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -714,7 +730,7 @@ class CollectionExtraRetrieveUpdateDestroyViewTest(OCLAPITestCase):
 
     def test_get_200(self):
         response = self.client.get(
-            self.collection.uri + 'extras/foo/',
+            '/collections/coll/extras/foo/',
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -723,7 +739,7 @@ class CollectionExtraRetrieveUpdateDestroyViewTest(OCLAPITestCase):
 
     def test_get_404(self):
         response = self.client.get(
-            self.collection.uri + 'extras/bar/',
+            '/collections/coll/extras/bar/',
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -731,7 +747,7 @@ class CollectionExtraRetrieveUpdateDestroyViewTest(OCLAPITestCase):
 
     def test_put_200(self):
         response = self.client.put(
-            self.collection.uri + 'extras/foo/',
+            '/collections/coll/extras/foo/',
             dict(foo='barbar'),
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
@@ -743,7 +759,7 @@ class CollectionExtraRetrieveUpdateDestroyViewTest(OCLAPITestCase):
 
     def test_put_400(self):
         response = self.client.put(
-            self.collection.uri + 'extras/foo/',
+            '/collections/coll/extras/foo/',
             dict(foo=None),
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
@@ -755,7 +771,7 @@ class CollectionExtraRetrieveUpdateDestroyViewTest(OCLAPITestCase):
 
     def test_delete_204(self):
         response = self.client.delete(
-            self.collection.uri + 'extras/foo/',
+            '/collections/coll/extras/foo/',
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -765,7 +781,7 @@ class CollectionExtraRetrieveUpdateDestroyViewTest(OCLAPITestCase):
 
     def test_delete_404(self):
         response = self.client.delete(
-            self.collection.uri + 'extras/bar/',
+            '/collections/coll/extras/bar/',
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -783,7 +799,7 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
 
     def test_get_404(self):
         response = self.client.get(
-            '/users/foo/collections/coll/v2/export/',
+            '/collections/coll/v2/export/',
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -795,7 +811,7 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
         s3_exists_mock.return_value = False
 
         response = self.client.get(
-            self.collection_v1.uri + 'export/',
+            '/collections/coll/v1/export/',
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -811,7 +827,7 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
         s3_url_for_mock.return_value = s3_url
 
         response = self.client.get(
-            self.collection_v1.uri + 'export/',
+            '/collections/coll/v1/export/',
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -825,8 +841,7 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
 
     def test_get_405(self):
         response = self.client.get(
-            '/users/{}/collections/{}/{}/export/'.format(
-                self.collection.parent.mnemonic, self.collection.mnemonic, 'HEAD'),
+            '/collections/coll/HEAD/export/',
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -835,8 +850,7 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
 
     def test_post_405(self):
         response = self.client.post(
-            '/users/{}/collections/{}/{}/export/'.format(
-                self.collection.parent.mnemonic, self.collection.mnemonic, 'HEAD'),
+            '/collections/coll/HEAD/export/',
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -847,7 +861,7 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
     def test_post_303(self, s3_exists_mock):
         s3_exists_mock.return_value = True
         response = self.client.post(
-            self.collection_v1.uri + 'export/',
+            '/collections/coll/v1/export/',
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -861,7 +875,7 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
     def test_post_202(self, s3_exists_mock, export_collection_mock):
         s3_exists_mock.return_value = False
         response = self.client.post(
-            self.collection_v1.uri + 'export/',
+            '/collections/coll/v1/export/',
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -876,7 +890,7 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
         s3_exists_mock.return_value = False
         export_collection_mock.delay.side_effect = AlreadyQueued('already-queued')
         response = self.client.post(
-            self.collection_v1.uri + 'export/',
+            '/collections/coll/v1/export/',
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -903,7 +917,7 @@ class CollectionVersionListViewTest(OCLAPITestCase):
 
     def test_get_200(self):
         response = self.client.get(
-            self.collection.uri + 'versions/?verbose=true',
+            '/collections/coll/versions/?verbose=true',
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -917,7 +931,7 @@ class CollectionVersionListViewTest(OCLAPITestCase):
         )
 
         response = self.client.get(
-            self.collection.uri + 'versions/?released=true',
+            '/collections/coll/versions/?released=true',
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -928,7 +942,7 @@ class CollectionVersionListViewTest(OCLAPITestCase):
 
     def test_post_201(self):
         response = self.client.post(
-            self.collection.uri + 'versions/',
+            '/collections/coll/versions/',
             dict(id='v1', description='version1'),
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
