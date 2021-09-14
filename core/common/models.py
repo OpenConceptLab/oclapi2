@@ -178,7 +178,7 @@ class BaseModel(models.Model):
 
     @staticmethod
     def batch_delete(queryset):
-        for batch in queryset.iterator(chunk_size=200):
+        for batch in queryset.iterator(chunk_size=1000):
             batch.delete()
 
 
