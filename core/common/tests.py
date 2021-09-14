@@ -261,7 +261,7 @@ class S3Test(TestCase):
             res = S3.upload_file(key=file_path, headers={'header1': 'val1'})
             self.assertEqual(res, 200)
             S3.upload.assert_called_once_with(file_path, 'file-content', {'header1': 'val1'}, None)
-            mock_file.assert_called_once_with(file_path, 'r', encoding='utf-8')
+            mock_file.assert_called_once_with(file_path, 'r')
 
     @patch('core.common.services.S3.upload')
     def test_upload_base64(self, s3_upload_mock):

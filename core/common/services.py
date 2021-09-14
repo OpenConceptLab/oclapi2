@@ -69,7 +69,7 @@ class S3:
     ):  # pylint: disable=too-many-arguments
         read_directive = 'rb' if binary else 'r'
         file_path = file_path if file_path else key
-        return cls.upload(key, open(file_path, read_directive, encoding='utf-8').read(), headers, metadata)
+        return cls.upload(key, open(file_path, read_directive).read(), headers, metadata)  # pylint: disable=unspecified-encoding
 
     @classmethod
     def upload_public(cls, file_path, file_content):
