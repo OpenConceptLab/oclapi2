@@ -93,7 +93,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
                 'mappings',
                 'updated_by',
                 'created_by',
-                'internal_reference_id',
+                'parent_concept_urls',
                 'hierarchy_path',
             ]
         )
@@ -196,8 +196,9 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
              'mappings',
              'updated_by',
              'created_by',
-             'internal_reference_id',
-             'hierarchy_path']
+             'parent_concept_urls',
+             'hierarchy_path',
+             'public_can_view']
         )
 
         version = Concept.objects.last()
@@ -272,8 +273,9 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
              'mappings',
              'updated_by',
              'created_by',
-             'internal_reference_id',
-             'hierarchy_path']
+             'parent_concept_urls',
+             'hierarchy_path',
+             'public_can_view']
         )
 
         names = response.data['names']
@@ -655,6 +657,48 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(latest_version.names.count(), 1)
         self.assertEqual(latest_version.names.first().name, name1.name)
         self.assertEqual(latest_version.comment, 'Deleted {} in names.'.format(name2.name))
+
+    def test_get_200_with_response_modes(self):
+        ConceptFactory(parent=self.source, mnemonic='conceptA')
+        response = self.client.get(
+            "/concepts/",
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            sorted(response.data[0].keys()),
+            sorted(['uuid', 'id', 'external_id', 'concept_class', 'datatype', 'url', 'retired', 'source',
+                    'owner', 'owner_type', 'owner_url', 'display_name', 'display_locale', 'version', 'update_comment',
+                    'locale', 'version_created_by', 'version_created_on', 'mappings', 'is_latest_version',
+                    'versions_url', 'version_url'])
+        )
+
+        response = self.client.get(
+            "/concepts/?verbose=true",
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            sorted(response.data[0].keys()),
+            sorted(['uuid', 'id', 'external_id', 'concept_class', 'datatype', 'url', 'retired', 'source',
+                    'owner', 'owner_type', 'owner_url', 'display_name', 'display_locale', 'names', 'descriptions',
+                    'created_on', 'updated_on', 'versions_url', 'version', 'extras', 'name', 'type',
+                    'update_comment', 'version_url', 'mappings', 'updated_by', 'created_by',
+                    'hierarchy_path', 'public_can_view'])
+        )
+
+        response = self.client.get(
+            "/concepts/?brief=true",
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            sorted(response.data[0].keys()),
+            sorted(['uuid', 'id'])
+        )
 
     def test_get_200_with_mappings(self):
         concept1 = ConceptFactory(parent=self.source, mnemonic='conceptA')

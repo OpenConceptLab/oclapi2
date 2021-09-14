@@ -449,7 +449,6 @@ class CollectionReference(models.Model):
     original_expression = None
 
     id = models.BigAutoField(primary_key=True)
-    internal_reference_id = models.CharField(max_length=255, null=True, blank=True)
     expression = models.TextField()
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -495,11 +494,6 @@ class CollectionReference(models.Model):
         is_resolved = bool((self.mappings and self.mappings.count()) or (self.concepts and self.concepts.count()))
         if not is_resolved:
             self.last_resolved_at = None
-
-    def save(self, force_insert=False, force_update=False, using=None, update_fields=None):
-        if not self.internal_reference_id and self.id:
-            self.internal_reference_id = str(self.id)
-        super().save(force_insert, force_update, using, update_fields)
 
     @property
     def is_concept(self):

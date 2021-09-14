@@ -42,7 +42,6 @@ class BaseModel(models.Model):
         ]
 
     id = models.BigAutoField(primary_key=True)
-    internal_reference_id = models.CharField(max_length=255, null=True, blank=True)
     public_access = models.CharField(
         max_length=16, choices=ACCESS_TYPE_CHOICES, default=DEFAULT_ACCESS_TYPE, blank=True
     )
@@ -80,11 +79,6 @@ class BaseModel(models.Model):
     def index(self):
         if not get(settings, 'TEST_MODE', False):
             handle_save.delay(self.app_name, self.model_name, self.id)
-
-    def save(self, force_insert=False, force_update=False, using=None, update_fields=None):
-        if not self.internal_reference_id and self.id:
-            self.internal_reference_id = str(self.id)
-        super().save(force_insert, force_update, using, update_fields)
 
     def soft_delete(self):
         if self.is_active:

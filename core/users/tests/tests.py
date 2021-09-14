@@ -107,17 +107,6 @@ class UserProfileTest(OCLTestCase):
         self.assertTrue(source.is_active)
         self.assertTrue(collection.is_active)
 
-    def test_internal_reference_id(self):
-        user = UserProfileFactory.build(id=123)
-
-        self.assertIsNotNone(user.id)
-        self.assertIsNone(user.internal_reference_id)
-
-        user.save()
-
-        self.assertIsNotNone(user.id)
-        self.assertEqual(user.internal_reference_id, str(user.id))
-
     def test_update_password(self):
         user = UserProfileFactory()
         user.set_password('Password123!')
