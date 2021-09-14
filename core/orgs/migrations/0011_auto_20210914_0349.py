@@ -5,8 +5,9 @@ from django.db import migrations
 
 def add_org_creator_as_member(apps, schema_editor):
     Organization = apps.get_model('orgs', 'Organization')
+    UserProfile = apps.get_model('users', 'UserProfile')
     orgs = Organization.objects.exclude(
-        id__in=Organization.members.through.objects.values_list('organization_id', flat=True))
+        id__in=UserProfile.organizations.through.objects.values_list('organization_id', flat=True))
     for org in orgs:
         org.members.set([org.created_by, org.updated_by])
 
