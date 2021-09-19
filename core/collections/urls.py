@@ -85,7 +85,7 @@ urlpatterns = [
     re_path(
         r'^(?P<collection>{pattern})/(?P<version>{pattern})/expansions/$'.format(pattern=NAMESPACE_PATTERN),
         views.CollectionVersionExpansionsView.as_view(),
-        name='collection-version-expansions'
+        name='expansion-list'
     ),
     re_path(
         r'^(?P<collection>{pattern})/(?P<version>{pattern})/expansions/(?P<expansion>{pattern})/$'.format(

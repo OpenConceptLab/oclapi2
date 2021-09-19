@@ -242,7 +242,7 @@ class CollectionDetailSerializer(CollectionCreateOrUpdateSerializer):
             'custom_validation_schema', 'public_access', 'default_locale', 'supported_locales', 'website',
             'url', 'owner', 'owner_type', 'owner_url',
             'created_on', 'updated_on', 'created_by', 'updated_by', 'extras', 'external_id', 'versions_url',
-            'version', 'concepts_url', 'mappings_url',
+            'version', 'concepts_url', 'mappings_url', 'expansions_url',
             'custom_resources_linked_source', 'repository_type', 'preferred_source', 'references',
             'canonical_url', 'identifier', 'publisher', 'contact', 'jurisdiction', 'purpose', 'copyright', 'meta',
             'immutable', 'revision_date', 'logo_url', 'summary', 'text', 'client_configs',
@@ -317,7 +317,7 @@ class CollectionVersionDetailSerializer(CollectionCreateOrUpdateSerializer):
             'custom_validation_schema', 'public_access', 'default_locale', 'supported_locales', 'website',
             'url', 'owner', 'owner_type', 'owner_url', 'version_url', 'previous_version_url',
             'created_on', 'updated_on', 'created_by', 'updated_by', 'extras', 'external_id', 'version',
-            'version', 'concepts_url', 'mappings_url', 'is_processing', 'released', 'retired',
+            'version', 'concepts_url', 'mappings_url', 'expansions_url', 'is_processing', 'released', 'retired',
             'canonical_url', 'identifier', 'publisher', 'contact', 'jurisdiction', 'purpose', 'copyright', 'meta',
             'immutable', 'revision_date', 'summary', 'text', 'experimental', 'locked_date', 'internal_reference_id',
             'autoexpand', 'expansion_url'

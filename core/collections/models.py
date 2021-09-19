@@ -2,9 +2,8 @@ import json
 
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
-from django.db.models import UniqueConstraint, QuerySet
+from django.db.models import UniqueConstraint
 from django.utils import timezone
-from pydash import flatten
 from rest_framework.test import APIRequestFactory
 
 from core.collections.constants import (
@@ -435,6 +434,10 @@ class Collection(ConceptContainerModel):
         if self.expansion_uri and self.expansion.mappings.exists():
             updated_at = self.expansion.mappings.latest('updated_at').updated_at
         return updated_at
+
+    @property
+    def expansions_url(self):
+        return self.uri + 'expansions/'
 
 
 class CollectionReference(models.Model):
