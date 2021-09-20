@@ -181,51 +181,44 @@ ELASTICSEARCH_DSL = {
     },
 }
 
-# LOGGING = {
-#     'version': 1,
-#     'disable_existing_loggers': False,
-#     'formatters': {
-#         'verbose': {
-#             'format': '%(levelname)s %(asctime)s %(message)s'
-#         },
-#         'simple': {
-#             'format': '%(levelname)s %(message)s'
-#         },
-#     },
-#     'filters': {
-#         'require_debug_true': {
-#             '()': 'django.utils.log.RequireDebugTrue',
-#         },
-#         'require_debug_false': {
-#             '()': 'django.utils.log.RequireDebugFalse',
-#         },
-#     },
-#     'handlers': {
-#         'console': {
-#             'level': 'DEBUG',
-#             'filters': ['require_debug_true'],
-#             'class': 'logging.StreamHandler',
-#             'formatter': 'verbose',
-#         },
-#         'request_handler': {
-#             'level': 'DEBUG',
-#             'filters': ['require_debug_false'],
-#             'class': 'logging.StreamHandler',
-#             'formatter': 'verbose',
-#         }
-#     },
-#     'loggers': {
-#         'django.db.backends': {
-#             'level': 'DEBUG',
-#             'handlers': ['console'],
-#         },
-#         'django.request': {
-#             'handlers': ['console', 'request_handler'],
-#             'level': 'DEBUG',
-#             'propagate': False,
-#         },
-#     }
-# }
+ENV = os.environ.get('ENVIRONMENT', 'development')
+
+if ENV and ENV != 'development':
+    LOGGING = {
+        'version': 1,
+        'disable_existing_loggers': False,
+        'formatters': {
+            'verbose': {
+                'format': '%(levelname)s %(asctime)s %(message)s'
+            },
+            'simple': {
+                'format': '%(levelname)s %(message)s'
+            },
+        },
+        'handlers': {
+            'console': {
+                'level': 'DEBUG',
+                'class': 'logging.StreamHandler',
+                'formatter': 'verbose',
+            },
+            'request_handler': {
+                'level': 'DEBUG',
+                'class': 'logging.StreamHandler',
+                'formatter': 'verbose',
+            }
+        },
+        'loggers': {
+            'django.db.backends': {
+                'level': 'DEBUG',
+                'handlers': ['console'],
+            },
+            'django.request': {
+                'handlers': ['console', 'request_handler'],
+                'level': 'DEBUG',
+                'propagate': False,
+            },
+        }
+    }
 
 # Password validation
 # https://docs.djangoproject.com/en/3.0/ref/settings/#auth-password-validators
@@ -332,7 +325,6 @@ ELASTICSEARCH_DSL_SIGNAL_PROCESSOR = 'core.common.models.CelerySignalProcessor'
 ES_SYNC = True
 USE_X_FORWARDED_HOST = True
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
-ENV = os.environ.get('ENVIRONMENT', 'development')
 # Only used for flower
 FLOWER_USER = os.environ.get('FLOWER_USER', 'root')
 FLOWER_PASSWORD = os.environ.get('FLOWER_PASSWORD', 'Root123')
