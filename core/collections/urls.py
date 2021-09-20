@@ -1,4 +1,4 @@
-from django.urls import re_path, include
+from django.urls import re_path
 
 from core.collections.feeds import CollectionFeed
 from core.common.constants import NAMESPACE_PATTERN

@@ -379,7 +379,7 @@ class Collection(ConceptContainerModel):
 
         return mapping_uris
 
-    def cascade_children_to_expansion(self, expansion_data=None, index=True):
+    def cascade_children_to_expansion(self, expansion_data=None, index=True):  # pylint: disable=arguments-differ
         if not expansion_data:
             expansion_data = dict()
         expansion = Expansion.persist(index=index, **expansion_data, collection_version=self)

@@ -6,7 +6,7 @@ from celery_once import AlreadyQueued
 from mock import patch, Mock, ANY
 from rest_framework.exceptions import ErrorDetail
 
-from core.collections.models import CollectionReference, Collection, Expansion
+from core.collections.models import CollectionReference, Collection
 from core.collections.serializers import CollectionVersionExportSerializer, CollectionReferenceSerializer
 from core.collections.tests.factories import OrganizationCollectionFactory, UserCollectionFactory, ExpansionFactory
 from core.common.tasks import export_collection

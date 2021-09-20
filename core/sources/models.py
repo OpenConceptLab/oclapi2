@@ -215,4 +215,3 @@ class Source(ConceptContainerModel):
 
         self.batch_index(self.concepts, ConceptDocument)
         self.batch_index(self.mappings, MappingDocument)
-
