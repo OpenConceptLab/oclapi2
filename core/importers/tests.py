@@ -570,8 +570,8 @@ class BulkImportViewTest(OCLAPITestCase):
 
     @patch('core.importers.views.flower_get')
     def test_get_without_task_id(self, flower_get_mock):
-        task_id1 = f"{str(uuid.uuid4())}-{'ocladmin'}~{'priority'}"
-        task_id2 = f"{str(uuid.uuid4())}-{'foobar'}~{'normal'}"
+        task_id1 = f"{str(uuid.uuid4())}-ocladmin~priority"
+        task_id2 = f"{str(uuid.uuid4())}-foobar~normal"
         flower_tasks = {
             task_id1: dict(name='core.common.tasks.bulk_import', state='success'),
             task_id2: dict(name='core.common.tasks.bulk_import', state='failed'),
@@ -620,8 +620,8 @@ class BulkImportViewTest(OCLAPITestCase):
 
     @patch('core.importers.views.AsyncResult')
     def test_get_with_task_id_success(self, async_result_klass_mock):
-        task_id1 = f"{str(uuid.uuid4())}-{'ocladmin'}~{'priority'}"
-        task_id2 = f"{str(uuid.uuid4())}-{'foobar'}~{'normal'}"
+        task_id1 = f"{str(uuid.uuid4())}-ocladmin'~priority"
+        task_id2 = f"{str(uuid.uuid4())}-foobar~normal"
         foobar_user = UserProfileFactory(username='foobar')
 
         response = self.client.get(
@@ -636,7 +636,7 @@ class BulkImportViewTest(OCLAPITestCase):
         async_result_klass_mock.return_value = async_result_instance_mock
 
         response = self.client.get(
-            '/importers/bulk-import/?task={}'.format(task_id2),
+            f'/importers/bulk-import/?task={task_id2}',
             HTTP_AUTHORIZATION='Token ' + foobar_user.get_token(),
             format='json'
         )
@@ -652,7 +652,7 @@ class BulkImportViewTest(OCLAPITestCase):
         self.assertEqual(response.data, 'json-format')
 
         response = self.client.get(
-            '/importers/bulk-import/?task={}&result=report'.format(task_id2),
+            f'/importers/bulk-import/?task={task_id2}&result=report',
             HTTP_AUTHORIZATION='Token ' + foobar_user.get_token(),
             format='json'
         )
@@ -663,7 +663,7 @@ class BulkImportViewTest(OCLAPITestCase):
 
     @patch('core.importers.views.AsyncResult')
     def test_get_with_task_id_failed(self, async_result_klass_mock):
-        task_id = "{}-{}~{}".format(str(uuid.uuid4()), 'foobar', 'normal')
+        task_id = f"{str(uuid.uuid4())}-foobar~normal"
         foobar_user = UserProfileFactory(username='foobar')
 
         async_result_instance_mock = Mock(
@@ -685,7 +685,7 @@ class BulkImportViewTest(OCLAPITestCase):
     @patch('core.importers.views.AsyncResult')
     def test_get_task_pending(self, async_result_klass_mock, task_exists_mock):
         task_exists_mock.return_value = False
-        task_id = "{}-{}~{}".format(str(uuid.uuid4()), 'foobar', 'normal')
+        task_id = f"{str(uuid.uuid4())}-foobar~normal"
         foobar_user = UserProfileFactory(username='foobar')
 
         async_result_instance_mock = Mock(
@@ -700,7 +700,7 @@ class BulkImportViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 404)
-        self.assertEqual(response.data, dict(exception="task {} not found".format(task_id)))
+        self.assertEqual(response.data, dict(exception=f"task {task_id} not found"))
 
         async_result_instance_mock.successful.assert_called_once()
         async_result_instance_mock.failed.assert_called_once()

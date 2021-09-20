@@ -597,7 +597,8 @@ class CollectionVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertTrue(self.collection.versions.first().is_latest_version)
 
         response = self.client.delete(
-            f'/users/{self.collection.parent.mnemonic}/collections/{self.collection.mnemonic}/{self.collection.version}/',
+            f'/users/{self.collection.parent.mnemonic}/collections/'
+            f'{self.collection.mnemonic}/{self.collection.version}/',
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
