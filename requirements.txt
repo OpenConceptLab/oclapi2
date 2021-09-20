@@ -3,12 +3,12 @@ psycopg2==2.9.1
 gunicorn==20.1.0 #production server
 whitenoise==5.3.0 #serving swagger static files
 djangorestframework==3.12.4
-pylint==2.10.2
+pylint==2.11.1
 pydash==5.0.2
 django-cors-headers==3.8.0
 pyyaml==5.4.1
 colour_runner==0.1.1
-boto3==1.18.42
+boto3==1.18.44
 moto==2.2.6
 python-dateutil==2.8.2
 requests==2.26.0
