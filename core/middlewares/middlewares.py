@@ -25,16 +25,12 @@ class RequestLogMiddleware(BaseMiddleware):
         remote_addr = request.META.get('REMOTE_ADDR')
         user = self.get_user(request)
         username = user.username
-        request_logger.info(colorize("{} {} {} {}".format(
-            username, remote_addr, request.method, request.get_full_path()
-        ), fg="cyan"))
+        request_logger.info(colorize(f"{username} {remote_addr} {request.method} {request.get_full_path()}", fg="cyan"))
         self.log_body(self.chunked_to_max(request.body))
 
         response = self.get_response(request)
         response_time = time() - getattr(request, 'request_start_time', time())
-        resp_log = "{} sec {} {} : {}".format(
-            response_time, request.method, request.get_full_path(), response.status_code
-        )
+        resp_log = f"{response_time} sec {request.method} {request.get_full_path()} : {response.status_code}"
         if response.status_code in range(400, 600):
             request_logger.info(colorize(resp_log, fg="magenta"))
             self.log_resp_body(response, level=logging.ERROR)
@@ -63,7 +59,7 @@ class RequestLogMiddleware(BaseMiddleware):
         ):
             return
 
-        self.log_body('{}, - {}'.format(self.chunked_to_max(response.content), response.status_code), level)
+        self.log_body(f'{self.chunked_to_max(response.content)}, - {response.status_code}', level)
 
     @staticmethod
     def log_body(msg, level=logging.DEBUG):
@@ -74,7 +70,7 @@ class RequestLogMiddleware(BaseMiddleware):
     @staticmethod
     def chunked_to_max(msg):
         if len(msg) > MAX_BODY_LENGTH:
-            return "{0}\n...\n".format(msg[0:MAX_BODY_LENGTH])
+            return f"{msg[0:MAX_BODY_LENGTH]}\n...\n"
 
         return msg
 

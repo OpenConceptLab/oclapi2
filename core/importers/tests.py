@@ -570,8 +570,8 @@ class BulkImportViewTest(OCLAPITestCase):
 
     @patch('core.importers.views.flower_get')
     def test_get_without_task_id(self, flower_get_mock):
-        task_id1 = "{}-{}~{}".format(str(uuid.uuid4()), 'ocladmin', 'priority')
-        task_id2 = "{}-{}~{}".format(str(uuid.uuid4()), 'foobar', 'normal')
+        task_id1 = f"{str(uuid.uuid4())}-{'ocladmin'}~{'priority'}"
+        task_id2 = f"{str(uuid.uuid4())}-{'foobar'}~{'normal'}"
         flower_tasks = {
             task_id1: dict(name='core.common.tasks.bulk_import', state='success'),
             task_id2: dict(name='core.common.tasks.bulk_import', state='failed'),
@@ -620,12 +620,12 @@ class BulkImportViewTest(OCLAPITestCase):
 
     @patch('core.importers.views.AsyncResult')
     def test_get_with_task_id_success(self, async_result_klass_mock):
-        task_id1 = "{}-{}~{}".format(str(uuid.uuid4()), 'ocladmin', 'priority')
-        task_id2 = "{}-{}~{}".format(str(uuid.uuid4()), 'foobar', 'normal')
+        task_id1 = f"{str(uuid.uuid4())}-{'ocladmin'}~{'priority'}"
+        task_id2 = f"{str(uuid.uuid4())}-{'foobar'}~{'normal'}"
         foobar_user = UserProfileFactory(username='foobar')
 
         response = self.client.get(
-            '/importers/bulk-import/?task={}'.format(task_id1),
+            f'/importers/bulk-import/?task={task_id1}',
             HTTP_AUTHORIZATION='Token ' + foobar_user.get_token(),
             format='json'
         )
@@ -644,7 +644,7 @@ class BulkImportViewTest(OCLAPITestCase):
         self.assertEqual(response.data, 'summary')
 
         response = self.client.get(
-            '/importers/bulk-import/?task={}&result=json'.format(task_id2),
+            f'/importers/bulk-import/?task={task_id2}&result=json',
             HTTP_AUTHORIZATION='Token ' + foobar_user.get_token(),
             format='json'
         )
@@ -672,7 +672,7 @@ class BulkImportViewTest(OCLAPITestCase):
         async_result_klass_mock.return_value = async_result_instance_mock
 
         response = self.client.get(
-            '/importers/bulk-import/?task={}'.format(task_id),
+            f'/importers/bulk-import/?task={task_id}',
             HTTP_AUTHORIZATION='Token ' + foobar_user.get_token(),
             format='json'
         )
@@ -694,7 +694,7 @@ class BulkImportViewTest(OCLAPITestCase):
         async_result_klass_mock.return_value = async_result_instance_mock
 
         response = self.client.get(
-            '/importers/bulk-import/?task={}'.format(task_id),
+            f'/importers/bulk-import/?task={task_id}',
             HTTP_AUTHORIZATION='Token ' + foobar_user.get_token(),
             format='json'
         )
@@ -708,7 +708,7 @@ class BulkImportViewTest(OCLAPITestCase):
 
         task_exists_mock.return_value = True
         response = self.client.get(
-            '/importers/bulk-import/?task={}'.format(task_id),
+            f'/importers/bulk-import/?task={task_id}',
             HTTP_AUTHORIZATION='Token ' + foobar_user.get_token(),
             format='json'
         )

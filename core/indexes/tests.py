@@ -121,6 +121,6 @@ class ResourceIndexViewTest(OCLAPITestCase):
         concept = ConceptFactory()
         url = '/indexes/resources/concepts/'
 
-        response = self.client.post(url, dict(ids='{}'.format(concept.mnemonic)), HTTP_AUTHORIZATION=self.token_header)
+        response = self.client.post(url, dict(ids=f'{concept.mnemonic}'), HTTP_AUTHORIZATION=self.token_header)
 
         self.assertEqual(response.status_code, 202)

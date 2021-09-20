@@ -180,7 +180,7 @@ def __run_search_index_command(command, app_names=None):
         return
 
     if app_names:
-        call_command('search_index', '%s' % command, '-f', '--models', *app_names, '--parallel')
+        call_command('search_index', f'{command}', '-f', '--models', *app_names, '--parallel')
     else:
         call_command('search_index', command, '-f', '--parallel')
 
@@ -390,11 +390,11 @@ def delete_duplicate_locales(start_from=None):  # pragma: no cover
     total = queryset.count()
     batch_size = 1000
 
-    logger.info('%d concepts with more than one locales. Getting them in batches of %d...' % (total, batch_size))  # pylint: disable=logging-not-lazy
+    logger.info(f'{total:d} concepts with more than one locales. Getting them in batches of {batch_size:d}...')  # pylint: disable=logging-not-lazy
 
     for start in range(start_from, total, batch_size):
         end = min(start + batch_size, total)
-        logger.info('Iterating concepts %d - %d...' % (start + 1, end))  # pylint: disable=logging-not-lazy
+        logger.info(f'Iterating concepts {start + 1:d} - {end:d}...')  # pylint: disable=logging-not-lazy
         concepts = queryset.order_by('id')[start:end]
         for concept in concepts:
             logger.info('Cleaning up %s', concept.mnemonic)
@@ -417,12 +417,12 @@ def delete_dormant_locales():  # pragma: no cover
     from core.concepts.models import LocalizedText
     queryset = LocalizedText.get_dormant_queryset()
     total = queryset.count()
-    logger.info('%s Dormant locales found. Deleting in batches...' % total)  # pylint: disable=logging-not-lazy
+    logger.info(f'{total} Dormant locales found. Deleting in batches...')  # pylint: disable=logging-not-lazy
 
     batch_size = 1000
     for start in range(0, total, batch_size):
         end = min(start + batch_size, total)
-        logger.info('Iterating locales %d - %d to delete...' % (start + 1, end))  # pylint: disable=logging-not-lazy
+        logger.info(f'Iterating locales {start + 1:d} - {end:d} to delete...')  # pylint: disable=logging-not-lazy
         LocalizedText.objects.filter(id__in=queryset.order_by('id')[start:end].values('id')).delete()
 
     return 1

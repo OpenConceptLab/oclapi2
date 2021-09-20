@@ -366,8 +366,7 @@ class ConceptImporter(BaseResourceImporter):
         if self.queryset:
             return self.queryset
 
-        parent_uri = '/{}/{}/sources/{}/'.format(
-            'users' if self.is_user_owner() else 'orgs', self.get('owner'), self.get('source'))
+        parent_uri = f'/{"users" if self.is_user_owner() else "orgs"}/{self.get("owner")}/sources/{self.get("source")}/'
         self.queryset = Concept.objects.filter(
             parent__uri=parent_uri, mnemonic=self.get('id'), id=F('versioned_object_id')
         )
@@ -430,8 +429,7 @@ class MappingImporter(BaseResourceImporter):
         to_concept_code = self.get('to_concept_code')
         from_concept_code = self.get('from_concept_code')
         to_source_url = self.get('to_source_url')
-        parent_uri = '/{}/{}/sources/{}/'.format(
-            'users' if self.is_user_owner() else 'orgs', self.get('owner'), self.get('source'))
+        parent_uri = f'/{"users" if self.is_user_owner() else "orgs"}/{self.get("owner")}/sources/{self.get("source")}/'
         filters = {
             'parent__uri': parent_uri,
             'id': F('versioned_object_id'),
@@ -597,7 +595,7 @@ class BulkImportInline(BaseImporter):
     def run(self):
         if self.self_task_id:
             print("****STARTED SUBPROCESS****")
-            print("TASK ID: {}".format(self.self_task_id))
+            print(f"TASK ID: {self.self_task_id}")
             print("***************")
         for original_item in self.input_list:
             self.processed += 1
@@ -660,10 +658,9 @@ class BulkImportInline(BaseImporter):
 
     @property
     def detailed_summary(self):
-        return "Processed: {}/{} | Created: {} | Updated: {} | DELETED: {} | Existing: {} | Time: {}secs".format(
-            self.processed, self.total, len(self.created), len(self.updated), len(self.deleted),
-            len(self.exists), self.elapsed_seconds
-        )
+        return f"Processed: {self.processed}/{self.total} | Created: {len(self.created)} | " \
+            f"Updated: {len(self.updated)} | DELETED: {len(self.deleted)} | Existing: {len(self.exists)} | " \
+            f"Time: {self.elapsed_seconds}secs"
 
     @property
     def json_result(self):
@@ -784,9 +781,9 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
         return total_processed
 
     def get_details_to_notify(self):
-        summary = "Started: {} | Processed: {}/{} | Time: {}secs".format(
-            self.start_time_formatted, self.get_overall_tasks_progress(), self.total, self.elapsed_seconds
-        )
+        summary = f"Started: {self.start_time_formatted} | " \
+            f"Processed: {self.get_overall_tasks_progress()}/{self.total} | " \
+            f"Time: {self.elapsed_seconds}secs"
 
         return dict(summary=summary)
 
@@ -809,7 +806,7 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
     def run(self):
         if self.self_task_id:
             print("****STARTED MAIN****")
-            print("TASK ID: {}".format(self.self_task_id))
+            print(f"TASK ID: {self.self_task_id}")
             print("***************")
         while len(self.parts) > 0:
             part_list = self.parts.popleft()
@@ -837,12 +834,10 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
     @property
     def detailed_summary(self):
         result = self.json_result
-        return "Started: {} | Processed: {}/{} | Created: {} | Updated: {} | Deleted: {} | " \
-            "Existing: {} | Time: {}secs".format(
-                self.start_time_formatted, result.get('processed'), result.get('total'),
-                len(result.get('created')), len(result.get('updated')), len(result.get('deleted')),
-                len(result.get('exists')), self.elapsed_seconds
-            )
+        return f"Started: {self.start_time_formatted} | Processed: {result.get('processed')}/{result.get('total')} | " \
+            f"Created: {len(result.get('created'))} | Updated: {len(result.get('updated'))} | " \
+            f"Deleted: {len(result.get('deleted'))} | Existing: {len(result.get('exists'))} | " \
+            f"Time: {self.elapsed_seconds}secs"
 
     @property
     def start_time_formatted(self):

@@ -190,9 +190,7 @@ class Collection(ConceptContainerModel):
 
     @staticmethod
     def __get_children_list_url(child_type, host_url, data):
-        return "{host_url}{uri}{child_type}?q={search_term}&limit=0".format(
-            host_url=host_url, uri=data.get('uri'), child_type=child_type, search_term=data.get('search_term', '')
-        )
+        return f"{host_url}{data.get('uri')}{child_type}?q={data.get('search_term', '')}&limit=0"
 
     @transaction.atomic
     def add_expressions(self, data, host_url, user, cascade_mappings=False):

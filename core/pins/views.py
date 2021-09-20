@@ -58,7 +58,7 @@ class PinListView(PinBaseView, ListAPIView):
             return Response(status=status.HTTP_404_NOT_FOUND)
         if parent.pins.count() >= MAX_PINS_ALLOWED:
             return Response(
-                dict(error=["Can only keep max {} items pinned".format(MAX_PINS_ALLOWED)]),
+                dict(error=[f"Can only keep max {MAX_PINS_ALLOWED} items pinned"]),
                 status=status.HTTP_404_NOT_FOUND
             )
 

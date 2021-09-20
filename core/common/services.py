@@ -123,10 +123,7 @@ class S3:
 
     @classmethod
     def public_url_for(cls, file_path):
-        url = "http://{0}.s3.amazonaws.com/{1}".format(
-            settings.AWS_STORAGE_BUCKET_NAME,
-            file_path,
-        )
+        url = f"http://{settings.AWS_STORAGE_BUCKET_NAME}.s3.amazonaws.com/{file_path}"
         if settings.ENV != 'development':
             url = url.replace('http://', 'https://')
         return url

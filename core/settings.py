@@ -282,7 +282,7 @@ API_SUPERUSER_TOKEN = os.environ.get('API_SUPERUSER_TOKEN', '891b4b17feab99f3ff7
 REDIS_PORT = os.environ.get('REDIS_PORT', 6379)
 REDIS_DB = 0
 REDIS_HOST = os.environ.get('REDIS_HOST', 'redis')
-REDIS_URL = "redis://{}:{}".format(REDIS_HOST, REDIS_PORT)  # needed for healthcheck
+REDIS_URL = f"redis://{REDIS_HOST}:{REDIS_PORT}"  # needed for healthcheck
 
 # Celery
 CELERY_ENABLE_UTC = True
@@ -306,7 +306,7 @@ CELERY_TASK_ROUTES = {
     'core.common.tasks.populate_indexes': {'queue': 'indexing'},
     'core.common.tasks.rebuild_indexes': {'queue': 'indexing'}
 }
-CELERY_RESULT_BACKEND = 'redis://%s:%s/%s' % (REDIS_HOST, REDIS_PORT, REDIS_DB)
+CELERY_RESULT_BACKEND = f'redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}'
 CELERY_RESULT_EXTENDED = True
 CELERY_RESULT_BACKEND_TRANSPORT_OPTIONS = {
     'retry_policy': {
@@ -361,7 +361,7 @@ if ENV and ENV != 'development':
 if not ENV or ENV in ['production']:
     EMAIL_SUBJECT_PREFIX = '[Openconceptlab.org] '
 else:
-    EMAIL_SUBJECT_PREFIX = '[Openconceptlab.org] [{}]'.format(ENV.upper())
+    EMAIL_SUBJECT_PREFIX = f'[Openconceptlab.org] [{ENV.upper()}]'
 
 if not ENV or ENV in ['development', 'ci']:
     EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'

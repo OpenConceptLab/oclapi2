@@ -150,9 +150,7 @@ class MappingTest(OCLTestCase):
         self.assertEqual(source.mappings.count(), 2)
         self.assertEqual(
             mapping.uri,
-            '/orgs/{}/sources/{}/mappings/{}/'.format(
-                source.organization.mnemonic, source.mnemonic, mapping.mnemonic
-            )
+            f'/orgs/{source.organization.mnemonic}/sources/{source.mnemonic}/mappings/{mapping.mnemonic}/'
         )
 
     def test_persist_clone(self):
@@ -185,10 +183,8 @@ class MappingTest(OCLTestCase):
         self.assertEqual(source_head.mappings.first().id, persisted_mapping.id)
         self.assertEqual(
             persisted_mapping.uri,
-            '/orgs/{}/sources/{}/{}/mappings/{}/{}/'.format(
-                source_version0.organization.mnemonic, source_version0.mnemonic, source_version0.version,
-                persisted_mapping.mnemonic, persisted_mapping.version
-            )
+            f'/orgs/{source_version0.organization.mnemonic}/sources/{source_version0.mnemonic}/'
+            f'{source_version0.version}/mappings/{persisted_mapping.mnemonic}/{persisted_mapping.version}/'
         )
         self.assertEqual(
             persisted_mapping.version_url, persisted_mapping.uri

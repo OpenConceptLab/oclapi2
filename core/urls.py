@@ -34,7 +34,7 @@ SchemaView = get_schema_view(
     openapi.Info(
         title="OCL API",
         default_version=VERSION,
-        description="OCL API ({})".format(VERSION),
+        description=f"OCL API ({VERSION})",
     ),
     public=True,
     permission_classes=(permissions.AllowAny,),
@@ -70,7 +70,7 @@ urlpatterns = [
 
     # just for ocldev
     re_path(
-        'manage/bulkimport/(?P<import_queue>{pattern})/'.format(pattern=NAMESPACE_PATTERN),
+        f'manage/bulkimport/(?P<import_queue>{NAMESPACE_PATTERN})/',
         BulkImportView.as_view(),
         name='bulk_import_detail_url'
     ),

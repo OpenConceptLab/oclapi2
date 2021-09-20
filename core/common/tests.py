@@ -443,13 +443,13 @@ class UtilsTest(OCLTestCase):
     def test_parse_bulk_import_task_id(self):
         task_uuid = str(uuid.uuid4())
 
-        task_id = "{}-{}~{}".format(task_uuid, 'username', 'queue')
+        task_id = f"{task_uuid}-username~queue"
         self.assertEqual(
             parse_bulk_import_task_id(task_id),
             dict(uuid=task_uuid + '-', username='username', queue='queue')
         )
 
-        task_id = "{}-{}".format(task_uuid, 'username')
+        task_id = f"{task_uuid}-username"
         self.assertEqual(
             parse_bulk_import_task_id(task_id),
             dict(uuid=task_uuid + '-', username='username', queue='default')

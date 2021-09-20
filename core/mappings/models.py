@@ -134,7 +134,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
 
     @property
     def from_source_shorthand(self):
-        return "%s:%s" % (self.from_source_owner_mnemonic, self.from_source_name)
+        return f"{self.from_source_owner_mnemonic}:{self.from_source_name}"
 
     @property
     def from_concept_url(self):
@@ -142,7 +142,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
 
     @property
     def from_concept_shorthand(self):
-        return "%s:%s" % (self.from_source_shorthand, self.from_concept_code)
+        return f"{self.from_source_shorthand}:{self.from_concept_code}"
 
     def get_to_source(self):
         if self.to_source_id:
@@ -178,7 +178,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
 
     @property
     def to_source_shorthand(self):
-        return self.get_to_source() and "%s:%s" % (self.to_source_owner_mnemonic, self.to_source_name)
+        return self.get_to_source() and f"{self.to_source_owner_mnemonic}:{self.to_source_name}"
 
     def get_to_concept_name(self):
         return self.to_concept_name or get(self, 'to_concept.display_name')
@@ -192,7 +192,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
 
     @property
     def to_concept_shorthand(self):
-        return "%s:%s" % (self.to_source_shorthand, self.get_to_concept_code())
+        return f"{self.to_source_shorthand}:{self.get_to_concept_code()}"
 
     @staticmethod
     def get_resource_url_kwarg():

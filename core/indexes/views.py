@@ -57,7 +57,7 @@ class ResourceIndexView(APIView):
         if ids:
             ids = compact([i.strip() for i in compact(ids.split(','))])
             if ids:
-                filters = {"{}__in".format(model.mnemonic_attr): ids}
+                filters = {f"{model.mnemonic_attr}__in": ids}
         elif uri:
             filters = dict(uri__icontains=uri)
         if not filters:

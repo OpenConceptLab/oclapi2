@@ -177,7 +177,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         return search_str
 
     def get_wildcard_search_string(self, _str):
-        return "*{}*".format(_str or self.get_search_string())
+        return f"*{_str or self.get_search_string()}*"
 
     @staticmethod
     def __get_order_by(is_desc):
@@ -272,8 +272,8 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         is_user_specified = 'user' in kwargs
         if is_collection_specified:
             filters['collection'] = kwargs['collection']
-            filters['collection_owner_url'] = '/users/{}/'.format(
-                kwargs['user']) if is_user_specified else '/orgs/{}/'.format(kwargs['org'])
+            filters['collection_owner_url'] = f'/users/{kwargs["user"]}/' if is_user_specified else \
+                f'/orgs/{kwargs["org"]}/'
         else:
             if is_user_specified:
                 filters['ownerType'] = USER_OBJECT_TYPE
@@ -319,9 +319,9 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                 owner_type = filters.pop('ownerType', None)
                 owner = filters.pop('owner', None)
                 if owner_type == USER_OBJECT_TYPE:
-                    filters['collection_owner_url'] = "/users/{}/".format(owner)
+                    filters['collection_owner_url'] = f"/users/{owner}/"
                 if owner_type == ORG_OBJECT_TYPE:
-                    filters['collection_owner_url'] = "/orgs/{}/".format(owner)
+                    filters['collection_owner_url'] = f"/orgs/{owner}/"
                 if not is_version_specified:
                     filters['collection_version'] = HEAD
             if is_source_specified and not is_version_specified:
@@ -477,7 +477,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                     results = results.filter("query_string", query=value, fields=[field])
             if extras_fields_exists:
                 for field in extras_fields_exists:
-                    results = results.query("exists", field="extras.{}".format(field))
+                    results = results.query("exists", field=f"extras.{field}")
             if extras_fields_exact:
                 for field, value in extras_fields_exact.items():
                     value = value.replace('/', '\\/')
@@ -680,7 +680,7 @@ class SourceChildExtraRetrieveUpdateDestroyView(SourceChildExtrasBaseView, Retri
 
         new_version = self.get_object().clone()
         new_version.extras[key] = value
-        new_version.comment = 'Updated extras: %s=%s.' % (key, value)
+        new_version.comment = f'Updated extras: {key}={value}.'
         errors = self.model.persist_clone(new_version, request.user)
         if errors:
             return Response(errors, status=status.HTTP_400_BAD_REQUEST)
@@ -691,7 +691,7 @@ class SourceChildExtraRetrieveUpdateDestroyView(SourceChildExtrasBaseView, Retri
         new_version = self.get_object().clone()
         if key in new_version.extras:
             del new_version.extras[key]
-            new_version.comment = 'Deleted extra %s.' % key
+            new_version.comment = f'Deleted extra {key}.'
             errors = self.model.persist_clone(new_version, request.user)
             if errors:
                 return Response(errors, status=status.HTTP_400_BAD_REQUEST)
@@ -787,7 +787,7 @@ class FeedbackView(APIView):  # pragma: no cover
             email = email or None
 
         message += '\n\n' + 'Reported By: ' + username
-        subject = "[{env}] [FEEDBACK] From: {user}".format(env=settings.ENV.upper(), user=username)
+        subject = f"[{settings.ENV.upper()}] [FEEDBACK] From: {username}"
 
         mail = EmailMessage(
             subject=subject,

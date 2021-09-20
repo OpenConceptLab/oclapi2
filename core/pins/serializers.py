@@ -71,7 +71,7 @@ class PinSerializer(serializers.ModelSerializer):
         )
 
         if not resource:
-            self._errors['resource'] = 'Resource type %s with id %s does not exists.' % (resource_type, resource_id)
+            self._errors['resource'] = f'Resource type {resource_type} with id {resource_id} does not exists.'
             return item
 
         try:

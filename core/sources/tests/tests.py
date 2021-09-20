@@ -46,10 +46,7 @@ class SourceTest(OCLTestCase):
         self.assertEqual(source.get_latest_version(), source)
         self.assertEqual(source.version, 'HEAD')
         self.assertFalse(source.released)
-        self.assertEqual(
-            source.uri,
-            '/users/{username}/sources/{source}/'.format(username=self.user.username, source=source.mnemonic)
-        )
+        self.assertEqual(source.uri, f'/users/{self.user.username}/sources/{source.mnemonic}/')
 
     def test_persist_new_negative__no_parent(self):
         errors = Source.persist_new(self.new_source, self.user)
@@ -88,7 +85,7 @@ class SourceTest(OCLTestCase):
 
         name = saved_source.name
 
-        self.new_source.name = "%s_prime" % name
+        self.new_source.name = f"{name}_prime"
         self.new_source.source_type = 'Reference'
 
         errors = Source.persist_changes(self.new_source, self.user, None, **kwargs)
@@ -101,7 +98,7 @@ class SourceTest(OCLTestCase):
         self.assertEqual(updated_source.source_type, 'Reference')
         self.assertEqual(
             updated_source.uri,
-            '/users/{username}/sources/{source}/'.format(username=self.user.username, source=updated_source.mnemonic)
+            f'/users/{self.user.username}/sources/{updated_source.mnemonic}/'
         )
 
     def test_persist_changes_negative__repeated_mnemonic(self):
@@ -140,10 +137,7 @@ class SourceTest(OCLTestCase):
         self.assertEqual(source_version, source.get_latest_version())
         self.assertEqual(
             source_version.uri,
-            '/orgs/{org}/sources/{source}/{version}/'.format(
-                org=source_version.organization.mnemonic,
-                source=source_version.mnemonic, version=source_version.version
-            )
+            f'/orgs/{source_version.organization.mnemonic}/sources/{source_version.mnemonic}/{source_version.version}/'
         )
 
     def test_source_version_create_negative__same_version(self):

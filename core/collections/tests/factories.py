@@ -11,8 +11,8 @@ class OrganizationCollectionFactory(factory.django.DjangoModelFactory):
     class Meta:
         model = Collection
 
-    mnemonic = Sequence("collection{}".format)
-    name = Sequence("collection{}".format)
+    mnemonic = Sequence("collection{}".format)  # pylint: disable=consider-using-f-string
+    name = Sequence("collection{}".format)  # pylint: disable=consider-using-f-string
     collection_type = "Dictionary"
     public_access = ACCESS_TYPE_EDIT
     default_locale = "en"
@@ -27,8 +27,8 @@ class UserCollectionFactory(factory.django.DjangoModelFactory):
     class Meta:
         model = Collection
 
-    mnemonic = Sequence("collection{}".format)
-    name = Sequence("collection{}".format)
+    mnemonic = Sequence("collection{}".format)  # pylint: disable=consider-using-f-string
+    name = Sequence("collection{}".format)  # pylint: disable=consider-using-f-string
     collection_type = "Dictionary"
     public_access = ACCESS_TYPE_EDIT
     default_locale = "en"

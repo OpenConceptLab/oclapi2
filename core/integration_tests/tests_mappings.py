@@ -640,7 +640,7 @@ class MappingVersionRetrieveViewTest(OCLAPITestCase):
     def test_get_200(self):
         latest_version = self.mapping.get_latest_version()
 
-        response = self.client.get(self.mapping.url + '{}/'.format(latest_version.id))
+        response = self.client.get(self.mapping.url + f'{latest_version.id}/')
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['is_latest_version'], True)

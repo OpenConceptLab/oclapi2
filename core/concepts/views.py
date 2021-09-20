@@ -381,14 +381,14 @@ class ConceptLabelListCreateView(ConceptBaseView, ListWithHeadersMixin, ListCrea
         if serializer.is_valid():
             instance = self.get_object()
             new_version = instance.clone()
-            subject_label_attr = "cloned_{}".format(self.parent_list_attribute)
+            subject_label_attr = f"cloned_{self.parent_list_attribute}"
             # get the current labels from the object
             labels = getattr(new_version, subject_label_attr, [])
             # If labels are None then we would want to initialize the labels in new_version
             saved_instance = serializer.save()
             labels.append(saved_instance)
             setattr(new_version, subject_label_attr, labels)
-            new_version.comment = 'Added to %s: %s.' % (self.parent_list_attribute, saved_instance.name)
+            new_version.comment = f'Added to {self.parent_list_attribute}: {saved_instance.name}.'
             # save updated ConceptVersion into database
             errors = Concept.persist_clone(new_version, request.user)
             if errors:
@@ -433,11 +433,11 @@ class ConceptLabelRetrieveUpdateDestroyView(ConceptBaseView, RetrieveUpdateDestr
             resource_instance = self.get_resource_object()
             new_version = resource_instance.clone()
             saved_instance = serializer.save()
-            subject_label_attr = "cloned_{}".format(self.parent_list_attribute)
+            subject_label_attr = f"cloned_{self.parent_list_attribute}"
             labels = getattr(new_version, subject_label_attr, [])
             labels.append(saved_instance)
             setattr(new_version, subject_label_attr, labels)
-            new_version.comment = 'Updated %s in %s.' % (saved_instance.name, self.parent_list_attribute)
+            new_version.comment = f'Updated {saved_instance.name} in {self.parent_list_attribute}.'
             errors = Concept.persist_clone(new_version, request.user)
             if errors:
                 return Response(errors, status=status.HTTP_400_BAD_REQUEST)
@@ -451,10 +451,10 @@ class ConceptLabelRetrieveUpdateDestroyView(ConceptBaseView, RetrieveUpdateDestr
         if instance:
             resource_instance = self.get_resource_object()
             new_version = resource_instance.clone()
-            subject_label_attr = "cloned_{}".format(self.parent_list_attribute)
+            subject_label_attr = f"cloned_{self.parent_list_attribute}"
             labels = [name.clone() for name in resource_instance.names.exclude(id=instance.id)]
             setattr(new_version, subject_label_attr, labels)
-            new_version.comment = 'Deleted %s in %s.' % (instance.name, self.parent_list_attribute)
+            new_version.comment = f'Deleted {instance.name} in {self.parent_list_attribute}.'
             errors = Concept.persist_clone(new_version, request.user)
             if errors:
                 return Response(errors, status=status.HTTP_400_BAD_REQUEST)

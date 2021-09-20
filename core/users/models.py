@@ -52,7 +52,7 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
 
     @property
     def name(self):
-        return "{} {}".format(self.first_name, self.last_name)
+        return f"{self.first_name} {self.last_name}"
 
     @property
     def full_name(self):
@@ -123,11 +123,11 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
 
     @property
     def email_verification_url(self):
-        return "{}/#/accounts/{}/verify/{}/".format(web_url(), self.username, self.verification_token)
+        return f"{web_url()}/#/accounts/{self.username}/verify/{self.verification_token}/"
 
     @property
     def reset_password_url(self):
-        return "{}/#/accounts/{}/password/reset/{}/".format(web_url(), self.username, self.verification_token)
+        return f"{web_url()}/#/accounts/{self.username}/password/reset/{self.verification_token}/"
 
     def mark_verified(self, token):
         if self.verified:

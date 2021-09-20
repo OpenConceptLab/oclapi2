@@ -507,19 +507,19 @@ class SourceChildMixin:
     def get_filter_by_container_criterion(  # pylint: disable=too-many-arguments
             cls, container_prefix, parent, org, user, container_version, is_latest_released, latest_released_version
     ):
-        criteria = cls.get_iexact_or_criteria('{}__mnemonic'.format(container_prefix), parent)
+        criteria = cls.get_iexact_or_criteria(f'{container_prefix}__mnemonic', parent)
 
         if not container_version and not is_latest_released:
-            criteria &= Q(**{'{}__version'.format(container_prefix): HEAD})
+            criteria &= Q(**{f'{container_prefix}__version': HEAD})
         if user:
-            criteria &= cls.get_iexact_or_criteria('{}__user__username'.format(container_prefix), user)
+            criteria &= cls.get_iexact_or_criteria(f'{container_prefix}__user__username', user)
         if org:
-            criteria &= cls.get_iexact_or_criteria('{}__organization__mnemonic'.format(container_prefix), org)
+            criteria &= cls.get_iexact_or_criteria(f'{container_prefix}__organization__mnemonic', org)
         if is_latest_released:
             criteria &= cls.get_iexact_or_criteria(
-                '{}__version'.format(container_prefix), get(latest_released_version, 'version'))
+                f'{container_prefix}__version', get(latest_released_version, 'version'))
         if container_version and not is_latest_released:
-            criteria &= cls.get_iexact_or_criteria('{}__version'.format(container_prefix), container_version)
+            criteria &= cls.get_iexact_or_criteria(f'{container_prefix}__version', container_version)
 
         return criteria
 
@@ -662,7 +662,7 @@ class ConceptContainerExtraRetrieveUpdateDestroyView(RetrieveUpdateDestroyAPIVie
         instance = self.get_object()
         instance.extras = get(instance, 'extras', {})
         instance.extras[key] = value
-        instance.comment = 'Updated extras: %s=%s.' % (key, value)
+        instance.comment = f'Updated extras: {key}={value}.'
         head = instance.get_head()
         head.extras = get(head, 'extras', {})
         head.extras.update(instance.extras)
@@ -676,7 +676,7 @@ class ConceptContainerExtraRetrieveUpdateDestroyView(RetrieveUpdateDestroyAPIVie
         instance.extras = get(instance, 'extras', {})
         if key in instance.extras:
             del instance.extras[key]
-            instance.comment = 'Deleted extra %s.' % key
+            instance.comment = f'Deleted extra {key}.'
             head = instance.get_head()
             head.extras = get(head, 'extras', {})
             del head.extras[key]

@@ -62,7 +62,7 @@ class ResourceReport:
 
     def get_instances(self):
         if self.instance_ids:
-            return self.queryset.filter(**{"{}__in".format(self.pk): self.instance_ids})
+            return self.queryset.filter(**{f"{self.pk}__in": self.instance_ids})
 
         return None
 
@@ -149,8 +149,8 @@ class UserReport(ResourceReport):
                         ('concepts', 'concept'), ('mappings', 'mapping'), ('sources', 'source'),
                         ('collections', 'collection'), ('users', 'userprofile'), ('orgs', 'organization')
                 ]:
-                    created = get(user, "{}_{}_related_created_by".format(app, model)).count()
-                    updated = get(user, "{}_{}_related_updated_by".format(app, model)).count()
+                    created = get(user, f"{app}_{model}_related_created_by").count()
+                    updated = get(user, f"{app}_{model}_related_updated_by").count()
                     user_result[app] = dict(created=created, updated=updated)
 
                 self.result[user.username] = user_result

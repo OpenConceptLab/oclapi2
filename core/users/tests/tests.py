@@ -278,7 +278,7 @@ class TasksTest(OCLTestCase):
         self.assertEqual(mail.subject, 'Confirm E-mail Address')
         self.assertEqual(mail.to, [user.email])
         self.assertTrue(user.email_verification_url in mail.body)
-        self.assertTrue('Hi {},'.format(user.username) in mail.body)
+        self.assertTrue(f'Hi {user.username},' in mail.body)
         send_mail_mock.assert_called_once()
 
     @patch('core.common.tasks.EmailMessage.send')
@@ -294,5 +294,5 @@ class TasksTest(OCLTestCase):
         self.assertEqual(mail.subject, 'Password Reset E-mail')
         self.assertEqual(mail.to, [user.email])
         self.assertTrue(user.reset_password_url in mail.body)
-        self.assertTrue('Hi {},'.format(user.username) in mail.body)
+        self.assertTrue(f'Hi {user.username},' in mail.body)
         send_mail_mock.assert_called_once()

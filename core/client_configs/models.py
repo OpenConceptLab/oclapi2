@@ -45,7 +45,7 @@ class ClientConfig(models.Model):
 
     @property
     def uri(self):
-        return "/client-configs/{}/".format(self.id)
+        return f"/client-configs/{self.id}/"
 
     def clean(self):
         self.errors = None

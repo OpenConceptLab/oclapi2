@@ -43,7 +43,7 @@ class Pin(OrderedModel):
     @property
     def uri(self):
         if self.parent:
-            return self.parent.uri + "pins/{}/".format(self.id)
+            return self.parent.uri + f"pins/{self.id}/"
 
         return None
 

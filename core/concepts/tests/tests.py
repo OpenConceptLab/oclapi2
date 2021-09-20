@@ -177,9 +177,7 @@ class ConceptTest(OCLTestCase):
         self.assertEqual(source.concepts.count(), 2)
         self.assertEqual(
             concept.uri,
-            '/orgs/{}/sources/{}/concepts/{}/'.format(
-                source.organization.mnemonic, source.mnemonic, concept.mnemonic
-            )
+            f'/orgs/{source.organization.mnemonic}/sources/{source.mnemonic}/concepts/{concept.mnemonic}/'
         )
 
     def test_hierarchy_one_parent_child(self):
@@ -677,10 +675,8 @@ class ConceptTest(OCLTestCase):
         self.assertEqual(source_head.concepts.first().id, persisted_concept.id)
         self.assertEqual(
             persisted_concept.uri,
-            '/orgs/{}/sources/{}/{}/concepts/{}/{}/'.format(
-                source_version0.organization.mnemonic, source_version0.mnemonic, source_version0.version,
-                persisted_concept.mnemonic, persisted_concept.version
-            )
+            f'/orgs/{source_version0.organization.mnemonic}/sources/{source_version0.mnemonic}/'
+            f'{source_version0.version}/concepts/{persisted_concept.mnemonic}/{persisted_concept.version}/'
         )
         self.assertEqual(
             persisted_concept.version_url, persisted_concept.uri

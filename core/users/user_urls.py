@@ -34,7 +34,7 @@ urlpatterns = [
         name='user-organization-collection-list'
     ),
     re_path(
-        r"^extras/(?P<extra>{pattern})/$".format(pattern=NAMESPACE_PATTERN),
+        fr"^extras/(?P<extra>{NAMESPACE_PATTERN})/$",
         views.UserExtraRetrieveUpdateDestroyView.as_view(),
         extra_kwargs,
         name='user-extra'

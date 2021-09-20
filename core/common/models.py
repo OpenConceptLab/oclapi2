@@ -128,9 +128,9 @@ class BaseModel(models.Model):
         entity_name = self.__class__.__name__.lower()
 
         if self.is_versioned and not self.is_head:
-            return "{}-version-detail".format(entity_name)
+            return f"{entity_name}-version-detail"
 
-        return "{}-detail".format(entity_name)
+        return f"{entity_name}-detail"
 
     @classmethod
     def pause_indexing(cls):
@@ -155,7 +155,7 @@ class BaseModel(models.Model):
             values = values.split(',')
 
         for value in values:
-            criteria = criteria | Q(**{'{}__iexact'.format(attr): value})
+            criteria = criteria | Q(**{f'{attr}__iexact': value})
 
         return criteria
 
@@ -721,10 +721,10 @@ class ConceptContainerModel(VersionedModel):
     @cached_property
     def export_path(self):
         last_update = self.last_child_update.strftime('%Y%m%d%H%M%S')
-        return self.generic_export_path(suffix="{}.zip".format(last_update))
+        return self.generic_export_path(suffix=f"{last_update}.zip")
 
     def generic_export_path(self, suffix='*'):
-        path = "{}/{}_{}.".format(self.parent_resource, self.mnemonic, self.version)
+        path = f"{self.parent_resource}/{self.mnemonic}_{self.version}."
         if suffix:
             path += suffix
 

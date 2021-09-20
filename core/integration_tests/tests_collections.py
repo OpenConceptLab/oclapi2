@@ -36,7 +36,7 @@ class CollectionListViewTest(OCLAPITestCase):
         self.assertEqual(response.data[0]['url'], coll.uri)
 
         response = self.client.get(
-            '/orgs/{}/collections/?verbose=true'.format(coll.parent.mnemonic),
+            f'/orgs/{coll.parent.mnemonic}/collections/?verbose=true',
             format='json'
         )
 
@@ -56,9 +56,8 @@ class CollectionListViewTest(OCLAPITestCase):
         coll.concepts.set(reference.concepts)
 
         response = self.client.get(
-            '/orgs/{}/collections/?contains={}&includeReferences=true'.format(
-                coll.parent.mnemonic, concept.get_latest_version().uri
-            ),
+            f'/orgs/{coll.parent.mnemonic}/collections/?contains={concept.get_latest_version().uri}'
+            f'&includeReferences=true',
             format='json'
         )
 
@@ -66,7 +65,7 @@ class CollectionListViewTest(OCLAPITestCase):
         self.assertEqual(len(response.data), 1)
 
         response = self.client.get(
-            '/orgs/{}/collections/?verbose=true&includeSummary=true'.format(coll.parent.mnemonic),
+            f'/orgs/{coll.parent.mnemonic}/collections/?verbose=true&includeSummary=true',
             format='json'
         )
 
@@ -315,7 +314,7 @@ class CollectionReferencesViewTest(OCLAPITestCase):
         self.assertEqual(response.data[0]['reference_type'], 'concepts')
 
         response = self.client.get(
-            self.collection.uri + 'references/?q={}&search_sort=desc'.format(self.concept.get_latest_version().uri),
+            self.collection.uri + f'references/?q={self.concept.get_latest_version().uri}&search_sort=desc',
             format='json'
         )
 
@@ -598,8 +597,7 @@ class CollectionVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertTrue(self.collection.versions.first().is_latest_version)
 
         response = self.client.delete(
-            '/users/{}/collections/{}/{}/'.format(
-                self.collection.parent.mnemonic, self.collection.mnemonic, self.collection.version),
+            f'/users/{self.collection.parent.mnemonic}/collections/{self.collection.mnemonic}/{self.collection.version}/',
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -801,13 +799,13 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 204)
-        s3_exists_mock.assert_called_once_with("username/coll_v1.{}.zip".format(self.v1_updated_at))
+        s3_exists_mock.assert_called_once_with(f"username/coll_v1.{self.v1_updated_at}.zip")
 
     @patch('core.common.services.S3.url_for')
     @patch('core.common.services.S3.exists')
     def test_get_303(self, s3_exists_mock, s3_url_for_mock):
         s3_exists_mock.return_value = True
-        s3_url = "https://s3/username/coll_v1.{}.zip".format(self.v1_updated_at)
+        s3_url = f"https://s3/username/coll_v1.{self.v1_updated_at}.zip"
         s3_url_for_mock.return_value = s3_url
 
         response = self.client.get(
@@ -820,13 +818,12 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
         self.assertEqual(response['Location'], s3_url)
         self.assertEqual(response['Last-Updated'], str(self.collection_v1.last_child_update.isoformat()))
         self.assertEqual(response['Last-Updated-Timezone'], 'America/New_York')
-        s3_exists_mock.assert_called_once_with("username/coll_v1.{}.zip".format(self.v1_updated_at))
-        s3_url_for_mock.assert_called_once_with("username/coll_v1.{}.zip".format(self.v1_updated_at))
+        s3_exists_mock.assert_called_once_with(f"username/coll_v1.{self.v1_updated_at}.zip")
+        s3_url_for_mock.assert_called_once_with(f"username/coll_v1.{self.v1_updated_at}.zip")
 
     def test_get_405(self):
         response = self.client.get(
-            '/users/{}/collections/{}/{}/export/'.format(
-                self.collection.parent.mnemonic, self.collection.mnemonic, 'HEAD'),
+            f'/users/{self.collection.parent.mnemonic}/collections/{self.collection.mnemonic}/{"HEAD"}/export/',
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -835,8 +832,7 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
 
     def test_post_405(self):
         response = self.client.post(
-            '/users/{}/collections/{}/{}/export/'.format(
-                self.collection.parent.mnemonic, self.collection.mnemonic, 'HEAD'),
+            f'/users/{self.collection.parent.mnemonic}/collections/{self.collection.mnemonic}/{"HEAD"}/export/',
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -854,7 +850,7 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 303)
         self.assertEqual(response['URL'], self.collection_v1.uri + 'export/')
-        s3_exists_mock.assert_called_once_with("username/coll_v1.{}.zip".format(self.v1_updated_at))
+        s3_exists_mock.assert_called_once_with(f"username/coll_v1.{self.v1_updated_at}.zip")
 
     @patch('core.collections.views.export_collection')
     @patch('core.common.services.S3.exists')
@@ -867,7 +863,7 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 202)
-        s3_exists_mock.assert_called_once_with("username/coll_v1.{}.zip".format(self.v1_updated_at))
+        s3_exists_mock.assert_called_once_with(f"username/coll_v1.{self.v1_updated_at}.zip")
         export_collection_mock.delay.assert_called_once_with(self.collection_v1.id)
 
     @patch('core.collections.views.export_collection')
@@ -882,7 +878,7 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 409)
-        s3_exists_mock.assert_called_once_with("username/coll_v1.{}.zip".format(self.v1_updated_at))
+        s3_exists_mock.assert_called_once_with(f"username/coll_v1.{self.v1_updated_at}.zip")
         export_collection_mock.delay.assert_called_once_with(self.collection_v1.id)
 
 

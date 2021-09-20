@@ -53,7 +53,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(len(response.data), 1)
 
     def test_post_201(self):
-        concepts_url = "/orgs/{}/sources/{}/concepts/".format(self.organization.mnemonic, self.source.mnemonic)
+        concepts_url = f"/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}/concepts/"
 
         response = self.client.post(
             concepts_url,
@@ -138,7 +138,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.data, dict(__all__=['Concept ID must be unique within a source.']))
 
     def test_post_400(self):
-        concepts_url = "/orgs/{}/sources/{}/concepts/".format(self.organization.mnemonic, self.source.mnemonic)
+        concepts_url = f"/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}/concepts/"
 
         response = self.client.post(
             concepts_url,
@@ -156,9 +156,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
     def test_put_200(self):
         concept = ConceptFactory(parent=self.source)
         self.assertEqual(concept.versions.count(), 1)
-        concepts_url = "/orgs/{}/sources/{}/concepts/{}/".format(
-            self.organization.mnemonic, self.source.mnemonic, concept.mnemonic
-        )
+        concepts_url = f"/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}/concepts/{concept.mnemonic}/"
 
         response = self.client.put(
             concepts_url,
@@ -335,9 +333,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
 
     def test_put_400(self):
         concept = ConceptFactory(parent=self.source)
-        concepts_url = "/orgs/{}/sources/{}/concepts/{}/".format(
-            self.organization.mnemonic, self.source.mnemonic, concept.mnemonic
-        )
+        concepts_url = f"/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}/concepts/{concept.mnemonic}/"
 
         response = self.client.put(
             concepts_url,
@@ -350,9 +346,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(list(response.data.keys()), ['concept_class'])
 
     def test_put_404(self):
-        concepts_url = "/orgs/{}/sources/{}/concepts/foobar/".format(
-            self.organization.mnemonic, self.source.mnemonic
-        )
+        concepts_url = f"/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}/concepts/foobar/"
 
         response = self.client.put(
             concepts_url,
@@ -366,9 +360,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
     def test_delete_204(self):
         names = [LocalizedTextFactory()]
         concept = ConceptFactory(parent=self.source, names=names)
-        concepts_url = "/orgs/{}/sources/{}/concepts/{}/".format(
-            self.organization.mnemonic, self.source.mnemonic, concept.mnemonic
-        )
+        concepts_url = f"/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}/concepts/{concept.mnemonic}/"
 
         response = self.client.delete(
             concepts_url,
@@ -388,9 +380,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         self.assertTrue(latest_version.comment, 'Deleting it')
 
     def test_delete_404(self):
-        concepts_url = "/orgs/{}/sources/{}/concepts/foobar/".format(
-            self.organization.mnemonic, self.source.mnemonic
-        )
+        concepts_url = f"/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}/concepts/foobar/"
 
         response = self.client.delete(
             concepts_url,
@@ -404,9 +394,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
     def test_delete_400(self):
         names = [LocalizedTextFactory()]
         concept = ConceptFactory(parent=self.source, names=names, retired=True)
-        concepts_url = "/orgs/{}/sources/{}/concepts/{}/".format(
-            self.organization.mnemonic, self.source.mnemonic, concept.mnemonic
-        )
+        concepts_url = f"/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}/concepts/{concept.mnemonic}/"
 
         response = self.client.delete(
             concepts_url + '?includeRetired=true',
@@ -421,9 +409,8 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
     def test_extras_get_200(self):
         names = [LocalizedTextFactory()]
         concept = ConceptFactory(parent=self.source, names=names, extras=dict(foo='bar'))
-        extras_url = "/orgs/{}/sources/{}/concepts/{}/extras/".format(
-            self.organization.mnemonic, self.source.mnemonic, concept.mnemonic
-        )
+        extras_url = f"/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}" \
+            f"/concepts/{concept.mnemonic}/extras/"
 
         response = self.client.get(
             extras_url,
@@ -439,9 +426,8 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         concept = ConceptFactory(parent=self.source, names=names, extras=dict(foo='bar', tao='ching'))
 
         def extra_url(extra):
-            return "/orgs/{}/sources/{}/concepts/{}/extras/{}/".format(
-                self.organization.mnemonic, self.source.mnemonic, concept.mnemonic, extra
-            )
+            return f"/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}" \
+                f"/concepts/{concept.mnemonic}/extras/{extra}/"
 
         response = self.client.get(
             extra_url('tao'),
@@ -475,9 +461,8 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         concept = ConceptFactory(parent=self.source, names=names, extras=dict(foo='bar', tao='ching'))
 
         def extra_url(extra):
-            return "/orgs/{}/sources/{}/concepts/{}/extras/{}/".format(
-                self.organization.mnemonic, self.source.mnemonic, concept.mnemonic, extra
-            )
+            return f"/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}" \
+                f"/concepts/{concept.mnemonic}/extras/{extra}/"
 
         response = self.client.put(
             extra_url('tao'),
@@ -501,9 +486,8 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         concept = ConceptFactory(parent=self.source, names=names, extras=dict(foo='bar', tao='ching'))
 
         def extra_url(extra):
-            return "/orgs/{}/sources/{}/concepts/{}/extras/{}/".format(
-                self.organization.mnemonic, self.source.mnemonic, concept.mnemonic, extra
-            )
+            return f"/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}" \
+                f"/concepts/{concept.mnemonic}/extras/{extra}/"
 
         response = self.client.put(
             extra_url('tao'),
@@ -523,9 +507,8 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(concept.versions.count(), 1)
 
         def extra_url(extra):
-            return "/orgs/{}/sources/{}/concepts/{}/extras/{}/".format(
-                self.organization.mnemonic, self.source.mnemonic, concept.mnemonic, extra
-            )
+            return f"/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}" \
+                f"/concepts/{concept.mnemonic}/extras/{extra}/"
 
         response = self.client.delete(
             extra_url('tao'),
@@ -548,9 +531,8 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         concept = ConceptFactory(parent=self.source, names=names, extras=dict(foo='bar', tao='ching'))
 
         def extra_url(extra):
-            return "/orgs/{}/sources/{}/concepts/{}/extras/{}/".format(
-                self.organization.mnemonic, self.source.mnemonic, concept.mnemonic, extra
-            )
+            return f"/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}" \
+                f"/concepts/{concept.mnemonic}/extras/{extra}/"
 
         response = self.client.delete(
             extra_url('bar'),
@@ -565,9 +547,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         concept = ConceptFactory(parent=self.source, names=[name])
 
         response = self.client.get(
-            "/orgs/{}/sources/{}/concepts/{}/names/".format(
-                self.organization.mnemonic, self.source.mnemonic, concept.mnemonic
-            ),
+            f"/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}/concepts/{concept.mnemonic}/names/",
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -591,9 +571,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         concept = ConceptFactory(parent=self.source, names=[name])
 
         response = self.client.post(
-            "/orgs/{}/sources/{}/concepts/{}/names/".format(
-                self.organization.mnemonic, self.source.mnemonic, concept.mnemonic
-            ),
+            f"/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}/concepts/{concept.mnemonic}/names/",
             {
                 "type": 'ConceptName',
                 "locale": 'en',
@@ -624,9 +602,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         concept = ConceptFactory(parent=self.source, names=[name])
 
         response = self.client.post(
-            "/orgs/{}/sources/{}/concepts/{}/names/".format(
-                self.organization.mnemonic, self.source.mnemonic, concept.mnemonic
-            ),
+            f"/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}/concepts/{concept.mnemonic}/names/",
             {
                 "type": 'ConceptName',
                 "name": name.name,
@@ -643,9 +619,8 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         name2 = LocalizedTextFactory()
         concept = ConceptFactory(parent=self.source, names=[name1, name2])
         response = self.client.delete(
-            "/orgs/{}/sources/{}/concepts/{}/names/{}/".format(
-                self.organization.mnemonic, self.source.mnemonic, concept.mnemonic, name2.id
-            ),
+            f"/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}"
+            f"/concepts/{concept.mnemonic}/names/{name2.id}/",
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -657,7 +632,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         latest_version = concept.get_latest_version()
         self.assertEqual(latest_version.names.count(), 1)
         self.assertEqual(latest_version.names.first().name, name1.name)
-        self.assertEqual(latest_version.comment, 'Deleted {} in names.'.format(name2.name))
+        self.assertEqual(latest_version.comment, f'Deleted {name2.name} in names.')
 
     def test_get_200_with_response_modes(self):
         ConceptFactory(parent=self.source, mnemonic='conceptA')

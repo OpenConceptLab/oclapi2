@@ -15,7 +15,7 @@ def message_with_name_details(message, name):
     name_str = name.name or NA
     locale = name.locale or NA
     preferred = YES if name.locale_preferred else NO
-    return "{}: {} (locale: {}, preferred: {})".format(message, name_str, locale, preferred)
+    return f"{message}: {name_str} (locale: {locale}, preferred: {preferred})"
 
 
 class ValidatorSpecifier:

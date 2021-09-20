@@ -62,7 +62,7 @@ class V1BaseImporter:
 
     @staticmethod
     def log(msg):
-        print("*******{}*******".format(msg))
+        print(f"*******{msg}*******")
 
     @property
     def v1_api_base_url(self):
@@ -202,7 +202,7 @@ class V1BaseImporter:
             return None
 
         self.log(self.start_message)
-        self.log('TOTAL: {}'.format(self.total))
+        self.log(f'TOTAL: {self.total}')
 
         for line in self.lines:
             self.process_line(line)
@@ -287,7 +287,7 @@ class V1OrganizationImporter(V1BaseImporter):
         data['created_at'] = get(created_at, '$date')
         data['updated_at'] = get(updated_at, '$date')
         mnemonic = data.get('mnemonic')
-        self.log("Processing: {} ({}/{})".format(mnemonic, self.processed, self.total))
+        self.log(f"Processing: {mnemonic} ({self.processed}/{self.total})")
         if Organization.objects.filter(mnemonic=mnemonic).exists():
             self.existed.append(original_data)
         else:
@@ -326,7 +326,7 @@ class V1UserImporter(V1BaseImporter):
         data['last_login'] = get(last_login, '$date')
         data['first_name'] = first_name
         username = data.get('username')
-        self.log("Processing: {} ({}/{})".format(username, self.processed, self.total))
+        self.log(f"Processing: {username} ({self.processed}/{self.total})")
         queryset = UserProfile.objects.filter(username=username)
         if queryset.exists():
             user = queryset.first()
@@ -386,7 +386,7 @@ class V1SourceImporter(V1BaseImporter):
             user = self.get_user(uri=owner_uri)
             data['user'] = user
 
-        self.log("Processing: {} ({}/{})".format(mnemonic, self.processed, self.total))
+        self.log(f"Processing: {mnemonic} ({self.processed}/{self.total})")
         if Source.objects.filter(uri=uri).exists():
             self.existed.append(original_data)
         else:
@@ -438,7 +438,7 @@ class V1SourceVersionImporter(V1BaseImporter):
         data['user_id'] = versioned_object.user_id
         data['source_type'] = versioned_object.source_type
 
-        self.log("Processing: {} ({}/{})".format(version, self.processed, self.total))
+        self.log(f"Processing: {version} ({self.processed}/{self.total})")
         if Source.objects.filter(uri=data['uri']).exists():
             self.existed.append(original_data)
         else:
@@ -481,7 +481,7 @@ class V1ConceptImporter(V1BaseImporter):
         if updater:
             data['updated_by'] = updater
 
-        self.log("Processing: {} ({}/{})".format(mnemonic, self.processed, self.total))
+        self.log(f"Processing: {mnemonic} ({self.processed}/{self.total})")
         if Concept.objects.filter(uri=data['uri']).exists():
             self.existed.append(original_data)
         else:
@@ -506,7 +506,7 @@ class V1ConceptImporter(V1BaseImporter):
                 concept.save()
                 self.created.append(original_data)
             except Exception as ex:
-                self.log("Failed: {}".format(data['uri']))
+                self.log(f"Failed: {data['uri']}")
                 args = get(ex, 'message_dict') or str(ex)
                 self.log(args)
                 self.failed.append({**original_data, 'errors': args})
@@ -556,7 +556,7 @@ class V1ConceptVersionImporter(V1BaseImporter):
         if updater:
             data['updated_by'] = updater
 
-        self.log("Processing: {} ({}/{})".format(mnemonic, self.processed, self.total))
+        self.log(f"Processing: {mnemonic} ({self.processed}/{self.total})")
         if Concept.objects.filter(uri=data['uri']).exists():
             self.existed.append(original_data)
         else:
@@ -578,7 +578,7 @@ class V1ConceptVersionImporter(V1BaseImporter):
                 concept.index()
                 self.created.append(original_data)
             except Exception as ex:
-                self.log("Failed: {}".format(data['uri']))
+                self.log(f"Failed: {data['uri']}")
                 args = get(ex, 'message_dict') or str(ex)
                 self.log(args)
                 self.failed.append({**original_data, 'errors': args})
@@ -633,7 +633,7 @@ class V1MappingImporter(V1BaseImporter):
         if updater:
             data['updated_by'] = updater
 
-        self.log("Processing: {} ({}/{})".format(mnemonic, self.processed, self.total))
+        self.log(f"Processing: {mnemonic} ({self.processed}/{self.total})")
         if Mapping.objects.filter(uri=data['uri']).exists():
             self.existed.append(original_data)
         else:
@@ -647,7 +647,7 @@ class V1MappingImporter(V1BaseImporter):
                 mapping.save()
                 self.created.append(original_data)
             except Exception as ex:
-                self.log("Failed: {}".format(data['uri']))
+                self.log(f"Failed: {data['uri']}")
                 args = get(ex, 'message_dict') or str(ex)
                 self.log(args)
                 self.log(str(data))
@@ -706,7 +706,7 @@ class V1MappingVersionImporter(V1BaseImporter):
         if updater:
             data['updated_by'] = updater
 
-        self.log("Processing: {} ({}/{})".format(mnemonic, self.processed, self.total))
+        self.log(f"Processing: {mnemonic} ({self.processed}/{self.total})")
         if Mapping.objects.filter(uri=data['uri']).exists():
             self.existed.append(original_data)
         else:
@@ -738,7 +738,7 @@ class V1MappingVersionImporter(V1BaseImporter):
 
                 self.created.append(original_data)
             except Exception as ex:
-                self.log("Failed: {}".format(data['uri']))
+                self.log(f"Failed: {data['uri']}")
                 args = get(ex, 'message_dict') or str(ex)
                 self.log(args)
                 self.failed.append({**original_data, 'errors': args})
@@ -790,7 +790,7 @@ class V1CollectionImporter(V1BaseImporter):
             user = self.get_user(uri=owner_uri)
             data['user'] = user
 
-        self.log("Processing: {} ({}/{})".format(mnemonic, self.processed, self.total))
+        self.log(f"Processing: {mnemonic} ({self.processed}/{self.total})")
         uri = data['uri']
         if Collection.objects.filter(uri=uri).exists():
             self.existed.append(original_data)
@@ -879,7 +879,7 @@ class V1CollectionVersionImporter(V1BaseImporter):
         data['collection_type'] = versioned_object.collection_type
         references = data.pop('references') or []
 
-        self.log("Processing: {} ({}/{})".format(version, self.processed, self.total))
+        self.log(f"Processing: {version} ({self.processed}/{self.total})")
         uri = data['uri']
         if Collection.objects.filter(uri=uri).exists():
             self.existed.append(original_data)
@@ -945,7 +945,7 @@ class V1CollectionMappingReferencesImporter(V1BaseImporter):
             return None
 
         self.log(self.start_message)
-        self.log('TOTAL: {}'.format(self.total))
+        self.log(f'TOTAL: {self.total}')
 
         for collection_uri, expressions in self.data.items():
             self.process(collection_uri, expressions)
@@ -956,40 +956,40 @@ class V1CollectionMappingReferencesImporter(V1BaseImporter):
 
     def process(self, collection_uri, expressions):  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
         self.processed += 1
-        self.log("Processing: {} ({}/{})".format(collection_uri, self.processed, self.total))
+        self.log(f"Processing: {collection_uri} ({self.processed}/{self.total})")
 
         collection = Collection.objects.filter(uri=collection_uri).first()
         saved_references = []
         mappings = []
         v1_api_base_url = self.v1_api_base_url
-        self.log("V1 API BASE URL: {}".format(v1_api_base_url))
+        self.log(f"V1 API BASE URL: {v1_api_base_url}")
 
         if collection:
             for expression in expressions:
-                self.log("Processing Expression: {} ".format(expression))
+                self.log(f"Processing Expression: {expression} ")
                 versionless_expression = drop_version(expression)
                 if collection.references.filter(expression__contains=versionless_expression).exists():
-                    self.log("Existed as reference. Skipping...: {} ".format(expression))
+                    self.log(f"Existed as reference. Skipping...: {expression} ")
                     self.existed.append(expression)
                     continue
-                response = requests.get("{}{}".format(v1_api_base_url, expression))
+                response = requests.get(f"{v1_api_base_url}{expression}")
                 if response.status_code != 200:
-                    self.log("Expression GET failed: {} ".format(expression))
+                    self.log(f"Expression GET failed: {expression} ")
                     if self.drop_version_if_version_missing:
-                        self.log("Trying Versionless expression...: {} ".format(versionless_expression))
-                        response = requests.get("{}{}".format(v1_api_base_url, versionless_expression))
+                        self.log(f"Trying Versionless expression...: {versionless_expression} ")
+                        response = requests.get(f"{v1_api_base_url}{versionless_expression}")
                         if response.status_code != 200:
                             self.log(
-                                "Versionless Expression GET failed. Skipping...: {} ".format(versionless_expression)
+                                f"Versionless Expression GET failed. Skipping...: {versionless_expression} "
                             )
                             self.failed.append(expression)
                             continue
                     else:
-                        self.log('Skipping...: {}'.format(expression))
+                        self.log(f'Skipping...: {expression}')
                         self.failed.append(expression)
                         continue
 
-                self.log("Found Expression: {} ".format(expression))
+                self.log(f"Found Expression: {expression} ")
                 v1_data = response.json()
 
                 map_type = v1_data.get('map_type')
@@ -1012,7 +1012,7 @@ class V1CollectionMappingReferencesImporter(V1BaseImporter):
                     map_type=map_type, parent__uri=parent_uri, from_concept__uri=from_concept_uri
                 ).filter(to_concept_criteria).first()
                 if not mapping:
-                    self.log("Matching mapping not found. Skipping...: {}".format(expression))
+                    self.log(f"Matching mapping not found. Skipping...: {expression}")
                     self.not_found_matching_mapping.append(expression)
                     continue
 
@@ -1022,7 +1022,7 @@ class V1CollectionMappingReferencesImporter(V1BaseImporter):
                     parent = mapping.parent
                     latest_version.sources.set([parent, parent.head])
                 if collection.references.filter(expression__contains=drop_version(latest_version.uri)).exists():
-                    self.log("Existed as matching reference. Skipping...: {} ".format(expression))
+                    self.log(f"Existed as matching reference. Skipping...: {expression} ")
                     self.existed.append(expression)
                     continue
                 reference = CollectionReference(expression=latest_version.uri)
@@ -1061,7 +1061,7 @@ class V1CollectionReferencesImporter(V1BaseImporter):
             return None
 
         self.log(self.start_message)
-        self.log('TOTAL: {}'.format(self.total))
+        self.log(f'TOTAL: {self.total}')
 
         for collection_uri, expressions in self.data.items():
             self.process(collection_uri, expressions)
@@ -1072,7 +1072,7 @@ class V1CollectionReferencesImporter(V1BaseImporter):
 
     def process(self, collection_uri, expressions):
         self.processed += 1
-        self.log("Processing: {} ({}/{})".format(collection_uri, self.processed, self.total))
+        self.log(f"Processing: {collection_uri} ({self.processed}/{self.total})")
 
         collection = Collection.objects.filter(uri=collection_uri).first()
         saved_references = []
@@ -1081,7 +1081,7 @@ class V1CollectionReferencesImporter(V1BaseImporter):
 
         if collection:
             for expression in expressions:
-                self.log("Processing Expression: {} ".format(expression))
+                self.log(f"Processing Expression: {expression} ")
                 __is_concept = is_concept(expression)
                 if __is_concept:
                     model = Concept
@@ -1107,7 +1107,7 @@ class V1CollectionReferencesImporter(V1BaseImporter):
                     parent = instance.parent
                     latest_version.sources.set([parent, parent.head])
                 if collection.references.filter(expression__contains=drop_version(latest_version.uri)).exists():
-                    self.log("Existed as matching reference. Skipping...: {} ".format(expression))
+                    self.log(f"Existed as matching reference. Skipping...: {expression} ")
                     self.existed.append(expression)
                     continue
                 reference = CollectionReference(expression=latest_version.uri)
@@ -1137,7 +1137,7 @@ class V1UserTokensImporter(V1BaseImporter):
         original_data = data.copy()
         username = data.get('username')
         token = data.get('token')
-        self.log("Processing: {} ({}/{})".format(username, self.processed, self.total))
+        self.log(f"Processing: {username} ({self.processed}/{self.total})")
         user = UserProfile.objects.filter(username=username).first()
         oct_1_2020 = datetime(2020, 10, 1).timestamp()
         if user and (not user.last_login or user.last_login.timestamp() >= oct_1_2020):
@@ -1158,7 +1158,7 @@ class V1WebUserCredentialsImporter(V1BaseImporter):
         username = data.get('username')
         password = data.get('password')
         last_login = data.get('last_login')
-        self.log("Processing: {} ({}/{})".format(username, self.processed, self.total))
+        self.log(f"Processing: {username} ({self.processed}/{self.total})")
         user = UserProfile.objects.filter(username=username).first()
         if user:
             user.password = password
@@ -1183,10 +1183,10 @@ class V1IdsImporter(V1BaseImporter):
             updated = self.model.objects.filter(uri=uri).update(internal_reference_id=_id)
             if updated:
                 self.updated.append(original_data)
-                self.log("Updated: {} ({}/{})".format(uri, self.processed, self.total))
+                self.log(f"Updated: {uri} ({self.processed}/{self.total})")
             else:
                 self.not_found.append(original_data)
-                self.log("Not Found: {} ({}/{})".format(uri, self.processed, self.total))
+                self.log(f"Not Found: {uri} ({self.processed}/{self.total})")
 
         except Exception as ex:
             self.log("Failed: ")

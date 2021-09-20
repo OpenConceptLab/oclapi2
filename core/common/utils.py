@@ -81,7 +81,7 @@ def reverse_resource(resource, viewname, args=None, kwargs=None, **extra):
     parent = resource
     while parent is not None:
         if not hasattr(parent, 'get_url_kwarg'):
-            return NoReverseMatch('Cannot get URL kwarg for %s' % resource)  # pragma: no cover
+            return NoReverseMatch(f'Cannot get URL kwarg for {resource}')  # pragma: no cover
 
         if parent.is_versioned and not parent.is_head:
             from core.collections.models import Collection
@@ -196,10 +196,10 @@ def write_export_file(
     from core.concepts.models import Concept
     from core.mappings.models import Mapping
     cwd = cd_temp()
-    logger.info('Writing export file to tmp directory: %s' % cwd)
+    logger.info(f'Writing export file to tmp directory: {cwd}')
 
-    logger.info('Found %s version %s.  Looking up resource...' % (resource_type, version.version))
-    logger.info('Found %s %s.  Serializing attributes...' % (resource_type, version.mnemonic))
+    logger.info(f'Found {resource_type} version {version.version}.  Looking up resource...')
+    logger.info(f'Found {resource_type} {version.mnemonic}.  Serializing attributes...')
 
     resource_serializer = get_class(resource_serializer_type)(version)
     data = resource_serializer.data
@@ -224,19 +224,19 @@ def write_export_file(
             filters['is_latest_version'] = True
 
     with open('export.json', 'w') as out:
-        out.write('%s, "concepts": [' % resource_string[:-1])
+        out.write(f'{resource_string[:-1]}, "concepts": [')
 
     resource_name = resource_type.title()
 
     if concepts_qs.exists():
-        logger.info('%s has concepts. Getting them in batches of %d...' % (resource_name, batch_size))
+        logger.info(f'{resource_name} has concepts. Getting them in batches of {batch_size:d}...')
         concept_serializer_class = get_class('core.concepts.serializers.ConceptVersionExportSerializer')
         start = 0
         end = batch_size
         batch_queryset = concepts_qs.order_by('-concept_id')[start:end]
 
         while batch_queryset.exists():
-            logger.info('Serializing concepts %d - %d...' % (start + 1, end))
+            logger.info(f'Serializing concepts {start + 1:d} - {end:d}...')
             queryset = Concept.objects.filter(
                 id__in=batch_queryset.values_list('concept_id')).filter(**filters).order_by('-id')
             if queryset.exists():
@@ -257,7 +257,7 @@ def write_export_file(
 
         logger.info('Done serializing concepts.')
     else:
-        logger.info('%s has no concepts to serialize.' % resource_name)
+        logger.info(f'{resource_name} has no concepts to serialize.')
 
     if is_collection:
         references_qs = version.references
@@ -267,13 +267,12 @@ def write_export_file(
             out.write('], "references": [')
         if total_references:
             logger.info(
-                '%s has %d references. Getting them in batches of %d...' % (
-                    resource_name, total_references, batch_size)
+                f'{resource_name} has {total_references:d} references. Getting them in batches of {batch_size:d}...'
             )
             reference_serializer_class = get_class('core.collections.serializers.CollectionReferenceSerializer')
             for start in range(0, total_references, batch_size):
                 end = min(start + batch_size, total_references)
-                logger.info('Serializing references %d - %d...' % (start + 1, end))
+                logger.info(f'Serializing references {start + 1:d} - {end:d}...')
                 references = references_qs.order_by('-id').filter()[start:end]
                 reference_serializer = reference_serializer_class(references, many=True)
                 reference_string = json.dumps(reference_serializer.data, cls=encoders.JSONEncoder)
@@ -284,20 +283,20 @@ def write_export_file(
                         out.write(', ')
             logger.info('Done serializing references.')
         else:
-            logger.info('%s has no references to serialize.' % resource_name)
+            logger.info(f'{resource_name} has no references to serialize.')
 
     with open('export.json', 'a') as out:
         out.write('], "mappings": [')
 
     if mappings_qs.exists():
-        logger.info('%s has mappings. Getting them in batches of %d...' % (resource_name, batch_size))
+        logger.info(f'{resource_name} has mappings. Getting them in batches of {batch_size:d}...')
         mapping_serializer_class = get_class('core.mappings.serializers.MappingDetailSerializer')
         start = 0
         end = batch_size
         batch_queryset = mappings_qs.order_by('-mapping_id')[start:end]
 
         while batch_queryset.exists():
-            logger.info('Serializing mappings %d - %d...' % (start + 1, start + batch_size))
+            logger.info(f'Serializing mappings {start + 1:d} - {start + batch_size:d}...')
             queryset = Mapping.objects.filter(
                 id__in=batch_queryset.values_list('mapping_id')).filter(**filters).order_by('-id')
             if queryset.exists():
@@ -317,7 +316,7 @@ def write_export_file(
 
         logger.info('Done serializing mappings.')
     else:
-        logger.info('%s has no mappings to serialize.' % resource_name)
+        logger.info(f'{resource_name} has no mappings to serialize.')
 
     with open('export.json', 'a') as out:
         out.write(']}')
@@ -335,7 +334,7 @@ def write_export_file(
         headers={'content-type': 'application/zip'}
     )
     uploaded_path = S3.url_for(s3_key)
-    logger.info('Uploaded to %s.' % uploaded_path)
+    logger.info(f'Uploaded to {uploaded_path}.')
     os.chdir(cwd)
 
 
@@ -385,7 +384,7 @@ def flower_get(url, **kwargs):
     :return:
     """
     return requests.get(
-        'http://%s:%s/%s' % (settings.FLOWER_HOST, settings.FLOWER_PORT, url),
+        f'http://{settings.FLOWER_HOST}:{settings.FLOWER_PORT}/{url}',
         auth=HTTPBasicAuth(settings.FLOWER_USER, settings.FLOWER_PASSWORD),
         **kwargs
     )
@@ -398,7 +397,7 @@ def es_get(url, **kwargs):
     :return:
     """
     return requests.get(
-        'http://%s:%s/%s' % (settings.ES_HOST, settings.ES_PORT, url),
+        f'http://{settings.ES_HOST}:{settings.ES_PORT}/{url}',
         **kwargs
     )
 
@@ -510,7 +509,7 @@ def separate_version(expression):
 
 
 def generate_temp_version():
-    return "{}-{}".format(TEMP, str(uuid.uuid4())[:8])
+    return f"{TEMP}-{str(uuid.uuid4())[:8]}"
 
 
 def jsonify_safe(value):
@@ -531,7 +530,7 @@ def web_url():
     if env == 'production':
         return "https://app.openconceptlab.org"
 
-    return "https://app.{}.openconceptlab.org".format(env)
+    return f"https://app.{env}.openconceptlab.org"
 
 
 def get_resource_class_from_resource_name(resource):  # pylint: disable=too-many-return-statements

@@ -45,7 +45,7 @@ class ConceptContainerFeed(Feed, FeedFilterMixin):
             self.org = Organization.objects.filter(mnemonic=org_mnemonic).first()
 
         if not (self.user or self.org):
-            raise Http404("{} owner does not exist".format(self.entity_name))
+            raise Http404(f"{self.entity_name} owner does not exist")
 
         mnemonic = kwargs.get(self.entity_name.lower())
         self.updated_since = request.GET.get('updated_since', None)
@@ -54,13 +54,13 @@ class ConceptContainerFeed(Feed, FeedFilterMixin):
         return get_object_or_404(self.model, mnemonic=mnemonic, user=self.user, organization=self.org, version=HEAD)
 
     def title(self, obj):  # pylint: disable=no-self-use
-        return "Updates to %s" % obj.mnemonic
+        return f"Updates to {obj.mnemonic}"
 
     def link(self, obj):
-        return reverse_resource(obj, '{}-detail'.format(self.entity_name.lower()))
+        return reverse_resource(obj, f'{self.entity_name.lower()}-detail')
 
     def description(self, obj):
-        return "Updates to concepts within {} {}".format(self.entity_name.lower(), obj.mnemonic)
+        return f"Updates to concepts within {self.entity_name.lower()} {obj.mnemonic}"
 
     def item_title(self, item):
         return item.mnemonic

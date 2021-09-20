@@ -26,7 +26,7 @@ class LocalizedTextFactory(factory.django.DjangoModelFactory):
     class Meta:
         model = LocalizedText
 
-    name = Sequence("name{}".format)
+    name = Sequence("name{}".format)  # pylint: disable=consider-using-f-string
     type = "FULLY_SPECIFIED"
     locale = "en"
     locale_preferred = False
@@ -36,8 +36,8 @@ class ConceptFactory(factory.django.DjangoModelFactory):
     class Meta:
         model = Concept
 
-    mnemonic = Sequence("concept{}".format)
-    name = Sequence("concept{}".format)
+    mnemonic = Sequence("concept{}".format)  # pylint: disable=consider-using-f-string
+    name = Sequence("concept{}".format)  # pylint: disable=consider-using-f-string
     version = HEAD
     parent = SubFactory(OrganizationSourceFactory)
     concept_class = "Diagnosis"
