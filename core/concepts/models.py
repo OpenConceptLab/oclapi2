@@ -191,6 +191,8 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         'owner': {'sortable': True, 'filterable': True, 'facet': True, 'exact': True},
         'owner_type': {'sortable': False, 'filterable': True, 'facet': True, 'exact': True},
         'external_id': {'sortable': False, 'filterable': True, 'facet': False, 'exact': False},
+        'name_types': {'sortable': False, 'filterable': True, 'facet': True},
+        'description_types': {'sortable': False, 'filterable': True, 'facet': True},
     }
 
     @staticmethod
