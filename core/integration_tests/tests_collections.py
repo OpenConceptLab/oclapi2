@@ -425,7 +425,7 @@ class CollectionReferencesViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 202)
         self.assertEqual(response.data, [])
         add_references_mock.delay.assert_called_once_with(
-            self.user, dict(concepts='*'), self.collection, 'http://testserver', False
+            self.user.id, dict(concepts='*'), self.collection.id, 'http://testserver', False
         )
 
     def test_put_200_specific_expression(self):
@@ -602,7 +602,6 @@ class CollectionVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
-
         self.assertEqual(response.status_code, 204)
         self.assertFalse(Collection.objects.filter(id=self.collection.id).exists())
 

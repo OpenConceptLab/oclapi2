@@ -1,10 +1,10 @@
 import json
 
+import requests
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
 from django.db.models import UniqueConstraint
 from django.utils import timezone
-from rest_framework.test import APIRequestFactory
 
 from core.collections.constants import (
     COLLECTION_TYPE, CONCEPTS_EXPRESSIONS,
@@ -19,9 +19,7 @@ from core.common.models import ConceptContainerModel
 from core.common.utils import is_valid_uri, drop_version
 from core.concepts.constants import LOCALES_FULLY_SPECIFIED
 from core.concepts.models import Concept
-from core.concepts.views import ConceptListView
 from core.mappings.models import Mapping
-from core.mappings.views import MappingListView
 
 
 class Collection(ConceptContainerModel):
@@ -174,17 +172,14 @@ class Collection(ConceptContainerModel):
                 raise ValidationError(validation_error)
 
     @staticmethod
-    def __get_children_uris(url, view_klass):
-        view = view_klass.as_view()
-        request = APIRequestFactory().get(url)
-        response = view(request)
-        response.render()
+    def __get_children_uris(url):
+        response = requests.get(url)
         data = json.loads(response.content)
         return [child['url'] for child in data]
 
-    def __get_expressions_from(self, expressions, url, view_klass):
+    def __get_expressions_from(self, expressions, url):
         if expressions == ALL_SYMBOL:
-            return self.__get_children_uris(url, view_klass)
+            return self.__get_children_uris(url)
 
         return expressions
 
@@ -199,14 +194,10 @@ class Collection(ConceptContainerModel):
         mapping_expressions = data.get('mappings', [])
 
         expressions.extend(
-            self.__get_expressions_from(
-                concept_expressions, self.__get_children_list_url('concepts', host_url, data), ConceptListView
-            )
+            self.__get_expressions_from(concept_expressions, self.__get_children_list_url('concepts', host_url, data))
         )
         expressions.extend(
-            self.__get_expressions_from(
-                mapping_expressions, self.__get_children_list_url('mappings', host_url, data), MappingListView
-            )
+            self.__get_expressions_from(mapping_expressions, self.__get_children_list_url('mappings', host_url, data))
         )
         if cascade_mappings:
             all_related_mappings = self.get_all_related_mappings(expressions)

@@ -107,8 +107,12 @@ def export_collection(self, version_id):
 
 @app.task(bind=True)
 def add_references(
-        self, user, data, collection, host_url, cascade_mappings=False
+        self, user_id, data, collection_id, host_url, cascade_mappings=False
 ):  # pylint: disable=too-many-arguments
+    from core.users.models import UserProfile
+    from core.collections.models import Collection
+    user = UserProfile.objects.get(id=user_id)
+    collection = Collection.objects.get(id=collection_id)
     head = collection.get_head()
     head.add_processing(self.request.id)
 
@@ -125,7 +129,7 @@ def add_references(
             for mapping in ref.mappings:
                 mapping.index()
 
-    return added_references, errors
+    return errors
 
 
 def __handle_save(instance):
