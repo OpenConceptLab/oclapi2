@@ -108,7 +108,7 @@ def export_collection(self, version_id):
 @app.task(bind=True)
 def add_references(
         self, user_id, data, collection_id, host_url, cascade_mappings=False
-):  # pylint: disable=too-many-arguments
+):  # pylint: disable=too-many-arguments,too-many-locals
     from core.users.models import UserProfile
     from core.collections.models import Collection
     user = UserProfile.objects.get(id=user_id)
