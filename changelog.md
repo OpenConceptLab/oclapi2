@@ -1,3 +1,31 @@
+##### 2.0.54 - Mon Sep 20 07:22:22 2021 +0000
+- [OpenConceptLab/ocl_issues#966](https://github.com/OpenConceptLab/ocl_issues/issues/966) | django logging for non-dev env (gunicorn based)
+- fixing pylint
+- Collection | add all references (*) bug fix
+- Pylint | implemented consider-using-f-string fixes
+- Pylint | implemented consider-using-f-string
+- Merge pull request #47 from OpenConceptLab/dependabot/pip/moto-2.2.7
+- Merge pull request #48 from OpenConceptLab/dependabot/pip/pylint-2.11.1
+- Bump pylint from 2.10.2 to 2.11.1
+- Bump moto from 2.2.6 to 2.2.7
+- Merge pull request #46 from OpenConceptLab/dependabot/pip/boto3-1.18.42
+- Bump boto3 from 1.18.40 to 1.18.42
+- Revert "Revert "OpenConceptLab/ocl_issues#971 | making sure the non REST URLs are not supported""
+- Mapping version creation | fixing queries to get and mark prev latest version not latest
+- removed internal_reference_id | was used for v1 to v2 data migration
+- Adding keep-alive to match ALB
+- Adjust gunicorn timeout to 60s
+- [OpenConceptLab/ocl_issues#972](https://github.com/OpenConceptLab/ocl_issues/issues/972) | data migration | not adding ocladmin as member to orgs with no members
+- Revert "OpenConceptLab/ocl_issues#971 | making sure the non REST URLs are not supported"
+- reverting file read encoding
+- Increase number of gunicorn workers
+- S3 | fixing upload of export file
+- Batch delete | chunk size 1000
+- [OpenConceptLab/ocl_issues#971](https://github.com/OpenConceptLab/ocl_issues/issues/971) | making sure the non REST URLs are not supported
+- [OpenConceptLab/ocl_issues#972](https://github.com/OpenConceptLab/ocl_issues/issues/972) | data migration | making sure related_name is not used
+- [OpenConceptLab/ocl_issues#972](https://github.com/OpenConceptLab/ocl_issues/issues/972) | data migration | making sure related_name is not used as string
+- [OpenConceptLab/ocl_issues#972](https://github.com/OpenConceptLab/ocl_issues/issues/972) | data migration to add creator and updater as org member in orgs without any members
+- Delete source can be an async call
 ##### 2.0.52 - Mon Sep 13 11:57:24 2021 +0000
 - Adding capture output for gunicorn
 - Merge pull request #44 from OpenConceptLab/dependabot/pip/boto3-1.18.40
