@@ -138,6 +138,8 @@ class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
 
     def post(self, request, **kwargs):  # pylint: disable=unused-argument
         self.set_parent_resource()
+        if not self.parent_resource:
+            raise Http404()
         serializer = self.get_serializer(data={
             **request.data, 'parent_id': self.parent_resource.id, 'name': request.data.get('id', None)
         })
