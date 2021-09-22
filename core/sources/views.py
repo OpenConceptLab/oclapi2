@@ -9,8 +9,7 @@ from drf_yasg.utils import swagger_auto_schema
 from pydash import get
 from rest_framework import status, mixins
 from rest_framework.generics import (
-    RetrieveAPIView, ListAPIView, UpdateAPIView
-)
+    RetrieveAPIView, ListAPIView, UpdateAPIView)
 from rest_framework.response import Response
 
 from core.client_configs.views import ResourceClientConfigsView
@@ -21,7 +20,7 @@ from core.common.permissions import CanViewConceptDictionary, CanEditConceptDict
     CanViewConceptDictionaryVersion
 from core.common.swagger_parameters import q_param, limit_param, sort_desc_param, sort_asc_param, exact_match_param, \
     page_param, verbose_param, include_retired_param, updated_since_param, include_facets_header, compress_header
-from core.common.tasks import export_source, delete_source
+from core.common.tasks import export_source, delete_source, index_source_concepts, index_source_mappings
 from core.common.utils import parse_boolean_query_param, compact_dict_by_values
 from core.common.views import BaseAPIView, BaseLogoView
 from core.sources.constants import DELETE_FAILURE, DELETE_SUCCESS, VERSION_ALREADY_EXISTS
@@ -268,6 +267,44 @@ class SourceLatestVersionRetrieveUpdateView(SourceVersionBaseView, RetrieveAPIVi
                 return Response(serializer.data, status=status.HTTP_200_OK)
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class SourceConceptsIndexView(SourceBaseView):
+    def get_queryset(self):
+        return Source.get_base_queryset(compact_dict_by_values(self.get_filter_params()))
+
+    def get_object(self, queryset=None):
+        instance = get_object_or_404(self.get_queryset())
+        self.check_object_permissions(self.request, instance)
+        return instance
+
+    def post(self, request, *args, **kwargs):  # pylint: disable=unused-argument
+        source = self.get_object()
+        result = index_source_concepts.delay(source.id)
+
+        return Response(
+            dict(state=result.state, username=self.request.user.username, task=result.task_id, queue='default'),
+            status=status.HTTP_202_ACCEPTED
+        )
+
+
+class SourceMappingsIndexView(SourceBaseView):
+    def get_queryset(self):
+        return Source.get_base_queryset(compact_dict_by_values(self.get_filter_params()))
+
+    def get_object(self, queryset=None):
+        instance = get_object_or_404(self.get_queryset())
+        self.check_object_permissions(self.request, instance)
+        return instance
+
+    def post(self, request, *args, **kwargs):  # pylint: disable=unused-argument
+        source = self.get_object()
+        result = index_source_mappings.delay(source.id)
+
+        return Response(
+            dict(state=result.state, username=self.request.user.username, task=result.task_id, queue='default'),
+            status=status.HTTP_202_ACCEPTED
+        )
 
 
 class SourceVersionRetrieveUpdateDestroyView(SourceVersionBaseView, RetrieveAPIView, UpdateAPIView):

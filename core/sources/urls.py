@@ -52,6 +52,8 @@ urlpatterns = [
         views.SourceVersionExportView.as_view(),
         name='sourceversion-latest-export-detail'
     ),
+    re_path(fr"^(?P<source>{NAMESPACE_PATTERN})/concepts/indexes/", views.SourceConceptsIndexView.as_view()),
+    re_path(fr"^(?P<source>{NAMESPACE_PATTERN})/mappings/indexes/", views.SourceMappingsIndexView.as_view()),
     re_path(fr"^(?P<source>{NAMESPACE_PATTERN})/concepts/", include('core.concepts.urls')),
     re_path(fr"^(?P<source>{NAMESPACE_PATTERN})/mappings/", include('core.mappings.urls')),
     re_path(

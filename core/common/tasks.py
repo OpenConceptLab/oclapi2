@@ -463,3 +463,21 @@ def make_hierarchy(concept_map):  # pragma: no cover
             for child_concept in Concept.objects.filter(uri__in=child_concept_urls):
                 child_concept.parent_concepts.add(latest_version)
                 child_concept.get_latest_version().parent_concepts.add(latest_version)
+
+
+@app.task
+def index_source_concepts(source_id):
+    from core.sources.models import Source
+    source = Source.objects.filter(id=source_id).first()
+    if source:
+        from core.concepts.documents import ConceptDocument
+        source.batch_index(source.concepts, ConceptDocument)
+
+
+@app.task
+def index_source_mappings(source_id):
+    from core.sources.models import Source
+    source = Source.objects.filter(id=source_id).first()
+    if source:
+        from core.mappings.documents import MappingDocument
+        source.batch_index(source.mappings, MappingDocument)
