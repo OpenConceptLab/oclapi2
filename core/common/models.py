@@ -148,14 +148,14 @@ class BaseModel(models.Model):
         settings.ES_SYNC = state
 
     @staticmethod
-    def get_iexact_or_criteria(attr, values):
+    def get_exact_or_criteria(attr, values):
         criteria = Q()
 
         if isinstance(values, str):
             values = values.split(',')
 
         for value in values:
-            criteria = criteria | Q(**{f'{attr}__iexact': value})
+            criteria = criteria | Q(**{f'{attr}': value})
 
         return criteria
 
@@ -385,11 +385,11 @@ class ConceptContainerModel(VersionedModel):
 
         queryset = cls.objects.filter(is_active=True)
         if username:
-            queryset = queryset.filter(cls.get_iexact_or_criteria('user__username', username))
+            queryset = queryset.filter(cls.get_exact_or_criteria('user__username', username))
         if org:
-            queryset = queryset.filter(cls.get_iexact_or_criteria('organization__mnemonic', org))
+            queryset = queryset.filter(cls.get_exact_or_criteria('organization__mnemonic', org))
         if version:
-            queryset = queryset.filter(cls.get_iexact_or_criteria('version', version))
+            queryset = queryset.filter(cls.get_exact_or_criteria('version', version))
         if is_latest:
             queryset = queryset.filter(is_latest_version=True)
         if updated_since:

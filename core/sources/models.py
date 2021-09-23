@@ -83,7 +83,7 @@ class Source(ConceptContainerModel):
         source = params.pop('source', None)
         queryset = super().get_base_queryset(params)
         if source:
-            queryset = queryset.filter(cls.get_iexact_or_criteria('mnemonic', source))
+            queryset = queryset.filter(cls.get_exact_or_criteria('mnemonic', source))
 
         return queryset
 

@@ -507,19 +507,19 @@ class SourceChildMixin:
     def get_filter_by_container_criterion(  # pylint: disable=too-many-arguments
             cls, container_prefix, parent, org, user, container_version, is_latest_released, latest_released_version
     ):
-        criteria = cls.get_iexact_or_criteria(f'{container_prefix}__mnemonic', parent)
+        criteria = cls.get_exact_or_criteria(f'{container_prefix}__mnemonic', parent)
 
         if not container_version and not is_latest_released:
             criteria &= Q(**{f'{container_prefix}__version': HEAD})
         if user:
-            criteria &= cls.get_iexact_or_criteria(f'{container_prefix}__user__username', user)
+            criteria &= cls.get_exact_or_criteria(f'{container_prefix}__user__username', user)
         if org:
-            criteria &= cls.get_iexact_or_criteria(f'{container_prefix}__organization__mnemonic', org)
+            criteria &= cls.get_exact_or_criteria(f'{container_prefix}__organization__mnemonic', org)
         if is_latest_released:
-            criteria &= cls.get_iexact_or_criteria(
+            criteria &= cls.get_exact_or_criteria(
                 f'{container_prefix}__version', get(latest_released_version, 'version'))
         if container_version and not is_latest_released:
-            criteria &= cls.get_iexact_or_criteria(f'{container_prefix}__version', container_version)
+            criteria &= cls.get_exact_or_criteria(f'{container_prefix}__version', container_version)
 
         return criteria
 
