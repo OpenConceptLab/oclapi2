@@ -1,3 +1,7 @@
+##### 2.0.56 - Thu Sep 23 02:20:53 2021 +0000
+- Fixing or criteria for searching mnemonic exact
+- API to batch index source's concepts and mappings
+- POST Concept/Mapping | 404 if parent not found
 ##### 2.0.54 - Mon Sep 20 07:22:22 2021 +0000
 - [OpenConceptLab/ocl_issues#966](https://github.com/OpenConceptLab/ocl_issues/issues/966) | django logging for non-dev env (gunicorn based)
 - fixing pylint
