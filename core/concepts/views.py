@@ -486,6 +486,9 @@ class ConceptsHierarchyAmendAdminView(APIView):  # pragma: no cover
         if not concept_map:
             return Response(status=status.HTTP_400_BAD_REQUEST)
 
-        make_hierarchy.delay(concept_map)
+        result = make_hierarchy.delay(concept_map)
 
-        return Response(status=status.HTTP_202_ACCEPTED)
+        return Response(
+            dict(state=result.state, username=request.user.username, task=result.task_id, queue='default'),
+            status=status.HTTP_202_ACCEPTED
+        )

@@ -459,10 +459,20 @@ def make_hierarchy(concept_map):  # pragma: no cover
     for parent_concept_uri, child_concept_urls in concept_map.items():
         parent_concept = Concept.objects.filter(uri=parent_concept_uri).first()
         if parent_concept:
-            latest_version = parent_concept.get_latest_version()
-            for child_concept in Concept.objects.filter(uri__in=child_concept_urls):
-                child_concept.parent_concepts.add(latest_version)
-                child_concept.get_latest_version().parent_concepts.add(latest_version)
+            parent_latest = parent_concept.get_latest_version()
+            if parent_latest:
+                for child_concept in Concept.objects.filter(uri__in=child_concept_urls):
+                    child_concept.parent_concepts.add(parent_latest)
+                    child_latest = child_concept.get_latest_version()
+                    if child_latest:
+                        child_latest.parent_concepts.add(parent_latest)
+                        logger.info('Added child %s to parent %s', child_concept.uri, parent_concept_uri)
+                    else:
+                        logger.info('Could not find child %s latest_version', child_concept.uri)
+            else:
+                logger.info('Could not find parent %s latest_version', parent_concept_uri)
+        else:
+            logger.info('Could not find parent %s', parent_concept_uri)
 
 
 @app.task
