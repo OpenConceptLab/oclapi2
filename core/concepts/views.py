@@ -218,10 +218,19 @@ class ConceptRetrieveUpdateDestroyView(ConceptBaseView, RetrieveAPIView, UpdateA
     def is_async_hard_delete_requested(self):
         return self.request.query_params.get('async', None) in ['true', True, 'True']
 
+    def is_db_delete_requested(self):
+        return self.request.query_params.get('db', None) in ['true', True, 'True']
+
     def destroy(self, request, *args, **kwargs):
+        is_hard_delete_requested = self.is_hard_delete_requested()
+        if self.is_db_delete_requested() and is_hard_delete_requested:
+            parent_filters = Concept.get_parent_and_owner_filters_from_kwargs(self.kwargs)
+            result = Concept.objects.filter(mnemonic=self.kwargs['concept'], **parent_filters).delete()
+            return Response(result, status=status.HTTP_204_NO_CONTENT)
+
         concept = self.get_object()
 
-        if self.is_hard_delete_requested():
+        if is_hard_delete_requested:
             if self.is_async_hard_delete_requested():
                 delete_concept.delay(concept.id)
                 return Response(status=status.HTTP_204_NO_CONTENT)

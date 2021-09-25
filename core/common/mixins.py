@@ -477,8 +477,8 @@ class SourceChildMixin:
 
         return queryset
 
-    @staticmethod
-    def get_parent_and_owner_filters_from_uri(uri):
+    @classmethod
+    def get_parent_and_owner_filters_from_uri(cls, uri):
         filters = {}
         if not uri:
             return filters
@@ -486,15 +486,26 @@ class SourceChildMixin:
         try:
             resolved_uri = resolve(uri)
             kwargs = resolved_uri.kwargs
-            filters['parent__mnemonic'] = kwargs.get('source')
-            if 'org' in kwargs:
-                filters['parent__organization__mnemonic'] = kwargs.get('org')
-            if 'user' in kwargs:
-                filters['parent__user__username'] = kwargs.get('user')
+            filters = cls.get_parent_and_owner_filters_from_kwargs(kwargs)
         except Resolver404:
             pass
 
         return compact_dict_by_values(filters)
+
+    @staticmethod
+    def get_parent_and_owner_filters_from_kwargs(kwargs):
+        filters = {}
+
+        if not kwargs:
+            return filters
+
+        filters['parent__mnemonic'] = kwargs.get('source')
+        if 'org' in kwargs:
+            filters['parent__organization__mnemonic'] = kwargs.get('org')
+        if 'user' in kwargs:
+            filters['parent__user__username'] = kwargs.get('user')
+
+        return filters
 
     @classmethod
     def get_filter_by_container_criterion(  # pylint: disable=too-many-arguments
