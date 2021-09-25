@@ -3,6 +3,7 @@ import logging
 from celery_once import AlreadyQueued
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError
+from django.db.models import Q
 from django.http import Http404
 from django.shortcuts import get_object_or_404
 from drf_yasg.utils import swagger_auto_schema
@@ -13,7 +14,7 @@ from rest_framework.generics import (
 from rest_framework.response import Response
 
 from core.client_configs.views import ResourceClientConfigsView
-from core.common.constants import HEAD, RELEASED_PARAM, PROCESSING_PARAM
+from core.common.constants import HEAD, RELEASED_PARAM, PROCESSING_PARAM, ACCESS_TYPE_NONE
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryCreateMixin, ConceptDictionaryUpdateMixin, \
     ConceptContainerExportMixin, ConceptContainerProcessingMixin, ConceptContainerExtraRetrieveUpdateDestroyView
 from core.common.permissions import CanViewConceptDictionary, CanEditConceptDictionary, HasAccessToVersionedObject, \
@@ -93,6 +94,19 @@ class SourceListView(SourceBaseView, ConceptDictionaryCreateMixin, ListWithHeade
     document_model = SourceDocument
     facet_class = SourceSearch
     default_filters = dict(is_active=True, version=HEAD)
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        user = self.request.user
+        if get(user, 'is_staff'):
+            return queryset
+        if get(user, 'is_anonymous'):
+            return queryset.exclude(public_access=ACCESS_TYPE_NONE)
+
+        public_queryset = queryset.exclude(public_access=ACCESS_TYPE_NONE)
+        private_queryset = queryset.filter(public_access=ACCESS_TYPE_NONE)
+        private_queryset = private_queryset.filter(Q(user_id=user.id) | Q(organization__members__id=user.id))
+        return public_queryset.union(private_queryset)
 
     def get_serializer_class(self):
         if self.request.method == 'GET' and self.is_verbose():

@@ -1,4 +1,4 @@
-from django.db.models import F
+from django.db.models import F, Q
 from django.http import QueryDict, Http404
 from django.shortcuts import get_object_or_404
 from drf_yasg.utils import swagger_auto_schema
@@ -9,7 +9,7 @@ from rest_framework.mixins import CreateModelMixin
 from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
 
-from core.common.constants import HEAD
+from core.common.constants import HEAD, ACCESS_TYPE_NONE
 from core.common.exceptions import Http409
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryMixin
 from core.common.swagger_parameters import (
@@ -65,11 +65,25 @@ class MappingListView(MappingBaseView, ListWithHeadersMixin, CreateModelMixin):
         if is_latest_version:
             queryset = queryset.filter(is_latest_version=True)
 
-        return queryset.select_related(
-            'parent__organization', 'parent__user', 'from_concept__parent', 'to_concept__parent', 'to_source',
-            'versioned_object', 'from_source',
-        )
+        user = self.request.user
+        if get(user, 'is_anonymous'):
+            queryset = queryset.exclude(public_access=ACCESS_TYPE_NONE)
+        elif not get(user, 'is_staff'):
+            public_queryset = queryset.exclude(public_access=ACCESS_TYPE_NONE)
+            private_queryset = queryset.filter(public_access=ACCESS_TYPE_NONE)
+            private_queryset = private_queryset.filter(
+                Q(parent__user_id=user.id) | Q(parent__organization__members__id=user.id))
+            queryset = public_queryset.union(private_queryset)
 
+        return queryset
+
+    @swagger_auto_schema(
+        manual_parameters=[
+            q_param, limit_param, sort_desc_param, sort_asc_param, exact_match_param, page_param, verbose_param,
+            include_retired_param, updated_since_param,
+            include_facets_header, compress_header
+        ]
+    )
     def get(self, request, *args, **kwargs):
         self.set_parent_resource(False)
         if self.parent_resource:
@@ -246,30 +260,6 @@ class MappingVersionRetrieveView(MappingBaseView, RetrieveAPIView, DestroyAPIVie
 
         self.check_object_permissions(self.request, instance)
         return instance
-
-
-class MappingVersionListAllView(MappingBaseView, ListWithHeadersMixin):
-    permission_classes = (CanViewParentDictionary,)
-
-    def get_serializer_class(self):
-        return MappingDetailSerializer if self.is_verbose() else MappingListSerializer
-
-    def get_queryset(self):
-        return Mapping.global_listing_queryset(
-            self.get_filter_params(), self.request.user
-        ).select_related(
-            'parent__organization', 'parent__user',
-        )
-
-    @swagger_auto_schema(
-        manual_parameters=[
-            q_param, limit_param, sort_desc_param, sort_asc_param, exact_match_param, page_param, verbose_param,
-            include_retired_param, updated_since_param,
-            include_facets_header, compress_header
-        ]
-    )
-    def get(self, request, *args, **kwargs):
-        return self.list(request, *args, **kwargs)
 
 
 class MappingExtrasView(SourceChildExtrasView, MappingBaseView):

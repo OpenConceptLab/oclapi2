@@ -3,6 +3,7 @@ import logging
 from celery_once import AlreadyQueued
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError
+from django.db.models import Q
 from django.http import Http404
 from django.shortcuts import get_object_or_404
 from drf_yasg.utils import swagger_auto_schema
@@ -31,8 +32,8 @@ from core.collections.serializers import (
     CollectionVersionSummaryDetailSerializer, CollectionReferenceDetailSerializer)
 from core.collections.utils import is_version_specified
 from core.common.constants import (
-    HEAD, RELEASED_PARAM, PROCESSING_PARAM, OK_MESSAGE
-)
+    HEAD, RELEASED_PARAM, PROCESSING_PARAM, OK_MESSAGE,
+    ACCESS_TYPE_NONE)
 from core.common.mixins import (
     ConceptDictionaryCreateMixin, ListWithHeadersMixin, ConceptDictionaryUpdateMixin,
     ConceptContainerExportMixin,
@@ -136,6 +137,19 @@ class CollectionListView(CollectionBaseView, ConceptDictionaryCreateMixin, ListW
     document_model = CollectionDocument
     facet_class = CollectionSearch
     default_filters = dict(is_active=True, version=HEAD)
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        user = self.request.user
+        if get(user, 'is_staff'):
+            return queryset
+        if get(user, 'is_anonymous'):
+            return queryset.exclude(public_access=ACCESS_TYPE_NONE)
+
+        public_queryset = queryset.exclude(public_access=ACCESS_TYPE_NONE)
+        private_queryset = queryset.filter(public_access=ACCESS_TYPE_NONE)
+        private_queryset = private_queryset.filter(Q(user_id=user.id) | Q(organization__members__id=user.id))
+        return public_queryset.union(private_queryset)
 
     def get_serializer_class(self):
         if self.request.method == 'GET' and self.is_verbose():

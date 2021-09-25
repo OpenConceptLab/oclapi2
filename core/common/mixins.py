@@ -477,13 +477,6 @@ class SourceChildMixin:
 
         return queryset
 
-    @classmethod
-    def global_listing_queryset(cls, params, user):
-        queryset = cls.get_base_queryset(params).filter(is_latest_version=True, is_active=True)
-        if not user.is_staff:
-            queryset = queryset.exclude(public_access=ACCESS_TYPE_NONE)
-        return queryset
-
     @staticmethod
     def get_parent_and_owner_filters_from_uri(uri):
         filters = {}

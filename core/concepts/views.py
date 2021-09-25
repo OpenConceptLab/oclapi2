@@ -1,4 +1,4 @@
-from django.db.models import F
+from django.db.models import F, Q
 from django.http import Http404
 from django.shortcuts import get_object_or_404
 from drf_yasg.utils import swagger_auto_schema
@@ -12,7 +12,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from core.common.constants import (
-    HEAD, INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_RETIRED_PARAM)
+    HEAD, INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_RETIRED_PARAM, ACCESS_TYPE_NONE)
 from core.common.exceptions import Http409
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryMixin
 from core.common.swagger_parameters import (
@@ -51,35 +51,6 @@ class ConceptBaseView(SourceChildCommonBaseView):
         return Concept.get_base_queryset(self.params)
 
 
-class ConceptVersionListAllView(ConceptBaseView, ListWithHeadersMixin):
-    permission_classes = (CanViewParentDictionary,)
-
-    def get_serializer_class(self):
-        if self.is_verbose():
-            return ConceptDetailSerializer
-        if self.is_brief():
-            return ConceptMinimalSerializer
-        return ConceptListSerializer
-
-    def get_queryset(self):
-        queryset = Concept.global_listing_queryset(self.get_filter_params(), self.request.user)
-        if self.is_brief():
-            return queryset
-
-        return queryset.select_related(
-            'parent__organization', 'parent__user',).prefetch_related('names', 'descriptions')
-
-    @swagger_auto_schema(
-        manual_parameters=[
-            q_param, limit_param, sort_desc_param, sort_asc_param, exact_match_param, page_param, verbose_param,
-            include_retired_param, include_inverse_mappings_param, updated_since_param,
-            include_facets_header, compress_header
-        ]
-    )
-    def get(self, request, *args, **kwargs):
-        return self.list(request, *args, **kwargs)
-
-
 class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
     serializer_class = ConceptListSerializer
 
@@ -106,12 +77,25 @@ class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
         queryset = super().get_queryset()
         if is_latest_version:
             queryset = queryset.filter(is_latest_version=True)
+        user = self.request.user
+        if get(user, 'is_anonymous'):
+            queryset = queryset.exclude(public_access=ACCESS_TYPE_NONE)
+        elif not get(user, 'is_staff'):
+            public_queryset = queryset.exclude(public_access=ACCESS_TYPE_NONE)
+            private_queryset = queryset.filter(public_access=ACCESS_TYPE_NONE)
+            private_queryset = private_queryset.filter(
+                Q(parent__user_id=user.id) | Q(parent__organization__members__id=user.id))
+            queryset = public_queryset.union(private_queryset)
 
-        if self.is_brief():
-            return queryset
+        return queryset
 
-        return queryset.select_related('parent__organization', 'parent__user', 'created_by').prefetch_related('names')
-
+    @swagger_auto_schema(
+        manual_parameters=[
+            q_param, limit_param, sort_desc_param, sort_asc_param, exact_match_param, page_param, verbose_param,
+            include_retired_param, include_inverse_mappings_param, updated_since_param,
+            include_facets_header, compress_header
+        ]
+    )
     def get(self, request, *args, **kwargs):
         self.set_parent_resource(False)
         if self.parent_resource:
