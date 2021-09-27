@@ -1,3 +1,6 @@
+##### 2.0.58 - Sat Sep 25 12:16:24 2021 +0000
+- populate hierarchy task to log more
+- [OpenConceptLab/ocl_issues#988](https://github.com/OpenConceptLab/ocl_issues/issues/988) | source/collection/concept/mapping list api to apply user permissions
 ##### 2.0.56 - Thu Sep 23 02:20:53 2021 +0000
 - Fixing or criteria for searching mnemonic exact
 - API to batch index source's concepts and mappings
