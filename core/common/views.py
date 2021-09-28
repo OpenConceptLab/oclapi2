@@ -567,14 +567,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         return self.request.method.lower() == 'head'
 
     def should_perform_es_search(self):
-        if self.is_head():
-            result = bool(self.get_search_string())
-        else:
-            result = SEARCH_PARAM in self.request.query_params
-
-        return result or self.has_searchable_extras_fields() or bool(
-            self.get_faceted_filters()
-        ) or len(self.get_sort_attributes()) > 0
+        return bool(self.get_search_string()) or self.has_searchable_extras_fields() or bool(self.get_faceted_filters())
 
     def has_searchable_extras_fields(self):
         return bool(
