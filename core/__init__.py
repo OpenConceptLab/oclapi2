@@ -1,4 +1,4 @@
 API_VERSION = '2.0.58'
-API_BUILD = 'dev'
+API_BUILD = '373afff9'
 VERSION = API_VERSION + '-' + API_BUILD
 __version__ = VERSION
