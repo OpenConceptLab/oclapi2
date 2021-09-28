@@ -11,6 +11,11 @@ urlpatterns = [
         name='concept-detail'
     ),
     path(
+        "<str:concept>/collection-versions/",
+        views.ConceptCollectionMembershipView.as_view(),
+        name='concept-collection-versions'
+    ),
+    path(
         "<str:concept>/summary/",
         views.ConceptSummaryView.as_view(),
         name='concept-summary'
@@ -70,6 +75,11 @@ urlpatterns = [
         '<str:concept>/<str:concept_version>/',
         views.ConceptVersionRetrieveView.as_view(),
         name='concept-version-detail'
+    ),
+    path(
+        '<str:concept>/<str:concept_version>/collection-versions/',
+        views.ConceptCollectionMembershipView.as_view(),
+        name='concept-version-collection-versions'
     ),
     path(
         '<str:concept>/<str:concept_version>/summary/',

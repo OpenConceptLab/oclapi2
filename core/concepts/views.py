@@ -158,6 +158,37 @@ class ConceptSummaryView(ConceptBaseView, RetrieveAPIView):
         return instance
 
 
+class ConceptCollectionMembershipView(ConceptBaseView, ListWithHeadersMixin):
+    def get_serializer_class(self):
+        from core.collections.serializers import CollectionVersionListSerializer
+        return CollectionVersionListSerializer
+
+    def get_object(self, queryset=None):
+        queryset = Concept.get_base_queryset(self.params)
+        if 'concept_version' in self.kwargs:
+            instance = queryset.first()
+        else:
+            instance = queryset.filter(id=F('versioned_object_id')).first().get_latest_version()
+
+        if not instance:
+            raise Http404()
+
+        self.check_object_permissions(self.request, instance)
+
+        return instance
+
+    def get_queryset(self):
+        instance = self.get_object()
+
+        if not self.kwargs.get('concept_version'):
+            instance = instance.get_latest_version()
+
+        return instance.collection_set
+
+    def get(self, request, *args, **kwargs):
+        return self.list(request, *args, **kwargs)
+
+
 class ConceptRetrieveUpdateDestroyView(ConceptBaseView, RetrieveAPIView, UpdateAPIView, DestroyAPIView):
     serializer_class = ConceptDetailSerializer
 
