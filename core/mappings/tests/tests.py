@@ -233,3 +233,21 @@ class OpenMRSMappingValidatorTest(OCLTestCase):
         mapping = MappingFactory.build(parent=source, to_concept=concept1, from_concept=concept2, map_type='Q-AND-A')
         mapping.populate_fields_from_relations({})
         mapping.clean()
+
+    def test_external_id(self):
+        source = OrganizationSourceFactory(custom_validation_schema=CUSTOM_VALIDATION_SCHEMA_OPENMRS)
+        concept1 = ConceptFactory(parent=source, names=[LocalizedTextFactory()])
+        concept2 = ConceptFactory(parent=source, names=[LocalizedTextFactory()])
+
+        mapping = MappingFactory.build(
+            parent=source, to_concept=concept1, from_concept=concept2, map_type='Q-AND-A', external_id='1'*37)
+        mapping.populate_fields_from_relations({})
+
+        with self.assertRaises(ValidationError) as ex:
+            mapping.clean()
+        self.assertEqual(ex.exception.messages, ['Mapping External ID cannot be more than 36 characters.'])
+
+        mapping = MappingFactory.build(
+            parent=source, to_concept=concept1, from_concept=concept2, map_type='Q-AND-A', external_id='1'*36)
+        mapping.populate_fields_from_relations({})
+        mapping.clean()

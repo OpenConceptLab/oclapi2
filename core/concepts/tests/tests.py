@@ -1268,6 +1268,71 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
         self.assertEqual(concept.errors, {})
         self.assertIsNotNone(concept.id)
 
+    def test_external_id_length(self):
+        source = OrganizationSourceFactory(custom_validation_schema=CUSTOM_VALIDATION_SCHEMA_OPENMRS)
+        concept = Concept.persist_new(dict(
+                mnemonic='concept', version=HEAD, name='concept', parent=source, external_id='1'*37,
+                concept_class='Diagnosis', datatype='None', names=[
+                    LocalizedTextFactory.build(name="mg", locale='en', locale_preferred=True),
+                ]
+            ))
+        self.assertEqual(concept.errors, {'external_id': ['Concept External ID cannot be more than 36 characters.']})
+        self.assertIsNone(concept.id)
+
+        concept = Concept.persist_new(dict(
+                mnemonic='concept', version=HEAD, name='concept', parent=source, external_id='1'*36,
+                concept_class='Diagnosis', datatype='None', names=[
+                    LocalizedTextFactory.build(name="mg", locale='en', locale_preferred=True),
+                ]
+            ))
+        self.assertEqual(concept.errors, {})
+        self.assertIsNotNone(concept.id)
+
+        concept1 = Concept.persist_new(dict(
+                mnemonic='concept1', version=HEAD, name='concept1', parent=source, external_id='1'*10,
+                concept_class='Diagnosis', datatype='None', names=[
+                    LocalizedTextFactory.build(name="mg1", locale='en', locale_preferred=True),
+                ]
+            ))
+        self.assertEqual(concept.errors, {})
+        self.assertIsNotNone(concept1.id)
+
+    def test_names_external_id_length(self):
+        source = OrganizationSourceFactory(custom_validation_schema=CUSTOM_VALIDATION_SCHEMA_OPENMRS)
+        concept = Concept.persist_new(dict(
+                mnemonic='concept', version=HEAD, name='concept', parent=source, external_id='1'*36,
+                concept_class='Diagnosis', datatype='None', names=[
+                    LocalizedTextFactory.build(name="mg", locale='en', locale_preferred=True, external_id='2'*37),
+                ]
+            ))
+        self.assertEqual(
+            concept.errors,
+            {
+                "names": ["Concept name's External ID cannot be more than 36 characters.: "
+                          "mg (locale: en, preferred: yes)"],
+            }
+        )
+        self.assertIsNone(concept.id)
+
+    def test_description_external_id_length(self):
+        source = OrganizationSourceFactory(custom_validation_schema=CUSTOM_VALIDATION_SCHEMA_OPENMRS)
+        concept = Concept.persist_new(dict(
+                mnemonic='concept', version=HEAD, name='concept', parent=source, external_id='1'*36,
+                concept_class='Diagnosis', datatype='None', names=[
+                    LocalizedTextFactory.build(name="mg", locale='en', locale_preferred=True, external_id='2'*36),
+                ], descriptions=[
+                    LocalizedTextFactory.build(name="mg", locale='en', external_id='2'*37),
+                ]
+            ))
+        self.assertEqual(
+            concept.errors,
+            {
+                "descriptions": ["Concept description's External ID cannot be more than 36 characters.: "
+                                 "mg (locale: ""en, preferred: no)"],
+            }
+        )
+        self.assertIsNone(concept.id)
+
 
 class ValidatorSpecifierTest(OCLTestCase):
     def setUp(self):

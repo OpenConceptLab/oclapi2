@@ -10,7 +10,9 @@ from core.concepts.constants import (
     OPENMRS_ONE_FULLY_SPECIFIED_NAME_PER_LOCALE, OPENMRS_NO_MORE_THAN_ONE_SHORT_NAME_PER_LOCALE, OPENMRS_CONCEPT_CLASS,
     OPENMRS_DATATYPE, OPENMRS_NAME_TYPE, OPENMRS_DESCRIPTION_TYPE, OPENMRS_NAME_LOCALE,
     OPENMRS_DESCRIPTION_LOCALE,
-    LOCALES_SEARCH_INDEX_TERM, INDEX_TERM, FULLY_SPECIFIED, SHORT)
+    LOCALES_SEARCH_INDEX_TERM, INDEX_TERM, FULLY_SPECIFIED, SHORT,
+    OPENMRS_CONCEPT_EXTERNAL_ID_ERROR, OPENMRS_EXTERNAL_ID_LENGTH, OPENMRS_NAME_EXTERNAL_ID_ERROR,
+    OPENMRS_DESCRIPTION_EXTERNAL_ID_ERROR)
 from core.concepts.validators import BaseConceptValidator, message_with_name_details
 
 
@@ -23,6 +25,7 @@ class OpenMRSConceptValidator(BaseConceptValidator):
     def validate_concept_based(self, concept):
         if concept.retired:
             return
+        self.validate_external_id(concept)
         self.must_have_exactly_one_preferred_name(concept)
         self.all_non_short_names_must_be_unique(concept)
         self.no_more_than_one_short_name_per_locale(concept)
@@ -30,6 +33,14 @@ class OpenMRSConceptValidator(BaseConceptValidator):
         self.only_one_fully_specified_name_per_locale(concept)
         self.requires_at_least_one_fully_specified_name(concept)
         self.lookup_attributes_should_be_valid(concept)
+
+    def validate_external_id(self, concept):
+        if self.is_invalid_external_id(concept):
+            raise ValidationError({'external_id': [OPENMRS_CONCEPT_EXTERNAL_ID_ERROR]})
+
+    @staticmethod
+    def is_invalid_external_id(instance):
+        return len(get(instance, 'external_id') or '') > OPENMRS_EXTERNAL_ID_LENGTH
 
     def validate_source_based(self, concept):
         if concept.retired:
@@ -193,7 +204,20 @@ class OpenMRSConceptValidator(BaseConceptValidator):
             if description.locale not in self.reference_values['Locales']:
                 raise ValidationError({'descriptions': [OPENMRS_DESCRIPTION_LOCALE]})
 
+    def local_external_id_should_be_valid(self, concept):
+        names = concept.saved_unsaved_names or []
+        for name in names:
+            if self.is_invalid_external_id(name):
+                raise ValidationError({'names': [message_with_name_details(OPENMRS_NAME_EXTERNAL_ID_ERROR, name)]})
+
+        descriptions = concept.saved_unsaved_descriptions or []
+        for description in descriptions:
+            if self.is_invalid_external_id(description):
+                raise ValidationError({
+                    'descriptions': [message_with_name_details(OPENMRS_DESCRIPTION_EXTERNAL_ID_ERROR, description)]})
+
     def lookup_attributes_should_be_valid(self, concept):
+        self.local_external_id_should_be_valid(concept)
         if concept.concept_class in LOOKUP_CONCEPT_CLASSES:
             return
 
