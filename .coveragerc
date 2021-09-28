@@ -7,7 +7,6 @@ omit =
     core/common/healthcheck/*
     core/reports/*
     core/wsgi.py
-    */v1_dump/*
     */management/commands/*
     */migrations/*
     */documents.py
@@ -16,7 +15,6 @@ omit =
     */feeds.py
     *test*
     core/middlewares/*
-    core/v1_importers/*
     *.css
     *.html
 concurrency=multiprocessing
