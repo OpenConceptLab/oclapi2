@@ -1,3 +1,13 @@
+##### 2.0.61 - Wed Sep 29 11:40:41 2021 +0000
+- [OpenConceptLab/ocl_issues#992](https://github.com/OpenConceptLab/ocl_issues/issues/992) | concept collection membership restricted to user/org scope
+- [OpenConceptLab/ocl_issues#1000](https://github.com/OpenConceptLab/ocl_issues/issues/1000) | deleted v1 to v2 data migration code
+- Merge pull request #56 from OpenConceptLab/dependabot/pip/boto3-1.18.49
+- Bump boto3 from 1.18.42 to 1.18.49
+- Merge pull request #54 from OpenConceptLab/dependabot/pip/moto-2.2.8
+- List APIs to use ES for non empty search str only
+- [OpenConceptLab/ocl_issues#992](https://github.com/OpenConceptLab/ocl_issues/issues/992) | API to get collection memberships for a concept
+- [OpenConceptLab/ocl_issues#963](https://github.com/OpenConceptLab/ocl_issues/issues/963) | OpenMRS validator external_id for concept/locales/mapping validations
+- Bump moto from 2.2.7 to 2.2.8
 ##### 2.0.58 - Sat Sep 25 12:16:24 2021 +0000
 - populate hierarchy task to log more
 - [OpenConceptLab/ocl_issues#988](https://github.com/OpenConceptLab/ocl_issues/issues/988) | source/collection/concept/mapping list api to apply user permissions
