@@ -183,7 +183,8 @@ class ConceptCollectionMembershipView(ConceptBaseView, ListWithHeadersMixin):
         if not self.kwargs.get('concept_version'):
             instance = instance.get_latest_version()
 
-        return instance.collection_set
+        return instance.collection_set.filter(
+            organization_id=instance.parent.organization_id, user_id=instance.parent.user_id)
 
     def get(self, request, *args, **kwargs):
         return self.list(request, *args, **kwargs)
