@@ -519,7 +519,7 @@ class ReferenceImporter(BaseResourceImporter):
 
         if collection:
             (added_references, _) = collection.add_expressions(
-                self.get('data'), settings.API_BASE_URL, self.user, self.get('__cascade', False)
+                self.get('data'), self.user, self.get('__cascade', False)
             )
             for ref in added_references:
                 if ref.concepts:

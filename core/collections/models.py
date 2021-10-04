@@ -1,6 +1,3 @@
-import json
-
-import requests
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
 from django.db.models import UniqueConstraint
@@ -13,8 +10,8 @@ from core.collections.constants import (
     CONCEPT_PREFERRED_NAME_UNIQUE_PER_COLLECTION_AND_LOCALE, ALL_SYMBOL, COLLECTION_VERSION_TYPE)
 from core.collections.utils import is_concept, is_mapping
 from core.common.constants import (
-    DEFAULT_REPOSITORY_TYPE, ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT
-)
+    DEFAULT_REPOSITORY_TYPE, ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT,
+    ACCESS_TYPE_NONE)
 from core.common.models import ConceptContainerModel
 from core.common.utils import is_valid_uri, drop_version
 from core.concepts.constants import LOCALES_FULLY_SPECIFIED
@@ -172,33 +169,38 @@ class Collection(ConceptContainerModel):
                 raise ValidationError(validation_error)
 
     @staticmethod
-    def __get_children_uris(url):
-        response = requests.get(url)
-        data = json.loads(response.content)
-        return [child['url'] for child in data]
-
-    def __get_expressions_from(self, expressions, url):
-        if expressions == ALL_SYMBOL:
-            return self.__get_children_uris(url)
-
-        return expressions
-
-    @staticmethod
-    def __get_children_list_url(child_type, host_url, data):
-        return f"{host_url}{data.get('uri')}{child_type}?q={data.get('search_term', '')}&limit=0"
+    def get_source_from_uri(uri):
+        from core.sources.models import Source
+        return Source.objects.filter(uri=uri).first()
 
     @transaction.atomic
-    def add_expressions(self, data, host_url, user, cascade_mappings=False):
+    def add_expressions(self, data, user, cascade_mappings=False):
         expressions = data.get('expressions', [])
         concept_expressions = data.get('concepts', [])
         mapping_expressions = data.get('mappings', [])
+        source = None
+        source_uri = data.get('uri')
+        if source_uri:
+            source = self.get_source_from_uri(source_uri)
 
-        expressions.extend(
-            self.__get_expressions_from(concept_expressions, self.__get_children_list_url('concepts', host_url, data))
-        )
-        expressions.extend(
-            self.__get_expressions_from(mapping_expressions, self.__get_children_list_url('mappings', host_url, data))
-        )
+        if source:
+            can_view_all_content = source.can_view_all_content(user)
+
+            def get_child_expressions(queryset):
+                if source.is_head:
+                    queryset = queryset.filter(is_latest_version=True)
+                if not can_view_all_content:
+                    queryset = queryset.filter(public_access=ACCESS_TYPE_NONE)
+                return list(queryset.values_list('uri', flat=True))
+
+            if concept_expressions == ALL_SYMBOL:
+                expressions.extend(get_child_expressions(source.concepts))
+            if mapping_expressions == ALL_SYMBOL:
+                expressions.extend(get_child_expressions(source.mappings))
+        else:
+            expressions.extend(concept_expressions)
+            expressions.extend(mapping_expressions)
+
         if cascade_mappings:
             all_related_mappings = self.get_all_related_mappings(expressions)
             expressions += all_related_mappings

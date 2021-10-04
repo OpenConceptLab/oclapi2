@@ -389,7 +389,6 @@ class TasksTest(OCLTestCase):
                 obj.get_latest_version().version_url for obj in [concept1, concept2, mapping2]
             ]),
             collection.id,
-            None,
             True
         )
 

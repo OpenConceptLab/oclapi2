@@ -413,7 +413,7 @@ class CollectionReferencesViewTest(OCLAPITestCase):
 
     @patch('core.collections.views.add_references')
     def test_put_202_all(self, add_references_mock):
-        add_references_mock.delay = Mock()
+        add_references_mock.delay = Mock(return_value=None)
 
         response = self.client.put(
             self.collection.uri + 'references/',
@@ -425,7 +425,7 @@ class CollectionReferencesViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 202)
         self.assertEqual(response.data, [])
         add_references_mock.delay.assert_called_once_with(
-            self.user.id, dict(concepts='*'), self.collection.id, 'http://testserver', False
+            self.user.id, dict(concepts='*'), self.collection.id, False
         )
 
     def test_put_200_specific_expression(self):

@@ -736,6 +736,11 @@ class ConceptContainerModel(VersionedModel):
     def has_export(self):
         return S3.exists(self.export_path)
 
+    def can_view_all_content(self, user):
+        if get(user, 'is_anonymous'):
+            return False
+        return get(user, 'is_staff') or self.user_id == user.id or self.organization.members.filter(id=user.id).exists()
+
 
 class CelerySignalProcessor(RealTimeSignalProcessor):
     def handle_save(self, sender, instance, **kwargs):

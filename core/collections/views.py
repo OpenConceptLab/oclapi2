@@ -320,11 +320,17 @@ class CollectionReferencesView(
         adding_all = mapping_expressions == '*' or concept_expressions == '*'
 
         if adding_all:
-            add_references.delay(self.request.user.id, data, collection.id, self.get_host_url(), cascade_mappings)
-            return Response([], status=status.HTTP_202_ACCEPTED)
+            result = add_references.delay(
+                self.request.user.id, data, collection.id, cascade_mappings)
+            return Response(
+                dict(
+                    state=result.state, username=request.user.username, task=result.task_id, queue='default'
+                ) if result else [],
+                status=status.HTTP_202_ACCEPTED
+            )
 
         (added_references, errors) = collection.add_expressions(
-            data, self.get_host_url(), request.user, cascade_mappings
+            data, request.user, cascade_mappings
         )
 
         all_expressions = expressions + concept_expressions + mapping_expressions
