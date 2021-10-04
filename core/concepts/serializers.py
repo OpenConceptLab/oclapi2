@@ -277,6 +277,8 @@ class ConceptDetailSerializer(ModelSerializer):
                 self.fields.pop('child_concept_urls')
             if not self.include_parent_concept_urls and get(request, 'method') == 'GET':
                 self.fields.pop('parent_concept_urls')
+            if not self.include_hierarchy_path:
+                self.fields.pop('hierarchy_path', None)
         except:  # pylint: disable=bare-except
             pass
 
