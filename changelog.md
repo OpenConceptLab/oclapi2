@@ -1,3 +1,7 @@
+##### 2.0.63 - Mon Oct 4 04:57:25 2021 +0000
+- [OpenConceptLab/ocl_issues#1018](https://github.com/OpenConceptLab/ocl_issues/issues/1018) | bulk references add from a source/version to not go through API
+- Merge pull request #57 from OpenConceptLab/dependabot/pip/django-cors-headers-3.9.0
+- Bump django-cors-headers from 3.8.0 to 3.9.0
 ##### 2.0.61 - Wed Sep 29 11:40:41 2021 +0000
 - [OpenConceptLab/ocl_issues#992](https://github.com/OpenConceptLab/ocl_issues/issues/992) | concept collection membership restricted to user/org scope
 - [OpenConceptLab/ocl_issues#1000](https://github.com/OpenConceptLab/ocl_issues/issues/1000) | deleted v1 to v2 data migration code
