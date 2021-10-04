@@ -805,6 +805,12 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             return Concept.objects.filter(uri__in=urls)
         return Concept.objects.none()
 
+    def parent_concept_queryset(self):
+        urls = self.parent_concept_urls
+        if urls:
+            return Concept.objects.filter(uri__in=urls)
+        return Concept.objects.none()
+
     @staticmethod
     def __format_hierarchy_uris(uris):
         return list({drop_version(uri) for uri in uris})

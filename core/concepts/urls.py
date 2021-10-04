@@ -30,6 +30,11 @@ urlpatterns = [
         views.ConceptChildrenView.as_view(),
         name='concept-children'
     ),
+    path(
+        "<str:concept>/parents/",
+        views.ConceptParentsView.as_view(),
+        name='concept-parents'
+    ),
     path('<str:concept>/atom/', ConceptFeed()),
     path(
         "<str:concept>/descriptions/",

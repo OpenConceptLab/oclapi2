@@ -481,3 +481,27 @@ class ConceptHierarchySerializer(ModelSerializer):
     class Meta:
         model = Concept
         fields = ('uuid', 'id', 'url', 'children', 'name')
+
+
+class ConceptChildrenSerializer(ModelSerializer):
+    uuid = CharField(source='id')
+    id = EncodedDecodedCharField(source='mnemonic')
+    url = CharField(source='uri')
+    children = ListField(source='child_concept_urls')
+    name = CharField(source='display_name')
+
+    class Meta:
+        model = Concept
+        fields = ('uuid', 'id', 'url', 'children', 'name')
+
+
+class ConceptParentsSerializer(ModelSerializer):
+    uuid = CharField(source='id')
+    id = EncodedDecodedCharField(source='mnemonic')
+    url = CharField(source='uri')
+    parents = ListField(source='parent_concept_urls')
+    name = CharField(source='display_name')
+
+    class Meta:
+        model = Concept
+        fields = ('uuid', 'id', 'url', 'parents', 'name')

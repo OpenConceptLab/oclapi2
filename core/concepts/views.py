@@ -31,7 +31,8 @@ from core.concepts.search import ConceptSearch
 from core.concepts.serializers import (
     ConceptDetailSerializer, ConceptListSerializer, ConceptDescriptionSerializer, ConceptNameSerializer,
     ConceptVersionDetailSerializer,
-    ConceptVersionListSerializer, ConceptHierarchySerializer, ConceptSummarySerializer, ConceptMinimalSerializer)
+    ConceptVersionListSerializer, ConceptSummarySerializer, ConceptMinimalSerializer,
+    ConceptChildrenSerializer, ConceptParentsSerializer)
 from core.mappings.serializers import MappingListSerializer
 
 
@@ -279,12 +280,21 @@ class ConceptRetrieveUpdateDestroyView(ConceptBaseView, RetrieveAPIView, UpdateA
 
 
 class ConceptChildrenView(ConceptBaseView, ListAPIView):
-    serializer_class = ConceptHierarchySerializer
+    serializer_class = ConceptChildrenSerializer
 
     def get_queryset(self):
         instance = get_object_or_404(super().get_queryset(), id=F('versioned_object_id'))
         self.check_object_permissions(self.request, instance)
         return instance.child_concept_queryset()
+
+
+class ConceptParentsView(ConceptBaseView, ListAPIView):
+    serializer_class = ConceptParentsSerializer
+
+    def get_queryset(self):
+        instance = get_object_or_404(super().get_queryset(), id=F('versioned_object_id'))
+        self.check_object_permissions(self.request, instance)
+        return instance.parent_concept_queryset()
 
 
 class ConceptReactivateView(ConceptBaseView, UpdateAPIView):
