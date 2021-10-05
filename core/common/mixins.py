@@ -463,7 +463,7 @@ class SourceChildMixin:
             queryset = cls.get_base_queryset(kwargs)
             if queryset.count() > 1 and \
                     ('concept_version' not in kwargs or 'mapping_version' not in kwargs) and \
-                    ('concept' in kwargs or 'mapping' in kwargs):
+                    ('collection' not in kwargs) and ('version' not in kwargs):
                 queryset = queryset.filter(is_latest_version=True)
         except:  # pylint: disable=bare-except
             pass

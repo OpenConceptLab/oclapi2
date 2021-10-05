@@ -93,8 +93,8 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
                 'mappings',
                 'updated_by',
                 'created_by',
-                'parent_concept_urls',
                 'hierarchy_path',
+                'public_can_view',
             ]
         )
 
@@ -196,7 +196,6 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
              'mappings',
              'updated_by',
              'created_by',
-             'parent_concept_urls',
              'hierarchy_path',
              'public_can_view']
         )
@@ -273,7 +272,6 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
              'mappings',
              'updated_by',
              'created_by',
-             'parent_concept_urls',
              'hierarchy_path',
              'public_can_view']
         )
@@ -687,17 +685,6 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
                     'created_on', 'updated_on', 'versions_url', 'version', 'extras', 'name', 'type',
                     'update_comment', 'version_url', 'mappings', 'updated_by', 'created_by',
                     'hierarchy_path', 'public_can_view'])
-        )
-
-        response = self.client.get(
-            "/concepts/?brief=true",
-            HTTP_AUTHORIZATION='Token ' + self.token,
-            format='json'
-        )
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(
-            sorted(response.data[0].keys()),
-            sorted(['uuid', 'id'])
         )
 
     def test_get_200_with_mappings(self):

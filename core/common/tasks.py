@@ -275,6 +275,14 @@ def seed_children_to_new_version(self, resource, obj_id, export=True):
 
 
 @app.task
+def seed_children_to_expansion(expansion_id, index=True):
+    from core.collections.models import Expansion
+    expansion = Expansion.objects.filter(id=expansion_id).first()
+    if expansion:
+        expansion.seed_children(index=index)
+
+
+@app.task
 def import_v1_content(importer_class, file_url, drop_version_if_version_missing=False):  # pragma: no cover
     from core.v1_importers.models import V1BaseImporter
     klass = V1BaseImporter.get_importer_class_from_string(importer_class)

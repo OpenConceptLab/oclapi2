@@ -1,9 +1,12 @@
 import json
 
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
 from django.db.models import UniqueConstraint
+from django.urls import resolve
 from django.utils import timezone
+from pydash import get
 from rest_framework.test import APIRequestFactory
 
 from core.collections.constants import (
@@ -13,10 +16,11 @@ from core.collections.constants import (
     CONCEPT_PREFERRED_NAME_UNIQUE_PER_COLLECTION_AND_LOCALE, ALL_SYMBOL, COLLECTION_VERSION_TYPE)
 from core.collections.utils import is_concept, is_mapping
 from core.common.constants import (
-    DEFAULT_REPOSITORY_TYPE, ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT
-)
+    DEFAULT_REPOSITORY_TYPE, ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT,
+    SEARCH_PARAM)
 from core.common.models import ConceptContainerModel, BaseResourceModel
-from core.common.utils import is_valid_uri, drop_version, to_owner_uri, generate_temp_version
+from core.common.tasks import seed_children_to_expansion
+from core.common.utils import is_valid_uri, drop_version, to_owner_uri, generate_temp_version, api_get
 from core.concepts.constants import LOCALES_FULLY_SPECIFIED
 from core.concepts.models import Concept
 from core.concepts.views import ConceptListView
@@ -455,10 +459,6 @@ class CollectionReference(models.Model):
     last_resolved_at = models.DateTimeField(default=timezone.now, null=True)
 
     @staticmethod
-    def get_concept_heads_from_expression(expression):
-        return Concept.get_latest_versions_for_queryset(Concept.from_uri_queryset(expression))
-
-    @staticmethod
     def diff(ctx, _from):
         prev_expressions = map(lambda r: r.expression, _from)
         return filter(lambda ref: ref.expression not in prev_expressions, ctx)
@@ -481,6 +481,22 @@ class CollectionReference(models.Model):
 
         return reference
 
+    def fetch_concepts(self, user):
+        if self.should_fetch_from_api:
+            return Concept.objects.filter(uri__in=self.fetch_uris(user))
+        return self.get_concepts()
+
+    def fetch_mappings(self, user):
+        if self.should_fetch_from_api:
+            return Mapping.objects.filter(uri__in=self.fetch_uris(user))
+        return self.get_mappings()
+
+    def fetch_uris(self, user):
+        data = api_get(self.expression, user)
+        if not isinstance(data, list):
+            data = [data]
+        return [obj['version_url'] for obj in data]
+
     def get_concepts(self):
         return Concept.from_uri_queryset(self.expression)
 
@@ -494,6 +510,10 @@ class CollectionReference(models.Model):
         is_resolved = bool((self.mappings and self.mappings.count()) or (self.concepts and self.concepts.count()))
         if not is_resolved:
             self.last_resolved_at = None
+
+    @property
+    def should_fetch_from_api(self):
+        return SEARCH_PARAM in get(self.expression.split('?'), '1', '')
 
     @property
     def is_concept(self):
@@ -627,12 +647,12 @@ class Expansion(BaseResourceModel):
         index_mappings = False
         for reference in refs:
             if reference.is_concept:
-                concepts = reference.get_concepts()
+                concepts = reference.fetch_concepts(self.created_by)
                 if concepts.exists():
                     index_concepts = True
                     self.concepts.add(*self.apply_parameters(concepts))
             elif reference.is_mapping:
-                mappings = reference.get_mappings()
+                mappings = reference.fetch_mappings(self.created_by)
                 if mappings.exists():
                     index_mappings = True
                     self.mappings.add(*self.apply_parameters(mappings))
@@ -668,7 +688,11 @@ class Expansion(BaseResourceModel):
             expansion.mnemonic = expansion.id
             expansion.save()
 
-        expansion.seed_children(index=index)
+        if get(settings, 'TEST_MODE', False):
+            seed_children_to_expansion(expansion.id, index)
+        else:
+            seed_children_to_expansion.delay(expansion.id, index)
+
         return expansion
 
 

@@ -145,5 +145,9 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
     def auth_groups(self):
         return self.groups.values_list('name', flat=True)
 
+    @property
+    def auth_headers(self):
+        return dict(Authorization=f'Token {self.get_token()}')
+
 
 admin.site.register(UserProfile)
