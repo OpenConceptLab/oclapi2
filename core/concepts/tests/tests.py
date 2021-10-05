@@ -1,6 +1,8 @@
 import factory
 from pydash import omit
 
+from core.collections.models import CollectionReference
+from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
 from core.common.constants import CUSTOM_VALIDATION_SCHEMA_OPENMRS, HEAD, ACCESS_TYPE_EDIT, ACCESS_TYPE_VIEW
 from core.common.tests import OCLTestCase
 from core.concepts.constants import (
@@ -929,6 +931,104 @@ class ConceptTest(OCLTestCase):
         self.assertEqual(
             list(child_child_concept.child_concept_queryset().values_list('uri', flat=True)), [])
         self.assertEqual(child_child_concept.parent_concept_urls, [child_concept.uri])
+
+    def test_from_uri_queryset_for_source_and_source_version(self):
+        source = OrganizationSourceFactory()
+        concept = Concept.persist_new({
+            **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'c1', 'parent': source,
+            'names': [LocalizedTextFactory.build(locale='en', name='English', locale_preferred=True)],
+        })
+        self.assertEqual(concept.versions.count(), 1)
+
+        concepts = Concept.from_uri_queryset(source.uri + 'concepts/')
+        self.assertEqual(concepts.count(), 1)
+        self.assertEqual(concepts.first().id, concept.get_latest_version().id)
+
+        source_version1 = OrganizationSourceFactory(
+            version='v1', mnemonic=source.mnemonic, organization=source.organization)
+        source_version1.seed_concepts(index=False)
+        self.assertEqual(source_version1.concepts.count(), 1)
+
+        concepts = Concept.from_uri_queryset(source_version1.uri + 'concepts/')
+        self.assertEqual(concepts.count(), 1)
+        self.assertEqual(concepts.first().id, concept.get_latest_version().id)
+
+        source_version2 = OrganizationSourceFactory(
+            version='v2', mnemonic=source.mnemonic, organization=source.organization)
+
+        cloned_concept = Concept.version_for_concept(concept, 'v1', source_version2)
+        Concept.persist_clone(cloned_concept, concept.created_by)
+        self.assertEqual(concept.versions.count(), 2)
+
+        concept_v1 = concept.get_latest_version()
+        self.assertTrue(concept_v1.is_latest_version)
+        concepts = Concept.from_uri_queryset(concept_v1.version_url)
+        self.assertEqual(concepts.count(), 1)
+        self.assertEqual(concepts.first().id, concept_v1.id)
+
+        concept_prev_version = concept_v1.prev_version
+        self.assertFalse(concept_prev_version.is_latest_version)
+        concepts = Concept.from_uri_queryset(concept_prev_version.version_url)
+        self.assertEqual(concepts.count(), 1)
+        self.assertEqual(concepts.first().id, concept_prev_version.id)
+
+        concepts = Concept.from_uri_queryset(source.uri + 'concepts/')
+        self.assertEqual(concepts.count(), 1)
+        self.assertEqual(concepts.first().id, concept_v1.id)
+
+        concepts = Concept.from_uri_queryset(source_version2.uri + 'concepts/')
+
+        self.assertEqual(concepts.count(), 1)
+        self.assertEqual(concepts.first().id, concept_v1.id)
+
+        concepts = Concept.from_uri_queryset(source_version1.uri + 'concepts/')
+        self.assertEqual(concepts.count(), 1)
+        self.assertEqual(concepts.first().id, concept_prev_version.id)
+
+    def test_from_uri_queryset_for_collection_and_collection_version(self):
+        source = OrganizationSourceFactory()
+        concept = Concept.persist_new({
+            **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'c1', 'parent': source,
+            'names': [LocalizedTextFactory.build(locale='en', name='English', locale_preferred=True)],
+        })
+        source_version1 = OrganizationSourceFactory(
+            version='v1', mnemonic=source.mnemonic, organization=source.organization)
+        source_version1.seed_concepts(index=False)
+        source_version2 = OrganizationSourceFactory(
+            version='v2', mnemonic=source.mnemonic, organization=source.organization)
+
+        cloned_concept = Concept.version_for_concept(concept, 'v1', source_version2)
+        Concept.persist_clone(cloned_concept, concept.created_by)
+        self.assertEqual(concept.versions.count(), 2)
+
+        concept_v1 = concept.get_latest_version()
+        collection = OrganizationCollectionFactory()
+        collection_version1 = OrganizationCollectionFactory(
+            version='v1', mnemonic=collection.mnemonic, organization=collection.organization)
+        expansion = ExpansionFactory(collection_version=collection_version1)
+        reference = CollectionReference(expression=concept_v1.version_url)
+        reference.save()
+        collection_version1.references.add(reference)
+        expansion.seed_children(index=False)
+
+        self.assertEqual(expansion.concepts.count(), 1)
+
+        concepts = Concept.from_uri_queryset(expansion.uri + 'concepts/')
+        self.assertEqual(concepts.count(), 1)
+        self.assertEqual(concepts.first().id, concept_v1.id)
+
+        concepts = Concept.from_uri_queryset(collection_version1.uri + 'concepts/')
+        self.assertEqual(concepts.count(), 0)
+
+        collection_version1.expansion_uri = expansion.uri
+        collection_version1.save()
+
+        concepts = Concept.from_uri_queryset(collection_version1.uri + 'concepts/')
+        self.assertEqual(concepts.count(), 1)
+        self.assertEqual(concepts.first().id, concept_v1.id)
+
+        concepts = Concept.from_uri_queryset(collection.uri + 'concepts/')
+        self.assertEqual(concepts.count(), 0)
 
 
 class OpenMRSConceptValidatorTest(OCLTestCase):

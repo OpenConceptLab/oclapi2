@@ -14,6 +14,7 @@ from rest_framework import status
 from rest_framework.mixins import ListModelMixin, CreateModelMixin
 from rest_framework.response import Response
 
+from core.collections.utils import is_concept
 from core.common.constants import HEAD, ACCESS_TYPE_EDIT, ACCESS_TYPE_VIEW, ACCESS_TYPE_NONE, INCLUDE_FACETS, \
     LIST_DEFAULT_LIMIT, HTTP_COMPRESS_HEADER, CSV_DEFAULT_LIMIT
 from core.common.permissions import HasPrivateAccess, HasOwnership, CanViewConceptDictionary
@@ -453,6 +454,8 @@ class SourceChildMixin:
     @classmethod
     def from_uri_queryset(cls, uri):
         queryset = cls.objects.none()
+        from core.collections.utils import is_concept
+        is_concept_uri = is_concept(uri)
 
         try:
             kwargs = get(resolve(uri), 'kwargs', dict())
@@ -460,11 +463,22 @@ class SourceChildMixin:
             kwargs.update(query_params)
             if 'concept' in kwargs:
                 kwargs['concept'] = parse.unquote(kwargs['concept'])
-            queryset = cls.get_base_queryset(kwargs)
-            if queryset.count() > 1 and \
-                    ('concept_version' not in kwargs or 'mapping_version' not in kwargs) and \
-                    ('collection' not in kwargs) and ('version' not in kwargs):
-                queryset = queryset.filter(is_latest_version=True)
+            if 'collection' in kwargs and 'version' in kwargs:
+                from core.collections.models import Collection
+                collection_version = Collection.get_base_queryset(kwargs).first()
+                if collection_version:
+                    if 'expansion' in kwargs:
+                        expansion = collection_version.expansions.filter(mnemonic=kwargs['expansion']).first()
+                    else:
+                        expansion = collection_version.expansion
+                    if expansion:
+                        queryset = expansion.concepts if is_concept_uri else expansion.mappings
+            else:
+                queryset = cls.get_base_queryset(kwargs)
+                if queryset.count() > 1 and \
+                        ('concept_version' not in kwargs or 'mapping_version' not in kwargs) and \
+                        ('version' not in kwargs):
+                    queryset = queryset.filter(is_latest_version=True)
         except:  # pylint: disable=bare-except
             pass
 
