@@ -14,7 +14,6 @@ from rest_framework import status
 from rest_framework.mixins import ListModelMixin, CreateModelMixin
 from rest_framework.response import Response
 
-from core.collections.utils import is_concept
 from core.common.constants import HEAD, ACCESS_TYPE_EDIT, ACCESS_TYPE_VIEW, ACCESS_TYPE_NONE, INCLUDE_FACETS, \
     LIST_DEFAULT_LIMIT, HTTP_COMPRESS_HEADER, CSV_DEFAULT_LIMIT
 from core.common.permissions import HasPrivateAccess, HasOwnership, CanViewConceptDictionary
