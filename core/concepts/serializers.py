@@ -487,21 +487,59 @@ class ConceptChildrenSerializer(ModelSerializer):
     uuid = CharField(source='id')
     id = EncodedDecodedCharField(source='mnemonic')
     url = CharField(source='uri')
-    children = ListField(source='child_concept_urls')
     name = CharField(source='display_name')
+    children = SerializerMethodField()
 
     class Meta:
         model = Concept
         fields = ('uuid', 'id', 'url', 'children', 'name')
+
+    def __init__(self, *args, **kwargs):
+        params = get(kwargs, 'context.request.query_params')
+
+        self.query_params = params.dict() if params else {}
+        self.include_child_concepts = self.query_params.get(INCLUDE_CHILD_CONCEPTS) in ['true', True]
+
+        try:
+            if not self.include_child_concepts:
+                self.fields.pop('children', None)
+        except:  # pylint: disable=bare-except
+            pass
+
+        super().__init__(*args, **kwargs)
+
+    def get_children(self, obj):
+        if self.include_child_concepts:
+            return obj.child_concept_urls
+        return None
 
 
 class ConceptParentsSerializer(ModelSerializer):
     uuid = CharField(source='id')
     id = EncodedDecodedCharField(source='mnemonic')
     url = CharField(source='uri')
-    parents = ListField(source='parent_concept_urls')
     name = CharField(source='display_name')
+    parents = SerializerMethodField()
 
     class Meta:
         model = Concept
         fields = ('uuid', 'id', 'url', 'parents', 'name')
+
+    def __init__(self, *args, **kwargs):
+        params = get(kwargs, 'context.request.query_params')
+
+        self.query_params = params.dict() if params else {}
+        self.include_parent_concepts = self.query_params.get(INCLUDE_PARENT_CONCEPTS) in ['true', True]
+
+        try:
+            if not self.include_parent_concepts:
+                self.fields.pop('parents', None)
+        except:  # pylint: disable=bare-except
+            pass
+
+        super().__init__(*args, **kwargs)
+
+    def get_parents(self, obj):
+        if self.include_parent_concepts:
+            return obj.parent_concept_urls
+        return None
