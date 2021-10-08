@@ -279,7 +279,7 @@ class ConceptRetrieveUpdateDestroyView(ConceptBaseView, RetrieveAPIView, UpdateA
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
-class ConceptChildrenView(ConceptBaseView, ListAPIView):
+class ConceptChildrenView(ConceptBaseView, ListWithHeadersMixin):
     serializer_class = ConceptChildrenSerializer
 
     def get_queryset(self):
@@ -287,14 +287,20 @@ class ConceptChildrenView(ConceptBaseView, ListAPIView):
         self.check_object_permissions(self.request, instance)
         return instance.child_concept_queryset()
 
+    def get(self, request, *args, **kwargs):
+        return self.list(request, *args, **kwargs)
 
-class ConceptParentsView(ConceptBaseView, ListAPIView):
+
+class ConceptParentsView(ConceptBaseView, ListWithHeadersMixin):
     serializer_class = ConceptParentsSerializer
 
     def get_queryset(self):
         instance = get_object_or_404(super().get_queryset(), id=F('versioned_object_id'))
         self.check_object_permissions(self.request, instance)
         return instance.parent_concept_queryset()
+
+    def get(self, request, *args, **kwargs):
+        return self.list(request, *args, **kwargs)
 
 
 class ConceptReactivateView(ConceptBaseView, UpdateAPIView):
