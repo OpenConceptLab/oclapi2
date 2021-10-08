@@ -1,3 +1,10 @@
+##### 2.0.66 - Thu Oct 7 05:38:06 2021 +0000
+- [OpenConceptLab/ocl_issues#1018](https://github.com/OpenConceptLab/ocl_issues/issues/1018) | user org collections/sources search result scope fix
+- [OpenConceptLab/ocl_issues#991](https://github.com/OpenConceptLab/ocl_issues/issues/991) | concept children/parents nested children/parents can be asked separately
+- Merge pull request #61 from OpenConceptLab/dependabot/pip/coverage-6.0
+- Bump coverage from 5.5 to 6.0
+- [OpenConceptLab/ocl_issues#991](https://github.com/OpenConceptLab/ocl_issues/issues/991) | API get parents of a concept
+- concept detail | not including empty hierarchy path by default
 ##### 2.0.63 - Mon Oct 4 04:57:25 2021 +0000
 - [OpenConceptLab/ocl_issues#1018](https://github.com/OpenConceptLab/ocl_issues/issues/1018) | bulk references add from a source/version to not go through API
 - Merge pull request #57 from OpenConceptLab/dependabot/pip/django-cors-headers-3.9.0
