@@ -143,7 +143,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         db_table = 'concepts'
         unique_together = ('mnemonic', 'version', 'parent')
         indexes = [
-            models.Index(fields=['is_active', 'retired', 'is_latest_version', 'public_access']),
+            models.Index(fields=['is_active', 'retired', 'is_latest_version', 'public_access', 'updated_at']),
         ] + VersionedModel.Meta.indexes
 
     external_id = models.TextField(null=True, blank=True)
