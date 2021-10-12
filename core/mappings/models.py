@@ -3,6 +3,7 @@ import uuid
 from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator
 from django.db import models, IntegrityError, transaction
+from django.db.models import Q
 from pydash import get, compact
 
 from core.common.constants import INCLUDE_RETIRED_PARAM, NAMESPACE_REGEX, HEAD, LATEST
@@ -21,7 +22,9 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         db_table = 'mappings'
         unique_together = ('mnemonic', 'version', 'parent')
         indexes = [
-            models.Index(fields=['is_active', 'retired', 'is_latest_version', 'public_access', '-updated_at']),
+                      models.Index(name="mappings_updated_at_public", fields=['-updated_at'],
+                                   condition=(Q('is_active') & Q('-retired') & Q('is_latest_version') &
+                                              ~Q(public_access='None'))),
         ] + VersionedModel.Meta.indexes
 
     parent = models.ForeignKey('sources.Source', related_name='mappings_set', on_delete=models.CASCADE)
