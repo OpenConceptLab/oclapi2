@@ -2,7 +2,7 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator
 from django.db import models, IntegrityError, transaction, connection
-from django.db.models import F, Q
+from django.db.models import F
 from pydash import get, compact
 
 from core.common.constants import ISO_639_1, INCLUDE_RETIRED_PARAM, LATEST, HEAD
@@ -143,9 +143,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         db_table = 'concepts'
         unique_together = ('mnemonic', 'version', 'parent')
         indexes = [
-                      models.Index(name="concepts_updated_at_public", fields=['-updated_at'],
-                                   condition=(Q('is_active') & Q('-retired') & Q('is_latest_version') &
-                                              ~Q(public_access='None'))),
+            models.Index(fields=['is_active', 'retired', 'is_latest_version', 'public_access', '-updated_at']),
         ] + VersionedModel.Meta.indexes
 
     external_id = models.TextField(null=True, blank=True)
