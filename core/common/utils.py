@@ -2,6 +2,7 @@ import json
 import mimetypes
 import os
 import random
+import shutil
 import tempfile
 import uuid
 import zipfile
@@ -14,7 +15,7 @@ from dateutil import parser
 from django.conf import settings
 from django.urls import NoReverseMatch, reverse, get_resolver, resolve, Resolver404
 from djqscsv import csv_file_for
-from pydash import flatten, compact
+from pydash import flatten, compact, get
 from requests.auth import HTTPBasicAuth
 from rest_framework.utils import encoders
 
@@ -335,6 +336,12 @@ def write_export_file(
     )
     uploaded_path = S3.url_for(s3_key)
     logger.info(f'Uploaded to {uploaded_path}.')
+
+    if not get(settings, 'TEST_MODE', False):
+        tmp_dir_path = file_path.replace('/export.zip', '')
+        logger.info(f'Removing tmp {tmp_dir_path}.')
+        shutil.rmtree(tmp_dir_path, ignore_errors=True)
+
     os.chdir(cwd)
 
 
