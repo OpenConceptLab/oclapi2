@@ -28,7 +28,8 @@ from core.collections.serializers import (
     CollectionDetailSerializer, CollectionListSerializer,
     CollectionCreateSerializer, CollectionReferenceSerializer, CollectionVersionDetailSerializer,
     CollectionVersionListSerializer, CollectionVersionExportSerializer, CollectionSummaryDetailSerializer,
-    CollectionVersionSummaryDetailSerializer, CollectionReferenceDetailSerializer, ExpansionSerializer)
+    CollectionVersionSummaryDetailSerializer, CollectionReferenceDetailSerializer, ExpansionSerializer,
+    ExpansionDetailSerializer)
 from core.collections.utils import is_version_specified
 from core.common.constants import (
     HEAD, RELEASED_PARAM, PROCESSING_PARAM, OK_MESSAGE, NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY
@@ -531,7 +532,10 @@ class CollectionVersionRetrieveUpdateDestroyView(CollectionBaseView, RetrieveAPI
 
 
 class CollectionVersionExpansionsView(CollectionBaseView, ListWithHeadersMixin, CreateAPIView):
-    serializer_class = ExpansionSerializer
+    def get_serializer_class(self):
+        if self.is_verbose():
+            return ExpansionDetailSerializer
+        return ExpansionSerializer
 
     def get_permissions(self):
         if self.request.method == 'GET':

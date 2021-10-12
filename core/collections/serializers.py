@@ -167,12 +167,9 @@ class CollectionCreateSerializer(CollectionCreateOrUpdateSerializer):
 
 
 class ExpansionSummarySerializer(ModelSerializer):
-    concepts = IntegerField(source='active_concepts', read_only=True)
-    mappings = IntegerField(source='active_mappings', read_only=True)
-
     class Meta:
         model = Expansion
-        fields = ('concepts', 'mappings')
+        fields = ('active_concepts', 'active_mappings')
 
 
 class ExpansionSummaryDetailSerializer(ExpansionSummarySerializer):
@@ -384,6 +381,41 @@ class ExpansionSerializer(ModelSerializer):
     class Meta:
         model = Expansion
         fields = ('mnemonic', 'id', 'parameters', 'canonical_url', 'url', 'summary')
+
+    def __init__(self, *args, **kwargs):
+        params = get(kwargs, 'context.request.query_params')
+        self.include_summary = False
+        if params:
+            self.query_params = params.dict()
+            self.include_summary = self.query_params.get(INCLUDE_SUMMARY) in ['true', True]
+
+        try:
+            if not self.include_summary:
+                self.fields.pop('summary', None)
+        except:  # pylint: disable=bare-except
+            pass
+
+        super().__init__(*args, **kwargs)
+
+    def get_summary(self, obj):
+        summary = None
+
+        if self.include_summary:
+            summary = ExpansionSummarySerializer(obj).data
+
+        return summary
+
+
+class ExpansionDetailSerializer(ModelSerializer):
+    summary = SerializerMethodField()
+    url = CharField(source='uri', read_only=True)
+    parameters = JSONField()
+    created_on = DateTimeField(source='created_at', read_only=True)
+    created_by = DateTimeField(source='created_by.username', read_only=True)
+
+    class Meta:
+        model = Expansion
+        fields = ('mnemonic', 'id', 'parameters', 'canonical_url', 'url', 'summary', 'created_on', 'created_by')
 
     def __init__(self, *args, **kwargs):
         params = get(kwargs, 'context.request.query_params')
