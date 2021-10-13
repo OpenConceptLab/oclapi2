@@ -260,7 +260,10 @@ class BulkImportParallelInlineView(APIView):  # pragma: no cover
                 file_content = file.read().decode('utf-8')
             elif is_file_url:
                 file_name = request.data['file_url']
-                file = requests.get(file_name)
+                headers = {
+                    'User-Agent': 'OCL'  # user-agent required by mod_security on some servers
+                }
+                file = requests.get(file_name, headers=headers)
                 file_content = file.text
         except:  # pylint: disable=bare-except
             pass
@@ -302,7 +305,10 @@ class BulkImportInlineView(APIView):  # pragma: no cover
                 file_content = file.read().decode('utf-8')
             elif is_file_url:
                 file_name = request.data['file_url']
-                file = requests.get(file_name)
+                headers = {
+                    'User-Agent': 'OCL'  # user-agent required by mod_security on some servers
+                }
+                file = requests.get(file_name, headers=headers)
                 file_content = file.text
         except:  # pylint: disable=bare-except
             pass
