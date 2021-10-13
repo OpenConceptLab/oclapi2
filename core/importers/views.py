@@ -90,7 +90,10 @@ class BulkImportFileURLView(APIView):
         file_url = request.data.get('file_url')
 
         try:
-            file = requests.get(file_url)
+            headers = {
+                'User-Agent': 'OCL'  # user-agent required by mod_security on some servers
+            }
+            file = requests.get(file_url, headers=headers)
         except:  # pylint: disable=bare-except
             pass
 
