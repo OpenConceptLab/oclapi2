@@ -8,7 +8,7 @@ pydash==5.1.0
 django-cors-headers==3.9.0
 pyyaml==5.4.1
 colour_runner==0.1.1
-boto3==1.18.49
+boto3==1.18.63
 moto==2.2.9
 python-dateutil==2.8.2
 requests==2.26.0
