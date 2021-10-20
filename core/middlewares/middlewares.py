@@ -5,6 +5,7 @@ from django.utils.termcolors import colorize
 from rest_framework.authtoken.models import Token
 
 from core.common.constants import VERSION_HEADER
+from core.common.utils import set_current_user
 
 request_logger = logging.getLogger('request_logger')
 MAX_BODY_LENGTH = 50000
@@ -97,4 +98,11 @@ class VersionHeaderMiddleware(BaseMiddleware):
         response = self.get_response(request)
         from django.conf import settings
         response[VERSION_HEADER] = settings.VERSION
+        return response
+
+
+class CurrentUserMiddleware(BaseMiddleware):
+    def __call__(self, request):
+        set_current_user(lambda self: getattr(request, 'user', None))
+        response = self.get_response(request)
         return response

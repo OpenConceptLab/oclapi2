@@ -11,6 +11,7 @@ omit =
     */migrations/*
     */documents.py
     core/common/search.py
+    core/common/errbit.py
     */es_normalizers.py
     */feeds.py
     *test*

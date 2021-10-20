@@ -20,7 +20,8 @@ from core.common.utils import (
     compact_dict_by_values, to_snake_case, flower_get, task_exists, parse_bulk_import_task_id,
     to_camel_case,
     drop_version, is_versioned_uri, separate_version, to_parent_uri, jsonify_safe, es_get,
-    get_resource_class_from_resource_name, flatten_dict, is_csv_file, is_url_encoded_string, to_parent_uri_from_kwargs)
+    get_resource_class_from_resource_name, flatten_dict, is_csv_file, is_url_encoded_string, to_parent_uri_from_kwargs,
+    set_current_user, get_current_user)
 from core.concepts.models import Concept, LocalizedText
 from core.mappings.models import Mapping
 from core.orgs.models import Organization
@@ -379,6 +380,10 @@ class S3Test(TestCase):
 
 
 class UtilsTest(OCLTestCase):
+    def test_set_and_get_current_user(self):
+        set_current_user(lambda self: 'foo')
+        self.assertEqual(get_current_user(), 'foo')
+
     def test_compact_dict_by_values(self):
         self.assertEqual(compact_dict_by_values({}), {})
         self.assertEqual(compact_dict_by_values(dict(foo=None)), {})

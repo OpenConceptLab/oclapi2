@@ -136,6 +136,7 @@ MIDDLEWARE = [
     'core.middlewares.middlewares.FixMalformedLimitParamMiddleware',
     'core.middlewares.middlewares.RequestLogMiddleware',
     'core.middlewares.middlewares.VersionHeaderMiddleware',
+    'core.middlewares.middlewares.CurrentUserMiddleware',
 ]
 
 ROOT_URLCONF = 'core.urls'
@@ -360,3 +361,7 @@ else:
     EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 
 VERSION = __version__
+
+# Errbit
+ERRBIT_URL = os.environ.get('ERRBIT_URL', 'http://errbit:8080')
+ERRBIT_KEY = os.environ.get('ERRBIT_KEY', 'errbit-key')

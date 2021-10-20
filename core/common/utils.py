@@ -7,6 +7,7 @@ import tempfile
 import uuid
 import zipfile
 from collections import MutableMapping, OrderedDict  # pylint: disable=no-name-in-module,deprecated-class
+from threading import local
 from urllib import parse
 
 import requests
@@ -19,7 +20,7 @@ from pydash import flatten, compact, get
 from requests.auth import HTTPBasicAuth
 from rest_framework.utils import encoders
 
-from core.common.constants import UPDATED_SINCE_PARAM, BULK_IMPORT_QUEUES_COUNT, TEMP
+from core.common.constants import UPDATED_SINCE_PARAM, BULK_IMPORT_QUEUES_COUNT, TEMP, CURRENT_USER
 from core.common.services import S3
 
 
@@ -667,3 +668,26 @@ def to_parent_uri_from_kwargs(params):
         parent = params.get('collection')
 
     return '/' + '/'.join(compact([owner_type, owner, parent_type, parent, params.get('version', None)])) + '/'
+
+
+def api_get(url, user, **kwargs):
+    response = requests.get(
+        settings.API_INTERNAL_BASE_URL + url, headers=user.auth_headers,
+        **kwargs
+    )
+    return response.json()
+
+
+thread_locals = local()
+
+
+def set_current_user(func):
+    setattr(thread_locals, CURRENT_USER, func.__get__(func, local))
+
+
+def get_current_user():
+    current_user = getattr(thread_locals, CURRENT_USER, None)
+    if callable(current_user):
+        current_user = current_user()  # pylint: disable=not-callable
+
+    return current_user
