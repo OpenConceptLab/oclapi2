@@ -24,7 +24,7 @@ from core.common.constants import SEARCH_PARAM, LIST_DEFAULT_LIMIT, CSV_DEFAULT_
     LIMIT_PARAM, NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY, INCLUDE_RETIRED_PARAM, VERBOSE_PARAM, HEAD, LATEST, \
     BRIEF_PARAM
 from core.common.exceptions import Http400
-from core.common.mixins import PathWalkerMixin
+from core.common.mixins import PathWalkerMixin, ListWithHeadersMixin
 from core.common.serializers import RootSerializer
 from core.common.utils import compact_dict_by_values, to_snake_case, to_camel_case, parse_updated_since_param, \
     is_url_encoded_string
@@ -842,3 +842,24 @@ class ConceptDormantLocalesView(APIView):  # pragma: no cover
         from core.common.tasks import delete_dormant_locales
         delete_dormant_locales.delay()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class ConceptMultipleLatestVersionsView(BaseAPIView, ListWithHeadersMixin):
+    permission_classes = (IsAdminUser, )
+
+    def get_serializer_class(self):
+        from core.concepts.serializers import ConceptVersionListSerializer, ConceptVersionDetailSerializer
+
+        if self.is_verbose():
+            return ConceptVersionDetailSerializer
+        return ConceptVersionListSerializer
+
+    def get_queryset(self):
+        from core.concepts.models import Concept
+        duplicate_version_mnemonics = [concept.mnemonic for concept in Concept.duplicate_latest_versions()]
+        if len(duplicate_version_mnemonics) > 0:
+            return Concept.objects.filter(mnemonic__in=duplicate_version_mnemonics, is_latest_version=True)
+        return Concept.objects.none()
+
+    def get(self, request, *args, **kwargs):
+        return self.list(request, *args, **kwargs)

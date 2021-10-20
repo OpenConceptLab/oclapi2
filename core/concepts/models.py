@@ -11,7 +11,7 @@ from core.common.models import VersionedModel
 from core.common.tasks import process_hierarchy_for_new_concept, process_hierarchy_for_concept_version, \
     process_hierarchy_for_new_parent_concept_version
 from core.common.utils import parse_updated_since_param, generate_temp_version, drop_version, \
-    encode_string, decode_string
+    encode_string, decode_string, named_tuple_fetchall
 from core.concepts.constants import CONCEPT_TYPE, LOCALES_FULLY_SPECIFIED, LOCALES_SHORT, LOCALES_SEARCH_INDEX_TERM, \
     CONCEPT_WAS_RETIRED, CONCEPT_IS_ALREADY_RETIRED, CONCEPT_IS_ALREADY_NOT_RETIRED, CONCEPT_WAS_UNRETIRED, \
     PERSIST_CLONE_ERROR, PERSIST_CLONE_SPECIFY_USER_ERROR, ALREADY_EXISTS, CONCEPT_REGEX, MAX_LOCALES_LIMIT, \
@@ -192,6 +192,17 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         'owner_type': {'sortable': False, 'filterable': True, 'facet': True, 'exact': True},
         'external_id': {'sortable': False, 'filterable': True, 'facet': False, 'exact': False},
     }
+
+    @classmethod
+    def duplicate_latest_versions(cls, limit=25, offset=0):
+        with connection.cursor() as cursor:
+            cursor.execute(
+                f"""
+                select mnemonic, count(*) from concepts where is_latest_version=true
+                group by parent_id, mnemonic having count(*) > 1 order by parent_id limit {limit} offset {offset}
+                """
+            )
+            return named_tuple_fetchall(cursor)
 
     @staticmethod
     def get_search_document():

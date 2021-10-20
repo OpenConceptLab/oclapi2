@@ -691,3 +691,11 @@ def get_current_user():
         current_user = current_user()  # pylint: disable=not-callable
 
     return current_user
+
+
+def named_tuple_fetchall(cursor):
+    "Return all rows from a cursor as a namedtuple"
+    from collections import namedtuple
+    desc = cursor.description
+    nt_result = namedtuple('Result', [col[0] for col in desc])
+    return [nt_result(*row) for row in cursor.fetchall()]
