@@ -878,3 +878,20 @@ class ConceptMultipleLatestVersionsView(BaseAPIView, ListWithHeadersMixin):
             Concept.batch_index(concepts, ConceptDocument)
 
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+    def post(self, request, *args, **kwargs):  # pylint: disable=unused-argument
+        ids = self.request.data.get('ids')  # versioned_object_ids
+        if not ids:
+            return Response(status=status.HTTP_400_BAD_REQUEST)
+
+        from core.concepts.models import Concept
+        concepts = Concept.objects.filter(id__in=ids)
+        for concept in concepts:
+            concept.is_latest_version = False
+            concept.save()
+            concept.versions.exclude(id=concept.get_latest_version().id).update(is_latest_version=False)
+
+        from core.concepts.documents import ConceptDocument
+        Concept.batch_index(concepts, ConceptDocument)
+
+        return Response(status=status.HTTP_204_NO_CONTENT)
