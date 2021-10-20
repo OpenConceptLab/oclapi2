@@ -870,9 +870,7 @@ class ConceptMultipleLatestVersionsView(BaseAPIView, ListWithHeadersMixin):
             from core.concepts.models import Concept
             versioned_objects = Concept.objects.filter(id__in=concepts.values_list('versioned_object_id', flat=True))
             for concept in versioned_objects:
-                concept.is_latest_version = False
-                concept.save()
-                concept.versions.exclude(id=concept.get_latest_version().id).update(is_latest_version=False)
+                concept.dedupe_latest_versions()
             from core.concepts.models import Concept
             from core.concepts.documents import ConceptDocument
             Concept.batch_index(concepts, ConceptDocument)
@@ -886,10 +884,9 @@ class ConceptMultipleLatestVersionsView(BaseAPIView, ListWithHeadersMixin):
 
         from core.concepts.models import Concept
         concepts = Concept.objects.filter(id__in=ids)
+
         for concept in concepts:
-            concept.is_latest_version = False
-            concept.save()
-            concept.versions.exclude(id=concept.get_latest_version().id).update(is_latest_version=False)
+            concept.dedupe_latest_versions()
 
         from core.concepts.documents import ConceptDocument
         Concept.batch_index(concepts, ConceptDocument)

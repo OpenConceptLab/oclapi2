@@ -193,6 +193,11 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         'external_id': {'sortable': False, 'filterable': True, 'facet': False, 'exact': False},
     }
 
+    def dedupe_latest_versions(self):
+        self.is_latest_version = False
+        self.save()
+        self.versions.exclude(id=self.get_latest_version().id).update(is_latest_version=False)
+
     @classmethod
     def duplicate_latest_versions(cls, limit=25, offset=0):
         with connection.cursor() as cursor:
