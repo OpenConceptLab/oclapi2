@@ -878,7 +878,7 @@ class ConceptMultipleLatestVersionsView(BaseAPIView, ListWithHeadersMixin):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     def post(self, request, *args, **kwargs):  # pylint: disable=unused-argument
-        ids = self.request.data.get('ids')  # versioned_object_ids
+        ids = self.request.data.get('ids')  # concept/version id
         if not ids:
             return Response(status=status.HTTP_400_BAD_REQUEST)
 

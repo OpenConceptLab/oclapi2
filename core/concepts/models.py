@@ -194,9 +194,19 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     }
 
     def dedupe_latest_versions(self):
-        self.is_latest_version = False
-        self.save()
-        self.versions.exclude(id=self.get_latest_version().id).update(is_latest_version=False)
+        if self.is_versioned_object and self.is_latest_version:
+            self.is_latest_version = False
+            self.save(update_fields=['is_latest_version'])
+        latest_versions = self.versions.filter(is_latest_version=True)
+        count = latest_versions.count()
+        if count > 1:
+            for version in latest_versions.order_by('-id')[1:]:
+                version.is_latest_version = False
+                version.save(update_fields=['is_latest_version'])
+        elif count < 1:
+            version = self.versions.order_by('-id').first()
+            version.is_latest_version = True
+            version.save(update_fields=['is_latest_version'])
 
     @classmethod
     def duplicate_latest_versions(cls, limit=25, offset=0):
