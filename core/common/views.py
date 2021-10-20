@@ -871,5 +871,8 @@ class ConceptMultipleLatestVersionsView(BaseAPIView, ListWithHeadersMixin):
                 versioned_object = concept.versioned_object
                 versioned_object.versions.exclude(id=versioned_object.get_latest_version().id).update(
                     is_latest_version=False)
+            from core.concepts.models import Concept
+            from core.concepts.documents import ConceptDocument
+            Concept.batch_index(concepts, ConceptDocument)
 
         return Response(status=status.HTTP_204_NO_CONTENT)
