@@ -199,7 +199,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             cursor.execute(
                 f"""
                 select mnemonic, count(*) from concepts where is_latest_version=true
-                group by parent_id, mnemonic having count(*) > 1 order by parent_id desc limit {limit} offset {offset}
+                group by parent_id, mnemonic having count(*) > 1 order by mnemonic limit {limit} offset {offset}
                 """
             )
             return named_tuple_fetchall(cursor)

@@ -1,5 +1,4 @@
 import base64
-import logging
 import urllib.parse
 from email.mime.image import MIMEImage
 
@@ -32,8 +31,6 @@ from core.common.utils import compact_dict_by_values, to_snake_case, to_camel_ca
 from core.concepts.permissions import CanViewParentDictionary, CanEditParentDictionary
 from core.orgs.constants import ORG_OBJECT_TYPE
 from core.users.constants import USER_OBJECT_TYPE
-
-logger = logging.getLogger(__name__)
 
 
 class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
@@ -869,12 +866,12 @@ class ConceptMultipleLatestVersionsView(BaseAPIView, ListWithHeadersMixin):
 
     def put(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         concepts = self.get_queryset()
-        logger.info("Duplicate Latest Versions approx count: %s" % concepts.count())
         if concepts.exists():
             from core.concepts.models import Concept
             versioned_objects = Concept.objects.filter(id__in=concepts.values_list('versioned_object_id', flat=True))
             for concept in versioned_objects:
-                logger.info("Resolving: %s" % concept.uri)
+                concept.is_latest_version = False
+                concept.save()
                 concept.versions.exclude(id=concept.get_latest_version().id).update(is_latest_version=False)
             from core.concepts.models import Concept
             from core.concepts.documents import ConceptDocument
