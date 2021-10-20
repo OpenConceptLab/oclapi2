@@ -5,7 +5,12 @@ import random
 import tempfile
 import uuid
 import zipfile
+<<<<<<< HEAD
 from collections import MutableMapping, OrderedDict  # pylint: disable=no-name-in-module
+=======
+from collections import MutableMapping, OrderedDict  # pylint: disable=no-name-in-module,deprecated-class
+from threading import local
+>>>>>>> a257c97... OpenConceptLab/ocl_issues#923 | errbit client setup
 from urllib import parse
 
 import requests
@@ -18,7 +23,7 @@ from pydash import flatten, compact
 from requests.auth import HTTPBasicAuth
 from rest_framework.utils import encoders
 
-from core.common.constants import UPDATED_SINCE_PARAM, BULK_IMPORT_QUEUES_COUNT, TEMP
+from core.common.constants import UPDATED_SINCE_PARAM, BULK_IMPORT_QUEUES_COUNT, TEMP, CURRENT_USER
 from core.common.services import S3
 
 
@@ -659,3 +664,18 @@ def api_get(url, user, **kwargs):
         **kwargs
     )
     return response.json()
+
+
+thread_locals = local()
+
+
+def set_current_user(func):
+    setattr(thread_locals, CURRENT_USER, func.__get__(func, local))
+
+
+def get_current_user():
+    current_user = getattr(thread_locals, CURRENT_USER, None)
+    if callable(current_user):
+        current_user = current_user()  # pylint: disable=not-callable
+
+    return current_user
