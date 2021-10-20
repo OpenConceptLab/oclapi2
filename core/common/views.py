@@ -863,3 +863,13 @@ class ConceptMultipleLatestVersionsView(BaseAPIView, ListWithHeadersMixin):
 
     def get(self, request, *args, **kwargs):
         return self.list(request, *args, **kwargs)
+
+    def put(self, request, *args, **kwargs):  # pylint: disable=unused-argument
+        concepts = self.get_queryset()
+        if concepts.exists():
+            for concept in concepts:
+                versioned_object = concept.versioned_object
+                versioned_object.versions.exclude(id=versioned_object.get_latest_version().id).update(
+                    is_latest_version=False)
+
+        return Response(status=status.HTTP_204_NO_CONTENT)
