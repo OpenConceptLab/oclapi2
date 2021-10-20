@@ -867,10 +867,10 @@ class ConceptMultipleLatestVersionsView(BaseAPIView, ListWithHeadersMixin):
     def put(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         concepts = self.get_queryset()
         if concepts.exists():
-            for concept in concepts:
-                versioned_object = concept.versioned_object
-                versioned_object.versions.exclude(id=versioned_object.get_latest_version().id).update(
-                    is_latest_version=False)
+            from core.concepts.models import Concept
+            versioned_objects = Concept.objects.filter(id__in=concepts.values_list('versioned_object_id', flat=True))
+            for concept in versioned_objects:
+                concept.versions.exclude(id=concept.get_latest_version().id).update(is_latest_version=False)
             from core.concepts.models import Concept
             from core.concepts.documents import ConceptDocument
             Concept.batch_index(concepts, ConceptDocument)
