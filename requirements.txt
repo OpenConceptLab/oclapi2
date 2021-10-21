@@ -1,4 +1,4 @@
-Django==3.2.7
+Django==3.2.8
 psycopg2==2.9.1
 gunicorn==20.1.0 #production server
 whitenoise==5.3.0 #serving swagger static files
@@ -23,7 +23,7 @@ django-elasticsearch-dsl==7.2.0
 drf-yasg==1.20.0
 git+https://github.com/snyaggarwal/django-queryset-csv
 git+https://github.com/OpenConceptLab/ocldev
-coverage==6.0
+coverage==6.0.2
 tblib==1.7.0
 django-ordered-model==3.4.3
 django-health-check>=3.16.2
