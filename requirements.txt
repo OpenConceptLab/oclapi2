@@ -5,10 +5,10 @@ whitenoise==5.3.0 #serving swagger static files
 djangorestframework==3.12.4
 pylint==2.11.1
 pydash==5.1.0
-django-cors-headers==3.9.0
+django-cors-headers==3.10.0
 pyyaml==5.4.1
 colour_runner==0.1.1
-boto3==1.18.49
+boto3==1.19.0
 moto==2.2.9
 python-dateutil==2.8.2
 requests==2.26.0
@@ -19,7 +19,7 @@ celery_once==3.0.1
 flower==0.9.5
 redis==3.5.3
 kombu==4.6.11
-django-elasticsearch-dsl==7.2.0
+django-elasticsearch-dsl==7.2.1
 drf-yasg==1.20.0
 git+https://github.com/snyaggarwal/django-queryset-csv
 git+https://github.com/OpenConceptLab/ocldev
