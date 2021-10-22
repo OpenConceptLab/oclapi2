@@ -1,3 +1,39 @@
+##### 2.0.74 - Fri Oct 22 02:13:56 2021 +0000
+- Merge pull request #81 from OpenConceptLab/dependabot/pip/django-elasticsearch-dsl-7.2.1
+- Bump django-elasticsearch-dsl from 7.2.0 to 7.2.1
+- Merge pull request #80 from OpenConceptLab/dependabot/pip/coverage-6.0.2
+- Merge pull request #79 from OpenConceptLab/dependabot/pip/django-cors-headers-3.10.0
+- Bump coverage from 6.0 to 6.0.2
+- Merge pull request #78 from OpenConceptLab/dependabot/pip/boto3-1.19.0
+- Bump django-cors-headers from 3.9.0 to 3.10.0
+- Merge pull request #70 from OpenConceptLab/dependabot/pip/django-3.2.8
+- Bump boto3 from 1.18.49 to 1.19.0
+- [OpenConceptLab/ocl_issues#1036](https://github.com/OpenConceptLab/ocl_issues/issues/1036) | POST Admin API to resolve duplicate latest versions using ids rather than created_at
+- [OpenConceptLab/ocl_issues#1036](https://github.com/OpenConceptLab/ocl_issues/issues/1036) | keeping code DRY
+- [OpenConceptLab/ocl_issues#1036](https://github.com/OpenConceptLab/ocl_issues/issues/1036) | POST Admin API to resolve duplicate latest versions for specific concepts
+- [OpenConceptLab/ocl_issues#1036](https://github.com/OpenConceptLab/ocl_issues/issues/1036) | resolve duplicate latest version order by mnemonic
+- [OpenConceptLab/ocl_issues#1036](https://github.com/OpenConceptLab/ocl_issues/issues/1036) | resolve duplicate latest version order by parent id desc
+- [OpenConceptLab/ocl_issues#1036](https://github.com/OpenConceptLab/ocl_issues/issues/1036) | resolve duplicate latest version | added logs
+- [OpenConceptLab/ocl_issues#1036](https://github.com/OpenConceptLab/ocl_issues/issues/1036) | resolve duplicate latest version with better query
+- [OpenConceptLab/ocl_issues#1036](https://github.com/OpenConceptLab/ocl_issues/issues/1036) | after latest version resolve indexing
+- [OpenConceptLab/ocl_issues#1036](https://github.com/OpenConceptLab/ocl_issues/issues/1036) | PUT Admin API to resolve duplicate latest versions
+- [OpenConceptLab/ocl_issues#1036](https://github.com/OpenConceptLab/ocl_issues/issues/1036) | Admin API to get duplicate latest concept versions
+- [OpenConceptLab/ocl_issues#923](https://github.com/OpenConceptLab/ocl_issues/issues/923) | errbit client setup
+- Adding User-Agent to import file url request for parallel imports
+- Adding User-Agent to import file url request
+- [OpenConceptLab/ocl_issues#1035](https://github.com/OpenConceptLab/ocl_issues/issues/1035) Slow concepts and mappings select (partial index)
+- Revert "OpenConceptLab/ocl_issues#1035 Slow concepts and mappings select (partial index)"
+- [OpenConceptLab/ocl_issues#1035](https://github.com/OpenConceptLab/ocl_issues/issues/1035) Slow concepts and mappings select (partial index)
+- [OpenConceptLab/ocl_issues#1035](https://github.com/OpenConceptLab/ocl_issues/issues/1035) Slow concepts and mappings select
+- [OpenConceptLab/ocl_issues#1035](https://github.com/OpenConceptLab/ocl_issues/issues/1035) Slow concepts select
+- Removing tmp after export file is uploaded
+- Bump django from 3.2.7 to 3.2.8
+- Merge pull request #69 from OpenConceptLab/dependabot/pip/moto-2.2.9
+- Bump moto from 2.2.8 to 2.2.9
+- Merge pull request #63 from OpenConceptLab/dependabot/pip/pydash-5.1.0
+- pylint | removed unused import
+- Concept children/parents | pagination and headers
+- Bump pydash from 5.0.2 to 5.1.0
 ##### 2.0.66 - Thu Oct 7 05:38:06 2021 +0000
 - [OpenConceptLab/ocl_issues#1018](https://github.com/OpenConceptLab/ocl_issues/issues/1018) | user org collections/sources search result scope fix
 - [OpenConceptLab/ocl_issues#991](https://github.com/OpenConceptLab/ocl_issues/issues/991) | concept children/parents nested children/parents can be asked separately
