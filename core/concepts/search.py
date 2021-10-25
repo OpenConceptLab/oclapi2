@@ -9,7 +9,7 @@ class ConceptSearch(CommonSearch):
     doc_types = [Concept]
     fields = [
         'datatype', 'concept_class', 'locale', 'retired',
-        'source', 'owner', 'owner_type', 'is_latest_version', 'is_active', 'name', 'collection',
+        'source', 'owner', 'owner_type', 'is_latest_version', 'is_active', 'name', 'collection', 'name_types', 'description_types',
     ]
 
     facets = {
@@ -24,4 +24,6 @@ class ConceptSearch(CommonSearch):
         'is_active': TermsFacet(field='is_active'),
         'is_latest_version': TermsFacet(field='is_latest_version'),
         'collection_owner_url': TermsFacet(field='collection_owner_url'),
+        'name_types': TermsFacet(field='name_types'),
+        'description_types': TermsFacet(field='description_types'),
     }
