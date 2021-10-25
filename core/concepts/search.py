@@ -9,7 +9,8 @@ class ConceptSearch(CommonSearch):
     doc_types = [Concept]
     fields = [
         'datatype', 'concept_class', 'locale', 'retired',
-        'source', 'owner', 'owner_type', 'is_latest_version', 'is_active', 'name', 'collection', 'name_types', 'description_types',
+        'source', 'owner', 'owner_type', 'is_latest_version', 'is_active', 'name', 'collection', 'name_types',
+        'description_types',
     ]
 
     facets = {
