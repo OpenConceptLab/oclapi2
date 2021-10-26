@@ -25,6 +25,6 @@ class ConceptSearch(CommonSearch):
         'is_active': TermsFacet(field='is_active'),
         'is_latest_version': TermsFacet(field='is_latest_version'),
         'collection_owner_url': TermsFacet(field='collection_owner_url'),
-        'name_types': TermsFacet(field='name_types'),
-        'description_types': TermsFacet(field='description_types'),
+        'nameTypes': TermsFacet(field='name_types'),
+        'descriptionTypes': TermsFacet(field='description_types'),
     }
