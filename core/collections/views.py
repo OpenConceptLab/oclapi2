@@ -21,7 +21,7 @@ from core.collections.constants import (
     HEAD_OF_MAPPING_ADDED_TO_COLLECTION, CONCEPT_ADDED_TO_COLLECTION_FMT, MAPPING_ADDED_TO_COLLECTION_FMT,
     DELETE_FAILURE, DELETE_SUCCESS, NO_MATCH, VERSION_ALREADY_EXISTS,
     SOURCE_MAPPINGS,
-    UNKNOWN_REFERENCE_ADDED_TO_COLLECTION_FMT)
+    UNKNOWN_REFERENCE_ADDED_TO_COLLECTION_FMT, SOURCE_TO_CONCEPTS)
 from core.collections.documents import CollectionDocument
 from core.collections.models import Collection, CollectionReference
 from core.collections.search import CollectionSearch
@@ -310,8 +310,8 @@ class CollectionReferencesView(
 
     def update(self, request, *args, **kwargs):  # pylint: disable=too-many-locals,unused-argument # Fixme: Sny
         collection = self.get_object()
-
-        cascade_mappings = self.should_cascade_mappings()
+        cascade_to_concepts = self.should_cascade_to_concepts()
+        cascade_mappings = cascade_to_concepts or self.should_cascade_mappings()
         data = request.data.get('data')
         concept_expressions = data.get('concepts', [])
         mapping_expressions = data.get('mappings', [])
@@ -321,7 +321,7 @@ class CollectionReferencesView(
 
         if adding_all:
             result = add_references.delay(
-                self.request.user.id, data, collection.id, cascade_mappings)
+                self.request.user.id, data, collection.id, cascade_mappings, cascade_to_concepts)
             return Response(
                 dict(
                     state=result.state, username=request.user.username, task=result.task_id, queue='default'
@@ -330,7 +330,7 @@ class CollectionReferencesView(
             )
 
         (added_references, errors) = collection.add_expressions(
-            data, request.user, cascade_mappings
+            data, request.user, cascade_mappings, cascade_to_concepts
         )
 
         all_expressions = expressions + concept_expressions + mapping_expressions
@@ -359,6 +359,9 @@ class CollectionReferencesView(
 
     def should_cascade_mappings(self):
         return self.request.query_params.get('cascade', '').lower() == SOURCE_MAPPINGS
+
+    def should_cascade_to_concepts(self):
+        return self.request.query_params.get('cascade', '').lower() == SOURCE_TO_CONCEPTS
 
     def create_response_item(self, added_expressions, errors, expression):
         adding_expression_failed = len(errors) > 0 and expression in errors

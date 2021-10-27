@@ -425,7 +425,7 @@ class CollectionReferencesViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 202)
         self.assertEqual(response.data, [])
         add_references_mock.delay.assert_called_once_with(
-            self.user.id, dict(concepts='*'), self.collection.id, False
+            self.user.id, dict(concepts='*'), self.collection.id, False, False
         )
 
     def test_put_200_specific_expression(self):
@@ -520,6 +520,71 @@ class CollectionReferencesViewTest(OCLAPITestCase):
         self.assertEqual(self.collection.active_mappings, 2)
         self.assertTrue(self.collection.references.filter(expression=mapping2.get_latest_version().uri).exists())
         self.assertTrue(self.collection.references.filter(expression=latest_version.uri).exists())
+
+    def test_put_expression_with_cascade_to_concepts(self):
+        source1 = OrganizationSourceFactory()
+        source2 = OrganizationSourceFactory()
+        concept1 = ConceptFactory(parent=source1)
+        concept2 = ConceptFactory(parent=source1)
+        concept3 = ConceptFactory(parent=source2)
+        concept4 = ConceptFactory(parent=source2)
+
+        mapping1 = MappingFactory(
+            mnemonic='m1-c1-c2-s1', from_concept=concept1.get_latest_version(),
+            to_concept=concept2.get_latest_version(), parent=source1
+        )
+        MappingFactory(
+            mnemonic='m2-c2-c1-s1', from_concept=concept2.get_latest_version(),
+            to_concept=concept1.get_latest_version(), parent=source1
+        )
+        MappingFactory(
+            mnemonic='m3-c1-c3-s2', from_concept=concept1.get_latest_version(),
+            to_concept=concept3.get_latest_version(), parent=source2
+        )
+        mapping4 = MappingFactory(
+            mnemonic='m4-c4-c3-s2', from_concept=concept4.get_latest_version(),
+            to_concept=concept3.get_latest_version(), parent=source2
+        )
+        MappingFactory(
+            mnemonic='m5-c4-c1-s1', from_concept=concept4.get_latest_version(),
+            to_concept=concept1.get_latest_version(), parent=source1
+        )
+
+        response = self.client.put(
+            self.collection.uri + 'references/?cascade=sourceToConcepts',
+            dict(data=dict(concepts=[concept1.get_latest_version().uri])),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 3)
+        self.assertTrue(all(data['added'] for data in response.data))
+        self.assertEqual(
+            sorted([data['expression'] for data in response.data]),
+            sorted([
+                concept1.get_latest_version().uri, mapping1.get_latest_version().uri,
+                mapping1.to_concept.get_latest_version().uri
+            ])
+        )
+
+        response = self.client.put(
+            self.collection.uri + 'references/?cascade=sourceToConcepts',
+            dict(data=dict(concepts=[concept4.get_latest_version().uri])),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 3)
+        self.assertTrue(all(data['added'] for data in response.data))
+        self.assertEqual(
+            sorted([data['expression'] for data in response.data]),
+            sorted([
+                concept4.get_latest_version().uri, mapping4.get_latest_version().uri,
+                mapping4.to_concept.get_latest_version().uri
+            ])
+        )
 
 
 class CollectionVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):

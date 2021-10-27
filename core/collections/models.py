@@ -174,7 +174,7 @@ class Collection(ConceptContainerModel):
         return Source.objects.filter(uri=uri).first()
 
     @transaction.atomic
-    def add_expressions(self, data, user, cascade_mappings=False):
+    def add_expressions(self, data, user, cascade_mappings=False, cascade_to_concepts=False):
         expressions = data.get('expressions', [])
         concept_expressions = data.get('concepts', [])
         mapping_expressions = data.get('mappings', [])
@@ -201,9 +201,8 @@ class Collection(ConceptContainerModel):
             expressions.extend(concept_expressions)
             expressions.extend(mapping_expressions)
 
-        if cascade_mappings:
-            all_related_mappings = self.get_all_related_mappings(expressions)
-            expressions += all_related_mappings
+        if cascade_mappings or cascade_to_concepts:
+            expressions += self.get_all_related_uris(expressions, cascade_to_concepts)
 
         return self.add_references_in_bulk(expressions, user)
 
@@ -327,7 +326,7 @@ class Collection(ConceptContainerModel):
         mappings = Mapping.objects.filter(uri__in=expressions)
         return concepts, mappings
 
-    def get_all_related_mappings(self, expressions):
+    def get_all_related_uris(self, expressions, cascade_to_concepts=False):
         all_related_mappings = []
         unversioned_mappings = []
         concept_expressions = []
@@ -342,7 +341,7 @@ class Collection(ConceptContainerModel):
             ref = CollectionReference(expression=concept_expression)
             try:
                 self.validate(ref)
-                all_related_mappings += ref.get_related_mappings(unversioned_mappings)
+                all_related_mappings += ref.get_related_uris(unversioned_mappings, cascade_to_concepts)
             except:  # pylint: disable=bare-except
                 continue
 
@@ -429,15 +428,15 @@ class CollectionReference(models.Model):
         elif self.mappings and self.mappings.exists():
             self.expression = self.mappings.first().uri
 
-    def get_related_mappings(self, exclude_mapping_uris):
-        mappings = []
+    def get_related_uris(self, exclude_mapping_uris, cascade_to_concepts=False):
+        uris = []
         concepts = self.get_concepts()
         if concepts.exists():
             for concept in concepts:
-                mappings = list(
-                    concept.get_unidirectional_mappings().exclude(
-                        uri__in=exclude_mapping_uris
-                    ).values_list('uri', flat=True)
-                )
+                mapping_queryset = concept.get_unidirectional_mappings().exclude(uri__in=exclude_mapping_uris)
+                uris = list(mapping_queryset.values_list('uri', flat=True))
+                if cascade_to_concepts:
+                    to_concepts_queryset = mapping_queryset.filter(to_concept__parent_id=concept.parent_id)
+                    uris += list(to_concepts_queryset.values_list('to_concept__uri', flat=True))
 
-        return mappings
+        return uris
