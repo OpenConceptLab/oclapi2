@@ -94,6 +94,7 @@ UPDATED = 2
 FAILED = 3
 DELETED = 4
 NOT_FOUND = 5
+PERMISSION_DENIED = 6
 
 
 class BaseResourceImporter:
@@ -188,8 +189,11 @@ class OrganizationImporter(BaseResourceImporter):
 
     def delete(self):
         if self.exists():
-            delete_organization(self.get_queryset().first().id)
-            return DELETED
+            org = self.get_queryset().first()
+            if self.user and (self.user.is_staff or org.is_member(self.user)):
+                delete_organization(org.id)
+                return DELETED
+            return PERMISSION_DENIED
         return NOT_FOUND
 
 
@@ -229,15 +233,19 @@ class SourceImporter(BaseResourceImporter):
 
     def process(self):
         source = Source(**self.data)
-        errors = Source.persist_new(source, self.user)
-        return errors or CREATED
+        if source.has_parent_edit_access(self.user):
+            errors = Source.persist_new(source, self.user)
+            return errors or CREATED
+        return PERMISSION_DENIED
 
     def delete(self):
         if self.exists():
             source = self.get_queryset().first()
             try:
-                source.delete()
-                return DELETED
+                if source.has_edit_access(self.user):
+                    source.delete()
+                    return DELETED
+                return PERMISSION_DENIED
             except Exception as ex:
                 return dict(errors=ex.args)
 
@@ -267,8 +275,10 @@ class SourceVersionImporter(BaseResourceImporter):
 
     def process(self):
         source = Source(**self.data)
-        errors = Source.persist_new_version(source, self.user)
-        return errors or CREATED
+        if source.has_edit_access(self.user):
+            errors = Source.persist_new_version(source, self.user)
+            return errors or CREATED
+        return PERMISSION_DENIED
 
 
 class CollectionImporter(BaseResourceImporter):
@@ -306,15 +316,19 @@ class CollectionImporter(BaseResourceImporter):
 
     def process(self):
         coll = Collection(**self.data)
-        errors = Collection.persist_new(coll, self.user)
-        return errors or CREATED
+        if coll.has_parent_edit_access(self.user):
+            errors = Collection.persist_new(coll, self.user)
+            return errors or CREATED
+        return PERMISSION_DENIED
 
     def delete(self):
         if self.exists():
             collection = self.get_queryset().first()
             try:
-                collection.delete()
-                return DELETED
+                if collection.has_edit_access(self.user):
+                    collection.delete()
+                    return DELETED
+                return PERMISSION_DENIED
             except Exception as ex:
                 return dict(errors=ex.args)
 
@@ -344,8 +358,10 @@ class CollectionVersionImporter(BaseResourceImporter):
 
     def process(self):
         coll = Collection(**self.data)
-        errors = Collection.persist_new_version(coll, self.user)
-        return errors or CREATED
+        if coll.has_edit_access(self.user):
+            errors = Collection.persist_new_version(coll, self.user)
+            return errors or CREATED
+        return PERMISSION_DENIED
 
 
 class ConceptImporter(BaseResourceImporter):
@@ -392,18 +408,22 @@ class ConceptImporter(BaseResourceImporter):
         return True
 
     def process(self):
-        if self.version:
-            instance = self.get_queryset().first().clone()
-            errors = Concept.create_new_version_for(
-                instance=instance, data=self.data, user=self.user, create_parent_version=False,
-                add_prev_version_children=False
-            )
-            return errors or UPDATED
+        parent = self.data.get('parent')
+        if parent.has_edit_access(self.user):
+            if self.version:
+                instance = self.get_queryset().first().clone()
+                errors = Concept.create_new_version_for(
+                    instance=instance, data=self.data, user=self.user, create_parent_version=False,
+                    add_prev_version_children=False
+                )
+                return errors or UPDATED
 
-        instance = Concept.persist_new(data=self.data, user=self.user, create_parent_version=False)
-        if instance.id:
-            return CREATED
-        return instance.errors or FAILED
+            instance = Concept.persist_new(data=self.data, user=self.user, create_parent_version=False)
+            if instance.id:
+                return CREATED
+            return instance.errors or FAILED
+
+        return PERMISSION_DENIED
 
 
 class MappingImporter(BaseResourceImporter):
@@ -484,14 +504,18 @@ class MappingImporter(BaseResourceImporter):
         return True
 
     def process(self):
-        if self.version:
-            instance = self.get_queryset().first().clone()
-            errors = Mapping.create_new_version_for(instance, self.data, self.user)
-            return errors or UPDATED
-        instance = Mapping.persist_new(self.data, self.user)
-        if instance.id:
-            return CREATED
-        return instance.errors or FAILED
+        parent = self.data.get('parent')
+        if parent.has_edit_access(self.user):
+            if self.version:
+                instance = self.get_queryset().first().clone()
+                errors = Mapping.create_new_version_for(instance, self.data, self.user)
+                return errors or UPDATED
+            instance = Mapping.persist_new(self.data, self.user)
+            if instance.id:
+                return CREATED
+            return instance.errors or FAILED
+
+        return PERMISSION_DENIED
 
 
 class ReferenceImporter(BaseResourceImporter):
@@ -518,18 +542,20 @@ class ReferenceImporter(BaseResourceImporter):
         collection = self.get_queryset().first()
 
         if collection:
-            (added_references, _) = collection.add_expressions(
-                self.get('data'), self.user, self.get('__cascade', False)
-            )
-            for ref in added_references:
-                if ref.concepts:
-                    for concept in ref.concepts:
-                        concept.index()
-                if ref.mappings:
-                    for mapping in ref.mappings:
-                        mapping.index()
+            if collection.has_edit_access(self.user):
+                (added_references, _) = collection.add_expressions(
+                    self.get('data'), self.user, self.get('__cascade', False)
+                )
+                for ref in added_references:
+                    if ref.concepts:
+                        for concept in ref.concepts:
+                            concept.index()
+                    if ref.mappings:
+                        for mapping in ref.mappings:
+                            mapping.index()
 
-            return CREATED
+                return CREATED
+            return PERMISSION_DENIED
         return FAILED
 
 
@@ -551,6 +577,7 @@ class BulkImportInline(BaseImporter):
         self.not_found = []
         self.failed = []
         self.exception = []
+        self.permission_denied = []
         self.others = []
         self.processed = 0
         self.total = len(self.input_list)
@@ -582,6 +609,9 @@ class BulkImportInline(BaseImporter):
             return
         if result == UPDATED:
             self.updated.append(item)
+            return
+        if result == PERMISSION_DENIED:
+            self.permission_denied.append(item)
             return
 
         print("****Unexpected Result****", result)
@@ -660,6 +690,7 @@ class BulkImportInline(BaseImporter):
     def detailed_summary(self):
         return f"Processed: {self.processed}/{self.total} | Created: {len(self.created)} | " \
             f"Updated: {len(self.updated)} | DELETED: {len(self.deleted)} | Existing: {len(self.exists)} | " \
+            f"Permision Denied: {len(self.permission_denied)} | " \
             f"Time: {self.elapsed_seconds}secs"
 
     @property
@@ -667,7 +698,7 @@ class BulkImportInline(BaseImporter):
         return dict(
             total=self.total, processed=self.processed, created=self.created, updated=self.updated,
             invalid=self.invalid, exists=self.exists, failed=self.failed, deleted=self.deleted,
-            not_found=self.not_found, exception=self.exception,
+            not_found=self.not_found, exception=self.exception, permission_denied=self.permission_denied,
             others=self.others, unknown=self.unknown, elapsed_seconds=self.elapsed_seconds
         )
 
@@ -837,6 +868,7 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
         return f"Started: {self.start_time_formatted} | Processed: {result.get('processed')}/{result.get('total')} | " \
             f"Created: {len(result.get('created'))} | Updated: {len(result.get('updated'))} | " \
             f"Deleted: {len(result.get('deleted'))} | Existing: {len(result.get('exists'))} | " \
+            f"Permission Denied: {len(result.get('permission_denied'))} | " \
             f"Time: {self.elapsed_seconds}secs"
 
     @property
@@ -851,7 +883,7 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
         total_result = dict(
             total=0, processed=0, created=[], updated=[],
             invalid=[], exists=[], failed=[], exception=[], deleted=[],
-            others=[], unknown=[], elapsed_seconds=self.elapsed_seconds
+            others=[], unknown=[], permission_denied=[], elapsed_seconds=self.elapsed_seconds
         )
         for task in self.tasks:
             result = task.result.get('json')

@@ -283,6 +283,34 @@ class BulkImportInlineTest(OCLTestCase):
         self.assertEqual(importer.failed, [])
         self.assertTrue(importer.elapsed_seconds > 0)
 
+    def test_concept_import_permission_denied(self):
+        self.assertFalse(Concept.objects.filter(mnemonic='Food').exists())
+
+        org = OrganizationFactory(mnemonic='DemoOrg')
+        source = OrganizationSourceFactory(
+            organization=org, mnemonic='DemoSource', version='HEAD', public_access='None')
+        self.assertFalse(source.public_can_view)
+
+        data = {
+            "type": "Concept", "id": "Food", "concept_class": "Root",
+            "datatype": "None", "source": "DemoSource", "owner": "DemoOrg", "owner_type": "Organization",
+            "names": [{"name": "Food", "locale": "en", "locale_preferred": "True", "name_type": "Fully Specified"}],
+            "descriptions": [],
+        }
+
+        random_user = UserProfileFactory(username='random-user')
+        self.assertFalse(org.is_member(random_user))
+
+        importer = BulkImportInline(json.dumps(data), 'random-user', True)
+        importer.run()
+
+        self.assertEqual(Concept.objects.filter(mnemonic='Food').count(), 0)
+        self.assertEqual(importer.processed, 1)
+        self.assertEqual(len(importer.permission_denied), 1)
+        self.assertEqual(len(importer.created), 0)
+        self.assertEqual(len(importer.updated), 0)
+        self.assertEqual(importer.permission_denied, [data])
+
     def test_mapping_import(self):
         self.assertEqual(Mapping.objects.count(), 0)
 
@@ -368,6 +396,7 @@ class BulkImportInlineTest(OCLTestCase):
         self.assertEqual(len(importer.failed), 0)
         self.assertEqual(len(importer.invalid), 0)
         self.assertEqual(len(importer.others), 0)
+        self.assertEqual(len(importer.permission_denied), 0)
         collection = Collection.objects.filter(uri='/orgs/PEPFAR/collections/MER-R-MOH-Facility-FY19/').first()
         self.assertEqual(collection.concepts.count(), 4)
         self.assertEqual(collection.mappings.count(), 0)
@@ -389,6 +418,7 @@ class BulkImportInlineTest(OCLTestCase):
         self.assertEqual(len(importer.failed), 0)
         self.assertEqual(len(importer.invalid), 0)
         self.assertEqual(len(importer.others), 0)
+        self.assertEqual(len(importer.permission_denied), 0)
 
     @unittest.skip('[Skipped] OPENMRS CSV Import Sample')
     def test_openmrs_schema_csv_import(self):
@@ -410,6 +440,7 @@ class BulkImportInlineTest(OCLTestCase):
         self.assertEqual(len(importer.updated), 0)
         self.assertEqual(len(importer.invalid), 0)
         self.assertEqual(len(importer.failed), 10)
+        self.assertEqual(len(importer.permission_denied), 0)
 
     @unittest.skip('[Skipped] PEPFAR (small) Import Sample')
     def test_pepfar_import(self):
@@ -427,6 +458,7 @@ class BulkImportInlineTest(OCLTestCase):
         self.assertEqual(len(importer.failed), 0)
         self.assertEqual(len(importer.invalid), 0)
         self.assertEqual(len(importer.others), 0)
+        self.assertEqual(len(importer.permission_denied), 0)
 
 
 class BulkImportParallelRunnerTest(OCLTestCase):

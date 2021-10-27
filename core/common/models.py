@@ -98,6 +98,10 @@ class BaseModel(models.Model):
         return self.public_access.lower() in [ACCESS_TYPE_EDIT.lower(), ACCESS_TYPE_VIEW.lower()]
 
     @property
+    def public_can_edit(self):
+        return self.public_access.lower() == ACCESS_TYPE_EDIT.lower()
+
+    @property
     def resource_type(self):
         return get(self, 'OBJECT_TYPE')
 
@@ -473,6 +477,21 @@ class ConceptContainerModel(VersionedModel):
 
     def get_concepts_queryset(self):
         return self.concepts_set.filter(id=F('versioned_object_id'))
+
+    def has_parent_edit_access(self, user):
+        if user.is_staff:
+            return True
+
+        if self.organization_id:
+            return self.parent.is_member(user)
+
+        return self.user_id == user.id
+
+    def has_edit_access(self, user):
+        if self.public_can_edit or user.is_staff:
+            return True
+
+        return self.has_parent_edit_access(user)
 
     @staticmethod
     def get_version_url_kwarg():
