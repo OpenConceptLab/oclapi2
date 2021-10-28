@@ -5,12 +5,8 @@ import random
 import tempfile
 import uuid
 import zipfile
-<<<<<<< HEAD
-from collections import MutableMapping, OrderedDict  # pylint: disable=no-name-in-module
-=======
 from collections import MutableMapping, OrderedDict  # pylint: disable=no-name-in-module,deprecated-class
 from threading import local
->>>>>>> a257c97... OpenConceptLab/ocl_issues#923 | errbit client setup
 from urllib import parse
 
 import requests
