@@ -5,3 +5,7 @@ from rest_framework.serializers import Serializer
 class RootSerializer(Serializer):  # pylint: disable=abstract-method
     version = CharField()
     routes = JSONField()
+
+
+class TaskSerializer(Serializer):
+    pass

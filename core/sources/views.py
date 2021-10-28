@@ -19,6 +19,7 @@ from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryCreateMixi
     ConceptContainerExportMixin, ConceptContainerProcessingMixin, ConceptContainerExtraRetrieveUpdateDestroyView
 from core.common.permissions import CanViewConceptDictionary, CanEditConceptDictionary, HasAccessToVersionedObject, \
     CanViewConceptDictionaryVersion
+from core.common.serializers import TaskSerializer
 from core.common.swagger_parameters import q_param, limit_param, sort_desc_param, sort_asc_param, exact_match_param, \
     page_param, verbose_param, include_retired_param, updated_since_param, include_facets_header, compress_header
 from core.common.tasks import export_source, delete_source, index_source_concepts, index_source_mappings
@@ -284,6 +285,8 @@ class SourceLatestVersionRetrieveUpdateView(SourceVersionBaseView, RetrieveAPIVi
 
 
 class SourceConceptsIndexView(SourceBaseView):
+    serializer_class = TaskSerializer
+
     def get_queryset(self):
         return Source.get_base_queryset(compact_dict_by_values(self.get_filter_params()))
 
@@ -303,6 +306,8 @@ class SourceConceptsIndexView(SourceBaseView):
 
 
 class SourceMappingsIndexView(SourceBaseView):
+    serializer_class = TaskSerializer
+
     def get_queryset(self):
         return Source.get_base_queryset(compact_dict_by_values(self.get_filter_params()))
 
