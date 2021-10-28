@@ -7,5 +7,5 @@ class RootSerializer(Serializer):  # pylint: disable=abstract-method
     routes = JSONField()
 
 
-class TaskSerializer(Serializer):
+class TaskSerializer(Serializer):  # pylint: disable=abstract-method
     pass
