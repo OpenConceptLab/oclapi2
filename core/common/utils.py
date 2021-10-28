@@ -5,7 +5,7 @@ import random
 import tempfile
 import uuid
 import zipfile
-from collections import MutableMapping, OrderedDict  # pylint: disable=no-name-in-module,deprecated-class
+from collections import MutableMapping, OrderedDict  # pylint: disable=no-name-in-module
 from threading import local
 from urllib import parse
 
