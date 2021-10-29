@@ -72,9 +72,10 @@ class OpenMRSConceptValidator(BaseConceptValidator):
 
     def preferred_name_should_be_unique_for_source_and_locale(self, concept):
         self.attribute_should_be_unique_for_source_and_locale(
-            concept,
+            concept=concept,
             attribute='locale_preferred',
-            error_message=OPENMRS_PREFERRED_NAME_UNIQUE_PER_SOURCE_LOCALE
+            error_message=OPENMRS_PREFERRED_NAME_UNIQUE_PER_SOURCE_LOCALE,
+            filters=dict(names__locale_preferred=True)
         )
 
     def fully_specified_name_should_be_unique_for_source_and_locale(self, concept):
@@ -84,24 +85,28 @@ class OpenMRSConceptValidator(BaseConceptValidator):
             error_message=OPENMRS_FULLY_SPECIFIED_NAME_UNIQUE_PER_SOURCE_LOCALE
         )
 
-    def attribute_should_be_unique_for_source_and_locale(self, concept, attribute, error_message):
+    def attribute_should_be_unique_for_source_and_locale(self, concept, attribute, error_message, filters=None):
         versioned_object_id = concept.versioned_object_id or get(concept, 'head.id')
 
         names = [name for name in concept.saved_unsaved_names if getattr(name, attribute)]
         for name in names:
-            if self.no_other_record_has_same_name(name, versioned_object_id):
+            if self.no_other_record_has_same_name(name, versioned_object_id, filters):
                 continue
 
             raise ValidationError({'names': [message_with_name_details(error_message, name)]})
 
-    def no_other_record_has_same_name(self, name, versioned_object_id):
+    def no_other_record_has_same_name(self, name, versioned_object_id, filters=None):
         if not self.repo:
             return True
+
+        if not filters:
+            filters = {}
 
         return not self.repo.concepts_set.exclude(
             versioned_object_id=versioned_object_id
         ).exclude(names__type__in=(*LOCALES_SHORT, *LOCALES_SEARCH_INDEX_TERM)).filter(
-            is_active=True, retired=False, is_latest_version=True, names__locale=name.locale, names__name=name.name
+            is_active=True, retired=False, is_latest_version=True, names__locale=name.locale, names__name=name.name,
+            **filters
         ).exists()
 
     @staticmethod
