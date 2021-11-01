@@ -242,7 +242,7 @@ class SourceImporter(BaseResourceImporter):
         if self.exists():
             source = self.get_queryset().first()
             try:
-                if source.has_edit_access(self.user):
+                if source.has_parent_edit_access(self.user):
                     source.delete()
                     return DELETED
                 return PERMISSION_DENIED
@@ -275,7 +275,7 @@ class SourceVersionImporter(BaseResourceImporter):
 
     def process(self):
         source = Source(**self.data)
-        if source.has_edit_access(self.user):
+        if source.has_parent_edit_access(self.user):
             errors = Source.persist_new_version(source, self.user)
             return errors or CREATED
         return PERMISSION_DENIED
@@ -325,7 +325,7 @@ class CollectionImporter(BaseResourceImporter):
         if self.exists():
             collection = self.get_queryset().first()
             try:
-                if collection.has_edit_access(self.user):
+                if collection.has_parent_edit_access(self.user):
                     collection.delete()
                     return DELETED
                 return PERMISSION_DENIED
@@ -358,7 +358,7 @@ class CollectionVersionImporter(BaseResourceImporter):
 
     def process(self):
         coll = Collection(**self.data)
-        if coll.has_edit_access(self.user):
+        if coll.has_parent_edit_access(self.user):
             errors = Collection.persist_new_version(coll, self.user)
             return errors or CREATED
         return PERMISSION_DENIED
