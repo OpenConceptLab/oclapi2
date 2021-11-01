@@ -6,6 +6,14 @@
 - Merge pull request #82 from OpenConceptLab/dependabot/pip/pyyaml-6.0
 - [OpenConceptLab/ocl_issues#37](https://github.com/OpenConceptLab/ocl_issues/issues/37) | filter concepts by name type and description type
 - Bump pyyaml from 5.4.1 to 6.0
+##### 2.0.75 - Wed Oct 27 08:40:29 2021 +0000
+- [OpenConceptLab/ocl_issues#993](https://github.com/OpenConceptLab/ocl_issues/issues/993) | Parallel Bulk Import | user permission checks on resources
+- [OpenConceptLab/ocl_issues#37](https://github.com/OpenConceptLab/ocl_issues/issues/37) | facets names are camel cased
+- [OpenConceptLab/ocl_issues#37](https://github.com/OpenConceptLab/ocl_issues/issues/37) | fixing pylint
+- Merge pull request #50 from PatrickCmd/filter_concepts_by_name_and_desctription_types
+- Merge pull request #82 from OpenConceptLab/dependabot/pip/pyyaml-6.0
+- [OpenConceptLab/ocl_issues#37](https://github.com/OpenConceptLab/ocl_issues/issues/37) | filter concepts by name type and description type
+- Bump pyyaml from 5.4.1 to 6.0
 ##### 2.0.74 - Fri Oct 22 02:13:56 2021 +0000
 - Merge pull request #81 from OpenConceptLab/dependabot/pip/django-elasticsearch-dsl-7.2.1
 - Bump django-elasticsearch-dsl from 7.2.0 to 7.2.1
