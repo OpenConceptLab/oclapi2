@@ -146,6 +146,9 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             models.Index(name='concepts_updated_6490d8_idx', fields=['-updated_at'],
                          condition=(Q(is_active=True) & Q(retired=False) & Q(is_latest_version=True) &
                                     ~Q(public_access='None'))),
+            models.Index(name='concepts_public_conditional', fields=['public_access'],
+                         condition=(Q(is_active=True) & Q(retired=False) & Q(is_latest_version=True) &
+                                    ~Q(public_access='None'))),
         ] + VersionedModel.Meta.indexes
 
     external_id = models.TextField(null=True, blank=True)

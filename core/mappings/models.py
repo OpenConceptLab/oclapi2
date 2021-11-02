@@ -25,7 +25,10 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
                       models.Index(name='mappings_updated_4589ad_idx', fields=['-updated_at'],
                                    condition=(Q(is_active=True) & Q(retired=False) & Q(is_latest_version=True) &
                                               ~Q(public_access='None'))),
-        ] + VersionedModel.Meta.indexes
+                      models.Index(name='mappings_public_conditional', fields=['public_access'],
+                                   condition=(Q(is_active=True) & Q(retired=False) & Q(is_latest_version=True) &
+                                              ~Q(public_access='None'))),
+                  ] + VersionedModel.Meta.indexes
 
     parent = models.ForeignKey('sources.Source', related_name='mappings_set', on_delete=models.CASCADE)
     map_type = models.TextField(db_index=True)
