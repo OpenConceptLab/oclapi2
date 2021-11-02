@@ -52,12 +52,13 @@ class PinSerializer(serializers.ModelSerializer):
     user_id = serializers.IntegerField(required=False, allow_null=True)
     organization_id = serializers.IntegerField(required=False, allow_null=True)
     resource = SerializerMethodField()
+    created_by_id = serializers.IntegerField(required=True)
 
     class Meta:
         model = Pin
         fields = (
             'id', 'created_at', 'resource_uri', 'user_id', 'organization_id', 'resource_type', 'resource_id',
-            'resource', 'uri', 'order'
+            'resource', 'uri', 'order', 'created_by_id'
         )
 
     def create(self, validated_data):
