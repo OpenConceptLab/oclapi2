@@ -8,7 +8,7 @@ pydash==5.1.0
 django-cors-headers==3.10.0
 pyyaml==6.0
 colour_runner==0.1.1
-boto3==1.19.0
+boto3==1.19.9
 moto==2.2.9
 python-dateutil==2.8.2
 requests==2.26.0
@@ -29,3 +29,5 @@ django-ordered-model==3.4.3
 django-health-check>=3.16.2
 markdown==3.3.4
 mock==4.0.3
+django-request-logging==0.7.3
+django-cid==2.2
