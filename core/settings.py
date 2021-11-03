@@ -186,48 +186,49 @@ ELASTICSEARCH_DSL = {
 ENV = os.environ.get('ENVIRONMENT', 'development')
 CID_GENERATE = True
 CID_RESPONSE_HEADER = None
-LOGGING = {
-    'version': 1,
-    'disable_existing_loggers': False,
-    'formatters': {
-        'verbose': {
-            'format': '[cid: %(cid)s] %(levelname)s %(asctime)s %(message)s'
+if ENV and ENV != 'development':
+    LOGGING = {
+        'version': 1,
+        'disable_existing_loggers': False,
+        'formatters': {
+            'verbose': {
+                'format': '[cid: %(cid)s] %(levelname)s %(asctime)s %(message)s'
+            },
+            'simple': {
+                'format': '[cid: %(cid)s] %(asctime)s %(message)s'
+            },
         },
-        'simple': {
-            'format': '[cid: %(cid)s] %(asctime)s %(message)s'
+        'filters': {
+            'require_debug_true': {
+                '()': 'django.utils.log.RequireDebugTrue',
+            },
+            'require_debug_false': {
+                '()': 'django.utils.log.RequireDebugFalse',
+            },
+            'correlation': {
+                '()': 'cid.log.CidContextFilter'
+            },
         },
-    },
-    'filters': {
-        'require_debug_true': {
-            '()': 'django.utils.log.RequireDebugTrue',
+        'handlers': {
+            'console': {
+                'class': 'logging.StreamHandler',
+                'filters': ['require_debug_true', 'correlation'],
+                'formatter': 'simple',
+            },
+            'request_handler': {
+                'filters': ['require_debug_false', 'correlation'],
+                'class': 'logging.StreamHandler',
+                'formatter': 'simple',
+            }
         },
-        'require_debug_false': {
-            '()': 'django.utils.log.RequireDebugFalse',
+        'loggers': {
+            'django.request': {
+                'handlers': ['console', 'request_handler'],
+                'level': 'DEBUG',
+                'propagate': False,
+            },
         },
-        'correlation': {
-            '()': 'cid.log.CidContextFilter'
-        },
-    },
-    'handlers': {
-        'console': {
-            'class': 'logging.StreamHandler',
-            'filters': ['require_debug_true', 'correlation'],
-            'formatter': 'simple',
-        },
-        'request_handler': {
-            'filters': ['require_debug_false', 'correlation'],
-            'class': 'logging.StreamHandler',
-            'formatter': 'simple',
-        }
-    },
-    'loggers': {
-        'django.request': {
-            'handlers': ['console', 'request_handler'],
-            'level': 'DEBUG',
-            'propagate': False,
-        },
-    },
-}
+    }
 
 # Password validation
 # https://docs.djangoproject.com/en/3.0/ref/settings/#auth-password-validators
