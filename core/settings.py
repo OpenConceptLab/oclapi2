@@ -69,6 +69,7 @@ INSTALLED_APPS = [
     'django_elasticsearch_dsl',
     'corsheaders',
     'ordered_model',
+    'cid.apps.CidAppConfig',
     'health_check',  # required
     'health_check.db',  # stock Django health checkers
     # 'health_check.contrib.celery_ping',  # requires celery
@@ -133,6 +134,8 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'request_logging.middleware.LoggingMiddleware',
+    'cid.middleware.CidMiddleware',
     'core.middlewares.middlewares.FixMalformedLimitParamMiddleware',
     'core.middlewares.middlewares.VersionHeaderMiddleware',
     'core.middlewares.middlewares.CurrentUserMiddleware',
@@ -181,43 +184,50 @@ ELASTICSEARCH_DSL = {
 }
 
 ENV = os.environ.get('ENVIRONMENT', 'development')
-
-if ENV and ENV != 'development':
-    LOGGING = {
-        'version': 1,
-        'disable_existing_loggers': False,
-        'formatters': {
-            'verbose': {
-                'format': '%(levelname)s %(asctime)s %(message)s'
-            },
-            'simple': {
-                'format': '%(levelname)s %(message)s'
-            },
+CID_GENERATE = True
+CID_RESPONSE_HEADER = None
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'verbose': {
+            'format': '[cid: %(cid)s] %(levelname)s %(asctime)s %(message)s'
         },
-        'handlers': {
-            'console': {
-                'level': 'DEBUG',
-                'class': 'logging.StreamHandler',
-                'formatter': 'verbose',
-            },
-            'request_handler': {
-                'level': 'DEBUG',
-                'class': 'logging.StreamHandler',
-                'formatter': 'verbose',
-            }
+        'simple': {
+            'format': '[cid: %(cid)s] %(asctime)s %(message)s'
         },
-        'loggers': {
-            'django.db.backends': {
-                'level': 'DEBUG',
-                'handlers': ['console'],
-            },
-            'django.request': {
-                'handlers': ['console', 'request_handler'],
-                'level': 'DEBUG',
-                'propagate': False,
-            },
+    },
+    'filters': {
+        'require_debug_true': {
+            '()': 'django.utils.log.RequireDebugTrue',
+        },
+        'require_debug_false': {
+            '()': 'django.utils.log.RequireDebugFalse',
+        },
+        'correlation': {
+            '()': 'cid.log.CidContextFilter'
+        },
+    },
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+            'filters': ['require_debug_true', 'correlation'],
+            'formatter': 'simple',
+        },
+        'request_handler': {
+            'filters': ['require_debug_false', 'correlation'],
+            'class': 'logging.StreamHandler',
+            'formatter': 'simple',
         }
-    }
+    },
+    'loggers': {
+        'django.request': {
+            'handlers': ['console', 'request_handler'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+    },
+}
 
 # Password validation
 # https://docs.djangoproject.com/en/3.0/ref/settings/#auth-password-validators
