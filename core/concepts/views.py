@@ -75,7 +75,7 @@ class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
     def get_queryset(self):
         is_latest_version = 'collection' not in self.kwargs and 'version' not in self.kwargs or \
                             get(self.kwargs, 'version') == HEAD
-        queryset = super().get_queryset()
+        queryset = super().get_queryset().select_related('parent').prefetch_related('names')
         if is_latest_version:
             queryset = queryset.filter(is_latest_version=True)
         user = self.request.user
@@ -88,7 +88,7 @@ class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
                 Q(parent__user_id=user.id) | Q(parent__organization__members__id=user.id))
             queryset = public_queryset.union(private_queryset)
 
-        return queryset.select_related('parent').prefetch_related('names')
+        return queryset
 
     @swagger_auto_schema(
         manual_parameters=[
