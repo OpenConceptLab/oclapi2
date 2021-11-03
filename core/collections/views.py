@@ -428,6 +428,8 @@ class CollectionVersionReferencesView(CollectionVersionBaseView, ListWithHeaders
         search_query = query_params.get('q', '')
         sort = query_params.get('search_sort', 'ASC')
         object_version = self.get_queryset().first()
+        if not object_version:
+            raise Http404()
         references = object_version.references.filter(expression__icontains=search_query)
         self.object_list = references if sort == 'ASC' else list(reversed(references))
         return self.list(request, *args, **kwargs)
