@@ -134,7 +134,6 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'core.middlewares.middlewares.FixMalformedLimitParamMiddleware',
-    'core.middlewares.middlewares.RequestLogMiddleware',
     'core.middlewares.middlewares.VersionHeaderMiddleware',
     'core.middlewares.middlewares.CurrentUserMiddleware',
 ]
