@@ -316,6 +316,11 @@ def update_validation_schema(instance_type, instance_id, target_schema):
     acks_late=True, reject_on_worker_lost=True
 )
 def process_hierarchy_for_new_concept(concept_id, initial_version_id, parent_concept_uris, create_parent_version=True):
+    """
+      Executed when a new concept is created with parent_concept_urls and does following:
+      1. Associates parent concepts to the concept and concept latest (initial) version
+      2. Creates new versions for parent concept (if asked)
+    """
     from core.concepts.models import Concept
     concept = Concept.objects.filter(id=concept_id).first()
 
@@ -338,6 +343,12 @@ def process_hierarchy_for_new_concept(concept_id, initial_version_id, parent_con
 )
 def process_hierarchy_for_concept_version(
         latest_version_id, prev_version_id, parent_concept_uris, create_parent_version):
+    """
+      Executed when a new concept version is created with new, updated or existing hierarchy
+      1. Associates parent concepts to the latest concept version.
+      2. Creates new versions for removed parent concepts from previous versions.
+      3. Creates new versions for parent concept (if asked)
+    """
     from core.concepts.models import Concept
     latest_version = Concept.objects.filter(id=latest_version_id).first()
 
@@ -365,6 +376,9 @@ def process_hierarchy_for_concept_version(
     acks_late=True, reject_on_worker_lost=True
 )
 def process_hierarchy_for_new_parent_concept_version(prev_version_id, latest_version_id):
+    """
+      Associates latest parent version to child concepts
+    """
     from core.concepts.models import Concept
     prev_version = Concept.objects.filter(id=prev_version_id).first()
     latest_version = Concept.objects.filter(id=latest_version_id).first()
