@@ -22,7 +22,7 @@ from rest_framework.views import APIView
 from core import __version__
 from core.common.constants import SEARCH_PARAM, LIST_DEFAULT_LIMIT, CSV_DEFAULT_LIMIT, \
     LIMIT_PARAM, NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY, INCLUDE_RETIRED_PARAM, VERBOSE_PARAM, HEAD, LATEST, \
-    BRIEF_PARAM
+    BRIEF_PARAM, ES_REQUEST_TIMEOUT
 from core.common.exceptions import Http400
 from core.common.mixins import PathWalkerMixin, ListWithHeadersMixin
 from core.common.serializers import RootSerializer
@@ -346,9 +346,11 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                 filters.pop('retired')
 
             is_exact_match_on = self.is_exact_match_on()
-            facets = self.facet_class(  # pylint: disable=not-callable
+            faceted_search = self.facet_class(  # pylint: disable=not-callable
                 self.get_search_string(lower=not is_exact_match_on), filters=filters, exact_match=is_exact_match_on
-            ).execute().facets.to_dict()
+            )
+            faceted_search.params(request_timeout=ES_REQUEST_TIMEOUT)
+            facets = faceted_search.execute().facets.to_dict()
 
         return facets
 
@@ -567,7 +569,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         page = int(self.request.GET.get('page', '1'))
         start = (page - 1) * self.limit
         end = start + self.limit
-        search_results = search_results.params(request_timeout=20)
+        search_results = search_results.params(request_timeout=ES_REQUEST_TIMEOUT)
         try:
             return search_results[start:end].to_queryset()
         except RequestError as ex:

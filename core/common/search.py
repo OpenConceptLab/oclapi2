@@ -20,3 +20,6 @@ class CommonSearch(FacetedSearch):
             return search.query('multi_match', query=search_str)
 
         return search
+
+    def params(self, **kwargs):
+        self._s = self._s.params(**kwargs)
