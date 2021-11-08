@@ -514,8 +514,8 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                 new_latest_version = parent.get_latest_version()
                 for uri in current_latest_version.child_concept_urls:
                     Concept.objects.filter(
-                        uri__contains=uri, is_latest_version=True
-                    ).first().parent_concepts.add(new_latest_version)
+                        uri=uri
+                    ).first().get_latest_version().parent_concepts.add(new_latest_version)
 
         if parent_concepts:
             self.parent_concepts.set([parent.get_latest_version() for parent in parent_concepts])
@@ -541,7 +541,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                 new_latest_version = concept.get_latest_version()
                 for uri in current_latest_version.child_concept_urls:
                     if uri != child_versioned_object_uri:
-                        child = Concept.objects.filter(uri__contains=uri, is_latest_version=True).first()
+                        child = Concept.objects.filter(uri=uri).first().get_latest_version()
                         child.parent_concepts.add(new_latest_version)
 
     def set_locales(self):
