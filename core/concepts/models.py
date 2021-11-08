@@ -630,8 +630,10 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                     process_hierarchy_for_new_concept(
                         concept.id, get(initial_version, 'id'), parent_concept_uris, create_parent_version)
                 else:
-                    process_hierarchy_for_new_concept.delay(
-                        concept.id, get(initial_version, 'id'), parent_concept_uris, create_parent_version)
+                    process_hierarchy_for_new_concept.apply_async(
+                        (concept.id, get(initial_version, 'id'), parent_concept_uris, create_parent_version),
+                        queue='concurrent'
+                    )
         except ValidationError as ex:
             concept.errors.update(ex.message_dict)
         except IntegrityError as ex:
@@ -689,7 +691,10 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                             if get(settings, 'TEST_MODE', False):
                                 process_hierarchy_for_new_parent_concept_version(prev_latest_version.id, obj.id)
                             else:
-                                process_hierarchy_for_new_parent_concept_version.delay(prev_latest_version.id, obj.id)
+                                process_hierarchy_for_new_parent_concept_version.apply_async(
+                                    (prev_latest_version.id, obj.id),
+                                    queue='concurrent'
+                                )
 
                     obj.sources.set(compact([parent, parent_head]))
                     persisted = True
@@ -698,8 +703,10 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                         process_hierarchy_for_concept_version(
                             obj.id, get(prev_latest_version, 'id'), parent_concept_uris, create_parent_version)
                     else:
-                        process_hierarchy_for_concept_version.delay(
-                            obj.id, get(prev_latest_version, 'id'), parent_concept_uris, create_parent_version)
+                        process_hierarchy_for_concept_version.apply_async(
+                            (obj.id, get(prev_latest_version, 'id'), parent_concept_uris, create_parent_version),
+                            queue='concurrent'
+                        )
 
                     def index_all():
                         if prev_latest_version:
