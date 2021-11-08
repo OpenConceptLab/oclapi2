@@ -346,6 +346,8 @@ class ConceptContainerModel(VersionedModel):
     snapshot = models.JSONField(null=True, blank=True, default=dict)
     experimental = models.BooleanField(null=True, blank=True, default=None)
     meta = models.JSONField(null=True, blank=True)
+    active_concepts = models.IntegerField(default=0)
+    active_mappings = models.IntegerField(default=0)
 
     class Meta:
         abstract = True
@@ -355,13 +357,11 @@ class ConceptContainerModel(VersionedModel):
     def is_openmrs_schema(self):
         return self.custom_validation_schema == CUSTOM_VALIDATION_SCHEMA_OPENMRS
 
-    @property
-    def active_concepts(self):
-        return self.concepts.filter(retired=False, is_active=True).count()
+    def set_active_concepts(self):
+        self.active_concepts = self.concepts.filter(retired=False, is_active=True).count()
 
-    @property
-    def active_mappings(self):
-        return self.mappings.filter(retired=False, is_active=True).count()
+    def set_active_mappings(self):
+        self.active_mappings = self.mappings.filter(retired=False, is_active=True).count()
 
     @property
     def last_concept_update(self):
@@ -444,6 +444,15 @@ class ConceptContainerModel(VersionedModel):
     @staticmethod
     def is_content_privately_referred():
         return False
+
+    def save(self, force_insert=False, force_update=False, using=None, update_fields=None):
+        if self.id:
+            is_head = self.is_head
+            if is_head or self.active_concepts == 0:
+                self.set_active_concepts()
+            if is_head or self.active_mappings == 0:
+                self.set_active_mappings()
+        return super().save(force_insert, force_update, using, update_fields)
 
     def delete(self, using=None, keep_parents=False, force=False):  # pylint: disable=arguments-differ
         if self.is_content_privately_referred():

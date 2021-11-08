@@ -204,9 +204,9 @@ class Collection(ConceptContainerModel):
         if cascade_mappings or cascade_to_concepts:
             expressions += self.get_all_related_uris(expressions, cascade_to_concepts)
 
-        return self.add_references_in_bulk(expressions, user)
+        return self.add_references(expressions, user)
 
-    def add_references_in_bulk(self, expressions, user=None):  # pylint: disable=too-many-locals,too-many-branches  # Fixme: Sny
+    def add_references(self, expressions, user=None):  # pylint: disable=too-many-locals,too-many-branches  # Fixme: Sny
         errors = {}
         collection_version = self.head
 
@@ -265,29 +265,9 @@ class Collection(ConceptContainerModel):
             collection_version.updated_by = user
             self.updated_by = user
         collection_version.save()
-        self.save()
+        if collection_version.id != self.id:
+            self.save()
         return added_references, errors
-
-    def add_references(self, expressions, user=None):
-        errors = {}
-
-        for expression in expressions:
-            reference = CollectionReference(expression=expression)
-            try:
-                self.validate(reference)
-                reference.save()
-            except Exception as ex:
-                errors[expression] = ex.messages if hasattr(ex, 'messages') else ex
-                continue
-
-            head = self.head
-            ref_hash = {'col_reference': reference}
-
-            error = Collection.persist_changes(head, user, None, **ref_hash)
-            if error:
-                errors[expression] = error
-
-        return errors
 
     @classmethod
     def persist_changes(cls, obj, updated_by, original_schema, **kwargs):

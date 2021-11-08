@@ -49,11 +49,7 @@ class CollectionListViewTest(OCLAPITestCase):
             self.assertFalse(attr in response.data[0])
 
         concept = ConceptFactory()
-        reference = CollectionReference(expression=concept.uri)
-        reference.full_clean()
-        reference.save()
-        coll.references.add(reference)
-        coll.concepts.set(reference.concepts)
+        coll.add_references([concept.uri])
 
         response = self.client.get(
             f'/orgs/{coll.parent.mnemonic}/collections/?contains={concept.get_latest_version().uri}'

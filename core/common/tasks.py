@@ -481,3 +481,24 @@ def index_source_mappings(source_id):
     if source:
         from core.mappings.documents import MappingDocument
         source.batch_index(source.mappings, MappingDocument)
+
+
+@app.task
+def update_source_children_counts(source_id):
+    from core.sources.models import Source
+    source = Source.objects.filter(id=source_id).first()
+    set_children_counts(source)
+
+
+@app.task
+def update_collection_children_counts(source_id):
+    from core.collections.models import Collection
+    collection = Collection.objects.filter(id=source_id).first()
+    set_children_counts(collection)
+
+
+def set_children_counts(instance):
+    if instance:
+        instance.set_active_concepts()
+        instance.set_active_mappings()
+        instance.save(update_fields=['active_concepts', 'active_mappings'])

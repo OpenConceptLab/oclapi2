@@ -50,9 +50,9 @@ class CollectionTest(OCLTestCase):
         self.assertEqual(collection.concepts.first(), concept.get_latest_version())
         self.assertEqual(collection.active_concepts, 1)
 
-        result = collection.add_references([concept_expression])
+        _, errors = collection.add_references([concept_expression])
         self.assertEqual(
-            result, {concept_expression: ['Concept or Mapping reference name must be unique in a collection.']}
+            errors, {concept_expression: ['Concept or Mapping reference name must be unique in a collection.']}
         )
         collection.refresh_from_db()
         self.assertEqual(collection.concepts.count(), 1)

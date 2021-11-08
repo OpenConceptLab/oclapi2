@@ -527,6 +527,14 @@ class SourceChildMixin:
 
         return criteria
 
+    def save(self, force_insert=False, force_update=False, using=None, update_fields=None):
+        result = super().save(force_insert, force_update, using, update_fields)
+
+        if self.is_latest_version:
+            self.parent.save()  # to update counts
+
+        return result
+
 
 class ConceptContainerExportMixin:
     def get_object(self):

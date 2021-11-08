@@ -1,6 +1,7 @@
 import logging
 
 from celery_once import AlreadyQueued
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError
 from django.db.models import Q
@@ -10,9 +11,9 @@ from drf_yasg.utils import swagger_auto_schema
 from pydash import get
 from rest_framework import status, mixins
 from rest_framework.generics import (
-    RetrieveAPIView, DestroyAPIView, UpdateAPIView, ListAPIView
-)
-from rest_framework.permissions import IsAuthenticated
+    RetrieveAPIView, DestroyAPIView, UpdateAPIView, ListAPIView,
+    CreateAPIView)
+from rest_framework.permissions import IsAuthenticated, IsAdminUser
 from rest_framework.response import Response
 
 from core.client_configs.views import ResourceClientConfigsView
@@ -44,7 +45,7 @@ from core.common.permissions import (
 )
 from core.common.swagger_parameters import q_param, compress_header, page_param, verbose_param, exact_match_param, \
     include_facets_header, sort_asc_param, sort_desc_param, updated_since_param, include_retired_param, limit_param
-from core.common.tasks import add_references, export_collection
+from core.common.tasks import add_references, export_collection, update_collection_children_counts
 from core.common.utils import compact_dict_by_values, parse_boolean_query_param
 from core.common.views import BaseAPIView, BaseLogoView
 
@@ -217,6 +218,10 @@ class CollectionRetrieveUpdateDestroyView(CollectionBaseView, ConceptDictionaryU
             raise Http404()
 
         self.check_object_permissions(self.request, instance)
+        if not get(settings, 'TEST_MODE', False) and (instance.active_concepts == 0 or instance.active_mappings == 0):
+            update_collection_children_counts.apply_async((instance.id,), queue='concurrent')
+            for version in instance.versions.exclude(id=instance.id):
+                update_collection_children_counts.apply_async((version.id,), queue='concurrent')
         return instance
 
     def get_permissions(self):
@@ -531,6 +536,8 @@ class CollectionVersionRetrieveUpdateDestroyView(CollectionBaseView, RetrieveAPI
     def get_object(self, queryset=None):
         instance = get_object_or_404(self.get_queryset())
         self.check_object_permissions(self.request, instance)
+        if not get(settings, 'TEST_MODE', False) and (instance.active_concepts == 0 or instance.active_mappings == 0):
+            update_collection_children_counts.apply_async((instance.id,), queue='concurrent')
         return instance
 
     def update(self, request, *args, **kwargs):
@@ -595,24 +602,50 @@ class CollectionVersionExportView(ConceptContainerExportMixin, CollectionVersion
             return status.HTTP_409_CONFLICT
 
 
-class CollectionSummaryView(CollectionBaseView, RetrieveAPIView):
+class CollectionSummaryView(CollectionBaseView, RetrieveAPIView, CreateAPIView):
     serializer_class = CollectionSummaryDetailSerializer
-    permission_classes = (CanViewConceptDictionary,)
+
+    def get_permissions(self):
+        if self.request.method == 'PUT':
+            return [IsAdminUser()]
+        return [CanViewConceptDictionary()]
 
     def get_object(self, queryset=None):
         instance = get_object_or_404(self.get_queryset())
         self.check_object_permissions(self.request, instance)
         return instance
+
+    def put(self, request, **kwargs):
+        result = self.perform_update()
+        return Response(
+            dict(state=result.state, task=result.task_id, queue='concurrent'), status=status.HTTP_202_ACCEPTED)
+
+    def perform_update(self):
+        instance = self.get_object()
+        return update_collection_children_counts.apply_async((instance.id,), queue='concurrent')
 
 
 class CollectionVersionSummaryView(CollectionBaseView, RetrieveAPIView):
     serializer_class = CollectionVersionSummaryDetailSerializer
-    permission_classes = (CanViewConceptDictionary,)
+
+    def get_permissions(self):
+        if self.request.method == 'PUT':
+            return [IsAdminUser()]
+        return [CanViewConceptDictionary()]
 
     def get_object(self, queryset=None):
         instance = get_object_or_404(self.get_queryset())
         self.check_object_permissions(self.request, instance)
         return instance
+
+    def put(self, request, **kwargs):
+        result = self.perform_update()
+        return Response(
+            dict(state=result.state, task=result.task_id, queue='concurrent'), status=status.HTTP_202_ACCEPTED)
+
+    def perform_update(self):
+        instance = self.get_object()
+        return update_collection_children_counts.apply_async((instance.id,), queue='concurrent')
 
 
 class CollectionLatestVersionSummaryView(CollectionVersionBaseView, RetrieveAPIView, UpdateAPIView):

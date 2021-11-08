@@ -184,16 +184,14 @@ class Source(ConceptContainerModel):
             limit=limit
         )
 
-    @property
-    def active_concepts(self):
+    def set_active_concepts(self):
         queryset = self.concepts.filter(retired=False, is_active=True)
         if self.is_head:
             queryset = queryset.filter(is_latest_version=True)
-        return queryset.count()
+        self.active_concepts = queryset.count()
 
-    @property
-    def active_mappings(self):
+    def set_active_mappings(self):
         queryset = self.mappings.filter(retired=False, is_active=True)
         if self.is_head:
             queryset = queryset.filter(is_latest_version=True)
-        return queryset.count()
+        self.active_mappings = queryset.count()

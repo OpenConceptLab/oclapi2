@@ -1,6 +1,7 @@
 import logging
 
 from celery_once import AlreadyQueued
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError
 from django.db.models import Q
@@ -11,6 +12,7 @@ from pydash import get
 from rest_framework import status, mixins
 from rest_framework.generics import (
     RetrieveAPIView, ListAPIView, UpdateAPIView)
+from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
 
 from core.client_configs.views import ResourceClientConfigsView
@@ -22,7 +24,8 @@ from core.common.permissions import CanViewConceptDictionary, CanEditConceptDict
 from core.common.serializers import TaskSerializer
 from core.common.swagger_parameters import q_param, limit_param, sort_desc_param, sort_asc_param, exact_match_param, \
     page_param, verbose_param, include_retired_param, updated_since_param, include_facets_header, compress_header
-from core.common.tasks import export_source, delete_source, index_source_concepts, index_source_mappings
+from core.common.tasks import export_source, delete_source, index_source_concepts, index_source_mappings, \
+    update_source_children_counts
 from core.common.utils import parse_boolean_query_param, compact_dict_by_values
 from core.common.views import BaseAPIView, BaseLogoView
 from core.sources.constants import DELETE_FAILURE, DELETE_SUCCESS, VERSION_ALREADY_EXISTS
@@ -175,6 +178,10 @@ class SourceRetrieveUpdateDestroyView(SourceBaseView, ConceptDictionaryUpdateMix
             raise Http404()
 
         self.check_object_permissions(self.request, instance)
+        if not get(settings, 'TEST_MODE', False) and (instance.active_concepts == 0 or instance.active_mappings == 0):
+            update_source_children_counts.apply_async((instance.id,), queue='concurrent')
+            for version in instance.versions.exclude(id=instance.id):
+                update_source_children_counts.apply_async((version.id,), queue='concurrent')
         return instance
 
     def get_permissions(self):
@@ -337,6 +344,8 @@ class SourceVersionRetrieveUpdateDestroyView(SourceVersionBaseView, RetrieveAPIV
     def get_object(self, queryset=None):
         instance = get_object_or_404(self.get_queryset())
         self.check_object_permissions(self.request, instance)
+        if not get(settings, 'TEST_MODE', False) and (instance.active_concepts == 0 or instance.active_mappings == 0):
+            update_source_children_counts.apply_async((instance.id,), queue='concurrent')
         return instance
 
     def update(self, request, *args, **kwargs):
@@ -426,22 +435,48 @@ class SourceHierarchyView(SourceBaseView, RetrieveAPIView):
 
 class SourceSummaryView(SourceBaseView, RetrieveAPIView):
     serializer_class = SourceSummaryDetailSerializer
-    permission_classes = (CanViewConceptDictionary,)
+
+    def get_permissions(self):
+        if self.request.method == 'PUT':
+            return [IsAdminUser()]
+        return [CanViewConceptDictionary()]
 
     def get_object(self, queryset=None):
         instance = get_object_or_404(self.get_queryset())
         self.check_object_permissions(self.request, instance)
         return instance
+
+    def put(self, request, **kwargs):
+        result = self.perform_update()
+        return Response(
+            dict(state=result.state, task=result.task_id, queue='concurrent'), status=status.HTTP_201_CREATED)
+
+    def perform_update(self):
+        instance = self.get_object()
+        return update_source_children_counts.apply_async((instance.id,), queue='concurrent')
 
 
 class SourceVersionSummaryView(SourceVersionBaseView, RetrieveAPIView):
     serializer_class = SourceVersionSummaryDetailSerializer
-    permission_classes = (CanViewConceptDictionary,)
+
+    def get_permissions(self):
+        if self.request.method == 'PUT':
+            return [IsAdminUser()]
+        return [CanViewConceptDictionary()]
 
     def get_object(self, queryset=None):
         instance = get_object_or_404(self.get_queryset())
         self.check_object_permissions(self.request, instance)
         return instance
+
+    def put(self, request, **kwargs):
+        result = self.perform_update()
+        return Response(
+            dict(state=result.state, task=result.task_id, queue='concurrent'), status=status.HTTP_202_ACCEPTED)
+
+    def perform_update(self):
+        instance = self.get_object()
+        return update_source_children_counts.apply_async((instance.id,), queue='concurrent')
 
 
 class SourceLatestVersionSummaryView(SourceVersionBaseView, RetrieveAPIView, UpdateAPIView):
