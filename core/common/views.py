@@ -567,6 +567,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         page = int(self.request.GET.get('page', '1'))
         start = (page - 1) * self.limit
         end = start + self.limit
+        search_results = search_results.params(request_timeout=20)
         try:
             return search_results[start:end].to_queryset()
         except RequestError as ex:
