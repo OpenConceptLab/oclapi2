@@ -1,3 +1,35 @@
+##### 2.0.80 - Mon Nov 8 11:36:04 2021 +0000
+- Reverting to flower 0.9.5
+- Merge pull request #28 from OpenConceptLab/dependabot/pip/flower-1.0.0
+- Merge pull request #102 from OpenConceptLab/dependabot/pip/factory-boy-3.2.1
+- Merge pull request #103 from OpenConceptLab/dependabot/pip/coverage-6.1.1
+- Bump factory-boy from 3.2.0 to 3.2.1
+- Bump coverage from 6.0.2 to 6.1.1
+- Merge pull request #99 from OpenConceptLab/dependabot/pip/boto3-1.19.12
+- Bump boto3 from 1.19.0 to 1.19.12
+- Merge pull request #101 from OpenConceptLab/dependabot/pip/moto-2.2.13
+- [OpenConceptLab/ocl_issues#1008](https://github.com/OpenConceptLab/ocl_issues/issues/1008) | hierarchy asyn processing on concurrent queue
+- Bump moto from 2.2.9 to 2.2.13
+- [OpenConceptLab/ocl_issues#1008](https://github.com/OpenConceptLab/ocl_issues/issues/1008) | not eager loading concepts/mappings owners
+- [OpenConceptLab/ocl_issues#1008](https://github.com/OpenConceptLab/ocl_issues/issues/1008) | fixing pylints | unused arguments
+- [OpenConceptLab/ocl_issues#1008](https://github.com/OpenConceptLab/ocl_issues/issues/1008) | saving concepts/mappings count on Source/Collection
+- Not logging verbose on CI
+- [OpenConceptLab/ocl_issues#1082](https://github.com/OpenConceptLab/ocl_issues/issues/1082) | fixing hierarchy query not use LIKE
+- Concept List View | fixing queryset
+- [OpenConceptLab/ocl_issues#941](https://github.com/OpenConceptLab/ocl_issues/issues/941) | not logging in dev/test
+- [OpenConceptLab/ocl_issues#941](https://github.com/OpenConceptLab/ocl_issues/issues/941) | Added request/response headers and correlation id in logs
+- [OpenConceptLab/ocl_issues#941](https://github.com/OpenConceptLab/ocl_issues/issues/941) | removed custom Logger middleware
+- Collection version references | raise 404 if version not found
+- Concept/Mapping | eager loading relations
+- Concept/Mapping | added index with public_access for count queries (without order by)
+- [OpenConceptLab/ocl_issues#1059](https://github.com/OpenConceptLab/ocl_issues/issues/1059) | including user as creator pins only if other user is not defined
+- [OpenConceptLab/ocl_issues#1059](https://github.com/OpenConceptLab/ocl_issues/issues/1059) | Pin to have created by | user's pins can include user's created by pins
+- [OpenConceptLab/ocl_issues#993](https://github.com/OpenConceptLab/ocl_issues/issues/993) | bulk import | collection/source delete and version creation only allowed for members
+- [OpenConceptLab/ocl_issues#1070](https://github.com/OpenConceptLab/ocl_issues/issues/1070) | OpenMRS concept validator | preferred name uniquness clause to only consider existing preferred names
+- pylint fixes
+- Source concepts/mappings indexes views | added dummy serializer
+- [OpenConceptLab/ocl_issues#1057](https://github.com/OpenConceptLab/ocl_issues/issues/1057) | Collection References | cascade source to concepts option
+- Bump flower from 0.9.5 to 1.0.0
 ##### 2.0.75 - Wed Oct 27 08:40:29 2021 +0000
 - [OpenConceptLab/ocl_issues#993](https://github.com/OpenConceptLab/ocl_issues/issues/993) | Parallel Bulk Import | user permission checks on resources
 - [OpenConceptLab/ocl_issues#37](https://github.com/OpenConceptLab/ocl_issues/issues/37) | facets names are camel cased
