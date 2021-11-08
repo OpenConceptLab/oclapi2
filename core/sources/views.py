@@ -446,7 +446,7 @@ class SourceSummaryView(SourceBaseView, RetrieveAPIView):
         self.check_object_permissions(self.request, instance)
         return instance
 
-    def put(self, request, **kwargs):
+    def put(self, request, **kwargs):  # pylint: disable=unused-argument
         result = self.perform_update()
         return Response(
             dict(state=result.state, task=result.task_id, queue='concurrent'), status=status.HTTP_201_CREATED)
@@ -469,7 +469,7 @@ class SourceVersionSummaryView(SourceVersionBaseView, RetrieveAPIView):
         self.check_object_permissions(self.request, instance)
         return instance
 
-    def put(self, request, **kwargs):
+    def put(self, request, **kwargs):  # pylint: disable=unused-argument
         result = self.perform_update()
         return Response(
             dict(state=result.state, task=result.task_id, queue='concurrent'), status=status.HTTP_202_ACCEPTED)
