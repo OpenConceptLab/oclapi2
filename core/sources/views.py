@@ -446,9 +446,8 @@ class SourceSummaryView(SourceBaseView, RetrieveAPIView):
         return instance
 
     def put(self, request, **kwargs):  # pylint: disable=unused-argument
-        result = self.perform_update()
-        return Response(
-            dict(state=result.state, task=result.task_id, queue='concurrent'), status=status.HTTP_201_CREATED)
+        self.perform_update()
+        return Response(status=status.HTTP_202_ACCEPTED)
 
     def perform_update(self):
         instance = self.get_object()
@@ -469,13 +468,12 @@ class SourceVersionSummaryView(SourceVersionBaseView, RetrieveAPIView):
         return instance
 
     def put(self, request, **kwargs):  # pylint: disable=unused-argument
-        result = self.perform_update()
-        return Response(
-            dict(state=result.state, task=result.task_id, queue='concurrent'), status=status.HTTP_202_ACCEPTED)
+        self.perform_update()
+        return Response(status=status.HTTP_202_ACCEPTED)
 
     def perform_update(self):
         instance = self.get_object()
-        return instance.update_children_counts()
+        instance.update_children_counts()
 
 
 class SourceLatestVersionSummaryView(SourceVersionBaseView, RetrieveAPIView, UpdateAPIView):

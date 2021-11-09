@@ -150,7 +150,12 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             models.Index(name='concepts_public_conditional', fields=['public_access'],
                          condition=(Q(is_active=True) & Q(retired=False) & Q(is_latest_version=True) &
                                     ~Q(public_access='None'))),
-            GinIndex(name='concepts_uri_trgm_id_gin_idx', fields=['uri', 'id'], opclasses=['gin_trgm_ops', 'int8_ops'], condition=Q(is_latest_version=True))
+            GinIndex(
+                name='concepts_uri_trgm_id_gin_idx',
+                fields=['uri', 'id'],
+                opclasses=['gin_trgm_ops', 'int8_ops'],
+                condition=Q(is_latest_version=True)
+            )
         ] + VersionedModel.Meta.indexes
 
     external_id = models.TextField(null=True, blank=True)
