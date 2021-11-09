@@ -498,21 +498,32 @@ def index_source_mappings(source_id):
 
 
 @app.task
-def update_source_children_counts(source_id):
+def update_source_active_concepts_count(source_id):
     from core.sources.models import Source
     source = Source.objects.filter(id=source_id).first()
-    set_children_counts(source)
+    source.set_active_concepts()
+    source.save(update_fields=['active_concepts'])
 
 
 @app.task
-def update_collection_children_counts(source_id):
+def update_source_active_mappings_count(source_id):
+    from core.sources.models import Source
+    source = Source.objects.filter(id=source_id).first()
+    source.set_active_mappings()
+    source.save(update_fields=['active_mappings'])
+
+
+@app.task
+def update_collection_active_concepts_count(collection_id):
     from core.collections.models import Collection
-    collection = Collection.objects.filter(id=source_id).first()
-    set_children_counts(collection)
+    collection = Collection.objects.filter(id=collection_id).first()
+    collection.set_active_concepts()
+    collection.save(update_fields=['active_concepts'])
 
 
-def set_children_counts(instance):
-    if instance:
-        instance.set_active_concepts()
-        instance.set_active_mappings()
-        instance.save(update_fields=['active_concepts', 'active_mappings'])
+@app.task
+def update_collection_active_mappings_count(collection_id):
+    from core.collections.models import Collection
+    collection = Collection.objects.filter(id=collection_id).first()
+    collection.set_active_mappings()
+    collection.save(update_fields=['active_mappings'])

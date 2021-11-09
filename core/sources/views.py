@@ -24,8 +24,7 @@ from core.common.permissions import CanViewConceptDictionary, CanEditConceptDict
 from core.common.serializers import TaskSerializer
 from core.common.swagger_parameters import q_param, limit_param, sort_desc_param, sort_asc_param, exact_match_param, \
     page_param, verbose_param, include_retired_param, updated_since_param, include_facets_header, compress_header
-from core.common.tasks import export_source, delete_source, index_source_concepts, index_source_mappings, \
-    update_source_children_counts
+from core.common.tasks import export_source, delete_source, index_source_concepts, index_source_mappings
 from core.common.utils import parse_boolean_query_param, compact_dict_by_values
 from core.common.views import BaseAPIView, BaseLogoView
 from core.sources.constants import DELETE_FAILURE, DELETE_SUCCESS, VERSION_ALREADY_EXISTS
@@ -179,9 +178,9 @@ class SourceRetrieveUpdateDestroyView(SourceBaseView, ConceptDictionaryUpdateMix
 
         self.check_object_permissions(self.request, instance)
         if not get(settings, 'TEST_MODE', False) and (instance.active_concepts == 0 or instance.active_mappings == 0):
-            update_source_children_counts.apply_async((instance.id,), queue='concurrent')
+            instance.update_children_counts()
             for version in instance.versions.exclude(id=instance.id):
-                update_source_children_counts.apply_async((version.id,), queue='concurrent')
+                version.update_children_counts()
         return instance
 
     def get_permissions(self):
@@ -345,7 +344,7 @@ class SourceVersionRetrieveUpdateDestroyView(SourceVersionBaseView, RetrieveAPIV
         instance = get_object_or_404(self.get_queryset())
         self.check_object_permissions(self.request, instance)
         if not get(settings, 'TEST_MODE', False) and (instance.active_concepts == 0 or instance.active_mappings == 0):
-            update_source_children_counts.apply_async((instance.id,), queue='concurrent')
+            instance.update_children_counts()
         return instance
 
     def update(self, request, *args, **kwargs):
@@ -453,7 +452,7 @@ class SourceSummaryView(SourceBaseView, RetrieveAPIView):
 
     def perform_update(self):
         instance = self.get_object()
-        return update_source_children_counts.apply_async((instance.id,), queue='concurrent')
+        instance.update_children_counts()
 
 
 class SourceVersionSummaryView(SourceVersionBaseView, RetrieveAPIView):
@@ -476,7 +475,7 @@ class SourceVersionSummaryView(SourceVersionBaseView, RetrieveAPIView):
 
     def perform_update(self):
         instance = self.get_object()
-        return update_source_children_counts.apply_async((instance.id,), queue='concurrent')
+        return instance.update_children_counts()
 
 
 class SourceLatestVersionSummaryView(SourceVersionBaseView, RetrieveAPIView, UpdateAPIView):

@@ -45,7 +45,7 @@ from core.common.permissions import (
 )
 from core.common.swagger_parameters import q_param, compress_header, page_param, verbose_param, exact_match_param, \
     include_facets_header, sort_asc_param, sort_desc_param, updated_since_param, include_retired_param, limit_param
-from core.common.tasks import add_references, export_collection, update_collection_children_counts
+from core.common.tasks import add_references, export_collection
 from core.common.utils import compact_dict_by_values, parse_boolean_query_param
 from core.common.views import BaseAPIView, BaseLogoView
 
@@ -219,9 +219,9 @@ class CollectionRetrieveUpdateDestroyView(CollectionBaseView, ConceptDictionaryU
 
         self.check_object_permissions(self.request, instance)
         if not get(settings, 'TEST_MODE', False) and (instance.active_concepts == 0 or instance.active_mappings == 0):
-            update_collection_children_counts.apply_async((instance.id,), queue='concurrent')
+            instance.update_children_counts()
             for version in instance.versions.exclude(id=instance.id):
-                update_collection_children_counts.apply_async((version.id,), queue='concurrent')
+                version.update_children_counts()
         return instance
 
     def get_permissions(self):
@@ -537,7 +537,7 @@ class CollectionVersionRetrieveUpdateDestroyView(CollectionBaseView, RetrieveAPI
         instance = get_object_or_404(self.get_queryset())
         self.check_object_permissions(self.request, instance)
         if not get(settings, 'TEST_MODE', False) and (instance.active_concepts == 0 or instance.active_mappings == 0):
-            update_collection_children_counts.apply_async((instance.id,), queue='concurrent')
+            instance.update_children_counts()
         return instance
 
     def update(self, request, *args, **kwargs):
@@ -622,7 +622,7 @@ class CollectionSummaryView(CollectionBaseView, RetrieveAPIView, CreateAPIView):
 
     def perform_update(self):
         instance = self.get_object()
-        return update_collection_children_counts.apply_async((instance.id,), queue='concurrent')
+        return instance.update_children_counts()
 
 
 class CollectionVersionSummaryView(CollectionBaseView, RetrieveAPIView):
@@ -645,7 +645,7 @@ class CollectionVersionSummaryView(CollectionBaseView, RetrieveAPIView):
 
     def perform_update(self):
         instance = self.get_object()
-        return update_collection_children_counts.apply_async((instance.id,), queue='concurrent')
+        return instance.update_children_counts()
 
 
 class CollectionLatestVersionSummaryView(CollectionVersionBaseView, RetrieveAPIView, UpdateAPIView):

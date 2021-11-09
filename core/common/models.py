@@ -14,6 +14,7 @@ from django_elasticsearch_dsl.signals import RealTimeSignalProcessor
 from pydash import get
 
 from core.common.services import S3
+from core.common.tasks import update_collection_active_concepts_count, update_collection_active_mappings_count
 from core.common.utils import reverse_resource, reverse_resource_version, parse_updated_since_param, drop_version
 from core.settings import DEFAULT_LOCALE
 from core.sources.constants import CONTENT_REFERRED_PRIVATELY
@@ -22,7 +23,8 @@ from .constants import (
     ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT, SUPER_ADMIN_USER_ID,
     HEAD, PERSIST_NEW_ERROR_MESSAGE, SOURCE_PARENT_CANNOT_BE_NONE, PARENT_RESOURCE_CANNOT_BE_NONE,
     CREATOR_CANNOT_BE_NONE, CANNOT_DELETE_ONLY_VERSION, CUSTOM_VALIDATION_SCHEMA_OPENMRS)
-from .tasks import handle_save, handle_m2m_changed, seed_children, update_validation_schema
+from .tasks import handle_save, handle_m2m_changed, seed_children, update_validation_schema, \
+    update_source_active_concepts_count, update_source_active_mappings_count
 
 
 class BaseModel(models.Model):
@@ -357,6 +359,26 @@ class ConceptContainerModel(VersionedModel):
     def is_openmrs_schema(self):
         return self.custom_validation_schema == CUSTOM_VALIDATION_SCHEMA_OPENMRS
 
+    def update_children_counts(self, sync=False):
+        self.update_concepts_count(sync)
+        self.update_mappings_counts(sync)
+
+    def update_mappings_counts(self, sync=False):
+        if sync or get(settings, 'TEST_MODE'):
+            self.set_active_mappings()
+        elif self.__class__.__name__ == 'Source':
+            update_source_active_mappings_count.apply_async((self.id,), queue='concurrent')
+        elif self.__class__.__name__ == 'Collection':
+            update_collection_active_mappings_count.apply_async((self.id,), queue='concurrent')
+
+    def update_concepts_count(self, sync=False):
+        if sync or get(settings, 'TEST_MODE'):
+            self.set_active_concepts()
+        elif self.__class__.__name__ == 'Source':
+            update_source_active_concepts_count.apply_async((self.id,), queue='concurrent')
+        elif self.__class__.__name__ == 'Collection':
+            update_collection_active_concepts_count.apply_async((self.id,), queue='concurrent')
+
     def set_active_concepts(self):
         self.active_concepts = self.concepts.filter(retired=False, is_active=True).count()
 
@@ -449,9 +471,9 @@ class ConceptContainerModel(VersionedModel):
         if self.id:
             is_head = self.is_head
             if is_head or self.active_concepts == 0:
-                self.set_active_concepts()
+                self.update_concepts_count()
             if is_head or self.active_mappings == 0:
-                self.set_active_mappings()
+                self.update_mappings_counts()
         return super().save(force_insert, force_update, using, update_fields)
 
     def delete(self, using=None, keep_parents=False, force=False):  # pylint: disable=arguments-differ
