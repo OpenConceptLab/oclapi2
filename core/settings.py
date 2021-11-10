@@ -186,7 +186,7 @@ ELASTICSEARCH_DSL = {
 ENV = os.environ.get('ENVIRONMENT', 'development')
 CID_GENERATE = True
 CID_RESPONSE_HEADER = None
-if ENV and ENV != 'ci':
+if ENV and ENV not in ['ci', 'development']:
     LOGGING = {
         'version': 1,
         'disable_existing_loggers': False,
