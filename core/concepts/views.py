@@ -262,12 +262,14 @@ class ConceptRetrieveUpdateDestroyView(ConceptBaseView, RetrieveAPIView, UpdateA
             return Response(result, status=status.HTTP_204_NO_CONTENT)
 
         concept = self.get_object()
+        parent = concept.parent
 
         if is_hard_delete_requested:
             if self.is_async_hard_delete_requested():
                 delete_concept.delay(concept.id)
                 return Response(status=status.HTTP_204_NO_CONTENT)
             concept.delete()
+            parent.update_concepts_count()
             return Response(status=status.HTTP_204_NO_CONTENT)
 
         comment = request.data.get('update_comment', None) or request.data.get('comment', None)
@@ -276,6 +278,7 @@ class ConceptRetrieveUpdateDestroyView(ConceptBaseView, RetrieveAPIView, UpdateA
         if errors:
             return Response(errors, status=status.HTTP_400_BAD_REQUEST)
 
+        parent.update_concepts_count()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
@@ -324,6 +327,8 @@ class ConceptReactivateView(ConceptBaseView, UpdateAPIView):
 
         if errors:
             return Response(errors, status=status.HTTP_400_BAD_REQUEST)
+
+        concept.parent.update_concepts_count()
 
         return Response(status=status.HTTP_204_NO_CONTENT)
 

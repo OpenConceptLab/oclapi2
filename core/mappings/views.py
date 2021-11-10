@@ -183,9 +183,11 @@ class MappingRetrieveUpdateDestroyView(MappingBaseView, RetrieveAPIView, UpdateA
 
     def destroy(self, request, *args, **kwargs):
         mapping = self.get_object()
+        parent = mapping.parent
         comment = request.data.get('update_comment', None) or request.data.get('comment', None)
         if self.is_hard_delete_requested():
             mapping.delete()
+            parent.update_mappings_count()
             return Response(status=status.HTTP_204_NO_CONTENT)
 
         errors = mapping.retire(request.user, comment)
@@ -193,6 +195,7 @@ class MappingRetrieveUpdateDestroyView(MappingBaseView, RetrieveAPIView, UpdateA
         if errors:
             return Response(errors, status=status.HTTP_400_BAD_REQUEST)
 
+        parent.update_mappings_count()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
@@ -217,6 +220,8 @@ class MappingReactivateView(MappingBaseView, UpdateAPIView):
 
         if errors:
             return Response(errors, status=status.HTTP_400_BAD_REQUEST)
+
+        mapping.parent.update_mappings_count()
 
         return Response(status=status.HTTP_204_NO_CONTENT)
 
