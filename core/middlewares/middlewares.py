@@ -1,7 +1,5 @@
 import logging
 
-from pydash import get
-
 from core.common.constants import VERSION_HEADER, REQUEST_USER_HEADER
 from core.common.utils import set_current_user, set_request_url
 
