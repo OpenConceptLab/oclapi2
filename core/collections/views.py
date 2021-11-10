@@ -218,8 +218,11 @@ class CollectionRetrieveUpdateDestroyView(CollectionBaseView, ConceptDictionaryU
             raise Http404()
 
         self.check_object_permissions(self.request, instance)
-        if not get(settings, 'TEST_MODE', False) and (instance.active_concepts == 0 or instance.active_mappings == 0):
-            instance.update_children_counts()
+        if not get(settings, 'TEST_MODE', False):
+            if instance.active_concepts == 0:
+                instance.update_concepts_count()
+            if instance.active_mappings == 0:
+                instance.update_mappings_count()
             for version in instance.versions.exclude(id=instance.id):
                 version.update_children_counts()
         return instance
@@ -536,8 +539,11 @@ class CollectionVersionRetrieveUpdateDestroyView(CollectionBaseView, RetrieveAPI
     def get_object(self, queryset=None):
         instance = get_object_or_404(self.get_queryset())
         self.check_object_permissions(self.request, instance)
-        if not get(settings, 'TEST_MODE', False) and (instance.active_concepts == 0 or instance.active_mappings == 0):
-            instance.update_children_counts()
+        if not get(settings, 'TEST_MODE', False):
+            if instance.active_concepts == 0:
+                instance.update_concepts_count()
+            if instance.active_mappings == 0:
+                instance.update_mappings_count()
         return instance
 
     def update(self, request, *args, **kwargs):

@@ -291,6 +291,7 @@ class SourceTest(OCLTestCase):
 
         concept = ConceptFactory(sources=[source], parent=source)
         source.save()
+        source.update_concepts_count()
 
         self.assertEqual(source.num_concepts, 1)
         self.assertEqual(source.active_concepts, 1)
@@ -306,11 +307,10 @@ class SourceTest(OCLTestCase):
         self.assertEqual(source_updated_at, source_last_child_update)
 
         concept = ConceptFactory(sources=[source], parent=source)
+        source.update_concepts_count()
         source.refresh_from_db()
 
-        self.assertNotEqual(source.updated_at, source_updated_at)
-        source_updated_at = source.updated_at  # new concept will update count on parent
-
+        self.assertEqual(source.updated_at, source_updated_at)
         self.assertEqual(source.last_child_update, concept.updated_at)
         self.assertNotEqual(source.last_child_update, source_updated_at)
         self.assertNotEqual(source.last_child_update, source_last_child_update)
