@@ -1,7 +1,7 @@
 import logging
 
 from core.common.constants import VERSION_HEADER
-from core.common.utils import set_current_user
+from core.common.utils import set_current_user, set_request_url
 
 request_logger = logging.getLogger('request_logger')
 MAX_BODY_LENGTH = 50000
@@ -40,5 +40,6 @@ class VersionHeaderMiddleware(BaseMiddleware):
 class CurrentUserMiddleware(BaseMiddleware):
     def __call__(self, request):
         set_current_user(lambda self: getattr(request, 'user', None))
+        set_request_url(lambda self: request.build_absolute_uri())
         response = self.get_response(request)
         return response

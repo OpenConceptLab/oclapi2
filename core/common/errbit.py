@@ -8,6 +8,8 @@ import traceback
 
 from django.conf import settings
 
+from core.common.utils import get_request_url
+
 app_name = 'OCLAPI2'
 version = settings.VERSION
 
@@ -28,6 +30,7 @@ ERRBIT_XML = (
     '</error>'
     '<request>'
     '<component>{component}</component>'
+    '<url>{url}</url>'
     '<cgi-data></cgi-data>'
     '<params>'
     '<var key="foobar">verify</var>'
@@ -146,6 +149,7 @@ class ErrbitClient:
         return ERRBIT_XML.format(
             api_key=self.api_key, version=settings.VERSION, class_name=etype.__class__.__name__, value=str(value),
             trace=_trace_str, component=self.component_name, environment=self.environment, user=str(get_current_user()),
+            url=str(get_request_url())
         )
 
 

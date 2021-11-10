@@ -21,7 +21,7 @@ from core.common.utils import (
     to_camel_case,
     drop_version, is_versioned_uri, separate_version, to_parent_uri, jsonify_safe, es_get,
     get_resource_class_from_resource_name, flatten_dict, is_csv_file, is_url_encoded_string, to_parent_uri_from_kwargs,
-    set_current_user, get_current_user)
+    set_current_user, get_current_user, set_request_url, get_request_url)
 from core.concepts.models import Concept, LocalizedText
 from core.mappings.models import Mapping
 from core.orgs.models import Organization
@@ -383,6 +383,10 @@ class UtilsTest(OCLTestCase):
     def test_set_and_get_current_user(self):
         set_current_user(lambda self: 'foo')
         self.assertEqual(get_current_user(), 'foo')
+
+    def test_set_and_get_request_url(self):
+        set_request_url(lambda self: 'https://foobar.org/foo')
+        self.assertEqual(get_request_url(), 'https://foobar.org/foo')
 
     def test_compact_dict_by_values(self):
         self.assertEqual(compact_dict_by_values({}), {})

@@ -20,7 +20,7 @@ from pydash import flatten, compact, get
 from requests.auth import HTTPBasicAuth
 from rest_framework.utils import encoders
 
-from core.common.constants import UPDATED_SINCE_PARAM, BULK_IMPORT_QUEUES_COUNT, TEMP, CURRENT_USER
+from core.common.constants import UPDATED_SINCE_PARAM, BULK_IMPORT_QUEUES_COUNT, TEMP, CURRENT_USER, REQUEST_URL
 from core.common.services import S3
 
 
@@ -685,12 +685,24 @@ def set_current_user(func):
     setattr(thread_locals, CURRENT_USER, func.__get__(func, local))
 
 
+def set_request_url(func):
+    setattr(thread_locals, REQUEST_URL, func.__get__(func, local))
+
+
 def get_current_user():
     current_user = getattr(thread_locals, CURRENT_USER, None)
     if callable(current_user):
         current_user = current_user()  # pylint: disable=not-callable
 
     return current_user
+
+
+def get_request_url():
+    request_url = getattr(thread_locals, REQUEST_URL, None)
+    if callable(request_url):
+        request_url = request_url()  # pylint: disable=not-callable
+
+    return request_url
 
 
 def named_tuple_fetchall(cursor):
