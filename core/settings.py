@@ -50,6 +50,7 @@ CORS_EXPOSE_HEADERS = (
     'Content-Length',
     'Content-Range',
     'X-OCL-API-VERSION',
+    'X-OCL-REQUEST-USER',
 )
 
 CORS_ORIGIN_ALLOW_ALL = True
@@ -137,7 +138,7 @@ MIDDLEWARE = [
     'request_logging.middleware.LoggingMiddleware',
     'cid.middleware.CidMiddleware',
     'core.middlewares.middlewares.FixMalformedLimitParamMiddleware',
-    'core.middlewares.middlewares.VersionHeaderMiddleware',
+    'core.middlewares.middlewares.ResponseHeadersMiddleware',
     'core.middlewares.middlewares.CurrentUserMiddleware',
 ]
 

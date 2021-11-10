@@ -1,6 +1,8 @@
 import logging
 
-from core.common.constants import VERSION_HEADER
+from pydash import get
+
+from core.common.constants import VERSION_HEADER, REQUEST_USER_HEADER
 from core.common.utils import set_current_user, set_request_url
 
 request_logger = logging.getLogger('request_logger')
@@ -29,11 +31,12 @@ class FixMalformedLimitParamMiddleware(BaseMiddleware):
         return self.get_response(request)
 
 
-class VersionHeaderMiddleware(BaseMiddleware):
+class ResponseHeadersMiddleware(BaseMiddleware):
     def __call__(self, request):
         response = self.get_response(request)
         from django.conf import settings
         response[VERSION_HEADER] = settings.VERSION
+        response[REQUEST_USER_HEADER] = str(getattr(request, 'user', None))
         return response
 
 
