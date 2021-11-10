@@ -172,11 +172,12 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     parent_concepts = models.ManyToManyField(
         'self', through='HierarchicalConcepts', symmetrical=False, related_name='child_concepts'
     )
-    logo_path = None
     mnemonic = models.CharField(
         max_length=255, validators=[RegexValidator(regex=CONCEPT_REGEX)],
         db_index=True
     )
+    _counted = models.BooleanField(default=True, null=True, blank=True)
+    logo_path = None
 
     OBJECT_TYPE = CONCEPT_TYPE
     ALREADY_RETIRED = CONCEPT_IS_ALREADY_RETIRED
@@ -481,7 +482,9 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         return initial_version
 
     @classmethod
-    def create_new_version_for(cls, instance, data, user, create_parent_version=True, add_prev_version_children=True):  # pylint: disable=too-many-arguments
+    def create_new_version_for(
+            cls, instance, data, user, create_parent_version=True, add_prev_version_children=True,
+    ):  # pylint: disable=too-many-arguments
         instance.concept_class = data.get('concept_class', instance.concept_class)
         instance.datatype = data.get('datatype', instance.datatype)
         instance.extras = data.get('extras', instance.extras)
@@ -641,6 +644,8 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                         (concept.id, get(initial_version, 'id'), parent_concept_uris, create_parent_version),
                         queue='concurrent'
                     )
+            if create_initial_version and concept._counted is True:
+                parent_resource.update_concepts_count()
         except ValidationError as ex:
             concept.errors.update(ex.message_dict)
         except IntegrityError as ex:

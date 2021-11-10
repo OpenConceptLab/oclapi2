@@ -361,11 +361,12 @@ class ConceptContainerModel(VersionedModel):
 
     def update_children_counts(self, sync=False):
         self.update_concepts_count(sync)
-        self.update_mappings_counts(sync)
+        self.update_mappings_count(sync)
 
-    def update_mappings_counts(self, sync=False):
+    def update_mappings_count(self, sync=False):
         if sync or get(settings, 'TEST_MODE'):
             self.set_active_mappings()
+            self.save(update_fields=['active_mappings'])
         elif self.__class__.__name__ == 'Source':
             update_source_active_mappings_count.apply_async((self.id,), queue='concurrent')
         elif self.__class__.__name__ == 'Collection':
@@ -374,6 +375,7 @@ class ConceptContainerModel(VersionedModel):
     def update_concepts_count(self, sync=False):
         if sync or get(settings, 'TEST_MODE'):
             self.set_active_concepts()
+            self.save(update_fields=['active_concepts'])
         elif self.__class__.__name__ == 'Source':
             update_source_active_concepts_count.apply_async((self.id,), queue='concurrent')
         elif self.__class__.__name__ == 'Collection':
@@ -466,15 +468,6 @@ class ConceptContainerModel(VersionedModel):
     @staticmethod
     def is_content_privately_referred():
         return False
-
-    def save(self, force_insert=False, force_update=False, using=None, update_fields=None):
-        if self.id:
-            is_head = self.is_head
-            if is_head or self.active_concepts == 0:
-                self.update_concepts_count()
-            if is_head or self.active_mappings == 0:
-                self.update_mappings_counts()
-        return super().save(force_insert, force_update, using, update_fields)
 
     def delete(self, using=None, keep_parents=False, force=False):  # pylint: disable=arguments-differ
         if self.is_content_privately_referred():
@@ -693,6 +686,7 @@ class ConceptContainerModel(VersionedModel):
                 concepts = head.concepts.all()
 
             self.concepts.set(concepts)
+            self.update_concepts_count()
             if index:
                 from core.concepts.documents import ConceptDocument
                 self.batch_index(self.concepts, ConceptDocument)
@@ -707,6 +701,7 @@ class ConceptContainerModel(VersionedModel):
                 mappings = head.mappings.all()
 
             self.mappings.set(mappings)
+            self.update_mappings_count()
             if index:
                 from core.mappings.documents import MappingDocument
                 self.batch_index(self.mappings, MappingDocument)

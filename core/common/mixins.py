@@ -530,8 +530,14 @@ class SourceChildMixin:
     def save(self, force_insert=False, force_update=False, using=None, update_fields=None):
         result = super().save(force_insert, force_update, using, update_fields)
 
-        if self.is_latest_version:
-            self.parent.save()  # to update counts
+        if self.is_latest_version and self._counted is False:
+            if self.__class__.__name__ == 'Concept':
+                self.parent.update_concepts_count()
+            else:
+                self.parent.update_mappings_count()
+
+            self._counted = True
+            self.save(update_fields=['_counted'])
 
         return result
 

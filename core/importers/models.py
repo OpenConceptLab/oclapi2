@@ -412,13 +412,15 @@ class ConceptImporter(BaseResourceImporter):
         if parent.has_edit_access(self.user):
             if self.version:
                 instance = self.get_queryset().first().clone()
+                instance._counted = None  # pylint: disable=protected-access
                 errors = Concept.create_new_version_for(
                     instance=instance, data=self.data, user=self.user, create_parent_version=False,
                     add_prev_version_children=False
                 )
                 return errors or UPDATED
 
-            instance = Concept.persist_new(data=self.data, user=self.user, create_parent_version=False)
+            instance = Concept.persist_new(
+                data={**self.data, '_counted': None}, user=self.user, create_parent_version=False)
             if instance.id:
                 return CREATED
             return instance.errors or FAILED
@@ -508,9 +510,10 @@ class MappingImporter(BaseResourceImporter):
         if parent.has_edit_access(self.user):
             if self.version:
                 instance = self.get_queryset().first().clone()
+                instance._counted = None  # pylint: disable=protected-access
                 errors = Mapping.create_new_version_for(instance, self.data, self.user)
                 return errors or UPDATED
-            instance = Mapping.persist_new(self.data, self.user)
+            instance = Mapping.persist_new({**self.data, '_counted': None}, self.user)
             if instance.id:
                 return CREATED
             return instance.errors or FAILED
@@ -853,6 +856,12 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
                             self.resource_wise_time[part_type] = 0
                         self.resource_wise_time[part_type] += (time.time() - start_time)
 
+        print("Updating Active Concepts Count...")
+        self.update_concept_counts()
+
+        print("Updating Active Mappings Count...")
+        self.update_mappings_counts()
+
         self.update_elapsed_seconds()
 
         self.make_result()
@@ -917,3 +926,20 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
         group_result = jobs.apply_async(queue='concurrent')
         self.groups.append(group_result)
         self.tasks += group_result.results
+
+    @staticmethod
+    def update_concept_counts():
+        uncounted_concepts = Concept.objects.filter(_counted__isnull=True)
+        sources = Source.objects.filter(id__in=uncounted_concepts.values_list('parent_id', flat=True))
+        for source in sources:
+            source.update_concepts_count(sync=True)
+            uncounted_concepts.filter(parent_id=source.id).update(_counted=True)
+
+    @staticmethod
+    def update_mappings_counts():
+        uncounted_mappings = Mapping.objects.filter(_counted__isnull=True)
+        sources = Source.objects.filter(
+            id__in=uncounted_mappings.values_list('parent_id', flat=True))
+        for source in sources:
+            source.update_mappings_count(sync=True)
+            uncounted_mappings.filter(parent_id=source.id).update(_counted=True)

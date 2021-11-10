@@ -65,6 +65,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
     to_concept_name = models.TextField(null=True, blank=True)
     to_source_url = models.TextField(null=True, blank=True, db_index=True)
     to_source_version = models.TextField(null=True, blank=True)
+    _counted = models.BooleanField(default=True, null=True, blank=True)
 
     logo_path = None
     name = None
@@ -371,6 +372,8 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
             initial_version = cls.create_initial_version(mapping)
             initial_version.sources.set([parent, parent_head])
             mapping.sources.set([parent, parent_head])
+            if mapping._counted is True:
+                parent.update_mappings_count()
         except ValidationError as ex:
             mapping.errors.update(ex.message_dict)
         except IntegrityError as ex:
