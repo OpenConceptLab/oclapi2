@@ -265,6 +265,7 @@ class Collection(ConceptContainerModel):
             collection_version.updated_by = user
             self.updated_by = user
         collection_version.save()
+        collection_version.update_children_counts()
         if collection_version.id != self.id:
             self.save()
         return added_references, errors
@@ -297,6 +298,7 @@ class Collection(ConceptContainerModel):
 
         from core.concepts.documents import ConceptDocument
         from core.mappings.documents import MappingDocument
+        head.update_children_counts()
         self.batch_index(Concept.objects.filter(uri__in=expressions), ConceptDocument)
         self.batch_index(Mapping.objects.filter(uri__in=expressions), MappingDocument)
 
