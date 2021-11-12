@@ -15,7 +15,6 @@ from core.concepts.tests.factories import ConceptFactory
 from core.mappings.serializers import MappingDetailSerializer
 from core.mappings.tests.factories import MappingFactory
 from core.orgs.models import Organization
-from core.sources.constants import CONTENT_REFERRED_PRIVATELY
 from core.sources.models import Source
 from core.sources.serializers import SourceDetailSerializer, SourceVersionExportSerializer
 from core.sources.tests.factories import OrganizationSourceFactory, UserSourceFactory
@@ -490,7 +489,7 @@ class SourceVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertFalse(self.source.versions.filter(version='v1').exists())
 
     @patch('core.common.services.S3.delete_objects', Mock())
-    def test_version_delete_400(self):  # sources content referred in a private collection
+    def test_version_delete_204_referenced_in_private_collection(self):
         concept = ConceptFactory(parent=self.source_v1)
 
         collection = OrganizationCollectionFactory(public_access='None')
@@ -504,10 +503,9 @@ class SourceVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
             format='json'
         )
 
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.data, {'detail': [CONTENT_REFERRED_PRIVATELY.format(self.source_v1.mnemonic)]})
-        self.assertEqual(self.source.versions.count(), 2)
-        self.assertTrue(self.source.versions.filter(version='v1').exists())
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(self.source.versions.count(), 1)
+        self.assertFalse(self.source.versions.filter(version='v1').exists())
 
 
 class SourceExtraRetrieveUpdateDestroyViewTest(OCLAPITestCase):

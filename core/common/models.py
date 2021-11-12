@@ -17,7 +17,6 @@ from core.common.services import S3
 from core.common.tasks import update_collection_active_concepts_count, update_collection_active_mappings_count
 from core.common.utils import reverse_resource, reverse_resource_version, parse_updated_since_param, drop_version
 from core.settings import DEFAULT_LOCALE
-from core.sources.constants import CONTENT_REFERRED_PRIVATELY
 from .constants import (
     ACCESS_TYPE_CHOICES, DEFAULT_ACCESS_TYPE, NAMESPACE_REGEX,
     ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT, SUPER_ADMIN_USER_ID,
@@ -465,14 +464,7 @@ class ConceptContainerModel(VersionedModel):
             organization_id=self.organization_id, user_id=self.user_id
         ).order_by('-created_at')
 
-    @staticmethod
-    def is_content_privately_referred():
-        return False
-
     def delete(self, using=None, keep_parents=False, force=False):  # pylint: disable=arguments-differ
-        if self.is_content_privately_referred():
-            raise ValidationError(dict(detail=CONTENT_REFERRED_PRIVATELY.format(self.mnemonic)))
-
         generic_export_path = self.generic_export_path(suffix=None)
 
         if self.is_head:
