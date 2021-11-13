@@ -1,10 +1,10 @@
 # pylint: disable-all
 import logging
-import os
 import socket
 import sys
 import threading
 import traceback
+from xml.sax.saxutils import escape
 
 from django.conf import settings
 
@@ -149,7 +149,7 @@ class ErrbitClient:
         return ERRBIT_XML.format(
             api_key=self.api_key, version=settings.VERSION, class_name=etype.__class__.__name__, value=str(value),
             trace=_trace_str, component=self.component_name, environment=self.environment, user=str(get_current_user()),
-            url=str(get_request_url())
+            url=escape(str(get_request_url()))
         )
 
 
