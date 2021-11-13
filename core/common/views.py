@@ -559,6 +559,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             return None
 
         search_results = self.__search_results
+        search_results = search_results.params(request_timeout=ES_REQUEST_TIMEOUT)
         self.total_count = search_results.count()
 
         if isinstance(self.limit, str):
@@ -569,7 +570,6 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         page = int(self.request.GET.get('page', '1'))
         start = (page - 1) * self.limit
         end = start + self.limit
-        search_results = search_results.params(request_timeout=ES_REQUEST_TIMEOUT)
         try:
             return search_results[start:end].to_queryset()
         except RequestError as ex:
