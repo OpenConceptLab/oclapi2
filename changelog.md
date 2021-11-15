@@ -1,3 +1,18 @@
+##### 2.0.82 - Sun Nov 14 13:30:38 2021 +0000
+- ES | search request timeout
+- Errbit Client | xml escaping url string
+- [OpenConceptLab/ocl_issues#661](https://github.com/OpenConceptLab/ocl_issues/issues/661) | Reverting OpenConceptLab/ocl_issues#103
+- [OpenConceptLab/ocl_issues#1008](https://github.com/OpenConceptLab/ocl_issues/issues/1008) | Collection ref add/delete will update child count
+- [OpenConceptLab/ocl_issues#1008](https://github.com/OpenConceptLab/ocl_issues/issues/1008) | Source/Collection/Version retrieve will only update concepts or mappings count when required
+- [OpenConceptLab/ocl_issues#1008](https://github.com/OpenConceptLab/ocl_issues/issues/1008) | concept/mapping on retire/delete updating parent counts
+- [OpenConceptLab/ocl_issues#1008](https://github.com/OpenConceptLab/ocl_issues/issues/1008) | concept/mapping parent active counts are bulk updated after content import
+- Response headers to have requesting user
+- Not logging in dev mode
+- Errbit errors to have request URL
+- [OpenConceptLab/ocl_issues#1008](https://github.com/OpenConceptLab/ocl_issues/issues/1008) | concept/mapping counts async tasks
+- [OpenConceptLab/ocl_issues#1082](https://github.com/OpenConceptLab/ocl_issues/issues/1082) Add GIN, GIST, TRGM extensions and concepts uri index
+- [OpenConceptLab/ocl_issues#1082](https://github.com/OpenConceptLab/ocl_issues/issues/1082) | comments explaining hierarchy async tasks
+- ES | increased timeout for facets query to 20s (default 10s) | Errbit
 ##### 2.0.80 - Mon Nov 8 11:36:04 2021 +0000
 - Reverting to flower 0.9.5
 - Merge pull request #28 from OpenConceptLab/dependabot/pip/flower-1.0.0
