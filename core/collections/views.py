@@ -34,7 +34,7 @@ from core.collections.serializers import (
 from core.collections.utils import is_version_specified
 from core.common.constants import (
     HEAD, RELEASED_PARAM, PROCESSING_PARAM, OK_MESSAGE,
-    ACCESS_TYPE_NONE)
+    ACCESS_TYPE_NONE, INCLUDE_RETIRED_PARAM)
 from core.common.mixins import (
     ConceptDictionaryCreateMixin, ListWithHeadersMixin, ConceptDictionaryUpdateMixin,
     ConceptContainerExportMixin,
@@ -602,7 +602,8 @@ class CollectionVersionExportView(ConceptContainerExportMixin, CollectionVersion
     def handle_export_version(self):
         version = self.get_object()
         try:
-            export_collection.delay(version.id)
+            include_retired = parse_boolean_query_param(self.request, INCLUDE_RETIRED_PARAM, "True")
+            export_collection.delay(version.id, include_retired)
             return status.HTTP_202_ACCEPTED
         except AlreadyQueued:
             return status.HTTP_409_CONFLICT

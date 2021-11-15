@@ -16,7 +16,7 @@ from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
 
 from core.client_configs.views import ResourceClientConfigsView
-from core.common.constants import HEAD, RELEASED_PARAM, PROCESSING_PARAM, ACCESS_TYPE_NONE
+from core.common.constants import HEAD, RELEASED_PARAM, PROCESSING_PARAM, ACCESS_TYPE_NONE, INCLUDE_RETIRED_PARAM
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryCreateMixin, ConceptDictionaryUpdateMixin, \
     ConceptContainerExportMixin, ConceptContainerProcessingMixin, ConceptContainerExtraRetrieveUpdateDestroyView
 from core.common.permissions import CanViewConceptDictionary, CanEditConceptDictionary, HasAccessToVersionedObject, \
@@ -411,7 +411,8 @@ class SourceVersionExportView(ConceptContainerExportMixin, SourceVersionBaseView
     def handle_export_version(self):
         version = self.get_object()
         try:
-            export_source.delay(version.id)
+            include_retired = parse_boolean_query_param(self.request, INCLUDE_RETIRED_PARAM, "True")
+            export_source.delay(version.id, include_retired)
             return status.HTTP_202_ACCEPTED
         except AlreadyQueued:
             return status.HTTP_409_CONFLICT

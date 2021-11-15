@@ -15,12 +15,12 @@ from rest_framework.generics import RetrieveUpdateDestroyAPIView
 from rest_framework.mixins import ListModelMixin, CreateModelMixin
 from rest_framework.response import Response
 
-from core.common.constants import HEAD, ACCESS_TYPE_EDIT, ACCESS_TYPE_VIEW, ACCESS_TYPE_NONE, INCLUDE_FACETS, \
+from core.common.constants import HEAD, ACCESS_TYPE_EDIT, ACCESS_TYPE_VIEW, ACCESS_TYPE_NONE, INCLUDE_FACETS, INCLUDE_RETIRED_PARAM, \
     LIST_DEFAULT_LIMIT, HTTP_COMPRESS_HEADER, CSV_DEFAULT_LIMIT, FACETS_ONLY, NOT_FOUND, \
     MUST_SPECIFY_EXTRA_PARAM_IN_BODY
 from core.common.permissions import HasPrivateAccess, HasOwnership, CanViewConceptDictionary
 from core.common.services import S3
-from .utils import write_csv_to_s3, get_csv_from_s3, get_query_params_from_url_string, compact_dict_by_values
+from .utils import write_csv_to_s3, get_csv_from_s3, get_query_params_from_url_string, compact_dict_by_values, parse_boolean_query_param
 
 logger = logging.getLogger('oclapi')
 
@@ -556,16 +556,8 @@ class ConceptContainerExportMixin:
         return instance
 
     def get(self, request, *args, **kwargs):  # pylint: disable=unused-argument
-        version = self.get_object()
-        logger.debug(
-            'Export requested for %s version %s - Requesting AWS-S3 key', self.entity.lower(), version.version
-        )
-        if version.is_head and not request.user.is_staff:
-            return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
 
-        if version.has_export():
-            export_url = version.get_export_url()
-
+        def export_response(export_url):
             no_redirect = request.query_params.get('noRedirect', False) in ['true', 'True', True]
             if no_redirect:
                 return Response(dict(url=export_url), status=status.HTTP_200_OK)
@@ -580,6 +572,24 @@ class ConceptContainerExportMixin:
             response['Last-Updated'] = version.last_child_update.isoformat()
             response['Last-Updated-Timezone'] = settings.TIME_ZONE_PLACE
             return response
+
+        version = self.get_object()
+        include_retired = parse_boolean_query_param(request, INCLUDE_RETIRED_PARAM, "True")
+        logger.debug(
+            'Export requested for %s version %s - Requesting AWS-S3 key', self.entity.lower(), version.version
+        )
+
+        if version.is_head and not request.user.is_staff:
+            return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
+
+        if include_retired:
+            if version.has_export():
+                export_url = version.get_export_url()
+                return export_response(export_url)
+        else:
+            if version.has_unretired_export():
+                export_url = version.get_unretired_export_url()
+                return export_response(export_url)
 
         if version.is_exporting:
             return Response(status=status.HTTP_208_ALREADY_REPORTED)
