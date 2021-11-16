@@ -500,30 +500,34 @@ def index_source_mappings(source_id):
 @app.task
 def update_source_active_concepts_count(source_id):
     from core.sources.models import Source
-    source = Source.objects.filter(id=source_id).first()
-    source.set_active_concepts()
-    source.save(update_fields=['active_concepts'])
+    sources = Source.objects.select_for_update().filter(id=source_id).first()
+    for source in sources:
+        source.set_active_concepts()
+        source.save(update_fields=['active_concepts'])
 
 
 @app.task
 def update_source_active_mappings_count(source_id):
     from core.sources.models import Source
-    source = Source.objects.filter(id=source_id).first()
-    source.set_active_mappings()
-    source.save(update_fields=['active_mappings'])
+    sources = Source.objects.select_for_update().filter(id=source_id).first()
+    for source in sources:
+        source.set_active_mappings()
+        source.save(update_fields=['active_mappings'])
 
 
 @app.task
 def update_collection_active_concepts_count(collection_id):
     from core.collections.models import Collection
-    collection = Collection.objects.filter(id=collection_id).first()
-    collection.set_active_concepts()
-    collection.save(update_fields=['active_concepts'])
+    collections = Collection.objects.select_for_update().filter(id=collection_id)
+    for collection in collections:
+        collection.set_active_concepts()
+        collection.save(update_fields=['active_concepts'])
 
 
 @app.task
 def update_collection_active_mappings_count(collection_id):
     from core.collections.models import Collection
-    collection = Collection.objects.filter(id=collection_id).first()
-    collection.set_active_mappings()
-    collection.save(update_fields=['active_mappings'])
+    collections = Collection.objects.select_for_update().filter(id=collection_id).first()
+    for collection in collections:
+        collection.set_active_mappings()
+        collection.save(update_fields=['active_mappings'])
