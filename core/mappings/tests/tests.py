@@ -5,6 +5,9 @@ from core.common.constants import HEAD, CUSTOM_VALIDATION_SCHEMA_OPENMRS
 from core.common.tests import OCLTestCase
 from core.concepts.tests.factories import ConceptFactory, LocalizedTextFactory
 from core.mappings.models import Mapping
+from core.mappings.serializers import MappingMinimalSerializer, MappingVersionDetailSerializer, \
+    MappingDetailSerializer, \
+    MappingVersionListSerializer, MappingListSerializer
 from core.mappings.tests.factories import MappingFactory
 from core.orgs.models import Organization
 from core.orgs.tests.factories import OrganizationFactory
@@ -189,6 +192,13 @@ class MappingTest(OCLTestCase):
         self.assertEqual(
             persisted_mapping.version_url, persisted_mapping.uri
         )
+
+    def test_get_serializer_class(self):
+        self.assertEqual(Mapping.get_serializer_class(), MappingListSerializer)
+        self.assertEqual(Mapping.get_serializer_class(version=True), MappingVersionListSerializer)
+        self.assertEqual(Mapping.get_serializer_class(verbose=True), MappingDetailSerializer)
+        self.assertEqual(Mapping.get_serializer_class(verbose=True, version=True), MappingVersionDetailSerializer)
+        self.assertEqual(Mapping.get_serializer_class(brief=True), MappingMinimalSerializer)
 
 
 class OpenMRSMappingValidatorTest(OCLTestCase):

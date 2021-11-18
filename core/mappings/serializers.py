@@ -12,6 +12,7 @@ from core.sources.serializers import SourceListSerializer, SourceDetailSerialize
 
 
 class MappingListSerializer(ModelSerializer):
+    type = CharField(source='resource_type', read_only=True)
     id = CharField(source='mnemonic', required=False)
     uuid = CharField(source='id', read_only=True)
     source = CharField(source='parent_resource', read_only=True)
@@ -40,7 +41,7 @@ class MappingListSerializer(ModelSerializer):
             'url', 'version', 'id', 'versioned_object_id', 'versioned_object_url',
             'is_latest_version', 'update_comment', 'version_url', 'uuid', 'version_created_on',
             'from_source_version', 'to_source_version', 'from_concept', 'to_concept', 'from_source', 'to_source',
-            'from_concept_name_resolved', 'to_concept_name_resolved', 'extras',
+            'from_concept_name_resolved', 'to_concept_name_resolved', 'extras', 'type'
         )
 
     def __init__(self, *args, **kwargs):
@@ -101,6 +102,16 @@ class MappingVersionListSerializer(MappingListSerializer):
             pass
 
         super().__init__(*args, **kwargs)
+
+
+class MappingMinimalSerializer(ModelSerializer):
+    uuid = CharField(source='id', read_only=True)
+    id = CharField(source='mnemonic', read_only=True)
+    url = CharField(source='uri', read_only=True)
+
+    class Meta:
+        model = Mapping
+        fields = ('uuid', 'id', 'url', 'map_type')
 
 
 class MappingDetailSerializer(MappingListSerializer):

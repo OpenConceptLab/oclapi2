@@ -2,7 +2,7 @@ from django.db.models import F, Q
 from django.http import Http404
 from django.shortcuts import get_object_or_404
 from drf_yasg.utils import swagger_auto_schema
-from pydash import get
+from pydash import get, compact
 from rest_framework import status
 from rest_framework.generics import RetrieveAPIView, DestroyAPIView, ListCreateAPIView, RetrieveUpdateDestroyAPIView, \
     UpdateAPIView
@@ -11,6 +11,9 @@ from rest_framework.permissions import IsAuthenticatedOrReadOnly, IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from core.bundles.models import Bundle
+from core.bundles.serializers import BundleSerializer
+from core.collections.constants import SOURCE_MAPPINGS, SOURCE_TO_CONCEPTS
 from core.common.constants import (
     HEAD, INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_RETIRED_PARAM, ACCESS_TYPE_NONE)
 from core.common.exceptions import Http409
@@ -33,7 +36,8 @@ from core.concepts.serializers import (
     ConceptVersionDetailSerializer,
     ConceptVersionListSerializer, ConceptSummarySerializer, ConceptMinimalSerializer,
     ConceptChildrenSerializer, ConceptParentsSerializer)
-from core.mappings.serializers import MappingListSerializer
+from core.mappings.serializers import MappingListSerializer, MappingVersionListSerializer, \
+    MappingVersionDetailSerializer
 
 
 class ConceptBaseView(SourceChildCommonBaseView):
@@ -280,6 +284,73 @@ class ConceptRetrieveUpdateDestroyView(ConceptBaseView, RetrieveAPIView, UpdateA
 
         parent.update_concepts_count()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class ConceptCascadeView(ConceptBaseView):
+    serializer_class = BundleSerializer
+
+    def get_concept_serializer(self):
+        if self.is_verbose():
+            return ConceptVersionDetailSerializer
+        return ConceptVersionListSerializer
+
+    def get_mapping_serializer(self):
+        if self.is_verbose():
+            return MappingVersionDetailSerializer
+        return MappingVersionListSerializer
+
+    def get_cascaded_result(self):
+        instance = self.get_object()
+        cascade_method = self.request.query_params.get('method', '').lower()
+        map_types = self.request.query_params.dict().get('mapTypes', None)
+        filters = None
+        if map_types:
+            filters = dict(map_type__in=compact(map_types.split(',')))
+        return instance.get_cascaded_resources(
+            cascade_method == SOURCE_MAPPINGS,
+            cascade_method == SOURCE_TO_CONCEPTS,
+            filters
+        )
+
+    def get_object(self, queryset=None):
+        queryset = self.get_queryset()
+        filters = dict()
+        if 'concept_version' not in self.kwargs:
+            filters = dict(id=F('versioned_object_id'))
+        if 'collection' in self.kwargs:
+            filters = {}
+            queryset = queryset.order_by('id').distinct('id')
+            uri_param = self.request.query_params.dict().get('uri')
+            if uri_param:
+                filters.update(Concept.get_parent_and_owner_filters_from_uri(uri_param))
+            if queryset.count() > 1 and not uri_param:
+                raise Http409()
+
+        instance = queryset.filter(**filters).first()
+
+        if not instance:
+            raise Http404()
+
+        self.check_object_permissions(self.request, instance)
+        return instance
+
+    def get(self, request, **kwargs):  # pylint: disable=unused-argument
+        if self.request.query_params.get('ocl', '').lower() in ['true', True]:
+            resources = self.get_cascaded_result()
+            result = []
+            if get(resources, 'concepts'):
+                serializer = self.get_concept_serializer()
+                result += serializer(resources['concepts'], many=True).data
+            if get(resources, 'mappings'):
+                serializer = self.get_mapping_serializer()
+                result += serializer(resources['mappings'], many=True).data
+            return Response(result)
+        instance = self.get_object()
+        bundle = Bundle(
+            root=instance, params=self.request.query_params, verbose=self.is_verbose(), brief=self.is_brief()
+        )
+        bundle.cascade()
+        return Response(BundleSerializer(bundle).data)
 
 
 class ConceptChildrenView(ConceptBaseView, ListWithHeadersMixin):

@@ -1,0 +1,1 @@
+BUNDLE_TYPE = 'Bundle'

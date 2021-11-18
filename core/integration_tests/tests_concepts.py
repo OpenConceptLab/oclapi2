@@ -64,8 +64,8 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 201)
         self.assertListEqual(
-            list(response.data.keys()),
-            [
+            sorted(list(response.data.keys())),
+            sorted([
                 'uuid',
                 'id',
                 'external_id',
@@ -90,12 +90,11 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
                 'type',
                 'update_comment',
                 'version_url',
-                'mappings',
                 'updated_by',
                 'created_by',
                 'parent_concept_urls',
                 'public_can_view',
-            ]
+            ])
         )
 
         concept = Concept.objects.first()
@@ -125,7 +124,6 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.data['name'], 'c1')
         self.assertEqual(response.data['type'], 'Concept')
         self.assertEqual(response.data['version_url'], latest_version.uri)
-        self.assertEqual(response.data['mappings'], [])
 
         response = self.client.post(
             concepts_url,
@@ -166,36 +164,35 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertListEqual(
-            list(response.data.keys()),
-            ['uuid',
-             'id',
-             'external_id',
-             'concept_class',
-             'datatype',
-             'url',
-             'retired',
-             'source',
-             'owner',
-             'owner_type',
-             'owner_url',
-             'display_name',
-             'display_locale',
-             'names',
-             'descriptions',
-             'created_on',
-             'updated_on',
-             'versions_url',
-             'version',
-             'extras',
-             'name',
-             'type',
-             'update_comment',
-             'version_url',
-             'mappings',
-             'updated_by',
-             'created_by',
-             'parent_concept_urls',
-             'public_can_view']
+            sorted(list(response.data.keys())),
+            sorted(['uuid',
+                    'id',
+                    'external_id',
+                    'concept_class',
+                    'datatype',
+                    'url',
+                    'retired',
+                    'source',
+                    'owner',
+                    'owner_type',
+                    'owner_url',
+                    'display_name',
+                    'display_locale',
+                    'names',
+                    'descriptions',
+                    'created_on',
+                    'updated_on',
+                    'versions_url',
+                    'version',
+                    'extras',
+                    'name',
+                    'type',
+                    'update_comment',
+                    'version_url',
+                    'updated_by',
+                    'created_by',
+                    'parent_concept_urls',
+                    'public_can_view'])
         )
 
         version = Concept.objects.last()
@@ -223,7 +220,6 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.data['extras'], dict(foo='bar'))
         self.assertEqual(response.data['type'], 'Concept')
         self.assertEqual(response.data['version_url'], version.uri)
-        self.assertEqual(response.data['mappings'], [])
         self.assertTrue(concept.is_versioned_object)
         self.assertEqual(concept.datatype, "None")
 
@@ -242,36 +238,35 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertListEqual(
-            list(response.data.keys()),
-            ['uuid',
-             'id',
-             'external_id',
-             'concept_class',
-             'datatype',
-             'url',
-             'retired',
-             'source',
-             'owner',
-             'owner_type',
-             'owner_url',
-             'display_name',
-             'display_locale',
-             'names',
-             'descriptions',
-             'created_on',
-             'updated_on',
-             'versions_url',
-             'version',
-             'extras',
-             'name',
-             'type',
-             'update_comment',
-             'version_url',
-             'mappings',
-             'updated_by',
-             'created_by',
-             'parent_concept_urls',
-             'public_can_view']
+            sorted(list(response.data.keys())),
+            sorted(['uuid',
+                    'id',
+                    'external_id',
+                    'concept_class',
+                    'datatype',
+                    'url',
+                    'retired',
+                    'source',
+                    'owner',
+                    'owner_type',
+                    'owner_url',
+                    'display_name',
+                    'display_locale',
+                    'names',
+                    'descriptions',
+                    'created_on',
+                    'updated_on',
+                    'versions_url',
+                    'version',
+                    'extras',
+                    'name',
+                    'type',
+                    'update_comment',
+                    'version_url',
+                    'updated_by',
+                    'created_by',
+                    'parent_concept_urls',
+                    'public_can_view'])
         )
 
         names = response.data['names']
@@ -301,7 +296,6 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.data['extras'], dict(foo='bar'))
         self.assertEqual(response.data['type'], 'Concept')
         self.assertEqual(response.data['version_url'], version.uri)
-        self.assertEqual(response.data['mappings'], [])
         self.assertTrue(concept.is_versioned_object)
         self.assertEqual(concept.datatype, "None")
 
@@ -643,8 +637,8 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
             sorted(response.data[0].keys()),
             sorted(['uuid', 'id', 'external_id', 'concept_class', 'datatype', 'url', 'retired', 'source',
                     'owner', 'owner_type', 'owner_url', 'display_name', 'display_locale', 'version', 'update_comment',
-                    'locale', 'version_created_by', 'version_created_on', 'mappings', 'is_latest_version',
-                    'versions_url', 'version_url'])
+                    'locale', 'version_created_by', 'version_created_on', 'is_latest_version',
+                    'versions_url', 'version_url', 'type'])
         )
 
         response = self.client.get(
@@ -658,7 +652,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
             sorted(['uuid', 'id', 'external_id', 'concept_class', 'datatype', 'url', 'retired', 'source',
                     'owner', 'owner_type', 'owner_url', 'display_name', 'display_locale', 'names', 'descriptions',
                     'created_on', 'updated_on', 'versions_url', 'version', 'extras', 'name', 'type',
-                    'update_comment', 'version_url', 'mappings', 'updated_by', 'created_by',
+                    'update_comment', 'version_url', 'updated_by', 'created_by',
                     'public_can_view'])
         )
 
@@ -670,7 +664,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
             sorted(response.data[0].keys()),
-            sorted(['uuid', 'id'])
+            sorted(['uuid', 'id', 'url'])
         )
 
     def test_get_200_with_mappings(self):
@@ -932,4 +926,141 @@ class ConceptMappingsViewTest(OCLAPITestCase):
         self.assertEqual(
             sorted([mapping['uuid'] for mapping in response.data]),
             sorted([str(direct_mapping.id), str(indirect_mapping.id)])
+        )
+
+
+class ConceptCascadeViewTest(OCLAPITestCase):
+    def test_get_200(self):
+        source1 = OrganizationSourceFactory()
+        source2 = OrganizationSourceFactory()
+        concept1 = ConceptFactory(parent=source1)
+        concept2 = ConceptFactory(parent=source1)
+        concept3 = ConceptFactory(parent=source2)
+        mapping1 = MappingFactory(from_concept=concept1, to_concept=concept2, parent=source1)
+        mapping2 = MappingFactory(from_concept=concept2, to_concept=concept1, parent=source1)
+        mapping3 = MappingFactory(from_concept=concept2, to_concept=concept3, parent=source1)
+        mapping4 = MappingFactory(from_concept=concept1, to_concept=concept3, parent=source1)
+        mapping6 = MappingFactory(from_concept=concept3, to_concept=concept1, parent=source2)
+
+        response = self.client.get(concept1.uri + '$cascade/?method=sourceMappings&ocl=true')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 3)
+        self.assertEqual(
+            sorted([[data['type'], data['url']] for data in response.data]),
+            sorted([
+                ['Concept', concept1.uri],
+                ['Mapping', mapping1.uri],
+                ['Mapping', mapping4.uri],
+            ])
+        )
+
+        response = self.client.get(concept1.uri + '$cascade/?method=sourceToConcepts&ocl=true')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 4)
+        self.assertEqual(
+            sorted([[data['type'], data['url']] for data in response.data]),
+            sorted([
+                ['Concept', concept1.uri],
+                ['Concept', concept2.uri],
+                ['Mapping', mapping1.uri],
+                ['Mapping', mapping4.uri],
+            ])
+        )
+
+        response = self.client.get(concept2.uri + '$cascade/?method=sourceMappings&ocl=true')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 3)
+        self.assertEqual(
+            sorted([[data['type'], data['url']] for data in response.data]),
+            sorted([
+                ['Concept', concept2.uri],
+                ['Mapping', mapping2.uri],
+                ['Mapping', mapping3.uri],
+            ])
+        )
+
+        response = self.client.get(concept2.uri + '$cascade/?method=sourceToConcepts&ocl=true')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 4)
+        self.assertEqual(
+            sorted([[data['type'], data['url']] for data in response.data]),
+            sorted([
+                ['Concept', concept2.uri],
+                ['Concept', concept1.uri],
+                ['Mapping', mapping2.uri],
+                ['Mapping', mapping3.uri],
+            ])
+        )
+
+        response = self.client.get(concept3.uri + '$cascade/?method=sourceMappings&ocl=true')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 2)
+        self.assertEqual(
+            sorted([[data['type'], data['url']] for data in response.data]),
+            sorted([
+                ['Concept', concept3.uri],
+                ['Mapping', mapping6.uri],
+            ])
+        )
+
+        response = self.client.get(concept3.uri + '$cascade/?method=sourceToConcepts&ocl=true')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 2)
+        self.assertEqual(
+            sorted([[data['type'], data['url']] for data in response.data]),
+            sorted([
+                ['Concept', concept3.uri],
+                ['Mapping', mapping6.uri],
+            ])
+        )
+
+        response = self.client.get(concept3.uri + '$cascade/?method=sourceToConcepts&ocl=true&mapTypes=foobar')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(
+            sorted([[data['type'], data['url']] for data in response.data]),
+            sorted([
+                ['Concept', concept3.uri],
+            ])
+        )
+
+        # bundle response
+        response = self.client.get(concept3.uri + '$cascade/?method=sourceToConcepts')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['resource_type'], 'Bundle')
+        self.assertEqual(response.data['id'], concept3.mnemonic)
+        self.assertEqual(response.data['meta'], dict(lastUpdated=concept3.updated_at))
+        self.assertEqual(response.data['type'], 'Concept')
+        self.assertEqual(response.data['total'], 2)
+        self.assertEqual(len(response.data['entry']), 2)
+        self.assertEqual(
+            sorted([[data['type'], data['url']] for data in response.data['entry']]),
+            sorted([
+                ['Concept', concept3.uri],
+                ['Mapping', mapping6.uri],
+            ])
+        )
+
+        response = self.client.get(concept3.uri + '$cascade/?method=sourceToConcepts&mapTypes=foobar')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['resource_type'], 'Bundle')
+        self.assertEqual(response.data['id'], concept3.mnemonic)
+        self.assertEqual(response.data['meta'], dict(lastUpdated=concept3.updated_at))
+        self.assertEqual(response.data['type'], 'Concept')
+        self.assertEqual(response.data['total'], 1)
+        self.assertEqual(len(response.data['entry']), 1)
+        self.assertEqual(
+            sorted([[data['type'], data['url']] for data in response.data['entry']]),
+            sorted([
+                ['Concept', concept3.uri],
+            ])
         )

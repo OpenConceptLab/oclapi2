@@ -881,3 +881,32 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         LocalizedText.objects.filter(name_locales=self).delete()
         LocalizedText.objects.filter(description_locales=self).delete()
         return super().delete(using=using, keep_parents=keep_parents)
+
+    def get_cascaded_resources(
+            self, source_mappings=True, source_to_concepts=True, mapping_filters=None
+    ):
+        from core.mappings.models import Mapping
+        result = dict(concepts=None, mappings=Mapping.objects.none())
+        mappings = None
+        mapping_filters = mapping_filters or {}
+        if source_mappings or source_to_concepts:
+            mappings = self.get_unidirectional_mappings().filter(**mapping_filters)
+            result['mappings'] = mappings
+        if source_to_concepts and mappings.exists():
+            result['concepts'] = Concept.objects.filter(
+                id__in=[*list(mappings.values_list('to_concept_id', flat=True)), self.id], parent=self.parent)
+        else:
+            result['concepts'] = Concept.objects.filter(id=self.id)
+        return result
+
+    @staticmethod
+    def get_serializer_class(verbose=False, version=False, brief=False):
+        if brief:
+            from core.concepts.serializers import ConceptMinimalSerializer
+            return ConceptMinimalSerializer
+        if version:
+            from core.concepts.serializers import ConceptVersionDetailSerializer, ConceptVersionListSerializer
+            return ConceptVersionDetailSerializer if verbose else ConceptVersionListSerializer
+
+        from core.concepts.serializers import ConceptDetailSerializer, ConceptListSerializer
+        return ConceptDetailSerializer if verbose else ConceptListSerializer
