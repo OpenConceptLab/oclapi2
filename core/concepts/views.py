@@ -314,7 +314,7 @@ class ConceptCascadeView(ConceptBaseView):
 
     def get_object(self, queryset=None):
         queryset = self.get_queryset()
-        filters = dict()
+        filters = {}
         if 'concept_version' not in self.kwargs:
             filters = dict(id=F('versioned_object_id'))
         if 'collection' in self.kwargs:

@@ -930,7 +930,7 @@ class ConceptMappingsViewTest(OCLAPITestCase):
 
 
 class ConceptCascadeViewTest(OCLAPITestCase):
-    def test_get_200(self):
+    def test_get_200(self):  # pylint: disable=too-many-statements
         source1 = OrganizationSourceFactory()
         source2 = OrganizationSourceFactory()
         concept1 = ConceptFactory(parent=source1)
