@@ -166,12 +166,13 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     def get_exact_search_fields(self):
         return [field for field, config in get(self, 'es_fields', {}).items() if config.get('exact', False)]
 
-    def get_search_string(self, lower=True):
+    def get_search_string(self, lower=True, decode=True):
         search_str = self.request.query_params.dict().get(SEARCH_PARAM, '').strip()
         if self.is_concept_document():
             search_str = search_str.replace('-', '_')
         if lower:
             search_str = search_str.lower()
+        if decode:
             search_str = search_str if is_url_encoded_string(search_str) else urllib.parse.quote_plus(search_str)
 
         return search_str
@@ -210,7 +211,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         return result
 
     def get_exact_search_criterion(self):
-        search_str = self.get_search_string(False)
+        search_str = self.get_search_string(False, False)
 
         def get_query(attr):
             words = search_str.split(' ')
@@ -347,7 +348,8 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
             is_exact_match_on = self.is_exact_match_on()
             faceted_search = self.facet_class(  # pylint: disable=not-callable
-                self.get_search_string(lower=not is_exact_match_on), filters=filters, exact_match=is_exact_match_on
+                self.get_search_string(lower=not is_exact_match_on),
+                filters=filters, exact_match=is_exact_match_on
             )
             faceted_search.params(request_timeout=ES_REQUEST_TIMEOUT)
             facets = faceted_search.execute().facets.to_dict()
