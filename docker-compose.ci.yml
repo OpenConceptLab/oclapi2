@@ -5,6 +5,7 @@ services:
   redis:
     restart: "no"
   api:
+    image: ${API_IMAGE-openconceptlab/oclapi2:latest}
     build: .
     environment:
       - ENVIRONMENT=ci
@@ -12,39 +13,46 @@ services:
       - .:/code
     restart: "no"
   celery:
+    image: ${API_IMAGE-openconceptlab/oclapi2:latest}
     build: .
     volumes:
       - .:/code
     command: ["bash", "-c", "CELERY_WORKER_NAME=default ./start_celery_worker.sh -P prefork -Q default -c 1"]
     restart: "no"
   celery_indexing:
+    image: ${API_IMAGE-openconceptlab/oclapi2:latest}
     build: .
     volumes:
         - .:/code
     command: ["bash", "-c", "CELERY_WORKER_NAME=indexing ./start_celery_worker.sh -P prefork -Q indexing -c 1"]
     restart: "no"
   celery_concurrent:
+    image: ${API_IMAGE-openconceptlab/oclapi2:latest}
     build: .
     volumes:
       - .:/code
     command: ["bash", "-c", "CELERY_WORKER_NAME=concurrent ./start_celery_worker.sh -P prefork -Q concurrent -c 1"]
     restart: "no"
   celery_bulk_import_0_1:
+    image: ${API_IMAGE-openconceptlab/oclapi2:latest}
     build: .
     volumes:
       - .:/code
     restart: "no"
   celery_bulk_import_0_2:
+    image: ${API_IMAGE-openconceptlab/oclapi2:latest}
     build: .
     volumes:
       - .:/code
     restart: "no"
   celery_bulk_import_root:
+    image: ${API_IMAGE-openconceptlab/oclapi2:latest}
     build: .
     volumes:
       - .:/code
     restart: "no"
   flower:
+    image: ${API_IMAGE-openconceptlab/oclapi2:latest}
     build: .
     volumes:
       - .:/code
