@@ -591,6 +591,8 @@ class CollectionVersionExpansionView(CollectionVersionExpansionBaseView, Retriev
 
     def destroy(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         obj = self.get_object()
+        if obj.is_default:
+            return Response(dict(erors=['Cannot delete default expansion']), status=status.HTTP_400_BAD_REQUEST)
         obj.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 

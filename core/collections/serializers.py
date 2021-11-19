@@ -180,10 +180,11 @@ class ExpansionSummaryDetailSerializer(ExpansionSummarySerializer):
 
 class CollectionSummarySerializer(ModelSerializer):
     versions = IntegerField(source='num_versions')
+    expansions = IntegerField(source='expansions_count')
 
     class Meta:
         model = Collection
-        fields = ('active_mappings', 'active_concepts', 'versions', 'active_references')
+        fields = ('active_mappings', 'active_concepts', 'versions', 'active_references', 'expansions')
 
 
 class CollectionSummaryDetailSerializer(CollectionSummarySerializer):
@@ -198,9 +199,11 @@ class CollectionSummaryDetailSerializer(CollectionSummarySerializer):
 
 
 class CollectionVersionSummarySerializer(ModelSerializer):
+    expansions = IntegerField(source='expansions_count')
+
     class Meta:
         model = Collection
-        fields = ('active_mappings', 'active_concepts', 'active_references')
+        fields = ('active_mappings', 'active_concepts', 'active_references', 'expansions')
 
 
 class CollectionVersionSummaryDetailSerializer(CollectionVersionSummarySerializer):

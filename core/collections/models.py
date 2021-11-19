@@ -334,6 +334,10 @@ class Collection(ConceptContainerModel):
     def is_validation_necessary():
         return False
 
+    @property
+    def expansions_count(self):
+        return self.expansions.count()
+
     def delete_references(self, expressions):
         if self.expansion_uri:
             self.expansion.delete_expressions(expressions)
@@ -592,6 +596,10 @@ class Expansion(BaseResourceModel):
         return 'expansion'
 
     @property
+    def is_default(self):
+        return self.uri == self.collection_version.expansion_uri
+
+    @property
     def expansion(self):
         return self.mnemonic
 
@@ -666,6 +674,9 @@ class Expansion(BaseResourceModel):
         return self.add_references(self.collection_version.references, index)
 
     def calculate_uri(self):
+        version = self.collection_version
+        if version.is_head:
+            return self.collection_version.uri + 'HEAD/expansions/{}/'.format(self.mnemonic)
         return self.collection_version.uri + 'expansions/{}/'.format(self.mnemonic)
 
     def clean(self):
