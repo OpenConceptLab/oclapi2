@@ -272,7 +272,7 @@ class ConceptMinimalSerializer(ConceptAbstractSerializer):
 
     class Meta:
         model = Concept
-        fields = ConceptAbstractSerializer.Meta.fields + ('id', 'url')
+        fields = ConceptAbstractSerializer.Meta.fields + ('id', 'url', 'version_url')
 
 
 class ConceptDetailSerializer(ConceptAbstractSerializer):

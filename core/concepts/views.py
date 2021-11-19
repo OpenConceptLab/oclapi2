@@ -289,29 +289,6 @@ class ConceptRetrieveUpdateDestroyView(ConceptBaseView, RetrieveAPIView, UpdateA
 class ConceptCascadeView(ConceptBaseView):
     serializer_class = BundleSerializer
 
-    def get_concept_serializer(self):
-        if self.is_verbose():
-            return ConceptVersionDetailSerializer
-        return ConceptVersionListSerializer
-
-    def get_mapping_serializer(self):
-        if self.is_verbose():
-            return MappingVersionDetailSerializer
-        return MappingVersionListSerializer
-
-    def get_cascaded_result(self):
-        instance = self.get_object()
-        cascade_method = self.request.query_params.get('method', '').lower()
-        map_types = self.request.query_params.dict().get('mapTypes', None)
-        filters = None
-        if map_types:
-            filters = dict(map_type__in=compact(map_types.split(',')))
-        return instance.get_cascaded_resources(
-            cascade_method == SOURCE_MAPPINGS,
-            cascade_method == SOURCE_TO_CONCEPTS,
-            filters
-        )
-
     def get_object(self, queryset=None):
         queryset = self.get_queryset()
         filters = {}
@@ -335,19 +312,9 @@ class ConceptCascadeView(ConceptBaseView):
         return instance
 
     def get(self, request, **kwargs):  # pylint: disable=unused-argument
-        if self.request.query_params.get('ocl', '').lower() in ['true', True]:
-            resources = self.get_cascaded_result()
-            result = []
-            if get(resources, 'concepts'):
-                serializer = self.get_concept_serializer()
-                result += serializer(resources['concepts'], many=True).data
-            if get(resources, 'mappings'):
-                serializer = self.get_mapping_serializer()
-                result += serializer(resources['mappings'], many=True).data
-            return Response(result)
         instance = self.get_object()
         bundle = Bundle(
-            root=instance, params=self.request.query_params, verbose=self.is_verbose(), brief=self.is_brief()
+            root=instance, params=self.request.query_params, verbose=self.is_verbose()
         )
         bundle.cascade()
         return Response(BundleSerializer(bundle).data)

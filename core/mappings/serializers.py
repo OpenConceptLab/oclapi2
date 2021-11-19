@@ -111,7 +111,7 @@ class MappingMinimalSerializer(ModelSerializer):
 
     class Meta:
         model = Mapping
-        fields = ('uuid', 'id', 'url', 'map_type')
+        fields = ('uuid', 'id', 'url', 'map_type', 'version_url')
 
 
 class MappingDetailSerializer(MappingListSerializer):

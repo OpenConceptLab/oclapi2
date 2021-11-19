@@ -17,9 +17,9 @@ class BundleMeta:
 
 
 class Bundle:
-    def __init__(self, root, params=None, verbose=False, brief=False):
+    def __init__(self, root, params=None, verbose=False):
         self.verbose = verbose
-        self.brief = brief
+        self.brief = not verbose
         self.root = root
         self.params = params
         self._meta = BundleMeta(self.root)
@@ -47,11 +47,15 @@ class Bundle:
         return self.root.mnemonic
 
     @property
+    def timestamp(self):  # pylint: disable=invalid-name
+        return self.root.updated_at
+
+    @property
     def meta(self):
         return self._meta.to_dict()
 
     @property
-    def type(self):
+    def bundle_type(self):
         return self.root.resource_type
 
     @property
