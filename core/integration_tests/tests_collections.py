@@ -77,7 +77,9 @@ class CollectionListViewTest(OCLAPITestCase):
         self.assertEqual(response.data[0]['id'], 'coll1')
         self.assertEqual(response.data[0]['url'], coll.uri)
         self.assertEqual(
-            response.data[0]['summary'], dict(versions=1, active_concepts=0, active_mappings=0, active_references=1))
+            response.data[0]['summary'],
+            dict(versions=1, active_concepts=0, active_mappings=0, active_references=1, expansions=0)
+        )
 
     def test_post_201(self):
         org = OrganizationFactory(mnemonic='org')
