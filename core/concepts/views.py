@@ -2,7 +2,7 @@ from django.db.models import F, Q
 from django.http import Http404
 from django.shortcuts import get_object_or_404
 from drf_yasg.utils import swagger_auto_schema
-from pydash import get, compact
+from pydash import get
 from rest_framework import status
 from rest_framework.generics import RetrieveAPIView, DestroyAPIView, ListCreateAPIView, RetrieveUpdateDestroyAPIView, \
     UpdateAPIView
@@ -13,7 +13,6 @@ from rest_framework.views import APIView
 
 from core.bundles.models import Bundle
 from core.bundles.serializers import BundleSerializer
-from core.collections.constants import SOURCE_MAPPINGS, SOURCE_TO_CONCEPTS
 from core.common.constants import (
     HEAD, INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_RETIRED_PARAM, ACCESS_TYPE_NONE)
 from core.common.exceptions import Http409
@@ -36,8 +35,7 @@ from core.concepts.serializers import (
     ConceptVersionDetailSerializer,
     ConceptVersionListSerializer, ConceptSummarySerializer, ConceptMinimalSerializer,
     ConceptChildrenSerializer, ConceptParentsSerializer)
-from core.mappings.serializers import MappingListSerializer, MappingVersionListSerializer, \
-    MappingVersionDetailSerializer
+from core.mappings.serializers import MappingListSerializer
 
 
 class ConceptBaseView(SourceChildCommonBaseView):
