@@ -1,3 +1,8 @@
+##### 2.0.85 - Fri Nov 19 10:17:43 2021 +0000
+- [OpenConceptLab/ocl_issues#1088](https://github.com/OpenConceptLab/ocl_issues/issues/1088) | bundle | default response is brief
+- exact match facets to encode special characters in search string
+- [OpenConceptLab/ocl_issues#1088](https://github.com/OpenConceptLab/ocl_issues/issues/1088) | concept  operation with bundle and ocl response
+- Source/Collection counts update | making sure save is called when counts change
 ##### 2.0.82 - Sun Nov 14 13:30:38 2021 +0000
 - ES | search request timeout
 - Errbit Client | xml escaping url string
