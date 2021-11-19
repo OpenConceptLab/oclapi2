@@ -1036,7 +1036,6 @@ class ConceptCascadeViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['resource_type'], 'Bundle')
-        self.assertEqual(response.data['bundle_type'], 'Concept')
         self.assertEqual(response.data['total'], 2)
         self.assertEqual(len(response.data['entry']), 2)
         self.assertEqual(
@@ -1051,7 +1050,6 @@ class ConceptCascadeViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['resource_type'], 'Bundle')
-        self.assertEqual(response.data['bundle_type'], 'Concept')
         self.assertEqual(response.data['total'], 1)
         self.assertEqual(len(response.data['entry']), 1)
         self.assertEqual(
