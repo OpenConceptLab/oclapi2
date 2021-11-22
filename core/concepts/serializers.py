@@ -268,11 +268,12 @@ class ConceptSummarySerializer(ModelSerializer):
 
 class ConceptMinimalSerializer(ConceptAbstractSerializer):
     id = CharField(source='mnemonic', read_only=True)
+    type = CharField(source='resource_type', read_only=True)
     url = CharField(source='uri', read_only=True)
 
     class Meta:
         model = Concept
-        fields = ConceptAbstractSerializer.Meta.fields + ('id', 'url', 'version_url')
+        fields = ConceptAbstractSerializer.Meta.fields + ('id', 'type', 'url', 'version_url')
 
 
 class ConceptDetailSerializer(ConceptAbstractSerializer):
