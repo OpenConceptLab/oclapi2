@@ -848,7 +848,9 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         if self.is_latest_version:
             queryset |= self.versioned_object.child_concepts.all()
         if self.is_versioned_object:
-            queryset |= self.get_latest_version().child_concepts.all()
+            latest_version = self.get_latest_version()
+            if latest_version:
+                queryset |= latest_version.child_concepts.all()
         return self.__format_hierarchy_uris(queryset.values_list('uri', flat=True))
 
     def child_concept_queryset(self):
