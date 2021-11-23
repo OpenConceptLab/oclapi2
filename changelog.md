@@ -1,3 +1,15 @@
+##### 2.0.88 - Tue Nov 23 06:08:40 2021 +0000
+- [OpenConceptLab/ocl_issues#1122](https://github.com/OpenConceptLab/ocl_issues/issues/1122) | concept cascade | swagger query parameters
+- [OpenConceptLab/ocl_issues#1122](https://github.com/OpenConceptLab/ocl_issues/issues/1122) | concept cascade | excludeMapTypes filter
+- [OpenConceptLab/ocl_issues#1126](https://github.com/OpenConceptLab/ocl_issues/issues/1126) | children concept urls queryset fix
+- [OpenConceptLab/ocl_issues#1126](https://github.com/OpenConceptLab/ocl_issues/issues/1126) | fixing authored report when payload is none
+- [OpenConceptLab/ocl_issues#1126](https://github.com/OpenConceptLab/ocl_issues/issues/1126) | parenless children queryset fix
+- [OpenConceptLab/ocl_issues#1127](https://github.com/OpenConceptLab/ocl_issues/issues/1127) | coverage | setting coverage directory
+- [OpenConceptLab/ocl_issues#1088](https://github.com/OpenConceptLab/ocl_issues/issues/1088) | bundle | added timestamp and concept/mapping type in response
+- Adding API_IMAGE variable to docker-compose.ci
+- Fixing Dockerfile to use cache
+- [OpenConceptLab/ocl_issues#1088](https://github.com/OpenConceptLab/ocl_issues/issues/1088) | bundle | removed bundle type
+- [OpenConceptLab/ocl_issues#1088](https://github.com/OpenConceptLab/ocl_issues/issues/1088) | bundle | not returning id and timestamp
 ##### 2.0.85 - Fri Nov 19 10:17:43 2021 +0000
 - [OpenConceptLab/ocl_issues#1088](https://github.com/OpenConceptLab/ocl_issues/issues/1088) | bundle | default response is brief
 - exact match facets to encode special characters in search string
