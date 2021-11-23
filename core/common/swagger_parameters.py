@@ -114,3 +114,17 @@ org_no_members_param = openapi.Parameter(
     NO_MEMBERS, openapi.IN_QUERY, description="Get all orgs without any members", type=openapi.TYPE_BOOLEAN,
     default=False
 )
+cascade_method_param = openapi.Parameter(
+    'method', openapi.IN_QUERY, type=openapi.TYPE_STRING,
+    enum=['sourceToConcepts', 'sourceMappings']
+)
+cascade_map_types_params = openapi.Parameter(
+    'mapTypes', openapi.IN_QUERY, type=openapi.TYPE_ARRAY,
+    items=openapi.Items(type=openapi.TYPE_STRING),
+    uniqueItems=True
+)
+cascade_exclude_map_types_params = openapi.Parameter(
+    'excludeMapTypes', openapi.IN_QUERY, type=openapi.TYPE_ARRAY,
+    items=openapi.Items(type=openapi.TYPE_STRING),
+    uniqueItems=True
+)

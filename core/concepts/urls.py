@@ -13,6 +13,12 @@ urlpatterns = [
     path(
         "<str:concept>/$cascade/",
         views.ConceptCascadeView.as_view(),
+        name='concept-$cascade'
+    ),
+    # duplicate due to swagger not accepting $cascade
+    path(
+        "<str:concept>/cascade/",
+        views.ConceptCascadeView.as_view(),
         name='concept-cascade'
     ),
     path(
@@ -88,6 +94,12 @@ urlpatterns = [
     ),
     path(
         "<str:concept>/<str:concept_version>/$cascade/",
+        views.ConceptCascadeView.as_view(),
+        name='concept-version-$cascade'
+    ),
+    # duplicate due to swagger not accepting $cascade
+    path(
+        "<str:concept>/<str:concept_version>/cascade/",
         views.ConceptCascadeView.as_view(),
         name='concept-version-cascade'
     ),

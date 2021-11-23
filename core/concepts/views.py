@@ -20,7 +20,8 @@ from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryMixin
 from core.common.swagger_parameters import (
     q_param, limit_param, sort_desc_param, page_param, exact_match_param, sort_asc_param, verbose_param,
     include_facets_header, updated_since_param, include_inverse_mappings_param, include_retired_param,
-    compress_header, include_source_versions_param, include_collection_versions_param)
+    compress_header, include_source_versions_param, include_collection_versions_param, cascade_method_param,
+    cascade_map_types_params, cascade_exclude_map_types_params)
 from core.common.tasks import delete_concept, make_hierarchy
 from core.common.utils import to_parent_uri_from_kwargs
 from core.common.views import SourceChildCommonBaseView, SourceChildExtrasView, \
@@ -309,6 +310,11 @@ class ConceptCascadeView(ConceptBaseView):
         self.check_object_permissions(self.request, instance)
         return instance
 
+    @swagger_auto_schema(
+        manual_parameters=[
+            cascade_method_param, cascade_map_types_params, cascade_exclude_map_types_params
+        ]
+    )
     def get(self, request, **kwargs):  # pylint: disable=unused-argument
         instance = self.get_object()
         bundle = Bundle(
