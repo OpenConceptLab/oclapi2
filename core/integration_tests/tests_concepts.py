@@ -939,11 +939,11 @@ class ConceptCascadeViewTest(OCLAPITestCase):
         concept1 = ConceptFactory(parent=source1)
         concept2 = ConceptFactory(parent=source1)
         concept3 = ConceptFactory(parent=source2)
-        mapping1 = MappingFactory(from_concept=concept1, to_concept=concept2, parent=source1)
-        mapping2 = MappingFactory(from_concept=concept2, to_concept=concept1, parent=source1)
-        mapping3 = MappingFactory(from_concept=concept2, to_concept=concept3, parent=source1)
-        mapping4 = MappingFactory(from_concept=concept1, to_concept=concept3, parent=source1)
-        mapping6 = MappingFactory(from_concept=concept3, to_concept=concept1, parent=source2)
+        mapping1 = MappingFactory(from_concept=concept1, to_concept=concept2, parent=source1, map_type='map_type1')
+        mapping2 = MappingFactory(from_concept=concept2, to_concept=concept1, parent=source1, map_type='map_type1')
+        mapping3 = MappingFactory(from_concept=concept2, to_concept=concept3, parent=source1, map_type='map_type1')
+        mapping4 = MappingFactory(from_concept=concept1, to_concept=concept3, parent=source1, map_type='map_type2')
+        mapping6 = MappingFactory(from_concept=concept3, to_concept=concept1, parent=source2, map_type='map_type2')
 
         response = self.client.get(concept1.uri + '$cascade/?method=sourceMappings')
 
@@ -968,6 +968,31 @@ class ConceptCascadeViewTest(OCLAPITestCase):
                 concept1.uri,
                 concept2.uri,
                 mapping1.uri,
+                mapping4.uri,
+            ])
+        )
+
+        response = self.client.get(concept1.uri + '$cascade/?method=sourceToConcepts&mapTypes=map_type1')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data['entry']), 3)
+        self.assertEqual(
+            sorted([data['url'] for data in response.data['entry']]),
+            sorted([
+                concept1.uri,
+                concept2.uri,
+                mapping1.uri,
+            ])
+        )
+
+        response = self.client.get(concept1.uri + '$cascade/?method=sourceToConcepts&excludeMapTypes=map_type1')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data['entry']), 2)
+        self.assertEqual(
+            sorted([data['url'] for data in response.data['entry']]),
+            sorted([
+                concept1.uri,
                 mapping4.uri,
             ])
         )

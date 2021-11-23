@@ -885,14 +885,16 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         return super().delete(using=using, keep_parents=keep_parents)
 
     def get_cascaded_resources(
-            self, source_mappings=True, source_to_concepts=True, mapping_filters=None
+            self, source_mappings=True, source_to_concepts=True, mapping_filters=None,
+            mapping_criteria=None
     ):
         from core.mappings.models import Mapping
         result = dict(concepts=None, mappings=Mapping.objects.none())
         mappings = None
         mapping_filters = mapping_filters or {}
+        mapping_criteria = mapping_criteria or Q()
         if source_mappings or source_to_concepts:
-            mappings = self.get_unidirectional_mappings().filter(**mapping_filters)
+            mappings = self.get_unidirectional_mappings().filter(**mapping_filters).filter(mapping_criteria)
             result['mappings'] = mappings
         if source_to_concepts and mappings.exists():
             result['concepts'] = Concept.objects.filter(

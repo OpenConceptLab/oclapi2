@@ -1,3 +1,4 @@
+from django.db.models import Q
 from pydash import compact, get
 
 from core.bundles.constants import BUNDLE_TYPE
@@ -27,7 +28,7 @@ class Bundle:
         self.mappings = None
         self._total = None
         self.cascade_method = None
-        self.cascade_mapping_filters = None
+        self.mapping_criteria = Q()
         self.entries = []
 
     def set_cascade_method(self):
@@ -35,8 +36,11 @@ class Bundle:
 
     def set_cascade_mapping_filters(self):
         map_types = self.params.dict().get('mapTypes', None)
+        exclude_map_types = self.params.dict().get('excludeMapTypes', None)
         if map_types:
-            self.cascade_mapping_filters = dict(map_type__in=compact(map_types.split(',')))
+            self.mapping_criteria &= Q(map_type__in=compact(map_types.split(',')))
+        if exclude_map_types:
+            self.mapping_criteria &= ~Q(map_type__in=compact(exclude_map_types.split(',')))
 
     @property
     def resource_type(self):
@@ -75,9 +79,9 @@ class Bundle:
         self.set_cascade_method()
         self.set_cascade_mapping_filters()
         result = self.root.get_cascaded_resources(
-            self.cascade_method == SOURCE_MAPPINGS,
-            self.cascade_method == SOURCE_TO_CONCEPTS,
-            self.cascade_mapping_filters
+            source_mappings=self.cascade_method == SOURCE_MAPPINGS,
+            source_to_concepts=self.cascade_method == SOURCE_TO_CONCEPTS,
+            mapping_criteria=self.mapping_criteria
         )
         self.concepts = get(result, 'concepts')
         self.mappings = get(result, 'mappings')
