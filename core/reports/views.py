@@ -50,6 +50,8 @@ class AuthoredView(BaseAPIView):  # pragma: no cover
         )
     )
     def post(request):
+        if not request.data:
+            return Response(status=status.HTTP_400_BAD_REQUEST)
         usernames = request.data.get('usernames', None)
         if not usernames:
             return Response(status=status.HTTP_400_BAD_REQUEST)
