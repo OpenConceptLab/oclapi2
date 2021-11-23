@@ -23,24 +23,35 @@ class Bundle:
         self.brief = not verbose
         self.root = root
         self.params = params
+        self.cascade_hierarchy = True
+        self.cascade_mappings = True
         self._meta = BundleMeta(self.root)
         self.concepts = None
         self.mappings = None
         self._total = None
-        self.cascade_method = None
-        self.mapping_criteria = Q()
+        self.cascade_method = SOURCE_TO_CONCEPTS
+        self.mappings_criteria = Q()
         self.entries = []
 
-    def set_cascade_method(self):
-        self.cascade_method = self.params.get('method', '').lower()
+    def set_cascade_mappings(self):
+        if 'cascadeMappings' in self.params:
+            self.cascade_mappings = self.params.get('cascadeMappings', None) in ['true', True]
 
-    def set_cascade_mapping_filters(self):
+    def set_cascade_hierarchy(self):
+        if 'cascadeHierarchy' in self.params:
+            self.cascade_hierarchy = self.params.get('cascadeHierarchy', None) in ['true', True]
+
+    def set_cascade_method(self):
+        if 'method' in self.params:
+            self.cascade_method = self.params.get('method', '').lower()
+
+    def set_cascade_mappings_criteria(self):
         map_types = self.params.dict().get('mapTypes', None)
         exclude_map_types = self.params.dict().get('excludeMapTypes', None)
         if map_types:
-            self.mapping_criteria &= Q(map_type__in=compact(map_types.split(',')))
+            self.mappings_criteria &= Q(map_type__in=compact(map_types.split(',')))
         if exclude_map_types:
-            self.mapping_criteria &= ~Q(map_type__in=compact(exclude_map_types.split(',')))
+            self.mappings_criteria &= ~Q(map_type__in=compact(exclude_map_types.split(',')))
 
     @property
     def resource_type(self):
@@ -76,12 +87,16 @@ class Bundle:
         self._total = total
 
     def cascade(self):
+        self.set_cascade_hierarchy()
+        self.set_cascade_mappings()
         self.set_cascade_method()
-        self.set_cascade_mapping_filters()
+        self.set_cascade_mappings_criteria()
         result = self.root.get_cascaded_resources(
             source_mappings=self.cascade_method == SOURCE_MAPPINGS,
             source_to_concepts=self.cascade_method == SOURCE_TO_CONCEPTS,
-            mapping_criteria=self.mapping_criteria
+            mappings_criteria=self.mappings_criteria,
+            cascade_mappings=self.cascade_mappings,
+            cascade_hierarchy=self.cascade_hierarchy
         )
         self.concepts = get(result, 'concepts')
         self.mappings = get(result, 'mappings')

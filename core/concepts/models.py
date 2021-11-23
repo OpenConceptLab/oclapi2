@@ -884,23 +884,24 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         LocalizedText.objects.filter(description_locales=self).delete()
         return super().delete(using=using, keep_parents=keep_parents)
 
-    def get_cascaded_resources(
-            self, source_mappings=True, source_to_concepts=True, mapping_filters=None,
-            mapping_criteria=None
+    def get_cascaded_resources(  # pylint: disable=too-many-arguments
+            self, source_mappings=True, source_to_concepts=True, mappings_criteria=None,
+            cascade_mappings=True, cascade_hierarchy=True
     ):
         from core.mappings.models import Mapping
-        result = dict(concepts=None, mappings=Mapping.objects.none())
-        mappings = None
-        mapping_filters = mapping_filters or {}
-        mapping_criteria = mapping_criteria or Q()
+        mappings = Mapping.objects.none()
+        result = dict(concepts=Concept.objects.filter(id=self.id), mappings=mappings)
+        mappings_criteria = mappings_criteria or Q()
         if source_mappings or source_to_concepts:
-            mappings = self.get_unidirectional_mappings().filter(**mapping_filters).filter(mapping_criteria)
-            result['mappings'] = mappings
-        if source_to_concepts and mappings.exists():
-            result['concepts'] = Concept.objects.filter(
-                id__in=[*list(mappings.values_list('to_concept_id', flat=True)), self.id], parent=self.parent)
-        else:
-            result['concepts'] = Concept.objects.filter(id=self.id)
+            mappings = self.get_unidirectional_mappings().filter(mappings_criteria)
+            if cascade_mappings:
+                result['mappings'] = mappings
+        if source_to_concepts:
+            if mappings.exists():
+                result['concepts'] |= Concept.objects.filter(
+                    id__in=mappings.values_list('to_concept_id', flat=True), parent=self.parent)
+            if cascade_hierarchy:
+                result['concepts'] |= self.child_concept_queryset()
         return result
 
     @staticmethod
