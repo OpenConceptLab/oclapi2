@@ -1,9 +1,11 @@
 from drf_yasg import openapi
 
+from core.collections.constants import SOURCE_TO_CONCEPTS, SOURCE_MAPPINGS
 from core.common.constants import RELEASED_PARAM, VERBOSE_PARAM, INCLUDE_RETIRED_PARAM, PROCESSING_PARAM, \
     INCLUDE_INVERSE_MAPPINGS_PARAM, UPDATED_SINCE_PARAM, INCLUDE_SOURCE_VERSIONS, INCLUDE_COLLECTION_VERSIONS, \
-    LAST_LOGIN_BEFORE_PARAM, LAST_LOGIN_SINCE_PARAM, DATE_JOINED_SINCE_PARAM, DATE_JOINED_BEFORE_PARAM
-
+    LAST_LOGIN_BEFORE_PARAM, LAST_LOGIN_SINCE_PARAM, DATE_JOINED_SINCE_PARAM, DATE_JOINED_BEFORE_PARAM, \
+    CASCADE_HIERARCHY_PARAM, CASCADE_METHOD_PARAM, MAP_TYPES_PARAM, EXCLUDE_MAP_TYPES_PARAM, CASCADE_MAPPINGS_PARAM, \
+    INCLUDE_MAPPINGS_PARAM, CASCADE_LEVELS_PARAM
 # HEADERS
 from core.orgs.constants import NO_MEMBERS
 
@@ -114,17 +116,31 @@ org_no_members_param = openapi.Parameter(
     NO_MEMBERS, openapi.IN_QUERY, description="Get all orgs without any members", type=openapi.TYPE_BOOLEAN,
     default=False
 )
+
+# cascade params
 cascade_method_param = openapi.Parameter(
-    'method', openapi.IN_QUERY, type=openapi.TYPE_STRING,
-    enum=['sourceToConcepts', 'sourceMappings']
+    CASCADE_METHOD_PARAM, openapi.IN_QUERY, type=openapi.TYPE_STRING,
+    enum=[SOURCE_TO_CONCEPTS, SOURCE_MAPPINGS], default=SOURCE_TO_CONCEPTS
 )
 cascade_map_types_params = openapi.Parameter(
-    'mapTypes', openapi.IN_QUERY, type=openapi.TYPE_ARRAY,
+    MAP_TYPES_PARAM, openapi.IN_QUERY, type=openapi.TYPE_ARRAY,
     items=openapi.Items(type=openapi.TYPE_STRING),
     uniqueItems=True
 )
 cascade_exclude_map_types_params = openapi.Parameter(
-    'excludeMapTypes', openapi.IN_QUERY, type=openapi.TYPE_ARRAY,
+    EXCLUDE_MAP_TYPES_PARAM, openapi.IN_QUERY, type=openapi.TYPE_ARRAY,
     items=openapi.Items(type=openapi.TYPE_STRING),
     uniqueItems=True
+)
+cascade_hierarchy_param = openapi.Parameter(
+    CASCADE_HIERARCHY_PARAM, openapi.IN_QUERY, type=openapi.TYPE_BOOLEAN, default=True
+)
+cascade_mappings_param = openapi.Parameter(
+    CASCADE_MAPPINGS_PARAM, openapi.IN_QUERY, type=openapi.TYPE_BOOLEAN, default=True
+)
+include_mappings_param = openapi.Parameter(
+    INCLUDE_MAPPINGS_PARAM, openapi.IN_QUERY, type=openapi.TYPE_BOOLEAN, default=True
+)
+cascade_levels_param = openapi.Parameter(
+    CASCADE_LEVELS_PARAM, openapi.IN_QUERY, type=openapi.TYPE_STRING, default='*', description='0, 1, 2...*'
 )

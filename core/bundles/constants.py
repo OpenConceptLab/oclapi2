@@ -1,1 +1,2 @@
-BUNDLE_TYPE = 'Bundle'
+RESOURCE_TYPE = 'Bundle'
+BUNDLE_TYPE_SEARCHSET = 'searchset'

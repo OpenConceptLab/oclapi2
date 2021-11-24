@@ -15,13 +15,14 @@ from core.bundles.models import Bundle
 from core.bundles.serializers import BundleSerializer
 from core.common.constants import (
     HEAD, INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_RETIRED_PARAM, ACCESS_TYPE_NONE)
-from core.common.exceptions import Http409
+from core.common.exceptions import Http409, Http400, Http405
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryMixin
 from core.common.swagger_parameters import (
     q_param, limit_param, sort_desc_param, page_param, exact_match_param, sort_asc_param, verbose_param,
     include_facets_header, updated_since_param, include_inverse_mappings_param, include_retired_param,
     compress_header, include_source_versions_param, include_collection_versions_param, cascade_method_param,
-    cascade_map_types_params, cascade_exclude_map_types_params)
+    cascade_map_types_params, cascade_exclude_map_types_params, cascade_hierarchy_param, cascade_mappings_param,
+    include_mappings_param, cascade_levels_param)
 from core.common.tasks import delete_concept, make_hierarchy
 from core.common.utils import to_parent_uri_from_kwargs
 from core.common.views import SourceChildCommonBaseView, SourceChildExtrasView, \
@@ -289,20 +290,14 @@ class ConceptCascadeView(ConceptBaseView):
     serializer_class = BundleSerializer
 
     def get_object(self, queryset=None):
-        queryset = self.get_queryset()
-        filters = {}
-        if 'concept_version' not in self.kwargs:
-            filters = dict(id=F('versioned_object_id'))
         if 'collection' in self.kwargs:
-            filters = {}
-            queryset = queryset.order_by('id').distinct('id')
-            uri_param = self.request.query_params.dict().get('uri')
-            if uri_param:
-                filters.update(Concept.get_parent_and_owner_filters_from_uri(uri_param))
-            if queryset.count() > 1 and not uri_param:
-                raise Http409()
+            raise Http405()
 
-        instance = queryset.filter(**filters).first()
+        queryset = self.get_queryset()
+        if 'concept_version' not in self.kwargs:
+            queryset = queryset.filter(id=F('versioned_object_id'))
+
+        instance = queryset.first()
 
         if not instance:
             raise Http404()
@@ -312,7 +307,8 @@ class ConceptCascadeView(ConceptBaseView):
 
     @swagger_auto_schema(
         manual_parameters=[
-            cascade_method_param, cascade_map_types_params, cascade_exclude_map_types_params
+            cascade_method_param, cascade_map_types_params, cascade_exclude_map_types_params,
+            cascade_hierarchy_param, cascade_mappings_param, include_mappings_param, cascade_levels_param
         ]
     )
     def get(self, request, **kwargs):  # pylint: disable=unused-argument

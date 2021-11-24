@@ -1,8 +1,10 @@
 from django.db.models import Q
 from pydash import compact, get
 
-from core.bundles.constants import BUNDLE_TYPE
+from core.bundles.constants import BUNDLE_TYPE_SEARCHSET, RESOURCE_TYPE
 from core.collections.constants import SOURCE_MAPPINGS, SOURCE_TO_CONCEPTS
+from core.common.constants import INCLUDE_MAPPINGS_PARAM, CASCADE_LEVELS_PARAM, CASCADE_MAPPINGS_PARAM, \
+    CASCADE_HIERARCHY_PARAM, CASCADE_METHOD_PARAM, MAP_TYPES_PARAM, EXCLUDE_MAP_TYPES_PARAM
 
 
 class BundleMeta:
@@ -25,6 +27,8 @@ class Bundle:
         self.params = params
         self.cascade_hierarchy = True
         self.cascade_mappings = True
+        self.cascade_levels = '*'
+        self.include_mappings = True
         self._meta = BundleMeta(self.root)
         self.concepts = None
         self.mappings = None
@@ -33,21 +37,39 @@ class Bundle:
         self.mappings_criteria = Q()
         self.entries = []
 
+    def set_cascade_parameters(self):
+        self.set_cascade_method()
+        self.set_cascade_hierarchy()
+        self.set_cascade_mappings()
+        self.set_cascade_mappings_criteria()
+        self.set_cascade_levels()
+        self.set_include_mappings()
+
+    def set_include_mappings(self):
+        if INCLUDE_MAPPINGS_PARAM in self.params:
+            self.include_mappings = self.params[INCLUDE_MAPPINGS_PARAM] in ['true', True]
+
+    def set_cascade_levels(self):
+        if CASCADE_LEVELS_PARAM in self.params:
+            level = self.params.get(CASCADE_LEVELS_PARAM, '*')
+            if level != '*' and level:
+                self.cascade_levels = int(level)
+
     def set_cascade_mappings(self):
-        if 'cascadeMappings' in self.params:
-            self.cascade_mappings = self.params.get('cascadeMappings', None) in ['true', True]
+        if CASCADE_MAPPINGS_PARAM in self.params:
+            self.cascade_mappings = self.params[CASCADE_MAPPINGS_PARAM] in ['true', True]
 
     def set_cascade_hierarchy(self):
-        if 'cascadeHierarchy' in self.params:
-            self.cascade_hierarchy = self.params.get('cascadeHierarchy', None) in ['true', True]
+        if CASCADE_HIERARCHY_PARAM in self.params:
+            self.cascade_hierarchy = self.params[CASCADE_HIERARCHY_PARAM] in ['true', True]
 
     def set_cascade_method(self):
-        if 'method' in self.params:
-            self.cascade_method = self.params.get('method', '').lower()
+        if CASCADE_METHOD_PARAM in self.params:
+            self.cascade_method = self.params.get(CASCADE_METHOD_PARAM, '').lower()
 
     def set_cascade_mappings_criteria(self):
-        map_types = self.params.dict().get('mapTypes', None)
-        exclude_map_types = self.params.dict().get('excludeMapTypes', None)
+        map_types = self.params.dict().get(MAP_TYPES_PARAM, None)
+        exclude_map_types = self.params.dict().get(EXCLUDE_MAP_TYPES_PARAM, None)
         if map_types:
             self.mappings_criteria &= Q(map_type__in=compact(map_types.split(',')))
         if exclude_map_types:
@@ -55,7 +77,7 @@ class Bundle:
 
     @property
     def resource_type(self):
-        return BUNDLE_TYPE
+        return RESOURCE_TYPE
 
     @property
     def id(self):  # pylint: disable=invalid-name
@@ -71,7 +93,7 @@ class Bundle:
 
     @property
     def bundle_type(self):
-        return self.root.resource_type
+        return BUNDLE_TYPE_SEARCHSET
 
     @property
     def total(self):
@@ -87,16 +109,15 @@ class Bundle:
         self._total = total
 
     def cascade(self):
-        self.set_cascade_hierarchy()
-        self.set_cascade_mappings()
-        self.set_cascade_method()
-        self.set_cascade_mappings_criteria()
+        self.set_cascade_parameters()
         result = self.root.get_cascaded_resources(
             source_mappings=self.cascade_method == SOURCE_MAPPINGS,
             source_to_concepts=self.cascade_method == SOURCE_TO_CONCEPTS,
             mappings_criteria=self.mappings_criteria,
             cascade_mappings=self.cascade_mappings,
-            cascade_hierarchy=self.cascade_hierarchy
+            cascade_hierarchy=self.cascade_hierarchy,
+            cascade_levels=self.cascade_levels,
+            include_mappings=self.include_mappings,
         )
         self.concepts = get(result, 'concepts')
         self.mappings = get(result, 'mappings')
