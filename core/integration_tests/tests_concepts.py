@@ -972,7 +972,8 @@ class ConceptCascadeViewTest(OCLAPITestCase):
             ])
         )
 
-        response = self.client.get(concept1.uri + '$cascade/?method=sourceToConcepts&mapTypes=map_type1&cascadeLevels=0')
+        response = self.client.get(
+            concept1.uri + '$cascade/?method=sourceToConcepts&mapTypes=map_type1&cascadeLevels=0')
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data['entry']), 3)
@@ -985,7 +986,8 @@ class ConceptCascadeViewTest(OCLAPITestCase):
             ])
         )
 
-        response = self.client.get(concept1.uri + '$cascade/?method=sourceToConcepts&excludeMapTypes=map_type1&cascadeLevels=0')
+        response = self.client.get(
+            concept1.uri + '$cascade/?method=sourceToConcepts&excludeMapTypes=map_type1&cascadeLevels=0')
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data['entry']), 2)

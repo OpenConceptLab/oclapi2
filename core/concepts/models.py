@@ -884,13 +884,14 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         LocalizedText.objects.filter(description_locales=self).delete()
         return super().delete(using=using, keep_parents=keep_parents)
 
-    def get_cascaded_resources(  # pylint: disable=too-many-arguments
+    def cascade(  # pylint: disable=too-many-arguments
             self, source_mappings=True, source_to_concepts=True, mappings_criteria=None,
             cascade_mappings=True, cascade_hierarchy=True, cascade_levels='*',
             include_mappings=True, max_results=1000
     ):
-        result = self.__get_cascaded_resources(
-            source_mappings, source_to_concepts, mappings_criteria, cascade_mappings, cascade_hierarchy, include_mappings
+        result = self.get_cascaded_resources(
+            source_mappings, source_to_concepts, mappings_criteria,
+            cascade_mappings, cascade_hierarchy, include_mappings
         )
         cascaded = []
 
@@ -901,8 +902,9 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                 if cascaded:
                     not_cascaded = not_cascaded.exclude(id__in=cascaded)
                 for concept in not_cascaded:
-                    res = concept.__get_cascaded_resources(
-                        source_mappings, source_to_concepts, mappings_criteria, cascade_mappings, cascade_hierarchy, include_mappings
+                    res = concept.get_cascaded_resources(
+                        source_mappings, source_to_concepts, mappings_criteria,
+                        cascade_mappings, cascade_hierarchy, include_mappings
                     )
                     cascaded.append(concept.id)
                     result['concepts'] |= res['concepts']
@@ -913,7 +915,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
         return result
 
-    def __get_cascaded_resources(
+    def get_cascaded_resources(  # pylint: disable=too-many-arguments
             self, source_mappings=True, source_to_concepts=True, mappings_criteria=None,
             cascade_mappings=True, cascade_hierarchy=True, include_mappings=True
     ):

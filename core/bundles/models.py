@@ -110,7 +110,7 @@ class Bundle:
 
     def cascade(self):
         self.set_cascade_parameters()
-        result = self.root.get_cascaded_resources(
+        result = self.root.cascade(
             source_mappings=self.cascade_method == SOURCE_MAPPINGS,
             source_to_concepts=self.cascade_method == SOURCE_TO_CONCEPTS,
             mappings_criteria=self.mappings_criteria,
