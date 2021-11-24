@@ -706,7 +706,7 @@ def get_request_url():
 
 
 def named_tuple_fetchall(cursor):
-    "Return all rows from a cursor as a namedtuple"
+    """Return all rows from a cursor as a namedtuple"""
     from collections import namedtuple
     desc = cursor.description
     nt_result = namedtuple('Result', [col[0] for col in desc])

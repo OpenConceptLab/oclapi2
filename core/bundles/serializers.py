@@ -7,7 +7,7 @@ class BundleSerializer(serializers.Serializer):  # pylint: disable=abstract-meth
     bundle_type = CharField(read_only=True)
     timestamp = DateTimeField(read_only=True)
     total = IntegerField(read_only=True)
-    entry = JSONField(read_only=True)
+    entry = JSONField(read_only=True, source='entries')
 
     class Meta:
         fields = (

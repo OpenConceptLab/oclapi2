@@ -7,18 +7,6 @@ from core.common.constants import INCLUDE_MAPPINGS_PARAM, CASCADE_LEVELS_PARAM, 
     CASCADE_HIERARCHY_PARAM, CASCADE_METHOD_PARAM, MAP_TYPES_PARAM, EXCLUDE_MAP_TYPES_PARAM
 
 
-class BundleMeta:
-    def __init__(self, root):
-        self.root = root
-
-    @property
-    def last_updated(self):
-        return self.root.updated_at
-
-    def to_dict(self):
-        return dict(lastUpdated=self.last_updated)
-
-
 class Bundle:
     def __init__(self, root, params=None, verbose=False):
         self.verbose = verbose
@@ -29,7 +17,6 @@ class Bundle:
         self.cascade_mappings = True
         self.cascade_levels = '*'
         self.include_mappings = True
-        self._meta = BundleMeta(self.root)
         self.concepts = None
         self.mappings = None
         self._total = None
@@ -80,16 +67,8 @@ class Bundle:
         return RESOURCE_TYPE
 
     @property
-    def id(self):  # pylint: disable=invalid-name
-        return self.root.mnemonic
-
-    @property
     def timestamp(self):  # pylint: disable=invalid-name
         return self.root.updated_at
-
-    @property
-    def meta(self):
-        return self._meta.to_dict()
 
     @property
     def bundle_type(self):
@@ -97,9 +76,6 @@ class Bundle:
 
     @property
     def total(self):
-        if self._total:
-            return self._total
-        self.set_total()
         return self._total
 
     def set_total(self):
@@ -123,13 +99,6 @@ class Bundle:
         self.mappings = get(result, 'mappings')
         self.set_total()
         self.set_entries()
-
-    @property
-    def entry(self):
-        if self.entries:
-            return self.entries
-        self.set_entries()
-        return self.entries
 
     def set_entries(self):
         from core.concepts.models import Concept
