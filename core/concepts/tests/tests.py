@@ -849,34 +849,28 @@ class ConceptTest(OCLTestCase):
         MappingFactory(from_concept=concept1, to_concept=concept2, parent=source2)
 
         mappings = concept1.get_unidirectional_mappings()
-        self.assertEqual(mappings.count(), 2)
-        self.assertEqual(list(mappings), [mapping2, mapping1])
+        self.assertCountEqual(list(mappings), [mapping2, mapping1])
 
         mappings = concept1.get_indirect_mappings()
-        self.assertEqual(mappings.count(), 1)
-        self.assertEqual(list(mappings), [mapping4])
+        self.assertCountEqual(list(mappings), [mapping4])
 
         mappings = concept1.get_bidirectional_mappings()
-        self.assertEqual(mappings.count(), 3)
-        self.assertEqual(list(mappings), [mapping4, mapping2, mapping1])
+        self.assertCountEqual(list(mappings), [mapping4, mapping2, mapping1])
 
         mappings = concept2.get_unidirectional_mappings()
         self.assertEqual(mappings.count(), 0)
 
         mappings = concept2.get_indirect_mappings()
-        self.assertEqual(mappings.count(), 1)
-        self.assertEqual(list(mappings), [mapping1])
+        self.assertCountEqual(list(mappings), [mapping1])
 
         mappings = concept3.get_unidirectional_mappings()
         self.assertEqual(mappings.count(), 0)
 
         mappings = concept3.get_indirect_mappings()
-        self.assertEqual(mappings.count(), 1)
-        self.assertEqual(list(mappings), [mapping3])
+        self.assertCountEqual(list(mappings), [mapping3])
 
         mappings = concept4.get_unidirectional_mappings()
-        self.assertEqual(mappings.count(), 1)
-        self.assertEqual(list(mappings), [mapping5])
+        self.assertCountEqual(list(mappings), [mapping5])
 
         mappings = concept4.get_indirect_mappings()
         self.assertEqual(mappings.count(), 0)

@@ -773,26 +773,31 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         return self.__get_mappings_from_relation('mappings_to')
 
     def __get_mappings_from_relation(self, relation_manager, is_latest=False):
-        queryset = getattr(self, relation_manager).filter(parent_id=self.parent_id)
+        from core.mappings.models import Mapping
+        mappings = Mapping.objects.filter(parent_id=self.parent_id)
 
-        if self.is_versioned_object:
-            latest_version = self.get_latest_version()
-            if latest_version:
-                queryset |= getattr(latest_version, relation_manager).filter(parent_id=self.parent_id)
+        if relation_manager == 'mappings_from':
+            key = 'from_concept_id__in'
+        else:
+            key = 'to_concept_id__in'
+
+        filters = {key: [self.id]}
         if self.is_latest_version:
-            versioned_object = self.versioned_object
-            if versioned_object:
-                queryset |= getattr(versioned_object, relation_manager).filter(parent_id=self.parent_id)
+            filters[key].append(self.versioned_object_id)
+        elif self.is_versioned_object:
+            latest_version = self.get_latest_version()
+            filters[key].append(get(latest_version, 'id'))
+
+        filters[key] = compact(filters[key])
+
+        mappings = mappings.filter(**filters)
 
         if is_latest:
-            return queryset.filter(is_latest_version=True)
-
-        return queryset.filter(id=F('versioned_object_id'))
+            return mappings.filter(is_latest_version=True)
+        return mappings.filter(id=F('versioned_object_id'))
 
     def get_bidirectional_mappings(self):
-        queryset = self.get_unidirectional_mappings() | self.get_indirect_mappings()
-
-        return queryset.distinct()
+        return self.get_unidirectional_mappings() | self.get_indirect_mappings()
 
     def get_bidirectional_mappings_for_collection(self, collection_url, collection_version=HEAD):
         queryset = self.get_unidirectional_mappings_for_collection(
@@ -893,14 +898,13 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             source_mappings, source_to_concepts, mappings_criteria,
             cascade_mappings, cascade_hierarchy, include_mappings
         )
-        cascaded = []
+        cascaded = [self.id]
 
         def iterate(level):
             not_cascaded = result['concepts']
             total = not_cascaded.count() + result['mappings'].count()
             if (level == '*' or level > 0) and total < max_results:
-                if cascaded:
-                    not_cascaded = not_cascaded.exclude(id__in=cascaded)
+                not_cascaded = not_cascaded.exclude(id__in=cascaded)
                 for concept in not_cascaded:
                     res = concept.get_cascaded_resources(
                         source_mappings, source_to_concepts, mappings_criteria,
