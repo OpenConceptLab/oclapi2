@@ -787,7 +787,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         if is_latest:
             return queryset.filter(is_latest_version=True)
 
-        return queryset.filter(id=F('versioned_object_id')).order_by('-updated_at').distinct('updated_at')
+        return queryset.filter(id=F('versioned_object_id'))
 
     def get_bidirectional_mappings(self):
         queryset = self.get_unidirectional_mappings() | self.get_indirect_mappings()
