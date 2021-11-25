@@ -892,7 +892,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     def cascade(  # pylint: disable=too-many-arguments
             self, source_mappings=True, source_to_concepts=True, mappings_criteria=None,
             cascade_mappings=True, cascade_hierarchy=True, cascade_levels='*',
-            include_mappings=True, max_results=500
+            include_mappings=True, max_results=1000
     ):
         result = self.get_cascaded_resources(
             source_mappings, source_to_concepts, mappings_criteria,
@@ -901,19 +901,19 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         cascaded = [self.id]
 
         def iterate(level):
-            not_cascaded = result['concepts']
-            total = not_cascaded.count() + result['mappings'].count()
-            if (level == '*' or level > 0) and total < max_results:
-                not_cascaded = not_cascaded.exclude(id__in=cascaded)
-                for concept in not_cascaded:
-                    res = concept.get_cascaded_resources(
-                        source_mappings, source_to_concepts, mappings_criteria,
-                        cascade_mappings, cascade_hierarchy, include_mappings
-                    )
-                    cascaded.append(concept.id)
-                    result['concepts'] |= res['concepts']
-                    result['mappings'] |= res['mappings']
-                    iterate(level if level == '*' else level - 1)
+            if level == '*' or level > 0:
+                if (result['concepts'].count() + result['mappings'].count()) < max_results:
+                    not_cascaded = result['concepts'].exclude(id__in=cascaded)
+                    if not_cascaded.exists():
+                        for concept in not_cascaded:
+                            res = concept.get_cascaded_resources(
+                                source_mappings, source_to_concepts, mappings_criteria,
+                                cascade_mappings, cascade_hierarchy, include_mappings
+                            )
+                            cascaded.append(concept.id)
+                            result['concepts'] |= res['concepts']
+                            result['mappings'] |= res['mappings']
+                        iterate(level if level == '*' else level - 1)
 
         iterate(cascade_levels)
 
