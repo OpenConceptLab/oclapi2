@@ -934,7 +934,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         if source_to_concepts:
             if mappings.exists():
                 result['concepts'] |= Concept.objects.filter(
-                    id__in=mappings.values_list('to_concept_id', flat=True), parent=self.parent)
+                    id__in=mappings.values_list('to_concept_id', flat=True), parent_id=self.parent_id)
             if cascade_hierarchy:
                 result['concepts'] |= self.child_concept_queryset()
 
