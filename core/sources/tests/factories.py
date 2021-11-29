@@ -11,8 +11,8 @@ class OrganizationSourceFactory(factory.django.DjangoModelFactory):
     class Meta:
         model = Source
 
-    mnemonic = Sequence("source{}".format)
-    name = Sequence("source{}".format)
+    mnemonic = Sequence("source{}".format)  # pylint: disable=consider-using-f-string
+    name = Sequence("source{}".format)  # pylint: disable=consider-using-f-string
     source_type = "Dictionary"
     public_access = ACCESS_TYPE_EDIT
     default_locale = "en"
@@ -27,8 +27,8 @@ class UserSourceFactory(factory.django.DjangoModelFactory):
     class Meta:
         model = Source
 
-    mnemonic = Sequence("source{}".format)
-    name = Sequence("source{}".format)
+    mnemonic = Sequence("source{}".format)  # pylint: disable=consider-using-f-string
+    name = Sequence("source{}".format)  # pylint: disable=consider-using-f-string
     source_type = "Dictionary"
     public_access = ACCESS_TYPE_EDIT
     default_locale = "en"

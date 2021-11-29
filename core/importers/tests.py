@@ -5,14 +5,18 @@ import uuid
 
 from celery_once import AlreadyQueued
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.core.management import call_command
 from django.db.models import F
 from mock import patch, Mock, ANY, call
+from ocldev.oclcsvtojsonconverter import OclStandardCsvToJsonConverter
 
 from core.collections.models import Collection
+from core.common.constants import CUSTOM_VALIDATION_SCHEMA_OPENMRS
 from core.common.tests import OCLAPITestCase, OCLTestCase
 from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory
 from core.importers.models import BulkImport, BulkImportInline, BulkImportParallelRunner
+from core.importers.views import csv_file_data_to_input_list
 from core.mappings.models import Mapping
 from core.orgs.models import Organization
 from core.orgs.tests.factories import OrganizationFactory
@@ -155,8 +159,8 @@ class BulkImportInlineTest(OCLTestCase):
         self.assertTrue(Source.objects.filter(mnemonic='DemoSource', version='HEAD').exists())
         self.assertTrue(Source.objects.filter(mnemonic='DemoSource', version='initial').exists())
         self.assertEqual(importer.processed, 2)
-        self.assertEqual(len(importer.created), 1)
-        self.assertEqual(len(importer.updated), 1)
+        self.assertEqual(len(importer.created), 2)
+        self.assertEqual(len(importer.updated), 0)
         self.assertEqual(importer.failed, [])
         self.assertTrue(importer.elapsed_seconds > 0)
 
@@ -227,8 +231,8 @@ class BulkImportInlineTest(OCLTestCase):
         self.assertTrue(Collection.objects.filter(mnemonic='MER-R-MOH-Facility-FY19', version='HEAD').exists())
         self.assertTrue(Collection.objects.filter(mnemonic='MER-R-MOH-Facility-FY19', version='FY19.v0').exists())
         self.assertEqual(importer.processed, 2)
-        self.assertEqual(len(importer.created), 1)
-        self.assertEqual(len(importer.updated), 1)
+        self.assertEqual(len(importer.created), 2)
+        self.assertEqual(len(importer.updated), 0)
         self.assertEqual(importer.failed, [])
         self.assertTrue(importer.elapsed_seconds > 0)
 
@@ -278,6 +282,34 @@ class BulkImportInlineTest(OCLTestCase):
         self.assertEqual(len(importer.updated), 1)
         self.assertEqual(importer.failed, [])
         self.assertTrue(importer.elapsed_seconds > 0)
+
+    def test_concept_import_permission_denied(self):
+        self.assertFalse(Concept.objects.filter(mnemonic='Food').exists())
+
+        org = OrganizationFactory(mnemonic='DemoOrg')
+        source = OrganizationSourceFactory(
+            organization=org, mnemonic='DemoSource', version='HEAD', public_access='None')
+        self.assertFalse(source.public_can_view)
+
+        data = {
+            "type": "Concept", "id": "Food", "concept_class": "Root",
+            "datatype": "None", "source": "DemoSource", "owner": "DemoOrg", "owner_type": "Organization",
+            "names": [{"name": "Food", "locale": "en", "locale_preferred": "True", "name_type": "Fully Specified"}],
+            "descriptions": [],
+        }
+
+        random_user = UserProfileFactory(username='random-user')
+        self.assertFalse(org.is_member(random_user))
+
+        importer = BulkImportInline(json.dumps(data), 'random-user', True)
+        importer.run()
+
+        self.assertEqual(Concept.objects.filter(mnemonic='Food').count(), 0)
+        self.assertEqual(importer.processed, 1)
+        self.assertEqual(len(importer.permission_denied), 1)
+        self.assertEqual(len(importer.created), 0)
+        self.assertEqual(len(importer.updated), 0)
+        self.assertEqual(importer.permission_denied, [data])
 
     def test_mapping_import(self):
         self.assertEqual(Mapping.objects.count(), 0)
@@ -365,6 +397,7 @@ class BulkImportInlineTest(OCLTestCase):
         self.assertEqual(len(importer.failed), 0)
         self.assertEqual(len(importer.invalid), 0)
         self.assertEqual(len(importer.others), 0)
+        self.assertEqual(len(importer.permission_denied), 0)
         collection = Collection.objects.filter(uri='/orgs/PEPFAR/collections/MER-R-MOH-Facility-FY19/').first()
         self.assertEqual(collection.expansions.count(), 1)
         self.assertEqual(collection.expansion.concepts.count(), 4)
@@ -373,34 +406,61 @@ class BulkImportInlineTest(OCLTestCase):
 
     def test_sample_import(self):
         importer = BulkImportInline(
-            open(os.path.join(os.path.dirname(__file__), '..', 'samples/sample_ocldev.json'), 'r').read(),
+            open(
+                os.path.join(os.path.dirname(__file__), '..', 'samples/sample_ocldev.json'), 'r'
+            ).read(),
             'ocladmin', True
         )
         importer.run()
 
         self.assertEqual(importer.processed, 64)
-        self.assertEqual(len(importer.created), 47)
+        self.assertEqual(len(importer.created), 49)
         self.assertEqual(len(importer.exists), 3)
-        self.assertEqual(len(importer.updated), 14)
+        self.assertEqual(len(importer.updated), 12)
         self.assertEqual(len(importer.failed), 0)
         self.assertEqual(len(importer.invalid), 0)
         self.assertEqual(len(importer.others), 0)
+        self.assertEqual(len(importer.permission_denied), 0)
+
+    @unittest.skip('[Skipped] OPENMRS CSV Import Sample')
+    def test_openmrs_schema_csv_import(self):
+        call_command('import_lookup_values')
+        org = OrganizationFactory(mnemonic='MSFOCP')
+        OrganizationSourceFactory(
+            mnemonic='Implementationtest', organization=org, custom_validation_schema=CUSTOM_VALIDATION_SCHEMA_OPENMRS)
+        file_content = open(
+            os.path.join(os.path.dirname(__file__), '..', 'samples/msfocp_concepts.csv'), 'r').read()
+        data = OclStandardCsvToJsonConverter(
+            input_list=csv_file_data_to_input_list(file_content),
+            allow_special_characters=True
+        ).process()
+        importer = BulkImportInline(data, 'ocladmin', True)
+        importer.run()
+
+        self.assertEqual(importer.processed, 31)
+        self.assertEqual(len(importer.created), 21)
+        self.assertEqual(len(importer.updated), 0)
+        self.assertEqual(len(importer.invalid), 0)
+        self.assertEqual(len(importer.failed), 10)
+        self.assertEqual(len(importer.permission_denied), 0)
 
     @unittest.skip('[Skipped] PEPFAR (small) Import Sample')
     def test_pepfar_import(self):
         importer = BulkImportInline(
-            open(os.path.join(os.path.dirname(__file__), '..', 'samples/pepfar_datim_moh_fy19.json'), 'r').read(),
+            open(
+                os.path.join(os.path.dirname(__file__), '..', 'samples/pepfar_datim_moh_fy19.json'), 'r').read(),
             'ocladmin', True
         )
         importer.run()
 
         self.assertEqual(importer.processed, 413)
-        self.assertEqual(len(importer.created), 411)
+        self.assertEqual(len(importer.created), 413)
         self.assertEqual(len(importer.exists), 0)
-        self.assertEqual(len(importer.updated), 2)
+        self.assertEqual(len(importer.updated), 0)
         self.assertEqual(len(importer.failed), 0)
         self.assertEqual(len(importer.invalid), 0)
         self.assertEqual(len(importer.others), 0)
+        self.assertEqual(len(importer.permission_denied), 0)
 
 
 class BulkImportParallelRunnerTest(OCLTestCase):
@@ -409,7 +469,9 @@ class BulkImportParallelRunnerTest(OCLTestCase):
         redis_service_mock.return_value = Mock()
 
         importer = BulkImportParallelRunner(
-            open(os.path.join(os.path.dirname(__file__), '..', 'samples/sample_ocldev.json'), 'r').read(),
+            open(
+                os.path.join(os.path.dirname(__file__), '..', 'samples/sample_ocldev.json'), 'r'
+            ).read(),
             'ocladmin', True
         )
 
@@ -433,7 +495,9 @@ class BulkImportParallelRunnerTest(OCLTestCase):
     def test_is_any_process_alive(self, redis_service_mock):
         redis_service_mock.return_value = Mock()
         importer = BulkImportParallelRunner(
-            open(os.path.join(os.path.dirname(__file__), '..', 'samples/sample_ocldev.json'), 'r').read(),
+            open(
+                os.path.join(os.path.dirname(__file__), '..', 'samples/sample_ocldev.json'), 'r'
+            ).read(),
             'ocladmin', True
         )
         self.assertFalse(importer.is_any_process_alive())
@@ -472,7 +536,9 @@ class BulkImportParallelRunnerTest(OCLTestCase):
         redis_instance_mock.get_int.side_effect = [100, 50]
         redis_service_mock.return_value = redis_instance_mock
         importer = BulkImportParallelRunner(
-            open(os.path.join(os.path.dirname(__file__), '..', 'samples/sample_ocldev.json'), 'r').read(),
+            open(
+                os.path.join(os.path.dirname(__file__), '..', 'samples/sample_ocldev.json'), 'r'
+            ).read(),
             'ocladmin', True
         )
         self.assertEqual(importer.get_overall_tasks_progress(), 0)
@@ -484,7 +550,9 @@ class BulkImportParallelRunnerTest(OCLTestCase):
         redis_service_mock.return_value = Mock()
 
         importer = BulkImportParallelRunner(
-            open(os.path.join(os.path.dirname(__file__), '..', 'samples/sample_ocldev.json'), 'r').read(),
+            open(
+                os.path.join(os.path.dirname(__file__), '..', 'samples/sample_ocldev.json'), 'r'
+            ).read(),
             'ocladmin', True
         )
         self.assertIsNotNone(importer.start_time)
@@ -497,7 +565,9 @@ class BulkImportParallelRunnerTest(OCLTestCase):
         redis_instance_mock = Mock(set_json=Mock())
         redis_service_mock.return_value = redis_instance_mock
         importer = BulkImportParallelRunner(
-            open(os.path.join(os.path.dirname(__file__), '..', 'samples/sample_ocldev.json'), 'r').read(),
+            open(
+                os.path.join(os.path.dirname(__file__), '..', 'samples/sample_ocldev.json'), 'r'
+            ).read(),
             'ocladmin', True, None, 'task-id'
         )
         importer.tasks = [Mock(task_id='task-1'), Mock(task_id='task-2')]
@@ -534,8 +604,8 @@ class BulkImportViewTest(OCLAPITestCase):
 
     @patch('core.importers.views.flower_get')
     def test_get_without_task_id(self, flower_get_mock):
-        task_id1 = "{}-{}~{}".format(str(uuid.uuid4()), 'ocladmin', 'priority')
-        task_id2 = "{}-{}~{}".format(str(uuid.uuid4()), 'foobar', 'normal')
+        task_id1 = f"{str(uuid.uuid4())}-ocladmin~priority"
+        task_id2 = f"{str(uuid.uuid4())}-foobar~normal"
         flower_tasks = {
             task_id1: dict(name='core.common.tasks.bulk_import', state='success'),
             task_id2: dict(name='core.common.tasks.bulk_import', state='failed'),
@@ -584,12 +654,12 @@ class BulkImportViewTest(OCLAPITestCase):
 
     @patch('core.importers.views.AsyncResult')
     def test_get_with_task_id_success(self, async_result_klass_mock):
-        task_id1 = "{}-{}~{}".format(str(uuid.uuid4()), 'ocladmin', 'priority')
-        task_id2 = "{}-{}~{}".format(str(uuid.uuid4()), 'foobar', 'normal')
+        task_id1 = f"{str(uuid.uuid4())}-ocladmin'~priority"
+        task_id2 = f"{str(uuid.uuid4())}-foobar~normal"
         foobar_user = UserProfileFactory(username='foobar')
 
         response = self.client.get(
-            '/importers/bulk-import/?task={}'.format(task_id1),
+            f'/importers/bulk-import/?task={task_id1}',
             HTTP_AUTHORIZATION='Token ' + foobar_user.get_token(),
             format='json'
         )
@@ -600,7 +670,7 @@ class BulkImportViewTest(OCLAPITestCase):
         async_result_klass_mock.return_value = async_result_instance_mock
 
         response = self.client.get(
-            '/importers/bulk-import/?task={}'.format(task_id2),
+            f'/importers/bulk-import/?task={task_id2}',
             HTTP_AUTHORIZATION='Token ' + foobar_user.get_token(),
             format='json'
         )
@@ -608,7 +678,7 @@ class BulkImportViewTest(OCLAPITestCase):
         self.assertEqual(response.data, 'summary')
 
         response = self.client.get(
-            '/importers/bulk-import/?task={}&result=json'.format(task_id2),
+            f'/importers/bulk-import/?task={task_id2}&result=json',
             HTTP_AUTHORIZATION='Token ' + foobar_user.get_token(),
             format='json'
         )
@@ -616,7 +686,7 @@ class BulkImportViewTest(OCLAPITestCase):
         self.assertEqual(response.data, 'json-format')
 
         response = self.client.get(
-            '/importers/bulk-import/?task={}&result=report'.format(task_id2),
+            f'/importers/bulk-import/?task={task_id2}&result=report',
             HTTP_AUTHORIZATION='Token ' + foobar_user.get_token(),
             format='json'
         )
@@ -627,7 +697,7 @@ class BulkImportViewTest(OCLAPITestCase):
 
     @patch('core.importers.views.AsyncResult')
     def test_get_with_task_id_failed(self, async_result_klass_mock):
-        task_id = "{}-{}~{}".format(str(uuid.uuid4()), 'foobar', 'normal')
+        task_id = f"{str(uuid.uuid4())}-foobar~normal"
         foobar_user = UserProfileFactory(username='foobar')
 
         async_result_instance_mock = Mock(
@@ -636,7 +706,7 @@ class BulkImportViewTest(OCLAPITestCase):
         async_result_klass_mock.return_value = async_result_instance_mock
 
         response = self.client.get(
-            '/importers/bulk-import/?task={}'.format(task_id),
+            f'/importers/bulk-import/?task={task_id}',
             HTTP_AUTHORIZATION='Token ' + foobar_user.get_token(),
             format='json'
         )
@@ -649,7 +719,7 @@ class BulkImportViewTest(OCLAPITestCase):
     @patch('core.importers.views.AsyncResult')
     def test_get_task_pending(self, async_result_klass_mock, task_exists_mock):
         task_exists_mock.return_value = False
-        task_id = "{}-{}~{}".format(str(uuid.uuid4()), 'foobar', 'normal')
+        task_id = f"{str(uuid.uuid4())}-foobar~normal"
         foobar_user = UserProfileFactory(username='foobar')
 
         async_result_instance_mock = Mock(
@@ -658,13 +728,13 @@ class BulkImportViewTest(OCLAPITestCase):
         async_result_klass_mock.return_value = async_result_instance_mock
 
         response = self.client.get(
-            '/importers/bulk-import/?task={}'.format(task_id),
+            f'/importers/bulk-import/?task={task_id}',
             HTTP_AUTHORIZATION='Token ' + foobar_user.get_token(),
             format='json'
         )
 
         self.assertEqual(response.status_code, 404)
-        self.assertEqual(response.data, dict(exception="task {} not found".format(task_id)))
+        self.assertEqual(response.data, dict(exception=f"task {task_id} not found"))
 
         async_result_instance_mock.successful.assert_called_once()
         async_result_instance_mock.failed.assert_called_once()
@@ -672,7 +742,7 @@ class BulkImportViewTest(OCLAPITestCase):
 
         task_exists_mock.return_value = True
         response = self.client.get(
-            '/importers/bulk-import/?task={}'.format(task_id),
+            f'/importers/bulk-import/?task={task_id}',
             HTTP_AUTHORIZATION='Token ' + foobar_user.get_token(),
             format='json'
         )

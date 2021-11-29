@@ -33,6 +33,8 @@ class ConceptDocument(Document):
     is_latest_version = fields.KeywordField(attr='is_latest_version')
     extras = fields.ObjectField(dynamic=True)
     created_by = fields.KeywordField(attr='created_by.username')
+    name_types = fields.ListField(fields.KeywordField())
+    description_types = fields.ListField(fields.KeywordField())
 
     class Django:
         model = Concept
@@ -102,3 +104,15 @@ class ConceptDocument(Document):
                 value = flatten_dict(value)
 
         return value or {}
+
+    @staticmethod
+    def prepare_name_types(instance):
+        return list(
+            instance.names.filter(type__isnull=False).distinct('type').values_list('type', flat=True)
+        )
+
+    @staticmethod
+    def prepare_description_types(instance):
+        return list(
+            instance.descriptions.filter(type__isnull=False).distinct('type').values_list('type', flat=True)
+        )

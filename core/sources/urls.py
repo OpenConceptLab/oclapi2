@@ -7,55 +7,57 @@ from . import views
 urlpatterns = [
     re_path(r'^$', views.SourceListView.as_view(), name='source-list'),
     re_path(
-        r"^(?P<source>{pattern})/$".format(pattern=NAMESPACE_PATTERN),
+        fr"^(?P<source>{NAMESPACE_PATTERN})/$",
         views.SourceRetrieveUpdateDestroyView.as_view(),
         name='source-detail'
     ),
     re_path(
-        r'^(?P<source>' + NAMESPACE_PATTERN + ')/client-configs/$',
+        fr"^(?P<source>{NAMESPACE_PATTERN})/client-configs/$",
         views.SourceClientConfigsView.as_view(),
         name='source-client-configs'
     ),
     re_path(
-        r"^(?P<source>{pattern})/summary/$".format(pattern=NAMESPACE_PATTERN),
+        fr"^(?P<source>{NAMESPACE_PATTERN})/summary/$",
         views.SourceSummaryView.as_view(),
         name='source-summary'
     ),
     re_path(
-        r"^(?P<source>{pattern})/hierarchy/$".format(pattern=NAMESPACE_PATTERN),
+        fr"^(?P<source>{NAMESPACE_PATTERN})/hierarchy/$",
         views.SourceHierarchyView.as_view(),
         name='source-hierarchy'
     ),
     re_path(
-        r"^(?P<source>{pattern})/logo/$".format(pattern=NAMESPACE_PATTERN),
+        fr"^(?P<source>{NAMESPACE_PATTERN})/logo/$",
         views.SourceLogoView.as_view(),
         name='source-logo'
     ),
-    re_path(r'^(?P<source>{pattern})/atom/$'.format(pattern=NAMESPACE_PATTERN), SourceFeed()),
+    re_path(fr'^(?P<source>{NAMESPACE_PATTERN})/atom/$', SourceFeed()),
     re_path(
-        r"^(?P<source>{pattern})/versions/$".format(pattern=NAMESPACE_PATTERN),
+        fr"^(?P<source>{NAMESPACE_PATTERN})/versions/$",
         views.SourceVersionListView.as_view(),
         name='source-version-list'
     ),
     re_path(
-        r'^(?P<source>{pattern})/latest/$'.format(pattern=NAMESPACE_PATTERN),
+        fr'^(?P<source>{NAMESPACE_PATTERN})/latest/$',
         views.SourceLatestVersionRetrieveUpdateView.as_view(),
         name='sourceversion-latest-detail'
     ),
     re_path(
-        r'^(?P<source>{pattern})/latest/summary/$'.format(pattern=NAMESPACE_PATTERN),
+        fr'^(?P<source>{NAMESPACE_PATTERN})/latest/summary/$',
         views.SourceLatestVersionSummaryView.as_view(),
         name='sourceversion-latest-summary'
     ),
     re_path(
-        r'^(?P<source>{pattern})/latest/export/$'.format(pattern=NAMESPACE_PATTERN),
+        fr'^(?P<source>{NAMESPACE_PATTERN})/latest/export/$',
         views.SourceVersionExportView.as_view(),
         name='sourceversion-latest-export-detail'
     ),
-    re_path(r"^(?P<source>{pattern})/concepts/".format(pattern=NAMESPACE_PATTERN), include('core.concepts.urls')),
-    re_path(r"^(?P<source>{pattern})/mappings/".format(pattern=NAMESPACE_PATTERN), include('core.mappings.urls')),
+    re_path(fr"^(?P<source>{NAMESPACE_PATTERN})/concepts/indexes/", views.SourceConceptsIndexView.as_view()),
+    re_path(fr"^(?P<source>{NAMESPACE_PATTERN})/mappings/indexes/", views.SourceMappingsIndexView.as_view()),
+    re_path(fr"^(?P<source>{NAMESPACE_PATTERN})/concepts/", include('core.concepts.urls')),
+    re_path(fr"^(?P<source>{NAMESPACE_PATTERN})/mappings/", include('core.mappings.urls')),
     re_path(
-        r"^(?P<source>{pattern})/extras/$".format(pattern=NAMESPACE_PATTERN),
+        fr"^(?P<source>{NAMESPACE_PATTERN})/extras/$",
         views.SourceExtrasView.as_view(),
         name='source-extras'
     ),

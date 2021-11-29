@@ -58,14 +58,14 @@ class UserSignupVerificationViewTest(OCLAPITestCase):
         self.assertEqual(response.data, dict(detail=VERIFICATION_TOKEN_MISMATCH))
 
         response = self.client.get(
-            '/users/unknown/verify/{}/'.format(created_user.verification_token),
+            f'/users/unknown/verify/{created_user.verification_token}/',
             format='json'
         )
 
         self.assertEqual(response.status_code, 404)
 
         response = self.client.get(
-            '/users/charles/verify/{}/'.format(created_user.verification_token),
+            f'/users/charles/verify/{created_user.verification_token}/',
             format='json'
         )
 
@@ -92,7 +92,7 @@ class UserPasswordResetViewTest(OCLAPITestCase):
 
         response = self.client.post(
             '/users/password/reset/',
-            dict(),
+            {},
             format='json'
         )
         self.assertEqual(response.status_code, 400)
@@ -116,7 +116,7 @@ class UserPasswordResetViewTest(OCLAPITestCase):
 
         response = self.client.put(
             '/users/password/reset/',
-            dict(),
+            {},
             format='json'
         )
         self.assertEqual(response.status_code, 400)
@@ -177,7 +177,7 @@ class UserOrganizationListViewTest(OCLAPITestCase):
 
     def test_get_200(self):
         response = self.client.get(
-            '/users/{}/orgs/'.format(self.user.username),
+            f'/users/{self.user.username}/orgs/',
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -191,7 +191,7 @@ class UserOrganizationListViewTest(OCLAPITestCase):
 
         random_user = UserProfileFactory()
         response = self.client.get(
-            '/users/{}/orgs/'.format(random_user.username),
+            f'/users/{random_user.username}/orgs/',
             HTTP_AUTHORIZATION='Token ' + random_user.get_token(),
             format='json'
         )
@@ -201,17 +201,17 @@ class UserOrganizationListViewTest(OCLAPITestCase):
 
     def test_head_200(self):
         response = self.client.head(
-            '/users/{}/orgs/'.format(self.user.username),
+            f'/users/{self.user.username}/orgs/',
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response['num_found'], '2')
+        self.assertEqual(response.get('num_found'), '2')
 
     def test_post_405(self):
         response = self.client.post(
-            '/users/{}/orgs/'.format(self.user.username),
+            f'/users/{self.user.username}/orgs/',
             dict(id='test-org-1', name='Test Org 1'),
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
@@ -329,7 +329,7 @@ class UserDetailViewTest(OCLAPITestCase):
 
     def test_get_200(self):
         response = self.client.get(
-            '/users/{}/'.format(self.user.username),
+            f'/users/{self.user.username}/',
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -341,7 +341,7 @@ class UserDetailViewTest(OCLAPITestCase):
 
     def test_get_200_with_subscribed_orgs(self):
         response = self.client.get(
-            '/users/{}/?includeSubscribedOrgs=false'.format(self.user.username),
+            f'/users/{self.user.username}/?includeSubscribedOrgs=false',
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -353,7 +353,7 @@ class UserDetailViewTest(OCLAPITestCase):
         self.assertFalse('subscribed_orgs' in response.data)
 
         response = self.client.get(
-            '/users/{}/?includeSubscribedOrgs=true'.format(self.user.username),
+            f'/users/{self.user.username}/?includeSubscribedOrgs=true',
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -366,7 +366,7 @@ class UserDetailViewTest(OCLAPITestCase):
         self.user.organizations.add(org)
 
         response = self.client.get(
-            '/users/{}/?includeSubscribedOrgs=true'.format(self.user.username),
+            f'/users/{self.user.username}/?includeSubscribedOrgs=true',
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -391,7 +391,7 @@ class UserDetailViewTest(OCLAPITestCase):
         self.assertTrue(self.user.check_password('password'))
 
         response = self.client.put(
-            '/users/{}/'.format(self.user.username),
+            f'/users/{self.user.username}/',
             dict(password='newpassword123', email='user@user.com'),
             HTTP_AUTHORIZATION='Token ' + self.user.get_token(),
             format='json'
@@ -405,7 +405,7 @@ class UserDetailViewTest(OCLAPITestCase):
 
     def test_delete_self_405(self):
         response = self.client.delete(
-            '/users/{}/'.format(self.superuser.username),
+            f'/users/{self.superuser.username}/',
             HTTP_AUTHORIZATION='Token ' + self.superuser.get_token(),
             format='json'
         )
@@ -415,7 +415,7 @@ class UserDetailViewTest(OCLAPITestCase):
     def test_delete_403(self):
         random_user = UserProfileFactory()
         response = self.client.delete(
-            '/users/{}/'.format(self.user.username),
+            f'/users/{self.user.username}/',
             HTTP_AUTHORIZATION='Token ' + random_user.get_token(),
             format='json'
         )
@@ -424,7 +424,7 @@ class UserDetailViewTest(OCLAPITestCase):
 
     def test_delete_204(self):
         response = self.client.delete(
-            '/users/{}/'.format(self.user.username),
+            f'/users/{self.user.username}/',
             HTTP_AUTHORIZATION='Token ' + self.superuser.get_token(),
             format='json'
         )
@@ -442,7 +442,7 @@ class UserReactivateViewTest(OCLAPITestCase):
     def test_put_bad_request(self):
         inactive_user = UserProfileFactory(is_active=False)
         response = self.client.put(
-            '/users/{}/reactivate/'.format(inactive_user.username),
+            f'/users/{inactive_user.username}/reactivate/',
             HTTP_AUTHORIZATION='Token ' + inactive_user.get_token(),
             format='json'
         )
@@ -450,7 +450,7 @@ class UserReactivateViewTest(OCLAPITestCase):
 
         random_user = UserProfileFactory()
         response = self.client.put(
-            '/users/{}/reactivate/'.format(inactive_user.username),
+            f'/users/{inactive_user.username}/reactivate/',
             HTTP_AUTHORIZATION='Token ' + random_user.get_token(),
             format='json'
         )
@@ -459,7 +459,7 @@ class UserReactivateViewTest(OCLAPITestCase):
     def test_put_204(self):
         inactive_user = UserProfileFactory(is_active=False)
         response = self.client.put(
-            '/users/{}/reactivate/'.format(inactive_user.username),
+            f'/users/{inactive_user.username}/reactivate/',
             HTTP_AUTHORIZATION='Token ' + self.superuser.get_token(),
             format='json'
         )
@@ -470,12 +470,12 @@ class UserReactivateViewTest(OCLAPITestCase):
 
 class UserExtrasViewTest(OCLAPITestCase):
     def setUp(self):
-        self.user = UserProfileFactory(extras=dict())
+        self.user = UserProfileFactory(extras={})
         self.token = self.user.get_token()
 
     def test_get(self):
         response = self.client.get(
-            '/users/{}/extras/'.format(self.user.username),
+            f'/users/{self.user.username}/extras/',
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -487,7 +487,7 @@ class UserExtrasViewTest(OCLAPITestCase):
         self.user.save()
 
         response = self.client.get(
-            '/users/{}/extras/'.format(self.user.username),
+            f'/users/{self.user.username}/extras/',
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -505,14 +505,14 @@ class UserExtrasViewTest(OCLAPITestCase):
 
 class UserExtraRetrieveUpdateDestroyViewTest(OCLAPITestCase):
     def setUp(self):
-        self.user = UserProfileFactory(extras=dict())
+        self.user = UserProfileFactory(extras={})
         self.token = self.user.get_token()
 
     def test_put(self):
         self.assertEqual(self.user.extras, {})
 
         response = self.client.put(
-            '/users/{}/extras/foo/'.format(self.user.username),
+            f'/users/{self.user.username}/extras/foo/',
             dict(foo='bar'),
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
@@ -523,7 +523,7 @@ class UserExtraRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(self.user.extras, dict(foo='bar'))
 
         response = self.client.put(
-            '/users/{}/extras/bar/'.format(self.user.username),
+            f'/users/{self.user.username}/extras/bar/',
             dict(foo='bar'),
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
@@ -544,7 +544,7 @@ class UserExtraRetrieveUpdateDestroyViewTest(OCLAPITestCase):
 
     def test_get(self):
         response = self.client.get(
-            '/users/{}/extras/foo/'.format(self.user.username),
+            f'/users/{self.user.username}/extras/foo/',
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -554,7 +554,7 @@ class UserExtraRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.user.save()
 
         response = self.client.get(
-            '/users/{}/extras/foo/'.format(self.user.username),
+            f'/users/{self.user.username}/extras/foo/',
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -563,7 +563,7 @@ class UserExtraRetrieveUpdateDestroyViewTest(OCLAPITestCase):
 
     def test_delete(self):
         response = self.client.delete(
-            '/users/{}/extras/foo/'.format(self.user.username),
+            f'/users/{self.user.username}/extras/foo/',
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -573,7 +573,7 @@ class UserExtraRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.user.save()
 
         response = self.client.delete(
-            '/users/{}/extras/foo/'.format(self.user.username),
+            f'/users/{self.user.username}/extras/foo/',
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )

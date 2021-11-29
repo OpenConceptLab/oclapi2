@@ -7,7 +7,7 @@ from . import views
 urlpatterns = [
     re_path(r'^$', views.CollectionListView.as_view(), name='collection-list'),
     re_path(
-        r"^(?P<collection>{pattern})/$".format(pattern=NAMESPACE_PATTERN),
+        fr"^(?P<collection>{NAMESPACE_PATTERN})/$",
         views.CollectionRetrieveUpdateDestroyView.as_view(),
         name='collection-detail'
     ),
@@ -17,48 +17,48 @@ urlpatterns = [
         name='collection-client-configs'
     ),
     re_path(
-        r"^(?P<collection>{pattern})/summary/$".format(pattern=NAMESPACE_PATTERN),
+        fr"^(?P<collection>{NAMESPACE_PATTERN})/summary/$",
         views.CollectionSummaryView.as_view(),
         name='collection-summary'
     ),
     re_path(
-        r"^(?P<collection>{pattern})/logo/$".format(pattern=NAMESPACE_PATTERN),
+        fr"^(?P<collection>{NAMESPACE_PATTERN})/logo/$",
         views.CollectionLogoView.as_view(),
         name='collection-logo'
     ),
     re_path(
-        r'^(?P<collection>{pattern})/versions/$'.format(pattern=NAMESPACE_PATTERN),
+        fr'^(?P<collection>{NAMESPACE_PATTERN})/versions/$',
         views.CollectionVersionListView.as_view(),
         name='collection-version-list'
     ),
-    re_path(r'^(?P<collection>{pattern})/concepts/atom/$'.format(pattern=NAMESPACE_PATTERN), CollectionFeed()),
+    re_path(fr'^(?P<collection>{NAMESPACE_PATTERN})/concepts/atom/$', CollectionFeed()),
     re_path(
-        r'^(?P<collection>{pattern})/latest/$'.format(pattern=NAMESPACE_PATTERN),
+        fr'^(?P<collection>{NAMESPACE_PATTERN})/latest/$',
         views.CollectionLatestVersionRetrieveUpdateView.as_view(),
         name='collectionversion-latest-detail'
     ),
     re_path(
-        r'^(?P<collection>{pattern})/latest/summary/$'.format(pattern=NAMESPACE_PATTERN),
+        fr'^(?P<collection>{NAMESPACE_PATTERN})/latest/summary/$',
         views.CollectionLatestVersionSummaryView.as_view(),
         name='collectionversion-latest-summary'
     ),
     re_path(
-        r'^(?P<collection>{pattern})/latest/export/$'.format(pattern=NAMESPACE_PATTERN),
+        fr'^(?P<collection>{NAMESPACE_PATTERN})/latest/export/$',
         views.CollectionVersionExportView.as_view(),
         name='collectionversion-latest-export-detail'
     ),
     re_path(
-        r"^(?P<collection>{pattern})/concepts/".format(pattern=NAMESPACE_PATTERN),
+        fr"^(?P<collection>{NAMESPACE_PATTERN})/concepts/",
         views.CollectionVersionConceptsView.as_view(),
         name='concept-list'
     ),
     re_path(
-        r"^(?P<collection>{pattern})/mappings/".format(pattern=NAMESPACE_PATTERN),
+        fr"^(?P<collection>{NAMESPACE_PATTERN})/mappings/",
         views.CollectionVersionMappingsView.as_view(),
         name='mapping-list'
     ),
     re_path(
-        r'^(?P<collection>{pattern})/references/$'.format(pattern=NAMESPACE_PATTERN),
+        fr'^(?P<collection>{NAMESPACE_PATTERN})/references/$',
         views.CollectionReferencesView.as_view(),
         name='collection-references'
     ),
@@ -68,7 +68,7 @@ urlpatterns = [
         name='collection-reference'
     ),
     re_path(
-        r"^(?P<collection>{pattern})/extras/$".format(pattern=NAMESPACE_PATTERN),
+        fr"^(?P<collection>{NAMESPACE_PATTERN})/extras/$",
         views.CollectionExtrasView.as_view(),
         name='collection-extras'
     ),

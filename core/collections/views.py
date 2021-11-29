@@ -1,17 +1,19 @@
 import logging
 
 from celery_once import AlreadyQueued
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError
+from django.db.models import Q
 from django.http import Http404
 from django.shortcuts import get_object_or_404
 from drf_yasg.utils import swagger_auto_schema
 from pydash import get
 from rest_framework import status, mixins
 from rest_framework.generics import (
-    RetrieveAPIView, DestroyAPIView, UpdateAPIView, ListAPIView, RetrieveUpdateDestroyAPIView,
+    RetrieveAPIView, DestroyAPIView, UpdateAPIView, ListAPIView,
     CreateAPIView)
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, IsAdminUser
 from rest_framework.response import Response
 
 from core.client_configs.views import ResourceClientConfigsView
@@ -20,7 +22,7 @@ from core.collections.constants import (
     HEAD_OF_MAPPING_ADDED_TO_COLLECTION, CONCEPT_ADDED_TO_COLLECTION_FMT, MAPPING_ADDED_TO_COLLECTION_FMT,
     DELETE_FAILURE, DELETE_SUCCESS, NO_MATCH, VERSION_ALREADY_EXISTS,
     SOURCE_MAPPINGS,
-    UNKNOWN_REFERENCE_ADDED_TO_COLLECTION_FMT)
+    UNKNOWN_REFERENCE_ADDED_TO_COLLECTION_FMT, SOURCE_TO_CONCEPTS)
 from core.collections.documents import CollectionDocument
 from core.collections.models import Collection, CollectionReference
 from core.collections.search import CollectionSearch
@@ -32,12 +34,12 @@ from core.collections.serializers import (
     ExpansionDetailSerializer)
 from core.collections.utils import is_version_specified
 from core.common.constants import (
-    HEAD, RELEASED_PARAM, PROCESSING_PARAM, OK_MESSAGE, NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY
-)
+    HEAD, RELEASED_PARAM, PROCESSING_PARAM, OK_MESSAGE,
+    ACCESS_TYPE_NONE)
 from core.common.mixins import (
     ConceptDictionaryCreateMixin, ListWithHeadersMixin, ConceptDictionaryUpdateMixin,
     ConceptContainerExportMixin,
-    ConceptContainerProcessingMixin)
+    ConceptContainerProcessingMixin, ConceptContainerExtraRetrieveUpdateDestroyView)
 from core.common.permissions import (
     CanViewConceptDictionary, CanEditConceptDictionary, HasAccessToVersionedObject,
     CanViewConceptDictionaryVersion
@@ -61,6 +63,17 @@ class CollectionBaseView(BaseAPIView):
     model = Collection
     permission_classes = (CanViewConceptDictionary,)
     queryset = Collection.objects.filter(is_active=True)
+
+    def verify_scope(self):
+        has_owner_scope = self.has_owner_scope()
+        has_no_kwargs = self.has_no_kwargs()
+
+        if not self.user_is_self:
+            if has_no_kwargs:
+                if self.request.method not in ['GET', 'HEAD']:
+                    raise Http404()
+            elif not has_owner_scope:
+                raise Http404()
 
     def set_parent_resource(self):
         from core.orgs.models import Organization
@@ -134,6 +147,19 @@ class CollectionListView(CollectionBaseView, ConceptDictionaryCreateMixin, ListW
     facet_class = CollectionSearch
     default_filters = dict(is_active=True, version=HEAD)
 
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        user = self.request.user
+        if get(user, 'is_staff'):
+            return queryset
+        if get(user, 'is_anonymous'):
+            return queryset.exclude(public_access=ACCESS_TYPE_NONE)
+
+        public_queryset = queryset.exclude(public_access=ACCESS_TYPE_NONE)
+        private_queryset = queryset.filter(public_access=ACCESS_TYPE_NONE)
+        private_queryset = private_queryset.filter(Q(user_id=user.id) | Q(organization__members__id=user.id))
+        return public_queryset.union(private_queryset)
+
     def get_serializer_class(self):
         if self.request.method == 'GET' and self.is_verbose():
             return CollectionDetailSerializer
@@ -200,6 +226,13 @@ class CollectionRetrieveUpdateDestroyView(CollectionBaseView, ConceptDictionaryU
             raise Http404()
 
         self.check_object_permissions(self.request, instance)
+        if not get(settings, 'TEST_MODE', False):
+            if instance.active_concepts == 0:
+                instance.update_concepts_count()
+            if instance.active_mappings == 0:
+                instance.update_mappings_count()
+            for version in instance.versions.exclude(id=instance.id):
+                version.update_children_counts()
         return instance
 
     def get_permissions(self):
@@ -293,8 +326,8 @@ class CollectionReferencesView(
 
     def update(self, request, *args, **kwargs):  # pylint: disable=too-many-locals,unused-argument # Fixme: Sny
         collection = self.get_object()
-
-        cascade_mappings = self.should_cascade_mappings()
+        cascade_to_concepts = self.should_cascade_to_concepts()
+        cascade_mappings = cascade_to_concepts or self.should_cascade_mappings()
         data = request.data.get('data')
         concept_expressions = data.get('concepts', [])
         mapping_expressions = data.get('mappings', [])
@@ -303,11 +336,17 @@ class CollectionReferencesView(
         adding_all = mapping_expressions == '*' or concept_expressions == '*'
 
         if adding_all:
-            add_references.delay(self.request.user, data, collection, self.get_host_url(), cascade_mappings)
-            return Response([], status=status.HTTP_202_ACCEPTED)
+            result = add_references.delay(
+                self.request.user.id, data, collection.id, cascade_mappings, cascade_to_concepts)
+            return Response(
+                dict(
+                    state=result.state, username=request.user.username, task=result.task_id, queue='default'
+                ) if result else [],
+                status=status.HTTP_202_ACCEPTED
+            )
 
         (added_references, errors) = collection.add_expressions(
-            data, self.get_host_url(), request.user, cascade_mappings
+            data, request.user, cascade_mappings, cascade_to_concepts
         )
 
         all_expressions = expressions + concept_expressions + mapping_expressions
@@ -334,6 +373,9 @@ class CollectionReferencesView(
 
     def should_cascade_mappings(self):
         return self.request.query_params.get('cascade', '').lower() == SOURCE_MAPPINGS
+
+    def should_cascade_to_concepts(self):
+        return self.request.query_params.get('cascade', '').lower() == SOURCE_TO_CONCEPTS
 
     def create_response_item(self, added_expressions, errors, expression):
         adding_expression_failed = len(errors) > 0 and expression in errors
@@ -503,6 +545,11 @@ class CollectionVersionRetrieveUpdateDestroyView(CollectionBaseView, RetrieveAPI
     def get_object(self, queryset=None):
         instance = get_object_or_404(self.get_queryset())
         self.check_object_permissions(self.request, instance)
+        if not get(settings, 'TEST_MODE', False):
+            if instance.active_concepts == 0:
+                instance.update_concepts_count()
+            if instance.active_mappings == 0:
+                instance.update_mappings_count()
         return instance
 
     def update(self, request, *args, **kwargs):
@@ -698,50 +745,9 @@ class CollectionExtrasView(CollectionExtrasBaseView, ListAPIView):
         return Response(get(self.get_object(), 'extras', {}))
 
 
-class CollectionExtraRetrieveUpdateDestroyView(CollectionExtrasBaseView, RetrieveUpdateDestroyAPIView):
+class CollectionExtraRetrieveUpdateDestroyView(CollectionExtrasBaseView,
+                                               ConceptContainerExtraRetrieveUpdateDestroyView):
     serializer_class = CollectionDetailSerializer
-
-    def retrieve(self, request, *args, **kwargs):
-        key = kwargs.get('extra')
-        instance = self.get_object()
-        extras = get(instance, 'extras', {})
-        if key in extras:
-            return Response({key: extras[key]})
-
-        return Response(dict(detail=NOT_FOUND), status=status.HTTP_404_NOT_FOUND)
-
-    def update(self, request, **kwargs):  # pylint: disable=arguments-differ
-        key = kwargs.get('extra')
-        value = request.data.get(key)
-        if not value:
-            return Response([MUST_SPECIFY_EXTRA_PARAM_IN_BODY.format(key)], status=status.HTTP_400_BAD_REQUEST)
-
-        instance = self.get_object()
-        instance.extras = get(instance, 'extras', {})
-        instance.extras[key] = value
-        instance.comment = 'Updated extras: %s=%s.' % (key, value)
-        head = instance.get_head()
-        head.extras = get(head, 'extras', {})
-        head.extras.update(instance.extras)
-        instance.save()
-        head.save()
-        return Response({key: value})
-
-    def delete(self, request, *args, **kwargs):
-        key = kwargs.get('extra')
-        instance = self.get_object()
-        instance.extras = get(instance, 'extras', {})
-        if key in instance.extras:
-            del instance.extras[key]
-            instance.comment = 'Deleted extra %s.' % key
-            head = instance.get_head()
-            head.extras = get(head, 'extras', {})
-            del head.extras[key]
-            instance.save()
-            head.save()
-            return Response(status=status.HTTP_204_NO_CONTENT)
-
-        return Response(dict(detail=NOT_FOUND), status=status.HTTP_404_NOT_FOUND)
 
 
 class CollectionVersionProcessingView(CollectionBaseView, ConceptContainerProcessingMixin):
@@ -763,24 +769,48 @@ class CollectionVersionExportView(ConceptContainerExportMixin, CollectionVersion
             return status.HTTP_409_CONFLICT
 
 
-class CollectionSummaryView(CollectionBaseView, RetrieveAPIView):
+class CollectionSummaryView(CollectionBaseView, RetrieveAPIView, CreateAPIView):
     serializer_class = CollectionSummaryDetailSerializer
-    permission_classes = (CanViewConceptDictionary,)
+
+    def get_permissions(self):
+        if self.request.method == 'PUT':
+            return [IsAdminUser()]
+        return [CanViewConceptDictionary()]
 
     def get_object(self, queryset=None):
         instance = get_object_or_404(self.get_queryset())
         self.check_object_permissions(self.request, instance)
         return instance
+
+    def put(self, request, **kwargs):  # pylint: disable=unused-argument
+        self.perform_update()
+        return Response(status=status.HTTP_202_ACCEPTED)
+
+    def perform_update(self):
+        instance = self.get_object()
+        instance.update_children_counts()
 
 
 class CollectionVersionSummaryView(CollectionBaseView, RetrieveAPIView):
     serializer_class = CollectionVersionSummaryDetailSerializer
-    permission_classes = (CanViewConceptDictionary,)
+
+    def get_permissions(self):
+        if self.request.method == 'PUT':
+            return [IsAdminUser()]
+        return [CanViewConceptDictionary()]
 
     def get_object(self, queryset=None):
         instance = get_object_or_404(self.get_queryset())
         self.check_object_permissions(self.request, instance)
         return instance
+
+    def put(self, request, **kwargs):  # pylint: disable=unused-argument
+        self.perform_update()
+        return Response(status=status.HTTP_202_ACCEPTED)
+
+    def perform_update(self):
+        instance = self.get_object()
+        instance.update_children_counts()
 
 
 class CollectionLatestVersionSummaryView(CollectionVersionBaseView, RetrieveAPIView, UpdateAPIView):

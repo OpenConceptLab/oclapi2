@@ -11,11 +11,13 @@ from django.urls import resolve, reverse, Resolver404
 from django.utils.functional import cached_property
 from pydash import compact, get
 from rest_framework import status
+from rest_framework.generics import RetrieveUpdateDestroyAPIView
 from rest_framework.mixins import ListModelMixin, CreateModelMixin
 from rest_framework.response import Response
 
 from core.common.constants import HEAD, ACCESS_TYPE_EDIT, ACCESS_TYPE_VIEW, ACCESS_TYPE_NONE, INCLUDE_FACETS, \
-    LIST_DEFAULT_LIMIT, HTTP_COMPRESS_HEADER, CSV_DEFAULT_LIMIT
+    LIST_DEFAULT_LIMIT, HTTP_COMPRESS_HEADER, CSV_DEFAULT_LIMIT, FACETS_ONLY, NOT_FOUND, \
+    MUST_SPECIFY_EXTRA_PARAM_IN_BODY
 from core.common.permissions import HasPrivateAccess, HasOwnership, CanViewConceptDictionary
 from core.common.services import S3
 from .utils import write_csv_to_s3, get_csv_from_s3, get_query_params_from_url_string, compact_dict_by_values, \
@@ -110,6 +112,9 @@ class ListWithHeadersMixin(ListModelMixin):
         if is_csv and not search_string:
             return self.get_csv(request)
 
+        if self.only_facets():
+            return Response(dict(facets=dict(fields=self.get_facets())))
+
         if self.object_list is None:
             self.object_list = self.filter_queryset(self.get_queryset())
 
@@ -126,7 +131,7 @@ class ListWithHeadersMixin(ListModelMixin):
 
         sorted_list = self.object_list
 
-        headers = dict()
+        headers = {}
         results = sorted_list
         if not compress:
             paginator = CustomPaginator(
@@ -150,6 +155,9 @@ class ListWithHeadersMixin(ListModelMixin):
 
     def should_include_facets(self):
         return self.request.META.get(INCLUDE_FACETS, False) in ['true', True]
+
+    def only_facets(self):
+        return self.request.query_params.get(FACETS_ONLY, False) in ['true', True]
 
     def should_compress(self):
         return self.request.META.get(HTTP_COMPRESS_HEADER, False) in ['true', True]
@@ -386,8 +394,8 @@ class SourceChildMixin:
     @property
     def versions(self):
         if self.is_versioned_object:
-            self.versions_set.exclude(id=F('versioned_object_id')).all()
-        return self.versioned_object.versions_set.exclude(id=F('versioned_object_id')).all()
+            self.versions_set.exclude(id=F('versioned_object_id'))
+        return self.versioned_object.versions_set.exclude(id=F('versioned_object_id'))
 
     @property
     def is_versioned_object(self):
@@ -457,7 +465,7 @@ class SourceChildMixin:
         is_concept_uri = is_concept(uri)
 
         try:
-            kwargs = get(resolve(uri), 'kwargs', dict())
+            kwargs = get(resolve(uri), 'kwargs', {})
             query_params = get_query_params_from_url_string(uri)  # parsing query parameters
             kwargs.update(query_params)
             if 'concept' in kwargs:
@@ -484,50 +492,68 @@ class SourceChildMixin:
         return queryset
 
     @classmethod
-    def global_listing_queryset(cls, params, user):
-        queryset = cls.get_base_queryset(params).filter(is_latest_version=True, is_active=True)
-        if not user.is_staff:
-            queryset = queryset.exclude(public_access=ACCESS_TYPE_NONE)
-        return queryset
-
-    @staticmethod
-    def get_parent_and_owner_filters_from_uri(uri):
-        filters = dict()
+    def get_parent_and_owner_filters_from_uri(cls, uri):
+        filters = {}
         if not uri:
             return filters
 
         try:
             resolved_uri = resolve(uri)
             kwargs = resolved_uri.kwargs
-            filters['parent__mnemonic'] = kwargs.get('source')
-            if 'org' in kwargs:
-                filters['parent__organization__mnemonic'] = kwargs.get('org')
-            if 'user' in kwargs:
-                filters['parent__user__username'] = kwargs.get('user')
+            filters = cls.get_parent_and_owner_filters_from_kwargs(kwargs)
         except Resolver404:
             pass
 
         return compact_dict_by_values(filters)
 
+    @staticmethod
+    def get_parent_and_owner_filters_from_kwargs(kwargs):
+        filters = {}
+
+        if not kwargs:
+            return filters
+
+        filters['parent__mnemonic'] = kwargs.get('source')
+        if 'org' in kwargs:
+            filters['parent__organization__mnemonic'] = kwargs.get('org')
+        if 'user' in kwargs:
+            filters['parent__user__username'] = kwargs.get('user')
+
+        return filters
+
     @classmethod
     def get_filter_by_container_criterion(  # pylint: disable=too-many-arguments
             cls, container_prefix, parent, org, user, container_version, is_latest_released, latest_released_version
     ):
-        criteria = cls.get_iexact_or_criteria('{}__mnemonic'.format(container_prefix), parent)
+        criteria = cls.get_exact_or_criteria(f'{container_prefix}__mnemonic', parent)
 
         if not container_version and not is_latest_released:
-            criteria &= Q(**{'{}__version'.format(container_prefix): HEAD})
+            criteria &= Q(**{f'{container_prefix}__version': HEAD})
         if user:
-            criteria &= cls.get_iexact_or_criteria('{}__user__username'.format(container_prefix), user)
+            criteria &= cls.get_exact_or_criteria(f'{container_prefix}__user__username', user)
         if org:
-            criteria &= cls.get_iexact_or_criteria('{}__organization__mnemonic'.format(container_prefix), org)
+            criteria &= cls.get_exact_or_criteria(f'{container_prefix}__organization__mnemonic', org)
         if is_latest_released:
-            criteria &= cls.get_iexact_or_criteria(
-                '{}__version'.format(container_prefix), get(latest_released_version, 'version'))
+            criteria &= cls.get_exact_or_criteria(
+                f'{container_prefix}__version', get(latest_released_version, 'version'))
         if container_version and not is_latest_released:
-            criteria &= cls.get_iexact_or_criteria('{}__version'.format(container_prefix), container_version)
+            criteria &= cls.get_exact_or_criteria(f'{container_prefix}__version', container_version)
 
         return criteria
+
+    def save(self, force_insert=False, force_update=False, using=None, update_fields=None):
+        result = super().save(force_insert, force_update, using, update_fields)
+
+        if self.is_latest_version and self._counted is False:
+            if self.__class__.__name__ == 'Concept':
+                self.parent.update_concepts_count()
+            else:
+                self.parent.update_mappings_count()
+
+            self._counted = True
+            self.save(update_fields=['_counted'])
+
+        return result
 
 
 class ConceptContainerExportMixin:
@@ -647,3 +673,47 @@ class ConceptContainerProcessingMixin:
         version.clear_processing()
 
         return Response(status=status.HTTP_200_OK)
+
+
+class ConceptContainerExtraRetrieveUpdateDestroyView(RetrieveUpdateDestroyAPIView):
+    def retrieve(self, request, *args, **kwargs):
+        key = kwargs.get('extra')
+        instance = self.get_object()
+        extras = get(instance, 'extras', {})
+        if key in extras:
+            return Response({key: extras[key]})
+
+        return Response(dict(detail=NOT_FOUND), status=status.HTTP_404_NOT_FOUND)
+
+    def update(self, request, **kwargs):  # pylint: disable=arguments-differ
+        key = kwargs.get('extra')
+        value = request.data.get(key)
+        if not value:
+            return Response([MUST_SPECIFY_EXTRA_PARAM_IN_BODY.format(key)], status=status.HTTP_400_BAD_REQUEST)
+
+        instance = self.get_object()
+        instance.extras = get(instance, 'extras', {})
+        instance.extras[key] = value
+        instance.comment = f'Updated extras: {key}={value}.'
+        head = instance.get_head()
+        head.extras = get(head, 'extras', {})
+        head.extras.update(instance.extras)
+        instance.save()
+        head.save()
+        return Response({key: value})
+
+    def delete(self, request, *args, **kwargs):
+        key = kwargs.get('extra')
+        instance = self.get_object()
+        instance.extras = get(instance, 'extras', {})
+        if key in instance.extras:
+            del instance.extras[key]
+            instance.comment = f'Deleted extra {key}.'
+            head = instance.get_head()
+            head.extras = get(head, 'extras', {})
+            del head.extras[key]
+            instance.save()
+            head.save()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+
+        return Response(dict(detail=NOT_FOUND), status=status.HTTP_404_NOT_FOUND)

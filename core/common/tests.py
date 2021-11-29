@@ -21,7 +21,7 @@ from core.common.utils import (
     to_camel_case,
     drop_version, is_versioned_uri, separate_version, to_parent_uri, jsonify_safe, es_get,
     get_resource_class_from_resource_name, flatten_dict, is_csv_file, is_url_encoded_string, to_parent_uri_from_kwargs,
-    set_current_user, get_current_user)
+    set_current_user, get_current_user, set_request_url, get_request_url)
 from core.concepts.models import Concept, LocalizedText
 from core.mappings.models import Mapping
 from core.orgs.models import Organization
@@ -384,31 +384,17 @@ class UtilsTest(OCLTestCase):
         set_current_user(lambda self: 'foo')
         self.assertEqual(get_current_user(), 'foo')
 
+    def test_set_and_get_request_url(self):
+        set_request_url(lambda self: 'https://foobar.org/foo')
+        self.assertEqual(get_request_url(), 'https://foobar.org/foo')
+
     def test_compact_dict_by_values(self):
-        self.assertEqual(
-            compact_dict_by_values(dict()),
-            dict()
-        )
-        self.assertEqual(
-            compact_dict_by_values(dict(foo=None)),
-            dict()
-        )
-        self.assertEqual(
-            compact_dict_by_values(dict(foo=None, bar=None)),
-            dict()
-        )
-        self.assertEqual(
-            compact_dict_by_values(dict(foo=None, bar=1)),
-            dict(bar=1)
-        )
-        self.assertEqual(
-            compact_dict_by_values(dict(foo=2, bar=1)),
-            dict(foo=2, bar=1)
-        )
-        self.assertEqual(
-            compact_dict_by_values(dict(foo=2, bar='')),
-            dict(foo=2)
-        )
+        self.assertEqual(compact_dict_by_values({}), {})
+        self.assertEqual(compact_dict_by_values(dict(foo=None)), {})
+        self.assertEqual(compact_dict_by_values(dict(foo=None, bar=None)), {})
+        self.assertEqual(compact_dict_by_values(dict(foo=None, bar=1)), dict(bar=1))
+        self.assertEqual(compact_dict_by_values(dict(foo=2, bar=1)), dict(foo=2, bar=1))
+        self.assertEqual(compact_dict_by_values(dict(foo=2, bar='')), dict(foo=2))
 
     def test_to_snake_case(self):
         self.assertEqual(to_snake_case(""), "")
@@ -466,13 +452,13 @@ class UtilsTest(OCLTestCase):
     def test_parse_bulk_import_task_id(self):
         task_uuid = str(uuid.uuid4())
 
-        task_id = "{}-{}~{}".format(task_uuid, 'username', 'queue')
+        task_id = f"{task_uuid}-username~queue"
         self.assertEqual(
             parse_bulk_import_task_id(task_id),
             dict(uuid=task_uuid + '-', username='username', queue='queue')
         )
 
-        task_id = "{}-{}".format(task_uuid, 'username')
+        task_id = f"{task_uuid}-username"
         self.assertEqual(
             parse_bulk_import_task_id(task_id),
             dict(uuid=task_uuid + '-', username='username', queue='default')
@@ -627,7 +613,7 @@ class UtilsTest(OCLTestCase):
 
     def test_jsonify_safe(self):
         self.assertEqual(jsonify_safe(None), None)
-        self.assertEqual(jsonify_safe(dict()), dict())
+        self.assertEqual(jsonify_safe({}), {})
         self.assertEqual(jsonify_safe(dict(a=1)), dict(a=1))
         self.assertEqual(jsonify_safe('foobar'), 'foobar')
         self.assertEqual(jsonify_safe('{"foo": "bar"}'), dict(foo='bar'))

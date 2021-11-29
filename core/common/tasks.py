@@ -24,20 +24,39 @@ def delete_organization(org_id):
 
     org = Organization.objects.filter(id=org_id).first()
 
-    if not org:  # pragma: no cover
+    if not org:
         logger.info('Not found org %s', org_id)
         return
 
     try:
         logger.info('Found org %s.  Beginning purge...', org.mnemonic)
         org.delete()
-        from core.pins.models import Pin
-        Pin.objects.filter(resource_type__model='organization', resource_id=org.id).delete()
-        from core.client_configs.models import ClientConfig
-        ClientConfig.objects.filter(resource_type__model='organization', resource_id=org.id).delete()
         logger.info('Purge complete!')
     except Exception as ex:
         logger.info('Org delete failed for %s with exception %s', org.mnemonic, ex.args)
+
+
+@app.task(base=QueueOnce)
+def delete_source(source_id):
+    from core.sources.models import Source
+    logger.info('Finding source...')
+
+    source = Source.objects.filter(id=source_id).first()
+
+    if not source:
+        logger.info('Not found source %s', source_id)
+        return None
+
+    try:
+        logger.info('Found source %s.  Beginning purge...', source.mnemonic)
+        source.batch_delete(source.concepts_set)
+        source.batch_delete(source.mappings_set)
+        source.delete(force=True)
+        logger.info('Delete complete!')
+        return True
+    except Exception as ex:
+        logger.info('Source delete failed for %s with exception %s', source.mnemonic, ex.args)
+        return ex
 
 
 @app.task(base=QueueOnce, bind=True)
@@ -88,13 +107,17 @@ def export_collection(self, version_id):
 
 @app.task(bind=True)
 def add_references(
-        self, user, data, collection, host_url, cascade_mappings=False
-):  # pylint: disable=too-many-arguments
+        self, user_id, data, collection_id, cascade_mappings=False, cascade_to_concepts=False
+):  # pylint: disable=too-many-arguments,too-many-locals
+    from core.users.models import UserProfile
+    from core.collections.models import Collection
+    user = UserProfile.objects.get(id=user_id)
+    collection = Collection.objects.get(id=collection_id)
     head = collection.get_head()
     head.add_processing(self.request.id)
 
     try:
-        (added_references, errors) = collection.add_expressions(data, host_url, user, cascade_mappings)
+        (added_references, errors) = collection.add_expressions(data, user, cascade_mappings, cascade_to_concepts)
     finally:
         head.remove_processing(self.request.id)
 
@@ -106,16 +129,18 @@ def add_references(
             for mapping in ref.mappings:
                 mapping.index()
 
-    return added_references, errors
+    return errors
 
 
 def __handle_save(instance):
-    registry.update(instance)
-    registry.update_related(instance)
+    if instance:
+        registry.update(instance)
+        registry.update_related(instance)
 
 
 def __handle_pre_delete(instance):
-    registry.delete_related(instance)
+    if instance:
+        registry.delete_related(instance)
 
 
 @app.task(
@@ -123,7 +148,7 @@ def __handle_pre_delete(instance):
     acks_late=True, reject_on_worker_lost=True
 )
 def handle_save(app_name, model_name, instance_id):
-    __handle_save(apps.get_model(app_name, model_name).objects.get(id=instance_id))
+    __handle_save(apps.get_model(app_name, model_name).objects.filter(id=instance_id).first())
 
 
 @app.task(
@@ -131,16 +156,17 @@ def handle_save(app_name, model_name, instance_id):
     acks_late=True, reject_on_worker_lost=True
 )
 def handle_m2m_changed(app_name, model_name, instance_id, action):
-    instance = apps.get_model(app_name, model_name).objects.get(id=instance_id)
-    if action in ('post_add', 'post_remove', 'post_clear'):
-        __handle_save(instance)
-    elif action in ('pre_remove', 'pre_clear'):
-        __handle_pre_delete(instance)
+    instance = apps.get_model(app_name, model_name).objects.filter(id=instance_id).first()
+    if instance:
+        if action in ('post_add', 'post_remove', 'post_clear'):
+            __handle_save(instance)
+        elif action in ('pre_remove', 'pre_clear'):
+            __handle_pre_delete(instance)
 
 
 @app.task(ignore_result=True)
 def handle_pre_delete(app_name, model_name, instance_id):
-    __handle_pre_delete(apps.get_model(app_name, model_name).objects.get(id=instance_id))
+    __handle_pre_delete(apps.get_model(app_name, model_name).objects.filter(id=instance_id).first())
 
 
 @app.task(base=QueueOnce)
@@ -158,7 +184,7 @@ def __run_search_index_command(command, app_names=None):
         return
 
     if app_names:
-        call_command('search_index', '%s' % command, '-f', '--models', *app_names, '--parallel')
+        call_command('search_index', f'{command}', '-f', '--models', *app_names, '--parallel')
     else:
         call_command('search_index', command, '-f', '--parallel')
 
@@ -283,21 +309,11 @@ def seed_children_to_expansion(expansion_id, index=True):
 
 
 @app.task
-def import_v1_content(importer_class, file_url, drop_version_if_version_missing=False):  # pragma: no cover
-    from core.v1_importers.models import V1BaseImporter
-    klass = V1BaseImporter.get_importer_class_from_string(importer_class)
-    if klass:
-        return klass(file_url, drop_version_if_version_missing=drop_version_if_version_missing).run()
-
-    return None
-
-
-@app.task
 def update_validation_schema(instance_type, instance_id, target_schema):
     klass = get_resource_class_from_resource_name(instance_type)
     instance = klass.objects.get(id=instance_id)
     instance.custom_validation_schema = target_schema
-    errors = dict()
+    errors = {}
 
     failed_concept_validations = instance.validate_child_concepts() or []
     if failed_concept_validations:
@@ -316,6 +332,11 @@ def update_validation_schema(instance_type, instance_id, target_schema):
     acks_late=True, reject_on_worker_lost=True
 )
 def process_hierarchy_for_new_concept(concept_id, initial_version_id, parent_concept_uris, create_parent_version=True):
+    """
+      Executed when a new concept is created with parent_concept_urls and does following:
+      1. Associates parent concepts to the concept and concept latest (initial) version
+      2. Creates new versions for parent concept (if asked)
+    """
     from core.concepts.models import Concept
     concept = Concept.objects.filter(id=concept_id).first()
 
@@ -338,6 +359,12 @@ def process_hierarchy_for_new_concept(concept_id, initial_version_id, parent_con
 )
 def process_hierarchy_for_concept_version(
         latest_version_id, prev_version_id, parent_concept_uris, create_parent_version):
+    """
+      Executed when a new concept version is created with new, updated or existing hierarchy
+      1. Associates parent concepts to the latest concept version.
+      2. Creates new versions for removed parent concepts from previous versions.
+      3. Creates new versions for parent concept (if asked)
+    """
     from core.concepts.models import Concept
     latest_version = Concept.objects.filter(id=latest_version_id).first()
 
@@ -365,9 +392,166 @@ def process_hierarchy_for_concept_version(
     acks_late=True, reject_on_worker_lost=True
 )
 def process_hierarchy_for_new_parent_concept_version(prev_version_id, latest_version_id):
+    """
+      Associates latest parent version to child concepts
+    """
     from core.concepts.models import Concept
     prev_version = Concept.objects.filter(id=prev_version_id).first()
     latest_version = Concept.objects.filter(id=latest_version_id).first()
     if prev_version and latest_version:
         for concept in Concept.objects.filter(parent_concepts__uri=prev_version.uri):
             concept.parent_concepts.add(latest_version)
+
+
+@app.task
+def delete_duplicate_locales(start_from=None):  # pragma: no cover
+    from core.concepts.models import Concept
+    from django.db.models import Count
+    from django.db.models import Q
+    start_from = start_from or 0
+    queryset = Concept.objects.annotate(
+        names_count=Count('names'), desc_count=Count('descriptions')).filter(Q(names_count__gt=1) | Q(desc_count__gt=1))
+    total = queryset.count()
+    batch_size = 1000
+
+    logger.info(f'{total:d} concepts with more than one locales. Getting them in batches of {batch_size:d}...')  # pylint: disable=logging-not-lazy
+
+    for start in range(start_from, total, batch_size):
+        end = min(start + batch_size, total)
+        logger.info('Iterating concepts %d - %d...' % (start + 1, end))  # pylint: disable=logging-not-lazy,consider-using-f-string
+        concepts = queryset.order_by('id')[start:end]
+        for concept in concepts:
+            logger.info('Cleaning up %s', concept.mnemonic)
+            for name in concept.names.all().reverse():
+                if concept.names.filter(
+                        type=name.type, name=name.name, locale=name.locale, locale_preferred=name.locale_preferred,
+                        external_id=name.external_id
+                ).count() > 1:
+                    name.delete()
+            for desc in concept.descriptions.all().reverse():
+                if concept.descriptions.filter(
+                        type=desc.type, name=desc.name, locale=desc.locale, locale_preferred=desc.locale_preferred,
+                        external_id=desc.external_id
+                ).count() > 1:
+                    desc.delete()
+
+
+@app.task
+def delete_dormant_locales():  # pragma: no cover
+    from core.concepts.models import LocalizedText
+    queryset = LocalizedText.get_dormant_queryset()
+    total = queryset.count()
+    logger.info('%s Dormant locales found. Deleting in batches...' % total)  # pylint: disable=logging-not-lazy,consider-using-f-string
+
+    batch_size = 1000
+    for start in range(0, total, batch_size):
+        end = min(start + batch_size, total)
+        logger.info('Iterating locales %d - %d to delete...' % (start + 1, end))  # pylint: disable=logging-not-lazy,consider-using-f-string
+        LocalizedText.objects.filter(id__in=queryset.order_by('id')[start:end].values('id')).delete()
+
+    return 1
+
+
+@app.task
+def delete_concept(concept_id):  # pragma: no cover
+    from core.concepts.models import Concept
+
+    queryset = Concept.objects.filter(id=concept_id)
+    if queryset.exists():
+        queryset.delete()
+
+    return 1
+
+
+@app.task
+def batch_index_resources(resource, filters):
+    model = get_resource_class_from_resource_name(resource)
+    if model:
+        model.batch_index(model.objects.filter(**filters), model.get_search_document())
+
+    return 1
+
+
+@app.task
+def make_hierarchy(concept_map):  # pragma: no cover
+    from core.concepts.models import Concept
+
+    for parent_concept_uri, child_concept_urls in concept_map.items():
+        parent_concept = Concept.objects.filter(uri=parent_concept_uri).first()
+        if parent_concept:
+            parent_latest = parent_concept.get_latest_version()
+            if parent_latest:
+                for child_concept in Concept.objects.filter(uri__in=child_concept_urls):
+                    child_concept.parent_concepts.add(parent_latest)
+                    child_latest = child_concept.get_latest_version()
+                    if child_latest:
+                        child_latest.parent_concepts.add(parent_latest)
+                        logger.info('Added child %s to parent %s', child_concept.uri, parent_concept_uri)
+                    else:
+                        logger.info('Could not find child %s latest_version', child_concept.uri)
+            else:
+                logger.info('Could not find parent %s latest_version', parent_concept_uri)
+        else:
+            logger.info('Could not find parent %s', parent_concept_uri)
+
+
+@app.task
+def index_source_concepts(source_id):
+    from core.sources.models import Source
+    source = Source.objects.filter(id=source_id).first()
+    if source:
+        from core.concepts.documents import ConceptDocument
+        source.batch_index(source.concepts, ConceptDocument)
+
+
+@app.task
+def index_source_mappings(source_id):
+    from core.sources.models import Source
+    source = Source.objects.filter(id=source_id).first()
+    if source:
+        from core.mappings.documents import MappingDocument
+        source.batch_index(source.mappings, MappingDocument)
+
+
+@app.task
+def update_source_active_concepts_count(source_id):
+    from core.sources.models import Source
+    source = Source.objects.filter(id=source_id).first()
+    if source:
+        before_active_concepts = source.active_concepts
+        source.set_active_concepts()
+        if before_active_concepts != source.active_concepts:
+            source.save(update_fields=['active_concepts'])
+
+
+@app.task
+def update_source_active_mappings_count(source_id):
+    from core.sources.models import Source
+    source = Source.objects.filter(id=source_id).first()
+    if source:
+        before_active_mappings = source.active_mappings
+        source.set_active_mappings()
+        if before_active_mappings != source.active_mappings:
+            source.save(update_fields=['active_mappings'])
+
+
+@app.task
+def update_collection_active_concepts_count(collection_id):
+    from core.collections.models import Collection
+    collection = Collection.objects.filter(id=collection_id).first()
+    if collection:
+        before_active_concepts = collection.active_concepts
+        collection.set_active_concepts()
+        if before_active_concepts != collection.active_concepts:
+            collection.save(update_fields=['active_concepts'])
+
+
+@app.task
+def update_collection_active_mappings_count(collection_id):
+    from core.collections.models import Collection
+    collection = Collection.objects.filter(id=collection_id).first()
+    if collection:
+        before_active_mappings = collection.active_mappings
+        collection.set_active_mappings()
+        if before_active_mappings != collection.active_mappings:
+            collection.save(update_fields=['active_mappings'])

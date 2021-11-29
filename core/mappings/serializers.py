@@ -12,6 +12,7 @@ from core.sources.serializers import SourceListSerializer, SourceDetailSerialize
 
 
 class MappingListSerializer(ModelSerializer):
+    type = CharField(source='resource_type', read_only=True)
     id = CharField(source='mnemonic', required=False)
     uuid = CharField(source='id', read_only=True)
     source = CharField(source='parent_resource', read_only=True)
@@ -40,12 +41,12 @@ class MappingListSerializer(ModelSerializer):
             'url', 'version', 'id', 'versioned_object_id', 'versioned_object_url',
             'is_latest_version', 'update_comment', 'version_url', 'uuid', 'version_created_on',
             'from_source_version', 'to_source_version', 'from_concept', 'to_concept', 'from_source', 'to_source',
-            'from_concept_name_resolved', 'to_concept_name_resolved', 'extras',
+            'from_concept_name_resolved', 'to_concept_name_resolved', 'extras', 'type'
         )
 
     def __init__(self, *args, **kwargs):
         params = get(kwargs, 'context.request.query_params')
-        self.query_params = params.dict() if params else dict()
+        self.query_params = params.dict() if params else {}
         self.include_from_source = self.query_params.get(MAPPING_LOOKUP_FROM_SOURCE) in ['true', True]
         self.include_to_source = self.query_params.get(MAPPING_LOOKUP_TO_SOURCE) in ['true', True]
         self.include_sources = self.query_params.get(MAPPING_LOOKUP_SOURCES) in ['true', True]
@@ -88,7 +89,7 @@ class MappingVersionListSerializer(MappingListSerializer):
 
     def __init__(self, *args, **kwargs):
         params = get(kwargs, 'context.request.query_params')
-        self.query_params = params.dict() if params else dict()
+        self.query_params = params.dict() if params else {}
         self.include_source_versions = self.query_params.get(INCLUDE_SOURCE_VERSIONS) in ['true', True]
         self.include_collection_versions = self.query_params.get(INCLUDE_COLLECTION_VERSIONS) in ['true', True]
 
@@ -101,6 +102,17 @@ class MappingVersionListSerializer(MappingListSerializer):
             pass
 
         super().__init__(*args, **kwargs)
+
+
+class MappingMinimalSerializer(ModelSerializer):
+    uuid = CharField(source='id', read_only=True)
+    id = CharField(source='mnemonic', read_only=True)
+    type = CharField(source='resource_type', read_only=True)
+    url = CharField(source='uri', read_only=True)
+
+    class Meta:
+        model = Mapping
+        fields = ('uuid', 'id', 'type', 'map_type', 'url', 'version_url')
 
 
 class MappingDetailSerializer(MappingListSerializer):
@@ -124,8 +136,7 @@ class MappingDetailSerializer(MappingListSerializer):
         model = Mapping
         fields = MappingListSerializer.Meta.fields + (
             'type', 'uuid', 'extras', 'created_on', 'updated_on', 'created_by',
-            'updated_by', 'parent_id', 'public_can_view',
-        )
+            'updated_by', 'parent_id', 'public_can_view',)
 
     def create(self, validated_data):
         mapping = Mapping.persist_new(data=validated_data, user=self.context.get('request').user)

@@ -8,9 +8,35 @@ The new and improved OCL terminology service v2
 3. Go to http://localhost:8000/swagger/ to benefit.
 
 #### Run Checks
-1. Pylint (pep8) --- `docker exec -it oclapi2_api_1 pylint -j2 core`
-2. Coverage -- `docker exec -it oclapi2_api_1 bash coverage.sh`
-2. Tests --- `docker exec -it oclapi2_api_1  python manage.py test --keepdb -v3`
+(use the `docker exec` command in a service started with `docker-compose up -d`)
+1. Pylint (pep8):
+   
+   `docker exec -it oclapi2_api_1 pylint -j2 core` 
+
+    or
+
+   `docker-compose -f docker-compose.yml -f docker-compose.ci.yml run --rm api pylint -j0 core`
+2. Coverage
+
+   `docker exec -it oclapi2_api_1 bash coverage.sh`
+
+   or
+
+   `docker-compose -f docker-compose.yml -f docker-compose.ci.yml run --rm api bash coverage.sh`
+3. Tests
+
+    `docker exec -it oclapi2_api_1  python manage.py test --keepdb -v3` 
+
+    or
+
+    `docker-compose -f docker-compose.yml -f docker-compose.ci.yml run --rm api python manage.py test --keepdb -v3`
+
+### DB migrations
+After modifying model you need to create migration files. Run:
+
+`docker-compose run --rm api python manage.py makemigrations`
+
+Make sure to commit newly created migration files.
 
 ### Release
 

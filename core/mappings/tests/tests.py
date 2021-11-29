@@ -5,6 +5,9 @@ from core.common.constants import HEAD, CUSTOM_VALIDATION_SCHEMA_OPENMRS
 from core.common.tests import OCLTestCase
 from core.concepts.tests.factories import ConceptFactory, LocalizedTextFactory
 from core.mappings.models import Mapping
+from core.mappings.serializers import MappingMinimalSerializer, MappingVersionDetailSerializer, \
+    MappingDetailSerializer, \
+    MappingVersionListSerializer, MappingListSerializer
 from core.mappings.tests.factories import MappingFactory
 from core.orgs.models import Organization
 from core.orgs.tests.factories import OrganizationFactory
@@ -150,9 +153,7 @@ class MappingTest(OCLTestCase):
         self.assertEqual(source.mappings.count(), 2)
         self.assertEqual(
             mapping.uri,
-            '/orgs/{}/sources/{}/mappings/{}/'.format(
-                source.organization.mnemonic, source.mnemonic, mapping.mnemonic
-            )
+            f'/orgs/{source.organization.mnemonic}/sources/{source.mnemonic}/mappings/{mapping.mnemonic}/'
         )
 
     def test_persist_clone(self):
@@ -185,14 +186,19 @@ class MappingTest(OCLTestCase):
         self.assertEqual(source_head.mappings.first().id, persisted_mapping.id)
         self.assertEqual(
             persisted_mapping.uri,
-            '/orgs/{}/sources/{}/{}/mappings/{}/{}/'.format(
-                source_version0.organization.mnemonic, source_version0.mnemonic, source_version0.version,
-                persisted_mapping.mnemonic, persisted_mapping.version
-            )
+            f'/orgs/{source_version0.organization.mnemonic}/sources/{source_version0.mnemonic}/'
+            f'{source_version0.version}/mappings/{persisted_mapping.mnemonic}/{persisted_mapping.version}/'
         )
         self.assertEqual(
             persisted_mapping.version_url, persisted_mapping.uri
         )
+
+    def test_get_serializer_class(self):
+        self.assertEqual(Mapping.get_serializer_class(), MappingListSerializer)
+        self.assertEqual(Mapping.get_serializer_class(version=True), MappingVersionListSerializer)
+        self.assertEqual(Mapping.get_serializer_class(verbose=True), MappingDetailSerializer)
+        self.assertEqual(Mapping.get_serializer_class(verbose=True, version=True), MappingVersionDetailSerializer)
+        self.assertEqual(Mapping.get_serializer_class(brief=True), MappingMinimalSerializer)
 
 
 class OpenMRSMappingValidatorTest(OCLTestCase):
@@ -235,5 +241,23 @@ class OpenMRSMappingValidatorTest(OCLTestCase):
 
         # 'Q-AND-A' is present in OpenMRS lookup values
         mapping = MappingFactory.build(parent=source, to_concept=concept1, from_concept=concept2, map_type='Q-AND-A')
+        mapping.populate_fields_from_relations({})
+        mapping.clean()
+
+    def test_external_id(self):
+        source = OrganizationSourceFactory(custom_validation_schema=CUSTOM_VALIDATION_SCHEMA_OPENMRS)
+        concept1 = ConceptFactory(parent=source, names=[LocalizedTextFactory()])
+        concept2 = ConceptFactory(parent=source, names=[LocalizedTextFactory()])
+
+        mapping = MappingFactory.build(
+            parent=source, to_concept=concept1, from_concept=concept2, map_type='Q-AND-A', external_id='1'*37)
+        mapping.populate_fields_from_relations({})
+
+        with self.assertRaises(ValidationError) as ex:
+            mapping.clean()
+        self.assertEqual(ex.exception.messages, ['Mapping External ID cannot be more than 36 characters.'])
+
+        mapping = MappingFactory.build(
+            parent=source, to_concept=concept1, from_concept=concept2, map_type='Q-AND-A', external_id='1'*36)
         mapping.populate_fields_from_relations({})
         mapping.clean()

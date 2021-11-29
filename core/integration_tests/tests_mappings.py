@@ -50,14 +50,6 @@ class MappingListViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 1)
 
-    def test_post_405(self):
-        response = self.client.post(
-            '/mappings/',
-            dict(foo='bar'),
-            HTTP_AUTHORIZATION='Token ' + self.token,
-        )
-        self.assertEqual(response.status_code, 405)
-
     def test_post_400(self):
         source = UserSourceFactory(user=self.user)
 
@@ -115,8 +107,10 @@ class MappingListViewTest(OCLAPITestCase):
             dict(map_type='same as', from_concept_url=concept2.uri, to_concept_url=concept2.uri),
             HTTP_AUTHORIZATION='Token ' + self.token,
         )
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.data, {'__all__': ['Cannot map concept to itself.']})
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data['map_type'], 'same as')
+        self.assertEqual(response.data['from_concept_code'], concept2.mnemonic)
+        self.assertEqual(response.data['to_concept_code'], concept2.mnemonic)
 
     def test_post_to_concept_does_not_exists_201(self):
         source = UserSourceFactory(user=self.user)
@@ -649,7 +643,7 @@ class MappingVersionRetrieveViewTest(OCLAPITestCase):
     def test_get_200(self):
         latest_version = self.mapping.get_latest_version()
 
-        response = self.client.get(self.mapping.url + '{}/'.format(latest_version.id))
+        response = self.client.get(self.mapping.url + f'{latest_version.id}/')
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['is_latest_version'], True)

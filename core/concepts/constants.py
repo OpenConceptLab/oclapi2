@@ -23,8 +23,17 @@ OPENMRS_DESCRIPTION_TYPE = 'Invalid description type'
 OPENMRS_NAME_TYPE = 'Invalid name type'
 OPENMRS_DATATYPE = 'Invalid data type'
 OPENMRS_CONCEPT_CLASS = 'Invalid concept class'
+OPENMRS_EXTERNAL_ID_LENGTH = 36
+OPENMRS_CONCEPT_EXTERNAL_ID_ERROR = f'Concept External ID cannot be more than {OPENMRS_EXTERNAL_ID_LENGTH} characters.'
+OPENMRS_NAME_EXTERNAL_ID_ERROR = f'Concept name\'s External ID cannot be more than ' \
+    f'{OPENMRS_EXTERNAL_ID_LENGTH} characters.'
+OPENMRS_DESCRIPTION_EXTERNAL_ID_ERROR = f'Concept description\'s External ID cannot be more than ' \
+    f'{OPENMRS_EXTERNAL_ID_LENGTH} characters.'
 BASIC_DESCRIPTION_CANNOT_BE_EMPTY = 'Concept description cannot be empty'
 BASIC_NAMES_CANNOT_BE_EMPTY = 'A concept must have at least one name'
+MAX_LOCALES_LIMIT = 500
+MAX_NAMES_LIMIT = f'max limit {MAX_LOCALES_LIMIT} of names exceeded'
+MAX_DESCRIPTIONS_LIMIT = f'max limit {MAX_LOCALES_LIMIT} of descriptions exceeded'
 CONCEPT_WAS_RETIRED = 'Concept was retired'
 CONCEPT_WAS_UNRETIRED = 'Concept was un-retired'
 CONCEPT_IS_ALREADY_RETIRED = 'Concept is already retired'

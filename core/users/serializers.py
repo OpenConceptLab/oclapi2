@@ -65,7 +65,7 @@ class UserCreateSerializer(serializers.ModelSerializer):
         username = validated_data.get('username')
         existing_profile = UserProfile.objects.filter(username=username)
         if existing_profile.exists():
-            self._errors['username'] = 'User with username %s already exists.' % username
+            self._errors['username'] = f'User with username {username} already exists.'
             user = existing_profile.first()
             user.token = user.get_token()
             return user
@@ -134,7 +134,7 @@ class UserDetailSerializer(serializers.ModelSerializer):
 
     def __init__(self, *args, **kwargs):
         params = get(kwargs, 'context.request.query_params')
-        self.query_params = params.dict() if params else dict()
+        self.query_params = params.dict() if params else {}
         self.include_subscribed_orgs = self.query_params.get(INCLUDE_SUBSCRIBED_ORGS) in ['true', True]
         self.include_verification_token = self.query_params.get(INCLUDE_VERIFICATION_TOKEN) in ['true', True]
         self.include_auth_groups = self.query_params.get(INCLUDE_AUTH_GROUPS) in ['true', True]

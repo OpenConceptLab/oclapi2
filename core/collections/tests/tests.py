@@ -53,9 +53,9 @@ class CollectionTest(OCLTestCase):
         self.assertEqual(collection.expansion.concepts.first(), concept.get_latest_version())
         self.assertEqual(collection.active_concepts, 1)
 
-        result = collection.add_references([concept_expression])
+        _, errors = collection.add_references([concept_expression])
         self.assertEqual(
-            result, {concept_expression: ['Concept or Mapping reference name must be unique in a collection.']}
+            errors, {concept_expression: ['Concept or Mapping reference name must be unique in a collection.']}
         )
         collection.refresh_from_db()
         self.assertEqual(collection.expansion.concepts.count(), 1)
@@ -401,22 +401,20 @@ class TasksTest(OCLTestCase):
         )
         mapping2 = MappingFactory()
 
-        added_references, errors = add_references(
-            collection.created_by,
+        errors = add_references(
+            collection.created_by.id,
             dict(expressions=[
                 obj.get_latest_version().version_url for obj in [concept1, concept2, mapping2]
             ]),
-            collection,
-            None,
+            collection.id,
             True
         )
 
         self.assertEqual(errors, {})
-        self.assertEqual(len(added_references), 4)
         self.assertListEqual(
-            sorted([
-                ref.expression for ref in added_references
-            ]),
+            sorted(list(
+                collection.references.values_list('expression', flat=True)
+            )),
             sorted([
                 concept1.get_latest_version().version_url, concept2.get_latest_version().version_url,
                 mapping1.get_latest_version().version_url, mapping2.get_latest_version().version_url,

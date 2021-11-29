@@ -10,7 +10,9 @@ from core.concepts.constants import (
     OPENMRS_ONE_FULLY_SPECIFIED_NAME_PER_LOCALE, OPENMRS_NO_MORE_THAN_ONE_SHORT_NAME_PER_LOCALE, OPENMRS_CONCEPT_CLASS,
     OPENMRS_DATATYPE, OPENMRS_NAME_TYPE, OPENMRS_DESCRIPTION_TYPE, OPENMRS_NAME_LOCALE,
     OPENMRS_DESCRIPTION_LOCALE,
-    LOCALES_SEARCH_INDEX_TERM, INDEX_TERM, FULLY_SPECIFIED, SHORT)
+    LOCALES_SEARCH_INDEX_TERM, INDEX_TERM, FULLY_SPECIFIED, SHORT,
+    OPENMRS_CONCEPT_EXTERNAL_ID_ERROR, OPENMRS_EXTERNAL_ID_LENGTH, OPENMRS_NAME_EXTERNAL_ID_ERROR,
+    OPENMRS_DESCRIPTION_EXTERNAL_ID_ERROR)
 from core.concepts.validators import BaseConceptValidator, message_with_name_details
 
 
@@ -21,6 +23,9 @@ class OpenMRSConceptValidator(BaseConceptValidator):
         self.reference_values = kwargs.pop('reference_values')
 
     def validate_concept_based(self, concept):
+        if concept.retired:
+            return
+        self.validate_external_id(concept)
         self.must_have_exactly_one_preferred_name(concept)
         self.all_non_short_names_must_be_unique(concept)
         self.no_more_than_one_short_name_per_locale(concept)
@@ -29,13 +34,23 @@ class OpenMRSConceptValidator(BaseConceptValidator):
         self.requires_at_least_one_fully_specified_name(concept)
         self.lookup_attributes_should_be_valid(concept)
 
+    def validate_external_id(self, concept):
+        if self.is_invalid_external_id(concept):
+            raise ValidationError({'external_id': [OPENMRS_CONCEPT_EXTERNAL_ID_ERROR]})
+
+    @staticmethod
+    def is_invalid_external_id(instance):
+        return len(get(instance, 'external_id') or '') > OPENMRS_EXTERNAL_ID_LENGTH
+
     def validate_source_based(self, concept):
+        if concept.retired:
+            return
         self.fully_specified_name_should_be_unique_for_source_and_locale(concept)
         self.preferred_name_should_be_unique_for_source_and_locale(concept)
 
     @staticmethod
     def must_have_exactly_one_preferred_name(concept):
-        preferred_name_locales_in_concept = dict()
+        preferred_name_locales_in_concept = {}
 
         for name in concept.saved_unsaved_names:
             if not name.locale_preferred:
@@ -57,9 +72,10 @@ class OpenMRSConceptValidator(BaseConceptValidator):
 
     def preferred_name_should_be_unique_for_source_and_locale(self, concept):
         self.attribute_should_be_unique_for_source_and_locale(
-            concept,
+            concept=concept,
             attribute='locale_preferred',
-            error_message=OPENMRS_PREFERRED_NAME_UNIQUE_PER_SOURCE_LOCALE
+            error_message=OPENMRS_PREFERRED_NAME_UNIQUE_PER_SOURCE_LOCALE,
+            filters=dict(names__locale_preferred=True)
         )
 
     def fully_specified_name_should_be_unique_for_source_and_locale(self, concept):
@@ -69,24 +85,28 @@ class OpenMRSConceptValidator(BaseConceptValidator):
             error_message=OPENMRS_FULLY_SPECIFIED_NAME_UNIQUE_PER_SOURCE_LOCALE
         )
 
-    def attribute_should_be_unique_for_source_and_locale(self, concept, attribute, error_message):
+    def attribute_should_be_unique_for_source_and_locale(self, concept, attribute, error_message, filters=None):
         versioned_object_id = concept.versioned_object_id or get(concept, 'head.id')
 
         names = [name for name in concept.saved_unsaved_names if getattr(name, attribute)]
         for name in names:
-            if self.no_other_record_has_same_name(name, versioned_object_id):
+            if self.no_other_record_has_same_name(name, versioned_object_id, filters):
                 continue
 
             raise ValidationError({'names': [message_with_name_details(error_message, name)]})
 
-    def no_other_record_has_same_name(self, name, versioned_object_id):
+    def no_other_record_has_same_name(self, name, versioned_object_id, filters=None):
         if not self.repo:
             return True
+
+        if not filters:
+            filters = {}
 
         return not self.repo.concepts_set.exclude(
             versioned_object_id=versioned_object_id
         ).exclude(names__type__in=(*LOCALES_SHORT, *LOCALES_SEARCH_INDEX_TERM)).filter(
-            is_active=True, retired=False, is_latest_version=True, names__locale=name.locale, names__name=name.name
+            is_active=True, retired=False, is_latest_version=True, names__locale=name.locale, names__name=name.name,
+            **filters
         ).exists()
 
     @staticmethod
@@ -118,7 +138,7 @@ class OpenMRSConceptValidator(BaseConceptValidator):
 
     @staticmethod
     def only_one_fully_specified_name_per_locale(concept):
-        fully_specified_names_per_locale = dict()
+        fully_specified_names_per_locale = {}
 
         for name in concept.saved_unsaved_names:
             if not name.is_fully_specified:
@@ -132,7 +152,7 @@ class OpenMRSConceptValidator(BaseConceptValidator):
 
     @staticmethod
     def no_more_than_one_short_name_per_locale(concept):
-        short_names_per_locale = dict()
+        short_names_per_locale = {}
 
         for name in concept.saved_unsaved_names:
             if not name.is_short:
@@ -189,7 +209,20 @@ class OpenMRSConceptValidator(BaseConceptValidator):
             if description.locale not in self.reference_values['Locales']:
                 raise ValidationError({'descriptions': [OPENMRS_DESCRIPTION_LOCALE]})
 
+    def local_external_id_should_be_valid(self, concept):
+        names = concept.saved_unsaved_names or []
+        for name in names:
+            if self.is_invalid_external_id(name):
+                raise ValidationError({'names': [message_with_name_details(OPENMRS_NAME_EXTERNAL_ID_ERROR, name)]})
+
+        descriptions = concept.saved_unsaved_descriptions or []
+        for description in descriptions:
+            if self.is_invalid_external_id(description):
+                raise ValidationError({
+                    'descriptions': [message_with_name_details(OPENMRS_DESCRIPTION_EXTERNAL_ID_ERROR, description)]})
+
     def lookup_attributes_should_be_valid(self, concept):
+        self.local_external_id_should_be_valid(concept)
         if concept.concept_class in LOOKUP_CONCEPT_CLASSES:
             return
 

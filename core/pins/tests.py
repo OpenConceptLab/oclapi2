@@ -189,6 +189,39 @@ class PinListViewTest(OCLAPITestCase):
         self.assertIsNotNone(response.data[0]['uri'])
         self.assertIsNone(response.data[0]['user_id'])
 
+    def test_get_200_with_creator_pins(self):
+        source = OrganizationSourceFactory()
+        collection = OrganizationCollectionFactory()
+        user = UserProfileFactory()
+        org = OrganizationFactory()
+        user.pins.create(resource=source)
+        org.pins.create(resource=source)
+        org.pins.create(resource=collection, created_by=user)
+        token = user.get_token()
+
+        response = self.client.get(
+            user.uri + 'pins/',
+            HTTP_AUTHORIZATION='Token ' + token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['resource_uri'], source.uri)
+
+        response = self.client.get(
+            user.uri + 'pins/?includeCreatorPins=true',
+            HTTP_AUTHORIZATION='Token ' + token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 2)
+        self.assertEqual(
+            sorted([resource['resource_uri'] for resource in response.data]),
+            [source.uri, collection.uri]
+        )
+
     def test_post_201(self):
         source = OrganizationSourceFactory()
         user = UserProfileFactory()

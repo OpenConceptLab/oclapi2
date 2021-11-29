@@ -1,7 +1,6 @@
-from django.contrib import admin
 from django.contrib.contenttypes.fields import GenericRelation
 from django.core.validators import RegexValidator
-from django.db import models
+from django.db import models, transaction
 
 from core.client_configs.models import ClientConfig
 from core.common.constants import NAMESPACE_REGEX, ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT
@@ -14,7 +13,6 @@ class Organization(BaseResourceModel, SourceContainerMixin):
     class Meta:
         db_table = 'organizations'
         indexes = [] + BaseResourceModel.Meta.indexes
-
 
     OBJECT_TYPE = ORG_OBJECT_TYPE
     es_fields = {
@@ -35,6 +33,11 @@ class Organization(BaseResourceModel, SourceContainerMixin):
     description = models.TextField(null=True, blank=True)
     client_configs = GenericRelation(ClientConfig, object_id_field='resource_id', content_type_field='resource_type')
     text = models.TextField(null=True, blank=True)  # for about description (markup)
+
+    @staticmethod
+    def get_search_document():
+        from core.orgs.documents import OrganizationDocument
+        return OrganizationDocument
 
     @property
     def org(self):
@@ -66,5 +69,26 @@ class Organization(BaseResourceModel, SourceContainerMixin):
             if self.updated_by_id:
                 self.members.add(self.updated_by)
 
+    def delete(self, using=None, keep_parents=False):
+        with transaction.atomic():
+            for source in self.source_set.all():
+                self.batch_delete(source.concepts_set)
+                self.batch_delete(source.mappings_set)
+                source.delete(force=True)
+            for collection in self.collection_set.all():
+                self.batch_delete(collection.references)
+                collection.delete(force=True)
+            self.delete_pins()
+            self.delete_client_configs()
 
-admin.site.register(Organization)
+            return super().delete(using=using, keep_parents=keep_parents)
+
+    def delete_client_configs(self):
+        ClientConfig.objects.filter(resource_type__model='organization', resource_id=self.id).delete()
+
+    def delete_pins(self):
+        from core.pins.models import Pin
+        # deletes pins where org is pinned
+        Pin.objects.filter(resource_type__model='organization', resource_id=self.id).delete()
+        # deletes pins for this org
+        self.pins.all().delete()

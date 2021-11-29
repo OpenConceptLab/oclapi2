@@ -31,7 +31,7 @@ services:
       - ES_HOST=${ES_HOST-es}
       - ES_PORT=${ES_PORT-9200}
       - ENVIRONMENT=${ENVIRONMENT-production}
-      - DEBUG=True #needed to be able to serve staticfiles with Django server
+      - DEBUG=${DEBUG-FALSE}
       - SECRET_KEY
       - SENTRY_DSN_KEY
       - API_SUPERUSER_PASSWORD=${API_SUPERUSER_PASSWORD-Root123}
@@ -49,7 +49,7 @@ services:
       test: "curl --silent --fail http://localhost:8000/version/ || exit 1"
   celery:
     image: openconceptlab/oclapi2:${ENVIRONMENT-production}
-    command: ["bash", "-c", "CELERY_WORKER_NAME=default ./start_celery_worker.sh -P prefork -Q default --autoscale=10,2"]
+    command: ["bash", "-c", "CELERY_WORKER_NAME=default ./start_celery_worker.sh -P prefork -Q default --autoscale=5,1"]
     restart: "always"
     healthcheck:
       test: ["CMD-SHELL", "-c", "CELERY_WORKER_NAME=default ./ping_celery_worker.sh"]
@@ -61,7 +61,7 @@ services:
       - ERRBIT_KEY
   celery_indexing:
     image: openconceptlab/oclapi2:${ENVIRONMENT-production}
-    command: ["bash", "-c", "CELERY_WORKER_NAME=indexing ./start_celery_worker.sh -P prefork -Q indexing --autoscale=10,2"]
+    command: ["bash", "-c", "CELERY_WORKER_NAME=indexing ./start_celery_worker.sh -P prefork -Q indexing --autoscale=2,1"]
     restart: "always"
     healthcheck:
       test: ["CMD-SHELL", "-c", "CELERY_WORKER_NAME=indexing ./ping_celery_worker.sh"]
@@ -73,7 +73,7 @@ services:
       - ERRBIT_KEY
   celery_concurrent:
     image: openconceptlab/oclapi2:${ENVIRONMENT-production}
-    command: ["bash", "-c", "CELERY_WORKER_NAME=concurrent ./start_celery_worker.sh -P prefork -Q concurrent -c 10"]
+    command: ["bash", "-c", "CELERY_WORKER_NAME=concurrent ./start_celery_worker.sh -P prefork -Q concurrent -c 5"]
     restart: "always"
     healthcheck:
       test:  ["CMD-SHELL", "-c", "CELERY_WORKER_NAME=concurrent ./ping_celery_worker.sh"]

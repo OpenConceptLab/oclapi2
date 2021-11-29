@@ -1,23 +1,29 @@
-from django.db.models import F
+from django.db.models import F, Q
 from django.http import Http404
 from django.shortcuts import get_object_or_404
 from drf_yasg.utils import swagger_auto_schema
 from pydash import get
 from rest_framework import status
 from rest_framework.generics import RetrieveAPIView, DestroyAPIView, ListCreateAPIView, RetrieveUpdateDestroyAPIView, \
-    UpdateAPIView, ListAPIView
+    UpdateAPIView
 from rest_framework.mixins import CreateModelMixin
 from rest_framework.permissions import IsAuthenticatedOrReadOnly, IsAdminUser
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
+from core.bundles.models import Bundle
+from core.bundles.serializers import BundleSerializer
 from core.common.constants import (
-    HEAD, INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_RETIRED_PARAM)
-from core.common.exceptions import Http409
+    HEAD, INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_RETIRED_PARAM, ACCESS_TYPE_NONE)
+from core.common.exceptions import Http409, Http405
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryMixin
 from core.common.swagger_parameters import (
     q_param, limit_param, sort_desc_param, page_param, exact_match_param, sort_asc_param, verbose_param,
     include_facets_header, updated_since_param, include_inverse_mappings_param, include_retired_param,
-    compress_header, include_source_versions_param, include_collection_versions_param)
+    compress_header, include_source_versions_param, include_collection_versions_param, cascade_method_param,
+    cascade_map_types_params, cascade_exclude_map_types_params, cascade_hierarchy_param, cascade_mappings_param,
+    include_mappings_param, cascade_levels_param)
+from core.common.tasks import delete_concept, make_hierarchy
 from core.common.utils import to_parent_uri_from_kwargs
 from core.common.views import SourceChildCommonBaseView, SourceChildExtrasView, \
     SourceChildExtraRetrieveUpdateDestroyView
@@ -29,7 +35,8 @@ from core.concepts.search import ConceptSearch
 from core.concepts.serializers import (
     ConceptDetailSerializer, ConceptListSerializer, ConceptDescriptionSerializer, ConceptNameSerializer,
     ConceptVersionDetailSerializer,
-    ConceptVersionListSerializer, ConceptHierarchySerializer)
+    ConceptVersionListSerializer, ConceptSummarySerializer, ConceptMinimalSerializer,
+    ConceptChildrenSerializer, ConceptParentsSerializer)
 from core.mappings.serializers import MappingListSerializer
 
 
@@ -49,30 +56,6 @@ class ConceptBaseView(SourceChildCommonBaseView):
         return Concept.get_base_queryset(self.params)
 
 
-class ConceptVersionListAllView(ConceptBaseView, ListWithHeadersMixin):
-    permission_classes = (CanViewParentDictionary,)
-
-    def get_serializer_class(self):
-        return ConceptDetailSerializer if self.is_verbose() else ConceptListSerializer
-
-    def get_queryset(self):
-        return Concept.global_listing_queryset(
-            self.get_filter_params(), self.request.user
-        ).select_related(
-            'parent__organization', 'parent__user',
-        ).prefetch_related('names', 'descriptions')
-
-    @swagger_auto_schema(
-        manual_parameters=[
-            q_param, limit_param, sort_desc_param, sort_asc_param, exact_match_param, page_param, verbose_param,
-            include_retired_param, include_inverse_mappings_param, updated_since_param,
-            include_facets_header, compress_header
-        ]
-    )
-    def get(self, request, *args, **kwargs):
-        return self.list(request, *args, **kwargs)
-
-
 class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
     serializer_class = ConceptListSerializer
 
@@ -83,7 +66,12 @@ class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
         return [CanViewParentDictionary(), ]
 
     def get_serializer_class(self):
-        if (self.request.method == 'GET' and self.is_verbose()) or self.request.method == 'POST':
+        method = self.request.method
+        is_get = method == 'GET'
+
+        if is_get and self.is_brief():
+            return ConceptMinimalSerializer
+        if (is_get and self.is_verbose()) or method == 'POST':
             return ConceptDetailSerializer
 
         return ConceptListSerializer
@@ -91,14 +79,28 @@ class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
     def get_queryset(self):
         is_latest_version = 'collection' not in self.kwargs and 'version' not in self.kwargs or \
                             get(self.kwargs, 'version') == HEAD
-        queryset = super().get_queryset()
+        queryset = super().get_queryset().prefetch_related('names')
         if is_latest_version:
             queryset = queryset.filter(is_latest_version=True)
+        user = self.request.user
+        if get(user, 'is_anonymous'):
+            queryset = queryset.exclude(public_access=ACCESS_TYPE_NONE)
+        elif not get(user, 'is_staff'):
+            public_queryset = queryset.exclude(public_access=ACCESS_TYPE_NONE)
+            private_queryset = queryset.filter(public_access=ACCESS_TYPE_NONE)
+            private_queryset = private_queryset.filter(
+                Q(parent__user_id=user.id) | Q(parent__organization__members__id=user.id))
+            queryset = public_queryset.union(private_queryset)
 
-        return queryset.select_related(
-            'parent__organization', 'parent__user', 'created_by'
-        ).prefetch_related('names')
+        return queryset
 
+    @swagger_auto_schema(
+        manual_parameters=[
+            q_param, limit_param, sort_desc_param, sort_asc_param, exact_match_param, page_param, verbose_param,
+            include_retired_param, include_inverse_mappings_param, updated_since_param,
+            include_facets_header, compress_header
+        ]
+    )
     def get(self, request, *args, **kwargs):
         self.set_parent_resource(False)
         if self.parent_resource:
@@ -125,6 +127,8 @@ class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
 
     def post(self, request, **kwargs):  # pylint: disable=unused-argument
         self.set_parent_resource()
+        if not self.parent_resource:
+            raise Http404()
         serializer = self.get_serializer(data={
             **request.data, 'parent_id': self.parent_resource.id, 'name': request.data.get('id', None)
         })
@@ -137,6 +141,60 @@ class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
+class ConceptSummaryView(ConceptBaseView, RetrieveAPIView):
+    serializer_class = ConceptSummarySerializer
+
+    def get_object(self, queryset=None):
+        if 'collection' in self.kwargs:
+            return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
+
+        queryset = self.get_queryset()
+
+        if 'concept_version' not in self.kwargs:
+            queryset = queryset.filter(id=F('versioned_object_id'))
+
+        instance = queryset.first()
+
+        if not instance:
+            raise Http404()
+
+        self.check_object_permissions(self.request, instance)
+
+        return instance
+
+
+class ConceptCollectionMembershipView(ConceptBaseView, ListWithHeadersMixin):
+    def get_serializer_class(self):
+        from core.collections.serializers import CollectionVersionListSerializer
+        return CollectionVersionListSerializer
+
+    def get_object(self, queryset=None):
+        queryset = Concept.get_base_queryset(self.params)
+        if 'concept_version' in self.kwargs:
+            instance = queryset.first()
+        else:
+            instance = queryset.filter(id=F('versioned_object_id')).first().get_latest_version()
+
+        if not instance:
+            raise Http404()
+
+        self.check_object_permissions(self.request, instance)
+
+        return instance
+
+    def get_queryset(self):
+        instance = self.get_object()
+
+        if not self.kwargs.get('concept_version'):
+            instance = instance.get_latest_version()
+
+        return instance.collection_set.filter(
+            organization_id=instance.parent.organization_id, user_id=instance.parent.user_id)
+
+    def get(self, request, *args, **kwargs):
+        return self.list(request, *args, **kwargs)
+
+
 class ConceptRetrieveUpdateDestroyView(ConceptBaseView, RetrieveAPIView, UpdateAPIView, DestroyAPIView):
     serializer_class = ConceptDetailSerializer
 
@@ -144,7 +202,7 @@ class ConceptRetrieveUpdateDestroyView(ConceptBaseView, RetrieveAPIView, UpdateA
         queryset = self.get_queryset()
         filters = dict(id=F('versioned_object_id'))
         if 'collection' in self.kwargs:
-            filters = dict()
+            filters = {}
             queryset = queryset.order_by('id').distinct('id')
             uri_param = self.request.query_params.dict().get('uri')
             if uri_param:
@@ -194,28 +252,96 @@ class ConceptRetrieveUpdateDestroyView(ConceptBaseView, RetrieveAPIView, UpdateA
     def is_hard_delete_requested(self):
         return self.request.query_params.get('hardDelete', None) in ['true', True, 'True']
 
+    def is_async_hard_delete_requested(self):
+        return self.request.query_params.get('async', None) in ['true', True, 'True']
+
+    def is_db_delete_requested(self):
+        return self.request.query_params.get('db', None) in ['true', True, 'True']
+
     def destroy(self, request, *args, **kwargs):
+        is_hard_delete_requested = self.is_hard_delete_requested()
+        if self.is_db_delete_requested() and is_hard_delete_requested:
+            parent_filters = Concept.get_parent_and_owner_filters_from_kwargs(self.kwargs)
+            result = Concept.objects.filter(mnemonic=self.kwargs['concept'], **parent_filters).delete()
+            return Response(result, status=status.HTTP_204_NO_CONTENT)
+
         concept = self.get_object()
-        comment = request.data.get('update_comment', None) or request.data.get('comment', None)
-        if self.is_hard_delete_requested():
+        parent = concept.parent
+
+        if is_hard_delete_requested:
+            if self.is_async_hard_delete_requested():
+                delete_concept.delay(concept.id)
+                return Response(status=status.HTTP_204_NO_CONTENT)
             concept.delete()
+            parent.update_concepts_count()
             return Response(status=status.HTTP_204_NO_CONTENT)
 
+        comment = request.data.get('update_comment', None) or request.data.get('comment', None)
         errors = concept.retire(request.user, comment)
 
         if errors:
             return Response(errors, status=status.HTTP_400_BAD_REQUEST)
 
+        parent.update_concepts_count()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
-class ConceptChildrenView(ConceptBaseView, ListAPIView):
-    serializer_class = ConceptHierarchySerializer
+class ConceptCascadeView(ConceptBaseView):
+    serializer_class = BundleSerializer
+
+    def get_object(self, queryset=None):
+        if 'collection' in self.kwargs:
+            raise Http405()
+
+        queryset = self.get_queryset()
+        if 'concept_version' not in self.kwargs:
+            queryset = queryset.filter(id=F('versioned_object_id'))
+
+        instance = queryset.first()
+
+        if not instance:
+            raise Http404()
+
+        self.check_object_permissions(self.request, instance)
+        return instance
+
+    @swagger_auto_schema(
+        manual_parameters=[
+            cascade_method_param, cascade_map_types_params, cascade_exclude_map_types_params,
+            cascade_hierarchy_param, cascade_mappings_param, include_mappings_param, cascade_levels_param
+        ]
+    )
+    def get(self, request, **kwargs):  # pylint: disable=unused-argument
+        instance = self.get_object()
+        bundle = Bundle(
+            root=instance, params=self.request.query_params, verbose=self.is_verbose()
+        )
+        bundle.cascade()
+        return Response(BundleSerializer(bundle).data)
+
+
+class ConceptChildrenView(ConceptBaseView, ListWithHeadersMixin):
+    serializer_class = ConceptChildrenSerializer
 
     def get_queryset(self):
         instance = get_object_or_404(super().get_queryset(), id=F('versioned_object_id'))
         self.check_object_permissions(self.request, instance)
         return instance.child_concept_queryset()
+
+    def get(self, request, *args, **kwargs):
+        return self.list(request, *args, **kwargs)
+
+
+class ConceptParentsView(ConceptBaseView, ListWithHeadersMixin):
+    serializer_class = ConceptParentsSerializer
+
+    def get_queryset(self):
+        instance = get_object_or_404(super().get_queryset(), id=F('versioned_object_id'))
+        self.check_object_permissions(self.request, instance)
+        return instance.parent_concept_queryset()
+
+    def get(self, request, *args, **kwargs):
+        return self.list(request, *args, **kwargs)
 
 
 class ConceptReactivateView(ConceptBaseView, UpdateAPIView):
@@ -239,6 +365,8 @@ class ConceptReactivateView(ConceptBaseView, UpdateAPIView):
 
         if errors:
             return Response(errors, status=status.HTTP_400_BAD_REQUEST)
+
+        concept.parent.update_concepts_count()
 
         return Response(status=status.HTTP_204_NO_CONTENT)
 
@@ -292,9 +420,14 @@ class ConceptMappingsView(ConceptBaseView, ListWithHeadersMixin):
         return self.list(request, *args, **kwargs)
 
 
-class ConceptVersionRetrieveView(ConceptBaseView, RetrieveAPIView):
+class ConceptVersionRetrieveView(ConceptBaseView, RetrieveAPIView, DestroyAPIView):
     serializer_class = ConceptVersionDetailSerializer
-    permission_classes = (CanViewParentDictionary,)
+
+    def get_permissions(self):
+        if self.request.method == 'DELETE':
+            return [IsAdminUser()]
+
+        return [CanViewParentDictionary(), ]
 
     def get_object(self, queryset=None):
         instance = self.get_queryset().first()
@@ -334,14 +467,14 @@ class ConceptLabelListCreateView(ConceptBaseView, ListWithHeadersMixin, ListCrea
         if serializer.is_valid():
             instance = self.get_object()
             new_version = instance.clone()
-            subject_label_attr = "cloned_{}".format(self.parent_list_attribute)
+            subject_label_attr = f"cloned_{self.parent_list_attribute}"
             # get the current labels from the object
             labels = getattr(new_version, subject_label_attr, [])
             # If labels are None then we would want to initialize the labels in new_version
             saved_instance = serializer.save()
             labels.append(saved_instance)
             setattr(new_version, subject_label_attr, labels)
-            new_version.comment = 'Added to %s: %s.' % (self.parent_list_attribute, saved_instance.name)
+            new_version.comment = f'Added to {self.parent_list_attribute}: {saved_instance.name}.'
             # save updated ConceptVersion into database
             errors = Concept.persist_clone(new_version, request.user)
             if errors:
@@ -386,11 +519,11 @@ class ConceptLabelRetrieveUpdateDestroyView(ConceptBaseView, RetrieveUpdateDestr
             resource_instance = self.get_resource_object()
             new_version = resource_instance.clone()
             saved_instance = serializer.save()
-            subject_label_attr = "cloned_{}".format(self.parent_list_attribute)
+            subject_label_attr = f"cloned_{self.parent_list_attribute}"
             labels = getattr(new_version, subject_label_attr, [])
             labels.append(saved_instance)
             setattr(new_version, subject_label_attr, labels)
-            new_version.comment = 'Updated %s in %s.' % (saved_instance.name, self.parent_list_attribute)
+            new_version.comment = f'Updated {saved_instance.name} in {self.parent_list_attribute}.'
             errors = Concept.persist_clone(new_version, request.user)
             if errors:
                 return Response(errors, status=status.HTTP_400_BAD_REQUEST)
@@ -404,10 +537,10 @@ class ConceptLabelRetrieveUpdateDestroyView(ConceptBaseView, RetrieveUpdateDestr
         if instance:
             resource_instance = self.get_resource_object()
             new_version = resource_instance.clone()
-            subject_label_attr = "cloned_{}".format(self.parent_list_attribute)
+            subject_label_attr = f"cloned_{self.parent_list_attribute}"
             labels = [name.clone() for name in resource_instance.names.exclude(id=instance.id)]
             setattr(new_version, subject_label_attr, labels)
-            new_version.comment = 'Deleted %s in %s.' % (instance.name, self.parent_list_attribute)
+            new_version.comment = f'Deleted {instance.name} in {self.parent_list_attribute}.'
             errors = Concept.persist_clone(new_version, request.user)
             if errors:
                 return Response(errors, status=status.HTTP_400_BAD_REQUEST)
@@ -441,3 +574,21 @@ class ConceptExtrasView(SourceChildExtrasView, ConceptBaseView):
 class ConceptExtraRetrieveUpdateDestroyView(SourceChildExtraRetrieveUpdateDestroyView, ConceptBaseView):
     serializer_class = ConceptDetailSerializer
     model = Concept
+
+
+class ConceptsHierarchyAmendAdminView(APIView):  # pragma: no cover
+    swagger_schema = None
+    permission_classes = (IsAdminUser, )
+
+    @staticmethod
+    def post(request):
+        concept_map = request.data
+        if not concept_map:
+            return Response(status=status.HTTP_400_BAD_REQUEST)
+
+        result = make_hierarchy.delay(concept_map)
+
+        return Response(
+            dict(state=result.state, username=request.user.username, task=result.task_id, queue='default'),
+            status=status.HTTP_202_ACCEPTED
+        )

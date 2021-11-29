@@ -49,6 +49,8 @@ class S3:
         except NoCredentialsError:  # pragma: no cover
             pass
 
+        return None
+
     @classmethod
     def upload(cls, file_path, file_content, headers=None, metadata=None):
         url = cls.generate_signed_url(cls.PUT, file_path, metadata)
@@ -81,6 +83,8 @@ class S3:
             )
         except NoCredentialsError:  # pragma: no cover
             pass
+
+        return None
 
     @classmethod
     def upload_base64(  # pylint: disable=too-many-arguments,inconsistent-return-statements
@@ -119,10 +123,7 @@ class S3:
 
     @classmethod
     def public_url_for(cls, file_path):
-        url = "http://{0}.s3.amazonaws.com/{1}".format(
-            settings.AWS_STORAGE_BUCKET_NAME,
-            file_path,
-        )
+        url = f"http://{settings.AWS_STORAGE_BUCKET_NAME}.s3.amazonaws.com/{file_path}"
         if settings.ENV != 'development':
             url = url.replace('http://', 'https://')
         return url
@@ -173,7 +174,7 @@ class S3:
 
         for obj in objects:
             paths = [obj.pdf_path(path) for path in sub_paths]
-            if not all([path in s3_keys for path in paths]):
+            if not all(path in s3_keys for path in paths):
                 missing_objects.append(obj)
 
         return missing_objects
@@ -188,6 +189,8 @@ class S3:
             )
         except NoCredentialsError:  # pragma: no cover
             pass
+
+        return None
 
 
 class RedisService:  # pragma: no cover

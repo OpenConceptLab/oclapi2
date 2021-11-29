@@ -1,7 +1,9 @@
 from django.core.exceptions import ValidationError
 from django.db.models import F
+from pydash import get
 
-from .constants import OPENMRS_SINGLE_MAPPING_BETWEEN_TWO_CONCEPTS, OPENMRS_INVALID_MAPTYPE
+from .constants import OPENMRS_SINGLE_MAPPING_BETWEEN_TWO_CONCEPTS, OPENMRS_INVALID_MAPTYPE,\
+    OPENMRS_EXTERNAL_ID_LENGTH, OPENMRS_MAPPING_EXTERNAL_ID_ERROR
 
 
 class OpenMRSMappingValidator:
@@ -9,8 +11,13 @@ class OpenMRSMappingValidator:
         self.mapping = mapping
 
     def validate(self):
+        self.should_have_valid_external_id()
         self.pair_must_be_unique()
         self.lookup_attributes_should_be_valid()
+
+    def should_have_valid_external_id(self):
+        if len(get(self.mapping, 'external_id') or '') > OPENMRS_EXTERNAL_ID_LENGTH:
+            raise ValidationError({'external_id': [OPENMRS_MAPPING_EXTERNAL_ID_ERROR]})
 
     def pair_must_be_unique(self):
         from .models import Mapping

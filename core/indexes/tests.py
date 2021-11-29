@@ -119,11 +119,8 @@ class ResourceIndexViewTest(OCLAPITestCase):
 
     def test_post_202(self):
         concept = ConceptFactory()
-        old_updated_at = concept.updated_at
         url = '/indexes/resources/concepts/'
 
-        response = self.client.post(url, dict(ids='{}'.format(concept.mnemonic)), HTTP_AUTHORIZATION=self.token_header)
+        response = self.client.post(url, dict(ids=f'{concept.mnemonic}'), HTTP_AUTHORIZATION=self.token_header)
 
         self.assertEqual(response.status_code, 202)
-        concept.refresh_from_db()
-        self.assertNotEqual(old_updated_at, concept.updated_at)

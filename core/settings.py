@@ -31,7 +31,7 @@ API_INTERNAL_BASE_URL = os.environ.get('API_INTERNAL_BASE_URL', 'http://api:8000
 SECRET_KEY = '=q1%fd62$x!35xzzlc3lix3g!s&!2%-1d@5a=rm!n4lu74&6)p'
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.environ.get('DEBUG', True)
+DEBUG = os.environ.get('DEBUG') == 'TRUE'
 
 ALLOWED_HOSTS = ['*']
 
@@ -50,9 +50,11 @@ CORS_EXPOSE_HEADERS = (
     'Content-Length',
     'Content-Range',
     'X-OCL-API-VERSION',
+    'X-OCL-REQUEST-USER',
 )
 
 CORS_ORIGIN_ALLOW_ALL = True
+DEFAULT_AUTO_FIELD = 'django.db.models.AutoField'
 # Application definition
 
 INSTALLED_APPS = [
@@ -68,6 +70,7 @@ INSTALLED_APPS = [
     'django_elasticsearch_dsl',
     'corsheaders',
     'ordered_model',
+    'cid.apps.CidAppConfig',
     'health_check',  # required
     'health_check.db',  # stock Django health checkers
     # 'health_check.contrib.celery_ping',  # requires celery
@@ -82,7 +85,6 @@ INSTALLED_APPS = [
     'core.importers',
     'core.pins',
     'core.client_configs',
-    'core.v1_importers'
 ]
 
 REST_FRAMEWORK = {
@@ -124,8 +126,8 @@ REDOC_SETTINGS = {
 }
 
 MIDDLEWARE = [
-    'django.middleware.gzip.GZipMiddleware',
     'django.middleware.security.SecurityMiddleware',
+    'django.middleware.gzip.GZipMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -133,9 +135,10 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'request_logging.middleware.LoggingMiddleware',
+    'cid.middleware.CidMiddleware',
     'core.middlewares.middlewares.FixMalformedLimitParamMiddleware',
-    'core.middlewares.middlewares.RequestLogMiddleware',
-    'core.middlewares.middlewares.VersionHeaderMiddleware',
+    'core.middlewares.middlewares.ResponseHeadersMiddleware',
     'core.middlewares.middlewares.CurrentUserMiddleware',
 ]
 
@@ -181,51 +184,52 @@ ELASTICSEARCH_DSL = {
     },
 }
 
-# LOGGING = {
-#     'version': 1,
-#     'disable_existing_loggers': False,
-#     'formatters': {
-#         'verbose': {
-#             'format': '%(levelname)s %(asctime)s %(message)s'
-#         },
-#         'simple': {
-#             'format': '%(levelname)s %(message)s'
-#         },
-#     },
-#     'filters': {
-#         'require_debug_true': {
-#             '()': 'django.utils.log.RequireDebugTrue',
-#         },
-#         'require_debug_false': {
-#             '()': 'django.utils.log.RequireDebugFalse',
-#         },
-#     },
-#     'handlers': {
-#         'console': {
-#             'level': 'DEBUG',
-#             'filters': ['require_debug_true'],
-#             'class': 'logging.StreamHandler',
-#             'formatter': 'verbose',
-#         },
-#         'request_handler': {
-#             'level': 'DEBUG',
-#             'filters': ['require_debug_false'],
-#             'class': 'logging.StreamHandler',
-#             'formatter': 'verbose',
-#         }
-#     },
-#     'loggers': {
-#         'django.db.backends': {
-#             'level': 'DEBUG',
-#             'handlers': ['console'],
-#         },
-#         'django.request': {
-#             'handlers': ['console', 'request_handler'],
-#             'level': 'DEBUG',
-#             'propagate': False,
-#         },
-#     }
-# }
+ENV = os.environ.get('ENVIRONMENT', 'development')
+CID_GENERATE = True
+CID_RESPONSE_HEADER = None
+if ENV and ENV not in ['ci', 'development']:
+    LOGGING = {
+        'version': 1,
+        'disable_existing_loggers': False,
+        'formatters': {
+            'verbose': {
+                'format': '[cid: %(cid)s] %(levelname)s %(asctime)s %(message)s'
+            },
+            'simple': {
+                'format': '[cid: %(cid)s] %(asctime)s %(message)s'
+            },
+        },
+        'filters': {
+            'require_debug_true': {
+                '()': 'django.utils.log.RequireDebugTrue',
+            },
+            'require_debug_false': {
+                '()': 'django.utils.log.RequireDebugFalse',
+            },
+            'correlation': {
+                '()': 'cid.log.CidContextFilter'
+            },
+        },
+        'handlers': {
+            'console': {
+                'class': 'logging.StreamHandler',
+                'filters': ['require_debug_true', 'correlation'],
+                'formatter': 'simple',
+            },
+            'request_handler': {
+                'filters': ['require_debug_false', 'correlation'],
+                'class': 'logging.StreamHandler',
+                'formatter': 'simple',
+            }
+        },
+        'loggers': {
+            'django.request': {
+                'handlers': ['console', 'request_handler'],
+                'level': 'DEBUG',
+                'propagate': False,
+            },
+        },
+    }
 
 # Password validation
 # https://docs.djangoproject.com/en/3.0/ref/settings/#auth-password-validators
@@ -263,9 +267,10 @@ USE_L10N = True
 USE_TZ = True
 
 # Static files (CSS, JavaScript, Images)
-# https://docs.djangoproject.com/en/3.0/howto/static-files/
-
 STATIC_URL = '/static/'
+STATIC_ROOT = '/staticfiles'
+STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+
 AUTH_USER_MODEL = 'users.UserProfile'
 TEST_RUNNER = 'core.common.tests.CustomTestRunner'
 DEFAULT_LOCALE = os.environ.get('DEFAULT_LOCALE', 'en')
@@ -281,7 +286,7 @@ API_SUPERUSER_TOKEN = os.environ.get('API_SUPERUSER_TOKEN', '891b4b17feab99f3ff7
 REDIS_PORT = os.environ.get('REDIS_PORT', 6379)
 REDIS_DB = 0
 REDIS_HOST = os.environ.get('REDIS_HOST', 'redis')
-REDIS_URL = "redis://{}:{}".format(REDIS_HOST, REDIS_PORT)  # needed for healthcheck
+REDIS_URL = f"redis://{REDIS_HOST}:{REDIS_PORT}"  # needed for healthcheck
 
 # Celery
 CELERY_ENABLE_UTC = True
@@ -305,7 +310,7 @@ CELERY_TASK_ROUTES = {
     'core.common.tasks.populate_indexes': {'queue': 'indexing'},
     'core.common.tasks.rebuild_indexes': {'queue': 'indexing'}
 }
-CELERY_RESULT_BACKEND = 'redis://%s:%s/%s' % (REDIS_HOST, REDIS_PORT, REDIS_DB)
+CELERY_RESULT_BACKEND = f'redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}'
 CELERY_RESULT_EXTENDED = True
 CELERY_RESULT_BACKEND_TRANSPORT_OPTIONS = {
     'retry_policy': {
@@ -331,14 +336,13 @@ ELASTICSEARCH_DSL_SIGNAL_PROCESSOR = 'core.common.models.CelerySignalProcessor'
 ES_SYNC = True
 USE_X_FORWARDED_HOST = True
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
-ENV = os.environ.get('ENVIRONMENT', 'development')
 # Only used for flower
 FLOWER_USER = os.environ.get('FLOWER_USER', 'root')
 FLOWER_PASSWORD = os.environ.get('FLOWER_PASSWORD', 'Root123')
 FLOWER_HOST = os.environ.get('FLOWER_HOST', 'flower')
 FLOWER_PORT = os.environ.get('FLOWER_PORT', 5555)
-DATA_UPLOAD_MAX_MEMORY_SIZE = 100*1024*1024
-FILE_UPLOAD_MAX_MEMORY_SIZE = 100*1024*1024
+DATA_UPLOAD_MAX_MEMORY_SIZE = 200*1024*1024
+FILE_UPLOAD_MAX_MEMORY_SIZE = 200*1024*1024
 
 # Mail settings
 EMAIL_HOST = os.environ.get('EMAIL_HOST', 'smtp.gmail.com')
@@ -353,10 +357,14 @@ ADMINS = (
     ('Jonathan Payne', 'paynejd@gmail.com'),
 )
 
+if ENV and ENV != 'development':
+    # Serving swagger static files (inserted after SecurityMiddleware)
+    MIDDLEWARE.insert(1, 'whitenoise.middleware.WhiteNoiseMiddleware')
+
 if not ENV or ENV in ['production']:
     EMAIL_SUBJECT_PREFIX = '[Openconceptlab.org] '
 else:
-    EMAIL_SUBJECT_PREFIX = '[Openconceptlab.org] [{}]'.format(ENV.upper())
+    EMAIL_SUBJECT_PREFIX = f'[Openconceptlab.org] [{ENV.upper()}]'
 
 if not ENV or ENV in ['development', 'ci']:
     EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'

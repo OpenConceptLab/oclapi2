@@ -84,17 +84,40 @@ class OrganizationListViewTest(OCLAPITestCase):
 
     def test_get_200_staff_user(self):
         staff_user = UserProfileFactory(is_staff=True)
+
         response = self.client.get(
             '/orgs/',
             HTTP_AUTHORIZATION='Token ' + staff_user.get_token(),
             format='json'
         )
+
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 6)
         self.assertEqual(
             [org['id'] for org in response.data],
             ['user-private-org', 'user-public-view-org', 'public-edit-org', 'public-view-org', 'private-org', 'OCL']
         )
+
+    def test_get_200_with_no_members(self):
+        org1 = OrganizationFactory(mnemonic='org-1')
+        org2 = OrganizationFactory(mnemonic='org-2')
+        org1.members.set([])
+        org2.members.set([])
+        org3 = OrganizationFactory(mnemonic='org-3')
+        self.user.organizations.add(org3)
+
+        response = self.client.get(
+            '/orgs/?noMembers=true',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        found_mnemonics = [org['id'] for org in response.data]
+        for mnemonic in ['org-1', 'org-2']:
+            self.assertTrue(mnemonic in found_mnemonics)
+        for mnemonic in ['org-3']:
+            self.assertFalse(mnemonic in found_mnemonics)
 
     def test_post_201(self):
         response = self.client.post(
@@ -142,7 +165,7 @@ class OrganizationDetailViewTest(OCLAPITestCase):
 
     def test_get_200(self):
         response = self.client.get(
-            '/orgs/{}/'.format(self.org.mnemonic),
+            f'/orgs/{self.org.mnemonic}/',
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -163,7 +186,7 @@ class OrganizationDetailViewTest(OCLAPITestCase):
 
     def test_put_200(self):
         response = self.client.put(
-            '/orgs/{}/'.format(self.org.mnemonic),
+            f'/orgs/{self.org.mnemonic}/',
             dict(name='Wayne Corporation'),
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
@@ -177,7 +200,7 @@ class OrganizationDetailViewTest(OCLAPITestCase):
     def test_delete_403(self):
         stranger = UserProfileFactory()
         response = self.client.delete(
-            '/orgs/{}/'.format(self.org.mnemonic),
+            f'/orgs/{self.org.mnemonic}/',
             HTTP_AUTHORIZATION='Token ' + stranger.get_token(),
             format='json'
         )
@@ -187,7 +210,7 @@ class OrganizationDetailViewTest(OCLAPITestCase):
     @patch('core.orgs.views.delete_organization')
     def test_delete_202_by_superuser(self, delete_organization_mock):
         response = self.client.delete(
-            '/orgs/{}/'.format(self.org.mnemonic),
+            f'/orgs/{self.org.mnemonic}/',
             HTTP_AUTHORIZATION='Token ' + self.superuser.get_token(),
             format='json'
         )
@@ -198,7 +221,7 @@ class OrganizationDetailViewTest(OCLAPITestCase):
     @patch('core.orgs.views.delete_organization')
     def test_delete_202_by_owner(self, delete_organization_mock):
         response = self.client.delete(
-            '/orgs/{}/'.format(self.org.mnemonic),
+            f'/orgs/{self.org.mnemonic}/',
             HTTP_AUTHORIZATION='Token ' + self.user.get_token(),
             format='json'
         )
@@ -208,7 +231,7 @@ class OrganizationDetailViewTest(OCLAPITestCase):
 
     def test_delete_204_inline(self):
         response = self.client.delete(
-            '/orgs/{}/'.format(self.org.mnemonic) + '?inline=true',
+            f'/orgs/{self.org.mnemonic}/?inline=true',
             HTTP_AUTHORIZATION='Token ' + self.user.get_token(),
             format='json'
         )
@@ -240,7 +263,7 @@ class OrganizationUserListViewTest(OCLAPITestCase):
         private_org = OrganizationFactory(public_access=ACCESS_TYPE_NONE)
 
         response = self.client.get(
-            '/orgs/{}/members/'.format(private_org.mnemonic),
+            f'/orgs/{private_org.mnemonic}/members/',
             format='json'
         )
 
@@ -256,7 +279,7 @@ class OrganizationMemberViewTest(OCLAPITestCase):
 
     def test_get_204(self):
         response = self.client.get(
-            '/orgs/{}/members/{}/'.format(self.org.mnemonic, self.user.username),
+            f'/orgs/{self.org.mnemonic}/members/{self.user.username}/',
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -266,7 +289,7 @@ class OrganizationMemberViewTest(OCLAPITestCase):
     def test_get_403(self):
         random_user = UserProfileFactory()
         response = self.client.get(
-            '/orgs/{}/members/{}/'.format(self.org.mnemonic, random_user.username),
+            f'/orgs/{self.org.mnemonic}/members/{random_user.username}/',
             HTTP_AUTHORIZATION='Token ' + random_user.get_token(),
             format='json'
         )
@@ -275,7 +298,7 @@ class OrganizationMemberViewTest(OCLAPITestCase):
 
     def test_get_404(self):
         response = self.client.get(
-            '/orgs/foobar/members/{}/'.format(self.user.username),
+            f'/orgs/foobar/members/{self.user.username}/',
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -287,7 +310,7 @@ class OrganizationMemberViewTest(OCLAPITestCase):
 
         new_org = OrganizationFactory()
         response = self.client.put(
-            '/orgs/{}/members/{}/'.format(new_org.mnemonic, self.user.username),
+            f'/orgs/{new_org.mnemonic}/members/{self.user.username}/',
             HTTP_AUTHORIZATION='Token ' + self.superuser.get_token(),
             format='json'
         )
@@ -300,7 +323,7 @@ class OrganizationMemberViewTest(OCLAPITestCase):
 
         new_org = OrganizationFactory()
         response = self.client.put(
-            '/orgs/{}/members/{}/'.format(new_org.mnemonic, self.user.username),
+            f'/orgs/{new_org.mnemonic}/members/{self.user.username}/',
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -311,7 +334,7 @@ class OrganizationMemberViewTest(OCLAPITestCase):
     def test_put_404(self):
         new_org = OrganizationFactory()
         response = self.client.put(
-            '/orgs/{}/members/foobar/'.format(new_org.mnemonic),
+            f'/orgs/{new_org.mnemonic}/members/foobar/',
             HTTP_AUTHORIZATION='Token ' + self.superuser.get_token(),
             format='json'
         )
@@ -322,7 +345,7 @@ class OrganizationMemberViewTest(OCLAPITestCase):
         self.assertEqual(self.user.organizations.count(), 1)
         random_user = UserProfileFactory()
         response = self.client.delete(
-            '/orgs/{}/members/{}/'.format(self.org.mnemonic, random_user.username),
+            f'/orgs/{self.org.mnemonic}/members/{random_user.username}/',
             HTTP_AUTHORIZATION='Token ' + random_user.get_token(),
             format='json'
         )
@@ -334,7 +357,7 @@ class OrganizationMemberViewTest(OCLAPITestCase):
         self.assertEqual(self.user.organizations.count(), 1)
 
         response = self.client.delete(
-            '/orgs/{}/members/{}/'.format(self.org.mnemonic, self.user.username),
+            f'/orgs/{self.org.mnemonic}/members/{self.user.username}/',
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -345,7 +368,7 @@ class OrganizationMemberViewTest(OCLAPITestCase):
 
 class OrganizationExtrasViewTest(OCLAPITestCase):
     def test_get_200(self):
-        org = OrganizationFactory(extras=dict())
+        org = OrganizationFactory(extras={})
         user = UserProfileFactory(organizations=[org])
         token = user.get_token()
 
@@ -356,7 +379,7 @@ class OrganizationExtrasViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data, dict())
+        self.assertEqual(response.data, {})
 
         org = OrganizationFactory(extras=dict(foo='bar'))
 

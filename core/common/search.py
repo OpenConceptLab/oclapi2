@@ -9,7 +9,7 @@ class CommonSearch(FacetedSearch):
     def format_search_str(self, search_str):
         if self.exact_match:
             return search_str
-        return "*{}*".format(search_str)
+        return f"*{search_str}*"
 
     def query(self, search, query):
         if query:
@@ -20,3 +20,6 @@ class CommonSearch(FacetedSearch):
             return search.query('multi_match', query=search_str)
 
         return search
+
+    def params(self, **kwargs):
+        self._s = self._s.params(**kwargs)

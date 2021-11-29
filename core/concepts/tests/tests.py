@@ -12,7 +12,9 @@ from core.concepts.constants import (
     SHORT, INDEX_TERM, OPENMRS_NAMES_EXCEPT_SHORT_MUST_BE_UNIQUE, OPENMRS_ONE_FULLY_SPECIFIED_NAME_PER_LOCALE,
     OPENMRS_NO_MORE_THAN_ONE_SHORT_NAME_PER_LOCALE, CONCEPT_IS_ALREADY_RETIRED, CONCEPT_IS_ALREADY_NOT_RETIRED,
     OPENMRS_CONCEPT_CLASS, OPENMRS_DATATYPE, OPENMRS_DESCRIPTION_TYPE, OPENMRS_NAME_LOCALE, OPENMRS_DESCRIPTION_LOCALE)
-from core.concepts.models import Concept
+from core.concepts.models import Concept, LocalizedText
+from core.concepts.serializers import ConceptListSerializer, ConceptVersionListSerializer, ConceptDetailSerializer, \
+    ConceptVersionDetailSerializer, ConceptMinimalSerializer
 from core.concepts.tests.factories import LocalizedTextFactory, ConceptFactory
 from core.concepts.validators import ValidatorSpecifier
 from core.mappings.tests.factories import MappingFactory
@@ -28,6 +30,31 @@ class LocalizedTextTest(OCLTestCase):
             omit(cloned_locale.__dict__, ['_state', 'id', 'created_at'])
         )
         self.assertNotEqual(saved_locale.id, cloned_locale.id)
+
+    def test_dormants_raw_query(self):
+        self.assertEqual(LocalizedText.dormants(), 0)
+
+        locale = LocalizedTextFactory()
+        self.assertEqual(LocalizedText.dormants(), 1)
+
+        ConceptFactory(names=[locale])
+
+        self.assertEqual(LocalizedText.dormants(), 0)
+
+        LocalizedTextFactory()
+        self.assertEqual(LocalizedText.dormants(raw=False), 1)
+
+    def test_dormants(self):
+        self.assertEqual(LocalizedText.dormants(raw=False), 0)
+
+        locale = LocalizedTextFactory()
+        self.assertEqual(LocalizedText.dormants(raw=False), 1)
+
+        ConceptFactory(names=[locale])
+        self.assertEqual(LocalizedText.dormants(raw=False), 0)
+
+        LocalizedTextFactory()
+        self.assertEqual(LocalizedText.dormants(raw=False), 1)
 
 
 class ConceptTest(OCLTestCase):
@@ -154,9 +181,7 @@ class ConceptTest(OCLTestCase):
         self.assertEqual(source.concepts.count(), 2)
         self.assertEqual(
             concept.uri,
-            '/orgs/{}/sources/{}/concepts/{}/'.format(
-                source.organization.mnemonic, source.mnemonic, concept.mnemonic
-            )
+            f'/orgs/{source.organization.mnemonic}/sources/{source.mnemonic}/concepts/{concept.mnemonic}/'
         )
 
     def test_hierarchy_one_parent_child(self):
@@ -654,10 +679,8 @@ class ConceptTest(OCLTestCase):
         self.assertEqual(source_head.concepts.first().id, persisted_concept.id)
         self.assertEqual(
             persisted_concept.uri,
-            '/orgs/{}/sources/{}/{}/concepts/{}/{}/'.format(
-                source_version0.organization.mnemonic, source_version0.mnemonic, source_version0.version,
-                persisted_concept.mnemonic, persisted_concept.version
-            )
+            f'/orgs/{source_version0.organization.mnemonic}/sources/{source_version0.mnemonic}/'
+            f'{source_version0.version}/concepts/{persisted_concept.mnemonic}/{persisted_concept.version}/'
         )
         self.assertEqual(
             persisted_concept.version_url, persisted_concept.uri
@@ -828,44 +851,38 @@ class ConceptTest(OCLTestCase):
         MappingFactory(from_concept=concept1, to_concept=concept2, parent=source2)
 
         mappings = concept1.get_unidirectional_mappings()
-        self.assertEqual(mappings.count(), 2)
-        self.assertEqual(list(mappings), [mapping2, mapping1])
+        self.assertCountEqual(list(mappings), [mapping2, mapping1])
 
         mappings = concept1.get_indirect_mappings()
-        self.assertEqual(mappings.count(), 1)
-        self.assertEqual(list(mappings), [mapping4])
+        self.assertCountEqual(list(mappings), [mapping4])
 
         mappings = concept1.get_bidirectional_mappings()
-        self.assertEqual(mappings.count(), 3)
-        self.assertEqual(list(mappings), [mapping4, mapping2, mapping1])
+        self.assertCountEqual(list(mappings), [mapping4, mapping2, mapping1])
 
         mappings = concept2.get_unidirectional_mappings()
         self.assertEqual(mappings.count(), 0)
 
         mappings = concept2.get_indirect_mappings()
-        self.assertEqual(mappings.count(), 1)
-        self.assertEqual(list(mappings), [mapping1])
+        self.assertCountEqual(list(mappings), [mapping1])
 
         mappings = concept3.get_unidirectional_mappings()
         self.assertEqual(mappings.count(), 0)
 
         mappings = concept3.get_indirect_mappings()
-        self.assertEqual(mappings.count(), 1)
-        self.assertEqual(list(mappings), [mapping3])
+        self.assertCountEqual(list(mappings), [mapping3])
 
         mappings = concept4.get_unidirectional_mappings()
-        self.assertEqual(mappings.count(), 1)
-        self.assertEqual(list(mappings), [mapping5])
+        self.assertCountEqual(list(mappings), [mapping5])
 
         mappings = concept4.get_indirect_mappings()
         self.assertEqual(mappings.count(), 0)
 
     def test_get_parent_and_owner_filters_from_uri(self):
-        self.assertEqual(Concept.get_parent_and_owner_filters_from_uri(None), dict())
-        self.assertEqual(Concept.get_parent_and_owner_filters_from_uri(''), dict())
-        self.assertEqual(Concept.get_parent_and_owner_filters_from_uri('/bar/'), dict())
-        self.assertEqual(Concept.get_parent_and_owner_filters_from_uri('/concepts/'), dict())
-        self.assertEqual(Concept.get_parent_and_owner_filters_from_uri('/concepts/concept1/'), dict())
+        self.assertEqual(Concept.get_parent_and_owner_filters_from_uri(None), {})
+        self.assertEqual(Concept.get_parent_and_owner_filters_from_uri(''), {})
+        self.assertEqual(Concept.get_parent_and_owner_filters_from_uri('/bar/'), {})
+        self.assertEqual(Concept.get_parent_and_owner_filters_from_uri('/concepts/'), {})
+        self.assertEqual(Concept.get_parent_and_owner_filters_from_uri('/concepts/concept1/'), {})
 
         self.assertEqual(
             Concept.get_parent_and_owner_filters_from_uri('/users/foo/sources/bar/concepts/'),
@@ -931,6 +948,42 @@ class ConceptTest(OCLTestCase):
         self.assertEqual(
             list(child_child_concept.child_concept_queryset().values_list('uri', flat=True)), [])
         self.assertEqual(child_child_concept.parent_concept_urls, [child_concept.uri])
+
+    def test_parent_concept_queryset(self):
+        parent_concept = ConceptFactory()
+        self.assertEqual(parent_concept.parent_concept_queryset().count(), 0)
+        self.assertEqual(parent_concept.parent_concept_urls, [])
+
+        child_concept = Concept.persist_new({
+            **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'c1', 'parent': parent_concept.parent,
+            'names': [LocalizedTextFactory.build(locale='en', name='English', locale_preferred=True)],
+            'parent_concept_urls': [parent_concept.uri]
+        })
+        self.assertEqual(
+            list(parent_concept.parent_concept_queryset().values_list('uri', flat=True)), [])
+        self.assertEqual(
+            list(child_concept.parent_concept_queryset().values_list('uri', flat=True)), [parent_concept.uri])
+        self.assertEqual(child_concept.parent_concept_urls, [parent_concept.uri])
+
+        child_child_concept = Concept.persist_new({
+            **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'c2', 'parent': parent_concept.parent,
+            'names': [LocalizedTextFactory.build(locale='en', name='English', locale_preferred=True)],
+            'parent_concept_urls': [child_concept.uri]
+        })
+        self.assertEqual(
+            list(parent_concept.parent_concept_queryset().values_list('uri', flat=True)), [])
+        self.assertEqual(
+            list(child_concept.parent_concept_queryset().values_list('uri', flat=True)), [parent_concept.uri])
+        self.assertEqual(
+            list(child_child_concept.parent_concept_queryset().values_list('uri', flat=True)), [child_concept.uri])
+        self.assertEqual(child_child_concept.parent_concept_urls, [child_concept.uri])
+
+    def test_get_serializer_class(self):
+        self.assertEqual(Concept.get_serializer_class(), ConceptListSerializer)
+        self.assertEqual(Concept.get_serializer_class(version=True), ConceptVersionListSerializer)
+        self.assertEqual(Concept.get_serializer_class(verbose=True), ConceptDetailSerializer)
+        self.assertEqual(Concept.get_serializer_class(verbose=True, version=True), ConceptVersionDetailSerializer)
+        self.assertEqual(Concept.get_serializer_class(brief=True), ConceptMinimalSerializer)
 
     def test_from_uri_queryset_for_source_and_source_version(self):
         source = OrganizationSourceFactory()
@@ -1346,6 +1399,71 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
         )
         self.assertEqual(concept.errors, {})
         self.assertIsNotNone(concept.id)
+
+    def test_external_id_length(self):
+        source = OrganizationSourceFactory(custom_validation_schema=CUSTOM_VALIDATION_SCHEMA_OPENMRS)
+        concept = Concept.persist_new(dict(
+                mnemonic='concept', version=HEAD, name='concept', parent=source, external_id='1'*37,
+                concept_class='Diagnosis', datatype='None', names=[
+                    LocalizedTextFactory.build(name="mg", locale='en', locale_preferred=True),
+                ]
+            ))
+        self.assertEqual(concept.errors, {'external_id': ['Concept External ID cannot be more than 36 characters.']})
+        self.assertIsNone(concept.id)
+
+        concept = Concept.persist_new(dict(
+                mnemonic='concept', version=HEAD, name='concept', parent=source, external_id='1'*36,
+                concept_class='Diagnosis', datatype='None', names=[
+                    LocalizedTextFactory.build(name="mg", locale='en', locale_preferred=True),
+                ]
+            ))
+        self.assertEqual(concept.errors, {})
+        self.assertIsNotNone(concept.id)
+
+        concept1 = Concept.persist_new(dict(
+                mnemonic='concept1', version=HEAD, name='concept1', parent=source, external_id='1'*10,
+                concept_class='Diagnosis', datatype='None', names=[
+                    LocalizedTextFactory.build(name="mg1", locale='en', locale_preferred=True),
+                ]
+            ))
+        self.assertEqual(concept.errors, {})
+        self.assertIsNotNone(concept1.id)
+
+    def test_names_external_id_length(self):
+        source = OrganizationSourceFactory(custom_validation_schema=CUSTOM_VALIDATION_SCHEMA_OPENMRS)
+        concept = Concept.persist_new(dict(
+                mnemonic='concept', version=HEAD, name='concept', parent=source, external_id='1'*36,
+                concept_class='Diagnosis', datatype='None', names=[
+                    LocalizedTextFactory.build(name="mg", locale='en', locale_preferred=True, external_id='2'*37),
+                ]
+            ))
+        self.assertEqual(
+            concept.errors,
+            {
+                "names": ["Concept name's External ID cannot be more than 36 characters.: "
+                          "mg (locale: en, preferred: yes)"],
+            }
+        )
+        self.assertIsNone(concept.id)
+
+    def test_description_external_id_length(self):
+        source = OrganizationSourceFactory(custom_validation_schema=CUSTOM_VALIDATION_SCHEMA_OPENMRS)
+        concept = Concept.persist_new(dict(
+                mnemonic='concept', version=HEAD, name='concept', parent=source, external_id='1'*36,
+                concept_class='Diagnosis', datatype='None', names=[
+                    LocalizedTextFactory.build(name="mg", locale='en', locale_preferred=True, external_id='2'*36),
+                ], descriptions=[
+                    LocalizedTextFactory.build(name="mg", locale='en', external_id='2'*37),
+                ]
+            ))
+        self.assertEqual(
+            concept.errors,
+            {
+                "descriptions": ["Concept description's External ID cannot be more than 36 characters.: "
+                                 "mg (locale: ""en, preferred: no)"],
+            }
+        )
+        self.assertIsNone(concept.id)
 
 
 class ValidatorSpecifierTest(OCLTestCase):

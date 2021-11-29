@@ -2,10 +2,11 @@ import json
 import mimetypes
 import os
 import random
+import shutil
 import tempfile
 import uuid
 import zipfile
-from collections import MutableMapping, OrderedDict  # pylint: disable=no-name-in-module
+from collections import MutableMapping, OrderedDict  # pylint: disable=no-name-in-module,deprecated-class
 from threading import local
 from urllib import parse
 
@@ -15,11 +16,11 @@ from dateutil import parser
 from django.conf import settings
 from django.urls import NoReverseMatch, reverse, get_resolver, resolve, Resolver404
 from djqscsv import csv_file_for
-from pydash import flatten, compact
+from pydash import flatten, compact, get
 from requests.auth import HTTPBasicAuth
 from rest_framework.utils import encoders
 
-from core.common.constants import UPDATED_SINCE_PARAM, BULK_IMPORT_QUEUES_COUNT, TEMP, CURRENT_USER
+from core.common.constants import UPDATED_SINCE_PARAM, BULK_IMPORT_QUEUES_COUNT, TEMP, CURRENT_USER, REQUEST_URL
 from core.common.services import S3
 
 
@@ -82,7 +83,7 @@ def reverse_resource(resource, viewname, args=None, kwargs=None, **extra):
     parent = resource
     while parent is not None:
         if not hasattr(parent, 'get_url_kwarg'):
-            return NoReverseMatch('Cannot get URL kwarg for %s' % resource)  # pragma: no cover
+            return NoReverseMatch(f'Cannot get URL kwarg for {resource}')  # pragma: no cover
 
         if parent.is_versioned and not parent.is_head:
             from core.collections.models import Collection
@@ -169,7 +170,7 @@ def get_query_params_from_url_string(url):
     try:
         return dict(parse.parse_qsl(parse.urlsplit(url).query))
     except:  # pylint: disable=bare-except  # pragma: no cover
-        return dict()
+        return {}
 
 
 def is_valid_uri(uri):
@@ -194,11 +195,13 @@ def get_class(kls):
 def write_export_file(
         version, resource_type, resource_serializer_type, logger
 ):  # pylint: disable=too-many-statements,too-many-locals,too-many-branches
+    from core.concepts.models import Concept
+    from core.mappings.models import Mapping
     cwd = cd_temp()
-    logger.info('Writing export file to tmp directory: %s' % cwd)
+    logger.info(f'Writing export file to tmp directory: {cwd}')
 
-    logger.info('Found %s version %s.  Looking up resource...' % (resource_type, version.version))
-    logger.info('Found %s %s.  Serializing attributes...' % (resource_type, version.mnemonic))
+    logger.info(f'Found {resource_type} version {version.version}.  Looking up resource...')
+    logger.info(f'Found {resource_type} {version.mnemonic}.  Serializing attributes...')
 
     resource_serializer = get_class(resource_serializer_type)(version)
     data = resource_serializer.data
@@ -207,49 +210,60 @@ def write_export_file(
 
     batch_size = 100
     is_collection = resource_type == 'collection'
+
     if is_collection:
         if version.expansion_uri:
-            concepts_qs = version.expansion.concepts
-            mappings_qs = version.expansion.mappings
+            concepts_qs = Concept.expansion_set.through.objects.filter(expansion_id=version.expansion.id)
+            mappings_qs = Mapping.expansion_set.through.objects.filter(expansion_id=version.expansion.id)
         else:
-            concepts_qs = version.concepts
-            mappings_qs = version.mappings
+            concepts_qs = Concept.collection_set.through.objects.filter(collection_id=version.id)
+            mappings_qs = Mapping.collection_set.through.objects.filter(collection_id=version.id)
     else:
-        concepts_qs = version.concepts.filter(is_active=True)
-        mappings_qs = version.mappings.filter(is_active=True)
-        if version.is_head:
-            concepts_qs = concepts_qs.filter(is_latest_version=True)
-            mappings_qs = mappings_qs.filter(is_latest_version=True)
+        concepts_qs = Concept.sources.through.objects.filter(source_id=version.id)
+        mappings_qs = Mapping.sources.through.objects.filter(source_id=version.id)
 
-    total_concepts = concepts_qs.count()
-    total_mappings = mappings_qs.count()
+    filters = {}
+
+    if not is_collection:
+        filters['is_active'] = True
+        if version.is_head:
+            filters['is_latest_version'] = True
 
     with open('export.json', 'w') as out:
-        out.write('%s, "concepts": [' % resource_string[:-1])
+        out.write(f'{resource_string[:-1]}, "concepts": [')
 
     resource_name = resource_type.title()
 
-    if total_concepts:
-        logger.info(
-            '%s has %d concepts. Getting them in batches of %d...' % (resource_name, total_concepts, batch_size)
-        )
-        concept_serializer_class = get_class('core.concepts.serializers.ConceptVersionDetailSerializer')
-        for start in range(0, total_concepts, batch_size):
-            end = min(start + batch_size, total_concepts)
-            logger.info('Serializing concepts %d - %d...' % (start+1, end))
-            concept_versions = concepts_qs.order_by('-id').prefetch_related(
-                'names', 'descriptions').select_related('parent__organization', 'parent__user')[start:end]
-            concept_serializer = concept_serializer_class(concept_versions, many=True)
-            concept_data = concept_serializer.data
-            concept_string = json.dumps(concept_data, cls=encoders.JSONEncoder)
-            concept_string = concept_string[1:-1]
-            with open('export.json', 'a') as out:
-                out.write(concept_string)
-                if end != total_concepts:
-                    out.write(', ')
+    if concepts_qs.exists():
+        logger.info(f'{resource_name} has concepts. Getting them in batches of {batch_size:d}...')
+        concept_serializer_class = get_class('core.concepts.serializers.ConceptVersionExportSerializer')
+        start = 0
+        end = batch_size
+        batch_queryset = concepts_qs.order_by('-concept_id')[start:end]
+
+        while batch_queryset.exists():
+            logger.info(f'Serializing concepts {start + 1:d} - {end:d}...')
+            queryset = Concept.objects.filter(
+                id__in=batch_queryset.values_list('concept_id')).filter(**filters).order_by('-id')
+            if queryset.exists():
+                if start > 0:
+                    with open('export.json', 'a') as out:
+                        out.write(', ')
+                concept_versions = queryset.prefetch_related('names', 'descriptions')
+                data = concept_serializer_class(concept_versions, many=True).data
+                concept_string = json.dumps(data, cls=encoders.JSONEncoder)
+                concept_string = concept_string[1:-1]
+
+                with open('export.json', 'a') as out:
+                    out.write(concept_string)
+
+            start += batch_size
+            end += batch_size
+            batch_queryset = concepts_qs.order_by('-concept_id')[start:end]
+
         logger.info('Done serializing concepts.')
     else:
-        logger.info('%s has no concepts to serialize.' % resource_name)
+        logger.info(f'{resource_name} has no concepts to serialize.')
 
     if is_collection:
         references_qs = version.references
@@ -259,13 +273,12 @@ def write_export_file(
             out.write('], "references": [')
         if total_references:
             logger.info(
-                '%s has %d references. Getting them in batches of %d...' % (
-                    resource_name, total_references, batch_size)
+                f'{resource_name} has {total_references:d} references. Getting them in batches of {batch_size:d}...'
             )
             reference_serializer_class = get_class('core.collections.serializers.CollectionReferenceSerializer')
             for start in range(0, total_references, batch_size):
                 end = min(start + batch_size, total_references)
-                logger.info('Serializing references %d - %d...' % (start + 1, end))
+                logger.info(f'Serializing references {start + 1:d} - {end:d}...')
                 references = references_qs.order_by('-id').filter()[start:end]
                 reference_serializer = reference_serializer_class(references, many=True)
                 reference_string = json.dumps(reference_serializer.data, cls=encoders.JSONEncoder)
@@ -276,35 +289,40 @@ def write_export_file(
                         out.write(', ')
             logger.info('Done serializing references.')
         else:
-            logger.info('%s has no references to serialize.' % resource_name)
+            logger.info(f'{resource_name} has no references to serialize.')
 
     with open('export.json', 'a') as out:
         out.write('], "mappings": [')
 
-    if total_mappings:
-        logger.info(
-            '%s has %d mappings. Getting them in batches of %d...' % (resource_name, total_mappings, batch_size)
-        )
+    if mappings_qs.exists():
+        logger.info(f'{resource_name} has mappings. Getting them in batches of {batch_size:d}...')
         mapping_serializer_class = get_class('core.mappings.serializers.MappingDetailSerializer')
-        for start in range(0, total_mappings, batch_size):
-            end = min(start + batch_size, total_mappings)
-            logger.info('Serializing mappings %d - %d...' % (start+1, end))
-            mappings = mappings_qs.order_by('-id').select_related(
-                'parent__organization', 'parent__user', 'from_concept', 'to_concept',
-                'from_source__organization', 'from_source__user',
-                'to_source__organization', 'to_source__user',
-            )[start:end]
-            reference_serializer = mapping_serializer_class(mappings, many=True)
-            reference_data = reference_serializer.data
-            reference_string = json.dumps(reference_data, cls=encoders.JSONEncoder)
-            reference_string = reference_string[1:-1]
-            with open('export.json', 'a') as out:
-                out.write(reference_string)
-                if end != total_mappings:
-                    out.write(', ')
+        start = 0
+        end = batch_size
+        batch_queryset = mappings_qs.order_by('-mapping_id')[start:end]
+
+        while batch_queryset.exists():
+            logger.info(f'Serializing mappings {start + 1:d} - {start + batch_size:d}...')
+            queryset = Mapping.objects.filter(
+                id__in=batch_queryset.values_list('mapping_id')).filter(**filters).order_by('-id')
+            if queryset.exists():
+                if start > 0:
+                    with open('export.json', 'a') as out:
+                        out.write(', ')
+
+                data = mapping_serializer_class(queryset, many=True).data
+                mapping_string = json.dumps(data, cls=encoders.JSONEncoder)
+                mapping_string = mapping_string[1:-1]
+                with open('export.json', 'a') as out:
+                    out.write(mapping_string)
+
+            start += batch_size
+            end += batch_size
+            batch_queryset = mappings_qs.order_by('-mapping_id')[start:end]
+
         logger.info('Done serializing mappings.')
     else:
-        logger.info('%s has no mappings to serialize.' % (resource_name))
+        logger.info(f'{resource_name} has no mappings to serialize.')
 
     with open('export.json', 'a') as out:
         out.write(']}')
@@ -322,7 +340,13 @@ def write_export_file(
         headers={'content-type': 'application/zip'}
     )
     uploaded_path = S3.url_for(s3_key)
-    logger.info('Uploaded to %s.' % uploaded_path)
+    logger.info(f'Uploaded to {uploaded_path}.')
+
+    if not get(settings, 'TEST_MODE', False):
+        tmp_dir_path = file_path.replace('/export.zip', '')
+        logger.info(f'Removing tmp {tmp_dir_path}.')
+        shutil.rmtree(tmp_dir_path, ignore_errors=True)
+
     os.chdir(cwd)
 
 
@@ -372,7 +396,7 @@ def flower_get(url, **kwargs):
     :return:
     """
     return requests.get(
-        'http://%s:%s/%s' % (settings.FLOWER_HOST, settings.FLOWER_PORT, url),
+        f'http://{settings.FLOWER_HOST}:{settings.FLOWER_PORT}/{url}',
         auth=HTTPBasicAuth(settings.FLOWER_USER, settings.FLOWER_PASSWORD),
         **kwargs
     )
@@ -385,7 +409,7 @@ def es_get(url, **kwargs):
     :return:
     """
     return requests.get(
-        'http://%s:%s/%s' % (settings.ES_HOST, settings.ES_PORT, url),
+        f'http://{settings.ES_HOST}:{settings.ES_PORT}/{url}',
         **kwargs
     )
 
@@ -501,7 +525,7 @@ def separate_version(expression):
 
 
 def generate_temp_version():
-    return "{}-{}".format(TEMP, str(uuid.uuid4())[:8])
+    return f"{TEMP}-{str(uuid.uuid4())[:8]}"
 
 
 def jsonify_safe(value):
@@ -522,7 +546,7 @@ def web_url():
     if env == 'production':
         return "https://app.openconceptlab.org"
 
-    return "https://app.{}.openconceptlab.org".format(env)
+    return f"https://app.{env}.openconceptlab.org"
 
 
 def get_resource_class_from_resource_name(resource):  # pylint: disable=too-many-return-statements
@@ -669,9 +693,29 @@ def set_current_user(func):
     setattr(thread_locals, CURRENT_USER, func.__get__(func, local))
 
 
+def set_request_url(func):
+    setattr(thread_locals, REQUEST_URL, func.__get__(func, local))
+
+
 def get_current_user():
     current_user = getattr(thread_locals, CURRENT_USER, None)
     if callable(current_user):
         current_user = current_user()  # pylint: disable=not-callable
 
     return current_user
+
+
+def get_request_url():
+    request_url = getattr(thread_locals, REQUEST_URL, None)
+    if callable(request_url):
+        request_url = request_url()  # pylint: disable=not-callable
+
+    return request_url
+
+
+def named_tuple_fetchall(cursor):
+    """Return all rows from a cursor as a namedtuple"""
+    from collections import namedtuple
+    desc = cursor.description
+    nt_result = namedtuple('Result', [col[0] for col in desc])
+    return [nt_result(*row) for row in cursor.fetchall()]

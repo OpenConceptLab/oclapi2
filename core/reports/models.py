@@ -2,6 +2,7 @@ from dateutil.relativedelta import relativedelta
 from django.db.models import Count, F
 from django.db.models.functions import TruncMonth
 from django.utils import timezone
+from pydash import get
 
 from core.collections.models import Collection, CollectionReference
 from core.common.constants import HEAD
@@ -18,7 +19,7 @@ class MonthlyUsageReport:
         self.start = start
         self.end = end
         self.resources = []
-        self.result = dict()
+        self.result = {}
         self.make_resources()
 
     def make_resources(self):
@@ -34,6 +35,8 @@ class MonthlyUsageReport:
             self.resources.append(MappingReport(start=self.start, end=self.end, verbose=self.verbose))
 
     def prepare(self):
+        self.result['start'] = self.resources[0].start
+        self.result['end'] = self.resources[0].end
         for resource in self.resources:
             self.result[resource.resource] = resource.get_monthly_report()
 
@@ -41,18 +44,27 @@ class MonthlyUsageReport:
 class ResourceReport:
     queryset = None
     resource = None
+    pk = 'mnemonic'
 
-    def __init__(self, start=None, end=None, verbose=False):
+    def __init__(self, start=None, end=None, verbose=False, instance_ids=None):
         self.verbose = verbose
         now = timezone.now()
-        self.start = start or (now - relativedelta(months=6))
-        self.end = end or now
+        self.start = start or (now - relativedelta(months=6)).date()
+        self.end = end or now.date()
         self.total = 0
         self.active = 0
         self.inactive = 0
+        self.instance_ids = instance_ids
+        self.instances = self.get_instances()
         self.created_monthly_distribution = None
-        self.result = dict()
+        self.result = {}
         self.set_date_range()
+
+    def get_instances(self):
+        if self.instance_ids:
+            return self.queryset.filter(**{f"{self.pk}__in": self.instance_ids})
+
+        return None
 
     @staticmethod
     def get_active_filter(active=True):
@@ -96,11 +108,11 @@ class ResourceReport:
 
     @staticmethod
     def format_distribution(queryset):
-        formatted = list()
+        formatted = []
         for item in queryset:
             month = item['month']
             if month:
-                result = dict()
+                result = {}
                 result[item['month'].strftime('%b %Y')] = item['total']
                 formatted.append(result)
 
@@ -110,9 +122,10 @@ class ResourceReport:
 class UserReport(ResourceReport):
     queryset = UserProfile.objects
     resource = 'users'
+    pk = 'username'
 
-    def __init__(self, start=None, end=None, verbose=False):
-        super().__init__(start, end, verbose)
+    def __init__(self, start=None, end=None, verbose=False, instance_ids=None):
+        super().__init__(start, end, verbose, instance_ids)
         self.last_login_monthly_distribution = None
 
     @staticmethod
@@ -126,6 +139,22 @@ class UserReport(ResourceReport):
         self.result = super().get_monthly_report()
         self.set_last_login_monthly_distribution()
         self.result['last_login_monthly'] = self.format_distribution(self.last_login_monthly_distribution)
+        return self.result
+
+    def get_authoring_report(self):
+        if self.instances is not None:
+            for user in self.instances:
+                user_result = {}
+                for app, model in [
+                        ('concepts', 'concept'), ('mappings', 'mapping'), ('sources', 'source'),
+                        ('collections', 'collection'), ('users', 'userprofile'), ('orgs', 'organization')
+                ]:
+                    created = get(user, f"{app}_{model}_related_created_by").count()
+                    updated = get(user, f"{app}_{model}_related_updated_by").count()
+                    user_result[app] = dict(created=created, updated=updated)
+
+                self.result[user.username] = user_result
+
         return self.result
 
 

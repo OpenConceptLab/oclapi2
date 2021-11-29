@@ -10,18 +10,21 @@ from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
+from elasticsearch import RequestError
 from elasticsearch_dsl import Q
 from pydash import get
 from rest_framework import response, generics, status
 from rest_framework.generics import ListAPIView, RetrieveUpdateDestroyAPIView
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from core import __version__
 from core.common.constants import SEARCH_PARAM, LIST_DEFAULT_LIMIT, CSV_DEFAULT_LIMIT, \
-    LIMIT_PARAM, NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY, INCLUDE_RETIRED_PARAM, VERBOSE_PARAM, HEAD, LATEST
-from core.common.mixins import PathWalkerMixin
+    LIMIT_PARAM, NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY, INCLUDE_RETIRED_PARAM, VERBOSE_PARAM, HEAD, LATEST, \
+    BRIEF_PARAM, ES_REQUEST_TIMEOUT
+from core.common.exceptions import Http400
+from core.common.mixins import PathWalkerMixin, ListWithHeadersMixin
 from core.common.serializers import RootSerializer
 from core.common.utils import compact_dict_by_values, to_snake_case, to_camel_case, parse_updated_since_param, \
     is_url_encoded_string
@@ -50,6 +53,20 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     facet_class = None
     total_count = 0
 
+    def has_no_kwargs(self):
+        return len(self.kwargs.values()) == 0
+
+    def has_owner_scope(self):
+        kwargs = self.kwargs.keys()
+        return 'org' in kwargs or 'user' in kwargs
+
+    def has_concept_container_scope(self):
+        kwargs = self.kwargs.keys()
+        return 'source' in kwargs or 'collection' in kwargs
+
+    def has_parent_scope(self):
+        return self.has_owner_scope() and self.has_concept_container_scope()
+
     def _should_exclude_retired_from_search_results(self):
         if self.is_owner_document_model() or 'expansion' in self.kwargs:
             return False
@@ -65,9 +82,16 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     def is_verbose(self):
         return self.request.query_params.get(VERBOSE_PARAM, False) in ['true', True]
 
+    def is_brief(self):
+        return self.request.query_params.get(BRIEF_PARAM, False) in ['true', True]
+
+    def verify_scope(self):
+        pass
+
     def initial(self, request, *args, **kwargs):
         super().initial(request, *args, **kwargs)
         self.initialize(request, request.path_info, **kwargs)
+        self.verify_scope()
 
     def initialize(self, request, path_info_segment, **kwargs):  # pylint: disable=unused-argument
         self.user_is_self = kwargs.pop('user_is_self', False)
@@ -137,23 +161,24 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         return self.request.query_params.dict().get(self.exact_match, None) == 'on'
 
     def get_searchable_fields(self):
-        return [field for field, config in get(self, 'es_fields', dict()).items() if config.get('filterable', False)]
+        return [field for field, config in get(self, 'es_fields', {}).items() if config.get('filterable', False)]
 
     def get_exact_search_fields(self):
-        return [field for field, config in get(self, 'es_fields', dict()).items() if config.get('exact', False)]
+        return [field for field, config in get(self, 'es_fields', {}).items() if config.get('exact', False)]
 
-    def get_search_string(self, lower=True):
+    def get_search_string(self, lower=True, decode=True):
         search_str = self.request.query_params.dict().get(SEARCH_PARAM, '').strip()
         if self.is_concept_document():
             search_str = search_str.replace('-', '_')
         if lower:
             search_str = search_str.lower()
+        if decode:
             search_str = search_str if is_url_encoded_string(search_str) else urllib.parse.quote_plus(search_str)
 
         return search_str
 
     def get_wildcard_search_string(self, _str):
-        return "*{}*".format(_str or self.get_search_string())
+        return f"*{_str or self.get_search_string()}*"
 
     @staticmethod
     def __get_order_by(is_desc):
@@ -186,7 +211,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         return result
 
     def get_exact_search_criterion(self):
-        search_str = self.get_search_string(False)
+        search_str = self.get_search_string(False, False)
 
         def get_query(attr):
             words = search_str.split(' ')
@@ -229,7 +254,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             return criterion
 
     def get_faceted_filters(self, split=False):
-        faceted_filters = dict()
+        faceted_filters = {}
         faceted_fields = self.get_faceted_fields()
         query_params = {to_snake_case(k): v for k, v in self.request.query_params.dict().items()}
         for field in faceted_fields:
@@ -239,17 +264,17 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         return faceted_filters
 
     def get_faceted_fields(self):
-        return [field for field, config in get(self, 'es_fields', dict()).items() if config.get('facet', False)]
+        return [field for field, config in get(self, 'es_fields', {}).items() if config.get('facet', False)]
 
     def get_facet_filters_from_kwargs(self):
         kwargs = self.kwargs
-        filters = dict()
+        filters = {}
         is_collection_specified = 'collection' in self.kwargs
         is_user_specified = 'user' in kwargs
         if is_collection_specified:
             filters['collection'] = kwargs['collection']
-            filters['collection_owner_url'] = '/users/{}/'.format(
-                kwargs['user']) if is_user_specified else '/orgs/{}/'.format(kwargs['org'])
+            filters['collection_owner_url'] = f'/users/{kwargs["user"]}/' if is_user_specified else \
+                f'/orgs/{kwargs["org"]}/'
         else:
             if is_user_specified:
                 filters['ownerType'] = USER_OBJECT_TYPE
@@ -301,9 +326,9 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                 owner_type = filters.pop('ownerType', None)
                 owner = filters.pop('owner', None)
                 if owner_type == USER_OBJECT_TYPE:
-                    filters['collection_owner_url'] = "/users/{}/".format(owner)
+                    filters['collection_owner_url'] = f"/users/{owner}/"
                 if owner_type == ORG_OBJECT_TYPE:
-                    filters['collection_owner_url'] = "/orgs/{}/".format(owner)
+                    filters['collection_owner_url'] = f"/orgs/{owner}/"
                 if not is_version_specified:
                     filters['collection_version'] = HEAD
                 if 'expansion' in self.kwargs:
@@ -315,9 +340,9 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         return filters
 
     def get_facets(self):
-        facets = dict()
+        facets = {}
 
-        if self.should_include_facets() and self.facet_class:
+        if self.facet_class:
             if self.is_user_document():
                 return facets
             is_source_child_document_model = self.is_source_child_document_model()
@@ -332,9 +357,12 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                 filters.pop('retired')
 
             is_exact_match_on = self.is_exact_match_on()
-            facets = self.facet_class(  # pylint: disable=not-callable
-                self.get_search_string(lower=not is_exact_match_on), filters=filters, exact_match=is_exact_match_on
-            ).execute().facets.to_dict()
+            faceted_search = self.facet_class(  # pylint: disable=not-callable
+                self.get_search_string(lower=not is_exact_match_on),
+                filters=filters, exact_match=is_exact_match_on
+            )
+            faceted_search.params(request_timeout=ES_REQUEST_TIMEOUT)
+            facets = faceted_search.execute().facets.to_dict()
 
         return facets
 
@@ -401,6 +429,8 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         if request_user.is_authenticated:
             if user:
                 return user == request_user.username
+            if self.user_is_self:
+                return True
             if org:
                 return request_user.organizations.filter(mnemonic=org).exists()
 
@@ -463,7 +493,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                     results = results.filter("query_string", query=value, fields=[field])
             if extras_fields_exists:
                 for field in extras_fields_exists:
-                    results = results.query("exists", field="extras.{}".format(field))
+                    results = results.query("exists", field=f"extras.{field}")
             if extras_fields_exact:
                 for field, value in extras_fields_exact.items():
                     value = value.replace('/', '\\/')
@@ -487,12 +517,22 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                     kwargs_filters['user'] = username
             else:
                 kwargs_filters = self.get_kwargs_filters()
-                if self.user_is_self and is_authenticated:
+                if self.get_view_name() in ['Organization Collection List', 'Organization Source List']:
+                    kwargs_filters['ownerType'] = 'Organization'
+                    kwargs_filters['owner'] = list(self.request.user.organizations.values_list('mnemonic', flat=True))
+                elif self.user_is_self and is_authenticated:
                     kwargs_filters['ownerType'] = 'User'
                     kwargs_filters['owner'] = username
 
             for key, value in kwargs_filters.items():
-                results = results.query('match', **{to_snake_case(key): value})
+                attr = to_snake_case(key)
+                if isinstance(value, list):
+                    criteria = Q('match', **{attr: value[0]})
+                    for val in value[1:]:
+                        criteria |= Q('match', **{attr: val})
+                    results = results.query(criteria)
+                else:
+                    results = results.query('match', **{attr: value})
 
             sort_by = self.get_sort_attributes()
             if sort_by:
@@ -531,6 +571,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             return None
 
         search_results = self.__search_results
+        search_results = search_results.params(request_timeout=ES_REQUEST_TIMEOUT)
         self.total_count = search_results.count()
 
         if isinstance(self.limit, str):
@@ -541,21 +582,19 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         page = int(self.request.GET.get('page', '1'))
         start = (page - 1) * self.limit
         end = start + self.limit
-
-        return search_results[start:end].to_queryset()
+        try:
+            return search_results[start:end].to_queryset()
+        except RequestError as ex:
+            if get(ex, 'info.error.caused_by.reason', '').startswith('Result window is too large'):
+                raise Http400(detail='Only 10000 results are available. Please apply additional filters'
+                                     ' or fine tune your query to get more accurate results.') from ex
+            raise ex
 
     def is_head(self):
         return self.request.method.lower() == 'head'
 
     def should_perform_es_search(self):
-        if self.is_head():
-            result = bool(self.get_search_string())
-        else:
-            result = SEARCH_PARAM in self.request.query_params
-
-        return result or self.has_searchable_extras_fields() or bool(
-            self.get_faceted_filters()
-        ) or len(self.get_sort_attributes()) > 0
+        return bool(self.get_search_string()) or self.has_searchable_extras_fields() or bool(self.get_faceted_filters())
 
     def has_searchable_extras_fields(self):
         return bool(
@@ -573,7 +612,7 @@ class SourceChildCommonBaseView(BaseAPIView):
     queryset = None
     params = None
     document_model = None
-    es_fields = dict()
+    es_fields = {}
     pk_field = 'mnemonic'
     permission_classes = (CanViewParentDictionary, )
     is_searchable = True
@@ -582,6 +621,16 @@ class SourceChildCommonBaseView(BaseAPIView):
     def initial(self, request, *args, **kwargs):
         super().initial(request, *args, **kwargs)
         self.__set_params()
+
+    def verify_scope(self):
+        has_parent_scope = self.has_parent_scope()
+        has_no_kwargs = self.has_no_kwargs()
+        if not self.user_is_self:
+            if has_no_kwargs:
+                if self.request.method not in ['GET', 'HEAD']:
+                    raise Http404()
+            elif not has_parent_scope:
+                raise Http404()
 
     def get_filter_params(self):
         if self.params:
@@ -651,7 +700,7 @@ class SourceChildExtraRetrieveUpdateDestroyView(SourceChildExtrasBaseView, Retri
 
         new_version = self.get_object().clone()
         new_version.extras[key] = value
-        new_version.comment = 'Updated extras: %s=%s.' % (key, value)
+        new_version.comment = f'Updated extras: {key}={value}.'
         errors = self.model.persist_clone(new_version, request.user)
         if errors:
             return Response(errors, status=status.HTTP_400_BAD_REQUEST)
@@ -662,7 +711,7 @@ class SourceChildExtraRetrieveUpdateDestroyView(SourceChildExtrasBaseView, Retri
         new_version = self.get_object().clone()
         if key in new_version.extras:
             del new_version.extras[key]
-            new_version.comment = 'Deleted extra %s.' % key
+            new_version.comment = f'Deleted extra {key}.'
             errors = self.model.persist_clone(new_version, request.user)
             if errors:
                 return Response(errors, status=status.HTTP_400_BAD_REQUEST)
@@ -703,8 +752,10 @@ class RootView(BaseAPIView):  # pragma: no cover
             route = str(pattern.pattern)
             if route in ['v1-importers/']:
                 continue
+            if isinstance(route, str) and route.startswith('admin/'):
+                continue
             if route and name is None:
-                name = route.split('/')[0] + '_urls'
+                name = route.split('/', maxsplit=1)[0] + '_urls'
                 if name == 'user_urls':
                     name = 'current_user_urls'
             data['routes'][name] = self.get_host_url() + '/' + route
@@ -756,7 +807,7 @@ class FeedbackView(APIView):  # pragma: no cover
             email = email or None
 
         message += '\n\n' + 'Reported By: ' + username
-        subject = "[{env}] [FEEDBACK] From: {user}".format(env=settings.ENV.upper(), user=username)
+        subject = f"[{settings.ENV.upper()}] [FEEDBACK] From: {username}"
 
         mail = EmailMessage(
             subject=subject,
@@ -780,3 +831,79 @@ class FeedbackView(APIView):  # pragma: no cover
         mail.send()
 
         return Response(status=status.HTTP_200_OK)
+
+
+class ConceptDuplicateLocalesView(APIView):  # pragma: no cover
+    permission_classes = (IsAdminUser,)
+
+    @staticmethod
+    def get(request):
+        from core.common.tasks import delete_duplicate_locales
+        delete_duplicate_locales.delay(int(request.query_params.get('start', 0)))
+        return Response(status=status.HTTP_200_OK)
+
+
+class ConceptDormantLocalesView(APIView):  # pragma: no cover
+    permission_classes = (IsAdminUser, )
+
+    @staticmethod
+    def get(_, **kwargs):  # pylint: disable=unused-argument
+        from core.concepts.models import LocalizedText
+        count = LocalizedText.dormants()
+        return Response(count, status=status.HTTP_200_OK)
+
+    @staticmethod
+    def delete(_, **kwargs):  # pylint: disable=unused-argument
+        from core.common.tasks import delete_dormant_locales
+        delete_dormant_locales.delay()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class ConceptMultipleLatestVersionsView(BaseAPIView, ListWithHeadersMixin):
+    permission_classes = (IsAdminUser, )
+
+    def get_serializer_class(self):
+        from core.concepts.serializers import ConceptVersionListSerializer, ConceptVersionDetailSerializer
+
+        if self.is_verbose():
+            return ConceptVersionDetailSerializer
+        return ConceptVersionListSerializer
+
+    def get_queryset(self):
+        from core.concepts.models import Concept
+        duplicate_version_mnemonics = [concept.mnemonic for concept in Concept.duplicate_latest_versions()]
+        if len(duplicate_version_mnemonics) > 0:
+            return Concept.objects.filter(mnemonic__in=duplicate_version_mnemonics, is_latest_version=True)
+        return Concept.objects.none()
+
+    def get(self, request, *args, **kwargs):
+        return self.list(request, *args, **kwargs)
+
+    def put(self, request, *args, **kwargs):  # pylint: disable=unused-argument
+        concepts = self.get_queryset()
+        if concepts.exists():
+            from core.concepts.models import Concept
+            versioned_objects = Concept.objects.filter(id__in=concepts.values_list('versioned_object_id', flat=True))
+            for concept in versioned_objects:
+                concept.dedupe_latest_versions()
+            from core.concepts.models import Concept
+            from core.concepts.documents import ConceptDocument
+            Concept.batch_index(concepts, ConceptDocument)
+
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    def post(self, request, *args, **kwargs):  # pylint: disable=unused-argument
+        ids = self.request.data.get('ids')  # concept/version id
+        if not ids:
+            return Response(status=status.HTTP_400_BAD_REQUEST)
+
+        from core.concepts.models import Concept
+        concepts = Concept.objects.filter(id__in=ids)
+
+        for concept in concepts:
+            concept.dedupe_latest_versions()
+
+        from core.concepts.documents import ConceptDocument
+        Concept.batch_index(concepts, ConceptDocument)
+
+        return Response(status=status.HTTP_204_NO_CONTENT)

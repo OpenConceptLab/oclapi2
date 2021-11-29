@@ -1,4 +1,3 @@
-from django.contrib import admin
 from django.contrib.auth.models import AbstractUser
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
@@ -42,13 +41,18 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
         'is_admin': {'sortable': False, 'filterable': False, 'exact': False, 'facet': True}
     }
 
+    @staticmethod
+    def get_search_document():
+        from core.users.documents import UserProfileDocument
+        return UserProfileDocument
+
     @property
     def user(self):
         return self.username
 
     @property
     def name(self):
-        return "{} {}".format(self.first_name, self.last_name)
+        return f"{self.first_name} {self.last_name}"
 
     @property
     def full_name(self):
@@ -119,11 +123,11 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
 
     @property
     def email_verification_url(self):
-        return "{}/#/accounts/{}/verify/{}/".format(web_url(), self.username, self.verification_token)
+        return f"{web_url()}/#/accounts/{self.username}/verify/{self.verification_token}/"
 
     @property
     def reset_password_url(self):
-        return "{}/#/accounts/{}/password/reset/{}/".format(web_url(), self.username, self.verification_token)
+        return f"{web_url()}/#/accounts/{self.username}/password/reset/{self.verification_token}/"
 
     def mark_verified(self, token):
         if self.verified:
@@ -148,6 +152,3 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
     @property
     def auth_headers(self):
         return dict(Authorization=f'Token {self.get_token()}')
-
-
-admin.site.register(UserProfile)

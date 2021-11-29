@@ -45,7 +45,7 @@ class ClientConfig(models.Model):
 
     @property
     def uri(self):
-        return "/client-configs/{}/".format(self.id)
+        return f"/client-configs/{self.id}/"
 
     def clean(self):
         self.errors = None
@@ -82,7 +82,7 @@ class ClientConfig(models.Model):
             self.errors = dict(tabs=[EMPTY_TABS_CONFIG])
         elif not isinstance(tabs, list):
             self.errors = dict(tabs=[NOT_LIST_TABS_CONFIG])
-        elif any([not isinstance(tab, dict) for tab in tabs]):
+        elif any(not isinstance(tab, dict) for tab in tabs):
             self.errors = dict(tabs=[INVALID_TABS_CONFIG])
         else:
             default_tabs = [tab for tab in tabs if tab.get('default', False)]
@@ -105,7 +105,7 @@ class ClientConfig(models.Model):
                 return
 
     def __get_resource_sortable_fields(self, tab_type):
-        es_fields = self.__get_es_fields(tab_type) or dict()
+        es_fields = self.__get_es_fields(tab_type) or {}
         return [field for field, config in es_fields.items() if config.get('sortable', False)]
 
     @staticmethod

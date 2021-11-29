@@ -1,3 +1,303 @@
+##### 2.0.88 - Tue Nov 23 06:08:40 2021 +0000
+- [OpenConceptLab/ocl_issues#1122](https://github.com/OpenConceptLab/ocl_issues/issues/1122) | concept cascade | swagger query parameters
+- [OpenConceptLab/ocl_issues#1122](https://github.com/OpenConceptLab/ocl_issues/issues/1122) | concept cascade | excludeMapTypes filter
+- [OpenConceptLab/ocl_issues#1126](https://github.com/OpenConceptLab/ocl_issues/issues/1126) | children concept urls queryset fix
+- [OpenConceptLab/ocl_issues#1126](https://github.com/OpenConceptLab/ocl_issues/issues/1126) | fixing authored report when payload is none
+- [OpenConceptLab/ocl_issues#1126](https://github.com/OpenConceptLab/ocl_issues/issues/1126) | parenless children queryset fix
+- [OpenConceptLab/ocl_issues#1127](https://github.com/OpenConceptLab/ocl_issues/issues/1127) | coverage | setting coverage directory
+- [OpenConceptLab/ocl_issues#1088](https://github.com/OpenConceptLab/ocl_issues/issues/1088) | bundle | added timestamp and concept/mapping type in response
+- Adding API_IMAGE variable to docker-compose.ci
+- Fixing Dockerfile to use cache
+- [OpenConceptLab/ocl_issues#1088](https://github.com/OpenConceptLab/ocl_issues/issues/1088) | bundle | removed bundle type
+- [OpenConceptLab/ocl_issues#1088](https://github.com/OpenConceptLab/ocl_issues/issues/1088) | bundle | not returning id and timestamp
+##### 2.0.85 - Fri Nov 19 10:17:43 2021 +0000
+- [OpenConceptLab/ocl_issues#1088](https://github.com/OpenConceptLab/ocl_issues/issues/1088) | bundle | default response is brief
+- exact match facets to encode special characters in search string
+- [OpenConceptLab/ocl_issues#1088](https://github.com/OpenConceptLab/ocl_issues/issues/1088) | concept  operation with bundle and ocl response
+- Source/Collection counts update | making sure save is called when counts change
+##### 2.0.82 - Sun Nov 14 13:30:38 2021 +0000
+- ES | search request timeout
+- Errbit Client | xml escaping url string
+- [OpenConceptLab/ocl_issues#661](https://github.com/OpenConceptLab/ocl_issues/issues/661) | Reverting OpenConceptLab/ocl_issues#103
+- [OpenConceptLab/ocl_issues#1008](https://github.com/OpenConceptLab/ocl_issues/issues/1008) | Collection ref add/delete will update child count
+- [OpenConceptLab/ocl_issues#1008](https://github.com/OpenConceptLab/ocl_issues/issues/1008) | Source/Collection/Version retrieve will only update concepts or mappings count when required
+- [OpenConceptLab/ocl_issues#1008](https://github.com/OpenConceptLab/ocl_issues/issues/1008) | concept/mapping on retire/delete updating parent counts
+- [OpenConceptLab/ocl_issues#1008](https://github.com/OpenConceptLab/ocl_issues/issues/1008) | concept/mapping parent active counts are bulk updated after content import
+- Response headers to have requesting user
+- Not logging in dev mode
+- Errbit errors to have request URL
+- [OpenConceptLab/ocl_issues#1008](https://github.com/OpenConceptLab/ocl_issues/issues/1008) | concept/mapping counts async tasks
+- [OpenConceptLab/ocl_issues#1082](https://github.com/OpenConceptLab/ocl_issues/issues/1082) Add GIN, GIST, TRGM extensions and concepts uri index
+- [OpenConceptLab/ocl_issues#1082](https://github.com/OpenConceptLab/ocl_issues/issues/1082) | comments explaining hierarchy async tasks
+- ES | increased timeout for facets query to 20s (default 10s) | Errbit
+##### 2.0.80 - Mon Nov 8 11:36:04 2021 +0000
+- Reverting to flower 0.9.5
+- Merge pull request #28 from OpenConceptLab/dependabot/pip/flower-1.0.0
+- Merge pull request #102 from OpenConceptLab/dependabot/pip/factory-boy-3.2.1
+- Merge pull request #103 from OpenConceptLab/dependabot/pip/coverage-6.1.1
+- Bump factory-boy from 3.2.0 to 3.2.1
+- Bump coverage from 6.0.2 to 6.1.1
+- Merge pull request #99 from OpenConceptLab/dependabot/pip/boto3-1.19.12
+- Bump boto3 from 1.19.0 to 1.19.12
+- Merge pull request #101 from OpenConceptLab/dependabot/pip/moto-2.2.13
+- [OpenConceptLab/ocl_issues#1008](https://github.com/OpenConceptLab/ocl_issues/issues/1008) | hierarchy asyn processing on concurrent queue
+- Bump moto from 2.2.9 to 2.2.13
+- [OpenConceptLab/ocl_issues#1008](https://github.com/OpenConceptLab/ocl_issues/issues/1008) | not eager loading concepts/mappings owners
+- [OpenConceptLab/ocl_issues#1008](https://github.com/OpenConceptLab/ocl_issues/issues/1008) | fixing pylints | unused arguments
+- [OpenConceptLab/ocl_issues#1008](https://github.com/OpenConceptLab/ocl_issues/issues/1008) | saving concepts/mappings count on Source/Collection
+- Not logging verbose on CI
+- [OpenConceptLab/ocl_issues#1082](https://github.com/OpenConceptLab/ocl_issues/issues/1082) | fixing hierarchy query not use LIKE
+- Concept List View | fixing queryset
+- [OpenConceptLab/ocl_issues#941](https://github.com/OpenConceptLab/ocl_issues/issues/941) | not logging in dev/test
+- [OpenConceptLab/ocl_issues#941](https://github.com/OpenConceptLab/ocl_issues/issues/941) | Added request/response headers and correlation id in logs
+- [OpenConceptLab/ocl_issues#941](https://github.com/OpenConceptLab/ocl_issues/issues/941) | removed custom Logger middleware
+- Collection version references | raise 404 if version not found
+- Concept/Mapping | eager loading relations
+- Concept/Mapping | added index with public_access for count queries (without order by)
+- [OpenConceptLab/ocl_issues#1059](https://github.com/OpenConceptLab/ocl_issues/issues/1059) | including user as creator pins only if other user is not defined
+- [OpenConceptLab/ocl_issues#1059](https://github.com/OpenConceptLab/ocl_issues/issues/1059) | Pin to have created by | user's pins can include user's created by pins
+- [OpenConceptLab/ocl_issues#993](https://github.com/OpenConceptLab/ocl_issues/issues/993) | bulk import | collection/source delete and version creation only allowed for members
+- [OpenConceptLab/ocl_issues#1070](https://github.com/OpenConceptLab/ocl_issues/issues/1070) | OpenMRS concept validator | preferred name uniquness clause to only consider existing preferred names
+- pylint fixes
+- Source concepts/mappings indexes views | added dummy serializer
+- [OpenConceptLab/ocl_issues#1057](https://github.com/OpenConceptLab/ocl_issues/issues/1057) | Collection References | cascade source to concepts option
+- Bump flower from 0.9.5 to 1.0.0
+##### 2.0.75 - Wed Oct 27 08:40:29 2021 +0000
+- [OpenConceptLab/ocl_issues#993](https://github.com/OpenConceptLab/ocl_issues/issues/993) | Parallel Bulk Import | user permission checks on resources
+- [OpenConceptLab/ocl_issues#37](https://github.com/OpenConceptLab/ocl_issues/issues/37) | facets names are camel cased
+- [OpenConceptLab/ocl_issues#37](https://github.com/OpenConceptLab/ocl_issues/issues/37) | fixing pylint
+- Merge pull request #50 from PatrickCmd/filter_concepts_by_name_and_desctription_types
+- Merge pull request #82 from OpenConceptLab/dependabot/pip/pyyaml-6.0
+- [OpenConceptLab/ocl_issues#37](https://github.com/OpenConceptLab/ocl_issues/issues/37) | filter concepts by name type and description type
+- Bump pyyaml from 5.4.1 to 6.0
+##### 2.0.75 - Wed Oct 27 08:40:29 2021 +0000
+- [OpenConceptLab/ocl_issues#993](https://github.com/OpenConceptLab/ocl_issues/issues/993) | Parallel Bulk Import | user permission checks on resources
+- [OpenConceptLab/ocl_issues#37](https://github.com/OpenConceptLab/ocl_issues/issues/37) | facets names are camel cased
+- [OpenConceptLab/ocl_issues#37](https://github.com/OpenConceptLab/ocl_issues/issues/37) | fixing pylint
+- Merge pull request #50 from PatrickCmd/filter_concepts_by_name_and_desctription_types
+- Merge pull request #82 from OpenConceptLab/dependabot/pip/pyyaml-6.0
+- [OpenConceptLab/ocl_issues#37](https://github.com/OpenConceptLab/ocl_issues/issues/37) | filter concepts by name type and description type
+- Bump pyyaml from 5.4.1 to 6.0
+##### 2.0.74 - Fri Oct 22 02:13:56 2021 +0000
+- Merge pull request #81 from OpenConceptLab/dependabot/pip/django-elasticsearch-dsl-7.2.1
+- Bump django-elasticsearch-dsl from 7.2.0 to 7.2.1
+- Merge pull request #80 from OpenConceptLab/dependabot/pip/coverage-6.0.2
+- Merge pull request #79 from OpenConceptLab/dependabot/pip/django-cors-headers-3.10.0
+- Bump coverage from 6.0 to 6.0.2
+- Merge pull request #78 from OpenConceptLab/dependabot/pip/boto3-1.19.0
+- Bump django-cors-headers from 3.9.0 to 3.10.0
+- Merge pull request #70 from OpenConceptLab/dependabot/pip/django-3.2.8
+- Bump boto3 from 1.18.49 to 1.19.0
+- [OpenConceptLab/ocl_issues#1036](https://github.com/OpenConceptLab/ocl_issues/issues/1036) | POST Admin API to resolve duplicate latest versions using ids rather than created_at
+- [OpenConceptLab/ocl_issues#1036](https://github.com/OpenConceptLab/ocl_issues/issues/1036) | keeping code DRY
+- [OpenConceptLab/ocl_issues#1036](https://github.com/OpenConceptLab/ocl_issues/issues/1036) | POST Admin API to resolve duplicate latest versions for specific concepts
+- [OpenConceptLab/ocl_issues#1036](https://github.com/OpenConceptLab/ocl_issues/issues/1036) | resolve duplicate latest version order by mnemonic
+- [OpenConceptLab/ocl_issues#1036](https://github.com/OpenConceptLab/ocl_issues/issues/1036) | resolve duplicate latest version order by parent id desc
+- [OpenConceptLab/ocl_issues#1036](https://github.com/OpenConceptLab/ocl_issues/issues/1036) | resolve duplicate latest version | added logs
+- [OpenConceptLab/ocl_issues#1036](https://github.com/OpenConceptLab/ocl_issues/issues/1036) | resolve duplicate latest version with better query
+- [OpenConceptLab/ocl_issues#1036](https://github.com/OpenConceptLab/ocl_issues/issues/1036) | after latest version resolve indexing
+- [OpenConceptLab/ocl_issues#1036](https://github.com/OpenConceptLab/ocl_issues/issues/1036) | PUT Admin API to resolve duplicate latest versions
+- [OpenConceptLab/ocl_issues#1036](https://github.com/OpenConceptLab/ocl_issues/issues/1036) | Admin API to get duplicate latest concept versions
+- [OpenConceptLab/ocl_issues#923](https://github.com/OpenConceptLab/ocl_issues/issues/923) | errbit client setup
+- Adding User-Agent to import file url request for parallel imports
+- Adding User-Agent to import file url request
+- [OpenConceptLab/ocl_issues#1035](https://github.com/OpenConceptLab/ocl_issues/issues/1035) Slow concepts and mappings select (partial index)
+- Revert "OpenConceptLab/ocl_issues#1035 Slow concepts and mappings select (partial index)"
+- [OpenConceptLab/ocl_issues#1035](https://github.com/OpenConceptLab/ocl_issues/issues/1035) Slow concepts and mappings select (partial index)
+- [OpenConceptLab/ocl_issues#1035](https://github.com/OpenConceptLab/ocl_issues/issues/1035) Slow concepts and mappings select
+- [OpenConceptLab/ocl_issues#1035](https://github.com/OpenConceptLab/ocl_issues/issues/1035) Slow concepts select
+- Removing tmp after export file is uploaded
+- Bump django from 3.2.7 to 3.2.8
+- Merge pull request #69 from OpenConceptLab/dependabot/pip/moto-2.2.9
+- Bump moto from 2.2.8 to 2.2.9
+- Merge pull request #63 from OpenConceptLab/dependabot/pip/pydash-5.1.0
+- pylint | removed unused import
+- Concept children/parents | pagination and headers
+- Bump pydash from 5.0.2 to 5.1.0
+##### 2.0.66 - Thu Oct 7 05:38:06 2021 +0000
+- [OpenConceptLab/ocl_issues#1018](https://github.com/OpenConceptLab/ocl_issues/issues/1018) | user org collections/sources search result scope fix
+- [OpenConceptLab/ocl_issues#991](https://github.com/OpenConceptLab/ocl_issues/issues/991) | concept children/parents nested children/parents can be asked separately
+- Merge pull request #61 from OpenConceptLab/dependabot/pip/coverage-6.0
+- Bump coverage from 5.5 to 6.0
+- [OpenConceptLab/ocl_issues#991](https://github.com/OpenConceptLab/ocl_issues/issues/991) | API get parents of a concept
+- concept detail | not including empty hierarchy path by default
+##### 2.0.63 - Mon Oct 4 04:57:25 2021 +0000
+- [OpenConceptLab/ocl_issues#1018](https://github.com/OpenConceptLab/ocl_issues/issues/1018) | bulk references add from a source/version to not go through API
+- Merge pull request #57 from OpenConceptLab/dependabot/pip/django-cors-headers-3.9.0
+- Bump django-cors-headers from 3.8.0 to 3.9.0
+##### 2.0.61 - Wed Sep 29 11:40:41 2021 +0000
+- [OpenConceptLab/ocl_issues#992](https://github.com/OpenConceptLab/ocl_issues/issues/992) | concept collection membership restricted to user/org scope
+- [OpenConceptLab/ocl_issues#1000](https://github.com/OpenConceptLab/ocl_issues/issues/1000) | deleted v1 to v2 data migration code
+- Merge pull request #56 from OpenConceptLab/dependabot/pip/boto3-1.18.49
+- Bump boto3 from 1.18.42 to 1.18.49
+- Merge pull request #54 from OpenConceptLab/dependabot/pip/moto-2.2.8
+- List APIs to use ES for non empty search str only
+- [OpenConceptLab/ocl_issues#992](https://github.com/OpenConceptLab/ocl_issues/issues/992) | API to get collection memberships for a concept
+- [OpenConceptLab/ocl_issues#963](https://github.com/OpenConceptLab/ocl_issues/issues/963) | OpenMRS validator external_id for concept/locales/mapping validations
+- Bump moto from 2.2.7 to 2.2.8
+##### 2.0.58 - Sat Sep 25 12:16:24 2021 +0000
+- populate hierarchy task to log more
+- [OpenConceptLab/ocl_issues#988](https://github.com/OpenConceptLab/ocl_issues/issues/988) | source/collection/concept/mapping list api to apply user permissions
+##### 2.0.56 - Thu Sep 23 02:20:53 2021 +0000
+- Fixing or criteria for searching mnemonic exact
+- API to batch index source's concepts and mappings
+- POST Concept/Mapping | 404 if parent not found
+##### 2.0.54 - Mon Sep 20 07:22:22 2021 +0000
+- [OpenConceptLab/ocl_issues#966](https://github.com/OpenConceptLab/ocl_issues/issues/966) | django logging for non-dev env (gunicorn based)
+- fixing pylint
+- Collection | add all references (*) bug fix
+- Pylint | implemented consider-using-f-string fixes
+- Pylint | implemented consider-using-f-string
+- Merge pull request #47 from OpenConceptLab/dependabot/pip/moto-2.2.7
+- Merge pull request #48 from OpenConceptLab/dependabot/pip/pylint-2.11.1
+- Bump pylint from 2.10.2 to 2.11.1
+- Bump moto from 2.2.6 to 2.2.7
+- Merge pull request #46 from OpenConceptLab/dependabot/pip/boto3-1.18.42
+- Bump boto3 from 1.18.40 to 1.18.42
+- Revert "Revert "OpenConceptLab/ocl_issues#971 | making sure the non REST URLs are not supported""
+- Mapping version creation | fixing queries to get and mark prev latest version not latest
+- removed internal_reference_id | was used for v1 to v2 data migration
+- Adding keep-alive to match ALB
+- Adjust gunicorn timeout to 60s
+- [OpenConceptLab/ocl_issues#972](https://github.com/OpenConceptLab/ocl_issues/issues/972) | data migration | not adding ocladmin as member to orgs with no members
+- Revert "OpenConceptLab/ocl_issues#971 | making sure the non REST URLs are not supported"
+- reverting file read encoding
+- Increase number of gunicorn workers
+- S3 | fixing upload of export file
+- Batch delete | chunk size 1000
+- [OpenConceptLab/ocl_issues#971](https://github.com/OpenConceptLab/ocl_issues/issues/971) | making sure the non REST URLs are not supported
+- [OpenConceptLab/ocl_issues#972](https://github.com/OpenConceptLab/ocl_issues/issues/972) | data migration | making sure related_name is not used
+- [OpenConceptLab/ocl_issues#972](https://github.com/OpenConceptLab/ocl_issues/issues/972) | data migration | making sure related_name is not used as string
+- [OpenConceptLab/ocl_issues#972](https://github.com/OpenConceptLab/ocl_issues/issues/972) | data migration to add creator and updater as org member in orgs without any members
+- Delete source can be an async call
+##### 2.0.52 - Mon Sep 13 11:57:24 2021 +0000
+- Adding capture output for gunicorn
+- Merge pull request #44 from OpenConceptLab/dependabot/pip/boto3-1.18.40
+- Bump boto3 from 1.18.39 to 1.18.40
+- data/file upload max memory size can be upto 200mb
+- [OpenConceptLab/ocl_issues#965](https://github.com/OpenConceptLab/ocl_issues/issues/965) Using Gunicorn for Swagger and disabling DEBUG mode
+- Merge pull request #42 from OpenConceptLab/dependabot/pip/boto3-1.18.39
+- Bump boto3 from 1.18.37 to 1.18.39
+- [OpenConceptLab/ocl_issues#957](https://github.com/OpenConceptLab/ocl_issues/issues/957) | parallel importers | using deque to manage parts list
+- CSV sample with special characters
+- [OpenConceptLab/ocl_issues#960](https://github.com/OpenConceptLab/ocl_issues/issues/960) | using Python 3 style super() without arguments
+- [OpenConceptLab/ocl_issues#960](https://github.com/OpenConceptLab/ocl_issues/issues/960) | fixed pylint warnings
+- Merge pull request #32 from OpenConceptLab/dependabot/pip/pylint-2.10.2
+- Merge pull request #40 from OpenConceptLab/dependabot/pip/boto3-1.18.37
+- Bump boto3 from 1.18.36 to 1.18.37
+- Bump pylint from 2.5.3 to 2.10.2
+##### 2.0.50 - Wed Sep 8 03:27:52 2021 +0000
+- updated pydash to 5.0.2
+- Merge pull request #36 from OpenConceptLab/dependabot/pip/django-ordered-model-3.4.3
+- Merge pull request #37 from OpenConceptLab/dependabot/pip/boto3-1.18.36
+- Bump boto3 from 1.14.37 to 1.18.36
+- Bump django-ordered-model from 3.4.1 to 3.4.3
+- Merge pull request #33 from OpenConceptLab/dependabot/pip/django-cors-headers-3.8.0
+- removed six from requirements
+- Explicitly adding mock (python core) deps
+- [OpenConceptLab/ocl_issues#957](https://github.com/OpenConceptLab/ocl_issues/issues/957) | parallel importers | memory optimiztion | getting rid of content once queued
+- Bump django-cors-headers from 3.4.0 to 3.8.0
+- Merge pull request #34 from OpenConceptLab/dependabot/pip/django-elasticsearch-dsl-7.2.0
+- Bump django-elasticsearch-dsl from 7.1.4 to 7.2.0
+- Merge pull request #31 from OpenConceptLab/dependabot/pip/moto-2.2.6
+- Merge pull request #26 from OpenConceptLab/dependabot/pip/factory-boy-3.2.0
+- Bump moto from 1.3.14 to 2.2.6
+- Merge pull request #27 from OpenConceptLab/dependabot/pip/pyyaml-5.4.1
+- Merge pull request #29 from OpenConceptLab/dependabot/pip/psycopg2-2.9.1
+- [OpenConceptLab/ocl_issues#957](https://github.com/OpenConceptLab/ocl_issues/issues/957) | parallel importers | memory optimiztion | getting rid of content once queued
+- Bump psycopg2 from 2.8.5 to 2.9.1
+- Bump pyyaml from 5.4 to 5.4.1
+- Bump factory-boy from 2.12.0 to 3.2.0
+- Fixing celery permissions issue when running locally in dev mode
+- updated drf-yasg
+- Merge pull request #24 from OpenConceptLab/dependabot/pip/requests-2.26.0
+- Bump requests from 2.24.0 to 2.26.0
+- Merge pull request #25 from OpenConceptLab/dependabot/pip/django-3.2.7
+- Merge pull request #23 from OpenConceptLab/dependabot/pip/djangorestframework-3.12.4
+- Merge pull request #22 from OpenConceptLab/dependabot/pip/coverage-5.5
+- Merge pull request #21 from OpenConceptLab/dependabot/pip/python-dateutil-2.8.2
+- Create codeql-analysis.yml
+- Create SECURITY.md
+- Bump django from 3.1.12 to 3.2.7
+- Bump djangorestframework from 3.11.2 to 3.12.4
+- Bump coverage from 5.3.1 to 5.5
+- Bump python-dateutil from 2.8.1 to 2.8.2
+- Create dependabot.yml
+- Source/Collection last latest version force delete on org delete
+- [OpenConceptLab/ocl_issues#955](https://github.com/OpenConceptLab/ocl_issues/issues/955) | CSV importer test for OpenMRS schema
+- [OpenConceptLab/ocl_issues#897](https://github.com/OpenConceptLab/ocl_issues/issues/897) Adding envs and args to runtime docker image
+- [OpenConceptLab/ocl_issues#897](https://github.com/OpenConceptLab/ocl_issues/issues/897) Adding missing curl
+- [OpenConceptLab/ocl_issues#897](https://github.com/OpenConceptLab/ocl_issues/issues/897) Adding missing permissions
+- [OpenConceptLab/ocl_issues#897](https://github.com/OpenConceptLab/ocl_issues/issues/897) Fixing tests
+- Revert "Revert "OpenConceptLab/ocl_issues#897 Run OCL API using gunicorn""
+##### 2.0.47 - Tue Aug 31 07:27:09 2021 +0000
+- Org delete to delete children first
+##### 2.0.46 - Fri Aug 27 09:14:25 2021 +0000
+- Org delete to use bulk_delete
+- [OpenConceptLab/ocl_issues#947](https://github.com/OpenConceptLab/ocl_issues/issues/947) | Handling ES error of max pagination
+##### 2.0.45 - Fri Aug 27 03:37:30 2021 +0000
+- [OpenConceptLab/ocl_issues#949](https://github.com/OpenConceptLab/ocl_issues/issues/949) | Source/collection last child updated at | using max query
+- [OpenConceptLab/ocl_issues#949](https://github.com/OpenConceptLab/ocl_issues/issues/949) | Concept hierarchy | avoiding join
+- [OpenConceptLab/ocl_issues#949](https://github.com/OpenConceptLab/ocl_issues/issues/949) | Mapping import | removed like query | reduced parent/owner joins
+- [OpenConceptLab/ocl_issues#911](https://github.com/OpenConceptLab/ocl_issues/issues/911) | +@akhilkala | Orgs List with no members using query parameter
+- [OpenConceptLab/ocl_issues#936](https://github.com/OpenConceptLab/ocl_issues/issues/936) | can request facets only from search routes
+- Importers | Added deleted count and details in results
+- [OpenConceptLab/ocl_issues#935](https://github.com/OpenConceptLab/ocl_issues/issues/935) | Parallel Importer | Mapping Importer to consider id (mnemonic) attribute for exists check
+- [OpenConceptLab/ocl_issues#935](https://github.com/OpenConceptLab/ocl_issues/issues/935) | Parallel Importer | Fixing tests
+- [OpenConceptLab/ocl_issues#935](https://github.com/OpenConceptLab/ocl_issues/issues/935) | Parallel Importer | Source/Collection version create to append results in created and not updated
+##### 2.0.41 - Mon Aug 16 04:19:11 2021 +0000
+- Including source/collection summaries in user/org pins listing
+- [OpenConceptLab/ocl_issues#910](https://github.com/OpenConceptLab/ocl_issues/issues/910) | export mappings | not loading relations eagerly
+- [OpenConceptLab/ocl_issues#910](https://github.com/OpenConceptLab/ocl_issues/issues/910) | ordering concepts/mappings | fixing batch size typo
+- [OpenConceptLab/ocl_issues#910](https://github.com/OpenConceptLab/ocl_issues/issues/910) | Export queries | limit/offset on lookup table only
+- [OpenConceptLab/ocl_issues#910](https://github.com/OpenConceptLab/ocl_issues/issues/910) | Fixing collection export concepts/mappings queryset
+- [OpenConceptLab/ocl_issues#910](https://github.com/OpenConceptLab/ocl_issues/issues/910) | Slow Query | concept/mapping exports to use less joins
+- Authoring Report | Added summary and description in swagger
+##### 2.0.38 - Thu Aug 12 01:45:01 2021 +0000
+- concept/mappings | Removed uri LIKE criteria
+- Update README.md
+- Amend hierarchy api to take input as parent->child uri map
+- pylint | Fixing indentation
+- [OpenConceptLab/ocl_issues#845](https://github.com/OpenConceptLab/ocl_issues/issues/845) Adding missing composite index
+##### 2.0.37 - Wed Aug 11 08:47:34 2021 +0000
+- using raw query for dormant locales count
+- Source exports | concepts to have child and parent concept urls
+- Admin API amend the concept hierarchy
+- Fixing unsued import
+- [OpenConceptLab/ocl_issues#845](https://github.com/OpenConceptLab/ocl_issues/issues/845) Reverting IN unnest custom lookups
+##### 2.0.35 - Tue Aug 10 03:33:12 2021 +0000
+- [OpenConceptLab/ocl_issues#895](https://github.com/OpenConceptLab/ocl_issues/issues/895) | concept/mapping | Admin API to delete (hard) a version
+##### 2.0.34 - Mon Aug 9 11:28:23 2021 +0000
+- user(s) authoring report | counts of resources created/updated
+- Indexing | making sure re-run of delete job doesn't fail if the instance is already deleted
+##### 2.0.33 - Fri Aug 6 08:19:53 2021 +0000
+- delete duplicate locales task | Updated log statement
+- Indexes API | can index resources by uri filter
+- Limiting locales for each concept to max 500
+- integration test for different concept response modes (verbose/standard/brief)
+- Concept brief response '?brief=true' | returns uuid and id only
+- [OpenConceptLab/ocl_issues#45](https://github.com/OpenConceptLab/ocl_issues/issues/45) | not validating retired concept locales
+- Fixing concept new/version leaving dormant locales
+- [OpenConceptLab/ocl_issues#860](https://github.com/OpenConceptLab/ocl_issues/issues/860) | self mappings | mappings can be created with same from/to concept
+- [OpenConceptLab/ocl_issues#857](https://github.com/OpenConceptLab/ocl_issues/issues/857) Frequent 504 gateway timeout when requesting export on staging
+- [OpenConceptLab/ocl_issues#852](https://github.com/OpenConceptLab/ocl_issues/issues/852) | Monthly usage report | added collection references in serializer
+- [OpenConceptLab/ocl_issues#852](https://github.com/OpenConceptLab/ocl_issues/issues/852) | added date range in monthly usage report
+- locales dormant/duplicate routes under admin namespace
+- Concept/Mapping | simplifying version get criteria
+- Concept summary API to return concept and not latest version when no version is specified
+- Concept hard delete to not leave any dormant locales behind
+- Concept POST/PUT | fixing parent concept urls not accepted
+- api to delete dormant locales in batches
+- Added version info in swagger UI
+- api to get count of dormant locales
+- logging count of dormant locales deleted
+- api/task to get concept/version summary, clean dormant locales
+- api/task for sys admin to delete dormant locales
+- async concept hard delete sys admin api
+- Task to cleanup duplicate locales | processing in batches
+- [OpenConceptLab/ocl_issues#845](https://github.com/OpenConceptLab/ocl_issues/issues/845) Adding missing indexes
+- [OpenConceptLab/ocl_issues#857](https://github.com/OpenConceptLab/ocl_issues/issues/857) | Source/collection child max updated at to select only updated_at field
+- Source concept/mapping export to eager load source's parent correctly
 ##### 2.0.21 - Wed Jul 28 05:30:54 2021 +0000
 - [OpenConceptLab/ocl_issues#845](https://github.com/OpenConceptLab/ocl_issues/issues/845) | exports | reducing batch size to 100
 - [OpenConceptLab/ocl_issues#852](https://github.com/OpenConceptLab/ocl_issues/issues/852) | monthly usage report under admin/report/ namespace

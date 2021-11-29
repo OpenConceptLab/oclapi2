@@ -3,14 +3,15 @@ from django.core.exceptions import ValidationError
 from django.db import transaction, IntegrityError
 from mock import patch, Mock, ANY
 
-from core.common.constants import HEAD
+from core.common.constants import HEAD, ACCESS_TYPE_EDIT, ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW
 from core.common.tasks import seed_children_to_new_version
 from core.common.tests import OCLTestCase
 from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory, LocalizedTextFactory
 from core.mappings.tests.factories import MappingFactory
 from core.sources.models import Source
-from core.sources.tests.factories import OrganizationSourceFactory
+from core.sources.tests.factories import OrganizationSourceFactory, UserSourceFactory
+from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
 
 
@@ -19,6 +20,56 @@ class SourceTest(OCLTestCase):
         super().setUp()
         self.new_source = OrganizationSourceFactory.build(organization=None)
         self.user = UserProfileFactory()
+
+    def test_public_can_view(self):
+        self.assertFalse(Source(public_access='none').public_can_view)
+        self.assertFalse(Source(public_access='foobar').public_can_view)
+        self.assertTrue(Source().public_can_view)  # default access_type is view
+        self.assertTrue(Source(public_access='view').public_can_view)
+        self.assertTrue(Source(public_access='edit').public_can_view)
+
+    def test_public_can_edit(self):
+        self.assertFalse(Source().public_can_edit)
+        self.assertFalse(Source(public_access='none').public_can_edit)
+        self.assertFalse(Source(public_access='foobar').public_can_edit)
+        self.assertFalse(Source(public_access='view').public_can_edit)
+        self.assertTrue(Source(public_access='edit').public_can_edit)
+
+    def test_has_edit_access(self):
+        admin = UserProfile.objects.get(username='ocladmin')
+        source_private = OrganizationSourceFactory(public_access=ACCESS_TYPE_NONE)
+        source_public_edit = OrganizationSourceFactory(public_access=ACCESS_TYPE_EDIT)
+        source_public_view = OrganizationSourceFactory(public_access=ACCESS_TYPE_VIEW)
+
+        self.assertTrue(source_public_view.has_edit_access(admin))
+        self.assertTrue(source_public_edit.has_edit_access(admin))
+        self.assertTrue(source_private.has_edit_access(admin))
+
+        self.assertFalse(source_private.has_edit_access(self.user))
+        self.assertFalse(source_public_view.has_edit_access(self.user))
+        self.assertTrue(source_public_edit.has_edit_access(self.user))
+
+        source_private.organization.members.add(self.user)
+        self.assertTrue(source_private.has_edit_access(self.user))
+
+        source_public_edit.organization.members.add(self.user)
+        self.assertTrue(source_public_edit.has_edit_access(self.user))
+
+        user_source_private = UserSourceFactory(public_access=ACCESS_TYPE_NONE)
+        user_source_public_edit = UserSourceFactory(public_access=ACCESS_TYPE_EDIT)
+        user_source_public_view = UserSourceFactory(public_access=ACCESS_TYPE_VIEW)
+
+        self.assertTrue(user_source_private.has_edit_access(admin))
+        self.assertTrue(user_source_public_view.has_edit_access(admin))
+        self.assertTrue(user_source_public_edit.has_edit_access(admin))
+
+        self.assertFalse(user_source_private.has_edit_access(self.user))
+        self.assertFalse(user_source_public_view.has_edit_access(self.user))
+        self.assertTrue(user_source_public_edit.has_edit_access(self.user))
+
+        self.assertTrue(user_source_private.has_edit_access(user_source_private.parent))
+        self.assertTrue(user_source_public_edit.has_edit_access(user_source_public_edit.parent))
+        self.assertTrue(user_source_public_view.has_edit_access(user_source_public_view.parent))
 
     def test_resource_version_type(self):
         self.assertEqual(Source().resource_version_type, 'Source Version')
@@ -46,10 +97,7 @@ class SourceTest(OCLTestCase):
         self.assertEqual(source.get_latest_version(), source)
         self.assertEqual(source.version, 'HEAD')
         self.assertFalse(source.released)
-        self.assertEqual(
-            source.uri,
-            '/users/{username}/sources/{source}/'.format(username=self.user.username, source=source.mnemonic)
-        )
+        self.assertEqual(source.uri, f'/users/{self.user.username}/sources/{source.mnemonic}/')
 
     def test_persist_new_negative__no_parent(self):
         errors = Source.persist_new(self.new_source, self.user)
@@ -88,7 +136,7 @@ class SourceTest(OCLTestCase):
 
         name = saved_source.name
 
-        self.new_source.name = "%s_prime" % name
+        self.new_source.name = f"{name}_prime"
         self.new_source.source_type = 'Reference'
 
         errors = Source.persist_changes(self.new_source, self.user, None, **kwargs)
@@ -101,7 +149,7 @@ class SourceTest(OCLTestCase):
         self.assertEqual(updated_source.source_type, 'Reference')
         self.assertEqual(
             updated_source.uri,
-            '/users/{username}/sources/{source}/'.format(username=self.user.username, source=updated_source.mnemonic)
+            f'/users/{self.user.username}/sources/{updated_source.mnemonic}/'
         )
 
     def test_persist_changes_negative__repeated_mnemonic(self):
@@ -140,10 +188,7 @@ class SourceTest(OCLTestCase):
         self.assertEqual(source_version, source.get_latest_version())
         self.assertEqual(
             source_version.uri,
-            '/orgs/{org}/sources/{source}/{version}/'.format(
-                org=source_version.organization.mnemonic,
-                source=source_version.mnemonic, version=source_version.version
-            )
+            f'/orgs/{source_version.organization.mnemonic}/sources/{source_version.mnemonic}/{source_version.version}/'
         )
 
     def test_source_version_create_negative__same_version(self):
@@ -246,6 +291,7 @@ class SourceTest(OCLTestCase):
 
         concept = ConceptFactory(sources=[source], parent=source)
         source.save()
+        source.update_concepts_count()
 
         self.assertEqual(source.num_concepts, 1)
         self.assertEqual(source.active_concepts, 1)
@@ -261,6 +307,7 @@ class SourceTest(OCLTestCase):
         self.assertEqual(source_updated_at, source_last_child_update)
 
         concept = ConceptFactory(sources=[source], parent=source)
+        source.update_concepts_count()
         source.refresh_from_db()
 
         self.assertEqual(source.updated_at, source_updated_at)

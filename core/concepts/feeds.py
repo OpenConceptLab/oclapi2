@@ -25,13 +25,13 @@ class ConceptFeed(Feed, FeedFilterMixin):
         return concept
 
     def title(self, obj):
-        return "Updates to %s:%s" % (self.source.mnemonic, obj.mnemonic)
+        return f"Updates to {self.source.mnemonic}:{obj.mnemonic}"
 
     def link(self, obj):  # pylint: disable=no-self-use
         return obj.url
 
     def description(self, obj):
-        return "Updates to concept %s in source %s" % (obj.mnemonic, self.source.mnemonic)
+        return f"Updates to concept {obj.mnemonic} in source {self.source.mnemonic}"
 
     def items(self, obj):
         return self.filter_queryset(Concept.objects.filter(versioned_object_id=obj.id))

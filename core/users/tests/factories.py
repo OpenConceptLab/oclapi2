@@ -7,10 +7,10 @@ from core.users.models import UserProfile
 class UserProfileFactory(factory.django.DjangoModelFactory):
     class Meta:
         model = UserProfile
-    email = Sequence("email{}@test.com".format)
-    username = Sequence("username{}".format)
-    first_name = Sequence("First-{}".format)
-    last_name = Sequence("Last-{}".format)
+    email = Sequence("email{}@test.com".format)  # pylint: disable=consider-using-f-string
+    username = Sequence("username{}".format)  # pylint: disable=consider-using-f-string
+    first_name = Sequence("First-{}".format)  # pylint: disable=consider-using-f-string
+    last_name = Sequence("Last-{}".format)  # pylint: disable=consider-using-f-string
     password = 'Password1$'
 
     @factory.post_generation

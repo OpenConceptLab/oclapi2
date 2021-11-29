@@ -4,7 +4,7 @@ from django.db.models import UniqueConstraint, F
 from django.urls import resolve
 from pydash import get, compact
 
-from core.common.constants import HEAD, ACCESS_TYPE_NONE
+from core.common.constants import HEAD
 from core.common.models import ConceptContainerModel
 from core.common.utils import get_query_params_from_url_string
 from core.concepts.models import LocalizedText
@@ -57,6 +57,11 @@ class Source(ConceptContainerModel):
     OBJECT_TYPE = SOURCE_TYPE
     OBJECT_VERSION_TYPE = SOURCE_VERSION_TYPE
 
+    @staticmethod
+    def get_search_document():
+        from core.sources.documents import SourceDocument
+        return SourceDocument
+
     @classmethod
     def head_from_uri(cls, uri):
         queryset = cls.objects.none()
@@ -64,7 +69,7 @@ class Source(ConceptContainerModel):
             return queryset
 
         try:
-            kwargs = get(resolve(uri), 'kwargs', dict())
+            kwargs = get(resolve(uri), 'kwargs', {})
             query_params = get_query_params_from_url_string(uri)  # parsing query parameters
             kwargs.update(query_params)
             queryset = cls.get_base_queryset(kwargs).filter(version=HEAD)
@@ -78,7 +83,7 @@ class Source(ConceptContainerModel):
         source = params.pop('source', None)
         queryset = super().get_base_queryset(params)
         if source:
-            queryset = queryset.filter(cls.get_iexact_or_criteria('mnemonic', source))
+            queryset = queryset.filter(cls.get_exact_or_criteria('mnemonic', source))
 
         return queryset
 
@@ -112,21 +117,6 @@ class Source(ConceptContainerModel):
 
         return self.custom_validation_schema is not None and self.num_concepts > 0
 
-    def any_concept_referred_privately(self):
-        from core.collections.models import Expansion
-        return Expansion.objects.filter(
-            collection_version__public_access=ACCESS_TYPE_NONE
-        ).filter(concepts__in=self.concepts.all()).exists()
-
-    def any_mapping_referred_privately(self):
-        from core.collections.models import Expansion
-        return Expansion.objects.filter(
-            collection_version__public_access=ACCESS_TYPE_NONE
-        ).filter(mappings__in=self.mappings.all()).exists()
-
-    def is_content_privately_referred(self):
-        return self.any_concept_referred_privately() or self.any_mapping_referred_privately()
-
     def update_mappings(self):
         from core.mappings.models import Mapping
         uris = compact([self.uri, self.canonical_url])
@@ -149,7 +139,7 @@ class Source(ConceptContainerModel):
             raise ValidationError({'hierarchy_root': [HIERARCHY_ROOT_MUST_BELONG_TO_SAME_SOURCE]})
 
     def get_parentless_concepts(self):
-        return self.concepts.filter(parent_concepts__isnull=True, id=F('versioned_object_id'))
+        return self.concepts_set.filter(parent_concepts__isnull=True, id=F('versioned_object_id'))
 
     def hierarchy(self, offset=0, limit=100):
         from core.concepts.serializers import ConceptHierarchySerializer
@@ -165,8 +155,11 @@ class Source(ConceptContainerModel):
         adjusted_limit = limit
         if hierarchy_root:
             adjusted_limit -= 1
-        parent_less_children = parent_less_children.order_by('mnemonic')[offset:limit+offset]
-        children = ConceptHierarchySerializer(compact(parent_less_children), many=True).data
+        parent_less_children = parent_less_children.order_by('mnemonic')[offset:adjusted_limit+offset]
+        if parent_less_children.exists():
+            children = ConceptHierarchySerializer(parent_less_children, many=True).data
+        else:
+            children = []
 
         if hierarchy_root:
             children.append({**ConceptHierarchySerializer(hierarchy_root).data, 'root': True})
@@ -179,19 +172,17 @@ class Source(ConceptContainerModel):
             limit=limit
         )
 
-    @property
-    def active_concepts(self):
+    def set_active_concepts(self):
         queryset = self.concepts.filter(retired=False, is_active=True)
         if self.is_head:
             queryset = queryset.filter(is_latest_version=True)
-        return queryset.count()
+        self.active_concepts = queryset.count()
 
-    @property
-    def active_mappings(self):
+    def set_active_mappings(self):
         queryset = self.mappings.filter(retired=False, is_active=True)
         if self.is_head:
             queryset = queryset.filter(is_latest_version=True)
-        return queryset.count()
+        self.active_mappings = queryset.count()
 
     def seed_concepts(self, index=True):
         head = self.head

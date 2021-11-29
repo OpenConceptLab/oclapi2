@@ -5,7 +5,7 @@ from django.contrib.postgres.fields import ArrayField
 from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator
 from django.db import models, IntegrityError
-from django.db.models import Value, Q
+from django.db.models import Value, Q, Max
 from django.db.models.expressions import CombinedExpression, F
 from django.utils import timezone
 from django.utils.functional import cached_property
@@ -14,16 +14,17 @@ from django_elasticsearch_dsl.signals import RealTimeSignalProcessor
 from pydash import get
 
 from core.common.services import S3
+from core.common.tasks import update_collection_active_concepts_count, update_collection_active_mappings_count
 from core.common.utils import reverse_resource, reverse_resource_version, parse_updated_since_param, drop_version, \
     to_owner_uri
 from core.settings import DEFAULT_LOCALE
-from core.sources.constants import CONTENT_REFERRED_PRIVATELY
 from .constants import (
     ACCESS_TYPE_CHOICES, DEFAULT_ACCESS_TYPE, NAMESPACE_REGEX,
     ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT, SUPER_ADMIN_USER_ID,
     HEAD, PERSIST_NEW_ERROR_MESSAGE, SOURCE_PARENT_CANNOT_BE_NONE, PARENT_RESOURCE_CANNOT_BE_NONE,
     CREATOR_CANNOT_BE_NONE, CANNOT_DELETE_ONLY_VERSION, CUSTOM_VALIDATION_SCHEMA_OPENMRS)
-from .tasks import handle_save, handle_m2m_changed, seed_children_to_new_version, update_validation_schema
+from .tasks import handle_save, handle_m2m_changed, seed_children_to_new_version, update_validation_schema, \
+    update_source_active_concepts_count, update_source_active_mappings_count
 
 
 class BaseModel(models.Model):
@@ -99,6 +100,10 @@ class BaseModel(models.Model):
         return self.public_access.lower() in [ACCESS_TYPE_EDIT.lower(), ACCESS_TYPE_VIEW.lower()]
 
     @property
+    def public_can_edit(self):
+        return self.public_access.lower() == ACCESS_TYPE_EDIT.lower()
+
+    @property
     def resource_type(self):
         return get(self, 'OBJECT_TYPE')
 
@@ -129,9 +134,9 @@ class BaseModel(models.Model):
         entity_name = self.__class__.__name__.lower()
 
         if self.is_versioned and not self.is_head:
-            return "{}-version-detail".format(entity_name)
+            return f"{entity_name}-version-detail"
 
-        return "{}-detail".format(entity_name)
+        return f"{entity_name}-detail"
 
     @classmethod
     def pause_indexing(cls):
@@ -149,14 +154,14 @@ class BaseModel(models.Model):
         settings.ES_SYNC = state
 
     @staticmethod
-    def get_iexact_or_criteria(attr, values):
+    def get_exact_or_criteria(attr, values):
         criteria = Q()
 
         if isinstance(values, str):
             values = values.split(',')
 
         for value in values:
-            criteria = criteria | Q(**{'{}__iexact'.format(attr): value})
+            criteria = criteria | Q(**{f'{attr}': value})
 
         return criteria
 
@@ -170,6 +175,11 @@ class BaseModel(models.Model):
             document().update(queryset.order_by('-id')[offset:limit], parallel=True)
             offset = limit
             limit += batch_size
+
+    @staticmethod
+    def batch_delete(queryset):
+        for batch in queryset.iterator(chunk_size=1000):
+            batch.delete()
 
 
 class CommonLogoModel(models.Model):
@@ -290,7 +300,7 @@ class VersionedModel(BaseResourceModel):
     @classmethod
     def get_version(cls, mnemonic, version=HEAD, filters=None):
         if not filters:
-            filters = dict()
+            filters = {}
         return cls.objects.filter(**{cls.mnemonic_attr: mnemonic, **filters}, version=version).first()
 
     def get_latest_version(self):
@@ -338,6 +348,8 @@ class ConceptContainerModel(VersionedModel):
     snapshot = models.JSONField(null=True, blank=True, default=dict)
     experimental = models.BooleanField(null=True, blank=True, default=None)
     meta = models.JSONField(null=True, blank=True)
+    active_concepts = models.IntegerField(default=0)
+    active_mappings = models.IntegerField(default=0)
 
     class Meta:
         abstract = True
@@ -347,27 +359,35 @@ class ConceptContainerModel(VersionedModel):
     def is_openmrs_schema(self):
         return self.custom_validation_schema == CUSTOM_VALIDATION_SCHEMA_OPENMRS
 
-    @property
-    def active_concepts(self):
-        return self.concepts.filter(retired=False, is_active=True).count()
+    def update_children_counts(self, sync=False):
+        self.update_concepts_count(sync)
+        self.update_mappings_count(sync)
 
-    @property
-    def active_mappings(self):
-        return self.mappings.filter(retired=False, is_active=True).count()
+    def update_mappings_count(self, sync=False):
+        if sync or get(settings, 'TEST_MODE'):
+            self.set_active_mappings()
+            self.save(update_fields=['active_mappings'])
+        elif self.__class__.__name__ == 'Source':
+            update_source_active_mappings_count.apply_async((self.id,), queue='concurrent')
+        elif self.__class__.__name__ == 'Collection':
+            update_collection_active_mappings_count.apply_async((self.id,), queue='concurrent')
+
+    def update_concepts_count(self, sync=False):
+        if sync or get(settings, 'TEST_MODE'):
+            self.set_active_concepts()
+            self.save(update_fields=['active_concepts'])
+        elif self.__class__.__name__ == 'Source':
+            update_source_active_concepts_count.apply_async((self.id,), queue='concurrent')
+        elif self.__class__.__name__ == 'Collection':
+            update_collection_active_concepts_count.apply_async((self.id,), queue='concurrent')
 
     @property
     def last_concept_update(self):
-        updated_at = None
-        if self.concepts.exists():
-            updated_at = self.concepts.latest('updated_at').updated_at
-        return updated_at
+        return get(self.concepts.aggregate(max_updated_at=Max('updated_at')), 'max_updated_at', None)
 
     @property
     def last_mapping_update(self):
-        updated_at = None
-        if self.mappings.exists():
-            updated_at = self.mappings.latest('updated_at').updated_at
-        return updated_at
+        return get(self.mappings.aggregate(max_updated_at=Max('updated_at')), 'max_updated_at', None)
 
     @property
     def last_child_update(self):
@@ -387,11 +407,11 @@ class ConceptContainerModel(VersionedModel):
 
         queryset = cls.objects.filter(is_active=True)
         if username:
-            queryset = queryset.filter(cls.get_iexact_or_criteria('user__username', username))
+            queryset = queryset.filter(cls.get_exact_or_criteria('user__username', username))
         if org:
-            queryset = queryset.filter(cls.get_iexact_or_criteria('organization__mnemonic', org))
+            queryset = queryset.filter(cls.get_exact_or_criteria('organization__mnemonic', org))
         if version:
-            queryset = queryset.filter(cls.get_iexact_or_criteria('version', version))
+            queryset = queryset.filter(cls.get_exact_or_criteria('version', version))
         if is_latest:
             queryset = queryset.filter(is_latest_version=True)
         if updated_since:
@@ -439,14 +459,7 @@ class ConceptContainerModel(VersionedModel):
             organization_id=self.organization_id, user_id=self.user_id
         ).order_by('-created_at')
 
-    @staticmethod
-    def is_content_privately_referred():
-        return False
-
-    def delete(self, using=None, keep_parents=False):
-        if self.is_content_privately_referred():
-            raise ValidationError(dict(detail=CONTENT_REFERRED_PRIVATELY.format(self.mnemonic)))
-
+    def delete(self, using=None, keep_parents=False, force=False):  # pylint: disable=arguments-differ
         generic_export_path = self.generic_export_path(suffix=None)
 
         if self.is_head:
@@ -454,10 +467,11 @@ class ConceptContainerModel(VersionedModel):
         else:
             if self.is_latest_version:
                 prev_version = self.prev_version
-                if not prev_version:
+                if not force and not prev_version:
                     raise ValidationError(dict(detail=CANNOT_DELETE_ONLY_VERSION))
-                prev_version.is_latest_version = True
-                prev_version.save()
+                if prev_version:
+                    prev_version.is_latest_version = True
+                    prev_version.save()
 
         from core.pins.models import Pin
         Pin.objects.filter(resource_type__model=self.resource_type.lower(), resource_id=self.id).delete()
@@ -474,6 +488,21 @@ class ConceptContainerModel(VersionedModel):
 
     def get_concepts_queryset(self):
         return self.concepts_set.filter(id=F('versioned_object_id'))
+
+    def has_parent_edit_access(self, user):
+        if user.is_staff:
+            return True
+
+        if self.organization_id:
+            return self.parent.is_member(user)
+
+        return self.user_id == user.id
+
+    def has_edit_access(self, user):
+        if self.public_can_edit or user.is_staff:
+            return True
+
+        return self.has_parent_edit_access(user)
 
     @staticmethod
     def get_version_url_kwarg():
@@ -505,7 +534,7 @@ class ConceptContainerModel(VersionedModel):
 
     @classmethod
     def persist_new(cls, obj, created_by, **kwargs):
-        errors = dict()
+        errors = {}
         parent_resource = kwargs.pop('parent_resource', None) or obj.parent
         if not parent_resource:
             errors['parent'] = PARENT_RESOURCE_CANNOT_BE_NONE
@@ -546,14 +575,13 @@ class ConceptContainerModel(VersionedModel):
         from core.collections.serializers import CollectionDetailSerializer
         from core.sources.serializers import SourceDetailSerializer
 
-        errors = dict()
+        errors = {}
 
         obj.is_active = True
         if user:
             obj.created_by = user
             obj.updated_by = user
-        is_source = obj.__class__.__name__ == 'Source'
-        serializer = SourceDetailSerializer if is_source else CollectionDetailSerializer
+        serializer = SourceDetailSerializer if obj.__class__.__name__ == 'Source' else CollectionDetailSerializer
         obj.snapshot = serializer(obj.head).data
         obj.update_version_data()
         obj.save(**kwargs)
@@ -570,7 +598,7 @@ class ConceptContainerModel(VersionedModel):
 
     @classmethod
     def persist_changes(cls, obj, updated_by, original_schema, **kwargs):
-        errors = dict()
+        errors = {}
         parent_resource = kwargs.pop('parent_resource', obj.parent)
         if not parent_resource:
             errors['parent'] = SOURCE_PARENT_CANNOT_BE_NONE
@@ -677,7 +705,7 @@ class ConceptContainerModel(VersionedModel):
         return False
 
     def clear_processing(self):
-        self._background_process_ids = list()
+        self._background_process_ids = []
         self.save(update_fields=['_background_process_ids'])
 
     @property
@@ -696,10 +724,10 @@ class ConceptContainerModel(VersionedModel):
     @cached_property
     def export_path(self):
         last_update = self.last_child_update.strftime('%Y%m%d%H%M%S')
-        return self.generic_export_path(suffix="{}.zip".format(last_update))
+        return self.generic_export_path(suffix=f"{last_update}.zip")
 
     def generic_export_path(self, suffix='*'):
-        path = "{}/{}_{}.".format(self.parent_resource, self.mnemonic, self.version)
+        path = f"{self.parent_resource}/{self.mnemonic}_{self.version}."
         if suffix:
             path += suffix
 
@@ -710,6 +738,11 @@ class ConceptContainerModel(VersionedModel):
 
     def has_export(self):
         return S3.exists(self.export_path)
+
+    def can_view_all_content(self, user):
+        if get(user, 'is_anonymous'):
+            return False
+        return get(user, 'is_staff') or self.user_id == user.id or self.organization.members.filter(id=user.id).exists()
 
 
 class CelerySignalProcessor(RealTimeSignalProcessor):

@@ -6,6 +6,8 @@ from django.db.models import UniqueConstraint
 from ordered_model.models import OrderedModel
 from pydash import get
 
+from core.common.constants import SUPER_ADMIN_USER_ID
+
 
 class Pin(OrderedModel):
     class Meta(OrderedModel.Meta):
@@ -35,6 +37,12 @@ class Pin(OrderedModel):
     )
     created_at = models.DateTimeField(auto_now_add=True)
     order_with_respect_to = ('user', 'organization')
+    created_by = models.ForeignKey(
+        'users.UserProfile',
+        related_name='creator_pins',
+        on_delete=models.DO_NOTHING,
+        default=SUPER_ADMIN_USER_ID,
+    )
 
     def clean(self):
         if not self.user_id and not self.organization_id:
@@ -43,7 +51,7 @@ class Pin(OrderedModel):
     @property
     def uri(self):
         if self.parent:
-            return self.parent.uri + "pins/{}/".format(self.id)
+            return self.parent.uri + f"pins/{self.id}/"
 
         return None
 

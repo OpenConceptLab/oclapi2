@@ -27,7 +27,7 @@ class FlowerHealthCheck(BaseHealthCheck):
             if not response.ok:
                 raise ServiceUnavailable('Flower Unavailable')
         except Exception as ex:
-            raise ServiceUnavailable(ex.args)
+            raise ServiceUnavailable(ex.args) from ex
 
     def identifier(self):
         return "Flower"
@@ -43,9 +43,9 @@ class ESHealthCheck(BaseHealthCheck):
             is_ok = status == 'green'
 
             if not is_ok:
-                raise ServiceReturnedUnexpectedResult("Status {}".format(status))
+                raise ServiceReturnedUnexpectedResult(f"Status {status}")
         except Exception as ex:
-            raise ServiceReturnedUnexpectedResult(ex.args)
+            raise ServiceReturnedUnexpectedResult(ex.args) from ex
 
     def identifier(self):
         return 'ElasticSearch'
@@ -114,7 +114,7 @@ class CeleryQueueHealthCheck(BaseHealthCheck):
 
     def identifier(self):  # Display name on the endpoint.
         if self.queues:
-            return "celery@{}".format(list(self.queues)[0])
+            return f"celery@{list(self.queues)[0]}"
 
         return self.__class__.__name__
 

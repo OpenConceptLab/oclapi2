@@ -1,27 +1,30 @@
 import logging
 
 from celery_once import AlreadyQueued
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError
+from django.db.models import Q
 from django.http import Http404
 from django.shortcuts import get_object_or_404
 from drf_yasg.utils import swagger_auto_schema
 from pydash import get
 from rest_framework import status, mixins
 from rest_framework.generics import (
-    RetrieveAPIView, ListAPIView, RetrieveUpdateDestroyAPIView, UpdateAPIView
-)
+    RetrieveAPIView, ListAPIView, UpdateAPIView)
+from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
 
 from core.client_configs.views import ResourceClientConfigsView
-from core.common.constants import HEAD, RELEASED_PARAM, PROCESSING_PARAM, NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY
+from core.common.constants import HEAD, RELEASED_PARAM, PROCESSING_PARAM, ACCESS_TYPE_NONE
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryCreateMixin, ConceptDictionaryUpdateMixin, \
-    ConceptContainerExportMixin, ConceptContainerProcessingMixin
+    ConceptContainerExportMixin, ConceptContainerProcessingMixin, ConceptContainerExtraRetrieveUpdateDestroyView
 from core.common.permissions import CanViewConceptDictionary, CanEditConceptDictionary, HasAccessToVersionedObject, \
     CanViewConceptDictionaryVersion
+from core.common.serializers import TaskSerializer
 from core.common.swagger_parameters import q_param, limit_param, sort_desc_param, sort_asc_param, exact_match_param, \
     page_param, verbose_param, include_retired_param, updated_since_param, include_facets_header, compress_header
-from core.common.tasks import export_source
+from core.common.tasks import export_source, delete_source, index_source_concepts, index_source_mappings
 from core.common.utils import parse_boolean_query_param, compact_dict_by_values
 from core.common.views import BaseAPIView, BaseLogoView
 from core.sources.constants import DELETE_FAILURE, DELETE_SUCCESS, VERSION_ALREADY_EXISTS
@@ -42,6 +45,16 @@ class SourceBaseView(BaseAPIView):
     model = Source
     permission_classes = (CanViewConceptDictionary,)
     queryset = Source.objects.filter(is_active=True)
+
+    def verify_scope(self):
+        has_owner_scope = self.has_owner_scope()
+        has_no_kwargs = self.has_no_kwargs()
+        if not self.user_is_self:
+            if has_no_kwargs:
+                if self.request.method not in ['GET', 'HEAD']:
+                    raise Http404()
+            elif not has_owner_scope:
+                raise Http404()
 
     @staticmethod
     def get_detail_serializer(obj):
@@ -84,6 +97,19 @@ class SourceListView(SourceBaseView, ConceptDictionaryCreateMixin, ListWithHeade
     document_model = SourceDocument
     facet_class = SourceSearch
     default_filters = dict(is_active=True, version=HEAD)
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        user = self.request.user
+        if get(user, 'is_staff'):
+            return queryset
+        if get(user, 'is_anonymous'):
+            return queryset.exclude(public_access=ACCESS_TYPE_NONE)
+
+        public_queryset = queryset.exclude(public_access=ACCESS_TYPE_NONE)
+        private_queryset = queryset.filter(public_access=ACCESS_TYPE_NONE)
+        private_queryset = private_queryset.filter(Q(user_id=user.id) | Q(organization__members__id=user.id))
+        return public_queryset.union(private_queryset)
 
     def get_serializer_class(self):
         if self.request.method == 'GET' and self.is_verbose():
@@ -151,6 +177,13 @@ class SourceRetrieveUpdateDestroyView(SourceBaseView, ConceptDictionaryUpdateMix
             raise Http404()
 
         self.check_object_permissions(self.request, instance)
+        if not get(settings, 'TEST_MODE', False):
+            if instance.active_concepts == 0:
+                instance.update_concepts_count()
+            if instance.active_mappings == 0:
+                instance.update_mappings_count()
+            for version in instance.versions.exclude(id=instance.id):
+                version.update_children_counts()
         return instance
 
     def get_permissions(self):
@@ -159,14 +192,22 @@ class SourceRetrieveUpdateDestroyView(SourceBaseView, ConceptDictionaryUpdateMix
 
         return [CanEditConceptDictionary()]
 
+    def is_async_requested(self):
+        return self.request.query_params.get('async', None) in ['true', True, 'True']
+
     def delete(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         source = self.get_object()
-        try:
-            source.delete()
-        except Exception as ex:
-            return Response({'detail': get(ex, 'messages', [DELETE_FAILURE])}, status=status.HTTP_400_BAD_REQUEST)
 
-        return Response({'detail': DELETE_SUCCESS}, status=status.HTTP_204_NO_CONTENT)
+        if self.is_async_requested():
+            task = delete_source.delay(source.id)
+            return Response(dict(task=task.id), status=status.HTTP_202_ACCEPTED)
+
+        result = delete_source(source.id)
+
+        if result is True:
+            return Response({'detail': DELETE_SUCCESS}, status=status.HTTP_204_NO_CONTENT)
+
+        return Response({'detail': get(result, 'messages', [DELETE_FAILURE])}, status=status.HTTP_400_BAD_REQUEST)
 
 
 class SourceVersionListView(SourceVersionBaseView, mixins.CreateModelMixin, ListWithHeadersMixin):
@@ -252,6 +293,48 @@ class SourceLatestVersionRetrieveUpdateView(SourceVersionBaseView, RetrieveAPIVi
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
+class SourceConceptsIndexView(SourceBaseView):
+    serializer_class = TaskSerializer
+
+    def get_queryset(self):
+        return Source.get_base_queryset(compact_dict_by_values(self.get_filter_params()))
+
+    def get_object(self, queryset=None):
+        instance = get_object_or_404(self.get_queryset())
+        self.check_object_permissions(self.request, instance)
+        return instance
+
+    def post(self, request, *args, **kwargs):  # pylint: disable=unused-argument
+        source = self.get_object()
+        result = index_source_concepts.delay(source.id)
+
+        return Response(
+            dict(state=result.state, username=self.request.user.username, task=result.task_id, queue='default'),
+            status=status.HTTP_202_ACCEPTED
+        )
+
+
+class SourceMappingsIndexView(SourceBaseView):
+    serializer_class = TaskSerializer
+
+    def get_queryset(self):
+        return Source.get_base_queryset(compact_dict_by_values(self.get_filter_params()))
+
+    def get_object(self, queryset=None):
+        instance = get_object_or_404(self.get_queryset())
+        self.check_object_permissions(self.request, instance)
+        return instance
+
+    def post(self, request, *args, **kwargs):  # pylint: disable=unused-argument
+        source = self.get_object()
+        result = index_source_mappings.delay(source.id)
+
+        return Response(
+            dict(state=result.state, username=self.request.user.username, task=result.task_id, queue='default'),
+            status=status.HTTP_202_ACCEPTED
+        )
+
+
 class SourceVersionRetrieveUpdateDestroyView(SourceVersionBaseView, RetrieveAPIView, UpdateAPIView):
     serializer_class = SourceVersionDetailSerializer
 
@@ -263,6 +346,11 @@ class SourceVersionRetrieveUpdateDestroyView(SourceVersionBaseView, RetrieveAPIV
     def get_object(self, queryset=None):
         instance = get_object_or_404(self.get_queryset())
         self.check_object_permissions(self.request, instance)
+        if not get(settings, 'TEST_MODE', False):
+            if instance.active_concepts == 0:
+                instance.update_concepts_count()
+            if instance.active_mappings == 0:
+                instance.update_mappings_count()
         return instance
 
     def update(self, request, *args, **kwargs):
@@ -306,50 +394,8 @@ class SourceExtrasView(SourceExtrasBaseView, ListAPIView):
         return Response(get(self.get_object(), 'extras', {}))
 
 
-class SourceExtraRetrieveUpdateDestroyView(SourceExtrasBaseView, RetrieveUpdateDestroyAPIView):
+class SourceExtraRetrieveUpdateDestroyView(SourceExtrasBaseView, ConceptContainerExtraRetrieveUpdateDestroyView):
     serializer_class = SourceDetailSerializer
-
-    def retrieve(self, request, *args, **kwargs):
-        key = kwargs.get('extra')
-        instance = self.get_object()
-        extras = get(instance, 'extras', {})
-        if key in extras:
-            return Response({key: extras[key]})
-
-        return Response(dict(detail=NOT_FOUND), status=status.HTTP_404_NOT_FOUND)
-
-    def update(self, request, **kwargs):  # pylint: disable=arguments-differ
-        key = kwargs.get('extra')
-        value = request.data.get(key)
-        if not value:
-            return Response([MUST_SPECIFY_EXTRA_PARAM_IN_BODY.format(key)], status=status.HTTP_400_BAD_REQUEST)
-
-        instance = self.get_object()
-        instance.extras = get(instance, 'extras', {})
-        instance.extras[key] = value
-        instance.comment = 'Updated extras: %s=%s.' % (key, value)
-        head = instance.get_head()
-        head.extras = get(head, 'extras', {})
-        head.extras.update(instance.extras)
-        instance.save()
-        head.save()
-        return Response({key: value})
-
-    def delete(self, request, *args, **kwargs):
-        key = kwargs.get('extra')
-        instance = self.get_object()
-        instance.extras = get(instance, 'extras', {})
-        if key in instance.extras:
-            del instance.extras[key]
-            instance.comment = 'Deleted extra %s.' % key
-            head = instance.get_head()
-            head.extras = get(head, 'extras', {})
-            del head.extras[key]
-            instance.save()
-            head.save()
-            return Response(status=status.HTTP_204_NO_CONTENT)
-
-        return Response(dict(detail=NOT_FOUND), status=status.HTTP_404_NOT_FOUND)
 
 
 class SourceVersionProcessingView(SourceBaseView, ConceptContainerProcessingMixin):
@@ -394,22 +440,46 @@ class SourceHierarchyView(SourceBaseView, RetrieveAPIView):
 
 class SourceSummaryView(SourceBaseView, RetrieveAPIView):
     serializer_class = SourceSummaryDetailSerializer
-    permission_classes = (CanViewConceptDictionary,)
+
+    def get_permissions(self):
+        if self.request.method == 'PUT':
+            return [IsAdminUser()]
+        return [CanViewConceptDictionary()]
 
     def get_object(self, queryset=None):
         instance = get_object_or_404(self.get_queryset())
         self.check_object_permissions(self.request, instance)
         return instance
+
+    def put(self, request, **kwargs):  # pylint: disable=unused-argument
+        self.perform_update()
+        return Response(status=status.HTTP_202_ACCEPTED)
+
+    def perform_update(self):
+        instance = self.get_object()
+        instance.update_children_counts()
 
 
 class SourceVersionSummaryView(SourceVersionBaseView, RetrieveAPIView):
     serializer_class = SourceVersionSummaryDetailSerializer
-    permission_classes = (CanViewConceptDictionary,)
+
+    def get_permissions(self):
+        if self.request.method == 'PUT':
+            return [IsAdminUser()]
+        return [CanViewConceptDictionary()]
 
     def get_object(self, queryset=None):
         instance = get_object_or_404(self.get_queryset())
         self.check_object_permissions(self.request, instance)
         return instance
+
+    def put(self, request, **kwargs):  # pylint: disable=unused-argument
+        self.perform_update()
+        return Response(status=status.HTTP_202_ACCEPTED)
+
+    def perform_update(self):
+        instance = self.get_object()
+        instance.update_children_counts()
 
 
 class SourceLatestVersionSummaryView(SourceVersionBaseView, RetrieveAPIView, UpdateAPIView):

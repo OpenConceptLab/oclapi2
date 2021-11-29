@@ -12,7 +12,7 @@ class ZippedJSONRenderer(JSONRenderer):
     render_style = 'binary'
 
     def render(self, data, accepted_media_type=None, renderer_context=None):
-        ret = super(ZippedJSONRenderer, self).render(data, accepted_media_type, renderer_context)
+        ret = super().render(data, accepted_media_type, renderer_context)
         temp = tempfile.TemporaryFile()
         archive = zipfile.ZipFile(temp, 'w', zipfile.ZIP_DEFLATED)
         archive.writestr('export.json', ret)

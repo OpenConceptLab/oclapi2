@@ -15,7 +15,7 @@ def message_with_name_details(message, name):
     name_str = name.name or NA
     locale = name.locale or NA
     preferred = YES if name.locale_preferred else NO
-    return "{}: {} (locale: {}, preferred: {})".format(message, name_str, locale, preferred)
+    return f"{message}: {name_str} (locale: {locale}, preferred: {preferred})"
 
 
 class ValidatorSpecifier:
@@ -24,7 +24,7 @@ class ValidatorSpecifier:
         self.validator_map = {
             CUSTOM_VALIDATION_SCHEMA_OPENMRS: OpenMRSConceptValidator
         }
-        self.reference_values = dict()
+        self.reference_values = {}
         self.repo = None
         self.validation_schema = None
 
@@ -48,7 +48,7 @@ class ValidatorSpecifier:
 
         sources = cache.get('reference_sources')
 
-        self.reference_values = dict()
+        self.reference_values = {}
         for source in sources:
             if source.mnemonic not in cache:
                 cache.set(source.mnemonic, self._get_reference_values(source), FIVE_MINS)
@@ -83,6 +83,8 @@ class BaseConceptValidator:
 
 class BasicConceptValidator(BaseConceptValidator):
     def validate_concept_based(self, concept):
+        if concept.retired:
+            return
         self.description_cannot_be_null(concept)
         self.must_have_at_least_one_name(concept)
 
