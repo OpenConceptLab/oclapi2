@@ -69,6 +69,7 @@ class PinSerializer(serializers.ModelSerializer):
             user_id=validated_data.get('user_id', None),
             organization_id=validated_data.get('organization_id', None),
             resource=resource,
+            created_by_id=validated_data.get('created_by_id'),
         )
 
         if not resource:
