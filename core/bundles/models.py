@@ -20,6 +20,8 @@ class Bundle:
         self.concepts = None
         self.mappings = None
         self._total = None
+        self.concepts_count = 0
+        self.mappings_count = 0
         self.cascade_method = SOURCE_TO_CONCEPTS
         self.mappings_criteria = Q()
         self.entries = []
@@ -78,11 +80,16 @@ class Bundle:
     def total(self):
         return self._total
 
-    def set_total(self):
-        total = self.concepts.count()
-        total += self.mappings.count()
+    def set_concepts_count(self):
+        self.concepts_count = self.concepts.count()
 
-        self._total = total
+    def set_mappings_count(self):
+        self.mappings_count = self.mappings.count()
+
+    def set_total(self):
+        self.set_concepts_count()
+        self.set_mappings_count()
+        self._total = self.concepts_count + self.mappings_count
 
     def cascade(self):
         self.set_cascade_parameters()

@@ -42,6 +42,7 @@ class MappingDocument(Document):
     collection_version = fields.ListField(fields.KeywordField())
     expansion = fields.ListField(fields.KeywordField())
     collection = fields.ListField(fields.KeywordField())
+    collection_url = fields.ListField(fields.KeywordField())
     collection_owner_url = fields.ListField(fields.KeywordField())
     public_can_view = fields.BooleanField(attr='public_can_view')
     id = fields.KeywordField(attr='mnemonic', normalizer="lowercase")
@@ -93,6 +94,10 @@ class MappingDocument(Document):
         collections = list(instance.collection_set.values_list('mnemonic', flat=True))
         expansion_collections = list(instance.expansion_set.values_list('collection_version__mnemonic', flat=True))
         return list(set(collections + expansion_collections))
+
+    @staticmethod
+    def prepare_collection_url(instance):
+        return list(set(list(instance.collection_set.values_list('uri', flat=True))))
 
     @staticmethod
     def prepare_collection_owner_url(instance):
