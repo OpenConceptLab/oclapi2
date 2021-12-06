@@ -233,6 +233,7 @@ class CollectionDetailSerializer(CollectionCreateOrUpdateSerializer):
     references = SerializerMethodField()
     summary = SerializerMethodField()
     client_configs = SerializerMethodField()
+    expansion_url = CharField(source='expansion_uri', read_only=True, allow_null=True, allow_blank=True)
 
     class Meta:
         model = Collection
@@ -246,7 +247,7 @@ class CollectionDetailSerializer(CollectionCreateOrUpdateSerializer):
             'custom_resources_linked_source', 'repository_type', 'preferred_source', 'references',
             'canonical_url', 'identifier', 'publisher', 'contact', 'jurisdiction', 'purpose', 'copyright', 'meta',
             'immutable', 'revision_date', 'logo_url', 'summary', 'text', 'client_configs',
-            'experimental', 'locked_date', 'autoexpand_head'
+            'experimental', 'locked_date', 'autoexpand_head', 'expansion_url'
         )
 
     def __init__(self, *args, **kwargs):
