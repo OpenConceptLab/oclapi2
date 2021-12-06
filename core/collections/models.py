@@ -371,6 +371,8 @@ class Collection(ConceptContainerModel):
     def cascade_children_to_expansion(self, expansion_data=None, index=True):  # pylint: disable=arguments-differ
         if not expansion_data:
             expansion_data = {}
+        if self.should_auto_expand:
+            expansion_data['mnemonic'] = f'autoexpand-{self.version}'
         expansion = Expansion.persist(index=index, **expansion_data, collection_version=self)
 
         if self.should_auto_expand and not self.expansion_uri:

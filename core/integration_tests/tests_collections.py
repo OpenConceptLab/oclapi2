@@ -146,6 +146,7 @@ class CollectionListViewTest(OCLAPITestCase):
         expansion = collection.expansions.first()
         self.assertEqual(collection.expansion_uri, expansion.uri)
         self.assertEqual(collection.expansion.id, expansion.id)
+        self.assertEqual(collection.expansion.mnemonic, 'autoexpand-HEAD')
         self.assertEqual(collection.expansion.concepts.count(), 0)
 
         concept = ConceptFactory()
