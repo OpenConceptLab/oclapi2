@@ -1107,7 +1107,7 @@ class ConceptCascadeViewTest(OCLAPITestCase):
         response = self.client.get(concept3.uri + '$cascade/?method=sourceToConcepts&cascadeLevels=0')
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data['resource_type'], 'Bundle')
+        self.assertEqual(response.data['type'], 'Bundle')
         self.assertEqual(response.data['total'], 2)
         self.assertEqual(len(response.data['entry']), 2)
         self.assertEqual(
@@ -1121,7 +1121,7 @@ class ConceptCascadeViewTest(OCLAPITestCase):
         response = self.client.get(concept3.uri + '$cascade/?method=sourceToConcepts&mapTypes=foobar&cascadeLevels=0')
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data['resource_type'], 'Bundle')
+        self.assertEqual(response.data['type'], 'Bundle')
         self.assertEqual(response.data['total'], 1)
         self.assertEqual(len(response.data['entry']), 1)
         self.assertEqual(
