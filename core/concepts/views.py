@@ -605,19 +605,25 @@ class ConceptDebugView(RetrieveAPIView, UpdateAPIView):  # pragma: no cover
 
     def patch(self, request, *args, **kwargs):
         mark_versioned = self.request.data.get('mark_versioned', False) in ['true', True]
+        connect_parent_version = self.request.data.get('connect_parent_version', False) in ['true', True]
 
+        concept = self.get_object()
+        versioned_object = None
+        try:
+            versioned_object = concept.versioned_object
+            if versioned_object:
+                print("Versioned Object Found: ", versioned_object.id)
+        except:  # pylint: disable=bare-except
+            pass
         if mark_versioned:
-            concept = self.get_object()
-            versioned_object = None
-            try:
-                versioned_object = concept.versioned_object
-                if versioned_object:
-                    print("Versioned Object Found: ", versioned_object.id)
-            except:  # pylint: disable=bare-except
-                pass
             if not versioned_object:
                 concept.id = concept.versioned_object_id
                 concept.save()
                 serializer = self.get_serializer(concept, data=request.data)
                 return Response(serializer.data)
-        return Response(status=status.HTTP_400_BAD_REQUEST)
+        if connect_parent_version and versioned_object:
+            print("Existing Source versions:", versioned_object.sources.values_list('uri', flat=True))
+            print("Connecting Source Version...")
+            versioned_object.sources.add(versioned_object.parent)
+        serializer = self.get_serializer(concept, data=request.data)
+        return Response(serializer.data)
