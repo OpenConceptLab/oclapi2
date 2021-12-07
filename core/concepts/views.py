@@ -592,3 +592,30 @@ class ConceptsHierarchyAmendAdminView(APIView):  # pragma: no cover
             dict(state=result.state, username=request.user.username, task=result.task_id, queue='default'),
             status=status.HTTP_202_ACCEPTED
         )
+
+
+class ConceptDebugView(RetrieveAPIView, UpdateAPIView):  # pragma: no cover
+    permission_classes = (IsAdminUser, )
+    serializer_class = ConceptVersionDetailSerializer
+    lookup_field = 'id'
+    swagger_schema = None
+
+    def get_queryset(self):
+        return Concept.objects.filter(id=self.kwargs['id'])
+
+    def patch(self, request, *args, **kwargs):
+        mark_versioned = self.request.data.get('mark_versioned', False) in ['true', True]
+
+        if mark_versioned:
+            concept = self.get_object()
+            versioned_object = None
+            try:
+                versioned_object = concept.versioned_object
+            except:
+                pass
+            if not versioned_object:
+                concept.id = concept.versioned_object_id
+                concept.save()
+                serializer = self.get_serializer(concept, data=request.data)
+                return Response(serializer.data)
+        return Response(status=status.HTTP_400_BAD_REQUEST)

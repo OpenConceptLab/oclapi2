@@ -59,6 +59,7 @@ urlpatterns = [
         'admin/concepts/duplicate-latest-versions/',
         ConceptMultipleLatestVersionsView.as_view(), name='concepts-duplicate-latest-versions'),
     path('admin/mappings/debug/', mapping_views.MappingDebugRetrieveDestroyView.as_view(), name='mapping-debug'),
+    path('admin/concepts/debug/<int:id>/', concept_views.ConceptDebugView.as_view(), name='concept-debug'),
     path('users/', include('core.users.urls'), name='users_urls'),
     path('user/', include('core.users.user_urls'), name='current_user_urls'),
     path('orgs/', include('core.orgs.urls'), name='orgs_url'),
