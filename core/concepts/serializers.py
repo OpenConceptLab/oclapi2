@@ -422,7 +422,7 @@ class ConceptVersionDetailSerializer(ModelSerializer):
             'version', 'created_on', 'updated_on', 'version_created_on', 'version_created_by', 'update_comment',
             'is_latest_version', 'locale', 'url', 'owner_type', 'version_url', 'mappings', 'previous_version_url',
             'parent_concepts', 'child_concepts', 'parent_concept_urls', 'child_concept_urls',
-            'source_versions', 'collection_versions'
+            'source_versions', 'collection_versions', 'versioned_object_id'
         )
 
     def get_mappings(self, obj):

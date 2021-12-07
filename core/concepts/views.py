@@ -611,6 +611,8 @@ class ConceptDebugView(RetrieveAPIView, UpdateAPIView):  # pragma: no cover
             versioned_object = None
             try:
                 versioned_object = concept.versioned_object
+                if versioned_object:
+                    print("Versioned Object Found: ", versioned_object.id)
             except:  # pylint: disable=bare-except
                 pass
             if not versioned_object:
