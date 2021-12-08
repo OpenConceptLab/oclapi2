@@ -3,7 +3,7 @@ from rest_framework.fields import CharField, JSONField, IntegerField, DateTimeFi
 
 
 class BundleSerializer(serializers.Serializer):  # pylint: disable=abstract-method
-    resource_type = CharField(read_only=True)
+    type = CharField(read_only=True, source='resource_type')
     bundle_type = CharField(read_only=True)
     timestamp = DateTimeField(read_only=True)
     total = IntegerField(read_only=True)

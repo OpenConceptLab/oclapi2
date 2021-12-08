@@ -841,22 +841,20 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
     @property
     def parent_concept_urls(self):
-        queryset = self.parent_concepts.all()
-        if self.is_latest_version:
-            queryset |= self.versioned_object.parent_concepts.all()
-        if self.is_versioned_object:
-            queryset |= self.get_latest_version().parent_concepts.all()
-        return self.__format_hierarchy_uris(queryset.values_list('uri', flat=True))
+        return self.__get_hierarchy_concept_urls('parent_concepts')
 
     @property
     def child_concept_urls(self):
-        queryset = self.child_concepts.all()
+        return self.__get_hierarchy_concept_urls('child_concepts')
+
+    def __get_hierarchy_concept_urls(self, relation):
+        queryset = get(self, relation).all()
         if self.is_latest_version:
-            queryset |= self.versioned_object.child_concepts.all()
+            queryset |= get(self.versioned_object, relation).all()
         if self.is_versioned_object:
             latest_version = self.get_latest_version()
             if latest_version:
-                queryset |= latest_version.child_concepts.all()
+                queryset |= get(latest_version, relation).all()
         return self.__format_hierarchy_uris(queryset.values_list('uri', flat=True))
 
     def child_concept_queryset(self):
