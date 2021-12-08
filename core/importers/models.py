@@ -460,13 +460,19 @@ class MappingImporter(BaseResourceImporter):
         if from_concept_code:
             filters['from_concept_code'] = from_concept_code
 
-        from_concept = Concept.objects.filter(id=F('versioned_object_id'), uri=drop_version(from_concept_url)).first()
+        versionless_from_concept_url = drop_version(from_concept_url)
+        from_concept = Concept.objects.filter(id=F('versioned_object_id'), uri=versionless_from_concept_url).first()
         if from_concept:
             filters['from_concept__versioned_object_id'] = from_concept.versioned_object_id
+        else:
+            filters['from_concept_code'] = compact(versionless_from_concept_url.split('/'))[-1]
         if to_concept_url:
-            to_concept = Concept.objects.filter(id=F('versioned_object_id'), uri=drop_version(to_concept_url)).first()
+            versionless_to_concept_url = drop_version(to_concept_url)
+            to_concept = Concept.objects.filter(id=F('versioned_object_id'), uri=versionless_to_concept_url).first()
             if to_concept:
                 filters['to_concept__versioned_object_id'] = to_concept.versioned_object_id
+            else:
+                filters['to_concept_code'] = compact(versionless_to_concept_url.split('/'))[-1]
 
         if self.get('id'):
             filters['mnemonic'] = self.get('id')
