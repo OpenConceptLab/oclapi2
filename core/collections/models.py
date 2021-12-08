@@ -64,8 +64,8 @@ class Collection(ConceptContainerModel):
     references = models.ManyToManyField('collections.CollectionReference', blank=True, related_name='collections')
     immutable = models.BooleanField(null=True, blank=True, default=None)
     locked_date = models.DateTimeField(null=True, blank=True)
-    autoexpand_head = models.BooleanField(default=True)
-    autoexpand = models.BooleanField(default=True)
+    autoexpand_head = models.BooleanField(default=True, null=True)
+    autoexpand = models.BooleanField(default=True, null=True)
     expansion_uri = models.TextField(null=True, blank=True)
 
     def set_active_concepts(self):
