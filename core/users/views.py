@@ -271,6 +271,7 @@ class UserReactivateView(UserBaseView, UpdateAPIView):
 
 class UserStaffToggleView(UserBaseView, UpdateAPIView):
     permission_classes = (IsAdminUser, )
+    swagger_schema = None
 
     def update(self, request, *args, **kwargs):
         user = self.get_object()
