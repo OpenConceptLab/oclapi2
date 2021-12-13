@@ -35,6 +35,11 @@ urlpatterns = [
         name='userprofile-reactivate'
     ),
     re_path(
+        r'^(?P<user>' + NAMESPACE_PATTERN + ')/staff/$',
+        views.UserStaffToggleView.as_view(),
+        name='userprofile-reactivate'
+    ),
+    re_path(
         r'^(?P<user>' + NAMESPACE_PATTERN + ')/orgs/$',
         org_views.OrganizationListView.as_view(),
         name='userprofile-orgs'
