@@ -499,6 +499,14 @@ class UserStaffToggleViewTest(OCLAPITestCase):
         self.assertFalse(self.user.is_staff)
         self.assertFalse(self.user.is_superuser)
 
+    def test_put_400(self):
+        response = self.client.put(
+            f'/users/{self.superuser.username}/staff/',
+            HTTP_AUTHORIZATION='Token ' + self.superuser.get_token(),
+            format='json'
+        )
+        self.assertEqual(response.status_code, 400)
+
 
 class UserExtrasViewTest(OCLAPITestCase):
     def setUp(self):

@@ -15,6 +15,7 @@ from rest_framework.views import APIView
 
 from core.common.constants import NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY, LAST_LOGIN_SINCE_PARAM, \
     LAST_LOGIN_BEFORE_PARAM, DATE_JOINED_SINCE_PARAM, DATE_JOINED_BEFORE_PARAM
+from core.common.exceptions import Http400
 from core.common.mixins import ListWithHeadersMixin
 from core.common.swagger_parameters import last_login_before_param, last_login_since_param, updated_since_param, \
     date_joined_since_param, date_joined_before_param
@@ -273,6 +274,8 @@ class UserStaffToggleView(UserBaseView, UpdateAPIView):
 
     def update(self, request, *args, **kwargs):
         user = self.get_object()
+        if user.username == self.request.user.username:
+            raise Http400()
         user.is_staff = not user.is_staff
         user.is_superuser = not user.is_superuser
         user.save()
