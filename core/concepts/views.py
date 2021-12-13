@@ -619,11 +619,10 @@ class ConceptDebugView(RetrieveAPIView, UpdateAPIView):  # pragma: no cover
             if not versioned_object:
                 concept.id = concept.versioned_object_id
                 concept.save()
-                serializer = self.get_serializer(concept, data=request.data)
-                return Response(serializer.data)
         if connect_parent_version and versioned_object:
             print("Existing Source versions:", versioned_object.sources.values_list('uri', flat=True))
             print("Connecting Source Version...")
-            versioned_object.sources.add(versioned_object.parent)
-        serializer = self.get_serializer(concept, data=request.data)
-        return Response(serializer.data)
+            parent = versioned_object.parent
+            versioned_object.sources.add(parent)
+            concept.sources.add(parent)
+        return Response(status=status.HTTP_204_NO_CONTENT)

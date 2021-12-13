@@ -468,6 +468,38 @@ class UserReactivateViewTest(OCLAPITestCase):
         self.assertTrue(inactive_user.is_active)
 
 
+class UserStaffToggleViewTest(OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.superuser = UserProfile.objects.get(username='ocladmin')
+        self.user = UserProfileFactory()
+        self.assertFalse(self.user.is_staff)
+        self.assertFalse(self.user.is_superuser)
+
+    def test_put_204(self):
+        response = self.client.put(
+            f'/users/{self.user.username}/staff/',
+            HTTP_AUTHORIZATION='Token ' + self.superuser.get_token(),
+            format='json'
+        )
+        self.assertEqual(response.status_code, 204)
+
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.is_staff)
+        self.assertTrue(self.user.is_superuser)
+
+        response = self.client.put(
+            f'/users/{self.user.username}/staff/',
+            HTTP_AUTHORIZATION='Token ' + self.superuser.get_token(),
+            format='json'
+        )
+        self.assertEqual(response.status_code, 204)
+
+        self.user.refresh_from_db()
+        self.assertFalse(self.user.is_staff)
+        self.assertFalse(self.user.is_superuser)
+
+
 class UserExtrasViewTest(OCLAPITestCase):
     def setUp(self):
         self.user = UserProfileFactory(extras={})

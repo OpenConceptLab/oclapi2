@@ -58,6 +58,7 @@ class UserBaseView(BaseAPIView):
     facet_class = UserProfileSearch
     is_searchable = True
     default_qs_sort_attr = '-date_joined'
+    serializer_class = UserDetailSerializer
 
     def get_queryset(self):
         updated_since = parse_updated_since_param(self.request.query_params)
@@ -79,7 +80,6 @@ class UserBaseView(BaseAPIView):
 
 
 class UserLogoView(UserBaseView, BaseLogoView):
-    serializer_class = UserDetailSerializer
     permission_classes = (IsAuthenticated, )
 
 
@@ -156,7 +156,6 @@ class UserSignup(UserBaseView, mixins.CreateModelMixin):
 
 
 class UserEmailVerificationView(UserBaseView):
-    serializer_class = UserDetailSerializer
     permission_classes = (AllowAny, )
 
     def get(self, request, *args, **kwargs):  # pylint: disable=unused-argument
@@ -173,7 +172,6 @@ class UserEmailVerificationView(UserBaseView):
 
 
 class UserPasswordResetView(UserBaseView):
-    serializer_class = UserDetailSerializer
     permission_classes = (AllowAny, )
 
     def post(self, request, *args, **kwargs):  # pylint: disable=unused-argument,no-self-use
@@ -213,8 +211,6 @@ class UserPasswordResetView(UserBaseView):
 
 
 class UserDetailView(UserBaseView, RetrieveAPIView, DestroyAPIView, mixins.UpdateModelMixin):
-    serializer_class = UserDetailSerializer
-
     def get_queryset(self):
         queryset = super().get_queryset()
 
@@ -265,7 +261,6 @@ class UserDetailView(UserBaseView, RetrieveAPIView, DestroyAPIView, mixins.Updat
 class UserReactivateView(UserBaseView, UpdateAPIView):
     permission_classes = (IsAdminUser, )
     queryset = UserProfile.objects.filter(is_active=False)
-    serializer_class = UserDetailSerializer
 
     def update(self, request, *args, **kwargs):
         profile = self.get_object()
@@ -273,7 +268,20 @@ class UserReactivateView(UserBaseView, UpdateAPIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
+class UserStaffToggleView(UserBaseView, UpdateAPIView):
+    permission_classes = (IsAdminUser, )
+
+    def update(self, request, *args, **kwargs):
+        user = self.get_object()
+        user.is_staff = not user.is_staff
+        user.is_superuser = not user.is_superuser
+        user.save()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
 class UserExtrasBaseView(APIView):
+    serializer_class = UserDetailSerializer
+
     def get_object(self):
         instance = self.request.user if self.kwargs.get('user_is_self') else UserProfile.objects.filter(
             username=self.kwargs['user']).first()
@@ -284,15 +292,11 @@ class UserExtrasBaseView(APIView):
 
 
 class UserExtrasView(UserExtrasBaseView):
-    serializer_class = UserDetailSerializer
-
     def get(self, request, **kwargs):  # pylint: disable=unused-argument
         return Response(get(self.get_object(), 'extras', {}))
 
 
 class UserExtraRetrieveUpdateDestroyView(UserExtrasBaseView, RetrieveUpdateDestroyAPIView):
-    serializer_class = UserDetailSerializer
-
     def retrieve(self, request, *args, **kwargs):
         key = kwargs.get('extra')
         instance = self.get_object()
