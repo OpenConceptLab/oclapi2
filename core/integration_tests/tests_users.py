@@ -271,6 +271,21 @@ class UserListViewTest(OCLAPITestCase):
         self.assertEqual(response.data[0]['username'], 'ocladmin')
         self.assertEqual(response.data[0]['email'], self.superuser.email)
 
+    def test_get_summary_200(self):
+        response = self.client.get(
+            '/users/?summary=true',
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['username'], 'ocladmin')
+        self.assertEqual(response.data[0]['organizations'], 1)
+        self.assertEqual(response.data[0]['sources'], 0)
+        self.assertEqual(response.data[0]['collections'], 0)
+        self.assertEqual(response.data[0]['logo_url'], None)
+        self.assertEqual(response.data[0]['url'], self.superuser.url)
+
     @patch('core.users.models.send_user_verification_email')
     def test_post_201(self, job_mock):
         response = self.client.post(

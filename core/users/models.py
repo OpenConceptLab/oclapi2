@@ -148,3 +148,7 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
     @property
     def auth_groups(self):
         return self.groups.values_list('name', flat=True)
+
+    @property
+    def organizations_count(self):
+        return self.organizations.count()

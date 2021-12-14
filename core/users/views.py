@@ -25,7 +25,7 @@ from core.orgs.models import Organization
 from core.users.constants import VERIFICATION_TOKEN_MISMATCH, VERIFY_EMAIL_MESSAGE
 from core.users.documents import UserProfileDocument
 from core.users.search import UserProfileSearch
-from core.users.serializers import UserDetailSerializer, UserCreateSerializer, UserListSerializer
+from core.users.serializers import UserDetailSerializer, UserCreateSerializer, UserListSerializer, UserSummarySerializer
 from .models import UserProfile
 
 
@@ -89,6 +89,8 @@ class UserListView(UserBaseView,
                    mixins.CreateModelMixin):
 
     def get_serializer_class(self):
+        if self.request.query_params.get('summary') in ['true', True] and self.request.method == 'GET':
+            return UserSummarySerializer
         if self.request.method == 'GET' and self.is_verbose():
             return UserDetailSerializer
         if self.request.method == 'POST':
@@ -212,6 +214,12 @@ class UserPasswordResetView(UserBaseView):
 
 
 class UserDetailView(UserBaseView, RetrieveAPIView, DestroyAPIView, mixins.UpdateModelMixin):
+    def get_serializer_class(self):
+        if self.request.query_params.get('summary') in ['true', True] and self.request.method == 'GET':
+            return UserSummarySerializer
+
+        return UserDetailSerializer
+
     def get_queryset(self):
         queryset = super().get_queryset()
 

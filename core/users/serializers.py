@@ -6,6 +6,7 @@ from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator
 from pydash import get
 from rest_framework import serializers
+from rest_framework.fields import IntegerField
 from rest_framework.validators import UniqueValidator
 
 from core.common.constants import NAMESPACE_REGEX, INCLUDE_SUBSCRIBED_ORGS, INCLUDE_VERIFICATION_TOKEN, \
@@ -15,11 +16,23 @@ from .models import UserProfile
 
 
 class UserListSerializer(serializers.ModelSerializer):
-
     class Meta:
         model = UserProfile
         fields = (
             'username', 'name', 'url'
+        )
+
+
+class UserSummarySerializer(serializers.ModelSerializer):
+    sources = IntegerField(source='public_sources')
+    collections = IntegerField(source='public_collections')
+    organizations = IntegerField(source='organizations_count')
+
+    class Meta:
+        model = UserProfile
+        fields = (
+            'username', 'name', 'url', 'logo_url', 'sources', 'collections', 'organizations',
+            'is_superuser', 'is_staff', 'first_name', 'last_name'
         )
 
 
