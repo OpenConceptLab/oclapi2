@@ -582,8 +582,9 @@ class ConceptContainerModel(VersionedModel):
             obj.created_by = user
             obj.updated_by = user
         serializer = SourceDetailSerializer if obj.__class__.__name__ == 'Source' else CollectionDetailSerializer
-        obj.snapshot = serializer(obj.head).data
-        obj.update_version_data()
+        head = obj.head
+        obj.snapshot = serializer(head).data
+        obj.update_version_data(head)
         obj.save(**kwargs)
 
         if get(settings, 'TEST_MODE', False):
@@ -653,23 +654,28 @@ class ConceptContainerModel(VersionedModel):
 
         return failed_concept_validations
 
-    def update_version_data(self, obj=None):
-        if obj:
-            self.description = obj.description
-        else:
-            obj = self.get_latest_version()
-
-        if obj:
-            self.name = obj.name
-            self.full_name = obj.full_name
-            self.website = obj.website
-            self.public_access = obj.public_access
-            self.supported_locales = obj.supported_locales
-            self.default_locale = obj.default_locale
-            self.external_id = obj.external_id
-            self.organization = obj.organization
-            self.user = obj.user
-            self.canonical_url = obj.canonical_url
+    def update_version_data(self, head):
+        self.description = self.description or head.description
+        self.name = head.name
+        self.full_name = head.full_name
+        self.website = head.website
+        self.public_access = head.public_access
+        self.supported_locales = head.supported_locales
+        self.default_locale = head.default_locale
+        self.external_id = head.external_id
+        self.organization = head.organization
+        self.user = head.user
+        self.canonical_url = head.canonical_url
+        self.identifier = head.identifier
+        self.contact = head.contact
+        self.jurisdiction = head.jurisdiction
+        self.publisher = head.publisher
+        self.purpose = head.purpose
+        self.copyright = head.copyright
+        self.revision_date = head.revision_date
+        self.text = head.text
+        self.experimental = head.experimental
+        self.custom_validation_schema = head.custom_validation_schema
 
     def add_processing(self, process_id):
         if self.id:

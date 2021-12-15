@@ -9,7 +9,7 @@ from django.http import Http404
 from django.shortcuts import get_object_or_404
 from drf_yasg.utils import swagger_auto_schema
 from pydash import get
-from rest_framework import status, mixins
+from rest_framework import status
 from rest_framework.generics import (
     RetrieveAPIView, DestroyAPIView, UpdateAPIView, ListAPIView,
     CreateAPIView)
@@ -449,7 +449,7 @@ class CollectionVersionReferencesView(CollectionVersionBaseView, ListWithHeaders
         return self.list(request, *args, **kwargs)
 
 
-class CollectionVersionListView(CollectionVersionBaseView, mixins.CreateModelMixin, ListWithHeadersMixin):
+class CollectionVersionListView(CollectionVersionBaseView, CreateAPIView, ListWithHeadersMixin):
     released_filter = None
     processing_filter = None
     default_qs_sort_attr = '-created_at'
@@ -466,9 +466,6 @@ class CollectionVersionListView(CollectionVersionBaseView, mixins.CreateModelMix
         self.released_filter = parse_boolean_query_param(request, RELEASED_PARAM, self.released_filter)
         self.processing_filter = parse_boolean_query_param(request, PROCESSING_PARAM, self.processing_filter)
         return self.list(request, *args, **kwargs)
-
-    def post(self, request, *args, **kwargs):
-        return self.create(request, *args, **kwargs)
 
     def create(self, request, *args, **kwargs):
         head_object = self.get_queryset().first()

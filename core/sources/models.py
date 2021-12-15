@@ -95,16 +95,16 @@ class Source(ConceptContainerModel):
     def source(self):
         return self.mnemonic
 
-    def update_version_data(self, obj=None):
-        super().update_version_data(obj)
-        if not obj:
-            obj = self.get_latest_version()
-
-        if obj:
-            self.source_type = obj.source_type
-            self.custom_validation_schema = obj.custom_validation_schema
-            self.hierarchy_meaning = obj.hierarchy_meaning
-            self.hierarchy_root_id = obj.hierarchy_root_id
+    def update_version_data(self, head):
+        super().update_version_data(head)
+        self.source_type = head.source_type
+        self.content_type = head.content_type
+        self.collection_reference = head.collection_reference
+        self.hierarchy_meaning = head.hierarchy_meaning
+        self.hierarchy_root_id = head.hierarchy_root_id
+        self.case_sensitive = head.case_sensitive
+        self.compositional = head.compositional
+        self.version_needed = head.version_needed
 
     def get_concept_name_locales(self):
         return LocalizedText.objects.filter(name_locales__in=self.get_active_concepts())

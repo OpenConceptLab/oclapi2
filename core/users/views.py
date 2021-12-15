@@ -15,6 +15,7 @@ from rest_framework.views import APIView
 
 from core.common.constants import NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY, LAST_LOGIN_SINCE_PARAM, \
     LAST_LOGIN_BEFORE_PARAM, DATE_JOINED_SINCE_PARAM, DATE_JOINED_BEFORE_PARAM
+from core.common.exceptions import Http400
 from core.common.mixins import ListWithHeadersMixin
 from core.common.swagger_parameters import last_login_before_param, last_login_since_param, updated_since_param, \
     date_joined_since_param, date_joined_before_param
@@ -24,7 +25,7 @@ from core.orgs.models import Organization
 from core.users.constants import VERIFICATION_TOKEN_MISMATCH, VERIFY_EMAIL_MESSAGE
 from core.users.documents import UserProfileDocument
 from core.users.search import UserProfileSearch
-from core.users.serializers import UserDetailSerializer, UserCreateSerializer, UserListSerializer
+from core.users.serializers import UserDetailSerializer, UserCreateSerializer, UserListSerializer, UserSummarySerializer
 from .models import UserProfile
 
 
@@ -88,6 +89,8 @@ class UserListView(UserBaseView,
                    mixins.CreateModelMixin):
 
     def get_serializer_class(self):
+        if self.request.query_params.get('summary') in ['true', True] and self.request.method == 'GET':
+            return UserSummarySerializer
         if self.request.method == 'GET' and self.is_verbose():
             return UserDetailSerializer
         if self.request.method == 'POST':
@@ -211,6 +214,12 @@ class UserPasswordResetView(UserBaseView):
 
 
 class UserDetailView(UserBaseView, RetrieveAPIView, DestroyAPIView, mixins.UpdateModelMixin):
+    def get_serializer_class(self):
+        if self.request.query_params.get('summary') in ['true', True] and self.request.method == 'GET':
+            return UserSummarySerializer
+
+        return UserDetailSerializer
+
     def get_queryset(self):
         queryset = super().get_queryset()
 
@@ -270,9 +279,12 @@ class UserReactivateView(UserBaseView, UpdateAPIView):
 
 class UserStaffToggleView(UserBaseView, UpdateAPIView):
     permission_classes = (IsAdminUser, )
+    swagger_schema = None
 
     def update(self, request, *args, **kwargs):
         user = self.get_object()
+        if user.username == self.request.user.username:
+            raise Http400()
         user.is_staff = not user.is_staff
         user.is_superuser = not user.is_superuser
         user.save()

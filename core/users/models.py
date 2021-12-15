@@ -152,3 +152,6 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
     @property
     def auth_headers(self):
         return dict(Authorization=f'Token {self.get_token()}')
+
+    def organizations_count(self):
+        return self.organizations.count()
