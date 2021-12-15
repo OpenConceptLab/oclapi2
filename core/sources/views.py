@@ -9,9 +9,9 @@ from django.http import Http404
 from django.shortcuts import get_object_or_404
 from drf_yasg.utils import swagger_auto_schema
 from pydash import get
-from rest_framework import status, mixins
+from rest_framework import status
 from rest_framework.generics import (
-    RetrieveAPIView, ListAPIView, UpdateAPIView)
+    RetrieveAPIView, ListAPIView, UpdateAPIView, CreateAPIView)
 from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
 
@@ -210,7 +210,7 @@ class SourceRetrieveUpdateDestroyView(SourceBaseView, ConceptDictionaryUpdateMix
         return Response({'detail': get(result, 'messages', [DELETE_FAILURE])}, status=status.HTTP_400_BAD_REQUEST)
 
 
-class SourceVersionListView(SourceVersionBaseView, mixins.CreateModelMixin, ListWithHeadersMixin):
+class SourceVersionListView(SourceVersionBaseView, CreateAPIView, ListWithHeadersMixin):
     released_filter = None
     processing_filter = None
     default_qs_sort_attr = '-created_at'
@@ -227,9 +227,6 @@ class SourceVersionListView(SourceVersionBaseView, mixins.CreateModelMixin, List
         self.released_filter = parse_boolean_query_param(request, RELEASED_PARAM, self.released_filter)
         self.processing_filter = parse_boolean_query_param(request, PROCESSING_PARAM, self.processing_filter)
         return self.list(request, *args, **kwargs)
-
-    def post(self, request, *args, **kwargs):
-        return self.create(request, *args, **kwargs)
 
     def create(self, request, *args, **kwargs):
         head_object = self.get_queryset().first()

@@ -92,17 +92,14 @@ class Collection(ConceptContainerModel):
     def get_resource_url_kwarg():
         return 'collection'
 
-    def update_version_data(self, obj=None):
-        super().update_version_data(obj)
-
-        if not obj:
-            obj = self.get_latest_version()
-
-        if obj:
-            self.collection_type = obj.collection_type
-            self.custom_resources_linked_source = obj.custom_resources_linked_source
-            self.repository_type = obj.repository_type
-            self.preferred_source = obj.preferred_source
+    def update_version_data(self, head):
+        super().update_version_data(head)
+        self.collection_type = head.collection_type
+        self.preferred_source = head.preferred_source
+        self.repository_type = head.repository_type
+        self.custom_resources_linked_source = head.custom_resources_linked_source
+        self.immutable = head.immutable
+        self.locked_date = head.locked_date
 
     def add_concept(self, concept):
         self.concepts.add(concept)
