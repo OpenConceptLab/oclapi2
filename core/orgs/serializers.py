@@ -4,7 +4,8 @@ from rest_framework import serializers
 from rest_framework.fields import SerializerMethodField
 
 from core.client_configs.serializers import ClientConfigSerializer
-from core.common.constants import NAMESPACE_REGEX, ACCESS_TYPE_CHOICES, DEFAULT_ACCESS_TYPE, INCLUDE_CLIENT_CONFIGS
+from core.common.constants import NAMESPACE_REGEX, ACCESS_TYPE_CHOICES, DEFAULT_ACCESS_TYPE, INCLUDE_CLIENT_CONFIGS, \
+    INCLUDE_OVERVIEW
 from .models import Organization
 
 
@@ -90,16 +91,20 @@ class OrganizationDetailSerializer(serializers.ModelSerializer):
             'type', 'uuid', 'id', 'public_access', 'name', 'company', 'website', 'location', 'members',
             'created_on', 'updated_on', 'url', 'extras', 'members_url', 'created_by', 'updated_by', 'location',
             'sources_url', 'public_sources', 'collections_url', 'public_collections', 'logo_url', 'description',
-            'client_configs', 'text',
+            'client_configs', 'text', 'overview'
         )
 
     def __init__(self, *args, **kwargs):
         params = get(kwargs, 'context.request.query_params')
         self.query_params = params.dict() if params else {}
         self.include_client_configs = self.query_params.get(INCLUDE_CLIENT_CONFIGS) in ['true', True]
+        self.include_overview = self.query_params.get(INCLUDE_OVERVIEW) in ['true', True]
 
         if not self.include_client_configs:
             self.fields.pop('client_configs')
+
+        if not self.include_overview:
+            self.fields.pop('overview')
 
         super().__init__(*args, **kwargs)
 
@@ -119,6 +124,23 @@ class OrganizationDetailSerializer(serializers.ModelSerializer):
         instance.location = validated_data.get('location', instance.website)
         instance.extras = validated_data.get('extras', instance.extras)
         instance.text = validated_data.get('text', None)
+        instance.updated_by = request_user
+        instance.save()
+        return instance
+
+
+class OrganizationOverviewSerializer(serializers.ModelSerializer):
+    id = serializers.CharField(source='mnemonic', read_only=True)
+    name = serializers.CharField(read_only=True)
+    overview = serializers.JSONField()
+
+    class Meta:
+        model = Organization
+        fields = ('id', 'name', 'url', 'overview', 'text', 'logo_url', 'description')
+
+    def update(self, instance, validated_data):
+        request_user = self.context['request'].user
+        instance.overview = validated_data.get('overview', instance.overview)
         instance.updated_by = request_user
         instance.save()
         return instance

@@ -4,8 +4,8 @@ from django.http import Http404
 from drf_yasg.utils import swagger_auto_schema
 from pydash import get
 from rest_framework import mixins, status, generics
-from rest_framework.generics import RetrieveAPIView, DestroyAPIView, RetrieveUpdateDestroyAPIView
-from rest_framework.permissions import IsAuthenticatedOrReadOnly
+from rest_framework.generics import RetrieveAPIView, DestroyAPIView, RetrieveUpdateDestroyAPIView, UpdateAPIView
+from rest_framework.permissions import IsAuthenticatedOrReadOnly, AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -21,7 +21,8 @@ from core.common.views import BaseAPIView, BaseLogoView
 from core.orgs.constants import DELETE_ACCEPTED, NO_MEMBERS
 from core.orgs.documents import OrganizationDocument
 from core.orgs.models import Organization
-from core.orgs.serializers import OrganizationDetailSerializer, OrganizationListSerializer, OrganizationCreateSerializer
+from core.orgs.serializers import OrganizationDetailSerializer, OrganizationListSerializer, \
+    OrganizationCreateSerializer, OrganizationOverviewSerializer
 from core.sources.views import SourceListView
 from core.users.models import UserProfile
 from core.users.serializers import UserDetailSerializer
@@ -108,6 +109,19 @@ class OrganizationLogoView(OrganizationBaseView, BaseLogoView):
             return [HasPrivateAccess(), ]
 
         return [CanViewConceptDictionary(), ]
+
+
+class OrganizationOverviewView(OrganizationBaseView, RetrieveAPIView, UpdateAPIView):
+    serializer_class = OrganizationOverviewSerializer
+
+    def get_permissions(self):
+        if self.request.method == 'PUT':
+            if self.request.method == 'DELETE':
+                return [HasPrivateAccess(), ]
+        return [AllowAny(), ]
+
+    def get_queryset(self):
+        return super().get_queryset().filter(mnemonic=self.kwargs['org'])
 
 
 class OrganizationDetailView(OrganizationBaseView, mixins.UpdateModelMixin, mixins.CreateModelMixin):

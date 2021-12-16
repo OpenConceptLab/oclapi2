@@ -174,6 +174,19 @@ class OrganizationDetailViewTest(OCLAPITestCase):
         self.assertEqual(response.data['uuid'], str(self.org.id))
         self.assertEqual(response.data['id'], self.org.mnemonic)
         self.assertEqual(response.data['name'], 'Stark Enterprises')
+        self.assertFalse('overview' in response.data)
+
+    def test_get_200_with_overview(self):
+        response = self.client.get(
+            f'/orgs/{self.org.mnemonic}/?includeOverview=true',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['uuid'], str(self.org.id))
+        self.assertEqual(response.data['id'], self.org.mnemonic)
+        self.assertTrue('overview' in response.data)
 
     def test_get_404(self):
         response = self.client.get(
@@ -501,3 +514,38 @@ class OrganizationLogoViewTest(OCLAPITestCase):
         self.assertEqual(self.organization.logo_url.replace('https://', 'http://'), expected_logo_url)
         self.assertEqual(self.organization.logo_path, 'orgs/org-1/logo.png')
         upload_base64_mock.assert_called_once_with('base64-data', 'orgs/org-1/logo.png', False, True)
+
+
+class OrganizationOverviewViewTest(OCLAPITestCase):
+    def setUp(self):
+        self.org = OrganizationFactory(name='Stark Enterprises')
+        self.user = UserProfileFactory(organizations=[self.org])
+        self.superuser = UserProfile.objects.get(is_superuser=True)
+        self.token = self.user.get_token()
+
+    def test_get_200(self):
+        response = self.client.get(
+            f'/orgs/{self.org.mnemonic}/overview/',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['id'], self.org.mnemonic)
+        self.assertEqual(response.data['name'], 'Stark Enterprises')
+        self.assertEqual(response.data['overview'], {})
+
+    def test_put_200(self):
+        response = self.client.put(
+            f'/orgs/{self.org.mnemonic}/overview/',
+            dict(overview=dict(foo='bar')),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['id'], self.org.mnemonic)
+        self.assertEqual(response.data['name'], 'Stark Enterprises')
+        self.assertEqual(response.data['overview'], dict(foo='bar'))
+        self.org.refresh_from_db()
+        self.assertEqual(self.org.overview, dict(foo='bar'))
