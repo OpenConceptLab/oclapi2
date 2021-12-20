@@ -125,9 +125,12 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     def get_host_url(self):
         return self.request.META['wsgi.url_scheme'] + '://' + self.request.get_host()
 
-    def filter_queryset(self, queryset):
+    def filter_queryset(self, queryset=None):
         if self.is_searchable and self.should_perform_es_search():
             return self.get_search_results_qs()
+
+        if queryset is None:
+            queryset = self.get_queryset()
 
         return super().filter_queryset(queryset).order_by(self.default_qs_sort_attr)
 

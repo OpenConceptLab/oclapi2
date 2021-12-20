@@ -92,7 +92,7 @@ class ListWithHeadersMixin(ListModelMixin):
     document_model = None
 
     def head(self, request, **kwargs):  # pylint: disable=unused-argument
-        queryset = self.filter_queryset(self.get_queryset())
+        queryset = self.filter_queryset()
         res = Response()
         res['num_found'] = get(self, 'total_count') or queryset.count()
         return res
@@ -116,7 +116,7 @@ class ListWithHeadersMixin(ListModelMixin):
             return Response(dict(facets=dict(fields=self.get_facets())))
 
         if self.object_list is None:
-            self.object_list = self.filter_queryset(self.get_queryset())
+            self.object_list = self.filter_queryset()
 
         if is_csv and search_string:
             klass = type(self.object_list[0])
