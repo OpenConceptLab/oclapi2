@@ -183,6 +183,7 @@ class OrganizationImporter(BaseResourceImporter):
 
     def process(self):
         org = Organization.objects.create(**self.data)
+        org.members.add(org.created_by)
         if org:
             return CREATED
         return FAILED
