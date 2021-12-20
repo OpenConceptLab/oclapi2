@@ -512,7 +512,8 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                 kwargs_filters = self.get_kwargs_filters()
                 if self.get_view_name() in ['Organization Collection List', 'Organization Source List']:
                     kwargs_filters['ownerType'] = 'Organization'
-                    kwargs_filters['owner'] = list(self.request.user.organizations.values_list('mnemonic', flat=True))
+                    kwargs_filters['owner'] = list(
+                        self.request.user.organizations.values_list('mnemonic', flat=True)) or ['UNKNOWN-ORG-DUMMY']
                 elif self.user_is_self and is_authenticated:
                     kwargs_filters['ownerType'] = 'User'
                     kwargs_filters['owner'] = username
@@ -520,7 +521,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             for key, value in kwargs_filters.items():
                 attr = to_snake_case(key)
                 if isinstance(value, list):
-                    criteria = Q('match', **{attr: value[0]})
+                    criteria = Q('match', **{attr: get(value, '0')})
                     for val in value[1:]:
                         criteria |= Q('match', **{attr: val})
                     results = results.query(criteria)
