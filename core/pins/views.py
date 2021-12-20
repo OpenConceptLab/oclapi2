@@ -18,7 +18,7 @@ class PinBaseView(BaseAPIView):
     serializer_class = PinSerializer
     permission_classes = (IsAuthenticatedOrReadOnly,)
 
-    def filter_queryset(self, queryset):
+    def filter_queryset(self, queryset=None):
         return queryset
 
     def should_include_creator_pins(self):
