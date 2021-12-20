@@ -409,6 +409,8 @@ class ConceptImporter(BaseResourceImporter):
 
     def process(self):
         parent = self.data.get('parent')
+        if not parent:
+            return FAILED
         if parent.has_edit_access(self.user):
             if self.version:
                 instance = self.get_queryset().first().clone()
@@ -519,6 +521,8 @@ class MappingImporter(BaseResourceImporter):
 
     def process(self):
         parent = self.data.get('parent')
+        if not parent:
+            return FAILED
         if parent.has_edit_access(self.user):
             if self.version:
                 instance = self.get_queryset().first().clone()
