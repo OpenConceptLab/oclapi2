@@ -33,6 +33,7 @@ class Organization(BaseResourceModel, SourceContainerMixin):
     description = models.TextField(null=True, blank=True)
     client_configs = GenericRelation(ClientConfig, object_id_field='resource_id', content_type_field='resource_type')
     text = models.TextField(null=True, blank=True)  # for about description (markup)
+    overview = models.JSONField(default=dict)
 
     @staticmethod
     def get_search_document():
