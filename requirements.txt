@@ -5,11 +5,11 @@ whitenoise==5.3.0 #serving swagger static files
 djangorestframework==3.12.4
 pylint==2.11.1
 pydash==5.1.0
-django-cors-headers==3.10.0
+django-cors-headers==3.10.1
 pyyaml==6.0
 colour_runner==0.1.1
 boto3==1.20.24
-moto==2.2.13
+moto==2.2.19
 python-dateutil==2.8.2
 requests==2.26.0
 factory_boy==3.2.1
@@ -23,7 +23,7 @@ django-elasticsearch-dsl==7.2.1
 drf-yasg==1.20.0
 git+https://github.com/snyaggarwal/django-queryset-csv
 git+https://github.com/OpenConceptLab/ocldev
-coverage==6.1.1
+coverage==6.2
 tblib==1.7.0
 django-ordered-model==3.4.3
 django-health-check>=3.16.2
