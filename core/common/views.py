@@ -22,7 +22,7 @@ from rest_framework.views import APIView
 from core import __version__
 from core.common.constants import SEARCH_PARAM, LIST_DEFAULT_LIMIT, CSV_DEFAULT_LIMIT, \
     LIMIT_PARAM, NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY, INCLUDE_RETIRED_PARAM, VERBOSE_PARAM, HEAD, LATEST, \
-    BRIEF_PARAM, ES_REQUEST_TIMEOUT
+    BRIEF_PARAM, ES_REQUEST_TIMEOUT, INCLUDE_INACTIVE
 from core.common.exceptions import Http400
 from core.common.mixins import PathWalkerMixin, ListWithHeadersMixin
 from core.common.serializers import RootSerializer
@@ -75,6 +75,9 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         include_retired = params.get('retired', None) in [True, 'true'] or params.get(
             INCLUDE_RETIRED_PARAM, None) in [True, 'true']
         return not include_retired
+
+    def should_include_inactive(self):
+        return self.request.query_params.get(INCLUDE_INACTIVE) in ['true', True]
 
     def _should_include_private(self):
         return self.is_user_document() or self.request.user.is_staff or self.is_user_scope()
@@ -457,6 +460,8 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         if self.should_perform_es_search():
             results = self.document_model.search()
             default_filters = self.default_filters.copy()
+            if self.is_user_document() and self.should_include_inactive():
+                default_filters.pop('is_active', None)
             if self.is_source_child_document_model() and self.__should_query_latest_version():
                 default_filters['is_latest_version'] = True
 

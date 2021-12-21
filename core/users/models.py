@@ -47,6 +47,15 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
         return UserProfileDocument
 
     @property
+    def status(self):
+        if not self.is_active:
+            return 'deactivated'
+        if not self.verified:
+            return 'unverified'
+
+        return 'verified'
+
+    @property
     def user(self):
         return self.username
 

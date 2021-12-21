@@ -245,6 +245,26 @@ class UserLoginViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.data, dict(non_field_errors=["Unable to log in with provided credentials."]))
 
+    def test_login_inactive_user(self):
+        user = UserProfileFactory(username='marty', is_active=False)
+        user.set_password('boogeyman')
+        user.save()
+
+        response = self.client.post(
+            '/users/login/',
+            dict(username='marty', password='boogeyman'),
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(
+            response.data,
+            dict(
+                detail='This account is deactivated. Please contact OCL Team to activate this account.',
+                email=user.email
+            )
+        )
+
 
 class UserListViewTest(OCLAPITestCase):
     def setUp(self):
@@ -270,6 +290,27 @@ class UserListViewTest(OCLAPITestCase):
         self.assertEqual(len(response.data), 1)
         self.assertEqual(response.data[0]['username'], 'ocladmin')
         self.assertEqual(response.data[0]['email'], self.superuser.email)
+
+    def test_get_200_with_inactive_user(self):
+        UserProfileFactory(is_active=False, username='inactive')
+
+        response = self.client.get(
+            '/users/',
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['username'], 'ocladmin')
+
+        response = self.client.get(
+            '/users/?includeInactive=true',
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 2)
+        self.assertEqual(sorted(user['username'] for user in response.data), sorted(['ocladmin', 'inactive']))
 
     def test_get_summary_200(self):
         response = self.client.get(

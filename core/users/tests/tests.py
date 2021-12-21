@@ -60,6 +60,12 @@ class UserProfileTest(OCLTestCase):
         self.assertEqual(UserProfile().user, '')
         self.assertEqual(UserProfile(username='foo').user, 'foo')
 
+    def test_status(self):
+        self.assertEqual(UserProfile(is_active=True, verified=True).status, 'verified')
+        self.assertEqual(UserProfile(is_active=True, verified=False).status, 'unverified')
+        self.assertEqual(UserProfile(is_active=False, verified=True).status, 'deactivated')
+        self.assertEqual(UserProfile(is_active=False, verified=False).status, 'deactivated')
+
     @patch('core.users.models.UserProfile.source_set')
     def test_public_sources(self, source_set_mock):
         source_set_mock.exclude = Mock(return_value=Mock(filter=Mock(return_value=Mock(count=Mock(return_value=10)))))
