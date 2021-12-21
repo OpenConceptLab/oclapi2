@@ -162,7 +162,9 @@ class Collection(ConceptContainerModel):
                 raise ValidationError(validation_error)
 
             matching_names_in_concept[name_key] = True
-            if other_concepts_in_collection.filter(names__name=name.name, names__locale=name.locale).exists():
+            if other_concepts_in_collection.filter(
+                    names__name=name.name, names__locale=name.locale, **{"names__{}".format(attribute): value}
+            ).exists():
                 raise ValidationError(validation_error)
 
     @staticmethod
