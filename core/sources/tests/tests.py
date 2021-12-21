@@ -293,7 +293,6 @@ class SourceTest(OCLTestCase):
         source.save()
         source.update_concepts_count()
 
-        self.assertEqual(source.num_concepts, 1)
         self.assertEqual(source.active_concepts, 1)
         self.assertEqual(source.last_concept_update, concept.updated_at)
         self.assertEqual(source.last_child_update, source.last_concept_update)
