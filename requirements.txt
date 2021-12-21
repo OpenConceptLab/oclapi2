@@ -1,5 +1,5 @@
 Django==3.2.10
-psycopg2==2.9.1
+psycopg2==2.9.2
 gunicorn==20.1.0 #production server
 whitenoise==5.3.0 #serving swagger static files
 djangorestframework==3.12.4
@@ -17,13 +17,13 @@ factory_boy==3.2.1
 celery[redis]==4.4.7
 celery_once==3.0.1
 flower==0.9.5
-redis==3.5.3
+redis==4.0.2
 kombu==4.6.11
 django-elasticsearch-dsl==7.2.1
 drf-yasg==1.20.0
 git+https://github.com/snyaggarwal/django-queryset-csv
 git+https://github.com/OpenConceptLab/ocldev
-coverage==6.1.1
+coverage==6.2
 tblib==1.7.0
 django-ordered-model==3.4.3
 django-health-check>=3.16.2
