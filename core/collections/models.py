@@ -131,7 +131,7 @@ class Collection(ConceptContainerModel):
             raise ValidationError({reference.expression: [REFERENCE_ALREADY_EXISTS]})
 
         if self.is_openmrs_schema:
-            if reference.concepts and reference.concepts.count() == 0:
+            if reference.concepts is None or reference.concepts.count() == 0:
                 return
 
             concept = reference.concepts[0]
