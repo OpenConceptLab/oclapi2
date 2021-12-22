@@ -482,10 +482,6 @@ class ConceptContainerModel(VersionedModel):
     def get_active_concepts(self):
         return self.get_concepts_queryset().filter(is_active=True, retired=False)
 
-    @property
-    def num_concepts(self):
-        return self.get_concepts_queryset().count()
-
     def get_concepts_queryset(self):
         return self.concepts_set.filter(id=F('versioned_object_id'))
 

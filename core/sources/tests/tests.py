@@ -1,9 +1,10 @@
 import factory
 from django.core.exceptions import ValidationError
 from django.db import transaction, IntegrityError
-from mock import patch, Mock, ANY
+from mock import patch, Mock, ANY, PropertyMock
 
-from core.common.constants import HEAD, ACCESS_TYPE_EDIT, ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW
+from core.common.constants import HEAD, ACCESS_TYPE_EDIT, ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW, \
+    CUSTOM_VALIDATION_SCHEMA_OPENMRS
 from core.common.tasks import seed_children_to_new_version
 from core.common.tests import OCLTestCase
 from core.concepts.models import Concept
@@ -293,7 +294,6 @@ class SourceTest(OCLTestCase):
         source.save()
         source.update_concepts_count()
 
-        self.assertEqual(source.num_concepts, 1)
         self.assertEqual(source.active_concepts, 1)
         self.assertEqual(source.last_concept_update, concept.updated_at)
         self.assertEqual(source.last_child_update, source.last_concept_update)
@@ -576,6 +576,31 @@ class SourceTest(OCLTestCase):
             dict(uuid=str(parentless_concept.id), id=parentless_concept.mnemonic, url=parentless_concept.uri,
                  name=parentless_concept.display_name, children=[parentless_concept_child.uri])
         )
+
+    def test_is_validation_necessary(self):
+        source = OrganizationSourceFactory()
+
+        self.assertFalse(source.is_validation_necessary())
+
+        source.custom_validation_schema = CUSTOM_VALIDATION_SCHEMA_OPENMRS
+
+        self.assertFalse(source.is_validation_necessary())
+
+        source.active_concepts = 1
+        self.assertTrue(source.is_validation_necessary())
+
+    @patch('core.sources.models.Source.head', new_callable=PropertyMock)
+    def test_is_hierarchy_root_belonging_to_self(self, head_mock):
+        root = Concept(id=1, parent_id=100)
+        source = Source(id=1, hierarchy_root=root, version='HEAD')
+        head_mock.return_value = source
+        self.assertFalse(source.is_hierarchy_root_belonging_to_self())
+        source_v1 = Source(id=1, hierarchy_root=root, version='v1')
+        self.assertFalse(source_v1.is_hierarchy_root_belonging_to_self())
+
+        root.parent_id = 1
+        self.assertTrue(source.is_hierarchy_root_belonging_to_self())
+        self.assertTrue(source_v1.is_hierarchy_root_belonging_to_self())
 
 
 class TasksTest(OCLTestCase):

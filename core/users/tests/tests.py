@@ -1,3 +1,4 @@
+from django.contrib.auth.models import Group
 from mock import Mock, patch, ANY
 from rest_framework.authtoken.models import Token
 
@@ -7,7 +8,7 @@ from core.common.tasks import send_user_verification_email, send_user_reset_pass
 from core.common.tests import OCLTestCase, OCLAPITestCase
 from core.orgs.models import Organization
 from core.sources.tests.factories import OrganizationSourceFactory
-from core.users.constants import USER_OBJECT_TYPE
+from core.users.constants import USER_OBJECT_TYPE, OCL_SERVERS_GROUP
 from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
 
@@ -58,6 +59,12 @@ class UserProfileTest(OCLTestCase):
     def test_user(self):
         self.assertEqual(UserProfile().user, '')
         self.assertEqual(UserProfile(username='foo').user, 'foo')
+
+    def test_status(self):
+        self.assertEqual(UserProfile(is_active=True, verified=True).status, 'verified')
+        self.assertEqual(UserProfile(is_active=True, verified=False).status, 'unverified')
+        self.assertEqual(UserProfile(is_active=False, verified=True).status, 'deactivated')
+        self.assertEqual(UserProfile(is_active=False, verified=False).status, 'deactivated')
 
     @patch('core.users.models.UserProfile.source_set')
     def test_public_sources(self, source_set_mock):
@@ -203,6 +210,18 @@ class UserProfileTest(OCLTestCase):
         self.assertTrue(user.mark_verified(token='some-token'))
         self.assertIsNone(user.verification_token)
         user.save.assert_not_called()
+
+    def test_auth_groups(self):
+        user = UserProfileFactory()
+        self.assertEqual(user.auth_groups.count(), 0)
+
+        user.groups.add(Group.objects.get(name=OCL_SERVERS_GROUP))
+
+        self.assertEqual(user.auth_groups.count(), 1)
+
+    def test_is_valid_auth_group(self):
+        self.assertFalse(UserProfile.is_valid_auth_group('foobar'))
+        self.assertTrue(UserProfile.is_valid_auth_group(OCL_SERVERS_GROUP))
 
 
 class TokenAuthenticationViewTest(OCLAPITestCase):

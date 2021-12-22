@@ -218,6 +218,7 @@ class OCLTestCase(TestCase, BaseTestCase):
     def setUpClass(cls):
         super().setUpClass()
         call_command("loaddata", "core/fixtures/base_entities.yaml")
+        call_command("loaddata", "core/fixtures/auth_groups.yaml")
 
     def tearDown(self):
         super().tearDown()

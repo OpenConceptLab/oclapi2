@@ -22,7 +22,7 @@ from core.common.swagger_parameters import last_login_before_param, last_login_s
 from core.common.utils import parse_updated_since_param, parse_updated_since
 from core.common.views import BaseAPIView, BaseLogoView
 from core.orgs.models import Organization
-from core.users.constants import VERIFICATION_TOKEN_MISMATCH, VERIFY_EMAIL_MESSAGE
+from core.users.constants import VERIFICATION_TOKEN_MISMATCH, VERIFY_EMAIL_MESSAGE, INACTIVE_USER_MESSAGE
 from core.users.documents import UserProfileDocument
 from core.users.search import UserProfileSearch
 from core.users.serializers import UserDetailSerializer, UserCreateSerializer, UserListSerializer, UserSummarySerializer
@@ -34,9 +34,17 @@ class TokenAuthenticationView(ObtainAuthToken):
 
     @swagger_auto_schema(request_body=AuthTokenSerializer)
     def post(self, request, *args, **kwargs):
+        user = UserProfile.objects.filter(username=request.data.get('username')).first()
+        if not user:
+            raise Http404()
+
+        if not user.is_active:
+            return Response(
+                {'detail': INACTIVE_USER_MESSAGE, 'email': user.email}, status=status.HTTP_401_UNAUTHORIZED
+            )
+
         result = super().post(request, *args, **kwargs)
         try:
-            user = UserProfile.objects.get(username=request.data['username'])
             if not user.verified:
                 user.send_verification_email()
                 return Response(
@@ -53,7 +61,7 @@ class UserBaseView(BaseAPIView):
     lookup_field = 'user'
     pk_field = 'username'
     model = UserProfile
-    queryset = UserProfile.objects.filter(is_active=True)
+    queryset = UserProfile.objects
     es_fields = UserProfile.es_fields
     document_model = UserProfileDocument
     facet_class = UserProfileSearch
@@ -77,6 +85,8 @@ class UserBaseView(BaseAPIView):
             self.queryset = self.queryset.filter(created_at__gte=parse_updated_since(date_joined_since))
         if date_joined_before:
             self.queryset = self.queryset.filter(created_at__lt=parse_updated_since(date_joined_before))
+        if not self.should_include_inactive():
+            self.queryset = self.queryset.filter(is_active=True)
         return self.queryset
 
 
@@ -122,8 +132,10 @@ class UserListView(UserBaseView,
 
             if not self.can_view(organization):
                 return Response(status=status.HTTP_403_FORBIDDEN)
-
-            self.queryset = organization.members.all()
+            queryset = organization.members
+            if not self.should_include_inactive():
+                queryset = queryset.filter(is_active=True)
+            self.queryset = queryset.all()
         return self.list(request, *args, **kwargs)
 
     def post(self, request, *args, **kwargs):  # pylint: disable=unused-argument
@@ -270,6 +282,9 @@ class UserDetailView(UserBaseView, RetrieveAPIView, DestroyAPIView, mixins.Updat
 class UserReactivateView(UserBaseView, UpdateAPIView):
     permission_classes = (IsAdminUser, )
     queryset = UserProfile.objects.filter(is_active=False)
+
+    def get_queryset(self):
+        return self.queryset
 
     def update(self, request, *args, **kwargs):
         profile = self.get_object()

@@ -1,6 +1,5 @@
 from django.db.models import F, Q
 from django.http import Http404
-from django.shortcuts import get_object_or_404
 from drf_yasg.utils import swagger_auto_schema
 from pydash import get
 from rest_framework import status
@@ -324,7 +323,10 @@ class ConceptChildrenView(ConceptBaseView, ListWithHeadersMixin):
     serializer_class = ConceptChildrenSerializer
 
     def get_queryset(self):
-        instance = get_object_or_404(super().get_queryset(), id=F('versioned_object_id'))
+        instance = super().get_queryset().filter(id=F('versioned_object_id')).first()
+        if not instance:
+            raise Http404()
+
         self.check_object_permissions(self.request, instance)
         return instance.child_concept_queryset()
 
@@ -336,7 +338,10 @@ class ConceptParentsView(ConceptBaseView, ListWithHeadersMixin):
     serializer_class = ConceptParentsSerializer
 
     def get_queryset(self):
-        instance = get_object_or_404(super().get_queryset(), id=F('versioned_object_id'))
+        instance = super().get_queryset().filter(id=F('versioned_object_id')).first()
+        if not instance:
+            raise Http404()
+
         self.check_object_permissions(self.request, instance)
         return instance.parent_concept_queryset()
 
@@ -348,7 +353,10 @@ class ConceptReactivateView(ConceptBaseView, UpdateAPIView):
     serializer_class = ConceptDetailSerializer
 
     def get_object(self, queryset=None):
-        instance = get_object_or_404(self.get_queryset(), id=F('versioned_object_id'))
+        instance = self.get_queryset().filter(id=F('versioned_object_id')).first()
+        if not instance:
+            raise Http404()
+
         self.check_object_permissions(self.request, instance)
         return instance
 

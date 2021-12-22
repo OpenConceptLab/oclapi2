@@ -153,7 +153,7 @@ class Collection(ConceptContainerModel):
             raise ValidationError({reference.expression: [REFERENCE_ALREADY_EXISTS]})
 
         if self.is_openmrs_schema and self.expansion_uri:
-            if reference.concepts and reference.concepts.count() == 0:
+            if reference.concepts is None or reference.concepts.count() == 0:
                 return
 
             concept = reference.concepts[0]
@@ -184,7 +184,9 @@ class Collection(ConceptContainerModel):
                 raise ValidationError(validation_error)
 
             matching_names_in_concept[name_key] = True
-            if other_concepts_in_collection.filter(names__name=name.name, names__locale=name.locale).exists():
+            if other_concepts_in_collection.filter(
+                    names__name=name.name, names__locale=name.locale, **{f"names__{attribute}": value}
+            ).exists():
                 raise ValidationError(validation_error)
 
     @staticmethod

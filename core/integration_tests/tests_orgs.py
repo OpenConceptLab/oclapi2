@@ -175,6 +175,7 @@ class OrganizationDetailViewTest(OCLAPITestCase):
         self.assertEqual(response.data['id'], self.org.mnemonic)
         self.assertEqual(response.data['name'], 'Stark Enterprises')
         self.assertFalse('overview' in response.data)
+        self.assertFalse('client_configs' in response.data)
 
     def test_get_200_with_overview(self):
         response = self.client.get(
@@ -187,6 +188,18 @@ class OrganizationDetailViewTest(OCLAPITestCase):
         self.assertEqual(response.data['uuid'], str(self.org.id))
         self.assertEqual(response.data['id'], self.org.mnemonic)
         self.assertTrue('overview' in response.data)
+
+    def test_get_200_with_configs(self):
+        response = self.client.get(
+            f'/orgs/{self.org.mnemonic}/?includeClientConfigs=true',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['uuid'], str(self.org.id))
+        self.assertEqual(response.data['id'], self.org.mnemonic)
+        self.assertTrue('client_configs' in response.data)
 
     def test_get_404(self):
         response = self.client.get(

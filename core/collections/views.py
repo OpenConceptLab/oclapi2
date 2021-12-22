@@ -232,7 +232,10 @@ class CollectionRetrieveUpdateDestroyView(CollectionBaseView, ConceptDictionaryU
             if instance.active_mappings == 0:
                 instance.update_mappings_count()
             for version in instance.versions.exclude(id=instance.id):
-                version.update_children_counts()
+                if version.active_concepts == 0:
+                    version.update_concepts_count()
+                if version.active_mappings == 0:
+                    version.update_mappings_count()
         return instance
 
     def get_permissions(self):
