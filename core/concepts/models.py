@@ -728,7 +728,8 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
                     transaction.on_commit(index_all)
         except ValidationError as err:
-            errors.update(err.message_dict)
+            if get(err, 'error_dict'):
+                errors.update(err.message_dict)
         finally:
             cls.resume_indexing()
             if not persisted:
