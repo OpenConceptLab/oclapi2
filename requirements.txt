@@ -14,7 +14,7 @@ python-dateutil==2.8.2
 requests==2.26.0
 factory_boy==3.2.1
 # Celery
-celery[redis]==4.4.7
+celery[redis]==5.2.2
 celery_once==3.0.1
 flower==0.9.5
 redis==3.5.3
