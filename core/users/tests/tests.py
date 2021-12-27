@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from django.contrib.auth.models import Group
 from mock import Mock, patch, ANY
 from rest_framework.authtoken.models import Token
@@ -223,16 +225,39 @@ class UserProfileTest(OCLTestCase):
         self.assertFalse(UserProfile.is_valid_auth_group('foobar'))
         self.assertTrue(UserProfile.is_valid_auth_group(OCL_SERVERS_GROUP))
 
+    def test_deactivate(self):
+        user = UserProfileFactory(is_active=True, deactivated_at=None, verified=True)
+
+        self.assertEqual(user.status, 'verified')
+
+        user.deactivate()
+
+        self.assertEqual(user.status, 'deactivated')
+        self.assertFalse(user.verified)
+        self.assertFalse(user.is_active)
+
+    def test_verify(self):
+        user = UserProfileFactory(
+            is_active=False, deactivated_at=datetime.now(), verified=False, verification_token=None)
+
+        self.assertEqual(user.status, 'deactivated')
+
+        user.send_verification_email = Mock()
+
+        user.verify()
+
+        self.assertEqual(user.status, 'verification_pending')
+        self.assertFalse(user.verified)
+        self.assertTrue(user.is_active)
+        self.assertIsNotNone(user.verification_token)
+        user.send_verification_email.assert_called_once()
+
 
 class TokenAuthenticationViewTest(OCLAPITestCase):
     def test_login(self):
         response = self.client.post('/users/login/', {})
 
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(
-            response.data,
-            dict(username=['This field is required.'], password=['This field is required.'])
-        )
 
         response = self.client.post('/users/login/', dict(username='foo', password='bar'))
 

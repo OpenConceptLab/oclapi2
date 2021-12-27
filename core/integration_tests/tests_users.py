@@ -227,6 +227,8 @@ class UserLoginViewTest(OCLAPITestCase):
         user.set_password('boogeyman')
         user.save()
 
+        self.assertIsNone(user.last_login)
+
         response = self.client.post(
             '/users/login/',
             dict(username='marty', password='boogeyman'),
@@ -235,6 +237,8 @@ class UserLoginViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data, dict(token=user.get_token()))
+        user.refresh_from_db()
+        self.assertIsNotNone(user.last_login)
 
         response = self.client.post(
             '/users/login/',
@@ -245,7 +249,8 @@ class UserLoginViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.data, dict(non_field_errors=["Unable to log in with provided credentials."]))
 
-    def test_login_inactive_user(self):
+    @patch('core.users.models.UserProfile.verify')
+    def test_login_inactive_user(self, verify_mock):
         user = UserProfileFactory(username='marty', is_active=False)
         user.set_password('boogeyman')
         user.save()
@@ -260,10 +265,35 @@ class UserLoginViewTest(OCLAPITestCase):
         self.assertEqual(
             response.data,
             dict(
-                detail='This account is deactivated. Please contact OCL Team to activate this account.',
+                detail='A verification email has been sent to the address on record. Verify your email address'
+                       ' to re-activate your account.',
                 email=user.email
             )
         )
+        verify_mock.assert_called_once()
+
+    @patch('core.users.models.UserProfile.send_verification_email')
+    def test_login_unverified_user(self, send_verification_email_mock):
+        user = UserProfileFactory(username='marty', is_active=True, verified=False)
+        user.set_password('boogeyman')
+        user.save()
+
+        response = self.client.post(
+            '/users/login/',
+            dict(username='marty', password='boogeyman'),
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(
+            response.data,
+            dict(
+                detail='A verification email has been sent to the address on record. Verify your email address to '
+                       'activate your account.',
+                email=user.email
+            )
+        )
+        send_verification_email_mock.assert_called_once()
 
 
 class UserListViewTest(OCLAPITestCase):

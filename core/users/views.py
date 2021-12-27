@@ -22,7 +22,7 @@ from core.common.swagger_parameters import last_login_before_param, last_login_s
 from core.common.utils import parse_updated_since_param, parse_updated_since
 from core.common.views import BaseAPIView, BaseLogoView
 from core.orgs.models import Organization
-from core.users.constants import VERIFICATION_TOKEN_MISMATCH, VERIFY_EMAIL_MESSAGE, INACTIVE_USER_MESSAGE
+from core.users.constants import VERIFICATION_TOKEN_MISMATCH, VERIFY_EMAIL_MESSAGE, REACTIVATE_USER_MESSAGE
 from core.users.documents import UserProfileDocument
 from core.users.search import UserProfileSearch
 from core.users.serializers import UserDetailSerializer, UserCreateSerializer, UserListSerializer, UserSummarySerializer
@@ -35,21 +35,23 @@ class TokenAuthenticationView(ObtainAuthToken):
     @swagger_auto_schema(request_body=AuthTokenSerializer)
     def post(self, request, *args, **kwargs):
         user = UserProfile.objects.filter(username=request.data.get('username')).first()
-        if not user:
-            raise Http404()
+        if not user or not user.check_password(request.data.get('password')):
+            raise Http400(dict(non_field_errors=["Unable to log in with provided credentials."]))
 
         if not user.is_active:
+            user.verify()
             return Response(
-                {'detail': INACTIVE_USER_MESSAGE, 'email': user.email}, status=status.HTTP_401_UNAUTHORIZED
+                {'detail': REACTIVATE_USER_MESSAGE, 'email': user.email}, status=status.HTTP_401_UNAUTHORIZED
+            )
+        if not user.verified:
+            user.send_verification_email()
+            return Response(
+                {'detail': VERIFY_EMAIL_MESSAGE, 'email': user.email}, status=status.HTTP_401_UNAUTHORIZED
             )
 
         result = super().post(request, *args, **kwargs)
+
         try:
-            if not user.verified:
-                user.send_verification_email()
-                return Response(
-                    {'detail': VERIFY_EMAIL_MESSAGE, 'email': user.email}, status=status.HTTP_401_UNAUTHORIZED
-                )
             update_last_login(None, user)
         except:  # pylint: disable=bare-except
             pass
@@ -233,11 +235,9 @@ class UserDetailView(UserBaseView, RetrieveAPIView, DestroyAPIView, mixins.Updat
         return UserDetailSerializer
 
     def get_queryset(self):
-        queryset = super().get_queryset()
-
         if self.kwargs.get('user_is_self'):
-            return queryset.filter(username=self.request.user.username)
-        return queryset.filter(username=self.kwargs['user'])
+            return self.queryset.filter(username=self.request.user.username)
+        return self.queryset.filter(username=self.kwargs['user'])
 
     def get_permissions(self):
         if self.request.method == 'DELETE':
@@ -275,7 +275,7 @@ class UserDetailView(UserBaseView, RetrieveAPIView, DestroyAPIView, mixins.Updat
         obj = self.get_object()
         if self.user_is_self:
             return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
-        obj.soft_delete()
+        obj.deactivate()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 

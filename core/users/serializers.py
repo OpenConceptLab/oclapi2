@@ -134,6 +134,7 @@ class UserDetailSerializer(serializers.ModelSerializer):
     extras = serializers.JSONField(required=False, allow_null=True)
     subscribed_orgs = serializers.SerializerMethodField()
     auth_groups = serializers.ListField(required=False, allow_null=True, allow_empty=True)
+    deactivated_at = serializers.DateTimeField(read_only=True)
 
     class Meta:
         model = UserProfile
@@ -142,7 +143,7 @@ class UserDetailSerializer(serializers.ModelSerializer):
             'public_collections', 'public_sources', 'created_on', 'updated_on', 'created_by', 'updated_by',
             'url', 'organizations_url', 'extras', 'sources_url', 'collections_url', 'website', 'last_login',
             'logo_url', 'subscribed_orgs', 'is_superuser', 'is_staff', 'first_name', 'last_name', 'verified',
-            'verification_token', 'date_joined', 'auth_groups', 'status'
+            'verification_token', 'date_joined', 'auth_groups', 'status', 'deactivated_at'
         )
 
     def __init__(self, *args, **kwargs):
