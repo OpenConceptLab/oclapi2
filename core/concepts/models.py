@@ -932,7 +932,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     def cascade_as_hierarchy(  # pylint: disable=too-many-arguments
             self, source_mappings=True, source_to_concepts=True, mappings_criteria=None,
             cascade_mappings=True, cascade_hierarchy=True, cascade_levels='*',
-            include_mappings=True, max_results=1000
+            include_mappings=True, _=None
     ):
         self.cascaded_entries = self.get_cascaded_resources(
             source_mappings, source_to_concepts, mappings_criteria,

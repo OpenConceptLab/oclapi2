@@ -96,7 +96,10 @@ class Bundle:
         self._total = self.concepts_count + self.mappings_count
 
     def cascade(self):
-        self.cascade_as_hierarchy() if self.is_hierarchy_view else self.cascade_flat()
+        if self.is_hierarchy_view:
+            self.cascade_as_hierarchy()
+        else:
+            self.cascade_flat()
 
     def cascade_flat(self):
         self.set_cascade_parameters()
