@@ -946,6 +946,7 @@ class ConceptTest(OCLTestCase):
         self.assertEqual(
             list(child_child_concept.child_concept_queryset().values_list('uri', flat=True)), [])
         self.assertEqual(child_child_concept.parent_concept_urls, [child_concept.uri])
+        self.assertEqual(parent_concept.children_concepts_count, 1)
 
     def test_parent_concept_queryset(self):
         parent_concept = ConceptFactory()
@@ -975,6 +976,7 @@ class ConceptTest(OCLTestCase):
         self.assertEqual(
             list(child_child_concept.parent_concept_queryset().values_list('uri', flat=True)), [child_concept.uri])
         self.assertEqual(child_child_concept.parent_concept_urls, [child_concept.uri])
+        self.assertEqual(child_child_concept.parent_concepts_count, 1)
 
     def test_get_serializer_class(self):
         self.assertEqual(Concept.get_serializer_class(), ConceptListSerializer)

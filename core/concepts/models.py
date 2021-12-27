@@ -864,6 +864,14 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             return Concept.objects.filter(uri__in=urls)
         return Concept.objects.none()
 
+    @property
+    def children_concepts_count(self):
+        return len(self.child_concept_urls)
+
+    @property
+    def parent_concepts_count(self):
+        return len(self.parent_concept_urls)
+
     def parent_concept_queryset(self):
         urls = self.parent_concept_urls
         if urls:
