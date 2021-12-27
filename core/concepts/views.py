@@ -312,11 +312,9 @@ class ConceptCascadeView(ConceptBaseView):
     )
     def get(self, request, **kwargs):  # pylint: disable=unused-argument
         instance = self.get_object()
-        bundle = Bundle(
-            root=instance, params=self.request.query_params, verbose=self.is_verbose()
-        )
+        bundle = Bundle(root=instance, params=self.request.query_params, verbose=self.is_verbose())
         bundle.cascade()
-        return Response(BundleSerializer(bundle).data)
+        return Response(BundleSerializer(bundle, context=dict(request=request)).data)
 
 
 class ConceptChildrenView(ConceptBaseView, ListWithHeadersMixin):

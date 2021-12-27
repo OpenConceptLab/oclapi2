@@ -287,6 +287,27 @@ class ConceptMinimalSerializer(ConceptAbstractSerializer):
         fields = ConceptAbstractSerializer.Meta.fields + ('id', 'type', 'url', 'version_url')
 
 
+class ConceptMinimalSerializerRecursive(ConceptAbstractSerializer):
+    name = CharField(source='mnemonic', read_only=True)
+    id = CharField(source='mnemonic', read_only=True)
+    type = CharField(source='resource_type', read_only=True)
+    url = CharField(source='uri', read_only=True)
+    entries = SerializerMethodField()
+
+    class Meta:
+        model = Concept
+        fields = ConceptAbstractSerializer.Meta.fields + ('id', 'name', 'type', 'url', 'version_url', 'entries')
+
+    @staticmethod
+    def get_entries(obj):
+        result = []
+        if obj.cascaded_entries:
+            result += ConceptMinimalSerializerRecursive(obj.cascaded_entries['concepts'], many=True).data
+            from core.mappings.serializers import MappingMinimalSerializer
+            result += MappingMinimalSerializer(obj.cascaded_entries['mappings'], many=True).data
+        return result
+
+
 class ConceptDetailSerializer(ConceptAbstractSerializer):
     version = CharField(read_only=True)
     type = CharField(source='versioned_resource_type', read_only=True)

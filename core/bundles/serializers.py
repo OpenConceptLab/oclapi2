@@ -1,3 +1,4 @@
+from pydash import get
 from rest_framework import serializers
 from rest_framework.fields import CharField, JSONField, IntegerField, DateTimeField
 
@@ -15,3 +16,20 @@ class BundleSerializer(serializers.Serializer):  # pylint: disable=abstract-meth
         fields = (
             'resource_type', 'bundle_type', 'timestamp', 'total', 'concepts', 'mappings', 'entry'
         )
+
+    def __init__(self, *args, **kwargs):
+        request = get(kwargs, 'context.request')
+        params = get(request, 'query_params')
+
+        self.query_params = params.dict() if params else {}
+        is_hierarchy_response = params.get('view', '').lower() == 'hierarchy'
+
+        try:
+            if is_hierarchy_response:
+                self.fields.pop('concepts')
+                self.fields.pop('mappings')
+                self.fields.pop('total')
+        except:  # pylint: disable=bare-except
+            pass
+
+        super().__init__(*args, **kwargs)
