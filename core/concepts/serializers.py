@@ -1,12 +1,12 @@
 from pydash import get
 from rest_framework.fields import CharField, DateTimeField, BooleanField, URLField, JSONField, SerializerMethodField, \
-    UUIDField, ListField
+    UUIDField, ListField, IntegerField
 from rest_framework.serializers import ModelSerializer
 
 from core.common.constants import INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_MAPPINGS_PARAM, INCLUDE_EXTRAS_PARAM, \
     INCLUDE_PARENT_CONCEPTS, INCLUDE_CHILD_CONCEPTS, INCLUDE_SOURCE_VERSIONS, INCLUDE_COLLECTION_VERSIONS, \
     CREATE_PARENT_VERSION_QUERY_PARAM, INCLUDE_HIERARCHY_PATH, INCLUDE_PARENT_CONCEPT_URLS, \
-    INCLUDE_CHILD_CONCEPT_URLS, HEAD
+    INCLUDE_CHILD_CONCEPT_URLS, HEAD, INCLUDE_SUMMARY
 from core.common.fields import EncodedDecodedCharField
 from core.common.utils import to_parent_uri_from_kwargs
 from core.concepts.models import Concept, LocalizedText
@@ -109,13 +109,14 @@ class ConceptAbstractSerializer(ModelSerializer):
     hierarchy_path = SerializerMethodField()
     parent_concept_urls = ListField(allow_null=True, required=False, allow_empty=True)
     child_concept_urls = ListField(read_only=True)
+    summary = SerializerMethodField()
 
     class Meta:
         model = Concept
         abstract = True
         fields = (
             'uuid', 'parent_concept_urls', 'child_concept_urls', 'parent_concepts', 'child_concepts', 'hierarchy_path',
-            'mappings', 'extras',
+            'mappings', 'extras', 'summary',
         )
 
     def __init__(self, *args, **kwargs):
@@ -132,6 +133,7 @@ class ConceptAbstractSerializer(ModelSerializer):
         self.include_child_concepts = self.query_params.get(INCLUDE_CHILD_CONCEPTS) in ['true', True]
         self.include_hierarchy_path = self.query_params.get(INCLUDE_HIERARCHY_PATH) in ['true', True]
         self.include_extras = self.query_params.get(INCLUDE_EXTRAS_PARAM) in ['true', True]
+        self.include_summary = self.query_params.get(INCLUDE_SUMMARY) in ['true', True]
         if CREATE_PARENT_VERSION_QUERY_PARAM in self.query_params:
             self.create_parent_version = self.query_params.get(CREATE_PARENT_VERSION_QUERY_PARAM) in ['true', True]
         else:
@@ -154,6 +156,8 @@ class ConceptAbstractSerializer(ModelSerializer):
                 self.fields.pop('extras', None)
             if not self.include_direct_mappings and not self.include_indirect_mappings:
                 self.fields.pop('mappings', None)
+            if not self.include_summary:
+                self.fields.pop('summary', None)
         except:  # pylint: disable=bare-except
             pass
 
@@ -190,6 +194,11 @@ class ConceptAbstractSerializer(ModelSerializer):
     def get_hierarchy_path(self, obj):
         if self.include_hierarchy_path:
             return obj.get_hierarchy_path()
+        return None
+
+    def get_summary(self, obj):
+        if self.include_summary:
+            return ConceptSummarySerializer(obj).data
         return None
 
 
@@ -248,10 +257,12 @@ class ConceptSummarySerializer(ModelSerializer):
     names = SerializerMethodField()
     descriptions = SerializerMethodField()
     versions = SerializerMethodField()
+    parents = IntegerField(source='parent_concepts_count', read_only=True)
+    children = IntegerField(source='children_concepts_count', read_only=True)
 
     class Meta:
         model = Concept
-        fields = ('names', 'descriptions', 'versions', 'id', 'uuid', 'versioned_object_id')
+        fields = ('children', 'parents', 'names', 'descriptions', 'versions', 'id', 'uuid', 'versioned_object_id')
 
     @staticmethod
     def get_names(obj):
