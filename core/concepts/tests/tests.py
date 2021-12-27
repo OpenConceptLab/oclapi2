@@ -985,6 +985,45 @@ class ConceptTest(OCLTestCase):
         self.assertEqual(Concept.get_serializer_class(verbose=True, version=True), ConceptVersionDetailSerializer)
         self.assertEqual(Concept.get_serializer_class(brief=True), ConceptMinimalSerializer)
 
+    def test_cascade_as_hierarchy(self):
+        source = OrganizationSourceFactory()
+        root = ConceptFactory(parent=source, mnemonic='root')
+        root_child = ConceptFactory(parent=source, mnemonic='root-child')
+        root_child.parent_concepts.add(root)
+        root_child_child1 = ConceptFactory(parent=source, mnemonic='root-child-child1')
+        root_child_child1.parent_concepts.add(root_child)
+        root_child_child2 = ConceptFactory(parent=source, mnemonic='root-child-child2')
+        root_child_child2.parent_concepts.add(root_child)
+        root_child_child2_child = ConceptFactory(parent=source, mnemonic='root-child-child2-child')
+        root_child_child2_child.parent_concepts.add(root_child_child2)
+
+        root_cascaded = root.cascade_as_hierarchy()
+
+        self.assertTrue(isinstance(root_cascaded, Concept))
+        self.assertEqual(root_cascaded.uri, root.uri)
+
+        root_cascaded_children = root_cascaded.cascaded_entries
+        self.assertEqual(len(root_cascaded_children['concepts']), 1)
+        self.assertEqual(root_cascaded_children['mappings'].count(), 0)
+
+        root_child_cascaded = root_cascaded_children['concepts'][0]
+        root_child_cascaded_children = root_child_cascaded.cascaded_entries
+        self.assertEqual(len(root_child_cascaded_children['concepts']), 2)
+        self.assertEqual(root_child_cascaded_children['mappings'].count(), 0)
+
+        root_child_child1_cascaded_children = [
+            child for child in root_child_cascaded_children['concepts'] if child.mnemonic == 'root-child-child1'
+        ][0].cascaded_entries
+        root_child_child2_cascaded_children = [
+            child for child in root_child_cascaded_children['concepts'] if child.mnemonic == 'root-child-child2'
+        ][0].cascaded_entries
+
+        self.assertEqual(len(root_child_child1_cascaded_children['concepts']), 0)
+        self.assertEqual(len(root_child_child1_cascaded_children['mappings']), 0)
+
+        self.assertEqual(len(root_child_child2_cascaded_children['concepts']), 1)
+        self.assertEqual(len(root_child_child2_cascaded_children['mappings']), 0)
+
 
 class OpenMRSConceptValidatorTest(OCLTestCase):
     def setUp(self):
