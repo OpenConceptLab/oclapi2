@@ -296,7 +296,8 @@ class ConceptMinimalSerializerRecursive(ConceptAbstractSerializer):
 
     class Meta:
         model = Concept
-        fields = ConceptAbstractSerializer.Meta.fields + ('id', 'name', 'type', 'url', 'version_url', 'entries')
+        fields = ConceptAbstractSerializer.Meta.fields + (
+            'id', 'name', 'type', 'url', 'version_url', 'entries', 'display_name')
 
     @staticmethod
     def get_entries(obj):
