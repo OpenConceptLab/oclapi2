@@ -1139,7 +1139,7 @@ class ConceptCascadeViewTest(OCLAPITestCase):
 
         entry = response.data['entry']
         self.assertEqual(
-            list(entry.keys()), ['uuid', 'id', 'name', 'type', 'url', 'version_url', 'entries']
+            list(entry.keys()), ['uuid', 'id', 'name', 'type', 'url', 'version_url', 'entries', 'display_name']
         )
         self.assertEqual(entry['uuid'], str(concept1.id))
         self.assertEqual(entry['name'], concept1.mnemonic)
