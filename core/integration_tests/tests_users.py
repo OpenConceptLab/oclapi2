@@ -1,4 +1,5 @@
 from mock import patch
+from rest_framework.authtoken.models import Token
 from rest_framework.exceptions import ErrorDetail
 
 from core.common.constants import ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT
@@ -508,7 +509,7 @@ class UserDetailViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 403)
 
-    def test_delete_204(self):
+    def test_soft_delete_204(self):
         response = self.client.delete(
             f'/users/{self.user.username}/',
             HTTP_AUTHORIZATION='Token ' + self.superuser.get_token(),
@@ -518,6 +519,21 @@ class UserDetailViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 204)
         self.user.refresh_from_db()
         self.assertFalse(self.user.is_active)
+        self.assertFalse(self.user.verified)
+        self.assertIsNotNone(self.user.deactivated_at)
+        self.assertFalse(Token.objects.filter(user_id=self.user.id).exists())
+
+    def test_hard_delete_204(self):
+        random_user = UserProfileFactory(username='random_user', is_active=True, verified=True)
+        self.assertTrue(UserProfile.objects.filter(username=random_user.username).exists())
+        response = self.client.delete(
+            f'/users/{random_user.username}/?hardDelete=true',
+            HTTP_AUTHORIZATION='Token ' + self.superuser.get_token(),
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(UserProfile.objects.filter(username=random_user.username).exists())
 
 
 class UserReactivateViewTest(OCLAPITestCase):

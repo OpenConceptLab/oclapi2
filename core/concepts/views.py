@@ -248,9 +248,6 @@ class ConceptRetrieveUpdateDestroyView(ConceptBaseView, RetrieveAPIView, UpdateA
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-    def is_hard_delete_requested(self):
-        return self.request.query_params.get('hardDelete', None) in ['true', True, 'True']
-
     def is_async_hard_delete_requested(self):
         return self.request.query_params.get('async', None) in ['true', True, 'True']
 

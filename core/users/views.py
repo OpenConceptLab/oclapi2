@@ -275,7 +275,10 @@ class UserDetailView(UserBaseView, RetrieveAPIView, DestroyAPIView, mixins.Updat
         obj = self.get_object()
         if self.user_is_self:
             return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
-        obj.deactivate()
+        if self.is_hard_delete_requested():
+            obj.delete()
+        else:
+            obj.deactivate()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
