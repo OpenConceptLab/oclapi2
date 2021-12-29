@@ -1,3 +1,6 @@
+import uuid
+from datetime import datetime
+
 from django.contrib.auth.models import AbstractUser
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
@@ -30,6 +33,7 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
     verified = models.BooleanField(default=True)
     verification_token = models.TextField(null=True, blank=True)
     mnemonic_attr = 'username'
+    deactivated_at = models.DateTimeField(null=True, blank=True)
 
     es_fields = {
         'username': {'sortable': True, 'filterable': True, 'exact': True},
@@ -51,7 +55,7 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
         if not self.is_active:
             return 'deactivated'
         if not self.verified:
-            return 'unverified'
+            return 'verification_pending' if self.verification_token else 'unverified'
 
         return 'verified'
 
@@ -145,6 +149,7 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
         if token == self.verification_token:
             self.verified = True
             self.verification_token = None
+            self.deactivated_at = None
             self.save()
             return True
 
@@ -164,3 +169,23 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
 
     def organizations_count(self):
         return self.organizations.count()
+
+    def deactivate(self):
+        self.is_active = False
+        self.verified = False
+        self.verification_token = None
+        self.deactivated_at = datetime.now()
+        self.__delete_token()
+        self.save()
+
+    def verify(self):
+        self.is_active = True
+        self.verified = False
+        self.verification_token = uuid.uuid4()
+
+        self.save()
+        self.token = self.get_token()
+        self.send_verification_email()
+
+    def soft_delete(self):
+        self.deactivate()

@@ -185,6 +185,8 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     WAS_RETIRED = CONCEPT_WAS_RETIRED
     WAS_UNRETIRED = CONCEPT_WAS_UNRETIRED
 
+    cascaded_entries = None
+
     es_fields = {
         'id': {'sortable': True, 'filterable': True, 'exact': True},
         'numeric_id': {'sortable': True, 'filterable': False, 'exact': False},
@@ -864,6 +866,14 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             return Concept.objects.filter(uri__in=urls)
         return Concept.objects.none()
 
+    @property
+    def children_concepts_count(self):
+        return len(self.child_concept_urls)
+
+    @property
+    def parent_concepts_count(self):
+        return len(self.parent_concept_urls)
+
     def parent_concept_queryset(self):
         urls = self.parent_concept_urls
         if urls:
@@ -919,13 +929,55 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
         return result
 
+    def cascade_as_hierarchy(  # pylint: disable=too-many-arguments
+            self, source_mappings=True, source_to_concepts=True, mappings_criteria=None,
+            cascade_mappings=True, cascade_hierarchy=True, cascade_levels='*',
+            include_mappings=True, _=None
+    ):
+        self.cascaded_entries = self.get_cascaded_resources(
+            source_mappings, source_to_concepts, mappings_criteria,
+            cascade_mappings, cascade_hierarchy, include_mappings, False
+        )
+        last_level_concepts = list(self.cascaded_entries['concepts'])
+        self.cascaded_entries['concepts'] = last_level_concepts
+        self.current_level = 0
+        levels = {self.current_level: last_level_concepts}
+
+        cascaded = [self.id]
+
+        def iterate(level):
+            if level == '*' or level > 0:
+                new_level = self.current_level + 1
+                levels[new_level] = levels.get(new_level, [])
+                for concept in levels[self.current_level]:
+                    if concept.id in cascaded:
+                        continue
+                    cascaded_entries = concept.get_cascaded_resources(
+                        source_mappings, source_to_concepts, mappings_criteria, cascade_mappings, cascade_hierarchy,
+                        include_mappings, False
+                    )
+                    cascaded_entries['concepts'] = list(cascaded_entries['concepts'])
+
+                    concept.cascaded_entries = cascaded_entries
+                    cascaded.append(concept.id)
+                    levels[new_level] += cascaded_entries['concepts']
+                if not levels[new_level]:
+                    return
+                self.current_level += 1
+                iterate(level if level == '*' else level - 1)
+
+        iterate(cascade_levels)
+
+        return self
+
     def get_cascaded_resources(  # pylint: disable=too-many-arguments
             self, source_mappings=True, source_to_concepts=True, mappings_criteria=None,
-            cascade_mappings=True, cascade_hierarchy=True, include_mappings=True
+            cascade_mappings=True, cascade_hierarchy=True, include_mappings=True, include_self=True
     ):
         from core.mappings.models import Mapping
         mappings = Mapping.objects.none()
-        result = dict(concepts=Concept.objects.filter(id=self.id), mappings=mappings)
+        concepts = Concept.objects.filter(id=self.id) if include_self else Concept.objects.none()
+        result = dict(concepts=concepts, mappings=mappings)
         mappings_criteria = mappings_criteria or Q()
         if cascade_mappings and (source_mappings or source_to_concepts):
             mappings = self.get_unidirectional_mappings().filter(mappings_criteria)

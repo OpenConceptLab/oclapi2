@@ -88,6 +88,9 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     def is_brief(self):
         return self.request.query_params.get(BRIEF_PARAM, False) in ['true', True]
 
+    def is_hard_delete_requested(self):
+        return self.request.query_params.get('hardDelete', None) in ['true', True, 'True']
+
     def verify_scope(self):
         pass
 

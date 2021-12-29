@@ -1130,3 +1130,19 @@ class ConceptCascadeViewTest(OCLAPITestCase):
                 concept3.uri,
             ])
         )
+
+        # hierarchy response
+        response = self.client.get(concept1.uri + '$cascade/?view=hierarchy&includeMappings=false')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['type'], 'Bundle')
+
+        entry = response.data['entry']
+        self.assertEqual(
+            list(entry.keys()), ['uuid', 'id', 'name', 'type', 'url', 'version_url', 'entries', 'display_name']
+        )
+        self.assertEqual(entry['uuid'], str(concept1.id))
+        self.assertEqual(entry['name'], concept1.mnemonic)
+        self.assertEqual(entry['id'], concept1.mnemonic)
+        self.assertEqual(entry['type'], 'Concept')
+        self.assertEqual(len(entry['entries']), 1)

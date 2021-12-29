@@ -34,6 +34,10 @@ class Bundle:
         self.set_cascade_levels()
         self.set_include_mappings()
 
+    @property
+    def is_hierarchy_view(self):
+        return self.params.get('view', '').lower() == 'hierarchy'
+
     def set_include_mappings(self):
         if INCLUDE_MAPPINGS_PARAM in self.params:
             self.include_mappings = self.params[INCLUDE_MAPPINGS_PARAM] in ['true', True]
@@ -92,6 +96,12 @@ class Bundle:
         self._total = self.concepts_count + self.mappings_count
 
     def cascade(self):
+        if self.is_hierarchy_view:
+            self.cascade_as_hierarchy()
+        else:
+            self.cascade_flat()
+
+    def cascade_flat(self):
         self.set_cascade_parameters()
         result = self.root.cascade(
             source_mappings=self.cascade_method == SOURCE_MAPPINGS,
@@ -107,10 +117,31 @@ class Bundle:
         self.set_total()
         self.set_entries()
 
+    def cascade_as_hierarchy(self):
+        self.set_cascade_parameters()
+        self.root.cascade_as_hierarchy(
+            source_mappings=self.cascade_method == SOURCE_MAPPINGS,
+            source_to_concepts=self.cascade_method == SOURCE_TO_CONCEPTS,
+            mappings_criteria=self.mappings_criteria,
+            cascade_mappings=self.cascade_mappings,
+            cascade_hierarchy=self.cascade_hierarchy,
+            cascade_levels=self.cascade_levels,
+            include_mappings=self.include_mappings,
+        )
+
+        from core.concepts.serializers import ConceptMinimalSerializerRecursive
+        self.entries = ConceptMinimalSerializerRecursive(self.root).data
+
     def set_entries(self):
-        from core.concepts.models import Concept
-        serializer = Concept.get_serializer_class(verbose=self.verbose, version=True, brief=self.brief)
-        self.entries += serializer(self.concepts, many=True).data
+        self.entries += self.get_concept_serializer()(self.concepts, many=True).data
+        self.entries += self.get_mapping_serializer()(self.mappings, many=True).data
+
+    def get_mapping_serializer(self):
         from core.mappings.models import Mapping
         serializer = Mapping.get_serializer_class(verbose=self.verbose, version=True, brief=self.brief)
-        self.entries += serializer(self.mappings, many=True).data
+        return serializer
+
+    def get_concept_serializer(self):
+        from core.concepts.models import Concept
+        serializer = Concept.get_serializer_class(verbose=self.verbose, version=True, brief=self.brief)
+        return serializer

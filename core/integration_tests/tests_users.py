@@ -1,4 +1,5 @@
 from mock import patch
+from rest_framework.authtoken.models import Token
 from rest_framework.exceptions import ErrorDetail
 
 from core.common.constants import ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT
@@ -227,6 +228,8 @@ class UserLoginViewTest(OCLAPITestCase):
         user.set_password('boogeyman')
         user.save()
 
+        self.assertIsNone(user.last_login)
+
         response = self.client.post(
             '/users/login/',
             dict(username='marty', password='boogeyman'),
@@ -235,6 +238,8 @@ class UserLoginViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data, dict(token=user.get_token()))
+        user.refresh_from_db()
+        self.assertIsNotNone(user.last_login)
 
         response = self.client.post(
             '/users/login/',
@@ -245,7 +250,8 @@ class UserLoginViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.data, dict(non_field_errors=["Unable to log in with provided credentials."]))
 
-    def test_login_inactive_user(self):
+    @patch('core.users.models.UserProfile.verify')
+    def test_login_inactive_user(self, verify_mock):
         user = UserProfileFactory(username='marty', is_active=False)
         user.set_password('boogeyman')
         user.save()
@@ -260,10 +266,35 @@ class UserLoginViewTest(OCLAPITestCase):
         self.assertEqual(
             response.data,
             dict(
-                detail='This account is deactivated. Please contact OCL Team to activate this account.',
+                detail='A verification email has been sent to the address on record. Verify your email address'
+                       ' to re-activate your account.',
                 email=user.email
             )
         )
+        verify_mock.assert_called_once()
+
+    @patch('core.users.models.UserProfile.send_verification_email')
+    def test_login_unverified_user(self, send_verification_email_mock):
+        user = UserProfileFactory(username='marty', is_active=True, verified=False)
+        user.set_password('boogeyman')
+        user.save()
+
+        response = self.client.post(
+            '/users/login/',
+            dict(username='marty', password='boogeyman'),
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(
+            response.data,
+            dict(
+                detail='A verification email has been sent to the address on record. Verify your email address to '
+                       'activate your account.',
+                email=user.email
+            )
+        )
+        send_verification_email_mock.assert_called_once()
 
 
 class UserListViewTest(OCLAPITestCase):
@@ -478,7 +509,7 @@ class UserDetailViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 403)
 
-    def test_delete_204(self):
+    def test_soft_delete_204(self):
         response = self.client.delete(
             f'/users/{self.user.username}/',
             HTTP_AUTHORIZATION='Token ' + self.superuser.get_token(),
@@ -488,6 +519,21 @@ class UserDetailViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 204)
         self.user.refresh_from_db()
         self.assertFalse(self.user.is_active)
+        self.assertFalse(self.user.verified)
+        self.assertIsNotNone(self.user.deactivated_at)
+        self.assertFalse(Token.objects.filter(user_id=self.user.id).exists())
+
+    def test_hard_delete_204(self):
+        random_user = UserProfileFactory(username='random_user', is_active=True, verified=True)
+        self.assertTrue(UserProfile.objects.filter(username=random_user.username).exists())
+        response = self.client.delete(
+            f'/users/{random_user.username}/?hardDelete=true',
+            HTTP_AUTHORIZATION='Token ' + self.superuser.get_token(),
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(UserProfile.objects.filter(username=random_user.username).exists())
 
 
 class UserReactivateViewTest(OCLAPITestCase):

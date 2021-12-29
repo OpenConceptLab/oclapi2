@@ -248,9 +248,6 @@ class ConceptRetrieveUpdateDestroyView(ConceptBaseView, RetrieveAPIView, UpdateA
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-    def is_hard_delete_requested(self):
-        return self.request.query_params.get('hardDelete', None) in ['true', True, 'True']
-
     def is_async_hard_delete_requested(self):
         return self.request.query_params.get('async', None) in ['true', True, 'True']
 
@@ -312,11 +309,9 @@ class ConceptCascadeView(ConceptBaseView):
     )
     def get(self, request, **kwargs):  # pylint: disable=unused-argument
         instance = self.get_object()
-        bundle = Bundle(
-            root=instance, params=self.request.query_params, verbose=self.is_verbose()
-        )
+        bundle = Bundle(root=instance, params=self.request.query_params, verbose=self.is_verbose())
         bundle.cascade()
-        return Response(BundleSerializer(bundle).data)
+        return Response(BundleSerializer(bundle, context=dict(request=request)).data)
 
 
 class ConceptChildrenView(ConceptBaseView, ListWithHeadersMixin):
