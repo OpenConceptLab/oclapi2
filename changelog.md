@@ -1,3 +1,40 @@
+##### 2.0.107 - Wed Dec 29 07:07:52 2021 +0000
+- [OpenConceptLab/ocl_issues#712](https://github.com/OpenConceptLab/ocl_issues/issues/712) | Admin can hard delete users (except self)
+- [OpenConceptLab/ocl_issues#1169](https://github.com/OpenConceptLab/ocl_issues/issues/1169) | added display_name in  hierarchy response
+- [OpenConceptLab/ocl_issues#1168](https://github.com/OpenConceptLab/ocl_issues/issues/1168) | bundle hierarchy and flat responses
+- [OpenConceptLab/ocl_issues#1168](https://github.com/OpenConceptLab/ocl_issues/issues/1168) | concept  as hierarchy method
+- [OpenConceptLab/ocl_issues#1169](https://github.com/OpenConceptLab/ocl_issues/issues/1169) | concept summary to have child/parent concepts count | summary an be added in concept obj response
+- [OpenConceptLab/ocl_issues#1169](https://github.com/OpenConceptLab/ocl_issues/issues/1169) | concept properties for child parent counts
+- [OpenConceptLab/ocl_issues#1167](https://github.com/OpenConceptLab/ocl_issues/issues/1167) | inactive->verify->activate user feature
+- [OpenConceptLab/ocl_issues#1163](https://github.com/OpenConceptLab/ocl_issues/issues/1163) | errbit | fixing concept clone
+- Errbit fix | API with page number empty 500 fix
+- [OpenConceptLab/ocl_issues#1167](https://github.com/OpenConceptLab/ocl_issues/issues/1167) | inactive user login | inactive user search and list
+- [OpenConceptLab/ocl_issues#45](https://github.com/OpenConceptLab/ocl_issues/issues/45) | OpenMRS collection concepts validation to consider same name types
+- Bump pylint from 2.11.1 to 2.12.2
+- Bump coverage from 6.1.1 to 6.2
+- Bump psycopg2 from 2.9.1 to 2.9.2
+- Bump moto from 2.2.13 to 2.2.19
+- Bump django-cors-headers from 3.10.0 to 3.10.1
+- Source/Collection | removed last (missed) calculation of concepts
+- Source/Collection Versions | saving unwanted summary calculation
+- Errbit | concept children/parent APIs fix
+- Errbit fix | user org collections/sources API fix when there are no user orgs
+- Making sure that search doesn't compute DB query also
+- [OpenConceptLab/ocl_issues#1133](https://github.com/OpenConceptLab/ocl_issues/issues/1133) | org importer | org creator is the member
+- [OpenConceptLab/ocl_issues#1161](https://github.com/OpenConceptLab/ocl_issues/issues/1161) | mapping importer | retired is allowed field
+- Errbit fix | importers | concepts/mappings returns failed if parent doesnt exist
+- [OpenConceptLab/ocl_issues#1161](https://github.com/OpenConceptLab/ocl_issues/issues/1161) | mapping importer | encoding to/from_concept_code correctly
+- [OpenConceptLab/ocl_issues#1156](https://github.com/OpenConceptLab/ocl_issues/issues/1156) | org overview settings
+- [OpenConceptLab/ocl_issues#1157](https://github.com/OpenConceptLab/ocl_issues/issues/1157) | making sure new collection/source version copies all attributes from HEAD
+- Bump django from 3.2.8 to 4.0
+- [OpenConceptLab/ocl_issues#1151](https://github.com/OpenConceptLab/ocl_issues/issues/1151) | mapping importer | fixing exist check criteria
+- Bump boto3 from 1.19.12 to 1.20.24
+- API for user summary
+- [OpenConceptLab/ocl_issues#1154](https://github.com/OpenConceptLab/ocl_issues/issues/1154) | Admin user can make another user admin or remove it (except self)
+- Admin API to toggle user's staff permission
+- Exposing DB for development
+- Concept Debug API | no need for response
+- [OpenConceptLab/ocl_issues#1151](https://github.com/OpenConceptLab/ocl_issues/issues/1151) | fixing self mapping importer
 ##### 2.0.93 - Wed Dec 8 04:42:29 2021 +0000
 - Concept debug api to connect parent as source version
 - Concept parent concept urls errbit fix | refactoring
