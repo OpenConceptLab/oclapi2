@@ -765,7 +765,9 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
     def make_resource_distribution(self):
         for line in self.input_list:
             data = line if isinstance(line, dict) else json.loads(line)
-            data_type = data['type']
+            data_type = data.get('type', None)
+            if not data_type:
+                continue
             if data_type not in self.resource_distribution:
                 self.resource_distribution[data_type] = []
             self.resource_distribution[data_type].append(data)
