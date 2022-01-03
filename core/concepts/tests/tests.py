@@ -58,7 +58,7 @@ class LocalizedTextTest(OCLTestCase):
 
 class ConceptTest(OCLTestCase):
     def test_concept(self):
-        self.assertEqual(Concept().concept, None)
+        self.assertEqual(Concept().concept, '')
         self.assertEqual(Concept(mnemonic='foobar').concept, 'foobar')
 
     def test_get_search_document(self):
