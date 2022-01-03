@@ -242,7 +242,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
     @property
     def concept(self):  # for url kwargs
-        return self.mnemonic  # pragma: no cover
+        return self.mnemonic
 
     @staticmethod
     def get_resource_url_kwarg():

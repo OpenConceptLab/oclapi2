@@ -2,6 +2,7 @@ from django.core.exceptions import ValidationError
 from django.db.models import QuerySet
 from mock import patch
 
+from core.collections.documents import CollectionDocument
 from core.collections.models import CollectionReference, Collection
 from core.collections.tests.factories import OrganizationCollectionFactory
 from core.collections.utils import is_mapping, is_concept, is_version_specified, \
@@ -22,6 +23,9 @@ class CollectionTest(OCLTestCase):
 
     def test_resource_type(self):
         self.assertEqual(Collection().resource_type, 'Collection')
+
+    def test_get_search_document(self):
+        self.assertEqual(Collection.get_search_document(), CollectionDocument)
 
     def test_collection(self):
         self.assertEqual(Collection(mnemonic='coll').collection, 'coll')

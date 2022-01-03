@@ -10,6 +10,7 @@ from core.concepts.tests.factories import ConceptFactory
 from core.mappings.models import Mapping
 from core.mappings.tests.factories import MappingFactory
 from core.orgs.constants import ORG_OBJECT_TYPE
+from core.orgs.documents import OrganizationDocument
 from core.orgs.models import Organization
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.models import Source
@@ -19,6 +20,9 @@ from core.users.tests.factories import UserProfileFactory
 
 
 class OrganizationTest(OCLTestCase):
+    def test_get_search_document(self):
+        self.assertEqual(Organization.get_search_document(), OrganizationDocument)
+
     def test_resource_type(self):
         self.assertEqual(Organization().resource_type, ORG_OBJECT_TYPE)
 

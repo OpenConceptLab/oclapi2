@@ -10,6 +10,7 @@ from core.common.tests import OCLTestCase
 from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory, LocalizedTextFactory
 from core.mappings.tests.factories import MappingFactory
+from core.sources.documents import SourceDocument
 from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory, UserSourceFactory
 from core.users.models import UserProfile
@@ -358,6 +359,9 @@ class SourceTest(OCLTestCase):
 
         self.assertTrue(source.is_active)
         self.assertTrue(concept.is_active)
+
+    def test_get_search_document(self):
+        self.assertEqual(Source.get_search_document(), SourceDocument)
 
     def test_head_from_uri(self):
         source = OrganizationSourceFactory(version='HEAD')

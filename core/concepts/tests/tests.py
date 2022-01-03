@@ -10,6 +10,7 @@ from core.concepts.constants import (
     SHORT, INDEX_TERM, OPENMRS_NAMES_EXCEPT_SHORT_MUST_BE_UNIQUE, OPENMRS_ONE_FULLY_SPECIFIED_NAME_PER_LOCALE,
     OPENMRS_NO_MORE_THAN_ONE_SHORT_NAME_PER_LOCALE, CONCEPT_IS_ALREADY_RETIRED, CONCEPT_IS_ALREADY_NOT_RETIRED,
     OPENMRS_CONCEPT_CLASS, OPENMRS_DATATYPE, OPENMRS_DESCRIPTION_TYPE, OPENMRS_NAME_LOCALE, OPENMRS_DESCRIPTION_LOCALE)
+from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept, LocalizedText
 from core.concepts.serializers import ConceptListSerializer, ConceptVersionListSerializer, ConceptDetailSerializer, \
     ConceptVersionDetailSerializer, ConceptMinimalSerializer
@@ -56,6 +57,13 @@ class LocalizedTextTest(OCLTestCase):
 
 
 class ConceptTest(OCLTestCase):
+    def test_concept(self):
+        self.assertEqual(Concept().concept, None)
+        self.assertEqual(Concept(mnemonic='foobar').concept, 'foobar')
+
+    def test_get_search_document(self):
+        self.assertEqual(Concept.get_search_document(), ConceptDocument)
+
     def test_is_versioned(self):
         self.assertTrue(Concept().is_versioned)
 

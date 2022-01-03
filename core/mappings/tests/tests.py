@@ -4,6 +4,7 @@ from django.core.exceptions import ValidationError
 from core.common.constants import HEAD, CUSTOM_VALIDATION_SCHEMA_OPENMRS
 from core.common.tests import OCLTestCase
 from core.concepts.tests.factories import ConceptFactory, LocalizedTextFactory
+from core.mappings.documents import MappingDocument
 from core.mappings.models import Mapping
 from core.mappings.serializers import MappingMinimalSerializer, MappingVersionDetailSerializer, \
     MappingDetailSerializer, \
@@ -19,6 +20,9 @@ from core.users.models import UserProfile
 class MappingTest(OCLTestCase):
     def test_mapping(self):
         self.assertEqual(Mapping(mnemonic='foobar').mapping, 'foobar')
+
+    def test_get_search_document(self):
+        self.assertEqual(Mapping.get_search_document(), MappingDocument)
 
     def test_source(self):
         self.assertIsNone(Mapping().source)
