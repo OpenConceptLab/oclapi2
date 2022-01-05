@@ -156,10 +156,10 @@ class Source(ConceptContainerModel):
         if hierarchy_root:
             adjusted_limit -= 1
         parent_less_children = parent_less_children.order_by('mnemonic')[offset:adjusted_limit+offset]
+
+        children = []
         if parent_less_children.exists():
             children = ConceptHierarchySerializer(parent_less_children, many=True).data
-        else:
-            children = []
 
         if hierarchy_root:
             children.append({**ConceptHierarchySerializer(hierarchy_root).data, 'root': True})

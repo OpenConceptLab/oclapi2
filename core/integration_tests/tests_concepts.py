@@ -1,5 +1,3 @@
-import unittest
-
 from mock import ANY
 
 from core.common.constants import CUSTOM_VALIDATION_SCHEMA_OPENMRS
@@ -225,7 +223,6 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         self.assertTrue(concept.is_versioned_object)
         self.assertEqual(concept.datatype, "None")
 
-    @unittest.skip('Flaky test, needs fixing')
     def test_put_200_openmrs_schema(self):  # pylint: disable=too-many-statements
         self.create_lookup_concept_classes()
         source = OrganizationSourceFactory(custom_validation_schema=CUSTOM_VALIDATION_SCHEMA_OPENMRS)

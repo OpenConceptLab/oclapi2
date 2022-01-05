@@ -11,6 +11,7 @@ from core.common.tests import OCLTestCase, OCLAPITestCase
 from core.orgs.models import Organization
 from core.sources.tests.factories import OrganizationSourceFactory
 from core.users.constants import USER_OBJECT_TYPE, OCL_SERVERS_GROUP
+from core.users.documents import UserProfileDocument
 from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
 
@@ -61,6 +62,9 @@ class UserProfileTest(OCLTestCase):
     def test_user(self):
         self.assertEqual(UserProfile().user, '')
         self.assertEqual(UserProfile(username='foo').user, 'foo')
+
+    def test_get_search_document(self):
+        self.assertEqual(UserProfile.get_search_document(), UserProfileDocument)
 
     def test_status(self):
         self.assertEqual(UserProfile(is_active=True, verified=True).status, 'verified')

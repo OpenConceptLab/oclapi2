@@ -109,10 +109,11 @@ class MappingMinimalSerializer(ModelSerializer):
     id = CharField(source='mnemonic', read_only=True)
     type = CharField(source='resource_type', read_only=True)
     url = CharField(source='uri', read_only=True)
+    to_concept_code = EncodedDecodedCharField()
 
     class Meta:
         model = Mapping
-        fields = ('uuid', 'id', 'type', 'map_type', 'url', 'version_url')
+        fields = ('uuid', 'id', 'type', 'map_type', 'url', 'version_url', 'to_concept_code', 'to_concept_url')
 
 
 class MappingDetailSerializer(MappingListSerializer):
