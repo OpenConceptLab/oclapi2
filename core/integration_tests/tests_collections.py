@@ -1,5 +1,4 @@
 import json
-import unittest
 import zipfile
 
 from celery_once import AlreadyQueued
@@ -1230,7 +1229,8 @@ class CollectionConceptsViewTest(OCLAPITestCase):
         source2 = OrganizationSourceFactory()
         concept1 = ConceptFactory(parent=source1, mnemonic='concept')
         concept2 = ConceptFactory(parent=source2, mnemonic='concept')
-        self.collection.add_references([concept1.uri, concept2.uri])
+        concept3 = ConceptFactory(parent=source2, mnemonic='concept3')
+        self.collection.add_references([concept1.uri, concept2.uri, concept3.uri])
 
         response = self.client.get(
             self.collection.concepts_url,
@@ -1239,9 +1239,33 @@ class CollectionConceptsViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.data), 2)
+        self.assertEqual(len(response.data), 3)
 
-    @unittest.skip('[Skipped] not sure if single concept details can be fetched from collection')
+        response = self.client.get(
+            self.collection.uri + 'concepts/concept3/',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['id'], 'concept3')
+        self.assertEqual(response.data['url'], concept3.uri)
+
+        response = self.client.get(
+            self.collection.uri + 'concepts/concept/',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+        self.assertEqual(response.status_code, 409)
+
+        response = self.client.get(
+            self.collection.uri + f'concepts/concept/?uri={concept2.uri}',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['id'], 'concept')
+        self.assertEqual(response.data['url'], concept2.uri)
+
     def test_get_duplicate_concept_name_from_multiple_sources_200(self):
         source1 = OrganizationSourceFactory()
         source2 = OrganizationSourceFactory()
@@ -1265,6 +1289,110 @@ class CollectionConceptsViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['uuid'], str(concept2.get_latest_version().id))
+
+        response = self.client.get(
+            self.collection.concepts_url + f'concept/{concept2.get_latest_version().version}/?uri=' + concept2.uri,
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['uuid'], str(concept2.get_latest_version().id))
+
+
+class CollectionMappingsViewTest(OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.user = UserProfileFactory()
+        self.collection = UserCollectionFactory(user=self.user)
+        self.expansion = ExpansionFactory(collection_version=self.collection)
+        self.collection.expansion_uri = self.expansion.uri
+        self.collection.save()
+        self.token = self.user.get_token()
+
+    def test_get_200(self):
+        response = self.client.get(
+            self.collection.mappings_url,
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 0)
+
+        source1 = OrganizationSourceFactory()
+        source2 = OrganizationSourceFactory()
+        mapping1 = MappingFactory(parent=source1, mnemonic='mapping')
+        mapping2 = MappingFactory(parent=source2, mnemonic='mapping')
+        mapping3 = MappingFactory(parent=source2, mnemonic='mapping3')
+        self.collection.add_references([mapping1.uri, mapping2.uri, mapping3.uri])
+
+        response = self.client.get(
+            self.collection.mappings_url,
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 3)
+
+        response = self.client.get(
+            self.collection.uri + 'mappings/mapping3/',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['id'], 'mapping3')
+        self.assertEqual(response.data['url'], mapping3.uri)
+
+        response = self.client.get(
+            self.collection.uri + 'mappings/mapping/',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+        self.assertEqual(response.status_code, 409)
+
+        response = self.client.get(
+            self.collection.uri + f'mappings/mapping/?uri={mapping2.uri}',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['id'], 'mapping')
+        self.assertEqual(response.data['url'], mapping2.uri)
+
+    def test_get_duplicate_mapping_name_from_multiple_sources_200(self):
+        source1 = OrganizationSourceFactory()
+        source2 = OrganizationSourceFactory()
+        mapping1 = MappingFactory(parent=source1, mnemonic='mapping')
+        mapping2 = MappingFactory(parent=source2, mnemonic='mapping')
+        self.collection.add_references([mapping1.uri, mapping2.uri])
+
+        response = self.client.get(
+            self.collection.mappings_url + 'mapping/',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 409)
+
+        response = self.client.get(
+            self.collection.mappings_url + 'mapping/?uri=' + mapping2.uri,
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['uuid'], str(mapping2.get_latest_version().id))
+
+        response = self.client.get(
+            self.collection.mappings_url + f'mapping/{mapping2.get_latest_version().version}/?uri=' + mapping2.uri,
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['uuid'], str(mapping2.get_latest_version().id))
 
 
 class CollectionLogoViewTest(OCLAPITestCase):

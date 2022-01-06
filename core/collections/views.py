@@ -36,6 +36,7 @@ from core.collections.utils import is_version_specified
 from core.common.constants import (
     HEAD, RELEASED_PARAM, PROCESSING_PARAM, OK_MESSAGE,
     ACCESS_TYPE_NONE)
+from core.common.exceptions import Http409
 from core.common.mixins import (
     ConceptDictionaryCreateMixin, ListWithHeadersMixin, ConceptDictionaryUpdateMixin,
     ConceptContainerExportMixin,
@@ -694,8 +695,7 @@ class CollectionVersionConceptsView(CollectionBaseView, ListWithHeadersMixin):
         return instance.expansion
 
     def get_serializer_class(self):
-        from core.concepts.serializers import ConceptDetailSerializer, ConceptListSerializer
-        return ConceptDetailSerializer if self.is_verbose() else ConceptListSerializer
+        return Concept.get_serializer_class(verbose=self.is_verbose(), version=True, brief=self.is_brief())
 
     def get_queryset(self):
         expansion = self.get_object()
@@ -706,6 +706,32 @@ class CollectionVersionConceptsView(CollectionBaseView, ListWithHeadersMixin):
 
     def get(self, request, *args, **kwargs):
         return self.list(request, *args, **kwargs)
+
+
+class CollectionVersionConceptRetrieveView(CollectionBaseView, RetrieveAPIView):
+    def get_object(self, queryset=None):
+        instance = get_object_or_404(self.get_base_queryset())
+        self.check_object_permissions(self.request, instance)
+        expansion = instance.expansion
+        if not expansion:
+            raise Http404()
+        concepts = expansion.concepts.filter(mnemonic=self.kwargs['concept'])
+        if 'concept_version' in self.kwargs:
+            concepts = concepts.filter(version=self.kwargs['concept_version'])
+
+        uri_param = self.request.query_params.dict().get('uri')
+        if uri_param:
+            concepts = concepts.filter(**Concept.get_parent_and_owner_filters_from_uri(uri_param))
+        count = concepts.count()
+        if count == 0:
+            raise Http404()
+        if count > 1 and not uri_param:
+            raise Http409()
+
+        return concepts.first()
+
+    def get_serializer_class(self):
+        return Concept.get_serializer_class(verbose=self.is_verbose(), version=True, brief=self.is_brief())
 
 
 class CollectionVersionMappingsView(CollectionBaseView, ListWithHeadersMixin):
@@ -719,8 +745,7 @@ class CollectionVersionMappingsView(CollectionBaseView, ListWithHeadersMixin):
         return instance.expansion
 
     def get_serializer_class(self):
-        from core.mappings.serializers import MappingDetailSerializer, MappingListSerializer
-        return MappingDetailSerializer if self.is_verbose() else MappingListSerializer
+        return Mapping.get_serializer_class(verbose=self.is_verbose(), version=True, brief=self.is_brief())
 
     def get_queryset(self):
         expansion = self.get_object()
@@ -731,6 +756,32 @@ class CollectionVersionMappingsView(CollectionBaseView, ListWithHeadersMixin):
 
     def get(self, request, *args, **kwargs):
         return self.list(request, *args, **kwargs)
+
+
+class CollectionVersionMappingRetrieveView(CollectionBaseView, RetrieveAPIView):
+    def get_object(self, queryset=None):
+        instance = get_object_or_404(self.get_base_queryset())
+        self.check_object_permissions(self.request, instance)
+        expansion = instance.expansion
+        if not expansion:
+            raise Http404()
+        mappings = expansion.mappings.filter(mnemonic=self.kwargs['mapping'])
+        if 'mapping_version' in self.kwargs:
+            mappings = mappings.filter(version=self.kwargs['mapping_version'])
+
+        uri_param = self.request.query_params.dict().get('uri')
+        if uri_param:
+            mappings = mappings.filter(**Mapping.get_parent_and_owner_filters_from_uri(uri_param))
+        count = mappings.count()
+        if count == 0:
+            raise Http404()
+        if count > 1 and not uri_param:
+            raise Http409()
+
+        return mappings.first()
+
+    def get_serializer_class(self):
+        return Mapping.get_serializer_class(verbose=self.is_verbose(), version=True, brief=self.is_brief())
 
 
 class CollectionExtrasBaseView(CollectionBaseView):

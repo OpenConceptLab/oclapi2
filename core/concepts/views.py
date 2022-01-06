@@ -14,7 +14,7 @@ from core.bundles.models import Bundle
 from core.bundles.serializers import BundleSerializer
 from core.common.constants import (
     HEAD, INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_RETIRED_PARAM, ACCESS_TYPE_NONE)
-from core.common.exceptions import Http409, Http405
+from core.common.exceptions import Http405
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryMixin
 from core.common.swagger_parameters import (
     q_param, limit_param, sort_desc_param, page_param, exact_match_param, sort_asc_param, verbose_param,
@@ -199,18 +199,7 @@ class ConceptRetrieveUpdateDestroyView(ConceptBaseView, RetrieveAPIView, UpdateA
 
     def get_object(self, queryset=None):
         queryset = self.get_queryset()
-        filters = dict(id=F('versioned_object_id'))
-        if 'collection' in self.kwargs:
-            filters = {}
-            queryset = queryset.order_by('id').distinct('id')
-            uri_param = self.request.query_params.dict().get('uri')
-            if uri_param:
-                filters.update(Concept.get_parent_and_owner_filters_from_uri(uri_param))
-            if queryset.count() > 1 and not uri_param:
-                raise Http409()
-
-        instance = queryset.filter(**filters).first()
-
+        instance = queryset.filter(id=F('versioned_object_id')).first()
         if not instance:
             raise Http404()
 
