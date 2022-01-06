@@ -514,6 +514,8 @@ class SourceVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 204)
         self.assertEqual(self.source.versions.count(), 1)
         self.assertFalse(self.source.versions.filter(version='v1').exists())
+        delete_s3_objects_mock.delay.assert_called_once_with(
+            f'{self.source.parent.mnemonic}/{self.source.mnemonic}_v1.')
 
         source_v2 = OrganizationSourceFactory(
             mnemonic=self.source.mnemonic, organization=self.organization, version='v2',
@@ -541,8 +543,6 @@ class SourceVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 204)
         self.assertEqual(self.source.versions.count(), 1)
         self.assertFalse(self.source.versions.filter(version='v2').exists())
-        delete_s3_objects_mock.delay.assert_called_once_with(
-            f'{self.source.parent.mnemonic}/{self.source.mnemonic}_v2.')
 
 
 class SourceExtraRetrieveUpdateDestroyViewTest(OCLAPITestCase):
