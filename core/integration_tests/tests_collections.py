@@ -308,24 +308,14 @@ class CollectionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 404)
 
-    @patch('core.common.services.S3.delete_objects', Mock())
-    def test_delete(self):
+    @patch('core.common.models.delete_s3_objects')
+    def test_delete(self, delete_s3_objects_mock):
         coll = OrganizationCollectionFactory(mnemonic='coll1')
-        coll_v1 = OrganizationCollectionFactory(
-            version='v1', is_latest_version=True, mnemonic='coll1', organization=coll.organization
-        )
+        OrganizationCollectionFactory(
+            version='v1', is_latest_version=True, mnemonic='coll1', organization=coll.organization)
         user = UserProfileFactory(organizations=[coll.organization])
 
         self.assertEqual(coll.versions.count(), 2)
-
-        response = self.client.delete(
-            coll_v1.uri,
-            HTTP_AUTHORIZATION='Token ' + user.get_token(),
-            format='json'
-        )
-
-        self.assertEqual(response.status_code, 204)
-        self.assertEqual(coll.versions.count(), 1)
 
         response = self.client.delete(
             coll.uri,
@@ -336,6 +326,7 @@ class CollectionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 204)
         self.assertEqual(coll.versions.count(), 0)
         self.assertFalse(Collection.objects.filter(mnemonic='coll1').exists())
+        delete_s3_objects_mock.delay.assert_called_once_with(f'{coll.organization.mnemonic}/coll1_HEAD.')
 
     def test_put_401(self):
         coll = OrganizationCollectionFactory(mnemonic='coll1', name='Collection')
@@ -756,8 +747,8 @@ class CollectionVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.data, {'version': [ErrorDetail(string='This field may not be null.', code='null')]})
 
-    @patch('core.common.services.S3.delete_objects', Mock())
-    def test_delete(self):
+    @patch('core.common.models.delete_s3_objects')
+    def test_delete(self, delete_s3_objects_mock):
         response = self.client.delete(
             self.collection_v1.uri,
             HTTP_AUTHORIZATION='Token ' + self.token,
@@ -767,15 +758,7 @@ class CollectionVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 204)
         self.assertEqual(self.collection.versions.count(), 1)
         self.assertTrue(self.collection.versions.first().is_latest_version)
-
-        response = self.client.delete(
-            f'/users/{self.collection.parent.mnemonic}/collections/'
-            f'{self.collection.mnemonic}/{self.collection.version}/',
-            HTTP_AUTHORIZATION='Token ' + self.token,
-            format='json'
-        )
-        self.assertEqual(response.status_code, 204)
-        self.assertFalse(Collection.objects.filter(id=self.collection.id).exists())
+        delete_s3_objects_mock.delay.assert_called_once_with(f'{self.collection.parent.mnemonic}/coll_v1.')
 
 
 class CollectionLatestVersionRetrieveUpdateViewTest(OCLAPITestCase):

@@ -133,7 +133,8 @@ class OrganizationTest(OCLTestCase):
         self.assertTrue(source.is_active)
         self.assertTrue(collection.is_active)
 
-    def test_delete_organization_task(self):
+    @patch('core.common.models.delete_s3_objects')
+    def test_delete_organization_task(self, delete_s3_objects_mock):
         org = OrganizationFactory(mnemonic='to-be-deleted-org')
         source = OrganizationSourceFactory(mnemonic='to-be-deleted-source', organization=org)
         collection = OrganizationCollectionFactory(mnemonic='to-be-deleted-coll', organization=org)
@@ -165,6 +166,7 @@ class OrganizationTest(OCLTestCase):
         self.assertFalse(Mapping.objects.filter(mnemonic='to-be-deleted-mapping').exists())
         self.assertEqual(CollectionReference.objects.count(), 0)
         self.assertEqual(Expansion.objects.count(), 0)
+        delete_s3_objects_mock.delay.assert_called()
 
     def test_logo_url(self):
         self.assertIsNone(Organization(logo_path=None).logo_url)
