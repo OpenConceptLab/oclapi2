@@ -260,8 +260,9 @@ class SourceCreateUpdateDestroyViewTest(OCLAPITestCase):
         source.refresh_from_db()
         self.assertEqual(source.hierarchy_root_id, concept2.id)
 
-    def test_delete_204(self):
-        source = OrganizationSourceFactory(organization=self.organization)
+    @patch('core.common.models.delete_s3_objects')
+    def test_delete_204(self, delete_s3_objects_mock):
+        source = OrganizationSourceFactory(mnemonic='source', organization=self.organization)
         response = self.client.delete(
             source.uri,
             HTTP_AUTHORIZATION='Token ' + self.token,
@@ -270,6 +271,8 @@ class SourceCreateUpdateDestroyViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 204)
         self.assertFalse(Source.objects.filter(id=source.id).exists())
+        self.assertFalse(Source.objects.filter(mnemonic='source').exists())
+        delete_s3_objects_mock.delay.assert_called_once_with(f'{self.organization.mnemonic}/source_HEAD.')
 
 
 class SourceVersionListViewTest(OCLAPITestCase):
@@ -474,8 +477,8 @@ class SourceVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.data, {'id': [ErrorDetail(string='This field may not be null.', code='null')]})
 
-    @patch('core.common.services.S3.delete_objects', Mock())
-    def test_version_delete_204(self):
+    @patch('core.common.models.delete_s3_objects')
+    def test_version_delete_204(self, delete_s3_objects_mock):
         self.assertEqual(self.source.versions.count(), 2)
 
         response = self.client.delete(
@@ -487,9 +490,11 @@ class SourceVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 204)
         self.assertEqual(self.source.versions.count(), 1)
         self.assertFalse(self.source.versions.filter(version='v1').exists())
+        delete_s3_objects_mock.delay.assert_called_once_with(
+            f'{self.source.parent.mnemonic}/{self.source.mnemonic}_v1.')
 
-    @patch('core.common.services.S3.delete_objects', Mock())
-    def test_version_delete_204_referenced_in_private_collection(self):
+    @patch('core.common.models.delete_s3_objects')
+    def test_version_delete_204_referenced_in_private_collection(self, delete_s3_objects_mock):
         concept = ConceptFactory(parent=self.source_v1)
 
         collection = OrganizationCollectionFactory(public_access='None')
@@ -506,6 +511,8 @@ class SourceVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 204)
         self.assertEqual(self.source.versions.count(), 1)
         self.assertFalse(self.source.versions.filter(version='v1').exists())
+        delete_s3_objects_mock.delay.assert_called_once_with(
+            f'{self.source.parent.mnemonic}/{self.source.mnemonic}_v1.')
 
 
 class SourceExtraRetrieveUpdateDestroyViewTest(OCLAPITestCase):

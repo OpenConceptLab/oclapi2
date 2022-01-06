@@ -14,7 +14,8 @@ from django_elasticsearch_dsl.signals import RealTimeSignalProcessor
 from pydash import get
 
 from core.common.services import S3
-from core.common.tasks import update_collection_active_concepts_count, update_collection_active_mappings_count
+from core.common.tasks import update_collection_active_concepts_count, update_collection_active_mappings_count, \
+    delete_s3_objects
 from core.common.utils import reverse_resource, reverse_resource_version, parse_updated_since_param, drop_version
 from core.settings import DEFAULT_LOCALE
 from .constants import (
@@ -465,24 +466,26 @@ class ConceptContainerModel(VersionedModel):
         ).order_by('-created_at')
 
     def delete(self, using=None, keep_parents=False, force=False):  # pylint: disable=arguments-differ
-        generic_export_path = self.generic_export_path(suffix=None)
-
         if self.is_head:
             self.versions.exclude(id=self.id).delete()
-        else:
-            if self.is_latest_version:
-                prev_version = self.prev_version
-                if not force and not prev_version:
-                    raise ValidationError(dict(detail=CANNOT_DELETE_ONLY_VERSION))
-                if prev_version:
-                    prev_version.is_latest_version = True
-                    prev_version.save()
+        elif self.is_latest_version:
+            prev_version = self.prev_version
+            if not force and not prev_version:
+                raise ValidationError(dict(detail=CANNOT_DELETE_ONLY_VERSION))
+            if prev_version:
+                prev_version.is_latest_version = True
+                prev_version.save()
 
-        from core.pins.models import Pin
-        Pin.objects.filter(resource_type__model=self.resource_type.lower(), resource_id=self.id).delete()
+        self.delete_pins()
 
+        generic_export_path = self.generic_export_path(suffix=None)
         super().delete(using=using, keep_parents=keep_parents)
-        S3.delete_objects(generic_export_path)
+        delete_s3_objects.delay(generic_export_path)
+
+    def delete_pins(self):
+        if self.is_head:
+            from core.pins.models import Pin
+            Pin.objects.filter(resource_type__model=self.resource_type.lower(), resource_id=self.id).delete()
 
     def get_active_concepts(self):
         return self.get_concepts_queryset().filter(is_active=True, retired=False)

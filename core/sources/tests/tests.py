@@ -250,7 +250,7 @@ class SourceTest(OCLTestCase):
         self.assertEqual(version1.concepts.first(), source.concepts.filter(is_latest_version=True).first())
         self.assertEqual(version1.concepts_set.count(), 0)  # no direct child
 
-    @patch('core.common.services.S3.delete_objects', Mock())
+    @patch('core.common.models.delete_s3_objects', Mock())
     def test_source_version_delete(self):
         source = OrganizationSourceFactory(version=HEAD)
         concept = ConceptFactory(
