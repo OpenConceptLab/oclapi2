@@ -133,6 +133,7 @@ class OrganizationTest(OCLTestCase):
         self.assertTrue(source.is_active)
         self.assertTrue(collection.is_active)
 
+    @patch('core.common.tasks.delete_s3_objects', Mock())
     def test_delete_organization_task(self):
         org = OrganizationFactory(mnemonic='to-be-deleted-org')
         source = OrganizationSourceFactory(mnemonic='to-be-deleted-source', organization=org)
