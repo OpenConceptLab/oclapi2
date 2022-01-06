@@ -219,14 +219,14 @@ class CollectionRetrieveUpdateDestroyView(CollectionBaseView, ConceptDictionaryU
 
         self.check_object_permissions(self.request, instance)
         if not get(settings, 'TEST_MODE', False):
-            if instance.active_concepts == 0:
+            if instance.should_set_active_concepts:
                 instance.update_concepts_count()
-            if instance.active_mappings == 0:
+            if instance.should_set_active_mappings:
                 instance.update_mappings_count()
             for version in instance.versions.exclude(id=instance.id):
-                if version.active_concepts == 0:
+                if version.should_set_active_concepts:
                     version.update_concepts_count()
-                if version.active_mappings == 0:
+                if version.should_set_active_mappings:
                     version.update_mappings_count()
         return instance
 
@@ -540,9 +540,9 @@ class CollectionVersionRetrieveUpdateDestroyView(CollectionBaseView, RetrieveAPI
         instance = get_object_or_404(self.get_queryset())
         self.check_object_permissions(self.request, instance)
         if not get(settings, 'TEST_MODE', False):
-            if instance.active_concepts == 0:
+            if instance.should_set_active_concepts:
                 instance.update_concepts_count()
-            if instance.active_mappings == 0:
+            if instance.should_set_active_mappings:
                 instance.update_mappings_count()
         return instance
 

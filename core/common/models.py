@@ -348,12 +348,20 @@ class ConceptContainerModel(VersionedModel):
     snapshot = models.JSONField(null=True, blank=True, default=dict)
     experimental = models.BooleanField(null=True, blank=True, default=None)
     meta = models.JSONField(null=True, blank=True)
-    active_concepts = models.IntegerField(default=0)
-    active_mappings = models.IntegerField(default=0)
+    active_concepts = models.IntegerField(null=True, blank=True, default=None)
+    active_mappings = models.IntegerField(null=True, blank=True, default=None)
 
     class Meta:
         abstract = True
         indexes = [] + VersionedModel.Meta.indexes
+
+    @property
+    def should_set_active_concepts(self):
+        return self.active_concepts is None
+
+    @property
+    def should_set_active_mappings(self):
+        return self.active_mappings is None
 
     @property
     def is_openmrs_schema(self):

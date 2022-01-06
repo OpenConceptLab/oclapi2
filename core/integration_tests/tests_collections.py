@@ -188,8 +188,8 @@ class CollectionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['uuid'], str(coll.id))
-        self.assertEqual(response.data['active_concepts'], 0)
-        self.assertEqual(response.data['active_mappings'], 0)
+        self.assertEqual(response.data['active_concepts'], None)
+        self.assertEqual(response.data['active_mappings'], None)
         self.assertEqual(response.data['versions'], 1)
 
     def test_get_404(self):
