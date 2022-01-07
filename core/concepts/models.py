@@ -938,7 +938,8 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             source_mappings, source_to_concepts, mappings_criteria,
             cascade_mappings, cascade_hierarchy, include_mappings, False
         )
-        last_level_concepts = list(self.cascaded_entries['concepts'])
+        last_level_concepts = list(
+            set(list(self.cascaded_entries['hierarchy_concepts']) + list(self.cascaded_entries['concepts'])))
         self.cascaded_entries['concepts'] = last_level_concepts
         self.current_level = 0
         levels = {self.current_level: last_level_concepts}
@@ -956,7 +957,8 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                         source_mappings, source_to_concepts, mappings_criteria, cascade_mappings, cascade_hierarchy,
                         include_mappings, False
                     )
-                    cascaded_entries['concepts'] = list(cascaded_entries['concepts'])
+                    cascaded_entries['concepts'] = list(
+                        set(list(cascaded_entries['hierarchy_concepts']) + list(cascaded_entries['concepts'])))
 
                     concept.cascaded_entries = cascaded_entries
                     cascaded.append(concept.id)
@@ -977,7 +979,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         from core.mappings.models import Mapping
         mappings = Mapping.objects.none()
         concepts = Concept.objects.filter(id=self.id) if include_self else Concept.objects.none()
-        result = dict(concepts=concepts, mappings=mappings)
+        result = dict(concepts=concepts, mappings=mappings, hierarchy_concepts=Concept.objects.none())
         mappings_criteria = mappings_criteria or Q()
         if cascade_mappings and (source_mappings or source_to_concepts):
             mappings = self.get_unidirectional_mappings().filter(mappings_criteria).order_by('map_type')
@@ -985,7 +987,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                 result['mappings'] = mappings
         if source_to_concepts:
             if cascade_hierarchy:
-                result['concepts'] |= self.child_concept_queryset()
+                result['hierarchy_concepts'] |= self.child_concept_queryset()
             if mappings.exists():
                 result['concepts'] |= Concept.objects.filter(
                     id__in=mappings.values_list('to_concept_id', flat=True),
