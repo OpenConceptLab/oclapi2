@@ -42,7 +42,7 @@ class CollectionTest(OCLTestCase):
 
         self.assertEqual(collection.expansion.concepts.count(), 0)
         self.assertEqual(collection.references.count(), 0)
-        self.assertEqual(collection.active_concepts, 0)
+        self.assertEqual(collection.active_concepts, None)
 
         source = OrganizationSourceFactory()
         concept = ConceptFactory(parent=source, sources=[source])

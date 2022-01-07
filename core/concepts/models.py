@@ -980,15 +980,17 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         result = dict(concepts=concepts, mappings=mappings)
         mappings_criteria = mappings_criteria or Q()
         if cascade_mappings and (source_mappings or source_to_concepts):
-            mappings = self.get_unidirectional_mappings().filter(mappings_criteria)
+            mappings = self.get_unidirectional_mappings().filter(mappings_criteria).order_by('map_type')
             if include_mappings:
                 result['mappings'] = mappings
         if source_to_concepts:
-            if mappings.exists():
-                result['concepts'] |= Concept.objects.filter(
-                    id__in=mappings.values_list('to_concept_id', flat=True), parent_id=self.parent_id)
             if cascade_hierarchy:
                 result['concepts'] |= self.child_concept_queryset()
+            if mappings.exists():
+                result['concepts'] |= Concept.objects.filter(
+                    id__in=mappings.values_list('to_concept_id', flat=True),
+                    parent_id=self.parent_id
+                )
 
         return result
 

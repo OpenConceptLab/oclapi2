@@ -131,6 +131,8 @@ class SourceListViewTest(OCLAPITestCase):
         self.assertEqual(response.data['url'], source.uri)
         self.assertEqual(response.data['canonical_url'], source.canonical_url)
         self.assertEqual(source.canonical_url, 'https://foo.com/foo/bar/')
+        self.assertIsNone(source.active_mappings)
+        self.assertIsNone(source.active_concepts)
 
     def test_post_400(self):
         sources_url = f"/orgs/{self.organization.mnemonic}/sources/"
@@ -376,8 +378,8 @@ class SourceLatestVersionRetrieveUpdateViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['id'], 'v1')
         self.assertEqual(response.data['uuid'], str(self.latest_version.id))
-        self.assertEqual(response.data['active_concepts'], 0)
-        self.assertEqual(response.data['active_mappings'], 0)
+        self.assertEqual(response.data['active_concepts'], None)
+        self.assertEqual(response.data['active_mappings'], None)
 
     def test_put_200(self):
         self.assertIsNone(self.latest_version.external_id)

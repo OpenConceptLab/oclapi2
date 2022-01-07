@@ -115,7 +115,7 @@ class Source(ConceptContainerModel):
         if origin_source.custom_validation_schema == self.custom_validation_schema:
             return False
 
-        return self.custom_validation_schema is not None and self.active_concepts > 0
+        return self.custom_validation_schema is not None and self.active_concepts
 
     def update_mappings(self):
         from core.mappings.models import Mapping
