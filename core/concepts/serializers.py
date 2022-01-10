@@ -299,6 +299,11 @@ class ConceptMinimalSerializerRecursive(ConceptAbstractSerializer):
         fields = ConceptAbstractSerializer.Meta.fields + (
             'id', 'name', 'type', 'url', 'version_url', 'entries', 'display_name')
 
+    def __init__(self, *args, **kwargs):
+        if 'mappings' in self.fields:
+            self.fields.pop('mappings', None)
+        super().__init__(*args, **kwargs)
+
     def get_entries(self, obj):
         result = []
         if obj.cascaded_entries:
