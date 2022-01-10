@@ -1143,3 +1143,63 @@ class ConceptCascadeViewTest(OCLAPITestCase):
         self.assertEqual(entry['id'], concept1.mnemonic)
         self.assertEqual(entry['type'], 'Concept')
         self.assertEqual(len(entry['entries']), 1)
+        self.assertEqual(entry['entries'][0]['url'], concept2.url)
+
+        # reverse ($cascade up)
+        response = self.client.get(concept3.uri + '$cascade/?method=sourceToConcepts&cascadeLevels=*&reverse=true')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data['entry']), 1)
+        self.assertEqual(
+            sorted([data['url'] for data in response.data['entry']]),
+            sorted([
+                concept3.uri,
+            ])
+        )
+
+        # reverse ($cascade up)
+        response = self.client.get(concept2.uri + '$cascade/?method=sourceToConcepts&cascadeLevels=*&reverse=true')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data['entry']), 4)
+        self.assertEqual(
+            sorted([data['url'] for data in response.data['entry']]),
+            sorted([
+                concept1.uri,
+                concept2.uri,
+                mapping1.uri,
+                mapping2.uri,
+            ])
+        )
+
+        # reverse ($cascade up)
+        response = self.client.get(concept1.uri + '$cascade/?method=sourceToConcepts&cascadeLevels=*&reverse=true')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data['entry']), 4)
+        self.assertEqual(
+            sorted([data['url'] for data in response.data['entry']]),
+            sorted([
+                concept1.uri,
+                concept2.uri,
+                mapping1.uri,
+                mapping2.uri,
+            ])
+        )
+
+        # reverse hierarchy response
+        response = self.client.get(concept2.uri + '$cascade/?view=hierarchy&reverse=true&includeMappings=false')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['type'], 'Bundle')
+
+        entry = response.data['entry']
+        self.assertEqual(
+            list(entry.keys()), ['uuid', 'id', 'name', 'type', 'url', 'version_url', 'entries', 'display_name']
+        )
+        self.assertEqual(entry['uuid'], str(concept2.id))
+        self.assertEqual(entry['name'], concept2.mnemonic)
+        self.assertEqual(entry['id'], concept2.mnemonic)
+        self.assertEqual(entry['type'], 'Concept')
+        self.assertEqual(len(entry['entries']), 1)
+        self.assertEqual(entry['entries'][0]['url'], concept1.url)

@@ -8,7 +8,7 @@ from core.mappings.documents import MappingDocument
 from core.mappings.models import Mapping
 from core.mappings.serializers import MappingMinimalSerializer, MappingVersionDetailSerializer, \
     MappingDetailSerializer, \
-    MappingVersionListSerializer, MappingListSerializer
+    MappingVersionListSerializer, MappingListSerializer, MappingReverseMinimalSerializer
 from core.mappings.tests.factories import MappingFactory
 from core.orgs.models import Organization
 from core.orgs.tests.factories import OrganizationFactory
@@ -203,6 +203,7 @@ class MappingTest(OCLTestCase):
         self.assertEqual(Mapping.get_serializer_class(verbose=True), MappingDetailSerializer)
         self.assertEqual(Mapping.get_serializer_class(verbose=True, version=True), MappingVersionDetailSerializer)
         self.assertEqual(Mapping.get_serializer_class(brief=True), MappingMinimalSerializer)
+        self.assertEqual(Mapping.get_serializer_class(brief=True, reverse=True), MappingReverseMinimalSerializer)
 
 
 class OpenMRSMappingValidatorTest(OCLTestCase):

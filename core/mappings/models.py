@@ -519,10 +519,10 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         return self.from_concept_code == self.to_concept_code and self.from_source_url == self.to_source_url
 
     @staticmethod
-    def get_serializer_class(verbose=False, version=False, brief=False):
+    def get_serializer_class(verbose=False, version=False, brief=False, reverse=False):
         if brief:
-            from core.mappings.serializers import MappingMinimalSerializer
-            return MappingMinimalSerializer
+            from core.mappings.serializers import MappingMinimalSerializer, MappingReverseMinimalSerializer
+            return MappingReverseMinimalSerializer if reverse else MappingMinimalSerializer
         if version:
             from core.mappings.serializers import MappingVersionDetailSerializer, MappingVersionListSerializer
             return MappingVersionDetailSerializer if verbose else MappingVersionListSerializer

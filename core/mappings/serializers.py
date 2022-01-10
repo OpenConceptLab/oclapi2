@@ -110,10 +110,32 @@ class MappingMinimalSerializer(ModelSerializer):
     type = CharField(source='resource_type', read_only=True)
     url = CharField(source='uri', read_only=True)
     to_concept_code = EncodedDecodedCharField()
+    target_concept_code = EncodedDecodedCharField(source='to_concept_code')
+    target_concept_url = CharField(source='to_concept_url')
 
     class Meta:
         model = Mapping
-        fields = ('uuid', 'id', 'type', 'map_type', 'url', 'version_url', 'to_concept_code', 'to_concept_url')
+        fields = (
+            'uuid', 'id', 'type', 'map_type', 'url', 'version_url', 'to_concept_code', 'to_concept_url',
+            'target_concept_code', 'target_concept_url'
+        )
+
+
+class MappingReverseMinimalSerializer(ModelSerializer):
+    uuid = CharField(source='id', read_only=True)
+    id = CharField(source='mnemonic', read_only=True)
+    type = CharField(source='resource_type', read_only=True)
+    url = CharField(source='uri', read_only=True)
+    from_concept_code = EncodedDecodedCharField()
+    target_concept_code = EncodedDecodedCharField(source='from_concept_code')
+    target_concept_url = CharField(source='from_concept_url')
+
+    class Meta:
+        model = Mapping
+        fields = (
+            'uuid', 'id', 'type', 'map_type', 'url', 'version_url', 'from_concept_code', 'from_concept_url',
+            'target_concept_code', 'target_concept_url'
+        )
 
 
 class MappingDetailSerializer(MappingListSerializer):

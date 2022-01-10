@@ -5,7 +5,7 @@ from core.common.constants import RELEASED_PARAM, VERBOSE_PARAM, INCLUDE_RETIRED
     INCLUDE_INVERSE_MAPPINGS_PARAM, UPDATED_SINCE_PARAM, INCLUDE_SOURCE_VERSIONS, INCLUDE_COLLECTION_VERSIONS, \
     LAST_LOGIN_BEFORE_PARAM, LAST_LOGIN_SINCE_PARAM, DATE_JOINED_SINCE_PARAM, DATE_JOINED_BEFORE_PARAM, \
     CASCADE_HIERARCHY_PARAM, CASCADE_METHOD_PARAM, MAP_TYPES_PARAM, EXCLUDE_MAP_TYPES_PARAM, CASCADE_MAPPINGS_PARAM, \
-    INCLUDE_MAPPINGS_PARAM, CASCADE_LEVELS_PARAM
+    INCLUDE_MAPPINGS_PARAM, CASCADE_LEVELS_PARAM, CASCADE_DIRECTION_PARAM
 # HEADERS
 from core.orgs.constants import NO_MEMBERS
 
@@ -143,4 +143,13 @@ include_mappings_param = openapi.Parameter(
 )
 cascade_levels_param = openapi.Parameter(
     CASCADE_LEVELS_PARAM, openapi.IN_QUERY, type=openapi.TYPE_STRING, default='*', description='0, 1, 2...*'
+)
+cascade_direction_param = openapi.Parameter(
+    CASCADE_DIRECTION_PARAM, openapi.IN_QUERY, type=openapi.TYPE_BOOLEAN, default=False,
+    description='$cascade backward or up'
+)
+cascade_view_hierarchy = openapi.Parameter(
+    'view', openapi.IN_QUERY, type=openapi.TYPE_STRING, default='',
+    enum=['', 'hierarchy'],
+    description='Hierarchy (nested) or Flat Response'
 )
