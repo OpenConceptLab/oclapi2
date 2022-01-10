@@ -299,13 +299,18 @@ class ConceptMinimalSerializerRecursive(ConceptAbstractSerializer):
         fields = ConceptAbstractSerializer.Meta.fields + (
             'id', 'name', 'type', 'url', 'version_url', 'entries', 'display_name')
 
-    @staticmethod
-    def get_entries(obj):
+    def get_entries(self, obj):
         result = []
         if obj.cascaded_entries:
-            result += ConceptMinimalSerializerRecursive(obj.cascaded_entries['concepts'], many=True).data
-            from core.mappings.serializers import MappingMinimalSerializer
-            result += MappingMinimalSerializer(obj.cascaded_entries['mappings'], many=True).data
+            result += ConceptMinimalSerializerRecursive(
+                obj.cascaded_entries['concepts'], many=True, context=self.context).data
+
+            from core.mappings.serializers import MappingMinimalSerializer, MappingReverseMinimalSerializer
+            if get(self, 'context.request.query_params.reverse') in ['true', True]:
+                result += MappingReverseMinimalSerializer(obj.cascaded_entries['mappings'], many=True).data
+            else:
+                result += MappingMinimalSerializer(obj.cascaded_entries['mappings'], many=True).data
+
         return result
 
 

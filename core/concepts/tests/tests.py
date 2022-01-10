@@ -1032,6 +1032,35 @@ class ConceptTest(OCLTestCase):
         self.assertEqual(len(root_child_child2_cascaded_children['concepts']), 1)
         self.assertEqual(len(root_child_child2_cascaded_children['mappings']), 0)
 
+    def test_cascade_as_hierarchy_reverse(self):
+        source = OrganizationSourceFactory()
+        root = ConceptFactory(parent=source, mnemonic='root')
+        root_child = ConceptFactory(parent=source, mnemonic='root-child')
+        root_child.parent_concepts.add(root)
+        root_child_child1 = ConceptFactory(parent=source, mnemonic='root-child-child1')
+        root_child_child1.parent_concepts.add(root_child)
+        root_child_child2 = ConceptFactory(parent=source, mnemonic='root-child-child2')
+        root_child_child2.parent_concepts.add(root_child)
+        root_child_child2_child = ConceptFactory(parent=source, mnemonic='root-child-child2-child')
+        root_child_child2_child.parent_concepts.add(root_child_child2)
+
+        root_child_child2_child_cascaded = root_child_child2_child.cascade_as_hierarchy(reverse=True)
+
+        self.assertEqual(root_child_child2_child_cascaded.uri, root_child_child2_child.uri)
+        root_child_child2_child_cascaded_entries = root_child_child2_child_cascaded.cascaded_entries
+        self.assertEqual(len(root_child_child2_child_cascaded_entries['concepts']), 1)
+        self.assertEqual(len(root_child_child2_child_cascaded_entries['mappings']), 0)
+        self.assertEqual(root_child_child2_child_cascaded_entries['concepts'][0].url, root_child_child2.url)
+        self.assertEqual(
+            root_child_child2_child_cascaded_entries['concepts'][0].cascaded_entries['concepts'][0].url,
+            root_child.url
+        )
+        self.assertEqual(
+            root_child_child2_child_cascaded_entries['concepts'][0].cascaded_entries['concepts'][
+                0].cascaded_entries['concepts'][0].url,
+            root.url
+        )
+
 
 class OpenMRSConceptValidatorTest(OCLTestCase):
     def setUp(self):
