@@ -390,6 +390,8 @@ class ConceptMappingsView(ConceptBaseView, ListWithHeadersMixin):
 
     def get_queryset(self):
         concept = super().get_queryset().first()
+        if not concept:
+            raise Http404()
         self.check_object_permissions(self.request, concept)
         include_retired = self.request.query_params.get(INCLUDE_RETIRED_PARAM, False)
         include_indirect_mappings = self.request.query_params.get(INCLUDE_INVERSE_MAPPINGS_PARAM, 'false') == 'true'
