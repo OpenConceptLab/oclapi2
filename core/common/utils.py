@@ -713,8 +713,8 @@ def named_tuple_fetchall(cursor):
     return [nt_result(*row) for row in cursor.fetchall()]
 
 
-def nested_dict_values(d):
-    for value in d.values():
+def nested_dict_values(_dict):
+    for value in _dict.values():
         if isinstance(value, dict):
             yield from nested_dict_values(value)
         else:

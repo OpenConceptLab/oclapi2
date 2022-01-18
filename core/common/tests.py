@@ -744,7 +744,7 @@ class UtilsTest(OCLTestCase):
         self.assertIsNone(to_parent_uri_from_kwargs(None))
 
     def test_nested_dict_values(self):
-        self.assertEqual(list(nested_dict_values(dict())), [])
+        self.assertEqual(list(nested_dict_values({})), [])
         self.assertEqual(list(nested_dict_values(dict(a=1))), [1])
         self.assertEqual(list(nested_dict_values(dict(a=1, b='foobar'))), [1, 'foobar'])
         self.assertEqual(
