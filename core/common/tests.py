@@ -22,7 +22,7 @@ from core.common.utils import (
     to_camel_case,
     drop_version, is_versioned_uri, separate_version, to_parent_uri, jsonify_safe, es_get,
     get_resource_class_from_resource_name, flatten_dict, is_csv_file, is_url_encoded_string, to_parent_uri_from_kwargs,
-    set_current_user, get_current_user, set_request_url, get_request_url)
+    set_current_user, get_current_user, set_request_url, get_request_url, nested_dict_values)
 from core.concepts.models import Concept, LocalizedText
 from core.mappings.models import Mapping
 from core.orgs.models import Organization
@@ -742,6 +742,23 @@ class UtilsTest(OCLTestCase):
         self.assertEqual(to_parent_uri_from_kwargs({'user': 'admin'}), '/users/admin/')
         self.assertIsNone(to_parent_uri_from_kwargs({}))
         self.assertIsNone(to_parent_uri_from_kwargs(None))
+
+    def test_nested_dict_values(self):
+        self.assertEqual(list(nested_dict_values({})), [])
+        self.assertEqual(list(nested_dict_values(dict(a=1))), [1])
+        self.assertEqual(list(nested_dict_values(dict(a=1, b='foobar'))), [1, 'foobar'])
+        self.assertEqual(
+            list(nested_dict_values(dict(a=1, b='foobar', c=dict(a=1, b='foobar')))),
+            [1, 'foobar', 1, 'foobar']
+        )
+        self.assertEqual(
+            list(
+                nested_dict_values(
+                    dict(a=1, b='foobar', c=dict(a=1, b='foobar', c=dict(d=[dict(a=1), dict(b='foobar')])))
+                )
+            ),
+            [1, 'foobar', 1, 'foobar', [{'a': 1}, {'b': 'foobar'}]]
+        )
 
 
 class BaseModelTest(OCLTestCase):
