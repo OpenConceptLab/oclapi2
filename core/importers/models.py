@@ -13,7 +13,7 @@ from pydash import compact, get
 from core.collections.models import Collection
 from core.common.constants import HEAD
 from core.common.services import RedisService
-from core.common.tasks import bulk_import_parts_inline, delete_organization
+from core.common.tasks import bulk_import_parts_inline, delete_organization, batch_index_resources
 from core.common.utils import drop_version, is_url_encoded_string, encode_string, to_parent_uri
 from core.concepts.models import Concept
 from core.mappings.models import Mapping
@@ -568,11 +568,11 @@ class ReferenceImporter(BaseResourceImporter):
                 )
                 for ref in added_references:
                     if ref.concepts:
-                        for concept in ref.concepts:
-                            concept.index()
+                        batch_index_resources.apply_async(
+                            ('concept', dict(id__in=list(ref.concepts.values_list('id', flat=True)))), queue='indexing')
                     if ref.mappings:
-                        for mapping in ref.mappings:
-                            mapping.index()
+                        batch_index_resources.apply_async(
+                            ('mapping', dict(id__in=list(ref.mappings.values_list('id', flat=True)))), queue='indexing')
 
                 return CREATED
             return PERMISSION_DENIED

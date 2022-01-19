@@ -474,6 +474,24 @@ def batch_index_resources(resource, filters):
 
 
 @app.task
+def index_expansion_concepts(expansion_id):
+    from core.collections.models import Expansion
+    expansion = Expansion.objects.filter(id=expansion_id).first()
+    if expansion:
+        from core.concepts.documents import ConceptDocument
+        expansion.batch_index(expansion.concepts, ConceptDocument)
+
+
+@app.task
+def index_expansion_mappings(expansion_id):
+    from core.collections.models import Expansion
+    expansion = Expansion.objects.filter(id=expansion_id).first()
+    if expansion:
+        from core.mappings.documents import MappingDocument
+        expansion.batch_index(expansion.mappings, MappingDocument)
+
+
+@app.task
 def make_hierarchy(concept_map):  # pragma: no cover
     from core.concepts.models import Concept
 

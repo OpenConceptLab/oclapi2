@@ -15,7 +15,8 @@ from core.common.constants import (
     DEFAULT_REPOSITORY_TYPE, ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT,
     ACCESS_TYPE_NONE, SEARCH_PARAM)
 from core.common.models import ConceptContainerModel, BaseResourceModel
-from core.common.tasks import seed_children_to_expansion
+from core.common.tasks import seed_children_to_expansion, batch_index_resources, index_expansion_concepts, \
+    index_expansion_mappings
 from core.common.utils import is_valid_uri, drop_version, to_owner_uri, generate_temp_version, api_get
 from core.concepts.constants import LOCALES_FULLY_SPECIFIED
 from core.concepts.models import Concept
@@ -594,13 +595,11 @@ class Expansion(BaseResourceModel):
 
     def index_concepts(self):
         if self.concepts.exists():
-            from core.concepts.documents import ConceptDocument
-            self.batch_index(self.concepts, ConceptDocument)
+            index_expansion_concepts.apply_async((self.id, ), queue='indexing')
 
     def index_mappings(self):
         if self.mappings.exists():
-            from core.mappings.documents import MappingDocument
-            self.batch_index(self.mappings, MappingDocument)
+            index_expansion_mappings.apply_async((self.id, ), queue='indexing')
 
     def index_all(self):
         self.index_concepts()
@@ -610,10 +609,8 @@ class Expansion(BaseResourceModel):
         self.concepts.set(self.concepts.exclude(uri__in=expressions))
         self.mappings.set(self.mappings.exclude(uri__in=expressions))
 
-        from core.concepts.documents import ConceptDocument
-        from core.mappings.documents import MappingDocument
-        self.batch_index(Concept.objects.filter(uri__in=expressions), ConceptDocument)
-        self.batch_index(Mapping.objects.filter(uri__in=expressions), MappingDocument)
+        batch_index_resources.apply_async(('concept', dict(uri__in=expressions)), queue='indexing')
+        batch_index_resources.apply_async(('mapping', dict(uri__in=expressions)), queue='indexing')
 
     def add_references(self, references, index=True):
         if isinstance(references, CollectionReference):
