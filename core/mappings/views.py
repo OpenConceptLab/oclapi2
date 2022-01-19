@@ -198,6 +198,35 @@ class MappingRetrieveUpdateDestroyView(MappingBaseView, RetrieveAPIView, UpdateA
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
+class MappingCollectionMembershipView(MappingBaseView, ListWithHeadersMixin):
+    def get_serializer_class(self):
+        from core.collections.serializers import CollectionVersionListSerializer
+        return CollectionVersionListSerializer
+
+    def get_object(self, queryset=None):
+        queryset = Mapping.get_base_queryset(self.params)
+        if 'mapping_version' in self.kwargs:
+            instance = queryset.first()
+        else:
+            instance = queryset.filter(id=F('versioned_object_id')).first().get_latest_version()
+
+        if not instance:
+            raise Http404()
+
+        self.check_object_permissions(self.request, instance)
+
+        return instance
+
+    def get_queryset(self):
+        instance = self.get_object()
+
+        return instance.collection_set.filter(
+            organization_id=instance.parent.organization_id, user_id=instance.parent.user_id)
+
+    def get(self, request, *args, **kwargs):
+        return self.list(request, *args, **kwargs)
+
+
 class MappingReactivateView(MappingBaseView, UpdateAPIView):
     serializer_class = MappingDetailSerializer
 

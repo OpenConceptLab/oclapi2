@@ -11,6 +11,11 @@ urlpatterns = [
         name='mapping-detail'
     ),
     re_path(
+        fr"^(?P<mapping>{NAMESPACE_PATTERN})/collection-versions/$",
+        views.MappingCollectionMembershipView.as_view(),
+        name='mapping-collection-versions'
+    ),
+    re_path(
         fr"^(?P<mapping>{NAMESPACE_PATTERN})/reactivate/$",
         views.MappingReactivateView.as_view(),
         name='mapping-reactivate'
@@ -34,6 +39,12 @@ urlpatterns = [
         r'^(?P<mapping>{pattern})/(?P<mapping_version>{pattern})/$'.format(pattern=NAMESPACE_PATTERN),
         views.MappingVersionRetrieveView.as_view(),
         name='mapping-version-detail'
+    ),
+    re_path(
+        r'^(?P<mapping>{pattern})/(?P<mapping_version>{pattern})/collection-versions/$'.format(
+            pattern=NAMESPACE_PATTERN),
+        views.MappingCollectionMembershipView.as_view(),
+        name='mapping-version-collection-versions'
     ),
     re_path(
         r'^(?P<mapping>{pattern})/(?P<mapping_version>{pattern})/extras/$'.format(pattern=NAMESPACE_PATTERN),
