@@ -566,13 +566,18 @@ class ReferenceImporter(BaseResourceImporter):
                 (added_references, _) = collection.add_expressions(
                     self.get('data'), self.user, self.get('__cascade', False)
                 )
-                for ref in added_references:
-                    if ref.concepts:
-                        batch_index_resources.apply_async(
-                            ('concept', dict(id__in=list(ref.concepts.values_list('id', flat=True)))), queue='indexing')
-                    if ref.mappings:
-                        batch_index_resources.apply_async(
-                            ('mapping', dict(id__in=list(ref.mappings.values_list('id', flat=True)))), queue='indexing')
+                if not get(settings, 'TEST_MODE', False):
+                    for ref in added_references:
+                        if ref.concepts:
+                            batch_index_resources.apply_async(
+                                ('concept', dict(id__in=list(ref.concepts.values_list('id', flat=True)))),
+                                queue='indexing'
+                            )
+                        if ref.mappings:
+                            batch_index_resources.apply_async(
+                                ('mapping', dict(id__in=list(ref.mappings.values_list('id', flat=True)))),
+                                queue='indexing'
+                            )
 
                 return CREATED
             return PERMISSION_DENIED
