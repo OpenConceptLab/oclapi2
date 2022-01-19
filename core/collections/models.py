@@ -595,11 +595,17 @@ class Expansion(BaseResourceModel):
 
     def index_concepts(self):
         if self.concepts.exists():
-            index_expansion_concepts.apply_async((self.id, ), queue='indexing')
+            if get(settings, 'TEST_MODE', False):
+                index_expansion_concepts(self.id)
+            else:
+                index_expansion_concepts.apply_async((self.id, ), queue='indexing')
 
     def index_mappings(self):
         if self.mappings.exists():
-            index_expansion_mappings.apply_async((self.id, ), queue='indexing')
+            if get(settings, 'TEST_MODE', False):
+                index_expansion_mappings(self.id)
+            else:
+                index_expansion_mappings.apply_async((self.id, ), queue='indexing')
 
     def index_all(self):
         self.index_concepts()
@@ -609,8 +615,9 @@ class Expansion(BaseResourceModel):
         self.concepts.set(self.concepts.exclude(uri__in=expressions))
         self.mappings.set(self.mappings.exclude(uri__in=expressions))
 
-        batch_index_resources.apply_async(('concept', dict(uri__in=expressions)), queue='indexing')
-        batch_index_resources.apply_async(('mapping', dict(uri__in=expressions)), queue='indexing')
+        if not get(settings, 'TEST_MODE', False):
+            batch_index_resources.apply_async(('concept', dict(uri__in=expressions)), queue='indexing')
+            batch_index_resources.apply_async(('mapping', dict(uri__in=expressions)), queue='indexing')
 
     def add_references(self, references, index=True):
         if isinstance(references, CollectionReference):
