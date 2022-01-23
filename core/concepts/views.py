@@ -76,11 +76,11 @@ class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
         return ConceptListSerializer
 
     def get_queryset(self):
-        is_latest_version = 'collection' not in self.kwargs and 'version' not in self.kwargs or \
-                            get(self.kwargs, 'version') == HEAD
+        is_latest_version = 'collection' not in self.kwargs and 'version' not in self.kwargs or get(
+            self.kwargs, 'version') == HEAD
         queryset = super().get_queryset().prefetch_related('names')
         if is_latest_version:
-            queryset = queryset.filter(is_latest_version=True)
+            queryset = queryset.filter(id=F('versioned_object_id'))
         user = self.request.user
         if get(user, 'is_anonymous'):
             queryset = queryset.exclude(public_access=ACCESS_TYPE_NONE)
@@ -427,6 +427,11 @@ class ConceptVersionRetrieveView(ConceptBaseView, RetrieveAPIView, DestroyAPIVie
             raise Http404()
         self.check_object_permissions(self.request, instance)
         return instance
+
+    def destroy(self, request, *args, **kwargs):
+        obj = self.get_object()
+        obj.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class ConceptLabelListCreateView(ConceptBaseView, ListWithHeadersMixin, ListCreateAPIView):
