@@ -895,8 +895,9 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         return result
 
     def delete(self, using=None, keep_parents=False):
-        LocalizedText.objects.filter(name_locales=self).delete()
-        LocalizedText.objects.filter(description_locales=self).delete()
+        if self.is_versioned_object:
+            LocalizedText.objects.filter(name_locales=self).delete()
+            LocalizedText.objects.filter(description_locales=self).delete()
         return super().delete(using=using, keep_parents=keep_parents)
 
     def cascade(  # pylint: disable=too-many-arguments
