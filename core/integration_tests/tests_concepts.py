@@ -6,7 +6,7 @@ from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory, LocalizedTextFactory
 from core.mappings.tests.factories import MappingFactory
 from core.orgs.models import Organization
-from core.sources.tests.factories import OrganizationSourceFactory
+from core.sources.tests.factories import OrganizationSourceFactory, UserSourceFactory
 from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
 
@@ -722,6 +722,60 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.data[0]['mappings'][0]['uuid'], str(mapping.id))
         self.assertTrue('/concepts/?page=1&limit=1&verbose=true&includeInverseMappings=true' in response['previous'])
         self.assertFalse(response.has_header('next'))
+
+
+class ConceptVersionRetrieveViewTest(OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.user = UserProfileFactory()
+        self.token = self.user.get_token()
+        self.source = UserSourceFactory(user=self.user)
+        self.concept = ConceptFactory(parent=self.source)
+
+    def test_get_200(self):
+        latest_version = self.concept.get_latest_version()
+
+        response = self.client.get(self.concept.url + f'{latest_version.id}/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['is_latest_version'], True)
+        self.assertEqual(response.data['version_url'], latest_version.uri)
+        self.assertEqual(response.data['versioned_object_id'], self.concept.id)
+
+    def test_get_404(self):
+        response = self.client.get(self.concept.url + 'unknown/')
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_soft_delete_204(self):
+        admin_token = UserProfile.objects.get(username='ocladmin').get_token()
+        concept_v1 = ConceptFactory(
+            parent=self.source, version='v1', mnemonic=self.concept.mnemonic
+        )
+
+        response = self.client.delete(
+            self.concept.url + f'{concept_v1.version}/',
+            HTTP_AUTHORIZATION=f'Token {admin_token}',
+        )
+
+        self.assertEqual(response.status_code, 204)
+        self.assertTrue(Concept.objects.filter(id=concept_v1.id).exists())
+        concept_v1.refresh_from_db()
+        self.assertFalse(concept_v1.is_active)
+
+    def test_hard_delete_204(self):
+        admin_token = UserProfile.objects.get(username='ocladmin').get_token()
+        concept_v1 = ConceptFactory(
+            parent=self.source, version='v1', mnemonic=self.concept.mnemonic
+        )
+
+        response = self.client.delete(
+            f'{self.concept.url}{concept_v1.version}/?hardDelete=true',
+            HTTP_AUTHORIZATION=f'Token {admin_token}',
+        )
+
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(Concept.objects.filter(id=concept_v1.id).exists())
 
 
 class ConceptExtrasViewTest(OCLAPITestCase):
