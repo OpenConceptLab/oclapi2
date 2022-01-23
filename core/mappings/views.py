@@ -296,6 +296,14 @@ class MappingVersionRetrieveView(MappingBaseView, RetrieveAPIView, DestroyAPIVie
         self.check_object_permissions(self.request, instance)
         return instance
 
+    def destroy(self, request, *args, **kwargs):
+        obj = self.get_object()
+        if self.is_hard_delete_requested():
+            obj.delete()
+        else:
+            obj.soft_delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
 
 class MappingExtrasView(SourceChildExtrasView, MappingBaseView):
     serializer_class = MappingVersionDetailSerializer

@@ -430,7 +430,10 @@ class ConceptVersionRetrieveView(ConceptBaseView, RetrieveAPIView, DestroyAPIVie
 
     def destroy(self, request, *args, **kwargs):
         obj = self.get_object()
-        obj.delete()
+        if self.is_hard_delete_requested():
+            obj.delete()
+        else:
+            obj.soft_delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
