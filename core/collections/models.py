@@ -368,6 +368,24 @@ class Collection(ConceptContainerModel):
 
         return mapping_uris
 
+    # Fixes auto expansions by upserting
+    # This should be deleted when all the old style collections are migrated to new style
+    def fix_auto_expansion(self):
+        if self.should_auto_expand:
+            expansion = self.expansion
+            if not expansion:
+                expansion = Expansion(mnemonic=f'autoexpand-{self.version}', collection_version=self)
+                expansion.save()
+                self.expansion_uri = expansion.uri
+                self.save()
+            expansion.concepts.set(self.concepts.all())
+            expansion.mappings.set(self.mappings.all())
+            expansion.index_concepts()
+            expansion.index_mappings()
+            return expansion
+
+        return None
+
     def cascade_children_to_expansion(self, expansion_data=None, index=True):  # pylint: disable=arguments-differ
         if not expansion_data:
             expansion_data = {}
