@@ -22,6 +22,7 @@ from core.common.permissions import HasPrivateAccess, HasOwnership, CanViewConce
 from core.common.services import S3
 from .utils import write_csv_to_s3, get_csv_from_s3, get_query_params_from_url_string, compact_dict_by_values, \
     to_owner_uri
+from ..bundles.serializers import BundleSerializer
 
 logger = logging.getLogger('oclapi')
 
@@ -143,6 +144,8 @@ class ListWithHeadersMixin(ListModelMixin):
         result_dict = self.get_serializer(results, many=True).data
         if self.should_include_facets():
             data = dict(results=result_dict, facets=dict(fields=self.get_facets()))
+        elif hasattr(self.__class__, 'should_bundle_result') and self.should_bundle_result():
+            data = BundleSerializer({'entries': result_dict}).data
         else:
             data = result_dict
 

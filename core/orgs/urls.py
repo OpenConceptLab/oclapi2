@@ -52,6 +52,9 @@ urlpatterns = [
         name='organization-member-detail'
     ),
     re_path(r'^(?P<org>' + NAMESPACE_PATTERN + ')/sources/', include('core.sources.urls')),
+    #TODO: require FHIR subdomain
+    re_path(r'^(?P<org>' + NAMESPACE_PATTERN + ')/CodeSystem/', include('core.code_systems.urls'),
+            name='code_systems_url'),
     re_path(r'^(?P<org>' + NAMESPACE_PATTERN + ')/collections/', include('core.collections.urls')),
     re_path(r'^(?P<org>' + NAMESPACE_PATTERN + ')/pins/', include('core.pins.urls')),
 ]

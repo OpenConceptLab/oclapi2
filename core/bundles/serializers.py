@@ -22,7 +22,9 @@ class BundleSerializer(serializers.Serializer):  # pylint: disable=abstract-meth
         params = get(request, 'query_params')
 
         self.query_params = params.dict() if params else {}
-        is_hierarchy_response = params.get('view', '').lower() == 'hierarchy'
+
+        if 'view' in self.query_params:
+            is_hierarchy_response = self.query_params.get('view', '').lower() == 'hierarchy'
 
         try:
             if is_hierarchy_response:
