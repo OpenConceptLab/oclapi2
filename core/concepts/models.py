@@ -905,6 +905,9 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             cascade_mappings=True, cascade_hierarchy=True, cascade_levels='*',
             include_mappings=True, reverse=False, max_results=1000
     ):
+        if cascade_levels == 0:
+            from core.mappings.models import Mapping
+            return dict(concepts=Concept.objects.filter(id=self.id), mappings=Mapping.objects.none())
         result = self.get_cascaded_resources(
             source_mappings=source_mappings, source_to_concepts=source_to_concepts, mappings_criteria=mappings_criteria,
             cascade_mappings=cascade_mappings, cascade_hierarchy=cascade_hierarchy, include_mappings=include_mappings,
@@ -913,7 +916,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         cascaded = [self.id]
 
         def iterate(level):
-            if level == '*' or level > 0:
+            if level == '*' or level > 1:
                 if (result['concepts'].count() + result['mappings'].count()) < max_results:
                     not_cascaded = result['concepts'].exclude(id__in=cascaded)
                     if not_cascaded.exists():
@@ -938,6 +941,8 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             cascade_mappings=True, cascade_hierarchy=True, cascade_levels='*',
             include_mappings=True, reverse=False, _=None
     ):
+        if cascade_levels == 0:
+            return self
         self.cascaded_entries = self.get_cascaded_resources(
             source_mappings=source_mappings, source_to_concepts=source_to_concepts, mappings_criteria=mappings_criteria,
             cascade_mappings=cascade_mappings, cascade_hierarchy=cascade_hierarchy, include_mappings=include_mappings,
@@ -946,13 +951,13 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         last_level_concepts = list(
             set(list(self.cascaded_entries['hierarchy_concepts']) + list(self.cascaded_entries['concepts'])))
         self.cascaded_entries['concepts'] = last_level_concepts
-        self.current_level = 0
+        self.current_level = 1
         levels = {self.current_level: last_level_concepts}
 
         cascaded = [self.id]
 
         def iterate(level):
-            if level == '*' or level > 0:
+            if level == '*' or level > 1:
                 new_level = self.current_level + 1
                 levels[new_level] = levels.get(new_level, [])
                 for concept in levels[self.current_level]:
