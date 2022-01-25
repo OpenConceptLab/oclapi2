@@ -7,6 +7,7 @@ from pydash import get
 from core.client_configs.constants import HOME_TYPE, CONFIG_TYPES, EMPTY_TABS_CONFIG, NOT_LIST_TABS_CONFIG, \
     INVALID_TABS_CONFIG, ONE_DEFAULT_TAB, ASC_AND_DESC_SORT, UNSUPPORTED_SORT_ATTRIBUTE
 from core.common.constants import SUPER_ADMIN_USER_ID
+from core.common.utils import get_resource_class_from_resource_name
 
 
 class ClientConfig(models.Model):
@@ -110,20 +111,7 @@ class ClientConfig(models.Model):
 
     @staticmethod
     def __get_es_fields(tab_type):
-        if tab_type == 'concepts':
-            from core.concepts.models import Concept
-            return Concept.es_fields
-        if tab_type == 'mappings':
-            from core.mappings.models import Mapping
-            return Mapping.es_fields
-        if tab_type == 'sources':
-            from core.sources.models import Source
-            return Source.es_fields
-        if tab_type == 'collections':
-            from core.collections.models import Collection
-            return Collection.es_fields
-        if tab_type == 'users':
-            from core.users.models import UserProfile
-            return UserProfile.es_fields
-
+        klass = get_resource_class_from_resource_name(tab_type)
+        if klass:
+            return klass.es_fields
         return None
