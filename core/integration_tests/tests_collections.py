@@ -1465,18 +1465,19 @@ class CollectionLatestVersionSummaryViewTest(OCLAPITestCase):
         collection = OrganizationCollectionFactory(version='HEAD')
         OrganizationCollectionFactory(
             mnemonic=collection.mnemonic, organization=collection.organization, version='v1')
-        v2 = OrganizationCollectionFactory(
+        version2 = OrganizationCollectionFactory(
             mnemonic=collection.mnemonic, organization=collection.organization, version='v2')
         OrganizationCollectionFactory(
             mnemonic=collection.mnemonic, organization=collection.organization, version='v3')
 
         response = self.client.get(collection.uri + 'latest/summary/')
+        self.assertEqual(response.status_code, 404)
 
-        v2.released = True
-        v2.save()
+        version2.released = True
+        version2.save()
 
         response = self.client.get(collection.uri + 'latest/summary/',)
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data['uuid'], str(v2.id))
+        self.assertEqual(response.data['uuid'], str(version2.id))
         self.assertEqual(response.data['id'], 'v2')
