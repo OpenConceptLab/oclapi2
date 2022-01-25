@@ -309,7 +309,7 @@ class CollectionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 404)
 
     @patch('core.common.models.delete_s3_objects')
-    def test_delete(self, delete_s3_objects_mock):
+    def test_delete_204(self, delete_s3_objects_mock):  # sync delete
         coll = OrganizationCollectionFactory(mnemonic='coll1')
         OrganizationCollectionFactory(
             version='v1', is_latest_version=True, mnemonic='coll1', organization=coll.organization)
@@ -318,7 +318,7 @@ class CollectionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(coll.versions.count(), 2)
 
         response = self.client.delete(
-            coll.uri,
+            coll.uri + '?inline=true',
             HTTP_AUTHORIZATION='Token ' + user.get_token(),
             format='json'
         )
@@ -327,6 +327,24 @@ class CollectionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(coll.versions.count(), 0)
         self.assertFalse(Collection.objects.filter(mnemonic='coll1').exists())
         delete_s3_objects_mock.delay.assert_called_once_with(f'{coll.organization.mnemonic}/coll1_HEAD.')
+
+    @patch('core.collections.views.delete_collection')
+    def test_delete_202(self, delete_collection_task_mock):  # async delete
+        delete_collection_task_mock.delay = Mock(return_value=Mock(id='task-id'))
+        coll = OrganizationCollectionFactory(mnemonic='coll1')
+        OrganizationCollectionFactory(
+            version='v1', is_latest_version=True, mnemonic='coll1', organization=coll.organization)
+        user = UserProfileFactory(organizations=[coll.organization])
+
+        response = self.client.delete(
+            coll.uri,
+            HTTP_AUTHORIZATION='Token ' + user.get_token(),
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.data, dict(task='task-id'))
+        delete_collection_task_mock.delay.assert_called_once_with(coll.id)
 
     def test_put_401(self):
         coll = OrganizationCollectionFactory(mnemonic='coll1', name='Collection')

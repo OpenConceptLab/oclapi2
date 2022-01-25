@@ -262,11 +262,25 @@ class SourceCreateUpdateDestroyViewTest(OCLAPITestCase):
         source.refresh_from_db()
         self.assertEqual(source.hierarchy_root_id, concept2.id)
 
-    @patch('core.common.models.delete_s3_objects')
-    def test_delete_204(self, delete_s3_objects_mock):
+    @patch('core.sources.views.delete_source')
+    def test_delete_202(self, delete_source_task_mock):  # async delete
+        delete_source_task_mock.delay = Mock(return_value=Mock(id='task-id'))
         source = OrganizationSourceFactory(mnemonic='source', organization=self.organization)
         response = self.client.delete(
             source.uri,
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.data, dict(task='task-id'))
+        delete_source_task_mock.delay.assert_called_once_with(source.id)
+
+    @patch('core.common.models.delete_s3_objects')
+    def test_delete_204(self, delete_s3_objects_mock):  # sync delete
+        source = OrganizationSourceFactory(mnemonic='source', organization=self.organization)
+        response = self.client.delete(
+            source.uri + '?inline=true',
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )

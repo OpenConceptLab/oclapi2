@@ -159,8 +159,7 @@ class OrganizationDetailView(OrganizationBaseView, mixins.UpdateModelMixin, mixi
     def destroy(self, request, *args, **kwargs):
         obj = self.get_object()
 
-        inline = request.query_params.get('inline') in ['true', True]
-        if inline:
+        if self.is_inline_requested():
             delete_organization(obj.id)
             return Response(status=status.HTTP_204_NO_CONTENT)
 

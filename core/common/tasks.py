@@ -60,6 +60,27 @@ def delete_source(source_id):
         return ex
 
 
+@app.task(base=QueueOnce)
+def delete_collection(collection_id):
+    from core.collections.models import Collection
+    logger.info('Finding collection...')
+
+    collection = Collection.objects.filter(id=collection_id).first()
+
+    if not collection:
+        logger.info('Not found collection %s', collection_id)
+        return None
+
+    try:
+        logger.info('Found collection %s.  Beginning purge...', collection.mnemonic)
+        collection.delete(force=True)
+        logger.info('Delete complete!')
+        return True
+    except Exception as ex:
+        logger.info('Collection delete failed for %s with exception %s', collection.mnemonic, ex.args)
+        return ex
+
+
 @app.task(base=QueueOnce, bind=True)
 def export_source(self, version_id):
     from core.sources.models import Source

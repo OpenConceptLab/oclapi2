@@ -91,6 +91,12 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     def is_hard_delete_requested(self):
         return self.request.query_params.get('hardDelete', None) in ['true', True, 'True']
 
+    def is_async_requested(self):
+        return self.request.query_params.get('async', None) in ['true', True, 'True']
+
+    def is_inline_requested(self):
+        return self.request.query_params.get('inline', None) in ['true', True, 'True']
+
     def verify_scope(self):
         pass
 

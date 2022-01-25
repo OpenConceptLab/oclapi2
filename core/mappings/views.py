@@ -177,9 +177,6 @@ class MappingRetrieveUpdateDestroyView(MappingBaseView, RetrieveAPIView, UpdateA
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-    def is_hard_delete_requested(self):
-        return self.request.query_params.get('hardDelete', None) in ['true', True, 'True']
-
     def destroy(self, request, *args, **kwargs):
         mapping = self.get_object()
         parent = mapping.parent
