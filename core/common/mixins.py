@@ -465,7 +465,7 @@ class SourceChildMixin:
         is_concept_uri = is_concept(uri)
 
         try:
-            kwargs = get(resolve(uri), 'kwargs', {})
+            kwargs = get(resolve(uri.split('?')[0]), 'kwargs', {})
             query_params = get_query_params_from_url_string(uri)  # parsing query parameters
             kwargs.update(query_params)
             if 'concept' in kwargs:
