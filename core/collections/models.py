@@ -136,15 +136,6 @@ class Collection(ConceptContainerModel):
 
         return concepts
 
-    def fill_data_from_reference(self, reference):
-        self.references.add(reference)
-        if self.should_auto_expand:
-            if reference.concepts:
-                self.expansion.concepts.add(*reference.concepts)
-            if reference.mappings:
-                self.expansion.mappings.add(*reference.mappings)
-        self.save()  # update counts
-
     def validate(self, reference):
         if self.should_auto_expand:
             reference.full_clean()
@@ -190,11 +181,6 @@ class Collection(ConceptContainerModel):
             ).exists():
                 raise ValidationError(validation_error)
 
-    @staticmethod
-    def get_source_from_uri(uri):
-        from core.sources.models import Source
-        return Source.objects.filter(uri=uri).first()
-
     @transaction.atomic
     def add_expressions(self, data, user, cascade_mappings=False, cascade_to_concepts=False):
         expressions = data.get('expressions', [])
@@ -203,7 +189,8 @@ class Collection(ConceptContainerModel):
         source = None
         source_uri = data.get('uri')
         if source_uri:
-            source = self.get_source_from_uri(source_uri)
+            from core.sources.models import Source
+            source = Source.objects.filter(uri=source_uri).first()
 
         if source:
             can_view_all_content = source.can_view_all_content(user)
@@ -296,14 +283,6 @@ class Collection(ConceptContainerModel):
             self.save()
         return added_references, errors
 
-    @classmethod
-    def persist_changes(cls, obj, updated_by, original_schema, **kwargs):
-        col_reference = kwargs.pop('col_reference', False)
-        errors = super().persist_changes(obj, updated_by, original_schema, **kwargs)
-        if col_reference and not errors:
-            obj.fill_data_from_reference(col_reference)
-        return errors
-
     def seed_references(self):
         head = self.head
         if head:
@@ -325,12 +304,6 @@ class Collection(ConceptContainerModel):
             self.expansion.delete_expressions(expressions)
 
         self.references.set(self.references.exclude(expression__in=expressions))
-
-    @staticmethod
-    def __get_children_from_expressions(expressions):
-        concepts = Concept.objects.filter(uri__in=expressions)
-        mappings = Mapping.objects.filter(uri__in=expressions)
-        return concepts, mappings
 
     def get_all_related_uris(self, expressions, cascade_to_concepts=False):
         all_related_mappings = []
@@ -453,18 +426,9 @@ class CollectionReference(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     last_resolved_at = models.DateTimeField(default=timezone.now, null=True)
 
-    @staticmethod
-    def diff(ctx, _from):
-        prev_expressions = map(lambda r: r.expression, _from)
-        return filter(lambda ref: ref.expression not in prev_expressions, ctx)
-
     @property
     def without_version(self):
         return drop_version(self.expression)
-
-    @property
-    def is_valid_expression(self):
-        return is_valid_uri(self.expression) and self.expression.count('/') >= 7
 
     @property
     def reference_type(self):
@@ -576,10 +540,6 @@ class Expansion(BaseResourceModel):
         'collections.Collection', related_name='expansions', on_delete=models.CASCADE)
 
     @staticmethod
-    def default_parameters():
-        return default_expansion_parameters()
-
-    @staticmethod
     def get_resource_url_kwarg():
         return 'expansion'
 
@@ -624,10 +584,6 @@ class Expansion(BaseResourceModel):
                 index_expansion_mappings(self.id)
             else:
                 index_expansion_mappings.apply_async((self.id, ), queue='indexing')
-
-    def index_all(self):
-        self.index_concepts()
-        self.index_mappings()
 
     def delete_expressions(self, expressions):
         self.concepts.set(self.concepts.exclude(uri__in=expressions))

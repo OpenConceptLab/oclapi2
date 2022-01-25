@@ -17,6 +17,7 @@ from core.mappings.serializers import MappingDetailSerializer
 from core.mappings.tests.factories import MappingFactory
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.tests.factories import OrganizationSourceFactory
+from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
 
 
@@ -1425,3 +1426,57 @@ class CollectionLogoViewTest(OCLAPITestCase):
         upload_base64_mock.assert_called_once_with(
             'base64-data', 'users/username/collections/coll1/logo.png', False, True
         )
+
+
+class CollectionSummaryViewTest(OCLAPITestCase):
+    @patch('core.collections.models.Collection.update_children_counts')
+    def test_put(self, update_children_counts_mock):
+        collection = OrganizationCollectionFactory(version='HEAD')
+        admin = UserProfile.objects.get(username='ocladmin')
+
+        response = self.client.put(
+            collection.uri + 'summary/',
+            HTTP_AUTHORIZATION='Token ' + admin.get_token(),
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 202)
+        update_children_counts_mock.assert_called_once()
+
+
+class CollectionVersionSummaryViewTest(OCLAPITestCase):
+    @patch('core.collections.models.Collection.update_children_counts')
+    def test_put(self, update_children_counts_mock):
+        collection = OrganizationCollectionFactory(version='v1')
+        admin = UserProfile.objects.get(username='ocladmin')
+
+        response = self.client.put(
+            collection.uri + 'summary/',
+            HTTP_AUTHORIZATION='Token ' + admin.get_token(),
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 202)
+        update_children_counts_mock.assert_called_once()
+
+
+class CollectionLatestVersionSummaryViewTest(OCLAPITestCase):
+    def test_get(self):
+        collection = OrganizationCollectionFactory(version='HEAD')
+        OrganizationCollectionFactory(
+            mnemonic=collection.mnemonic, organization=collection.organization, version='v1')
+        v2 = OrganizationCollectionFactory(
+            mnemonic=collection.mnemonic, organization=collection.organization, version='v2')
+        OrganizationCollectionFactory(
+            mnemonic=collection.mnemonic, organization=collection.organization, version='v3')
+
+        response = self.client.get(collection.uri + 'latest/summary/')
+
+        v2.released = True
+        v2.save()
+
+        response = self.client.get(collection.uri + 'latest/summary/',)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['uuid'], str(v2.id))
+        self.assertEqual(response.data['id'], 'v2')

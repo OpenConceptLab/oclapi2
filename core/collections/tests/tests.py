@@ -1,9 +1,9 @@
 from django.core.exceptions import ValidationError
 from django.db.models import QuerySet
-from mock import patch
+from mock import patch, Mock, PropertyMock
 
 from core.collections.documents import CollectionDocument
-from core.collections.models import CollectionReference, Collection
+from core.collections.models import CollectionReference, Collection, Expansion
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
 from core.collections.utils import is_mapping, is_concept, is_version_specified, \
     get_concept_by_expression
@@ -11,8 +11,10 @@ from core.common.constants import CUSTOM_VALIDATION_SCHEMA_OPENMRS
 from core.common.tasks import add_references, seed_children_to_new_version
 from core.common.tests import OCLTestCase
 from core.common.utils import drop_version
+from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory, LocalizedTextFactory
+from core.mappings.documents import MappingDocument
 from core.mappings.tests.factories import MappingFactory
 from core.sources.tests.factories import OrganizationSourceFactory
 
@@ -328,6 +330,18 @@ class CollectionTest(OCLTestCase):
         self.assertEqual(head_expansion.concepts.count(), 1)
         self.assertEqual(head_expansion.mappings.count(), 1)
 
+    @patch('core.collections.models.Collection.expansion', new_callable=PropertyMock)
+    @patch('core.collections.models.Collection.batch_index')
+    def test_index_children(self, batch_index_mock, expansion_mock):
+        expansion_mock.return_value = Mock(concepts='concepts-qs', mappings='mappings-qs')
+        collection = Collection(expansion_uri='foobar')
+
+        collection.index_children()
+
+        self.assertEqual(batch_index_mock.call_count, 2)
+        self.assertEqual(batch_index_mock.mock_calls[0].args, ('concepts-qs', ConceptDocument))
+        self.assertEqual(batch_index_mock.mock_calls[1].args, ('mappings-qs', MappingDocument))
+
 
 class CollectionReferenceTest(OCLTestCase):
     def test_invalid_expression(self):
@@ -549,3 +563,52 @@ class TasksTest(OCLTestCase):
         self.assertEqual(expansion.mappings.count(), 1)
         export_collection_task.delay.assert_called_once_with(collection_v1.id)
         index_children_mock.assert_called_once()
+
+
+class ExpansionTest(OCLTestCase):
+    @patch('core.collections.models.seed_children_to_expansion')
+    def test_persist_without_mnemonic(self, seed_children_to_expansion_mock):
+        collection = OrganizationCollectionFactory()
+
+        expansion = Expansion.persist(index=False, collection_version=collection)
+
+        self.assertIsNotNone(expansion.id)
+        self.assertEqual(expansion.id, expansion.mnemonic)
+        self.assertEqual(expansion.collection_version, collection)
+        seed_children_to_expansion_mock.assert_called_once_with(expansion.id, False)
+
+    @patch('core.collections.models.seed_children_to_expansion')
+    def test_persist_with_mnemonic(self, seed_children_to_expansion_mock):
+        collection = OrganizationCollectionFactory()
+
+        expansion = Expansion.persist(index=True, mnemonic='e1', collection_version=collection)
+
+        self.assertIsNotNone(expansion.id)
+        self.assertEqual(expansion.mnemonic, 'e1')
+        self.assertNotEqual(expansion.id, expansion.mnemonic)
+        self.assertEqual(expansion.collection_version, collection)
+        seed_children_to_expansion_mock.assert_called_once_with(expansion.id, True)
+
+    def test_owner_url(self):
+        self.assertEqual(
+            Expansion(uri='/orgs/org/collections/coll/HEAD/expansions/e1/').owner_url, '/orgs/org/')
+        self.assertEqual(
+            Expansion(uri='/users/user/collections/coll/HEAD/expansions/e1/').owner_url, '/users/user/')
+        self.assertEqual(
+            Expansion(uri='/orgs/org/collections/coll/v1/expansions/e1/').owner_url, '/orgs/org/')
+        self.assertEqual(
+            Expansion(uri='/orgs/org/collections/coll/expansions/e1/').owner_url, '/orgs/org/')
+
+    def test_expansion(self):
+        self.assertEqual(Expansion(mnemonic='e1').expansion, 'e1')
+
+    def test_get_url_kwarg(self):
+        self.assertEqual(Expansion().get_url_kwarg(), 'expansion')
+
+    def test_get_resource_url_kwarg(self):
+        self.assertEqual(Expansion().get_resource_url_kwarg(), 'expansion')
+
+    def test_is_default(self):
+        self.assertTrue(Expansion(uri='foobar', collection_version=Collection(expansion_uri='foobar')).is_default)
+        self.assertFalse(Expansion(uri='foobar', collection_version=Collection(expansion_uri='foo')).is_default)
+        self.assertFalse(Expansion(uri='foobar', collection_version=Collection(expansion_uri=None)).is_default)
