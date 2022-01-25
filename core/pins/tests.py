@@ -219,7 +219,7 @@ class PinListViewTest(OCLAPITestCase):
         self.assertEqual(len(response.data), 2)
         self.assertEqual(
             sorted([resource['resource_uri'] for resource in response.data]),
-            [source.uri, collection.uri]
+            sorted([source.uri, collection.uri])
         )
 
     def test_post_201(self):
