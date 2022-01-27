@@ -117,23 +117,6 @@ class CollectionTest(OCLTestCase):
         self.assertEqual(collection.expansion.concepts.first().uri, concept1.get_latest_version().uri)
         self.assertEqual(collection.references.first().expression, concept1.get_latest_version().uri)
 
-    def test_get_concepts(self):
-        collection = OrganizationCollectionFactory()
-        expansion = ExpansionFactory(collection_version=collection)
-        collection.expansion_uri = expansion.uri
-        collection.save()
-        source = OrganizationSourceFactory()
-        concept = ConceptFactory(parent=source, sources=[source])
-        concept_expression = concept.uri
-        collection.add_references([concept_expression])
-
-        concepts = collection.get_concepts()
-
-        self.assertEqual(concepts.count(), 1)
-        self.assertEqual(concepts.first(), concept.get_latest_version())
-        self.assertEqual(collection.get_concepts(start=0, end=10).count(), 1)
-        self.assertEqual(collection.get_concepts(start=1, end=2).count(), 0)
-
     def test_seed_references(self):
         collection1 = OrganizationCollectionFactory()
         expansion1 = ExpansionFactory(collection_version=collection1)

@@ -123,19 +123,6 @@ class Collection(ConceptContainerModel):
 
         return self.autoexpand
 
-    def get_concepts(self, start=None, end=None):
-        """ Use for efficient iteration over paginated concepts. Note that any filter will be applied only to concepts
-        from the given range. If you need to filter on all concepts, use get_concepts() without args.
-        """
-        concepts = Concept.objects.none()
-
-        if self.expansion_uri:
-            concepts = self.expansion.concepts.all()
-            if start and end:
-                concepts = concepts[start:end]
-
-        return concepts
-
     def validate(self, reference):
         if self.should_auto_expand:
             reference.full_clean()
