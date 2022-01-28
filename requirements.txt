@@ -17,7 +17,7 @@ factory_boy==3.2.1
 celery[redis]==4.4.7
 celery_once==3.0.1
 flower==0.9.5
-redis==3.5.3
+redis==4.1.2
 kombu==4.6.11
 django-elasticsearch-dsl==7.2.1
 drf-yasg==1.20.0
