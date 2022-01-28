@@ -957,8 +957,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         levels = {self.current_level: last_level_concepts}
 
         def has_entries(entries):
-            return entries is not None and bool(
-                len(entries['concepts'])) or entries['mappings'].exists()
+            return entries is not None and (bool(len(entries['concepts'])) or entries['mappings'].exists())
 
         concept_has_entries = has_entries(self.cascaded_entries)
         self.terminal = not concept_has_entries
