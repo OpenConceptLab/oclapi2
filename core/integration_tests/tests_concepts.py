@@ -1190,7 +1190,8 @@ class ConceptCascadeViewTest(OCLAPITestCase):
 
         entry = response.data['entry']
         self.assertEqual(
-            list(entry.keys()), ['uuid', 'id', 'name', 'type', 'url', 'version_url', 'entries', 'display_name']
+            list(entry.keys()),
+            ['uuid', 'id', 'name', 'type', 'url', 'version_url', 'terminal', 'entries', 'display_name']
         )
         self.assertEqual(entry['uuid'], str(concept1.id))
         self.assertEqual(entry['name'], concept1.mnemonic)
@@ -1249,7 +1250,8 @@ class ConceptCascadeViewTest(OCLAPITestCase):
 
         entry = response.data['entry']
         self.assertEqual(
-            list(entry.keys()), ['uuid', 'id', 'name', 'type', 'url', 'version_url', 'entries', 'display_name']
+            list(entry.keys()),
+            ['uuid', 'id', 'name', 'type', 'url', 'version_url', 'terminal', 'entries', 'display_name']
         )
         self.assertEqual(entry['uuid'], str(concept2.id))
         self.assertEqual(entry['name'], concept2.mnemonic)
@@ -1292,7 +1294,8 @@ class ConceptCascadeViewTest(OCLAPITestCase):
 
         entry = response.data['entry']
         self.assertEqual(
-            list(entry.keys()), ['uuid', 'id', 'name', 'type', 'url', 'version_url', 'entries', 'display_name']
+            list(entry.keys()),
+            ['uuid', 'id', 'name', 'type', 'url', 'version_url', 'terminal', 'entries', 'display_name']
         )
         self.assertEqual(entry['uuid'], str(concept1.id))
         self.assertEqual(entry['name'], concept1.mnemonic)
@@ -1308,7 +1311,8 @@ class ConceptCascadeViewTest(OCLAPITestCase):
 
         entry = response.data['entry']
         self.assertEqual(
-            list(entry.keys()), ['uuid', 'id', 'name', 'type', 'url', 'version_url', 'entries', 'display_name']
+            list(entry.keys()),
+            ['uuid', 'id', 'name', 'type', 'url', 'version_url', 'terminal', 'entries', 'display_name']
         )
         self.assertEqual(entry['uuid'], str(concept2.id))
         self.assertEqual(entry['name'], concept2.mnemonic)
