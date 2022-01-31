@@ -295,7 +295,7 @@ class Collection(ConceptContainerModel):
             references_to_be_deleted = self.references.filter(expression__in=expressions)
             if self.expansion_uri:
                 self.expansion.delete_references(references_to_be_deleted)
-            references_to_be_deleted.delete()
+            self.references.set(self.references.exclude(expression__in=expressions))
 
     def get_all_related_uris(self, expressions, cascade_to_concepts=False):
         all_related_mappings = []
