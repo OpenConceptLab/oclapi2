@@ -618,7 +618,7 @@ class CollectionReferencesViewTest(OCLAPITestCase):
 
         concept3 = ConceptFactory()
         latest_version = concept3.get_latest_version()
-        mapping2 = MappingFactory(from_concept=latest_version, parent=concept3.parent)
+        MappingFactory(from_concept=latest_version, parent=concept3.parent)
 
         response = self.client.put(
             self.collection.uri + 'references/?cascade=sourcemappings',
