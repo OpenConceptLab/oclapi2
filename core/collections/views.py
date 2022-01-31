@@ -327,9 +327,7 @@ class CollectionReferencesView(
         if not expressions:
             return Response(status=status.HTTP_400_BAD_REQUEST)
 
-        if expressions == '*':
-            expressions = list(instance.references.values_list('expression', flat=True))
-        if self.should_cascade_mappings():
+        if self.should_cascade_mappings() and expressions != '*':
             expressions += instance.get_cascaded_mapping_uris_from_concept_expressions(expressions)
 
         instance.delete_references(expressions)

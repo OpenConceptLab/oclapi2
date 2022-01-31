@@ -55,8 +55,8 @@ class CollectionTest(OCLTestCase):
 
         self.assertEqual(collection.expansion.concepts.count(), 1)
         self.assertEqual(collection.references.count(), 1)
-        self.assertEqual(collection.references.first().expression, concept.get_latest_version().uri)
-        self.assertEqual(collection.expansion.concepts.first(), concept.get_latest_version())
+        self.assertEqual(collection.references.first().expression, concept.uri)
+        self.assertEqual(collection.expansion.concepts.first().id, concept.get_latest_version().id)
         self.assertEqual(collection.active_concepts, 1)
 
         _, errors = collection.add_references([concept_expression])
@@ -84,7 +84,7 @@ class CollectionTest(OCLTestCase):
         collection.add_references([concept_expression])
 
         self.assertEqual(collection.references.count(), 1)
-        self.assertEqual(collection.references.first().expression, concept.get_latest_version().uri)
+        self.assertEqual(collection.references.first().expression, concept.uri)
         self.assertEqual(collection.expansion.concepts.count(), 1)
         self.assertEqual(collection.expansion.concepts.first(), concept.get_latest_version())
 
@@ -109,13 +109,14 @@ class CollectionTest(OCLTestCase):
         self.assertEqual(collection.expansion.mappings.count(), 1)
         self.assertEqual(collection.references.count(), 3)
 
-        collection.delete_references([concept2.get_latest_version().uri, mapping.get_latest_version().uri])
+        collection.delete_references(
+            [concept2.get_latest_version().uri, concept2.uri, mapping.get_latest_version().uri, mapping.uri])
 
         self.assertEqual(collection.expansion.concepts.count(), 1)
         self.assertEqual(collection.expansion.mappings.count(), 0)
         self.assertEqual(collection.references.count(), 1)
         self.assertEqual(collection.expansion.concepts.first().uri, concept1.get_latest_version().uri)
-        self.assertEqual(collection.references.first().expression, concept1.get_latest_version().uri)
+        self.assertEqual(collection.references.first().expression, concept1.uri)
 
     def test_seed_references(self):
         collection1 = OrganizationCollectionFactory()
@@ -168,7 +169,7 @@ class CollectionTest(OCLTestCase):
         self.assertEqual(
             ex.exception.message_dict,
             {
-                concept.get_latest_version().uri: [
+                concept.uri: [
                     'Concept or Mapping reference name must be unique in a collection.'
                 ]
             }
@@ -466,7 +467,7 @@ class TasksTest(OCLTestCase):
             )),
             sorted([
                 concept1.get_latest_version().version_url, concept2.get_latest_version().version_url,
-                mapping1.get_latest_version().version_url, mapping2.get_latest_version().version_url,
+                mapping1.url, mapping2.get_latest_version().version_url,
             ])
         )
 

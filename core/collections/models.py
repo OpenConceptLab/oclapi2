@@ -205,7 +205,6 @@ class Collection(ConceptContainerModel):
     def add_references(self, expressions, user=None):  # pylint: disable=too-many-locals,too-many-branches,too-many-statements  # Fixme: Sny
         errors = {}
         collection_version = self.head
-
         new_expressions = set(expressions)
         new_versionless_expressions = {drop_version(expression): expression for expression in new_expressions}
         for reference in collection_version.references.all():
@@ -218,6 +217,7 @@ class Collection(ConceptContainerModel):
         added_references = []
         for expression in new_expressions:
             ref = CollectionReference(expression=expression)
+            ref.created_by = user
             try:
                 if self.autoexpand_head:
                     ref.clean()
@@ -287,10 +287,15 @@ class Collection(ConceptContainerModel):
         return self.expansions.count()
 
     def delete_references(self, expressions):
-        if self.expansion_uri:
-            self.expansion.delete_expressions(expressions)
-
-        self.references.set(self.references.exclude(expression__in=expressions))
+        if expressions == '*':
+            self.references.clear()
+            if self.expansion_uri:
+                self.expansion.delete_expressions(expressions)
+        else:
+            references_to_be_deleted = self.references.filter(expression__in=expressions)
+            if self.expansion_uri:
+                self.expansion.delete_references(references_to_be_deleted)
+            references_to_be_deleted.delete()
 
     def get_all_related_uris(self, expressions, cascade_to_concepts=False):
         all_related_mappings = []
@@ -406,6 +411,7 @@ class CollectionReference(models.Model):
     concepts = None
     mappings = None
     original_expression = None
+    created_by = None
 
     id = models.BigAutoField(primary_key=True)
     expression = models.TextField()
@@ -453,7 +459,7 @@ class CollectionReference(models.Model):
         self.original_expression = str(self.expression)
 
         self.create_entities_from_expressions()
-        is_resolved = bool((self.mappings and self.mappings.count()) or (self.concepts and self.concepts.count()))
+        is_resolved = bool((self.mappings and self.mappings.exists()) or (self.concepts and self.concepts.exists()))
         if not is_resolved:
             self.last_resolved_at = None
 
@@ -471,14 +477,11 @@ class CollectionReference(models.Model):
 
     def create_entities_from_expressions(self):
         if self.is_concept:
-            self.concepts = self.get_concepts()
+            self.concepts = self.fetch_concepts(self.created_by)
         elif self.is_mapping:
-            self.mappings = self.get_mappings()
+            self.mappings = self.fetch_mappings(self.created_by)
 
-        if self.concepts and self.concepts.exists():
-            self.expression = self.concepts.first().uri
-        elif self.mappings and self.mappings.exists():
-            self.expression = self.mappings.first().uri
+        self._fetched = True
 
     def get_related_uris(self, exclude_mapping_uris, cascade_to_concepts=False):
         uris = []
@@ -572,13 +575,58 @@ class Expansion(BaseResourceModel):
             else:
                 index_expansion_mappings.apply_async((self.id, ), queue='indexing')
 
+    def delete_references(self, references):
+        if isinstance(references, CollectionReference):
+            refs = [references]
+        elif isinstance(references, list):
+            refs = references
+        else:
+            refs = references.all()
+
+        index_concepts = False
+        index_mappings = False
+        for reference in refs:
+            if reference.is_concept:
+                if get(reference, '_fetched'):
+                    concepts = reference.concepts
+                else:
+                    concepts = reference.fetch_concepts(self.created_by)
+                if concepts.exists():
+                    index_concepts = True
+                    self.concepts.set(self.concepts.exclude(id__in=concepts.values_list('id', flat=True)))
+            elif reference.is_mapping:
+                if get(reference, '_fetched'):
+                    mappings = reference.mappings
+                else:
+                    mappings = reference.fetch_mappings(self.created_by)
+                if mappings.exists():
+                    index_mappings = True
+                    self.mappings.set(self.mappings.exclude(id__in=mappings.values_list('id', flat=True)))
+        if index_concepts:
+            self.index_concepts()
+        if index_mappings:
+            self.index_mappings()
+
     def delete_expressions(self, expressions):
-        self.concepts.set(self.concepts.exclude(uri__in=expressions))
-        self.mappings.set(self.mappings.exclude(uri__in=expressions))
+        concepts_filters = None
+        mappings_filters = None
+        if expressions == '*':
+            if self.concepts.exists():
+                concepts_filters = dict(id__in=list(self.concepts.values_list('id', flat=True)))
+                self.concepts.clear()
+            if self.mappings.exists():
+                mappings_filters = dict(id__in=list(self.mappings.values_list('id', flat=True)))
+                self.mappings.clear()
+
+        else:
+            concepts_filters = dict(uri__in=expressions)
+            mappings_filters = dict(uri__in=expressions)
+            self.concepts.set(self.concepts.exclude(**concepts_filters))
+            self.mappings.set(self.mappings.exclude(**mappings_filters))
 
         if not get(settings, 'TEST_MODE', False):
-            batch_index_resources.apply_async(('concept', dict(uri__in=expressions)), queue='indexing')
-            batch_index_resources.apply_async(('mapping', dict(uri__in=expressions)), queue='indexing')
+            batch_index_resources.apply_async(('concept', concepts_filters), queue='indexing')
+            batch_index_resources.apply_async(('mapping', mappings_filters), queue='indexing')
 
     def add_references(self, references, index=True):
         if isinstance(references, CollectionReference):
@@ -592,12 +640,18 @@ class Expansion(BaseResourceModel):
         index_mappings = False
         for reference in refs:
             if reference.is_concept:
-                concepts = reference.fetch_concepts(self.created_by)
+                if get(reference, '_fetched'):
+                    concepts = reference.concepts
+                else:
+                    concepts = reference.fetch_concepts(self.created_by)
                 if concepts.exists():
                     index_concepts = True
                     self.concepts.add(*self.apply_parameters(concepts))
             elif reference.is_mapping:
-                mappings = reference.fetch_mappings(self.created_by)
+                if get(reference, '_fetched'):
+                    mappings = reference.mappings
+                else:
+                    mappings = reference.fetch_mappings(self.created_by)
                 if mappings.exists():
                     index_mappings = True
                     self.mappings.add(*self.apply_parameters(mappings))
