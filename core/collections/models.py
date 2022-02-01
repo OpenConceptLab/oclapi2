@@ -451,7 +451,7 @@ class CollectionReference(models.Model):
         data = api_get(self.expression, user)
         if not isinstance(data, list):
             data = [data]
-        return [obj['version_url'] for obj in data]
+        return [obj.get('version_url') or obj['url'] for obj in data]
 
     def get_concepts(self):
         return Concept.from_uri_queryset(self.expression)
@@ -469,7 +469,8 @@ class CollectionReference(models.Model):
 
     @property
     def should_fetch_from_api(self):
-        return SEARCH_PARAM in get(self.expression.split('?'), '1', '')
+        query_string = get(self.expression.split('?'), '1', '')
+        return SEARCH_PARAM in query_string or 'page' in query_string or 'limit' in query_string
 
     @property
     def is_concept(self):
