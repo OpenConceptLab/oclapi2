@@ -112,9 +112,7 @@ class ResourceReport:
         for item in queryset:
             month = item['month']
             if month:
-                result = {}
-                result[item['month'].strftime('%b %Y')] = item['total']
-                formatted.append(result)
+                formatted.append({item['month'].strftime('%b %Y'): item['total']})
 
         return formatted
 

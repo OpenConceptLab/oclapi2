@@ -5,6 +5,7 @@ from rest_framework import status
 from rest_framework.generics import RetrieveAPIView
 from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
+from rest_framework.renderers import TemplateHTMLRenderer, JSONRenderer
 
 from core.common.swagger_parameters import verbose_param, start_date_param, end_date_param
 from core.common.views import BaseAPIView
@@ -14,6 +15,8 @@ from core.reports.serializers import MonthlyUsageReportSerializer
 
 class MonthlyUsageView(BaseAPIView, RetrieveAPIView):  # pragma: no cover
     permission_classes = (IsAdminUser, )
+    renderer_classes = [TemplateHTMLRenderer, JSONRenderer]
+    template_name = "monthly_usage_report.html"
     serializer_class = MonthlyUsageReportSerializer
 
     def get_serializer_context(self):
@@ -21,14 +24,21 @@ class MonthlyUsageView(BaseAPIView, RetrieveAPIView):  # pragma: no cover
         context.update({'is_verbose': self.is_verbose()})
         return context
 
+    def is_verbose(self):
+        return super().is_verbose() or self.request.query_params.dict().get('format') != 'json'
+
     def get_object(self, _=None):
+        is_verbose = self.is_verbose()
         report = MonthlyUsageReport(
-            verbose=self.is_verbose(),
+            verbose=is_verbose,
             start=self.request.query_params.get('start', None),
             end=self.request.query_params.get('end', None)
         )
         report.prepare()
-        return report.result
+        result = report.result
+        result["verbose"] = is_verbose
+
+        return result
 
     @swagger_auto_schema(manual_parameters=[verbose_param, start_date_param, end_date_param])
     def get(self, request, *args, **kwargs):
