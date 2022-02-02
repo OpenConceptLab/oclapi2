@@ -123,7 +123,14 @@ class LocalizedText(models.Model):
 
     @property
     def is_fully_specified(self):
-        return self.type in LOCALES_FULLY_SPECIFIED
+        return self.type in LOCALES_FULLY_SPECIFIED or self.is_fully_specified_after_clean
+
+    @property
+    def is_fully_specified_after_clean(self):  # needed for OpenMRS schema content created from TermBrowser
+        if not self.type:
+            return False
+        _type = self.type.replace(' ', '').replace('-', '').replace('_', '').lower()
+        return _type == 'fullyspecified'
 
     @property
     def is_short(self):

@@ -178,7 +178,7 @@ class OpenMRSConceptValidator(BaseConceptValidator):
             return
 
         for name in names:
-            if name.type in [FULLY_SPECIFIED, SHORT, INDEX_TERM]:
+            if name.type in [FULLY_SPECIFIED, SHORT, INDEX_TERM] or name.is_fully_specified_after_clean:
                 continue
 
             if (name.type or 'None') in self.reference_values['NameTypes']:
