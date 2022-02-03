@@ -65,14 +65,18 @@ class MappingListView(MappingBaseView, ListWithHeadersMixin, CreateModelMixin):
             queryset = queryset.filter(id=F('versioned_object_id'))
 
         user = self.request.user
+
+        if get(user, 'is_staff'):
+            return queryset
+
         if get(user, 'is_anonymous'):
-            queryset = queryset.exclude(public_access=ACCESS_TYPE_NONE)
-        elif not get(user, 'is_staff'):
-            public_queryset = queryset.exclude(public_access=ACCESS_TYPE_NONE)
-            private_queryset = queryset.filter(public_access=ACCESS_TYPE_NONE)
-            private_queryset = private_queryset.filter(
-                Q(parent__user_id=user.id) | Q(parent__organization__members__id=user.id))
-            queryset = public_queryset.union(private_queryset)
+            return queryset.exclude(public_access=ACCESS_TYPE_NONE)
+
+        public_queryset = queryset.exclude(public_access=ACCESS_TYPE_NONE)
+        private_queryset = queryset.filter(public_access=ACCESS_TYPE_NONE)
+        private_queryset = private_queryset.filter(
+            Q(parent__user_id=user.id) | Q(parent__organization__members__id=user.id))
+        queryset = public_queryset.union(private_queryset)
 
         return queryset
 
