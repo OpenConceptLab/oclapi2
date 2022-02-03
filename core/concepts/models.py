@@ -914,20 +914,18 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             cascade_mappings=True, cascade_hierarchy=True, cascade_levels='*',
             include_mappings=True, reverse=False, max_results=1000
     ):
+        from core.mappings.models import Mapping
+        result = dict(concepts=Concept.objects.filter(id=self.id), mappings=Mapping.objects.none())
+
         if cascade_levels == 0:
-            from core.mappings.models import Mapping
-            return dict(concepts=Concept.objects.filter(id=self.id), mappings=Mapping.objects.none())
-        result = self.get_cascaded_resources(
-            source_mappings=source_mappings, source_to_concepts=source_to_concepts, mappings_criteria=mappings_criteria,
-            cascade_mappings=cascade_mappings, cascade_hierarchy=cascade_hierarchy, include_mappings=include_mappings,
-            reverse=reverse
-        )
-        cascaded = [self.id]
+            return result
+
+        cascaded = []
 
         def iterate(level):
-            if level == '*' or level > 1:
-                if (result['concepts'].count() + result['mappings'].count()) < max_results:
-                    not_cascaded = result['concepts'].exclude(id__in=cascaded)
+            if level == '*' or level > 0:
+                if not cascaded or (result['concepts'].count() + result['mappings'].count()) < max_results:
+                    not_cascaded = result['concepts'].exclude(id__in=cascaded) if cascaded else result['concepts']
                     if not_cascaded.exists():
                         for concept in not_cascaded:
                             res = concept.get_cascaded_resources(
@@ -939,6 +937,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                             cascaded.append(concept.id)
                             result['concepts'] |= res['concepts']
                             result['mappings'] |= res['mappings']
+
                         iterate(level if level == '*' else level - 1)
 
         iterate(cascade_levels)
@@ -952,26 +951,16 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     ):
         if cascade_levels == 0:
             return self
-        self.cascaded_entries = self.get_cascaded_resources(
-            source_mappings=source_mappings, source_to_concepts=source_to_concepts, mappings_criteria=mappings_criteria,
-            cascade_mappings=cascade_mappings, cascade_hierarchy=cascade_hierarchy, include_mappings=include_mappings,
-            include_self=False, reverse=reverse
-        )
-        last_level_concepts = list(
-            set(list(self.cascaded_entries['hierarchy_concepts']) + list(self.cascaded_entries['concepts'])))
-        self.cascaded_entries['concepts'] = last_level_concepts
-        self.current_level = 1
-        levels = {self.current_level: last_level_concepts}
+        self.current_level = 0
+        levels = {self.current_level: [self]}
 
         def has_entries(entries):
             return entries is not None and (bool(len(entries['concepts'])) or entries['mappings'].exists())
 
-        concept_has_entries = has_entries(self.cascaded_entries)
-        self.terminal = not concept_has_entries
-        cascaded = {self.id: concept_has_entries}
+        cascaded = {}
 
         def iterate(level):
-            if level == '*' or level > 1:
+            if level == '*' or level > 0:
                 new_level = self.current_level + 1
                 levels[new_level] = levels.get(new_level, [])
                 for concept in levels[self.current_level]:
@@ -991,6 +980,11 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                     concept_has_entries = has_entries(cascaded_entries)
                     cascaded[concept.id] = concept_has_entries
                     concept.terminal = not concept_has_entries
+                    if level == 1 and cascade_levels != '*':  # last level, when cascadeLevels are finite
+                        for _concept in cascaded_entries['concepts']:
+                            if _concept.id in cascaded:
+                                _concept.terminal = not cascaded[_concept.id]
+
                     levels[new_level] += cascaded_entries['concepts']
                 if not levels[new_level]:
                     return
