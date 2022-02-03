@@ -219,7 +219,7 @@ class ConceptListSerializer(ConceptAbstractSerializer):
             'uuid', 'id', 'external_id', 'concept_class', 'datatype', 'url', 'retired', 'source',
             'owner', 'owner_type', 'owner_url', 'display_name', 'display_locale', 'version', 'update_comment',
             'locale', 'version_created_by', 'version_created_on', 'mappings', 'is_latest_version', 'versions_url',
-            'version_url', 'extras', 'type'
+            'version_url', 'extras', 'type', 'versioned_object_id'
         )
 
 
@@ -351,7 +351,7 @@ class ConceptDetailSerializer(ConceptAbstractSerializer):
             'owner', 'owner_type', 'owner_url', 'display_name', 'display_locale', 'names', 'descriptions',
             'created_on', 'updated_on', 'versions_url', 'version', 'extras', 'parent_id', 'name', 'type',
             'update_comment', 'version_url', 'updated_by', 'created_by',
-            'public_can_view',
+            'public_can_view', 'versioned_object_id'
         )
 
     def create(self, validated_data):

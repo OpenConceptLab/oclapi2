@@ -94,6 +94,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
                 'created_by',
                 'parent_concept_urls',
                 'public_can_view',
+                'versioned_object_id',
             ])
         )
 
@@ -192,7 +193,8 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
                     'updated_by',
                     'created_by',
                     'parent_concept_urls',
-                    'public_can_view'])
+                    'public_can_view',
+                    'versioned_object_id'])
         )
 
         version = Concept.objects.last()
@@ -266,7 +268,8 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
                     'updated_by',
                     'created_by',
                     'parent_concept_urls',
-                    'public_can_view'])
+                    'public_can_view',
+                    'versioned_object_id'])
         )
 
         names = response.data['names']
@@ -638,7 +641,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
             sorted(['uuid', 'id', 'external_id', 'concept_class', 'datatype', 'url', 'retired', 'source',
                     'owner', 'owner_type', 'owner_url', 'display_name', 'display_locale', 'version', 'update_comment',
                     'locale', 'version_created_by', 'version_created_on', 'is_latest_version',
-                    'versions_url', 'version_url', 'type'])
+                    'versions_url', 'version_url', 'type', 'versioned_object_id'])
         )
 
         response = self.client.get(
@@ -653,7 +656,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
                     'owner', 'owner_type', 'owner_url', 'display_name', 'display_locale', 'names', 'descriptions',
                     'created_on', 'updated_on', 'versions_url', 'version', 'extras', 'name', 'type',
                     'update_comment', 'version_url', 'updated_by', 'created_by',
-                    'public_can_view'])
+                    'public_can_view', 'versioned_object_id'])
         )
 
         response = self.client.get(
