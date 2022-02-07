@@ -4,20 +4,13 @@ from django.db import migrations, models
 import django.db.models.deletion
 
 
-def delete_dormant_references(apps, schema_editor):
-    CollectionReference = apps.get_model('collections', 'CollectionReference')
-    CollectionReference.objects.filter(collections__isnull=True).all().delete()
-
-
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('collections', '0039_auto_20220204_1228'),
+        ('collections', '0039_auto_20220204_1229'),
     ]
 
     operations = [
-        migrations.RunPython(delete_dormant_references),
-
         migrations.AlterField(
             model_name='collectionreference',
             name='collection',
