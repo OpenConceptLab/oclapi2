@@ -5,6 +5,8 @@ from django.db import migrations
 
 def update_collection_reference_relations(apps, schema_editor):
     Collection = apps.get_model('collections', 'Collection')
+    CollectionReference = apps.get_model('collections', 'CollectionReference')
+    CollectionReference.objects.filter(collections__isnull=True).all().delete()
 
     for collection in Collection.objects.all():
         collection.references.update(collection_id=collection.id)
