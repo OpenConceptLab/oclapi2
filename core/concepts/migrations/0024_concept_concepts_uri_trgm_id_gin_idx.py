@@ -13,6 +13,7 @@ class Migration(migrations.Migration):
 
     operations = [
         BtreeGinExtension(),
+        migrations.RunSQL('create extension if not exists pg_trgm;'),
         migrations.AddIndex(
             model_name='concept',
             index=django.contrib.postgres.indexes.GinIndex(condition=models.Q(('is_latest_version', True)), fields=['uri', 'id'], name='concepts_uri_trgm_id_gin_idx', opclasses=['gin_trgm_ops', 'int8_ops']),
