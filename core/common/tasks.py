@@ -144,12 +144,14 @@ def add_references(
         head.remove_processing(self.request.id)
 
     for ref in added_references:
-        if ref.concepts:
-            for concept in ref.concepts:
-                concept.index()
-        if ref.mappings:
-            for mapping in ref.mappings:
-                mapping.index()
+        if ref.concepts.exists():
+            from core.concepts.models import Concept
+            from core.concepts.documents import ConceptDocument
+            Concept.batch_index(ref.concepts, ConceptDocument)
+        if ref.mappings.exists():
+            from core.mappings.models import Mapping
+            from core.mappings.documents import MappingDocument
+            Mapping.batch_index(ref.mappings, MappingDocument)
 
     return errors
 

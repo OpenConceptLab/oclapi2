@@ -315,8 +315,10 @@ class CollectionReferencesView(
 
         if search_query:
             queryset = queryset.filter(expression__icontains=search_query).order_by(sort + 'expression')
+        else:
+            queryset = queryset.order_by('-id')
 
-        return queryset.all()
+        return queryset
 
     def retrieve(self, request, *args, **kwargs):
         return self.list(request, *args, **kwargs)
@@ -642,6 +644,7 @@ class CollectionVersionExpansionBaseView(CollectionBaseView):
     def get_queryset(self):
         version = get_object_or_404(super().get_queryset())
         self.check_object_permissions(self.request, version)
+        self.request.instance = version
         return version.expansions.filter(mnemonic=self.kwargs.get('expansion'))
 
 
@@ -707,6 +710,7 @@ class CollectionVersionConceptsView(CollectionBaseView, ListWithHeadersMixin):
     def get_object(self, queryset=None):
         instance = get_object_or_404(self.get_base_queryset())
         self.check_object_permissions(self.request, instance)
+        self.request.instance = instance
         return instance.expansion
 
     def get_serializer_class(self):
@@ -730,6 +734,7 @@ class CollectionVersionConceptRetrieveView(CollectionBaseView, RetrieveAPIView):
         expansion = instance.expansion
         if not expansion:
             raise Http404()
+        self.request.instance = instance
         concepts = expansion.concepts.filter(mnemonic=self.kwargs['concept'])
         if 'concept_version' in self.kwargs:
             concepts = concepts.filter(version=self.kwargs['concept_version'])

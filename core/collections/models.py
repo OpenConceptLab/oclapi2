@@ -3,6 +3,7 @@ from django.core.exceptions import ValidationError
 from django.db import models, transaction
 from django.db.models import UniqueConstraint
 from django.utils import timezone
+from django.utils.functional import cached_property
 from pydash import get
 
 from core.collections.constants import (
@@ -62,7 +63,6 @@ class Collection(ConceptContainerModel):
     custom_resources_linked_source = models.TextField(blank=True)
     concepts = models.ManyToManyField('concepts.Concept', blank=True, related_name='collection_set')
     mappings = models.ManyToManyField('mappings.Mapping', blank=True, related_name='collection_set')
-    references = models.ManyToManyField('collections.CollectionReference', blank=True, related_name='collections')
     immutable = models.BooleanField(null=True, blank=True, default=None)
     locked_date = models.DateTimeField(null=True, blank=True)
     autoexpand_head = models.BooleanField(default=True, null=True)
@@ -132,10 +132,10 @@ class Collection(ConceptContainerModel):
             raise ValidationError({reference.expression: [REFERENCE_ALREADY_EXISTS]})
 
         if self.is_openmrs_schema and self.expansion_uri:
-            if reference.concepts is None or reference.concepts.count() == 0:
+            if reference._concepts is None or reference._concepts.count() == 0:  # pylint: disable=protected-access
                 return
 
-            concept = reference.concepts[0]
+            concept = reference._concepts[0]  # pylint: disable=protected-access
             self.check_concept_uniqueness_in_collection_and_locale_by_name_attribute(
                 concept, attribute='type__in', value=LOCALES_FULLY_SPECIFIED,
                 error_message=CONCEPT_FULLY_SPECIFIED_NAME_UNIQUE_PER_COLLECTION_AND_LOCALE
@@ -216,7 +216,7 @@ class Collection(ConceptContainerModel):
 
         added_references = []
         for expression in new_expressions:
-            ref = CollectionReference(expression=expression)
+            ref = CollectionReference(expression=expression, collection=self)
             ref.created_by = user
             try:
                 if self.autoexpand_head:
@@ -229,9 +229,9 @@ class Collection(ConceptContainerModel):
                 continue
 
             added = False
-            if ref.concepts:
+            if ref._concepts:  # pylint: disable=protected-access
                 if self.is_openmrs_schema:
-                    for concept in ref.concepts:
+                    for concept in ref._concepts:  # pylint: disable=protected-access
                         try:
                             self.check_concept_uniqueness_in_collection_and_locale_by_name_attribute(
                                 concept, attribute='type__in', value=LOCALES_FULLY_SPECIFIED,
@@ -250,15 +250,13 @@ class Collection(ConceptContainerModel):
                 else:
                     collection_version.expansion.add_references(ref)
                     added = True
-            if ref.mappings:
+            if ref._mappings:  # pylint: disable=protected-access
                 collection_version.expansion.add_references(ref)
                 added = True
             if not added and ref.id:
                 added = True
 
             if added:
-                collection_version.references.add(ref)
-                self.references.add(ref)
                 added_references.append(ref)
 
         if user and user.is_authenticated:
@@ -273,10 +271,13 @@ class Collection(ConceptContainerModel):
     def seed_references(self):
         head = self.head
         if head:
-            references = CollectionReference.objects.bulk_create(
-                [CollectionReference(expression=ref.expression) for ref in head.references.all()]
-            )
-            self.references.set(references)
+            for reference in head.references.all():
+                new_reference = CollectionReference(expression=reference.expression, collection=self)
+                new_reference.save()
+                if reference.concepts.exists():
+                    new_reference.concepts.set(reference.concepts.all())
+                if reference.mappings.exists():
+                    new_reference.mappings.set(reference.mappings.all())
 
     @staticmethod
     def is_validation_necessary():
@@ -288,14 +289,15 @@ class Collection(ConceptContainerModel):
 
     def delete_references(self, expressions):
         if expressions == '*':
-            self.references.clear()
+            references_to_be_deleted = self.references
             if self.expansion_uri:
                 self.expansion.delete_expressions(expressions)
         else:
             references_to_be_deleted = self.references.filter(expression__in=expressions)
             if self.expansion_uri:
                 self.expansion.delete_references(references_to_be_deleted)
-            self.references.remove(*references_to_be_deleted)
+
+        references_to_be_deleted.all().delete()
 
     def get_all_related_uris(self, expressions, cascade_to_concepts=False):
         all_related_mappings = []
@@ -309,7 +311,7 @@ class Collection(ConceptContainerModel):
                 concept_expressions.append(expression)
 
         for concept_expression in concept_expressions:
-            ref = CollectionReference(expression=concept_expression)
+            ref = CollectionReference(expression=concept_expression, collection=self)
             try:
                 self.validate(ref)
                 all_related_mappings += ref.get_related_uris(unversioned_mappings, cascade_to_concepts)
@@ -404,12 +406,22 @@ class Collection(ConceptContainerModel):
         return self.uri + 'expansions/'
 
 
+class ReferencedConcept(models.Model):
+    reference = models.ForeignKey('collections.CollectionReference', on_delete=models.CASCADE)
+    concept = models.ForeignKey('concepts.Concept', on_delete=models.CASCADE)
+
+
+class ReferencedMapping(models.Model):
+    reference = models.ForeignKey('collections.CollectionReference', on_delete=models.CASCADE)
+    mapping = models.ForeignKey('mappings.Mapping', on_delete=models.CASCADE)
+
+
 class CollectionReference(models.Model):
     class Meta:
         db_table = 'collection_references'
 
-    concepts = None
-    mappings = None
+    _concepts = None
+    _mappings = None
     original_expression = None
     created_by = None
 
@@ -418,6 +430,18 @@ class CollectionReference(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     last_resolved_at = models.DateTimeField(default=timezone.now, null=True)
+    concepts = models.ManyToManyField('concepts.Concept', related_name='references', through=ReferencedConcept)
+    mappings = models.ManyToManyField('mappings.Mapping', related_name='references', through=ReferencedMapping)
+    collection = models.ForeignKey('collections.Collection', related_name='references', on_delete=models.CASCADE)
+
+    @cached_property
+    def uri(self):
+        return self.calculate_uri(self.collection)
+
+    def calculate_uri(self, collection):
+        if collection:
+            return f'{collection.uri}references/{self.id}/'
+        return None
 
     @property
     def without_version(self):
@@ -435,14 +459,14 @@ class CollectionReference(models.Model):
 
     def fetch_concepts(self, user):
         if get(self, '_fetched'):
-            return self.concepts
+            return self._concepts
         if self.should_fetch_from_api:
             return Concept.objects.filter(uri__in=self.fetch_uris(user))
         return self.get_concepts()
 
     def fetch_mappings(self, user):
         if get(self, '_fetched'):
-            return self.mappings
+            return self._mappings
         if self.should_fetch_from_api:
             return Mapping.objects.filter(uri__in=self.fetch_uris(user))
         return self.get_mappings()
@@ -463,9 +487,19 @@ class CollectionReference(models.Model):
         self.original_expression = str(self.expression)
 
         self.create_entities_from_expressions()
-        is_resolved = bool((self.mappings and self.mappings.exists()) or (self.concepts and self.concepts.exists()))
+        is_resolved = bool((self._mappings and self._mappings.exists()) or (self._concepts and self._concepts.exists()))
         if not is_resolved:
             self.last_resolved_at = None
+
+    def save(self, force_insert=False, force_update=False, using=None,
+             update_fields=None):
+        super().save(force_insert=force_insert, force_update=force_update, using=using, update_fields=update_fields)
+
+        if self.id and get(self, '_fetched'):
+            if self._concepts is not None and self._concepts.exists():
+                self.concepts.set(self._concepts)
+            if self._mappings is not None and self._mappings.exists():
+                self.mappings.set(self._mappings)
 
     @property
     def should_fetch_from_api(self):
@@ -482,9 +516,9 @@ class CollectionReference(models.Model):
 
     def create_entities_from_expressions(self):
         if self.is_concept:
-            self.concepts = self.fetch_concepts(self.created_by)
+            self._concepts = self.fetch_concepts(self.created_by)
         elif self.is_mapping:
-            self.mappings = self.fetch_mappings(self.created_by)
+            self._mappings = self.fetch_mappings(self.created_by)
 
         self._fetched = True
 
@@ -592,12 +626,12 @@ class Expansion(BaseResourceModel):
         index_mappings = False
         for reference in refs:
             if reference.is_concept:
-                concepts = reference.fetch_concepts(self.created_by)
+                concepts = reference.concepts
                 if concepts.exists():
                     index_concepts = True
                     self.concepts.set(self.concepts.exclude(id__in=concepts.values_list('id', flat=True)))
             elif reference.is_mapping:
-                mappings = reference.fetch_mappings(self.created_by)
+                mappings = reference.mappings
                 if mappings.exists():
                     index_mappings = True
                     self.mappings.set(self.mappings.exclude(id__in=mappings.values_list('id', flat=True)))

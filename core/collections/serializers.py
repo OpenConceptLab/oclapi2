@@ -359,7 +359,7 @@ class CollectionReferenceSerializer(ModelSerializer):
 
     class Meta:
         model = CollectionReference
-        fields = ('expression', 'reference_type', 'id', 'last_resolved_at')
+        fields = ('expression', 'reference_type', 'id', 'last_resolved_at', 'uri')
 
 
 class CollectionReferenceDetailSerializer(CollectionReferenceSerializer):

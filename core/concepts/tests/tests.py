@@ -1069,9 +1069,8 @@ class ConceptTest(OCLTestCase):
         collection_version1 = OrganizationCollectionFactory(
             version='v1', mnemonic=collection.mnemonic, organization=collection.organization)
         expansion = ExpansionFactory(collection_version=collection_version1)
-        reference = CollectionReference(expression=concept_v1.version_url)
+        reference = CollectionReference(expression=concept_v1.version_url, collection=collection_version1)
         reference.save()
-        collection_version1.references.add(reference)
         expansion.seed_children(index=False)
 
         self.assertEqual(expansion.concepts.count(), 1)

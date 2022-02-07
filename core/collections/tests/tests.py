@@ -16,6 +16,7 @@ from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory, LocalizedTextFactory
 from core.mappings.documents import MappingDocument
 from core.mappings.tests.factories import MappingFactory
+from core.orgs.tests.factories import OrganizationFactory
 from core.sources.tests.factories import OrganizationSourceFactory
 
 
@@ -157,10 +158,9 @@ class CollectionTest(OCLTestCase):
         ch_locale = LocalizedTextFactory(locale_preferred=True, locale='ch')
         en_locale = LocalizedTextFactory(locale_preferred=True, locale='en')
         concept = ConceptFactory(names=[ch_locale, en_locale])
-        reference = CollectionReference(expression=concept.uri)
+        reference = CollectionReference(expression=concept.uri, collection=collection)
         reference.save()
 
-        collection.references.add(reference)
         self.assertEqual(collection.references.count(), 1)
 
         with self.assertRaises(ValidationError) as ex:
@@ -184,12 +184,11 @@ class CollectionTest(OCLTestCase):
         collection.expansion_uri = expansion.uri
         collection.save()
         expansion.concepts.add(concept1)
-        concept1_reference = CollectionReference(expression=concept1.uri)
+        concept1_reference = CollectionReference(expression=concept1.uri, collection=collection)
         concept1_reference.save()
-        collection.references.add(concept1_reference)
 
         concept2 = ConceptFactory(names=[ch_locale, en_locale])
-        concept2_reference = CollectionReference(expression=concept2.uri)
+        concept2_reference = CollectionReference(expression=concept2.uri, collection=collection)
 
         with self.assertRaises(ValidationError) as ex:
             collection.validate(concept2_reference)
@@ -207,14 +206,13 @@ class CollectionTest(OCLTestCase):
         collection.expansion_uri = expansion.uri
         collection.save()
         collection.expansion.concepts.add(concept1)
-        concept1_reference = CollectionReference(expression=concept1.uri)
+        concept1_reference = CollectionReference(expression=concept1.uri, collection=collection)
         concept1_reference.save()
-        collection.references.add(concept1_reference)
 
         en_locale1 = LocalizedTextFactory(locale='en', locale_preferred=False, name='name')
         en_locale2 = LocalizedTextFactory(locale='en', locale_preferred=True, name='name')
         concept2 = ConceptFactory(names=[en_locale1, en_locale2])
-        concept2_reference = CollectionReference(expression=concept2.uri)
+        concept2_reference = CollectionReference(expression=concept2.uri, collection=collection)
 
         with self.assertRaises(ValidationError) as ex:
             collection.validate(concept2_reference)
@@ -328,8 +326,20 @@ class CollectionTest(OCLTestCase):
 
 
 class CollectionReferenceTest(OCLTestCase):
+    def test_uri(self):
+        org = OrganizationFactory(mnemonic='MyOrg')
+        collection = OrganizationCollectionFactory(organization=org, mnemonic='MyCollection', version='HEAD')
+        reference = CollectionReference(expression='/foo/bar', collection=collection)
+        reference.save()
+        self.assertEqual(reference.uri, f'/orgs/MyOrg/collections/MyCollection/references/{reference.id}/')
+
+        collection_v1 = OrganizationCollectionFactory(organization=org, mnemonic='MyCollection', version='v1')
+        reference = CollectionReference(expression='/foo/bar', collection=collection_v1)
+        reference.save()
+        self.assertEqual(reference.uri, f'/orgs/MyOrg/collections/MyCollection/v1/references/{reference.id}/')
+
     def test_invalid_expression(self):
-        reference = CollectionReference(expression='')
+        reference = CollectionReference(expression='', collection=OrganizationCollectionFactory())
 
         with self.assertRaises(ValidationError) as ex:
             reference.full_clean()
@@ -357,15 +367,16 @@ class CollectionReferenceTest(OCLTestCase):
         self.assertEqual(reference.reference_type, 'mappings')
 
     def test_reference_as_concept_version(self):
+        collection = OrganizationCollectionFactory()
         concept = ConceptFactory()
         expression = concept.uri
 
-        reference = CollectionReference(expression=expression)
+        reference = CollectionReference(expression=expression, collection=collection)
         reference.full_clean()
 
-        self.assertEqual(len(reference.concepts), 1)
-        self.assertTrue(isinstance(reference.concepts[0], Concept))
-        self.assertEqual(reference.concepts[0].id, concept.get_latest_version().id)
+        self.assertEqual(len(reference._concepts), 1)  # pylint: disable=protected-access
+        self.assertTrue(isinstance(reference._concepts[0], Concept))  # pylint: disable=protected-access
+        self.assertEqual(reference._concepts[0].id, concept.get_latest_version().id)  # pylint: disable=protected-access
 
     def test_get_concepts(self):
         reference = CollectionReference()

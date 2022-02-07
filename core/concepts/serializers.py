@@ -110,13 +110,14 @@ class ConceptAbstractSerializer(ModelSerializer):
     parent_concept_urls = ListField(allow_null=True, required=False, allow_empty=True)
     child_concept_urls = ListField(read_only=True)
     summary = SerializerMethodField()
+    references = SerializerMethodField()
 
     class Meta:
         model = Concept
         abstract = True
         fields = (
             'uuid', 'parent_concept_urls', 'child_concept_urls', 'parent_concepts', 'child_concepts', 'hierarchy_path',
-            'mappings', 'extras', 'summary',
+            'mappings', 'extras', 'summary', 'references'
         )
 
     def __init__(self, *args, **kwargs):
@@ -158,10 +159,18 @@ class ConceptAbstractSerializer(ModelSerializer):
                 self.fields.pop('mappings', None)
             if not self.include_summary:
                 self.fields.pop('summary', None)
+            if not get(request, 'instance'):
+                self.fields.pop('references', None)
         except:  # pylint: disable=bare-except
             pass
 
         super().__init__(*args, **kwargs)
+
+    def get_references(self, obj):
+        collection = get(self, 'context.request.instance')
+        if collection:
+            return obj.collection_references_uris(collection)
+        return None
 
     def get_mappings(self, obj):
         from core.mappings.serializers import MappingDetailSerializer

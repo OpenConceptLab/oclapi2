@@ -1,5 +1,5 @@
 from pydash import get
-from rest_framework.fields import CharField, JSONField, IntegerField, DateTimeField, ListField
+from rest_framework.fields import CharField, JSONField, IntegerField, DateTimeField, ListField, SerializerMethodField
 from rest_framework.serializers import ModelSerializer
 
 from core.common.constants import MAPPING_LOOKUP_CONCEPTS, MAPPING_LOOKUP_SOURCES, MAPPING_LOOKUP_FROM_CONCEPT, \
@@ -29,6 +29,7 @@ class MappingListSerializer(ModelSerializer):
     to_concept_name_resolved = CharField(source='to_concept.display_name', read_only=True)
     to_concept_code = EncodedDecodedCharField(required=False)
     from_concept_code = EncodedDecodedCharField(required=False)
+    references = SerializerMethodField()
 
     class Meta:
         model = Mapping
@@ -41,11 +42,12 @@ class MappingListSerializer(ModelSerializer):
             'url', 'version', 'id', 'versioned_object_id', 'versioned_object_url',
             'is_latest_version', 'update_comment', 'version_url', 'uuid', 'version_created_on',
             'from_source_version', 'to_source_version', 'from_concept', 'to_concept', 'from_source', 'to_source',
-            'from_concept_name_resolved', 'to_concept_name_resolved', 'extras', 'type'
+            'from_concept_name_resolved', 'to_concept_name_resolved', 'extras', 'type', 'references'
         )
 
     def __init__(self, *args, **kwargs):
-        params = get(kwargs, 'context.request.query_params')
+        request = get(kwargs, 'context.request')
+        params = get(request, 'query_params')
         self.query_params = params.dict() if params else {}
         self.include_from_source = self.query_params.get(MAPPING_LOOKUP_FROM_SOURCE) in ['true', True]
         self.include_to_source = self.query_params.get(MAPPING_LOOKUP_TO_SOURCE) in ['true', True]
@@ -73,7 +75,16 @@ class MappingListSerializer(ModelSerializer):
         ]:
             self.fields.pop('extras', None)
 
+        if not get(request, 'instance'):
+            self.fields.pop('references', None)
+
         super().__init__(*args, **kwargs)
+
+    def get_references(self, obj):
+        collection = get(self, 'context.request.instance')
+        if collection:
+            return obj.collection_references_uris(collection)
+        return None
 
 
 class MappingVersionListSerializer(MappingListSerializer):

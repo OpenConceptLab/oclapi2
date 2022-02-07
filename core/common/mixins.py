@@ -555,6 +555,11 @@ class SourceChildMixin:
 
         return result
 
+    def collection_references_uris(self, collection):
+        uri = collection.uri
+        ids = self.references.filter(collection=collection).values_list('id', flat=True)
+        return [f"{uri}references/{_id}/" for _id in ids]
+
 
 class ConceptContainerExportMixin:
     def get_object(self):

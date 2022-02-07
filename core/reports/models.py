@@ -186,7 +186,7 @@ class CollectionVersionReport(ResourceReport):
 
 
 class CollectionReferenceReport(ResourceReport):
-    queryset = CollectionReference.objects.filter(collections__version=HEAD)
+    queryset = CollectionReference.objects.filter(collection__version=HEAD)
     resource = 'collection_references'
 
 

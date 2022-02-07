@@ -402,11 +402,10 @@ class CollectionReferencesViewTest(OCLAPITestCase):
         self.collection.expansion_uri = self.expansion.uri
         self.collection.save()
         self.concept = ConceptFactory()
-        self.reference = CollectionReference(expression=self.concept.uri)
+        self.reference = CollectionReference(expression=self.concept.uri, collection=self.collection)
         self.reference.full_clean()
         self.reference.save()
-        self.collection.references.add(self.reference)
-        self.expansion.concepts.set(self.reference.concepts)
+        self.expansion.concepts.set(self.reference.concepts.all())
         self.assertEqual(self.collection.references.count(), 1)
         self.assertEqual(self.expansion.concepts.count(), 1)
 
@@ -1060,11 +1059,10 @@ class CollectionVersionListViewTest(OCLAPITestCase):
         self.token = self.user.get_token()
         self.collection = UserCollectionFactory(mnemonic='coll', user=self.user)
         self.concept = ConceptFactory()
-        self.reference = CollectionReference(expression=self.concept.uri)
+        self.reference = CollectionReference(expression=self.concept.uri, collection=self.collection)
         self.reference.full_clean()
         self.reference.save()
-        self.collection.references.add(self.reference)
-        self.collection.concepts.set(self.reference.concepts)
+        self.collection.concepts.set(self.reference.concepts.all())
         self.assertEqual(self.collection.references.count(), 1)
         self.assertEqual(self.collection.concepts.count(), 1)
 
