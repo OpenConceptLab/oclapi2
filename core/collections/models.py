@@ -1,3 +1,5 @@
+import time
+
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
@@ -360,6 +362,7 @@ class Collection(ConceptContainerModel):
 
         if should_auto_expand and not self.expansions.exists():
             expansion_data['mnemonic'] = f'autoexpand-{self.version}'
+            expansion_data['is_processing'] = True
         expansion = Expansion.persist(index=index, **expansion_data, collection_version=self)
 
         if should_auto_expand and not self.expansion_uri:
@@ -567,6 +570,7 @@ class Expansion(BaseResourceModel):
     mappings = models.ManyToManyField('mappings.Mapping', blank=True, related_name='expansion_set')
     collection_version = models.ForeignKey(
         'collections.Collection', related_name='expansions', on_delete=models.CASCADE)
+    is_processing = models.BooleanField(default=False)
 
     @staticmethod
     def get_resource_url_kwarg():
@@ -690,6 +694,16 @@ class Expansion(BaseResourceModel):
 
     def seed_children(self, index=True):
         return self.add_references(self.collection_version.references, index)
+
+    def wait_until_processed(self):
+        processing = self.is_processing
+        while processing:
+            print("Expansion is still processing, sleeping for 5 secs...")
+            time.sleep(5)
+            self.refresh_from_db()
+            processing = self.is_processing
+            if not processing:
+                print("Expansion processed, waking up...")
 
     def calculate_uri(self):
         version = self.collection_version

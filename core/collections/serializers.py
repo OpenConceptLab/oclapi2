@@ -387,7 +387,7 @@ class ExpansionSerializer(ModelSerializer):
 
     class Meta:
         model = Expansion
-        fields = ('mnemonic', 'id', 'parameters', 'canonical_url', 'url', 'summary')
+        fields = ('mnemonic', 'id', 'parameters', 'canonical_url', 'url', 'summary', 'is_processing')
 
     def __init__(self, *args, **kwargs):
         params = get(kwargs, 'context.request.query_params')
@@ -422,7 +422,10 @@ class ExpansionDetailSerializer(ModelSerializer):
 
     class Meta:
         model = Expansion
-        fields = ('mnemonic', 'id', 'parameters', 'canonical_url', 'url', 'summary', 'created_on', 'created_by')
+        fields = (
+            'mnemonic', 'id', 'parameters', 'canonical_url', 'url', 'summary', 'created_on', 'created_by',
+            'is_processing'
+        )
 
     def __init__(self, *args, **kwargs):
         params = get(kwargs, 'context.request.query_params')

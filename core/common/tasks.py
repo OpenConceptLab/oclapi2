@@ -117,6 +117,9 @@ def export_collection(self, version_id):
         return
 
     version.add_processing(self.request.id)
+
+    if version.expansion_uri:
+        version.expansion.wait_until_processed()
     try:
         logger.info('Found collection version %s.  Beginning export...', version.version)
         write_export_file(
@@ -330,6 +333,9 @@ def seed_children_to_expansion(expansion_id, index=True):
     expansion = Expansion.objects.filter(id=expansion_id).first()
     if expansion:
         expansion.seed_children(index=index)
+        if expansion.is_processing:
+            expansion.is_processing = False
+            expansion.save()
 
 
 @app.task
