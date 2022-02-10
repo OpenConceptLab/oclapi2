@@ -884,6 +884,17 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         return len(self.child_concept_urls)
 
     @property
+    def has_children(self):
+        result = self.child_concepts.exists()
+
+        if not result and self.is_latest_version:
+            result = self.versioned_object.child_concepts.exists()
+        elif not result and self.is_versioned_object:
+            result = self.get_latest_version().child_concepts.exists()
+
+        return result
+
+    @property
     def parent_concepts_count(self):
         return len(self.parent_concept_urls)
 

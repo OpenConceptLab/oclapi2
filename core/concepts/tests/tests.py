@@ -988,6 +988,17 @@ class ConceptTest(OCLTestCase):
         self.assertEqual(child_child_concept.parent_concept_urls, [child_concept.uri])
         self.assertEqual(child_child_concept.parent_concepts_count, 1)
 
+    def test_has_children(self):
+        concept = ConceptFactory()
+
+        self.assertFalse(concept.has_children)
+
+        concept2 = ConceptFactory()
+        concept2.parent_concepts.add(concept)
+
+        self.assertTrue(concept.has_children)
+        self.assertFalse(concept2.has_children)
+
     def test_get_serializer_class(self):
         self.assertEqual(Concept.get_serializer_class(), ConceptListSerializer)
         self.assertEqual(Concept.get_serializer_class(version=True), ConceptVersionListSerializer)
