@@ -518,16 +518,12 @@ class ConceptHierarchySerializer(ModelSerializer):
         fields = ('uuid', 'id', 'url', 'children', 'name')
 
 
-class ConceptChildrenSerializer(ModelSerializer):
-    uuid = CharField(source='id')
-    id = EncodedDecodedCharField(source='mnemonic')
-    url = CharField(source='uri')
-    name = CharField(source='display_name')
+class ConceptChildrenSerializer(ConceptListSerializer):
     children = SerializerMethodField()
 
     class Meta:
         model = Concept
-        fields = ('uuid', 'id', 'url', 'children', 'name')
+        fields = ConceptListSerializer.Meta.fields + ('children', 'has_children')
 
     def __init__(self, *args, **kwargs):
         params = get(kwargs, 'context.request.query_params')

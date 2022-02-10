@@ -139,7 +139,7 @@ class Source(ConceptContainerModel):
             raise ValidationError({'hierarchy_root': [HIERARCHY_ROOT_MUST_BELONG_TO_SAME_SOURCE]})
 
     def get_parentless_concepts(self):
-        return self.concepts_set.filter(parent_concepts__isnull=True, id=F('versioned_object_id'))
+        return self.concepts.filter(parent_concepts__isnull=True, id=F('versioned_object_id'))
 
     def hierarchy(self, offset=0, limit=100):
         from core.concepts.serializers import ConceptHierarchySerializer
