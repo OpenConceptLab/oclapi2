@@ -1,6 +1,6 @@
 from pydash import get
 from rest_framework.fields import CharField, DateTimeField, BooleanField, URLField, JSONField, SerializerMethodField, \
-    UUIDField, ListField, IntegerField
+    UUIDField, ListField, IntegerField, ReadOnlyField
 from rest_framework.serializers import ModelSerializer
 
 from core.common.constants import INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_MAPPINGS_PARAM, INCLUDE_EXTRAS_PARAM, \
@@ -117,10 +117,10 @@ class ConceptAbstractSerializer(ModelSerializer):
         abstract = True
         fields = (
             'uuid', 'parent_concept_urls', 'child_concept_urls', 'parent_concepts', 'child_concepts', 'hierarchy_path',
-            'mappings', 'extras', 'summary', 'references'
+            'mappings', 'extras', 'summary', 'references', 'has_children'
         )
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, **kwargs):  # pylint: disable=too-many-branches
         request = get(kwargs, 'context.request')
         params = get(request, 'query_params')
         self.view_kwargs = get(kwargs, 'context.view.kwargs', {})
@@ -161,6 +161,8 @@ class ConceptAbstractSerializer(ModelSerializer):
                 self.fields.pop('summary', None)
             if not get(request, 'instance'):
                 self.fields.pop('references', None)
+            if get(params, 'onlyParentLess') not in ['true', True]:
+                self.fields.pop('has_children', None)
         except:  # pylint: disable=bare-except
             pass
 
@@ -538,6 +540,9 @@ class ConceptChildrenSerializer(ConceptListSerializer):
             pass
 
         super().__init__(*args, **kwargs)
+
+        if 'has_children' not in self.fields:
+            self.fields['has_children'] = ReadOnlyField()
 
     def get_children(self, obj):
         if self.include_child_concepts:
