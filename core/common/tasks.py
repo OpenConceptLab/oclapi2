@@ -494,10 +494,13 @@ def delete_concept(concept_id):  # pragma: no cover
 
 
 @app.task
-def batch_index_resources(resource, filters):
+def batch_index_resources(resource, filters, update_indexed=False):
     model = get_resource_class_from_resource_name(resource)
     if model:
-        model.batch_index(model.objects.filter(**filters), model.get_search_document())
+        queryset = model.objects.filter(**filters)
+        model.batch_index(queryset, model.get_search_document())
+        if update_indexed:
+            queryset.update(_index=True)
 
     return 1
 

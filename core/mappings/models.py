@@ -70,6 +70,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
     to_source_url = models.TextField(null=True, blank=True, db_index=True)
     to_source_version = models.TextField(null=True, blank=True)
     _counted = models.BooleanField(default=True, null=True, blank=True)
+    _index = models.BooleanField(default=True)
 
     logo_path = None
     name = None
@@ -239,6 +240,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
             from_source_id=self.from_source_id,
             from_source_url=self.from_source_url,
             from_source_version=self.from_source_version,
+            _index=self._index
         )
         if user:
             mapping.created_by = mapping.updated_by = user
@@ -435,16 +437,18 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
                     obj.update_versioned_object()
                     if prev_latest_version:
                         prev_latest_version.is_latest_version = False
-                        prev_latest_version.save(update_fields=['is_latest_version'])
+                        prev_latest_version._index = obj._index  # pylint: disable=protected-access
+                        prev_latest_version.save(update_fields=['is_latest_version', '_index'])
 
                     obj.sources.set(compact([parent, parent_head]))
                     persisted = True
                     cls.resume_indexing()
 
                     def index_all():
-                        if prev_latest_version:
-                            prev_latest_version.index()
-                        obj.index()
+                        if obj._index:  # pylint: disable=protected-access
+                            if prev_latest_version:
+                                prev_latest_version.index()
+                            obj.index()
 
                     transaction.on_commit(index_all)
         except ValidationError as err:
@@ -455,8 +459,9 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
                 if obj.id:
                     obj.sources.remove(parent_head)
                     if prev_latest_version:
+                        prev_latest_version._index = True  # pylint: disable=protected-access
                         prev_latest_version.is_latest_version = True
-                        prev_latest_version.save(update_fields=['is_latest_version'])
+                        prev_latest_version.save(update_fields=['is_latest_version', '_index'])
                     obj.delete()
                 errors['non_field_errors'] = [PERSIST_CLONE_ERROR]
 

@@ -188,6 +188,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         db_index=True
     )
     _counted = models.BooleanField(default=True, null=True, blank=True)
+    _index = models.BooleanField(default=True)
     logo_path = None
 
     OBJECT_TYPE = CONCEPT_TYPE
@@ -468,6 +469,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             is_latest_version=self.is_latest_version,
             parent_id=self.parent_id,
             versioned_object_id=self.versioned_object_id,
+            _index=self._index
         )
         concept_version.cloned_names = self.__clone_name_locales()
         concept_version.cloned_descriptions = self.__clone_description_locales()
@@ -713,8 +715,9 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                     obj.clean()  # clean here to validate locales that can only be saved after obj is saved
                     obj.update_versioned_object()
                     if prev_latest_version:
+                        prev_latest_version._index = obj._index  # pylint: disable=protected-access
                         prev_latest_version.is_latest_version = False
-                        prev_latest_version.save(update_fields=['is_latest_version'])
+                        prev_latest_version.save(update_fields=['is_latest_version', '_index'])
                         if add_prev_version_children:
                             if get(settings, 'TEST_MODE', False):
                                 process_hierarchy_for_new_parent_concept_version(prev_latest_version.id, obj.id)
@@ -737,9 +740,10 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                         )
 
                     def index_all():
-                        if prev_latest_version:
-                            prev_latest_version.index()
-                        obj.index()
+                        if obj._index:  # pylint: disable=protected-access
+                            if prev_latest_version:
+                                prev_latest_version.index()
+                            obj.index()
 
                     transaction.on_commit(index_all)
         except ValidationError as err:
@@ -749,8 +753,9 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             cls.resume_indexing()
             if not persisted:
                 if prev_latest_version:
+                    prev_latest_version._index = True  # pylint: disable=protected-access
                     prev_latest_version.is_latest_version = True
-                    prev_latest_version.save(update_fields=['is_latest_version'])
+                    prev_latest_version.save(update_fields=['is_latest_version', '_index'])
                 if obj.id:
                     obj.remove_locales()
                     obj.sources.remove(parent_head)

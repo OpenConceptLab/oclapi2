@@ -69,6 +69,7 @@ class BaseModel(models.Model):
     extras_have_been_encoded = False
     extras_have_been_decoded = False
     is_being_saved = False
+    _index = True
 
     @property
     def model_name(self):
@@ -81,6 +82,12 @@ class BaseModel(models.Model):
     def index(self):
         if not get(settings, 'TEST_MODE', False):
             handle_save.delay(self.app_name, self.model_name, self.id)
+
+    @property
+    def should_index(self):
+        if getattr(self, '_index', None) is not None:
+            return self._index
+        return True
 
     def soft_delete(self):
         if self.is_active:
@@ -760,9 +767,9 @@ class ConceptContainerModel(VersionedModel):
 
 class CelerySignalProcessor(RealTimeSignalProcessor):
     def handle_save(self, sender, instance, **kwargs):
-        if settings.ES_SYNC and instance.__class__ in registry.get_models():
+        if settings.ES_SYNC and instance.__class__ in registry.get_models() and instance.should_index:
             handle_save.delay(instance.app_name, instance.model_name, instance.id)
 
     def handle_m2m_changed(self, sender, instance, action, **kwargs):
-        if settings.ES_SYNC and instance.__class__ in registry.get_models():
+        if settings.ES_SYNC and instance.__class__ in registry.get_models() and instance.should_index:
             handle_m2m_changed.delay(instance.app_name, instance.model_name, instance.id, action)

@@ -375,6 +375,7 @@ class ConceptImporter(BaseResourceImporter):
     def __init__(self, data, user, update_if_exists):
         super().__init__(data, user, update_if_exists)
         self.version = False
+        self.instance = None
 
     def exists(self):
         return self.get_queryset().exists()
@@ -414,19 +415,20 @@ class ConceptImporter(BaseResourceImporter):
             return FAILED
         if parent.has_edit_access(self.user):
             if self.version:
-                instance = self.get_queryset().first().clone()
-                instance._counted = None  # pylint: disable=protected-access
+                self.instance = self.get_queryset().first().clone()
+                self.instance._counted = None  # pylint: disable=protected-access
+                self.instance._index = False  # pylint: disable=protected-access
                 errors = Concept.create_new_version_for(
-                    instance=instance, data=self.data, user=self.user, create_parent_version=False,
+                    instance=self.instance, data=self.data, user=self.user, create_parent_version=False,
                     add_prev_version_children=False
                 )
                 return errors or UPDATED
 
-            instance = Concept.persist_new(
-                data={**self.data, '_counted': None}, user=self.user, create_parent_version=False)
-            if instance.id:
+            self.instance = Concept.persist_new(
+                data={**self.data, '_counted': None, '_index': False}, user=self.user, create_parent_version=False)
+            if self.instance.id:
                 return CREATED
-            return instance.errors or FAILED
+            return self.instance.errors or FAILED
 
         return PERMISSION_DENIED
 
@@ -441,6 +443,7 @@ class MappingImporter(BaseResourceImporter):
     def __init__(self, data, user, update_if_exists):
         super().__init__(data, user, update_if_exists)
         self.version = False
+        self.instance = None
 
     def exists(self):
         return self.get_queryset().exists()
@@ -526,14 +529,15 @@ class MappingImporter(BaseResourceImporter):
             return FAILED
         if parent.has_edit_access(self.user):
             if self.version:
-                instance = self.get_queryset().first().clone()
-                instance._counted = None  # pylint: disable=protected-access
-                errors = Mapping.create_new_version_for(instance, self.data, self.user)
+                self.instance = self.get_queryset().first().clone()
+                self.instance._counted = None  # pylint: disable=protected-access
+                self.instance._index = False  # pylint: disable=protected-access
+                errors = Mapping.create_new_version_for(self.instance, self.data, self.user)
                 return errors or UPDATED
-            instance = Mapping.persist_new({**self.data, '_counted': None}, self.user)
-            if instance.id:
+            self.instance = Mapping.persist_new({**self.data, '_counted': None, '_index': False}, self.user)
+            if self.instance.id:
                 return CREATED
-            return instance.errors or FAILED
+            return self.instance.errors or FAILED
 
         return PERMISSION_DENIED
 
@@ -647,11 +651,13 @@ class BulkImportInline(BaseImporter):
             service = RedisService()
             service.set(self.self_task_id, self.processed)
 
-    def run(self):
+    def run(self):  # pylint: disable=too-many-branches,too-many-statements
         if self.self_task_id:
             print("****STARTED SUBPROCESS****")
             print(f"TASK ID: {self.self_task_id}")
             print("***************")
+        new_concept_ids = []
+        new_mapping_ids = []
         for original_item in self.input_list:
             self.processed += 1
             logger.info('Processing %s of %s', str(self.processed), str(self.total))
@@ -690,20 +696,29 @@ class BulkImportInline(BaseImporter):
                 )
                 continue
             if item_type == 'concept':
-                self.handle_item_import_result(
-                    ConceptImporter(item, self.user, self.update_if_exists).run(), original_item
-                )
+                concept_importer = ConceptImporter(item, self.user, self.update_if_exists)
+                _result = concept_importer.run()
+                if get(concept_importer.instance, 'id'):
+                    new_concept_ids.append(concept_importer.instance.mnemonic)
+                self.handle_item_import_result(_result, original_item)
                 continue
             if item_type == 'mapping':
-                self.handle_item_import_result(
-                    MappingImporter(item, self.user, self.update_if_exists).run(), original_item
-                )
+                mapping_importer = MappingImporter(item, self.user, self.update_if_exists)
+                _result = mapping_importer.run()
+                if get(mapping_importer.instance, 'id'):
+                    new_mapping_ids.append(mapping_importer.instance.mnemonic)
+                self.handle_item_import_result(_result, original_item)
                 continue
             if item_type == 'reference':
                 self.handle_item_import_result(
                     ReferenceImporter(item, self.user, self.update_if_exists).run(), original_item
                 )
                 continue
+
+        if new_concept_ids:
+            batch_index_resources.apply_async(('concept', dict(mnemonic__in=new_concept_ids), True), queue='indexing')
+        if new_mapping_ids:
+            batch_index_resources.apply_async(('mapping', dict(mnemonic__in=new_mapping_ids), True), queue='indexing')
 
         self.elapsed_seconds = time.time() - self.start_time
 
