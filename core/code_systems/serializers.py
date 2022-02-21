@@ -6,7 +6,7 @@ from core import settings
 from core.concepts.models import Concept, LocalizedText
 from core.sources.models import Source
 
-
+# pylint: disable=R0201
 class CodeSystemConceptDesignationSerializer(serializers.ModelSerializer):
     language = CharField(source='locale')
     value = CharField(source='name')

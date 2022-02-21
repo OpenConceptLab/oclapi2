@@ -98,6 +98,7 @@ class SourceListView(SourceBaseView, ConceptDictionaryCreateMixin, ListWithHeade
     facet_class = SourceSearch
     default_filters = dict(is_active=True, version=HEAD)
 
+    # pylint: disable=R0201
     def apply_filters(self, queryset):
         return queryset
 

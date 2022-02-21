@@ -8,6 +8,7 @@ logger = logging.getLogger('oclapi')
 class CodeSystemListView(SourceListView):
     serializer_class = CodeSystemDetailSerializer
 
+    # pylint: disable=R0201
     def should_bundle_result(self):
         return True
 
@@ -25,4 +26,3 @@ class CodeSystemRetrieveUpdateView(SourceLatestVersionRetrieveUpdateView):
 
     def update(self, request, *args, **kwargs):
         raise NotImplementedError()
-
