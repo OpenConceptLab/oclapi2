@@ -360,7 +360,7 @@ class Collection(ConceptContainerModel):
             expansion_data = {}
         should_auto_expand = self.should_auto_expand
 
-        if should_auto_expand and not self.expansions.exists():
+        if should_auto_expand and not self.expansions.exists() and not get(expansion_data, 'mnemonic'):
             expansion_data['mnemonic'] = f'autoexpand-{self.version}'
             expansion_data['is_processing'] = True
         expansion = Expansion.persist(index=index, **expansion_data, collection_version=self)
