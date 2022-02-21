@@ -120,7 +120,7 @@ class CodeSystemDetailSerializer(serializers.ModelSerializer):
 
         return CodeSystemConceptSerializer(concepts_page.object_list, many=True).data
 
-    def get_property(self, obj):
+    def get_property(self):
         return CodeSystemPropertySerializer([
             {'code': 'conceptclass', 'uri': settings.API_BASE_URL + '/orgs/OCL/sources/Classes/concepts',
              'description': 'Standard list of concept classes.', 'type': 'string'},

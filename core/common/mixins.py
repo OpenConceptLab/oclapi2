@@ -127,27 +127,20 @@ class ListWithHeadersMixin(ListModelMixin):
         # Skip pagination if compressed results are requested
         compress = self.should_compress()
 
-        if not compress and (not self.limit or int(self.limit) == 0 or int(self.limit) > 1000):
-            self.limit = LIST_DEFAULT_LIMIT
-
         sorted_list = self.object_list
 
         headers = {}
         results = sorted_list
         if not compress:
+            if not self.limit or int(self.limit) == 0 or int(self.limit) > 1000:
+                self.limit = LIST_DEFAULT_LIMIT
             paginator = CustomPaginator(
                 request=request, queryset=sorted_list, page_size=self.limit, total_count=self.total_count
             )
             headers = paginator.headers
             results = paginator.current_page_results
 
-        result_dict = self.get_serializer(results, many=True).data
-        if self.should_include_facets():
-            data = dict(results=result_dict, facets=dict(fields=self.get_facets()))
-        elif hasattr(self.__class__, 'should_bundle_result') and self.should_bundle_result():
-            data = BundleSerializer({'entries': result_dict}).data
-        else:
-            data = result_dict
+        data = self.serialize_list(results)
 
         response = Response(data)
         for key, value in headers.items():
@@ -155,6 +148,16 @@ class ListWithHeadersMixin(ListModelMixin):
         if not headers:
             response['num_found'] = len(sorted_list)
         return response
+
+    def serialize_list(self, results):
+        result_dict = self.get_serializer(results, many=True).data
+        if self.should_include_facets():
+            data = dict(results=result_dict, facets=dict(fields=self.get_facets()))
+        elif hasattr(self.__class__, 'should_bundle_result') and self.should_bundle_result():
+            data = BundleSerializer({'entries': result_dict}).data
+        else:
+            data = result_dict
+        return data
 
     def should_include_facets(self):
         return self.request.META.get(INCLUDE_FACETS, False) in ['true', True]
