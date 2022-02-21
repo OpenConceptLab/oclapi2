@@ -308,6 +308,7 @@ class ConceptCascadeView(ConceptBaseView):
 
 class ConceptChildrenView(ConceptBaseView, ListWithHeadersMixin):
     serializer_class = ConceptChildrenSerializer
+    default_qs_sort_attr = 'mnemonic'
 
     def get_queryset(self):
         instance = super().get_queryset().filter(id=F('versioned_object_id')).first()
