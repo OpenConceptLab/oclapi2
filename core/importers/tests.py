@@ -236,7 +236,8 @@ class BulkImportInlineTest(OCLTestCase):
         self.assertEqual(importer.failed, [])
         self.assertTrue(importer.elapsed_seconds > 0)
 
-    def test_concept_import(self):
+    @patch('core.importers.models.batch_index_resources')
+    def test_concept_import(self, batch_index_resources_mock):
         self.assertFalse(Concept.objects.filter(mnemonic='Food').exists())
 
         OrganizationSourceFactory(
@@ -282,6 +283,7 @@ class BulkImportInlineTest(OCLTestCase):
         self.assertEqual(len(importer.updated), 1)
         self.assertEqual(importer.failed, [])
         self.assertTrue(importer.elapsed_seconds > 0)
+        batch_index_resources_mock.apply_async.assert_called()
 
     def test_concept_import_permission_denied(self):
         self.assertFalse(Concept.objects.filter(mnemonic='Food').exists())
@@ -311,7 +313,8 @@ class BulkImportInlineTest(OCLTestCase):
         self.assertEqual(len(importer.updated), 0)
         self.assertEqual(importer.permission_denied, [data])
 
-    def test_mapping_import(self):
+    @patch('core.importers.models.batch_index_resources')
+    def test_mapping_import(self, batch_index_resources_mock):
         self.assertEqual(Mapping.objects.count(), 0)
 
         source = OrganizationSourceFactory(
@@ -360,8 +363,10 @@ class BulkImportInlineTest(OCLTestCase):
         self.assertEqual(len(importer.updated), 1)
         self.assertEqual(importer.failed, [])
         self.assertTrue(importer.elapsed_seconds > 0)
+        batch_index_resources_mock.apply_async.assert_called()
 
-    def test_reference_import(self):
+    @patch('core.importers.models.batch_index_resources')
+    def test_reference_import(self, batch_index_resources_mock):
         importer = BulkImportInline(
             open(
                 os.path.join(os.path.dirname(__file__), '..', 'samples/sample_collection_references.json'), 'r'
@@ -403,8 +408,10 @@ class BulkImportInlineTest(OCLTestCase):
         self.assertEqual(collection.expansion.concepts.count(), 4)
         self.assertEqual(collection.expansion.mappings.count(), 0)
         self.assertEqual(collection.references.count(), 4)
+        batch_index_resources_mock.apply_async.assert_called()
 
-    def test_sample_import(self):
+    @patch('core.importers.models.batch_index_resources')
+    def test_sample_import(self, batch_index_resources_mock):
         importer = BulkImportInline(
             open(
                 os.path.join(os.path.dirname(__file__), '..', 'samples/sample_ocldev.json'), 'r'
@@ -421,9 +428,11 @@ class BulkImportInlineTest(OCLTestCase):
         self.assertEqual(len(importer.invalid), 0)
         self.assertEqual(len(importer.others), 0)
         self.assertEqual(len(importer.permission_denied), 0)
+        batch_index_resources_mock.apply_async.assert_called()
 
     @unittest.skip('[Skipped] OPENMRS CSV Import Sample')
-    def test_openmrs_schema_csv_import(self):
+    @patch('core.importers.models.batch_index_resources')
+    def test_openmrs_schema_csv_import(self, batch_index_resources_mock):
         call_command('import_lookup_values')
         org = OrganizationFactory(mnemonic='MSFOCP')
         OrganizationSourceFactory(
@@ -443,9 +452,11 @@ class BulkImportInlineTest(OCLTestCase):
         self.assertEqual(len(importer.invalid), 0)
         self.assertEqual(len(importer.failed), 10)
         self.assertEqual(len(importer.permission_denied), 0)
+        batch_index_resources_mock.apply_async.assert_called()
 
     @unittest.skip('[Skipped] PEPFAR (small) Import Sample')
-    def test_pepfar_import(self):
+    @patch('core.importers.models.batch_index_resources')
+    def test_pepfar_import(self, batch_index_resources_mock):
         importer = BulkImportInline(
             open(
                 os.path.join(os.path.dirname(__file__), '..', 'samples/pepfar_datim_moh_fy19.json'), 'r').read(),
@@ -461,6 +472,7 @@ class BulkImportInlineTest(OCLTestCase):
         self.assertEqual(len(importer.invalid), 0)
         self.assertEqual(len(importer.others), 0)
         self.assertEqual(len(importer.permission_denied), 0)
+        batch_index_resources_mock.apply_async.assert_called()
 
 
 class BulkImportParallelRunnerTest(OCLTestCase):
