@@ -395,7 +395,8 @@ class SourceChildMixin:
 
     @property
     def collection_versions(self):
-        return self.collection_set.exclude(version=HEAD).values_list('uri', flat=True)
+        return self.expansion_set.exclude(
+            collection_version__version=HEAD).values_list('collection_version__uri', flat=True)
 
     @property
     def versions(self):
