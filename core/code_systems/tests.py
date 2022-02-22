@@ -10,18 +10,12 @@ class SourceTest(OCLTestCase):
     def setUp(self):
         super().setUp()
         self.org = OrganizationFactory()
-        self.org.save()
 
-        self.org_source = OrganizationSourceFactory.build(organization=self.org)
-        self.org_source.canonical_url = '/some/url'
-        self.org_source.save()
+        self.org_source = OrganizationSourceFactory(organization=self.org, canonical_url='/some/url')
 
         self.user = UserProfileFactory()
-        self.user.save()
         self.user_token = self.user.get_token()
-        self.user_source = UserSourceFactory(user=self.user, public_access='None')
-        self.user_source.canonical_url = '/some/url'
-        self.user_source.save()
+        self.user_source = UserSourceFactory(user=self.user, public_access='None', canonical_url='/some/url')
 
         self.client = APIClient()
 

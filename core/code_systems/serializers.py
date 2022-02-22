@@ -1,10 +1,18 @@
-from django.core.paginator import Paginator
 from rest_framework import serializers
 from rest_framework.fields import CharField, IntegerField, SerializerMethodField, ReadOnlyField
 
 from core import settings
 from core.concepts.models import Concept, LocalizedText
 from core.sources.models import Source
+
+
+class CodeSystemSerializerMixin:
+    def update(self, instance, validated_data):
+        pass
+
+    def create(self, validated_data):
+        pass
+
 
 # pylint: disable=R0201
 class CodeSystemConceptDesignationSerializer(serializers.ModelSerializer):
@@ -21,15 +29,10 @@ class CodeSystemConceptDesignationSerializer(serializers.ModelSerializer):
             return {'code': obj.type}
         return None
 
-class CodeSystemConceptPropertySerializer(serializers.Serializer):
+
+class CodeSystemConceptPropertySerializer(CodeSystemSerializerMixin, serializers.Serializer):
     code = CharField()
     value = CharField()
-
-    def update(self, instance, validated_data):
-        raise NotImplementedError('`update()` must be implemented.')
-
-    def create(self, validated_data):
-        raise NotImplementedError('`create()` must be implemented.')
 
 
 class CodeSystemConceptSerializer(serializers.ModelSerializer):
@@ -63,17 +66,36 @@ class CodeSystemConceptSerializer(serializers.ModelSerializer):
 
         return CodeSystemConceptPropertySerializer(properties, many=True).data
 
-class CodeSystemPropertySerializer(serializers.Serializer):
+
+class CodeSystemPropertySerializer(CodeSystemSerializerMixin, serializers.Serializer):
     code = CharField()
     uri = CharField()
     description = CharField()
     type = CharField()
+
+
+class CodeSystemIdentifierTypeCodingSerializer(CodeSystemSerializerMixin, serializers.Serializer):
+    system = CharField(default='http://hl7.org/fhir/v2/0203')
+    code = CharField(default='ACSN')
+    display = CharField(default='Accession ID')
+
+
+class CodeSystemIdentifierTypeSerializer(CodeSystemSerializerMixin, serializers.Serializer):
+    text = CharField(default='Accession ID')
+    coding = CodeSystemIdentifierTypeCodingSerializer()
+
+
+class CodeSystemIdentifierSerializer(serializers.Serializer):
+    system = CharField()
+    value = CharField()
+    type = CodeSystemIdentifierTypeSerializer()
 
     def update(self, instance, validated_data):
         raise NotImplementedError('`update()` must be implemented.')
 
     def create(self, validated_data):
         raise NotImplementedError('`create()` must be implemented.')
+
 
 class CodeSystemDetailSerializer(serializers.ModelSerializer):
     resource_type = ReadOnlyField(default='CodeSystem')
@@ -87,6 +109,7 @@ class CodeSystemDetailSerializer(serializers.ModelSerializer):
     property = SerializerMethodField(read_only=True)
     meta = SerializerMethodField(read_only=True)
     concept = SerializerMethodField()
+    identifier = CodeSystemIdentifierSerializer(many=True)
 
     class Meta:
         model = Source
@@ -111,14 +134,9 @@ class CodeSystemDetailSerializer(serializers.ModelSerializer):
         return None
 
     def get_concept(self, obj):
-        paginator = Paginator(obj.get_concepts_queryset().order_by('id'), 100)
-        if 'page' in self.context:
-            page_number = self.context['page']
-        else:
-            page_number = 1
-        concepts_page = paginator.get_page(page_number)
-
-        return CodeSystemConceptSerializer(concepts_page.object_list, many=True).data
+        # limit to 1000 concepts by default
+        # TODO: support graphQL to go around the limit
+        return CodeSystemConceptSerializer(obj.get_concepts_queryset().order_by('id')[:1000], many=True).data
 
     def get_property(self, _):
         return CodeSystemPropertySerializer([
@@ -135,14 +153,14 @@ class CodeSystemDetailSerializer(serializers.ModelSerializer):
         return {'lastUpdated': obj.updated_at}
 
     def to_representation(self, instance):
-        """ Add accession identifier if not present """
         rep = super().to_representation(instance)
-        if not rep['identifier']:
-            rep['identifier'] = []
 
-        has_accession_identifier = self.has_accession_identifier(rep)
+        self.include_accession_identifier(instance, rep)
+        return rep
 
-        if not has_accession_identifier:
+    def include_accession_identifier(self, instance, rep):
+        """ Add accession identifier if not present """
+        if not self.has_accession_identifier(rep):
             rep['identifier'].append({
                 'system': settings.API_BASE_URL,
                 'value': instance.uri.replace('sources', 'CodeSystem').replace('collections', 'ValueSet'),
@@ -155,7 +173,6 @@ class CodeSystemDetailSerializer(serializers.ModelSerializer):
                     }]
                 }
             })
-        return rep
 
     def has_accession_identifier(self, rep):
         found = False
