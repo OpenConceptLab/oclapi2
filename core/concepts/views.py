@@ -192,8 +192,11 @@ class ConceptCollectionMembershipView(ConceptBaseView, ListWithHeadersMixin):
     def get_queryset(self):
         instance = self.get_object()
 
-        return instance.collection_set.filter(
-            organization_id=instance.parent.organization_id, user_id=instance.parent.user_id)
+        from core.collections.models import Collection
+        return Collection.objects.filter(id__in=instance.expansion_set.filter(
+            collection_version__organization_id=instance.parent.organization_id,
+            collection_version__user_id=instance.parent.user_id
+        ).values_list('collection_version_id', flat=True))
 
     def get(self, request, *args, **kwargs):
         return self.list(request, *args, **kwargs)
