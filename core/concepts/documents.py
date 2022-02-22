@@ -73,11 +73,7 @@ class ConceptDocument(Document):
 
     @staticmethod
     def prepare_collection_version(instance):
-        collection_versions = list(instance.collection_set.values_list('version', flat=True))
-        expansion_collection_versions = list(
-            instance.expansion_set.values_list('collection_version__version', flat=True))
-
-        return list(set(collection_versions + expansion_collection_versions))
+        return list(set(instance.expansion_set.values_list('collection_version__version', flat=True)))
 
     @staticmethod
     def prepare_expansion(instance):
@@ -85,19 +81,15 @@ class ConceptDocument(Document):
 
     @staticmethod
     def prepare_collection(instance):
-        collections = list(instance.collection_set.values_list('mnemonic', flat=True))
-        expansion_collections = list(instance.expansion_set.values_list('collection_version__mnemonic', flat=True))
-        return list(set(collections + expansion_collections))
+        return list(set(instance.expansion_set.values_list('collection_version__mnemonic', flat=True)))
 
     @staticmethod
     def prepare_collection_url(instance):
-        return list(set(list(instance.collection_set.values_list('uri', flat=True))))
+        return list(set(list(instance.expansion_set.values_list('collection_version__uri', flat=True))))
 
     @staticmethod
     def prepare_collection_owner_url(instance):
-        collection_owner_urls = [coll.parent_url for coll in instance.collection_set.all()]
-        expansion_collection_owner_urls = [expansion.owner_url for expansion in instance.expansion_set.all()]
-        return list(set(collection_owner_urls + expansion_collection_owner_urls))
+        return list(set(expansion.owner_url for expansion in instance.expansion_set.all()))
 
     @staticmethod
     def prepare_extras(instance):
