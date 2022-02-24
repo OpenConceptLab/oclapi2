@@ -426,7 +426,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         if collection:
             queryset = queryset.filter(
                 cls.get_filter_by_container_criterion(
-                    'collection_set', collection, org, user, container_version,
+                    'expansion_set__collection_version', collection, org, user, container_version,
                     is_latest_released, latest_released_version,
                 )
             )
@@ -774,15 +774,17 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     def get_unidirectional_mappings_for_collection(self, collection_url, collection_version=HEAD):
         from core.mappings.models import Mapping
         return Mapping.objects.filter(
-            from_concept__uri__icontains=drop_version(self.uri), collection_set__uri__icontains=collection_url,
-            collection_set__version=collection_version
+            from_concept__uri__icontains=drop_version(self.uri),
+            expansion_set__collection_version__uri__icontains=collection_url,
+            expansion_set__collection_version__version=collection_version
         )
 
     def get_indirect_mappings_for_collection(self, collection_url, collection_version=HEAD):
         from core.mappings.models import Mapping
         return Mapping.objects.filter(
-            to_concept__uri__icontains=drop_version(self.uri), collection_set__uri__icontains=collection_url,
-            collection_set__version=collection_version
+            to_concept__uri__icontains=drop_version(self.uri),
+            expansion_set__collection_version__uri__icontains=collection_url,
+            expansion_set__collection_version__version=collection_version
         )
 
     def get_unidirectional_mappings(self):

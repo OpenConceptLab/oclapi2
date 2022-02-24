@@ -499,7 +499,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         if collection:
             queryset = queryset.filter(
                 cls.get_filter_by_container_criterion(
-                    'collection_set', collection, org, user, container_version,
+                    'expansion_set__collection_version', collection, org, user, container_version,
                     is_latest_released, latest_released_version,
                 )
             )
