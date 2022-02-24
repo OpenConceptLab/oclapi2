@@ -35,7 +35,7 @@ from core.collections.serializers import (
 from core.collections.utils import is_version_specified
 from core.common.constants import (
     HEAD, RELEASED_PARAM, PROCESSING_PARAM, OK_MESSAGE,
-    ACCESS_TYPE_NONE)
+    ACCESS_TYPE_NONE, INCLUDE_RETIRED_PARAM, INCLUDE_INVERSE_MAPPINGS_PARAM)
 from core.common.exceptions import Http409
 from core.common.mixins import (
     ConceptDictionaryCreateMixin, ListWithHeadersMixin, ConceptDictionaryUpdateMixin,
@@ -48,7 +48,7 @@ from core.common.permissions import (
 from core.common.swagger_parameters import q_param, compress_header, page_param, verbose_param, exact_match_param, \
     include_facets_header, sort_asc_param, sort_desc_param, updated_since_param, include_retired_param, limit_param
 from core.common.tasks import add_references, export_collection, delete_collection
-from core.common.utils import compact_dict_by_values, parse_boolean_query_param
+from core.common.utils import compact_dict_by_values, parse_boolean_query_param, to_parent_uri_from_kwargs
 from core.common.views import BaseAPIView, BaseLogoView
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept
@@ -752,6 +752,46 @@ class CollectionVersionConceptRetrieveView(CollectionBaseView, RetrieveAPIView):
 
     def get_serializer_class(self):
         return Concept.get_serializer_class(verbose=self.is_verbose(), version=True, brief=self.is_brief())
+
+
+class CollectionVersionConceptMappingsView(CollectionBaseView, ListWithHeadersMixin):
+    def get_queryset(self):
+        instance = get_object_or_404(self.get_base_queryset())
+        self.check_object_permissions(self.request, instance)
+        expansion = instance.expansion
+        if not expansion:
+            raise Http404()
+        self.request.instance = instance
+        concepts = expansion.concepts.filter(mnemonic=self.kwargs['concept'])
+        if 'concept_version' in self.kwargs:
+            concepts = concepts.filter(version=self.kwargs['concept_version'])
+
+        uri_param = self.request.query_params.dict().get('uri')
+        if uri_param:
+            concepts = concepts.filter(**Concept.get_parent_and_owner_filters_from_uri(uri_param))
+        count = concepts.count()
+        if count == 0:
+            raise Http404()
+        if count > 1 and not uri_param:
+            raise Http409()
+
+        concept = concepts.first()
+
+        include_retired = self.request.query_params.get(INCLUDE_RETIRED_PARAM, False)
+        include_indirect_mappings = self.request.query_params.get(INCLUDE_INVERSE_MAPPINGS_PARAM, 'false') == 'true'
+
+        mappings_queryset = expansion.get_mappings_for_concept(
+            concept=concept, include_indirect=include_indirect_mappings)
+        if not include_retired:
+            mappings_queryset = mappings_queryset.exclude(retired=True)
+
+        return mappings_queryset
+
+    def get_serializer_class(self):
+        return Mapping.get_serializer_class(verbose=self.is_verbose(), version=True, brief=self.is_brief())
+
+    def get(self, request, *args, **kwargs):
+        return self.list(request, *args, **kwargs)
 
 
 class CollectionVersionMappingsView(CollectionBaseView, ListWithHeadersMixin):

@@ -737,6 +737,13 @@ class Expansion(BaseResourceModel):
 
         return expansion
 
+    def get_mappings_for_concept(self, concept, include_indirect=False):
+        concept_criteria = [concept.uri, drop_version(concept.uri)]
+        criteria = models.Q(from_concept__uri__in=concept_criteria)
+        if include_indirect:
+            criteria |= models.Q(to_concept__uri__in=concept_criteria)
+        return self.mappings.filter(criteria)
+
 
 class ExpansionParameters:
     ACTIVE = 'activeOnly'

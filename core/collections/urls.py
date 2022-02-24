@@ -48,6 +48,16 @@ urlpatterns = [
         name='collectionversion-latest-export-detail'
     ),
     path(
+        "<str:collection>/concepts/<str:concept>/mappings/",
+        views.CollectionVersionConceptMappingsView.as_view(),
+        name='concept-mappings'
+    ),
+    path(
+        "<str:collection>/concepts/<str:concept>/<str:concept_version>/mappings/",
+        views.CollectionVersionConceptMappingsView.as_view(),
+        name='concept-version-mappings'
+    ),
+    path(
         "<str:collection>/concepts/<str:concept>/<str:concept_version>/",
         views.CollectionVersionConceptRetrieveView.as_view(),
         name='concept-version-detail'
@@ -145,6 +155,16 @@ urlpatterns = [
         ),
         views.CollectionExtraRetrieveUpdateDestroyView.as_view(),
         name='collectionversion-extra'
+    ),
+    path(
+        "<str:collection>/<str:version>/concepts/<str:concept>/<str:concept_version>/mappings/",
+        views.CollectionVersionConceptMappingsView.as_view(),
+        name='concept-version-mappings'
+    ),
+    path(
+        "<str:collection>/<str:version>/concepts/<str:concept>/mappings/",
+        views.CollectionVersionConceptMappingsView.as_view(),
+        name='concept-mappings'
     ),
     path(
         "<str:collection>/<str:version>/concepts/<str:concept>/<str:concept_version>/",
