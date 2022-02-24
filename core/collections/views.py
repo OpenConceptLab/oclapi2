@@ -48,7 +48,7 @@ from core.common.permissions import (
 from core.common.swagger_parameters import q_param, compress_header, page_param, verbose_param, exact_match_param, \
     include_facets_header, sort_asc_param, sort_desc_param, updated_since_param, include_retired_param, limit_param
 from core.common.tasks import add_references, export_collection, delete_collection
-from core.common.utils import compact_dict_by_values, parse_boolean_query_param, to_parent_uri_from_kwargs
+from core.common.utils import compact_dict_by_values, parse_boolean_query_param
 from core.common.views import BaseAPIView, BaseLogoView
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept
