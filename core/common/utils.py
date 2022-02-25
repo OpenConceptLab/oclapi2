@@ -211,13 +211,13 @@ def write_export_file(
     batch_size = 100
     is_collection = resource_type == 'collection'
 
+    concepts_qs = Concept.objects.none()
+    mappings_qs = Mapping.objects.none()
+
     if is_collection:
         if version.expansion_uri:
             concepts_qs = Concept.expansion_set.through.objects.filter(expansion_id=version.expansion.id)
             mappings_qs = Mapping.expansion_set.through.objects.filter(expansion_id=version.expansion.id)
-        else:
-            concepts_qs = Concept.collection_set.through.objects.filter(collection_id=version.id)
-            mappings_qs = Mapping.collection_set.through.objects.filter(collection_id=version.id)
     else:
         concepts_qs = Concept.sources.through.objects.filter(source_id=version.id)
         mappings_qs = Mapping.sources.through.objects.filter(source_id=version.id)
