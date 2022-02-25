@@ -504,6 +504,8 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     def create_new_version_for(
             cls, instance, data, user, create_parent_version=True, add_prev_version_children=True,
     ):  # pylint: disable=too-many-arguments
+        instance.id = None # Clear id so it is persisted as a new object
+        instance.version = data.get('version', None)
         instance.concept_class = data.get('concept_class', instance.concept_class)
         instance.datatype = data.get('datatype', instance.datatype)
         instance.extras = data.get('extras', instance.extras)

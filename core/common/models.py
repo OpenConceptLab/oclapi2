@@ -694,7 +694,7 @@ class ConceptContainerModel(VersionedModel):
         self.custom_validation_schema = head.custom_validation_schema
 
     def add_processing(self, process_id):
-        if self.id:
+        if self.id and process_id:
             self.__class__.objects.filter(id=self.id).update(
                 _background_process_ids=CombinedExpression(
                     F('_background_process_ids'),

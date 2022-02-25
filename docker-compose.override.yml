@@ -16,6 +16,12 @@ services:
     volumes:
       - .:/code:z
     restart: "no"
+    depends_on:
+      - db
+      - redis
+      - es
+      - celery
+      - flower
     environment:
       - ENVIRONMENT=development
       - DEBUG=${DEBUG-TRUE}
@@ -24,6 +30,13 @@ services:
     volumes:
       - .:/code:z
     restart: "no"
+    depends_on:
+      - redis
+      - celery_indexing
+      - celery_concurrent
+      - celery_bulk_import_0_1
+      - celery_bulk_import_2_3
+      - celery_bulk_import_root
   celery_indexing:
     build: .
     volumes:
@@ -56,6 +69,9 @@ services:
     ports:
       - 5555:5555
     restart: "no"
+    depends_on:
+      - celery
+      - redis
   es:
     ports:
       - 9200:9200

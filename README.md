@@ -42,6 +42,20 @@ After modifying model you need to create migration files. Run:
 
 Make sure to commit newly created migration files.
 
+### Debugging
+
+In order to debug tests or api you can use PDB. Set a breakpoint in code with:
+
+`import pdb; pdb.set_trace()`
+
+Run tests with:
+
+`docker-compose run --rm api python manage.py test core.code_systems --keepdb -v3`
+
+Run api with:
+
+`docker-compose run --rm --service-ports api`
+
 ### Release
 
 Every build is a candidate for release.

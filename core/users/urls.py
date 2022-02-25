@@ -65,6 +65,9 @@ urlpatterns = [
         name='user-extra'
     ),
     re_path(r'^(?P<user>' + NAMESPACE_PATTERN + ')/sources/', include('core.sources.urls')),
+    #TODO: require FHIR subdomain
+    re_path(r'^(?P<user>' + NAMESPACE_PATTERN + ')/CodeSystem/', include('core.code_systems.urls'),
+            name='code_systems_url'),
     re_path(r'^(?P<user>' + NAMESPACE_PATTERN + ')/collections/', include('core.collections.urls')),
     re_path(r'^(?P<user>' + NAMESPACE_PATTERN + ')/pins/', include('core.pins.urls')),
 ]
