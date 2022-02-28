@@ -1,5 +1,6 @@
 from elasticsearch_dsl import TermsFacet
 
+from core.common.constants import FACET_SIZE
 from core.common.search import CommonSearch
 from core.mappings.models import Mapping
 
@@ -16,25 +17,25 @@ class MappingSearch(CommonSearch):
     ]
 
     facets = {
-        'toConceptSource': TermsFacet(field='to_concept_source'),
-        'fromConceptSource': TermsFacet(field='from_concept_source'),
+        'toConceptSource': TermsFacet(field='to_concept_source', size=FACET_SIZE),
+        'fromConceptSource': TermsFacet(field='from_concept_source', size=FACET_SIZE),
         'toConceptOwnerType': TermsFacet(field='to_concept_owner_type'),
         'fromConceptOwnerType': TermsFacet(field='from_concept_owner_type'),
         'conceptOwnerType': TermsFacet(field='concept_owner_type'),
-        'toConceptOwner': TermsFacet(field='to_concept_owner'),
-        'fromConceptOwner': TermsFacet(field='from_concept_owner'),
-        'conceptOwner': TermsFacet(field='concept_owner'),
-        'conceptSource': TermsFacet(field='concept_source'),
-        'concept': TermsFacet(field='concept'),
-        'toConcept': TermsFacet(field='to_concept'),
-        'fromConcept': TermsFacet(field='from_concept'),
-        'mapType': TermsFacet(field='map_type'),
+        'toConceptOwner': TermsFacet(field='to_concept_owner', size=FACET_SIZE),
+        'fromConceptOwner': TermsFacet(field='from_concept_owner', size=FACET_SIZE),
+        'conceptOwner': TermsFacet(field='concept_owner', size=FACET_SIZE),
+        'conceptSource': TermsFacet(field='concept_source', size=FACET_SIZE),
+        'concept': TermsFacet(field='concept', size=FACET_SIZE),
+        'toConcept': TermsFacet(field='to_concept', size=FACET_SIZE),
+        'fromConcept': TermsFacet(field='from_concept', size=FACET_SIZE),
+        'mapType': TermsFacet(field='map_type', size=FACET_SIZE),
         'retired': TermsFacet(field='retired'),
-        'source': TermsFacet(field='source'),
-        'collection': TermsFacet(field='collection'),
-        'owner': TermsFacet(field='owner'),
+        'source': TermsFacet(field='source', size=FACET_SIZE),
+        'collection': TermsFacet(field='collection', size=FACET_SIZE),
+        'owner': TermsFacet(field='owner', size=FACET_SIZE),
         'ownerType': TermsFacet(field='owner_type'),
         'is_active': TermsFacet(field='is_active'),
         'is_latest_version': TermsFacet(field='is_latest_version'),
-        'collection_owner_url': TermsFacet(field='collection_owner_url'),
+        'collection_owner_url': TermsFacet(field='collection_owner_url', size=FACET_SIZE),
     }

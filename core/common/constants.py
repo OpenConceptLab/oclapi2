@@ -97,3 +97,4 @@ EXCLUDE_MAP_TYPES_PARAM = 'excludeMapTypes'
 MAP_TYPES_PARAM = 'mapTypes'
 CASCADE_LEVELS_PARAM = 'cascadeLevels'
 CASCADE_DIRECTION_PARAM = 'reverse'
+FACET_SIZE = 20
