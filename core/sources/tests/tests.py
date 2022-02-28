@@ -608,27 +608,28 @@ class SourceTest(OCLTestCase):
         self.assertTrue(source_v1.is_hierarchy_root_belonging_to_self())
 
     def test_resolve_expression_non_existing(self):
-        resolvedSourceVersion = Source.resolve_reference_expression('/some/url/')
-        self.assertIsNone(resolvedSourceVersion.id)
-        self.assertFalse(resolvedSourceVersion.is_FQDN)
-        self.assertEqual(resolvedSourceVersion.namespace, None)
+        resolved_source_version = Source.resolve_reference_expression('/some/url/')
+        self.assertIsNone(resolved_source_version.id)
+        self.assertFalse(resolved_source_version.is_fqdn)
+        self.assertEqual(resolved_source_version.namespace, None)
 
-        resolvedSourceVersion = Source.resolve_reference_expression('/some/url/', namespace='/orgs/foo/')
-        self.assertIsNone(resolvedSourceVersion.id)
-        self.assertFalse(resolvedSourceVersion.is_FQDN)
-        self.assertEqual(resolvedSourceVersion.namespace, '/orgs/foo/')
+        resolved_source_version = Source.resolve_reference_expression('/some/url/', namespace='/orgs/foo/')
+        self.assertIsNone(resolved_source_version.id)
+        self.assertFalse(resolved_source_version.is_fqdn)
+        self.assertEqual(resolved_source_version.namespace, '/orgs/foo/')
 
-        resolvedSourceVersion = Source.resolve_reference_expression('https://some/url/')
-        self.assertIsNone(resolvedSourceVersion.id)
-        self.assertEqual(resolvedSourceVersion.version, '')
-        self.assertTrue(resolvedSourceVersion.is_FQDN)
-        self.assertEqual(resolvedSourceVersion.namespace, None)
+        resolved_source_version = Source.resolve_reference_expression('https://some/url/')
+        self.assertIsNone(resolved_source_version.id)
+        self.assertEqual(resolved_source_version.version, '')
+        self.assertTrue(resolved_source_version.is_fqdn)
+        self.assertEqual(resolved_source_version.namespace, None)
 
-        resolvedSourceVersion = Source.resolve_reference_expression('https://some/url/', namespace='/orgs/foo/')
-        self.assertIsNone(resolvedSourceVersion.id)
-        self.assertTrue(resolvedSourceVersion.is_FQDN)
-        self.assertEqual(resolvedSourceVersion.namespace, '/orgs/foo/')
-        self.assertTrue(isinstance(resolvedSourceVersion, Source))
+        resolved_source_version = Source.resolve_reference_expression(
+            'https://some/url/', namespace='/orgs/foo/')
+        self.assertIsNone(resolved_source_version.id)
+        self.assertTrue(resolved_source_version.is_fqdn)
+        self.assertEqual(resolved_source_version.namespace, '/orgs/foo/')
+        self.assertTrue(isinstance(resolved_source_version, Source))
 
         org = OrganizationFactory(mnemonic='org')
         OrganizationSourceFactory(
@@ -636,17 +637,17 @@ class SourceTest(OCLTestCase):
         OrganizationSourceFactory(
             mnemonic='source', canonical_url='https://source.org.com', organization=org, version='v1.0')
 
-        resolvedSourceVersion = Source.resolve_reference_expression('https://source.org.com|v2.0')
-        self.assertIsNone(resolvedSourceVersion.id)
-        self.assertTrue(resolvedSourceVersion.is_FQDN)
+        resolved_source_version = Source.resolve_reference_expression('https://source.org.com|v2.0')
+        self.assertIsNone(resolved_source_version.id)
+        self.assertTrue(resolved_source_version.is_fqdn)
 
-        resolvedSourceVersion = Source.resolve_reference_expression('https://source.org.com', version='2.0')
-        self.assertIsNone(resolvedSourceVersion.id)
-        self.assertTrue(resolvedSourceVersion.is_FQDN)
+        resolved_source_version = Source.resolve_reference_expression('https://source.org.com', version='2.0')
+        self.assertIsNone(resolved_source_version.id)
+        self.assertTrue(resolved_source_version.is_fqdn)
 
-        resolvedSourceVersion = Source.resolve_reference_expression('https://source.org.com', version='2.0')
-        self.assertIsNone(resolvedSourceVersion.id)
-        self.assertTrue(resolvedSourceVersion.is_FQDN)
+        resolved_source_version = Source.resolve_reference_expression('https://source.org.com', version='2.0')
+        self.assertIsNone(resolved_source_version.id)
+        self.assertTrue(resolved_source_version.is_fqdn)
 
     def test_resolve_expression_existing(self):
         org = OrganizationFactory(mnemonic='org')
@@ -662,41 +663,45 @@ class SourceTest(OCLTestCase):
         )
         OrganizationSourceFactory(mnemonic='source', organization=org, version='v3.0',)
 
-        resolvedSourceVersion = Source.resolve_reference_expression('/orgs/org/sources/source/', version="v1.0")
-        self.assertIsNotNone(resolvedSourceVersion.id)
-        self.assertEqual(resolvedSourceVersion.version, 'v1.0')
-        self.assertEqual(resolvedSourceVersion.canonical_url, 'https://source.org.com')
-        self.assertFalse(resolvedSourceVersion.is_FQDN)
+        resolved_source_version = Source.resolve_reference_expression(
+            '/orgs/org/sources/source/', version="v1.0")
+        self.assertIsNotNone(resolved_source_version.id)
+        self.assertEqual(resolved_source_version.version, 'v1.0')
+        self.assertEqual(resolved_source_version.canonical_url, 'https://source.org.com')
+        self.assertFalse(resolved_source_version.is_fqdn)
 
-        resolvedSourceVersion = Source.resolve_reference_expression('/orgs/org/sources/source/')
-        self.assertIsNotNone(resolvedSourceVersion.id)
-        self.assertEqual(resolvedSourceVersion.version, 'v2.0')
-        self.assertEqual(resolvedSourceVersion.canonical_url, 'https://source.org.com')
-        self.assertFalse(resolvedSourceVersion.is_FQDN)
+        resolved_source_version = Source.resolve_reference_expression('/orgs/org/sources/source/')
+        self.assertIsNotNone(resolved_source_version.id)
+        self.assertEqual(resolved_source_version.version, 'v2.0')
+        self.assertEqual(resolved_source_version.canonical_url, 'https://source.org.com')
+        self.assertFalse(resolved_source_version.is_fqdn)
 
-        resolvedSourceVersion = Source.resolve_reference_expression('/orgs/org/sources/source/', namespace='/orgs/org/')
-        self.assertIsNotNone(resolvedSourceVersion.id)
-        self.assertEqual(resolvedSourceVersion.version, 'v2.0')
-        self.assertEqual(resolvedSourceVersion.canonical_url, 'https://source.org.com')
-        self.assertFalse(resolvedSourceVersion.is_FQDN)
+        resolved_source_version = Source.resolve_reference_expression(
+            '/orgs/org/sources/source/', namespace='/orgs/org/')
+        self.assertIsNotNone(resolved_source_version.id)
+        self.assertEqual(resolved_source_version.version, 'v2.0')
+        self.assertEqual(resolved_source_version.canonical_url, 'https://source.org.com')
+        self.assertFalse(resolved_source_version.is_fqdn)
 
-        resolvedSourceVersion = Source.resolve_reference_expression('https://source.org.com', version="v3.0")
-        self.assertIsNotNone(resolvedSourceVersion.id)
-        self.assertEqual(resolvedSourceVersion.version, 'v3.0')
-        self.assertEqual(resolvedSourceVersion.canonical_url, 'https://source.org.com')
-        self.assertTrue(resolvedSourceVersion.is_FQDN)
+        resolved_source_version = Source.resolve_reference_expression(
+            'https://source.org.com', version="v3.0")
+        self.assertIsNotNone(resolved_source_version.id)
+        self.assertEqual(resolved_source_version.version, 'v3.0')
+        self.assertEqual(resolved_source_version.canonical_url, 'https://source.org.com')
+        self.assertTrue(resolved_source_version.is_fqdn)
 
-        resolvedSourceVersion = Source.resolve_reference_expression('https://source.org.com')
-        self.assertIsNotNone(resolvedSourceVersion.id)
-        self.assertEqual(resolvedSourceVersion.version, 'v2.0')
-        self.assertEqual(resolvedSourceVersion.canonical_url, 'https://source.org.com')
-        self.assertTrue(resolvedSourceVersion.is_FQDN)
+        resolved_source_version = Source.resolve_reference_expression('https://source.org.com')
+        self.assertIsNotNone(resolved_source_version.id)
+        self.assertEqual(resolved_source_version.version, 'v2.0')
+        self.assertEqual(resolved_source_version.canonical_url, 'https://source.org.com')
+        self.assertTrue(resolved_source_version.is_fqdn)
 
-        resolvedSourceVersion = Source.resolve_reference_expression('https://source.org.com|v1.0', namespace='/orgs/org/')
-        self.assertIsNotNone(resolvedSourceVersion.id)
-        self.assertEqual(resolvedSourceVersion.version, 'v1.0')
-        self.assertEqual(resolvedSourceVersion.canonical_url, 'https://source.org.com')
-        self.assertTrue(resolvedSourceVersion.is_FQDN)
+        resolved_source_version = Source.resolve_reference_expression(
+            'https://source.org.com|v1.0', namespace='/orgs/org/')
+        self.assertIsNotNone(resolved_source_version.id)
+        self.assertEqual(resolved_source_version.version, 'v1.0')
+        self.assertEqual(resolved_source_version.canonical_url, 'https://source.org.com')
+        self.assertTrue(resolved_source_version.is_fqdn)
 
 
 class TasksTest(OCLTestCase):

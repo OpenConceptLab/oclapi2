@@ -471,7 +471,7 @@ class ReferenceExpressionResolveSerializer(Serializer):  # pylint: disable=abstr
 
     @staticmethod
     def get_type(obj):
-        return 'canonical' if get(obj, 'is_FQDN') else 'relative'
+        return 'canonical' if get(obj, 'is_fqdn') else 'relative'
 
     @staticmethod
     def get_resolved(obj):

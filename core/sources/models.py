@@ -213,12 +213,12 @@ class Source(ConceptContainerModel):
         if '|' in lookup_url:
             lookup_url, version = lookup_url.split('|')
 
-        is_FQDN = lookup_url.startswith('http://') or url.startswith('https://')
+        is_fqdn = lookup_url.startswith('http://') or url.startswith('https://')
 
         queryset = cls.objects.filter(is_active=True, retired=False)
         if namespace:
             queryset = queryset.filter(models.Q(user__uri=namespace) | models.Q(organization__uri=namespace))
-        if is_FQDN:
+        if is_fqdn:
             queryset = queryset.filter(canonical_url=lookup_url)
         else:
             queryset = queryset.filter(uri=lookup_url)
@@ -234,8 +234,8 @@ class Source(ConceptContainerModel):
             source = Source()
             source.namespace = namespace
 
-        source.is_FQDN = is_FQDN
-        if is_FQDN and source.id and not source.canonical_url:
+        source.is_fqdn = is_fqdn
+        if is_fqdn and source.id and not source.canonical_url:
             source.canonical_url = lookup_url
 
         return source
