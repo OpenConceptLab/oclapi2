@@ -22,6 +22,7 @@ from rest_framework import permissions
 import core.concepts.views as concept_views
 import core.mappings.views as mapping_views
 from core import VERSION
+from core.collections.views import ReferenceExpressionResolveView
 from core.common.constants import NAMESPACE_PATTERN
 from core.common.utils import get_api_base_url
 from core.common.views import RootView, FeedbackView, APIVersionView, ChangeLogView, ConceptDuplicateLocalesView, \
@@ -60,6 +61,7 @@ urlpatterns = [
         ConceptMultipleLatestVersionsView.as_view(), name='concepts-duplicate-latest-versions'),
     path('admin/mappings/debug/', mapping_views.MappingDebugRetrieveDestroyView.as_view(), name='mapping-debug'),
     path('admin/concepts/debug/<int:id>/', concept_views.ConceptDebugView.as_view(), name='concept-debug'),
+    path('$resolveReference/', ReferenceExpressionResolveView.as_view(), name='reference-$resolve'),
     path('users/', include('core.users.urls'), name='users_urls'),
     path('user/', include('core.users.user_urls'), name='current_user_urls'),
     path('orgs/', include('core.orgs.urls'), name='orgs_url'),

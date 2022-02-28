@@ -1,9 +1,10 @@
+from datetime import datetime
 from django.core.validators import RegexValidator
 from pydash import get
 from rest_framework.fields import CharField, ChoiceField, ListField, IntegerField, DateTimeField, JSONField, \
     BooleanField, SerializerMethodField
 from rest_framework.relations import PrimaryKeyRelatedField
-from rest_framework.serializers import ModelSerializer
+from rest_framework.serializers import ModelSerializer, Serializer
 
 from core.client_configs.serializers import ClientConfigSerializer
 from core.collections.constants import INCLUDE_REFERENCES_PARAM
@@ -450,3 +451,36 @@ class ExpansionDetailSerializer(ModelSerializer):
             summary = ExpansionSummarySerializer(obj).data
 
         return summary
+
+
+class ReferenceExpressionResolveSerializer(Serializer):  # pylint: disable=abstract-method
+    type = SerializerMethodField()
+    resolved = SerializerMethodField()
+    timestamp = SerializerMethodField()
+    namespace = SerializerMethodField()
+    url = CharField(read_only=True, source='uri')
+    title = CharField(read_only=True, source='full_name')
+    version = CharField(read_only=True)
+    canonical_url = CharField(read_only=True)
+
+    class Meta:
+        fields = (
+            'type', 'resolved', 'timestamp', 'namespace', 'url', 'canonical_url', 'title',
+            'version',
+        )
+
+    @staticmethod
+    def get_type(obj):
+        return 'canonical' if get(obj, 'is_FQDN') else 'relative'
+
+    @staticmethod
+    def get_resolved(obj):
+        return bool(obj.id)
+
+    @staticmethod
+    def get_timestamp(_):
+        return datetime.now()
+
+    @staticmethod
+    def get_namespace(obj):
+        return obj.parent_url if obj.id else get(obj, 'namespace')

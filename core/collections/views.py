@@ -15,6 +15,7 @@ from rest_framework.generics import (
     CreateAPIView)
 from rest_framework.permissions import IsAuthenticated, IsAdminUser
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from core.client_configs.views import ResourceClientConfigsView
 from core.collections.constants import (
@@ -31,7 +32,7 @@ from core.collections.serializers import (
     CollectionCreateSerializer, CollectionReferenceSerializer, CollectionVersionDetailSerializer,
     CollectionVersionListSerializer, CollectionVersionExportSerializer, CollectionSummaryDetailSerializer,
     CollectionVersionSummaryDetailSerializer, CollectionReferenceDetailSerializer, ExpansionSerializer,
-    ExpansionDetailSerializer)
+    ExpansionDetailSerializer, ReferenceExpressionResolveSerializer)
 from core.collections.utils import is_version_specified
 from core.common.constants import (
     HEAD, RELEASED_PARAM, PROCESSING_PARAM, OK_MESSAGE,
@@ -946,3 +947,22 @@ class CollectionClientConfigsView(CollectionBaseView, ResourceClientConfigsView)
     model = Collection
     queryset = Collection.objects.filter(is_active=True, version='HEAD')
     permission_classes = (CanViewConceptDictionary, )
+
+
+class ReferenceExpressionResolveView(APIView):
+    serializer_class = ReferenceExpressionResolveSerializer
+
+    def get_object(self):
+        data = self.request.data
+        url = data.get('url', None)
+        if not url:
+            return Response(status=status.HTTP_400_BAD_REQUEST)
+
+        version = data.get('version', None)
+        namespace = data.get('namespace', None)
+        from core.sources.models import Source
+        return Source.resolve_reference_expression(url=url, namespace=namespace, version=version)
+
+    def post(self, _):
+        instance = self.get_object()
+        return Response(ReferenceExpressionResolveSerializer(instance).data, status=status.HTTP_200_OK)
