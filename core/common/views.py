@@ -175,9 +175,6 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     def is_exact_match_on(self):
         return self.request.query_params.dict().get(self.exact_match, None) == 'on'
 
-    def get_searchable_fields(self):
-        return [field for field, config in get(self, 'es_fields', {}).items() if config.get('filterable', False)]
-
     def get_exact_search_fields(self):
         return [field for field, config in get(self, 'es_fields', {}).items() if config.get('exact', False)]
 
