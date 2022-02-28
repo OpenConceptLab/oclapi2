@@ -607,7 +607,7 @@ class SourceTest(OCLTestCase):
         self.assertTrue(source.is_hierarchy_root_belonging_to_self())
         self.assertTrue(source_v1.is_hierarchy_root_belonging_to_self())
 
-    def test_resolve_expression_non_existing(self):
+    def test_resolve_reference_expression_non_existing(self):
         resolved_source_version = Source.resolve_reference_expression('/some/url/')
         self.assertIsNone(resolved_source_version.id)
         self.assertFalse(resolved_source_version.is_fqdn)
@@ -649,7 +649,7 @@ class SourceTest(OCLTestCase):
         self.assertIsNone(resolved_source_version.id)
         self.assertTrue(resolved_source_version.is_fqdn)
 
-    def test_resolve_expression_existing(self):
+    def test_resolve_reference_expression_existing(self):
         org = OrganizationFactory(mnemonic='org')
         OrganizationSourceFactory(
             mnemonic='source', canonical_url='https://source.org.com', organization=org)
@@ -680,6 +680,13 @@ class SourceTest(OCLTestCase):
             '/orgs/org/sources/source/', namespace='/orgs/org/')
         self.assertIsNotNone(resolved_source_version.id)
         self.assertEqual(resolved_source_version.version, 'v2.0')
+        self.assertEqual(resolved_source_version.canonical_url, 'https://source.org.com')
+        self.assertFalse(resolved_source_version.is_fqdn)
+
+        resolved_source_version = Source.resolve_reference_expression(
+            '/orgs/org/sources/source/v1.0/', namespace='/orgs/org/')
+        self.assertIsNotNone(resolved_source_version.id)
+        self.assertEqual(resolved_source_version.version, 'v1.0')
         self.assertEqual(resolved_source_version.canonical_url, 'https://source.org.com')
         self.assertFalse(resolved_source_version.is_fqdn)
 

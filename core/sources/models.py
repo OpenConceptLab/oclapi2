@@ -227,7 +227,7 @@ class Source(ConceptContainerModel):
         if source:
             if version:
                 source = source.versions.filter(version=version).first()
-            else:
+            elif source.is_head:
                 source = source.get_latest_released_version()
 
         if not source:
