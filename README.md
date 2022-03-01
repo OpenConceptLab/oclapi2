@@ -29,6 +29,10 @@ The new and improved OCL terminology service v2
 
     or
 
+    `docker exec -it oclapi2_api_1  python manage.py test --keepdb -v3 -- core.sources.tests.tests.SourceTest` 
+
+    or
+
     `docker-compose -f docker-compose.yml -f docker-compose.ci.yml run --rm api python manage.py test --keepdb -v3`
 
 ### DB migrations
