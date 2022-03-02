@@ -206,36 +206,3 @@ class Source(ConceptContainerModel):
 
         self.batch_index(self.concepts, ConceptDocument)
         self.batch_index(self.mappings, MappingDocument)
-
-    @classmethod
-    def resolve_reference_expression(cls, url, namespace=None, version=None):
-        lookup_url = url
-        if '|' in lookup_url:
-            lookup_url, version = lookup_url.split('|')
-
-        is_fqdn = lookup_url.startswith('http://') or url.startswith('https://')
-
-        queryset = cls.objects.filter(is_active=True, retired=False)
-        if namespace:
-            queryset = queryset.filter(models.Q(user__uri=namespace) | models.Q(organization__uri=namespace))
-        if is_fqdn:
-            queryset = queryset.filter(canonical_url=lookup_url)
-        else:
-            queryset = queryset.filter(uri=lookup_url)
-
-        source = queryset.first()
-        if source:
-            if version:
-                source = source.versions.filter(version=version).first()
-            elif source.is_head:
-                source = source.get_latest_released_version()
-
-        if not source:
-            source = Source()
-            source.namespace = namespace
-
-        source.is_fqdn = is_fqdn
-        if is_fqdn and source.id and not source.canonical_url:
-            source.canonical_url = lookup_url
-
-        return source

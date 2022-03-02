@@ -78,8 +78,10 @@ class OrganizationListViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 6)
         self.assertEqual(
-            [org['id'] for org in response.data],
-            ['user-private-org', 'user-public-view-org', 'public-edit-org', 'public-view-org', 'private-org', 'OCL']
+            sorted([org['id'] for org in response.data]),
+            sorted([
+                'user-private-org', 'user-public-view-org', 'public-edit-org', 'public-view-org', 'private-org', 'OCL'
+            ])
         )
 
     def test_get_200_staff_user(self):

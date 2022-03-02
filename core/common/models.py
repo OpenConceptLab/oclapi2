@@ -16,7 +16,8 @@ from pydash import get
 from core.common.services import S3
 from core.common.tasks import update_collection_active_concepts_count, update_collection_active_mappings_count, \
     delete_s3_objects
-from core.common.utils import reverse_resource, reverse_resource_version, parse_updated_since_param, drop_version
+from core.common.utils import reverse_resource, reverse_resource_version, parse_updated_since_param, drop_version, \
+    to_parent_uri
 from core.common.utils import to_owner_uri
 from core.settings import DEFAULT_LOCALE
 from .constants import (
@@ -763,6 +764,45 @@ class ConceptContainerModel(VersionedModel):
         if get(user, 'is_anonymous'):
             return False
         return get(user, 'is_staff') or self.user_id == user.id or self.organization.members.filter(id=user.id).exists()
+
+    @staticmethod
+    def resolve_reference_expression(url, namespace=None, version=None):
+        lookup_url = url
+        if '|' in lookup_url:
+            lookup_url, version = lookup_url.split('|')
+
+        lookup_url = lookup_url.split('?')[0]
+
+        is_fqdn = lookup_url.startswith('http://') or url.startswith('https://')
+
+        criteria = models.Q(is_active=True, retired=False)
+        if namespace:
+            criteria &= models.Q(models.Q(user__uri=namespace) | models.Q(organization__uri=namespace))
+        if is_fqdn:
+            criteria &= models.Q(canonical_url=lookup_url)
+        else:
+            criteria &= models.Q(uri=to_parent_uri(lookup_url))
+
+        from core.sources.models import Source
+        instance = Source.objects.filter(criteria).first()
+        if not instance:
+            from core.collections.models import Collection
+            instance = Collection.objects.filter(criteria).first()
+
+        if instance:
+            if version:
+                instance = instance.versions.filter(version=version).first()
+            elif instance.is_head:
+                instance = instance.get_latest_released_version()
+
+        if not instance:
+            instance = Source()
+
+        instance.is_fqdn = is_fqdn
+        if is_fqdn and instance.id and not instance.canonical_url:
+            instance.canonical_url = lookup_url
+
+        return instance
 
 
 class CelerySignalProcessor(RealTimeSignalProcessor):

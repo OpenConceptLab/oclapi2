@@ -42,8 +42,8 @@ class SourceVersionListSerializer(ModelSerializer):
     class Meta:
         model = Source
         fields = (
-            'short_code', 'name', 'url', 'owner', 'owner_type', 'owner_url', 'version', 'created_at', 'id',
-            'source_type', 'updated_at', 'canonical_url', 'released', 'retired', 'version_url', 'previous_version_url'
+            'short_code', 'name', 'url', 'canonical_url', 'owner', 'owner_type', 'owner_url', 'version', 'created_at',
+            'id', 'source_type', 'updated_at', 'released', 'retired', 'version_url', 'previous_version_url'
         )
 
 

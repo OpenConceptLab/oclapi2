@@ -46,9 +46,9 @@ class CollectionVersionListSerializer(ModelSerializer):
     class Meta:
         model = Collection
         fields = (
-            'short_code', 'name', 'url', 'owner', 'owner_type', 'owner_url', 'version', 'created_at', 'id',
-            'collection_type', 'updated_at', 'canonical_url', 'released', 'retired', 'version_url',
-            'previous_version_url', 'autoexpand', 'expansion_url',
+            'short_code', 'name', 'url', 'canonical_url', 'owner', 'owner_type', 'owner_url', 'version', 'created_at',
+            'id', 'collection_type', 'updated_at', 'released', 'retired', 'version_url', 'previous_version_url',
+            'autoexpand', 'expansion_url',
         )
 
 
@@ -454,23 +454,17 @@ class ExpansionDetailSerializer(ModelSerializer):
 
 
 class ReferenceExpressionResolveSerializer(Serializer):  # pylint: disable=abstract-method
-    type = SerializerMethodField()
+    reference_type = SerializerMethodField()
     resolved = SerializerMethodField()
     timestamp = SerializerMethodField()
-    namespace = SerializerMethodField()
-    url = CharField(read_only=True, source='uri')
-    title = CharField(read_only=True, source='full_name')
-    version = CharField(read_only=True)
-    canonical_url = CharField(read_only=True)
 
     class Meta:
         fields = (
-            'type', 'resolved', 'timestamp', 'namespace', 'url', 'canonical_url', 'title',
-            'version',
+            'reference_type', 'resolved', 'timestamp'
         )
 
     @staticmethod
-    def get_type(obj):
+    def get_reference_type(obj):
         return 'canonical' if get(obj, 'is_fqdn') else 'relative'
 
     @staticmethod
@@ -480,7 +474,3 @@ class ReferenceExpressionResolveSerializer(Serializer):  # pylint: disable=abstr
     @staticmethod
     def get_timestamp(_):
         return datetime.now()
-
-    @staticmethod
-    def get_namespace(obj):
-        return obj.parent_url if obj.id else get(obj, 'namespace')

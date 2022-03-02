@@ -960,9 +960,17 @@ class ReferenceExpressionResolveView(APIView):
 
         version = data.get('version', None)
         namespace = data.get('namespace', None)
-        from core.sources.models import Source
-        return Source.resolve_reference_expression(url=url, namespace=namespace, version=version)
+        from core.common.models import ConceptContainerModel
+        return ConceptContainerModel.resolve_reference_expression(url=url, namespace=namespace, version=version)
 
     def post(self, _):
         instance = self.get_object()
-        return Response(ReferenceExpressionResolveSerializer(instance).data, status=status.HTTP_200_OK)
+        data = ReferenceExpressionResolveSerializer(instance).data
+
+        if instance.id:
+            from core.sources.serializers import SourceVersionListSerializer
+            serializer_klass = CollectionVersionListSerializer if isinstance(
+                instance, Collection) else SourceVersionListSerializer
+            data = {**data, **serializer_klass(instance).data}
+
+        return Response(data, status=status.HTTP_200_OK)
