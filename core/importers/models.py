@@ -360,7 +360,7 @@ class CollectionVersionImporter(BaseResourceImporter):
     def process(self):
         coll = Collection(**self.data)
         if coll.has_parent_edit_access(self.user):
-            errors = Collection.persist_new_version(coll, self.user)
+            errors = Collection.persist_new_version(obj=coll, user=self.user, sync=True)
             return errors or CREATED
         return PERMISSION_DENIED
 
@@ -567,22 +567,7 @@ class ReferenceImporter(BaseResourceImporter):
 
         if collection:
             if collection.has_edit_access(self.user):
-                (added_references, _) = collection.add_expressions(
-                    self.get('data'), self.user, self.get('__cascade', False)
-                )
-                if not get(settings, 'TEST_MODE', False):
-                    for ref in added_references:
-                        if ref.concepts:
-                            batch_index_resources.apply_async(
-                                ('concept', dict(id__in=list(ref.concepts.values_list('id', flat=True)))),
-                                queue='indexing'
-                            )
-                        if ref.mappings:
-                            batch_index_resources.apply_async(
-                                ('mapping', dict(id__in=list(ref.mappings.values_list('id', flat=True)))),
-                                queue='indexing'
-                            )
-
+                collection.add_expressions(self.get('data'), self.user, self.get('__cascade', False))
                 return CREATED
             return PERMISSION_DENIED
         return FAILED
@@ -812,8 +797,9 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
             if data_type not in ['organization', 'source', 'collection']:
                 if prev_line:
                     prev_type = prev_line.get('type').lower()
+                    children_data_types = ['concept', 'mapping', 'reference']
                     if prev_type == data_type or (
-                            data_type not in ['concept', 'mapping'] and prev_type not in ['concept', 'mapping']
+                            data_type not in children_data_types and prev_type not in children_data_types
                     ):
                         self.parts[-1].append(line)
                     else:
