@@ -593,6 +593,7 @@ class ConceptContainerModel(VersionedModel):
         errors = {}
 
         obj.is_active = True
+        sync = kwargs.pop('sync', False)
         if user:
             obj.created_by = user
             obj.updated_by = user
@@ -602,10 +603,10 @@ class ConceptContainerModel(VersionedModel):
         obj.update_version_data(head)
         obj.save(**kwargs)
 
-        if get(settings, 'TEST_MODE', False):
-            seed_children_to_new_version(obj.resource_type.lower(), obj.id, False)
+        if get(settings, 'TEST_MODE', False) or sync:
+            seed_children_to_new_version(obj.resource_type.lower(), obj.id, False, sync)
         else:
-            seed_children_to_new_version.delay(obj.resource_type.lower(), obj.id)
+            seed_children_to_new_version.delay(obj.resource_type.lower(), obj.id, sync)
 
         if obj.id:
             obj.sibling_versions.update(is_latest_version=False)

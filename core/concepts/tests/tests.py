@@ -1081,6 +1081,7 @@ class ConceptTest(OCLTestCase):
             version='v1', mnemonic=collection.mnemonic, organization=collection.organization)
         expansion = ExpansionFactory(collection_version=collection_version1)
         reference = CollectionReference(expression=concept_v1.version_url, collection=collection_version1)
+        reference.clean()
         reference.save()
         expansion.seed_children(index=False)
 

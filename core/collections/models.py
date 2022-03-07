@@ -230,37 +230,25 @@ class Collection(ConceptContainerModel):
                 errors[expression] = ex.messages if hasattr(ex, 'messages') else ex
                 continue
 
-            added = False
-            if ref._concepts:  # pylint: disable=protected-access
-                if self.is_openmrs_schema:
-                    for concept in ref._concepts:  # pylint: disable=protected-access
-                        try:
-                            self.check_concept_uniqueness_in_collection_and_locale_by_name_attribute(
-                                concept, attribute='type__in', value=LOCALES_FULLY_SPECIFIED,
-                                error_message=CONCEPT_FULLY_SPECIFIED_NAME_UNIQUE_PER_COLLECTION_AND_LOCALE
-                            )
-                            self.check_concept_uniqueness_in_collection_and_locale_by_name_attribute(
-                                concept, attribute='locale_preferred', value=True,
-                                error_message=CONCEPT_PREFERRED_NAME_UNIQUE_PER_COLLECTION_AND_LOCALE
-                            )
-                        except Exception as ex:
-                            errors[expression] = ex.messages if hasattr(ex, 'messages') else ex
-                            continue
-                        collection_version.expansion.concepts.add(concept)
-                        concept.index()
-                        added = True
-                else:
-                    collection_version.expansion.add_references(ref)
-                    added = True
-            if ref._mappings:  # pylint: disable=protected-access
-                collection_version.expansion.add_references(ref)
-                added = True
-            if not added and ref.id:
-                added = True
+            if self.is_openmrs_schema and ref.concepts.exists():
+                for concept in ref.concepts.all():
+                    try:
+                        self.check_concept_uniqueness_in_collection_and_locale_by_name_attribute(
+                            concept, attribute='type__in', value=LOCALES_FULLY_SPECIFIED,
+                            error_message=CONCEPT_FULLY_SPECIFIED_NAME_UNIQUE_PER_COLLECTION_AND_LOCALE
+                        )
+                        self.check_concept_uniqueness_in_collection_and_locale_by_name_attribute(
+                            concept, attribute='locale_preferred', value=True,
+                            error_message=CONCEPT_PREFERRED_NAME_UNIQUE_PER_COLLECTION_AND_LOCALE
+                        )
+                    except Exception as ex:
+                        errors[expression] = ex.messages if hasattr(ex, 'messages') else ex
 
-            if added:
+            if ref.id:
                 added_references.append(ref)
 
+        if collection_version.expansion_uri:
+            collection_version.expansion.add_references(added_references)
         if user and user.is_authenticated:
             collection_version.updated_by = user
             self.updated_by = user
@@ -355,7 +343,7 @@ class Collection(ConceptContainerModel):
 
         return None
 
-    def cascade_children_to_expansion(self, expansion_data=None, index=True):  # pylint: disable=arguments-differ
+    def cascade_children_to_expansion(self, expansion_data=None, index=True, sync=False):  # pylint: disable=arguments-differ
         if not expansion_data:
             expansion_data = {}
         should_auto_expand = self.should_auto_expand
@@ -363,7 +351,7 @@ class Collection(ConceptContainerModel):
         if should_auto_expand and not self.expansions.exists() and not get(expansion_data, 'mnemonic'):
             expansion_data['mnemonic'] = f'autoexpand-{self.version}'
             expansion_data['is_processing'] = True
-        expansion = Expansion.persist(index=index, **expansion_data, collection_version=self)
+        expansion = Expansion.persist(index=index, **expansion_data, collection_version=self, sync=sync)
 
         if should_auto_expand and not self.expansion_uri:
             self.expansion_uri = expansion.uri
@@ -675,17 +663,15 @@ class Expansion(BaseResourceModel):
 
         index_concepts = False
         index_mappings = False
+
         for reference in refs:
-            if reference.is_concept:
-                concepts = reference.fetch_concepts(self.created_by)
-                if concepts.exists():
-                    index_concepts = True
-                    self.concepts.add(*self.apply_parameters(concepts))
-            elif reference.is_mapping:
-                mappings = reference.fetch_mappings(self.created_by)
-                if mappings.exists():
-                    index_mappings = True
-                    self.mappings.add(*self.apply_parameters(mappings))
+            if reference.concepts.exists():
+                self.concepts.add(*self.apply_parameters(reference.concepts))
+                index_concepts = True
+            if reference.mappings.exists():
+                self.mappings.add(*self.apply_parameters(reference.mappings))
+                index_mappings = True
+
         if index:
             if index_concepts:
                 self.index_concepts()
@@ -719,6 +705,7 @@ class Expansion(BaseResourceModel):
 
     @classmethod
     def persist(cls, index, **kwargs):
+        sync = kwargs.pop('sync', False)
         expansion = cls(**kwargs)
         temp_version = not bool(expansion.mnemonic)
         if temp_version:
@@ -730,7 +717,7 @@ class Expansion(BaseResourceModel):
             expansion.mnemonic = expansion.id
             expansion.save()
 
-        if get(settings, 'TEST_MODE', False):
+        if get(settings, 'TEST_MODE', False) or sync:
             seed_children_to_expansion(expansion.id, index)
         else:
             seed_children_to_expansion.delay(expansion.id, index)

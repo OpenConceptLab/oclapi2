@@ -288,7 +288,7 @@ def send_user_reset_password_email(user_id):
 
 
 @app.task(bind=True)
-def seed_children_to_new_version(self, resource, obj_id, export=True):
+def seed_children_to_new_version(self, resource, obj_id, export=True, sync=False):
     instance = None
     export_task = None
     autoexpand = True
@@ -317,7 +317,7 @@ def seed_children_to_new_version(self, resource, obj_id, export=True):
                 instance.seed_concepts(index=index)
                 instance.seed_mappings(index=index)
             elif autoexpand:
-                instance.cascade_children_to_expansion(index=index)
+                instance.cascade_children_to_expansion(index=index, sync=sync)
 
             if export:
                 export_task.delay(obj_id)
