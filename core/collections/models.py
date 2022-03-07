@@ -665,12 +665,16 @@ class Expansion(BaseResourceModel):
         index_mappings = False
 
         for reference in refs:
-            if reference.concepts.exists():
-                self.concepts.add(*self.apply_parameters(reference.concepts))
-                index_concepts = True
-            if reference.mappings.exists():
-                self.mappings.add(*self.apply_parameters(reference.mappings))
-                index_mappings = True
+            if reference.is_concept:
+                concepts = reference.fetch_concepts(self.created_by)
+                if concepts.exists():
+                    self.concepts.add(*self.apply_parameters(concepts))
+                    index_concepts = True
+            elif reference.is_mapping:
+                mappings = reference.fetch_mappings(self.created_by)
+                if mappings.exists():
+                    self.mappings.add(*self.apply_parameters(mappings))
+                    index_mappings = True
 
         if index:
             if index_concepts:
