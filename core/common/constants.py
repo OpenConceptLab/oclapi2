@@ -93,7 +93,6 @@ ES_REQUEST_TIMEOUT = 20  # seconds, default is 10
 CASCADE_METHOD_PARAM = 'method'
 CASCADE_HIERARCHY_PARAM = 'cascadeHierarchy'
 CASCADE_MAPPINGS_PARAM = 'cascadeMappings'
-CASCADE_ALL_VERSIONS = 'cascadeAllVersions'
 EXCLUDE_MAP_TYPES_PARAM = 'excludeMapTypes'
 MAP_TYPES_PARAM = 'mapTypes'
 CASCADE_LEVELS_PARAM = 'cascadeLevels'
