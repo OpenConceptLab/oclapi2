@@ -119,20 +119,20 @@ class CodeSystemPropertySerializer(CodeSystemSerializerMixin, serializers.Serial
 
 
 class CodeSystemIdentifierTypeCodingSerializer(CodeSystemSerializerMixin, serializers.Serializer):
-    system = CharField(default='http://hl7.org/fhir/v2/0203')
-    code = CharField(default='ACSN')
-    display = CharField(default='Accession ID')
+    system = CharField(default='http://hl7.org/fhir/v2/0203', required=False)
+    code = CharField(default='ACSN', required=False)
+    display = CharField(default='Accession ID', required=False)
 
 
 class CodeSystemIdentifierTypeSerializer(CodeSystemSerializerMixin, serializers.Serializer):
-    text = CharField(default='Accession ID')
-    coding = CodeSystemIdentifierTypeCodingSerializer(many=True)
+    text = CharField(default='Accession ID', required=False)
+    coding = CodeSystemIdentifierTypeCodingSerializer(many=True, required=False)
 
 
 class CodeSystemIdentifierSerializer(CodeSystemSerializerMixin, serializers.Serializer):
-    system = CharField(default=settings.API_BASE_URL)
-    value = CharField()
-    type = CodeSystemIdentifierTypeSerializer()
+    system = CharField(default=settings.API_BASE_URL, required=False)
+    value = CharField(required=False)
+    type = CodeSystemIdentifierTypeSerializer(required=False)
 
 
 class CodeSystemStatusField(serializers.Field):
@@ -164,17 +164,17 @@ class CodeSystemConceptField(serializers.Field):
 class CodeSystemDetailSerializer(serializers.ModelSerializer):
     resource_type = SerializerMethodField()
     id = CharField(source='mnemonic')
-    url = CharField(source='canonical_url')
-    title = CharField(source='full_name')
+    url = CharField(source='canonical_url', required=False)
+    title = CharField(source='full_name', required=False)
     status = CodeSystemStatusField(source='*')
-    language = CharField(source='default_locale')
+    language = CharField(source='default_locale', required=False)
     count = IntegerField(source='active_concepts', read_only=True)
     content = ChoiceField(source='content_type', choices=['not-present', 'example', 'fragment', 'complete',
                                                           'supplement'], allow_blank=True)
     property = SerializerMethodField()
     meta = SerializerMethodField()
     concept = CodeSystemConceptField(source='*', required=False)
-    identifier = CodeSystemIdentifierSerializer(many=True)
+    identifier = CodeSystemIdentifierSerializer(many=True, required=False)
 
     class Meta:
         model = Source
