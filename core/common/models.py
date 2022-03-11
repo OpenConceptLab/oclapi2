@@ -794,7 +794,7 @@ class ConceptContainerModel(VersionedModel):
             if version:
                 instance = instance.versions.filter(version=version).first()
             elif instance.is_head:
-                instance = instance.get_latest_released_version()
+                instance = instance.get_latest_released_version() or instance
 
         if not instance:
             instance = Source()

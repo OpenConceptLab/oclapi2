@@ -971,6 +971,6 @@ class ReferenceExpressionResolveView(APIView):
             from core.sources.serializers import SourceVersionListSerializer
             serializer_klass = CollectionVersionListSerializer if isinstance(
                 instance, Collection) else SourceVersionListSerializer
-            data = {**data, **serializer_klass(instance).data}
+            data = {**data, "result": serializer_klass(instance).data}
 
         return Response(data, status=status.HTTP_200_OK)

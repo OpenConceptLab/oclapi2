@@ -32,6 +32,7 @@ class CollectionListSerializer(ModelSerializer):
 
 
 class CollectionVersionListSerializer(ModelSerializer):
+    type = CharField(source='resource_version_type')
     short_code = CharField(source='mnemonic')
     owner = CharField(source='parent_resource')
     owner_type = CharField(source='parent_resource_type')
@@ -46,9 +47,9 @@ class CollectionVersionListSerializer(ModelSerializer):
     class Meta:
         model = Collection
         fields = (
-            'short_code', 'name', 'url', 'canonical_url', 'owner', 'owner_type', 'owner_url', 'version', 'created_at',
-            'id', 'collection_type', 'updated_at', 'released', 'retired', 'version_url', 'previous_version_url',
-            'autoexpand', 'expansion_url',
+            'type', 'short_code', 'name', 'url', 'canonical_url', 'owner', 'owner_type', 'owner_url', 'version',
+            'created_at', 'id', 'collection_type', 'updated_at', 'released', 'retired', 'version_url',
+            'previous_version_url', 'autoexpand', 'expansion_url',
         )
 
 

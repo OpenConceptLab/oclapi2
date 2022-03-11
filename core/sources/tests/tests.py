@@ -664,6 +664,9 @@ class SourceTest(OCLTestCase):
         OrganizationCollectionFactory(id=6, mnemonic='collection', organization=org, version='v1.0', released=True)
         OrganizationCollectionFactory(id=7, mnemonic='collection', organization=org, version='v2.0')
 
+        OrganizationCollectionFactory(id=8, mnemonic='collection2', organization=org)
+        OrganizationCollectionFactory(id=9, mnemonic='collection2', organization=org, version='v1.0', released=False)
+
         resolved_version = Source.resolve_reference_expression(
             '/orgs/org/sources/source/', version="v1.0")
         self.assertEqual(resolved_version.id, 2)
@@ -731,6 +734,14 @@ class SourceTest(OCLTestCase):
         self.assertEqual(resolved_version.id, 7)
         self.assertTrue(isinstance(resolved_version, Collection))
         self.assertEqual(resolved_version.version, 'v2.0')
+        self.assertEqual(resolved_version.canonical_url, None)
+        self.assertFalse(resolved_version.is_fqdn)
+
+        resolved_version = Source.resolve_reference_expression(
+            '/orgs/org/collections/collection2/', namespace='/orgs/org/')
+        self.assertEqual(resolved_version.id, 8)
+        self.assertTrue(isinstance(resolved_version, Collection))
+        self.assertEqual(resolved_version.version, 'HEAD')
         self.assertEqual(resolved_version.canonical_url, None)
         self.assertFalse(resolved_version.is_fqdn)
 
