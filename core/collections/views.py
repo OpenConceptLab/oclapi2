@@ -952,25 +952,37 @@ class CollectionClientConfigsView(CollectionBaseView, ResourceClientConfigsView)
 class ReferenceExpressionResolveView(APIView):
     serializer_class = ReferenceExpressionResolveSerializer
 
-    def get_object(self):
+    def get_results(self):
         data = self.request.data
-        url = data.get('url', None)
-        if not url:
-            return Response(status=status.HTTP_400_BAD_REQUEST)
+        if not isinstance(data, list):
+            data = [data]
 
-        version = data.get('version', None)
-        namespace = data.get('namespace', None)
         from core.common.models import ConceptContainerModel
-        return ConceptContainerModel.resolve_reference_expression(url=url, namespace=namespace, version=version)
+        results = []
+        for expression in data:
+            if isinstance(expression, dict) and get(expression, 'url'):
+                url = expression['url']
+                version = expression.get('version', None)
+                namespace = expression.get('namespace', None)
+            else:
+                url = expression
+                version = None
+                namespace = None
+            instance = ConceptContainerModel.resolve_reference_expression(url=url, namespace=namespace, version=version)
+            result = {
+                **ReferenceExpressionResolveSerializer(instance).data,
+                'request': expression, 'resolution_url': instance.resolution_url
+            }
+
+            if instance.id:
+                from core.sources.serializers import SourceVersionListSerializer
+                serializer_klass = CollectionVersionListSerializer if isinstance(
+                    instance, Collection) else SourceVersionListSerializer
+                result = {**result, "result": serializer_klass(instance).data}
+
+            results.append(result)
+
+        return results
 
     def post(self, _):
-        instance = self.get_object()
-        data = ReferenceExpressionResolveSerializer(instance).data
-
-        if instance.id:
-            from core.sources.serializers import SourceVersionListSerializer
-            serializer_klass = CollectionVersionListSerializer if isinstance(
-                instance, Collection) else SourceVersionListSerializer
-            data = {**data, "result": serializer_klass(instance).data}
-
-        return Response(data, status=status.HTTP_200_OK)
+        return Response(self.get_results(), status=status.HTTP_200_OK)
