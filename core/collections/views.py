@@ -1061,19 +1061,20 @@ class ReferenceExpressionResolveView(APIView):
                 url = expression
                 version = None
                 namespace = None
-            instance = ConceptContainerModel.resolve_reference_expression(url=url, namespace=namespace, version=version)
-            result = {
-                **ReferenceExpressionResolveSerializer(instance).data,
-                'request': expression, 'resolution_url': instance.resolution_url
-            }
+            if url:
+                instance = ConceptContainerModel.resolve_reference_expression(url=url, namespace=namespace, version=version)
+                result = {
+                    **ReferenceExpressionResolveSerializer(instance).data,
+                    'request': expression, 'resolution_url': instance.resolution_url
+                }
 
-            if instance.id:
-                from core.sources.serializers import SourceVersionListSerializer
-                serializer_klass = CollectionVersionListSerializer if isinstance(
-                    instance, Collection) else SourceVersionListSerializer
-                result = {**result, "result": serializer_klass(instance).data}
+                if instance.id:
+                    from core.sources.serializers import SourceVersionListSerializer
+                    serializer_klass = CollectionVersionListSerializer if isinstance(
+                        instance, Collection) else SourceVersionListSerializer
+                    result = {**result, "result": serializer_klass(instance).data}
 
-            results.append(result)
+                results.append(result)
 
         return results
 

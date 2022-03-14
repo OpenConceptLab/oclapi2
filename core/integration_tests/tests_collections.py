@@ -1476,3 +1476,52 @@ class CollectionLatestVersionSummaryViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['uuid'], str(version2.id))
         self.assertEqual(response.data['id'], 'v2')
+
+
+class ReferenceExpressionResolveViewTest(OCLAPITestCase):
+    def test_post_200(self):
+        admin = UserProfile.objects.get(username='ocladmin')
+        token = admin.get_token()
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection)
+        collection.expansion_uri = expansion.uri
+        collection.save()
+        mapping = MappingFactory()
+        collection.add_references([mapping.uri])
+        expansion.mappings.add(mapping)
+
+        response = self.client.post(
+            '/$resolveReference/',
+            [dict(url=collection.uri), mapping.parent.uri, '/orgs/foobar/'],
+            HTTP_AUTHORIZATION='Token ' + token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 3)
+
+        collection_resolution = response.data[0]
+        self.assertTrue(collection_resolution['resolved'])
+        self.assertIsNotNone(collection_resolution['timestamp'])
+        self.assertEqual(collection_resolution['resolution_url'], collection.uri)
+        self.assertEqual(collection_resolution['request'], dict(url=collection.uri))
+        self.assertEqual(collection_resolution['result']['short_code'], collection.mnemonic)
+        self.assertEqual(collection_resolution['result']['id'], collection.version)
+        self.assertEqual(collection_resolution['result']['url'], collection.uri)
+        self.assertEqual(collection_resolution['result']['type'], 'Collection Version')
+
+        source_resolution = response.data[1]
+        self.assertTrue(source_resolution['resolved'])
+        self.assertIsNotNone(source_resolution['timestamp'])
+        self.assertEqual(source_resolution['resolution_url'], mapping.parent.uri)
+        self.assertEqual(source_resolution['request'], mapping.parent.uri)
+        self.assertEqual(source_resolution['result']['short_code'], mapping.parent.mnemonic)
+        self.assertEqual(source_resolution['result']['id'], mapping.parent.version)
+        self.assertEqual(source_resolution['result']['url'], mapping.parent.uri)
+
+        unknown_resolution = response.data[2]
+        self.assertFalse(unknown_resolution['resolved'])
+        self.assertIsNotNone(unknown_resolution['timestamp'])
+        self.assertEqual(unknown_resolution['resolution_url'], '/orgs/foobar/')
+        self.assertEqual(unknown_resolution['request'], '/orgs/foobar/')
+        self.assertFalse('result' in unknown_resolution)
