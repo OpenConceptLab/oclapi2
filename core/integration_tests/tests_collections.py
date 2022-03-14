@@ -1483,12 +1483,7 @@ class ReferenceExpressionResolveViewTest(OCLAPITestCase):
         admin = UserProfile.objects.get(username='ocladmin')
         token = admin.get_token()
         collection = OrganizationCollectionFactory()
-        expansion = ExpansionFactory(collection_version=collection)
-        collection.expansion_uri = expansion.uri
-        collection.save()
         mapping = MappingFactory()
-        collection.add_references([mapping.uri])
-        expansion.mappings.add(mapping)
 
         response = self.client.post(
             '/$resolveReference/',
@@ -1525,3 +1520,19 @@ class ReferenceExpressionResolveViewTest(OCLAPITestCase):
         self.assertEqual(unknown_resolution['resolution_url'], '/orgs/foobar/')
         self.assertEqual(unknown_resolution['request'], '/orgs/foobar/')
         self.assertFalse('result' in unknown_resolution)
+
+
+class CollectionVersionExpansionMappingRetrieveViewTest(OCLAPITestCase):
+    def test_get_200(self):
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection)
+        mapping = MappingFactory()
+        reference = CollectionReference(expression=mapping.url, collection=collection)
+        reference.save()
+        expansion.mappings.add(mapping)
+        reference.mappings.add(mapping)
+
+        response = self.client.get(expansion.url + f'mappings/{mapping.mnemonic}/')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['id'], str(mapping.mnemonic))
+        self.assertEqual(response.data['type'], 'Mapping')
