@@ -1536,3 +1536,19 @@ class CollectionVersionExpansionMappingRetrieveViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['id'], str(mapping.mnemonic))
         self.assertEqual(response.data['type'], 'Mapping')
+
+
+class CollectionVersionExpansionConceptRetrieveViewTest(OCLAPITestCase):
+    def test_get_200(self):
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection)
+        concept = ConceptFactory()
+        reference = CollectionReference(expression=concept.url, collection=collection)
+        reference.save()
+        expansion.concepts.add(concept)
+        reference.concepts.add(concept)
+
+        response = self.client.get(expansion.url + f'concepts/{concept.mnemonic}/')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['id'], str(concept.mnemonic))
+        self.assertEqual(response.data['type'], 'Concept')
