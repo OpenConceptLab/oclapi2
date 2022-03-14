@@ -777,10 +777,10 @@ class ConceptContainerModel(VersionedModel):
         is_fqdn = lookup_url.startswith('http://') or url.startswith('https://')
 
         criteria = models.Q(is_active=True, retired=False)
-        if namespace:
-            criteria &= models.Q(models.Q(user__uri=namespace) | models.Q(organization__uri=namespace))
         if is_fqdn:
             criteria &= models.Q(canonical_url=lookup_url)
+            if namespace:
+                criteria &= models.Q(models.Q(user__uri=namespace) | models.Q(organization__uri=namespace))
         else:
             criteria &= models.Q(uri=to_parent_uri(lookup_url))
 
