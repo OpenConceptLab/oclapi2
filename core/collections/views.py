@@ -755,11 +755,78 @@ class CollectionVersionConceptRetrieveView(CollectionBaseView, RetrieveAPIView):
         return Concept.get_serializer_class(verbose=self.is_verbose(), version=True, brief=self.is_brief())
 
 
+class CollectionVersionExpansionConceptRetrieveView(CollectionBaseView, RetrieveAPIView):
+    def get_object(self, queryset=None):
+        instance = get_object_or_404(self.get_base_queryset())
+        self.check_object_permissions(self.request, instance)
+        expansion = instance.expansions.filter(mnemonic=self.kwargs['expansion']).first()
+        if not expansion:
+            raise Http404()
+        self.request.instance = instance
+        concepts = expansion.concepts.filter(mnemonic=self.kwargs['concept'])
+        if 'concept_version' in self.kwargs:
+            concepts = concepts.filter(version=self.kwargs['concept_version'])
+
+        uri_param = self.request.query_params.dict().get('uri')
+        if uri_param:
+            concepts = concepts.filter(**Concept.get_parent_and_owner_filters_from_uri(uri_param))
+        count = concepts.count()
+        if count == 0:
+            raise Http404()
+        if count > 1 and not uri_param:
+            raise Http409()
+
+        return concepts.first()
+
+    def get_serializer_class(self):
+        return Concept.get_serializer_class(verbose=self.is_verbose(), version=True, brief=self.is_brief())
+
+
 class CollectionVersionConceptMappingsView(CollectionBaseView, ListWithHeadersMixin):
     def get_queryset(self):
         instance = get_object_or_404(self.get_base_queryset())
         self.check_object_permissions(self.request, instance)
         expansion = instance.expansion
+        if not expansion:
+            raise Http404()
+        self.request.instance = instance
+        concepts = expansion.concepts.filter(mnemonic=self.kwargs['concept'])
+        if 'concept_version' in self.kwargs:
+            concepts = concepts.filter(version=self.kwargs['concept_version'])
+
+        uri_param = self.request.query_params.dict().get('uri')
+        if uri_param:
+            concepts = concepts.filter(**Concept.get_parent_and_owner_filters_from_uri(uri_param))
+        count = concepts.count()
+        if count == 0:
+            raise Http404()
+        if count > 1 and not uri_param:
+            raise Http409()
+
+        concept = concepts.first()
+
+        include_retired = self.request.query_params.get(INCLUDE_RETIRED_PARAM, False)
+        include_indirect_mappings = self.request.query_params.get(INCLUDE_INVERSE_MAPPINGS_PARAM, 'false') == 'true'
+
+        mappings_queryset = expansion.get_mappings_for_concept(
+            concept=concept, include_indirect=include_indirect_mappings)
+        if not include_retired:
+            mappings_queryset = mappings_queryset.exclude(retired=True)
+
+        return mappings_queryset
+
+    def get_serializer_class(self):
+        return Mapping.get_serializer_class(verbose=self.is_verbose(), version=True, brief=self.is_brief())
+
+    def get(self, request, *args, **kwargs):
+        return self.list(request, *args, **kwargs)
+
+
+class CollectionVersionExpansionConceptMappingsView(CollectionBaseView, ListWithHeadersMixin):
+    def get_queryset(self):
+        instance = get_object_or_404(self.get_base_queryset())
+        self.check_object_permissions(self.request, instance)
+        expansion = instance.expansions.filter(mnemonic=self.kwargs['expansion']).first()
         if not expansion:
             raise Http404()
         self.request.instance = instance
@@ -825,6 +892,32 @@ class CollectionVersionMappingRetrieveView(CollectionBaseView, RetrieveAPIView):
         instance = get_object_or_404(self.get_base_queryset())
         self.check_object_permissions(self.request, instance)
         expansion = instance.expansion
+        if not expansion:
+            raise Http404()
+        mappings = expansion.mappings.filter(mnemonic=self.kwargs['mapping'])
+        if 'mapping_version' in self.kwargs:
+            mappings = mappings.filter(version=self.kwargs['mapping_version'])
+
+        uri_param = self.request.query_params.dict().get('uri')
+        if uri_param:
+            mappings = mappings.filter(**Mapping.get_parent_and_owner_filters_from_uri(uri_param))
+        count = mappings.count()
+        if count == 0:
+            raise Http404()
+        if count > 1 and not uri_param:
+            raise Http409()
+
+        return mappings.first()
+
+    def get_serializer_class(self):
+        return Mapping.get_serializer_class(verbose=self.is_verbose(), version=True, brief=self.is_brief())
+
+
+class CollectionVersionExpansionMappingRetrieveView(CollectionBaseView, RetrieveAPIView):
+    def get_object(self, queryset=None):
+        instance = get_object_or_404(self.get_base_queryset())
+        self.check_object_permissions(self.request, instance)
+        expansion = instance.expansions.filter(mnemonic=self.kwargs['expansion']).first()
         if not expansion:
             raise Http404()
         mappings = expansion.mappings.filter(mnemonic=self.kwargs['mapping'])

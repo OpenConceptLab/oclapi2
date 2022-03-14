@@ -123,6 +123,36 @@ urlpatterns = [
         views.CollectionVersionExpansionView.as_view(),
         name='collection-version-expansion-detail'
     ),
+    path(
+        "<str:collection>/<str:version>/expansions/<str:expansion>/concepts/<str:concept>/mappings/",
+        views.CollectionVersionExpansionConceptMappingsView.as_view(),
+        name='concept-mappings'
+    ),
+    path(
+        "<str:collection>/<str:version>/expansions/<str:expansion>/concepts/<str:concept>/<str:concept_version>/mappings/",  # pylint: disable: line-too-long
+        views.CollectionVersionExpansionConceptMappingsView.as_view(),
+        name='concept-version-mappings'
+    ),
+    path(
+        "<str:collection>/<str:version>/expansions/<str:expansion>/concepts/<str:concept>/<str:concept_version>/",
+        views.CollectionVersionExpansionConceptRetrieveView.as_view(),
+        name='concept-version-detail'
+    ),
+    path(
+        "<str:collection>/<str:version>/expansions/<str:expansion>/concepts/<str:concept>/",
+        views.CollectionVersionExpansionConceptRetrieveView.as_view(),
+        name='concept-detail'
+    ),
+    path(
+        "<str:collection>/<str:version>/expansions/<str:expansion>/mappings/<str:mapping>/<str:mapping_version>/",
+        views.CollectionVersionExpansionMappingRetrieveView.as_view(),
+        name='mapping-version-detail'
+    ),
+    path(
+        "<str:collection>/<str:version>/expansions/<str:expansion>/mappings/<str:mapping>/",
+        views.CollectionVersionExpansionMappingRetrieveView.as_view(),
+        name='mapping-detail'
+    ),
     re_path(
         r'^(?P<collection>{pattern})/(?P<version>{pattern})/expansions/(?P<expansion>{pattern})/concepts/$'.format(
             pattern=NAMESPACE_PATTERN),
