@@ -1062,7 +1062,8 @@ class ReferenceExpressionResolveView(APIView):
                 version = None
                 namespace = None
             if url:
-                instance = ConceptContainerModel.resolve_reference_expression(url=url, namespace=namespace, version=version)
+                instance = ConceptContainerModel.resolve_reference_expression(
+                    url=url, namespace=namespace, version=version)
                 result = {
                     **ReferenceExpressionResolveSerializer(instance).data,
                     'request': expression, 'resolution_url': instance.resolution_url

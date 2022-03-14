@@ -129,7 +129,7 @@ urlpatterns = [
         name='concept-mappings'
     ),
     path(
-        "<str:collection>/<str:version>/expansions/<str:expansion>/concepts/<str:concept>/<str:concept_version>/mappings/",  # pylint: disable: line-too-long
+        "<str:collection>/<str:version>/expansions/<str:expansion>/concepts/<str:concept>/<str:concept_version>/mappings/",  # pylint: disable=line-too-long
         views.CollectionVersionExpansionConceptMappingsView.as_view(),
         name='concept-version-mappings'
     ),
