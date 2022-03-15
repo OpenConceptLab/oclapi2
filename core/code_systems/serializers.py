@@ -206,8 +206,8 @@ class CodeSystemDetailSerializer(serializers.ModelSerializer):
     def to_representation(self, instance):
         try:
             rep = super().to_representation(instance)
-        except Exception as e:
-            raise Exception(f'Failed to deserialize {instance.uri}') from e
+        except Exception as error:
+            raise Exception(f'Failed to deserialize {instance.uri}') from error
 
         self.include_ocl_identifier(instance, rep)
         return rep
@@ -277,7 +277,8 @@ class CodeSystemDetailSerializer(serializers.ModelSerializer):
             if isinstance(ident.get('type', {}).get('coding', None), list):
                 codings = ident['type']['coding']
                 for coding in codings:
-                    if coding.get('code', None) == 'ACSN' and coding.get('system', None) == 'http://hl7.org/fhir/v2/0203':
+                    if coding.get('code', None) == 'ACSN' and \
+                            coding.get('system', None) == 'http://hl7.org/fhir/v2/0203':
                         found = ident.get('value', None)
                         if found:
                             break
@@ -322,7 +323,7 @@ class CodeSystemDetailSerializer(serializers.ModelSerializer):
             source.version = version
         else:
             source.version = '0.1'
-        source.id = None # pylint: disable=C0103
+        source.id = None  # pylint: disable=C0103
         errors = Source.persist_new_version(source, user)
         self._errors.update(errors)
 
