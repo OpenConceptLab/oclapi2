@@ -204,7 +204,10 @@ class CodeSystemDetailSerializer(serializers.ModelSerializer):
         return {'lastUpdated': obj.updated_at}
 
     def to_representation(self, instance):
-        rep = super().to_representation(instance)
+        try:
+            rep = super().to_representation(instance)
+        except Exception as e:
+            raise Exception(f'Failed to deserialize {instance.uri}') from e
 
         self.include_ocl_identifier(instance, rep)
         return rep
@@ -271,12 +274,13 @@ class CodeSystemDetailSerializer(serializers.ModelSerializer):
     def find_ocl_identifier(identifiers):
         found = None
         for ident in identifiers:
-            if ident['type'] and ident['type']['coding']:
+            if isinstance(ident.get('type', {}).get('coding', None), list):
                 codings = ident['type']['coding']
                 for coding in codings:
-                    if coding['code'] == 'ACSN' and coding['system'] == 'http://hl7.org/fhir/v2/0203':
-                        found = ident['value']
-                        break
+                    if coding.get('code', None) == 'ACSN' and coding.get('system', None) == 'http://hl7.org/fhir/v2/0203':
+                        found = ident.get('value', None)
+                        if found:
+                            break
                 if found:
                     break
         return found
