@@ -205,9 +205,14 @@ class ConceptCollectionMembershipView(ConceptBaseView, ListWithHeadersMixin):
 class ConceptRetrieveUpdateDestroyView(ConceptBaseView, RetrieveAPIView, UpdateAPIView, DestroyAPIView):
     serializer_class = ConceptDetailSerializer
 
+    def is_container_version_specified(self):
+        return 'version' in self.kwargs
+
     def get_object(self, queryset=None):
         queryset = self.get_queryset()
-        instance = queryset.filter(id=F('versioned_object_id')).first()
+        if not self.is_container_version_specified():
+            queryset = queryset.filter(id=F('versioned_object_id'))
+        instance = queryset.first()
         if not instance:
             raise Http404()
 
@@ -225,6 +230,9 @@ class ConceptRetrieveUpdateDestroyView(ConceptBaseView, RetrieveAPIView, UpdateA
         return [CanEditParentDictionary(), ]
 
     def update(self, request, *args, **kwargs):
+        if self.is_container_version_specified():
+            return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
+
         self.object = self.get_object()
         partial = kwargs.pop('partial', True)
         self.parent_resource = self.object.parent
@@ -249,6 +257,8 @@ class ConceptRetrieveUpdateDestroyView(ConceptBaseView, RetrieveAPIView, UpdateA
         return self.request.query_params.get('db', None) in ['true', True, 'True']
 
     def destroy(self, request, *args, **kwargs):
+        if self.is_container_version_specified():
+            return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
         is_hard_delete_requested = self.is_hard_delete_requested()
         if self.is_db_delete_requested() and is_hard_delete_requested:
             parent_filters = Concept.get_parent_and_owner_filters_from_kwargs(self.kwargs)

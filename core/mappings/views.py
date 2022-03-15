@@ -9,7 +9,6 @@ from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
 
 from core.common.constants import HEAD, ACCESS_TYPE_NONE
-from core.common.exceptions import Http409
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryMixin
 from core.common.swagger_parameters import (
     q_param, limit_param, sort_desc_param, page_param, exact_match_param, sort_asc_param, verbose_param,
@@ -130,20 +129,14 @@ class MappingListView(MappingBaseView, ListWithHeadersMixin, CreateModelMixin):
 class MappingRetrieveUpdateDestroyView(MappingBaseView, RetrieveAPIView, UpdateAPIView, DestroyAPIView):
     serializer_class = MappingDetailSerializer
 
+    def is_container_version_specified(self):
+        return 'version' in self.kwargs
+
     def get_object(self, queryset=None):
         queryset = self.get_queryset()
-        filters = dict(id=F('versioned_object_id'))
-        if 'collection' in self.kwargs:
-            filters = {}
-            queryset = queryset.order_by('id').distinct('id')
-            uri_param = self.request.query_params.dict().get('uri')
-            if uri_param:
-                filters.update(Mapping.get_parent_and_owner_filters_from_uri(uri_param))
-            if queryset.count() > 1 and not uri_param:
-                raise Http409()
-
-        instance = queryset.filter(**filters).first()
-
+        if not self.is_container_version_specified():
+            queryset = queryset.filter(id=F('versioned_object_id'))
+        instance = queryset.first()
         if not instance:
             raise Http404()
 
@@ -161,6 +154,9 @@ class MappingRetrieveUpdateDestroyView(MappingBaseView, RetrieveAPIView, UpdateA
         return [CanEditParentDictionary(), ]
 
     def update(self, request, *args, **kwargs):
+        if self.is_container_version_specified():
+            return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
+
         partial = kwargs.pop('partial', True)
         self.object = self.get_object()
         self.parent_resource = self.object.parent
@@ -182,6 +178,9 @@ class MappingRetrieveUpdateDestroyView(MappingBaseView, RetrieveAPIView, UpdateA
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     def destroy(self, request, *args, **kwargs):
+        if self.is_container_version_specified():
+            return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
+
         mapping = self.get_object()
         parent = mapping.parent
         comment = request.data.get('update_comment', None) or request.data.get('comment', None)
