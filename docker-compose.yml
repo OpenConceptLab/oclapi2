@@ -135,7 +135,7 @@ services:
     healthcheck:
       test: "curl --silent --fail -u $${FLOWER_USER:-root}:$${FLOWER_PASSWORD:-Root123} http://localhost:5555/metrics || exit 1"
   es:
-    image: elasticsearch:7.8.1
+    image: elasticsearch:7.17.1
     environment:
       - discovery.type=single-node
       - bootstrap.memory_lock=true
