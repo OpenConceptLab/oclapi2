@@ -539,7 +539,7 @@ class CollectionReferencesViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 202)
         self.assertEqual(response.data, [])
         add_references_mock.delay.assert_called_once_with(
-            self.user.id, dict(concepts='*'), self.collection.id, False, False
+            self.user.id, dict(concepts='*'), self.collection.id, False, False, False
         )
 
     def test_put_200_specific_expression(self):
@@ -698,6 +698,56 @@ class CollectionReferencesViewTest(OCLAPITestCase):
                 mapping4.to_concept.get_latest_version().uri
             ])
         )
+
+    def test_put_expression_transform_to_latest_version(self):
+        concept2 = ConceptFactory()
+        concept2_latest_version = concept2.get_latest_version()
+        concept3 = ConceptFactory()
+        concept3_latest_version = concept3.get_latest_version()
+
+        self.assertNotEqual(concept2.uri, concept2_latest_version.uri)
+        self.assertNotEqual(concept3.uri, concept3_latest_version.uri)
+
+        response = self.client.put(
+            self.collection.uri + 'references/?transformReferences=resourceVersions',
+            dict(data=dict(concepts=[concept2.uri])),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data,
+            [
+                dict(
+                    added=True, expression=concept2_latest_version.uri,
+                    message=ANY
+                )
+            ]
+        )
+
+        response = self.client.put(
+            self.collection.uri + 'references/',
+            dict(data=dict(concepts=[concept3.uri])),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data,
+            [
+                dict(
+                    added=True, expression=concept3.uri,
+                    message=ANY
+                )
+            ]
+        )
+
+        self.assertFalse(self.collection.references.filter(expression=concept2.uri).exists())
+        self.assertFalse(self.collection.references.filter(expression=concept3_latest_version.uri).exists())
+        self.assertTrue(self.collection.references.filter(expression=concept2_latest_version.uri).exists())
+        self.assertTrue(self.collection.references.filter(expression=concept3.uri).exists())
 
 
 class CollectionVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):

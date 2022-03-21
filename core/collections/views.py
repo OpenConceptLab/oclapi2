@@ -23,7 +23,7 @@ from core.collections.constants import (
     HEAD_OF_MAPPING_ADDED_TO_COLLECTION, CONCEPT_ADDED_TO_COLLECTION_FMT, MAPPING_ADDED_TO_COLLECTION_FMT,
     DELETE_FAILURE, DELETE_SUCCESS, NO_MATCH, VERSION_ALREADY_EXISTS,
     SOURCE_MAPPINGS,
-    UNKNOWN_REFERENCE_ADDED_TO_COLLECTION_FMT, SOURCE_TO_CONCEPTS)
+    UNKNOWN_REFERENCE_ADDED_TO_COLLECTION_FMT, SOURCE_TO_CONCEPTS, TRANSFORM_TO_RESOURCE_VERSIONS)
 from core.collections.documents import CollectionDocument
 from core.collections.models import Collection, CollectionReference
 from core.collections.search import CollectionSearch
@@ -49,7 +49,7 @@ from core.common.permissions import (
 from core.common.swagger_parameters import q_param, compress_header, page_param, verbose_param, exact_match_param, \
     include_facets_header, sort_asc_param, sort_desc_param, updated_since_param, include_retired_param, limit_param
 from core.common.tasks import add_references, export_collection, delete_collection
-from core.common.utils import compact_dict_by_values, parse_boolean_query_param
+from core.common.utils import compact_dict_by_values, parse_boolean_query_param, drop_version
 from core.common.views import BaseAPIView, BaseLogoView
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept
@@ -340,6 +340,7 @@ class CollectionReferencesView(
         collection = self.get_object()
         cascade_to_concepts = self.should_cascade_to_concepts()
         cascade_mappings = cascade_to_concepts or self.should_cascade_mappings()
+        transform_to_resource_version = self.should_transform_to_resource_version()
         data = request.data.get('data')
         concept_expressions = data.get('concepts', [])
         mapping_expressions = data.get('mappings', [])
@@ -349,7 +350,9 @@ class CollectionReferencesView(
 
         if adding_all:
             result = add_references.delay(
-                self.request.user.id, data, collection.id, cascade_mappings, cascade_to_concepts)
+                self.request.user.id, data, collection.id, cascade_mappings, cascade_to_concepts,
+                transform_to_resource_version
+            )
             return Response(
                 dict(
                     state=result.state, username=request.user.username, task=result.task_id, queue='default'
@@ -358,15 +361,17 @@ class CollectionReferencesView(
             )
 
         (added_references, errors) = collection.add_expressions(
-            data, request.user, cascade_mappings, cascade_to_concepts
+            data, request.user, cascade_mappings, cascade_to_concepts, transform_to_resource_version
         )
 
         all_expressions = expressions + concept_expressions + mapping_expressions
-
-        added_expressions = [reference.expression for reference in added_references]
-        added_original_expressions = set(
-            [reference.original_expression or reference.expression for reference in added_references] + all_expressions
-        )
+        added_expressions = set()
+        added_original_expressions = set(all_expressions)
+        for reference in added_references:
+            added_expressions.add(reference.expression)
+            added_expression = reference.original_expression or reference.expression
+            if drop_version(added_expression) not in all_expressions:
+                added_original_expressions.add(added_expression)
 
         response = []
 
@@ -388,6 +393,9 @@ class CollectionReferencesView(
 
     def should_cascade_to_concepts(self):
         return self.request.query_params.get('cascade', '').lower() == SOURCE_TO_CONCEPTS
+
+    def should_transform_to_resource_version(self):
+        return self.request.query_params.get('transformReferences', '').lower() == TRANSFORM_TO_RESOURCE_VERSIONS
 
     def create_response_item(self, added_expressions, errors, expression):
         adding_expression_failed = len(errors) > 0 and expression in errors

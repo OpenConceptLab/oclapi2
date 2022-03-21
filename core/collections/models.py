@@ -6,7 +6,7 @@ from django.db import models, transaction
 from django.db.models import UniqueConstraint
 from django.utils import timezone
 from django.utils.functional import cached_property
-from pydash import get
+from pydash import get, compact
 
 from core.collections.constants import (
     COLLECTION_TYPE, CONCEPTS_EXPRESSIONS,
@@ -171,7 +171,8 @@ class Collection(ConceptContainerModel):
                 raise ValidationError(validation_error)
 
     @transaction.atomic
-    def add_expressions(self, data, user, cascade_mappings=False, cascade_to_concepts=False):
+    def add_expressions(  # pylint: disable=too-many-arguments,too-many-locals,too-many-branches
+            self, data, user, cascade_mappings=False, cascade_to_concepts=False, transform_to_resource_version=False):
         expressions = data.get('expressions', [])
         concept_expressions = data.get('concepts', [])
         mapping_expressions = data.get('mappings', [])
@@ -201,8 +202,25 @@ class Collection(ConceptContainerModel):
 
         if cascade_mappings or cascade_to_concepts:
             expressions += self.get_all_related_uris(expressions, cascade_to_concepts)
+        new_expressions = []
+        if transform_to_resource_version:
+            for expression in expressions:
+                if drop_version(expression) == expression:
+                    if is_concept(expression):
+                        transformed_expression = get(
+                            Concept.objects.filter(versioned_object__uri=expression, is_latest_version=True), '0.uri')
+                    elif is_mapping(expression):
+                        transformed_expression = get(
+                            Mapping.objects.filter(versioned_object__uri=expression, is_latest_version=True), '0.uri')
+                    else:
+                        transformed_expression = expression
+                    new_expressions.append(transformed_expression)
+                else:
+                    new_expressions.append(expression)
+        else:
+            new_expressions = expressions
 
-        return self.add_references(expressions, user)
+        return self.add_references(compact(new_expressions), user)
 
     def add_references(self, expressions, user=None):  # pylint: disable=too-many-locals,too-many-branches,too-many-statements  # Fixme: Sny
         errors = {}
