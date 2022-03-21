@@ -22,7 +22,7 @@ from core.common.utils import (
     to_camel_case,
     drop_version, is_versioned_uri, separate_version, to_parent_uri, jsonify_safe, es_get,
     get_resource_class_from_resource_name, flatten_dict, is_csv_file, is_url_encoded_string, to_parent_uri_from_kwargs,
-    set_current_user, get_current_user, set_request_url, get_request_url, nested_dict_values)
+    set_current_user, get_current_user, set_request_url, get_request_url, nested_dict_values, chunks)
 from core.concepts.models import Concept, LocalizedText
 from core.mappings.models import Mapping
 from core.orgs.models import Organization
@@ -759,6 +759,13 @@ class UtilsTest(OCLTestCase):
             ),
             [1, 'foobar', 1, 'foobar', [{'a': 1}, {'b': 'foobar'}]]
         )
+
+    def test_chunks(self):
+        self.assertEqual(list(chunks([], 1000)), [])
+        self.assertEqual(list(chunks([1, 2, 3, 4], 3)), [[1, 2, 3], [4]])
+        self.assertEqual(list(chunks([1, 2, 3, 4], 2)), [[1, 2], [3, 4]])
+        self.assertEqual(list(chunks([1, 2, 3, 4], 7)), [[1, 2, 3, 4]])
+        self.assertEqual(list(chunks([1, 2, 3, 4], 4)), [[1, 2, 3, 4]])
 
 
 class BaseModelTest(OCLTestCase):

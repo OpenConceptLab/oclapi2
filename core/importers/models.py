@@ -14,7 +14,7 @@ from core.collections.models import Collection
 from core.common.constants import HEAD
 from core.common.services import RedisService
 from core.common.tasks import bulk_import_parts_inline, delete_organization, batch_index_resources
-from core.common.utils import drop_version, is_url_encoded_string, encode_string, to_parent_uri
+from core.common.utils import drop_version, is_url_encoded_string, encode_string, to_parent_uri, chunks
 from core.concepts.models import Concept
 from core.mappings.models import Mapping
 from core.orgs.models import Organization
@@ -656,8 +656,8 @@ class BulkImportInline(BaseImporter):
             print("****STARTED SUBPROCESS****")
             print(f"TASK ID: {self.self_task_id}")
             print("***************")
-        new_concept_ids = []
-        new_mapping_ids = []
+        new_concept_ids = {}
+        new_mapping_ids = {}
         for original_item in self.input_list:
             self.processed += 1
             logger.info('Processing %s of %s', str(self.processed), str(self.total))
@@ -699,14 +699,19 @@ class BulkImportInline(BaseImporter):
                 concept_importer = ConceptImporter(item, self.user, self.update_if_exists)
                 _result = concept_importer.run()
                 if get(concept_importer.instance, 'id'):
-                    new_concept_ids.append(concept_importer.instance.mnemonic)
+                    parent_url = concept_importer.instance.parent.uri
+                    if parent_url not in new_concept_ids:
+                        new_concept_ids[parent_url] = []
+                    new_concept_ids[parent_url].append(concept_importer.instance.mnemonic)
                 self.handle_item_import_result(_result, original_item)
                 continue
             if item_type == 'mapping':
                 mapping_importer = MappingImporter(item, self.user, self.update_if_exists)
                 _result = mapping_importer.run()
-                if get(mapping_importer.instance, 'id'):
-                    new_mapping_ids.append(mapping_importer.instance.mnemonic)
+                parent_url = mapping_importer.instance.parent.uri
+                if parent_url not in new_concept_ids:
+                    new_mapping_ids[parent_url] = []
+                new_mapping_ids[parent_url].append(mapping_importer.instance.mnemonic)
                 self.handle_item_import_result(_result, original_item)
                 continue
             if item_type == 'reference':
@@ -716,9 +721,15 @@ class BulkImportInline(BaseImporter):
                 continue
 
         if new_concept_ids:
-            batch_index_resources.apply_async(('concept', dict(mnemonic__in=new_concept_ids), True), queue='indexing')
+            for parent_url, ids in new_concept_ids.items():
+                for chunk in chunks(ids, 1000):
+                    batch_index_resources.apply_async(
+                        ('concept', dict(mnemonic__in=chunk, parent__uri=parent_url), True), queue='indexing')
         if new_mapping_ids:
-            batch_index_resources.apply_async(('mapping', dict(mnemonic__in=new_mapping_ids), True), queue='indexing')
+            for parent_url, ids in new_mapping_ids.items():
+                for chunk in chunks(ids, 1000):
+                    batch_index_resources.apply_async(
+                        ('mapping', dict(mnemonic__in=chunk, parent__uri=parent_url), True), queue='indexing')
 
         self.elapsed_seconds = time.time() - self.start_time
 
