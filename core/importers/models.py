@@ -709,7 +709,7 @@ class BulkImportInline(BaseImporter):
                 mapping_importer = MappingImporter(item, self.user, self.update_if_exists)
                 _result = mapping_importer.run()
                 parent_url = mapping_importer.instance.parent.uri
-                if parent_url not in new_concept_ids:
+                if parent_url not in new_mapping_ids:
                     new_mapping_ids[parent_url] = []
                 new_mapping_ids[parent_url].append(mapping_importer.instance.mnemonic)
                 self.handle_item_import_result(_result, original_item)
