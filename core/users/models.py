@@ -189,3 +189,10 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
 
     def soft_delete(self):
         self.deactivate()
+
+    def undelete(self):
+        self.verified = True
+        self.verification_token = None
+        self.deactivated_at = None
+        self.is_active = True
+        self.save()
