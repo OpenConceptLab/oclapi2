@@ -651,7 +651,7 @@ class BulkImportInline(BaseImporter):
             service = RedisService()
             service.set(self.self_task_id, self.processed)
 
-    def run(self):  # pylint: disable=too-many-branches,too-many-statements
+    def run(self):  # pylint: disable=too-many-branches,too-many-statements,too-many-locals
         if self.self_task_id:
             print("****STARTED SUBPROCESS****")
             print(f"TASK ID: {self.self_task_id}")

@@ -729,7 +729,7 @@ def nested_dict_values(_dict):
             yield value
 
 
-def chunks(lst, n):
+def chunks(lst, size):
     """Yield successive n-sized chunks from lst."""
-    for i in range(0, len(lst), n):
-        yield lst[i:i + n]
+    for i in range(0, len(lst), size):
+        yield lst[i:i + size]
