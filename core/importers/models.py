@@ -369,7 +369,7 @@ class ConceptImporter(BaseResourceImporter):
     mandatory_fields = {"id"}
     allowed_fields = [
         "id", "external_id", "concept_class", "datatype", "names", "descriptions", "retired", "extras",
-        "parent_concept_urls",
+        "parent_concept_urls", 'update_comment', 'comment'
     ]
 
     def __init__(self, data, user, update_if_exists):
@@ -437,7 +437,7 @@ class MappingImporter(BaseResourceImporter):
     mandatory_fields = {"map_type", "from_concept_url"}
     allowed_fields = [
         "id", "map_type", "from_concept_url", "to_source_url", "to_concept_url", "to_concept_code",
-        "to_concept_name", "extras", "external_id", "retired"
+        "to_concept_name", "extras", "external_id", "retired", 'update_comment', 'comment'
     ]
 
     def __init__(self, data, user, update_if_exists):
