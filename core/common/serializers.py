@@ -9,3 +9,12 @@ class RootSerializer(Serializer):  # pylint: disable=abstract-method
 
 class TaskSerializer(Serializer):  # pylint: disable=abstract-method
     pass
+
+
+class ReadSerializerMixin:
+    """ Mixin for serializer which does not update or create resources. """
+    def update(self, instance, validated_data):
+        pass
+
+    def create(self, validated_data):
+        pass

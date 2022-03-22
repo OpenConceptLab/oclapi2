@@ -2,20 +2,13 @@ from rest_framework import serializers
 from rest_framework.fields import CharField, IntegerField, SerializerMethodField, ChoiceField
 
 from core import settings
+from core.common.serializers import ReadSerializerMixin
 from core.concepts.models import Concept, LocalizedText
 from core.concepts.serializers import ConceptDetailSerializer
 from core.orgs.models import Organization
 from core.sources.models import Source
 from core.sources.serializers import SourceCreateOrUpdateSerializer
 from core.users.models import UserProfile
-
-
-class CodeSystemSerializerMixin:
-    def update(self, instance, validated_data):
-        pass
-
-    def create(self, validated_data):
-        pass
 
 
 class CodeSystemConceptDesignationUseSerializer(serializers.Field):
@@ -74,7 +67,7 @@ class CodeSystemConceptDisplaySerializer(serializers.Field):
         return value.display_name
 
 
-class CodeSystemConceptSerializer(CodeSystemSerializerMixin, serializers.Serializer):
+class CodeSystemConceptSerializer(ReadSerializerMixin, serializers.Serializer):
     code = CharField(source='mnemonic')
     display = CodeSystemConceptDisplaySerializer(source='*', required=False)
     definition = SerializerMethodField()
@@ -111,25 +104,25 @@ class CodeSystemConceptSerializer(CodeSystemSerializerMixin, serializers.Seriali
         return ''
 
 
-class CodeSystemPropertySerializer(CodeSystemSerializerMixin, serializers.Serializer):
+class CodeSystemPropertySerializer(ReadSerializerMixin, serializers.Serializer):
     code = CharField()
     uri = CharField()
     description = CharField()
     type = CharField()
 
 
-class CodeSystemIdentifierTypeCodingSerializer(CodeSystemSerializerMixin, serializers.Serializer):
+class CodeSystemIdentifierTypeCodingSerializer(ReadSerializerMixin, serializers.Serializer):
     system = CharField(default='http://hl7.org/fhir/v2/0203', required=False)
     code = CharField(default='ACSN', required=False)
     display = CharField(default='Accession ID', required=False)
 
 
-class CodeSystemIdentifierTypeSerializer(CodeSystemSerializerMixin, serializers.Serializer):
+class CodeSystemIdentifierTypeSerializer(ReadSerializerMixin, serializers.Serializer):
     text = CharField(default='Accession ID', required=False)
     coding = CodeSystemIdentifierTypeCodingSerializer(many=True, required=False)
 
 
-class CodeSystemIdentifierSerializer(CodeSystemSerializerMixin, serializers.Serializer):
+class CodeSystemIdentifierSerializer(ReadSerializerMixin, serializers.Serializer):
     system = CharField(default=settings.API_BASE_URL, required=False)
     value = CharField(required=False)
     type = CodeSystemIdentifierTypeSerializer(required=False)
@@ -162,7 +155,7 @@ class CodeSystemConceptField(serializers.Field):
 
 
 class CodeSystemDetailSerializer(serializers.ModelSerializer):
-    resource_type = SerializerMethodField()
+    resourceType = SerializerMethodField(method_name='get_resource_type')
     id = CharField(source='mnemonic')
     url = CharField(source='canonical_url', required=False)
     title = CharField(source='full_name', required=False)
@@ -176,12 +169,18 @@ class CodeSystemDetailSerializer(serializers.ModelSerializer):
     concept = CodeSystemConceptField(source='*', required=False)
     identifier = CodeSystemIdentifierSerializer(many=True, required=False)
 
+    caseSensitive = CharField(source='case_sensitive', required=False)
+    versionNeeded = CharField(source='version_needed', required=False)
+    collectionReference = CharField(source='collection_reference', required=False)
+    hierarchyMeaning = CharField(source='hierarchy_meaning', required=False)
+    revisionDate = CharField(source='revision_date', required=False)
+
     class Meta:
         model = Source
-        fields = ('resource_type', 'url', 'title', 'status', 'id', 'language', 'count', 'content', 'property', 'meta',
+        fields = ('resourceType', 'url', 'title', 'status', 'id', 'language', 'count', 'content', 'property', 'meta',
                   'version', 'identifier', 'contact', 'jurisdiction', 'name', 'description', 'publisher', 'purpose',
-                  'copyright', 'revision_date', 'experimental', 'case_sensitive', 'compositional', 'version_needed',
-                  'collection_reference', 'hierarchy_meaning', 'concept')
+                  'copyright', 'revisionDate', 'experimental', 'caseSensitive', 'compositional', 'versionNeeded',
+                  'collectionReference', 'hierarchyMeaning', 'concept')
 
     @staticmethod
     def get_resource_type(_):
@@ -206,10 +205,9 @@ class CodeSystemDetailSerializer(serializers.ModelSerializer):
     def to_representation(self, instance):
         try:
             rep = super().to_representation(instance)
+            self.include_ocl_identifier(instance, rep)
         except Exception as error:
-            raise Exception(f'Failed to deserialize {instance.uri}') from error
-
-        self.include_ocl_identifier(instance, rep)
+            raise Exception(f'Failed to represent "{instance.uri}" as CodeSystem') from error
         return rep
 
     @staticmethod
