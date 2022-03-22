@@ -45,13 +45,13 @@ class CustomTestRunner(ColourRunnerMixin, DiscoverRunner):
     pass
 
 
-class PauseElasticSearchIndex:
+class SetupTestEnvironment:
     settings.TEST_MODE = True
-    settings.ELASTICSEARCH_DSL_AUTOSYNC = False
-    settings.ES_SYNC = False
+    settings.ELASTICSEARCH_DSL_AUTOSYNC = True
+    settings.ES_SYNC = True
 
 
-class BaseTestCase(PauseElasticSearchIndex):
+class BaseTestCase(SetupTestEnvironment):
     @staticmethod
     def create_lookup_concept_classes(user=None, org=None):
         from core.sources.tests.factories import OrganizationSourceFactory

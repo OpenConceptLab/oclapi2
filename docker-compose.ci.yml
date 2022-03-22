@@ -12,6 +12,10 @@ services:
     volumes:
       - .:/code
     restart: "no"
+    depends_on:
+      - db
+      - redis
+      - es
   celery:
     image: ${API_IMAGE-openconceptlab/oclapi2:latest}
     build: .

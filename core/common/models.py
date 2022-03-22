@@ -812,8 +812,14 @@ class ConceptContainerModel(VersionedModel):
 class CelerySignalProcessor(RealTimeSignalProcessor):
     def handle_save(self, sender, instance, **kwargs):
         if settings.ES_SYNC and instance.__class__ in registry.get_models() and instance.should_index:
-            handle_save.delay(instance.app_name, instance.model_name, instance.id)
+            if settings.TEST_MODE:
+                super().handle_save(instance.model_name, instance.id)
+            else:
+                handle_save.delay(instance.app_name, instance.model_name, instance.id)
 
     def handle_m2m_changed(self, sender, instance, action, **kwargs):
         if settings.ES_SYNC and instance.__class__ in registry.get_models() and instance.should_index:
-            handle_m2m_changed.delay(instance.app_name, instance.model_name, instance.id, action)
+            if settings.TEST_MODE:
+                super().handle_save(instance.model_name, instance.id)
+            else:
+                handle_m2m_changed.delay(instance.app_name, instance.model_name, instance.id, action)
