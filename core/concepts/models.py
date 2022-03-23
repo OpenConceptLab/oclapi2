@@ -161,6 +161,16 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                          condition=(Q(is_active=True) & Q(retired=False) & Q(is_latest_version=True))),
             models.Index(name='concepts_all_for_sort', fields=['-updated_at'],
                          condition=(Q(is_active=True) & Q(retired=False) & Q(is_latest_version=True))),
+            models.Index(name='concepts_ver_updated_idx', fields=['-updated_at'],
+                         condition=(Q(is_active=True) & Q(retired=False) & Q(id=F('versioned_object_id')) &
+                                    ~Q(public_access='None'))),
+            models.Index(name='concepts_ver_public_cond', fields=['public_access'],
+                         condition=(Q(is_active=True) & Q(retired=False) & Q(id=F('versioned_object_id')) &
+                                    ~Q(public_access='None'))),
+            models.Index(name='concepts_ver_all_for_count', fields=['is_active'],
+                         condition=(Q(is_active=True) & Q(retired=False) & Q(id=F('versioned_object_id')))),
+            models.Index(name='concepts_ver_all_for_sort', fields=['-updated_at'],
+                         condition=(Q(is_active=True) & Q(retired=False) & Q(id=F('versioned_object_id')))),
             GinIndex(
                 name='concepts_uri_trgm_id_gin_idx',
                 fields=['uri', 'id'],

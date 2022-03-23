@@ -3,7 +3,7 @@ import uuid
 from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator
 from django.db import models, IntegrityError, transaction
-from django.db.models import Q
+from django.db.models import Q, F
 from pydash import get, compact
 
 from core.common.constants import INCLUDE_RETIRED_PARAM, NAMESPACE_REGEX, HEAD, LATEST
@@ -25,13 +25,23 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
                       models.Index(name='mappings_updated_4589ad_idx', fields=['-updated_at'],
                                    condition=(Q(is_active=True) & Q(retired=False) & Q(is_latest_version=True) &
                                               ~Q(public_access='None'))),
+                      models.Index(name='mappings_vers_updated_idx', fields=['-updated_at'],
+                                   condition=(Q(is_active=True) & Q(retired=False) & Q(id=F('versioned_object_id')) &
+                                              ~Q(public_access='None'))),
                       models.Index(name='mappings_public_conditional', fields=['public_access'],
                                    condition=(Q(is_active=True) & Q(retired=False) & Q(is_latest_version=True) &
                                               ~Q(public_access='None'))),
+                      models.Index(name='mappings_ver_public_cond', fields=['public_access'],
+                                   condition=(Q(is_active=True) & Q(retired=False) & Q(id=F('versioned_object_id')) &
+                                              ~Q(public_access='None'))),
                       models.Index(name='mappings_all_for_count', fields=['is_active'],
                                    condition=(Q(is_active=True) & Q(retired=False) & Q(is_latest_version=True))),
+                      models.Index(name='mappings_ver_all_for_count', fields=['is_active'],
+                                   condition=(Q(is_active=True) & Q(retired=False) & Q(id=F('versioned_object_id')))),
                       models.Index(name='mappings_all_for_sort', fields=['-updated_at'],
                                    condition=(Q(is_active=True) & Q(retired=False) & Q(is_latest_version=True))),
+                      models.Index(name='mappings_ver_all_for_sort', fields=['-updated_at'],
+                                   condition=(Q(is_active=True) & Q(retired=False) & Q(id=F('versioned_object_id')))),
                   ] + VersionedModel.Meta.indexes
 
     parent = models.ForeignKey('sources.Source', related_name='mappings_set', on_delete=models.CASCADE)
