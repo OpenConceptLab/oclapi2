@@ -1322,3 +1322,47 @@ class ConceptCascadeViewTest(OCLAPITestCase):
         self.assertEqual(entry['id'], concept2.mnemonic)
         self.assertEqual(entry['type'], 'Concept')
         self.assertEqual(len(entry['entries']), 0)
+
+
+class ConceptListViewTest(OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.source = OrganizationSourceFactory(mnemonic='MySource')
+        self.concept1 = ConceptFactory(mnemonic='MyConcept1', parent=self.source, concept_class='classA')
+        self.concept2 = ConceptFactory(mnemonic='MyConcept2', parent=self.source, concept_class='classB')
+
+    def test_get_200(self):
+        response = self.client.get('/concepts/?q=Concept2')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['id'], 'MyConcept2')
+        self.assertEqual(response.data[0]['uuid'], str(self.concept2.get_latest_version().id))
+        self.assertEqual(response.data[0]['versioned_object_id'], self.concept2.id)
+
+        response = self.client.get('/concepts/?q=Concept1')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['id'], 'MyConcept1')
+
+        response = self.client.get('/concepts/?q=classA&exact_match=on')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['id'], 'MyConcept1')
+
+        response = self.client.get('/concepts/?q=Concept1&exact_match=on')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 0)
+
+        response = self.client.get('/concepts/?q=Concept1&conceptClass=classA')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['id'], 'MyConcept1')
+
+        response = self.client.get('/concepts/?q=Concept1&conceptClass=classB')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 0)
+
+        response = self.client.get('/concepts/?conceptClass=classA')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['id'], 'MyConcept1')
