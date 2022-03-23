@@ -17,6 +17,7 @@ from rest_framework.test import APITestCase
 
 from core.collections.models import Collection
 from core.common.constants import HEAD, OCL_ORG_ID, SUPER_ADMIN_USER_ID
+from core.common.tasks import rebuild_indexes
 from core.common.utils import (
     compact_dict_by_values, to_snake_case, flower_get, task_exists, parse_bulk_import_task_id,
     to_camel_case,
@@ -208,6 +209,8 @@ class OCLAPITestCase(APITestCase, BaseTestCase):
     def setUpClass(cls):
         super().setUpClass()
         call_command("loaddata", "core/fixtures/base_entities.yaml")
+        if settings.ENV == 'ci':
+            rebuild_indexes(['concepts'])
 
     def tearDown(self):
         super().tearDown()
