@@ -1329,11 +1329,20 @@ class ConceptListViewTest(OCLAPITestCase):
     def setUp(self):
         super().setUp()
         self.source = OrganizationSourceFactory(mnemonic='MySource')
-        self.concept1 = ConceptFactory(mnemonic='MyConcept1', parent=self.source, concept_class='classA')
-        self.concept2 = ConceptFactory(mnemonic='MyConcept2', parent=self.source, concept_class='classB')
+        self.source_v1 = OrganizationSourceFactory(version='v1', mnemonic='MySource', organization=self.source.parent)
+        self.concept1 = ConceptFactory(
+            mnemonic='MyConcept1', parent=self.source, concept_class='classA', extras=dict(foo='bar')
+        )
+        self.concept2 = ConceptFactory(
+            mnemonic='MyConcept2', parent=self.source, concept_class='classB', extras=dict(bar='foo')
+        )
+        self.source_v1.concepts.add(self.concept2)
         ConceptDocument().update(self.source.concepts.all())  # needed for parallel test execution
+        self.user = UserProfile.objects.filter(is_superuser=True).first()
+        self.token = self.user.get_token()
+        self.random_user = UserProfileFactory()
 
-    def test_get_200(self):
+    def test_search(self):
         response = self.client.get('/concepts/?q=Concept2')
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 1)
@@ -1368,3 +1377,49 @@ class ConceptListViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 1)
         self.assertEqual(response.data[0]['id'], 'MyConcept1')
+
+        response = self.client.get('/concepts/?extras.foo=bar')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['id'], 'MyConcept1')
+
+        response = self.client.get('/concepts/?extras.exists=bar')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['id'], 'MyConcept2')
+
+        response = self.client.get(self.source.concepts_url + '?q=MySource&extras.exact.foo=bar')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['id'], 'MyConcept1')
+
+        response = self.client.get(
+            self.source.concepts_url + '?q=MySource',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 2)
+
+        response = self.client.get(
+            self.source.uri + 'v1/concepts/?q=MySource&sortAsc=id',
+            HTTP_AUTHORIZATION='Token ' + self.random_user.get_token(),
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['id'], 'MyConcept2')
+
+        response = self.client.get(
+            '/concepts/?facetsOnly=true'
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(list(response.data.keys()), ['facets'])
+
+        class_a_facet = [x for x in response.data['facets']['fields']['conceptClass'] if x[0] == 'classa'][0]
+        self.assertEqual(class_a_facet[0], 'classa')
+        self.assertTrue(class_a_facet[1] >= 1)
+        self.assertFalse(class_a_facet[2])
+
+        class_b_facet = [x for x in response.data['facets']['fields']['conceptClass'] if x[0] == 'classb'][0]
+        self.assertEqual(class_b_facet[0], 'classb')
+        self.assertTrue(class_b_facet[1] >= 1)
+        self.assertFalse(class_b_facet[2])

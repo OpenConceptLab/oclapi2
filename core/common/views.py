@@ -582,9 +582,6 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         return criterion
 
     def get_search_results_qs(self):
-        if not self.should_perform_es_search():
-            return None
-
         search_results = self.__search_results
         search_results = search_results.params(request_timeout=ES_REQUEST_TIMEOUT)
         self.total_count = search_results.count()
@@ -604,9 +601,6 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                 raise Http400(detail='Only 10000 results are available. Please apply additional filters'
                                      ' or fine tune your query to get more accurate results.') from ex
             raise ex
-
-    def is_head(self):
-        return self.request.method.lower() == 'head'
 
     def should_perform_es_search(self):
         return bool(self.get_search_string()) or self.has_searchable_extras_fields() or bool(self.get_faceted_filters())
@@ -734,7 +728,7 @@ class SourceChildExtraRetrieveUpdateDestroyView(SourceChildExtrasBaseView, Retri
         return Response(dict(detail=NOT_FOUND), status=status.HTTP_404_NOT_FOUND)
 
 
-class APIVersionView(APIView):
+class APIVersionView(APIView):  # pragma: no cover
     permission_classes = (AllowAny,)
     swagger_schema = None
 
@@ -743,7 +737,7 @@ class APIVersionView(APIView):
         return Response(__version__)
 
 
-class ChangeLogView(APIView):
+class ChangeLogView(APIView):  # pragma: no cover
     permission_classes = (AllowAny, )
     swagger_schema = None
 
@@ -874,7 +868,8 @@ class ConceptDormantLocalesView(APIView):  # pragma: no cover
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
-class ConceptMultipleLatestVersionsView(BaseAPIView, ListWithHeadersMixin):
+# only meant to fix data (used once due to a bug)
+class ConceptMultipleLatestVersionsView(BaseAPIView, ListWithHeadersMixin):  # pragma: no cover
     permission_classes = (IsAdminUser, )
 
     def get_serializer_class(self):
