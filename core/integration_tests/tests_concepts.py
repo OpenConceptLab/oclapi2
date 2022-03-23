@@ -1342,7 +1342,7 @@ class ConceptListViewTest(OCLAPITestCase):
         self.token = self.user.get_token()
         self.random_user = UserProfileFactory()
 
-    def test_search(self):
+    def test_search(self):  # pylint: disable=too-many-statements
         response = self.client.get('/concepts/?q=Concept2')
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 1)
