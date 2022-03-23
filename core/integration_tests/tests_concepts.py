@@ -1,6 +1,8 @@
+from django.conf import settings
 from mock import ANY
 
 from core.common.constants import CUSTOM_VALIDATION_SCHEMA_OPENMRS
+from core.common.tasks import rebuild_indexes
 from core.common.tests import OCLAPITestCase
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept
@@ -1328,6 +1330,9 @@ class ConceptCascadeViewTest(OCLAPITestCase):
 class ConceptListViewTest(OCLAPITestCase):
     def setUp(self):
         super().setUp()
+        if settings.ENV == 'ci':
+            rebuild_indexes(['concepts'])
+
         self.source = OrganizationSourceFactory(mnemonic='MySource')
         self.source_v1 = OrganizationSourceFactory(version='v1', mnemonic='MySource', organization=self.source.parent)
         self.concept1 = ConceptFactory(
@@ -1401,7 +1406,7 @@ class ConceptListViewTest(OCLAPITestCase):
         self.assertEqual(len(response.data), 2)
 
         response = self.client.get(
-            self.source.uri + 'v1/concepts/?q=MySource&sortAsc=id',
+            self.source.uri + 'v1/concepts/?q=MySource&sortAsc=last_update',
             HTTP_AUTHORIZATION='Token ' + self.random_user.get_token(),
         )
         self.assertEqual(response.status_code, 200)
