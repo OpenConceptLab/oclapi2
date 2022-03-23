@@ -2,6 +2,7 @@ from mock import ANY
 
 from core.common.constants import CUSTOM_VALIDATION_SCHEMA_OPENMRS
 from core.common.tests import OCLAPITestCase
+from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory, LocalizedTextFactory
 from core.mappings.tests.factories import MappingFactory
@@ -1330,6 +1331,7 @@ class ConceptListViewTest(OCLAPITestCase):
         self.source = OrganizationSourceFactory(mnemonic='MySource')
         self.concept1 = ConceptFactory(mnemonic='MyConcept1', parent=self.source, concept_class='classA')
         self.concept2 = ConceptFactory(mnemonic='MyConcept2', parent=self.source, concept_class='classB')
+        ConceptDocument().update(self.source.concepts.all())  # needed for parallel test execution
 
     def test_get_200(self):
         response = self.client.get('/concepts/?q=Concept2')
