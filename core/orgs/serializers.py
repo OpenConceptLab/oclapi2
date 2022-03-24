@@ -109,10 +109,8 @@ class OrganizationDetailSerializer(serializers.ModelSerializer):
         super().__init__(*args, **kwargs)
 
     def get_client_configs(self, obj):
-        if self.include_client_configs:
-            return ClientConfigSerializer(obj.client_configs.filter(is_active=True), many=True).data
-
-        return None
+        return ClientConfigSerializer(obj.client_configs.filter(
+            is_active=True), many=True).data if self.include_client_configs else None
 
     def update(self, instance, validated_data):
         request_user = self.context['request'].user

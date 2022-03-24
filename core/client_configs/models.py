@@ -112,6 +112,4 @@ class ClientConfig(models.Model):
     @staticmethod
     def __get_es_fields(tab_type):
         klass = get_resource_class_from_resource_name(tab_type)
-        if klass:
-            return klass.es_fields
-        return None
+        return klass.es_fields if klass else None
