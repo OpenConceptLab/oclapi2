@@ -22,12 +22,13 @@ from core.common.utils import (
     to_camel_case,
     drop_version, is_versioned_uri, separate_version, to_parent_uri, jsonify_safe, es_get,
     get_resource_class_from_resource_name, flatten_dict, is_csv_file, is_url_encoded_string, to_parent_uri_from_kwargs,
-    set_current_user, get_current_user, set_request_url, get_request_url, nested_dict_values, chunks)
+    set_current_user, get_current_user, set_request_url, get_request_url, nested_dict_values, chunks, api_get)
 from core.concepts.models import Concept, LocalizedText
 from core.mappings.models import Mapping
 from core.orgs.models import Organization
 from core.sources.models import Source
 from core.users.models import UserProfile
+from core.users.tests.factories import UserProfileFactory
 from .services import S3
 
 
@@ -421,6 +422,18 @@ class UtilsTest(OCLTestCase):
         http_get_mock.assert_called_once_with(
             'http://flower:5555/some-url',
             auth=HTTPBasicAuth(settings.FLOWER_USER, settings.FLOWER_PASSWORD)
+        )
+
+    @patch('core.common.utils.requests.get')
+    def test_api_get(self, http_get_mock):
+        user = UserProfileFactory()
+        http_get_mock.return_value = Mock(json=Mock(return_value='api-response'))
+
+        self.assertEqual(api_get('/some-url', user), 'api-response')
+
+        http_get_mock.assert_called_once_with(
+            'http://api:8000/some-url',
+            headers=dict(Authorization=f'Token {user.get_token()}')
         )
 
     @patch('core.common.utils.requests.get')
