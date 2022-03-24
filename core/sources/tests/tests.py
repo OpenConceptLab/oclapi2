@@ -747,7 +747,7 @@ class SourceTest(OCLTestCase):
 
     @patch('core.mappings.documents.MappingDocument.update')
     @patch('core.concepts.documents.ConceptDocument.update')
-    def test_index_children(self, concept_document_update, mapping_document_update):
+    def test_index_children(self, concept_document_update, mapping_document_update):  # pylint: disable=no-self-use
         source = OrganizationSourceFactory()
         concept1 = ConceptFactory(parent=source)
         concept2 = ConceptFactory(parent=source)
