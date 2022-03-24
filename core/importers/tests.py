@@ -7,7 +7,7 @@ from celery_once import AlreadyQueued
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.db.models import F
-from mock import patch, Mock, ANY, call
+from mock import patch, Mock, ANY, call, PropertyMock
 from ocldev.oclcsvtojsonconverter import OclStandardCsvToJsonConverter
 
 from core.collections.models import Collection
@@ -902,3 +902,104 @@ class BulkImportViewTest(OCLAPITestCase):
         self.assertEqual(bulk_import_mock.apply_async.call_args[0], (('{"key": "value"}', 'ocladmin', True),))
         self.assertEqual(bulk_import_mock.apply_async.call_args[1]['task_id'][37:], 'ocladmin~priority')
         self.assertEqual(bulk_import_mock.apply_async.call_args[1]['queue'], 'bulk_import_root')
+
+    @patch('core.importers.views.QueueOnce.once_backend', new_callable=PropertyMock)
+    @patch('core.importers.views.AsyncResult')
+    @patch('core.importers.views.app')
+    def test_delete_parallel_import_204(self, celery_app_mock, async_result_mock, queue_once_backend_mock):
+        clear_lock_mock = Mock()
+        queue_once_backend_mock.return_value = Mock(clear_lock=clear_lock_mock)
+        result_mock = Mock(
+            args=['content', 'ocladmin', True, 5]  # content, username, update_if_exists, threads
+        )
+        result_mock.name = 'core.common.tasks.bulk_import_parallel_inline'
+        async_result_mock.return_value = result_mock
+        task_id = 'ace5abf4-3b7f-4e4a-b16f-d1c041088c3e-ocladmin~priority'
+        response = self.client.delete(
+            "/importers/bulk-import/",
+            {'task_id': task_id},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+        )
+
+        self.assertEqual(response.status_code, 204)
+        celery_app_mock.control.revoke.assert_called_once_with(task_id, terminate=True, signal='SIGKILL')
+        self.assertTrue(clear_lock_mock.call_args[0][0].endswith(
+            'core.common.tasks.bulk_import_parallel_inline_threads-5_to_import-content_update_if_exists-True_username-ocladmin'  # pylint: disable=line-too-long
+        ))
+
+    @patch('core.importers.views.QueueOnce.once_backend', new_callable=PropertyMock)
+    @patch('core.importers.views.AsyncResult')
+    @patch('core.importers.views.app')
+    def test_delete_204(self, celery_app_mock, async_result_mock, queue_once_backend_mock):
+        clear_lock_mock = Mock()
+        queue_once_backend_mock.return_value = Mock(clear_lock=clear_lock_mock)
+        result_mock = Mock(
+            args=['content', 'ocladmin', True]  # content, username, update_if_exists
+        )
+        result_mock.name = 'core.common.tasks.bulk_import'
+        async_result_mock.return_value = result_mock
+        task_id = 'ace5abf4-3b7f-4e4a-b16f-d1c041088c3e-ocladmin~priority'
+        response = self.client.delete(
+            "/importers/bulk-import/",
+            {'task_id': task_id, 'signal': 'SIGTERM'},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+        )
+
+        self.assertEqual(response.status_code, 204)
+        celery_app_mock.control.revoke.assert_called_once_with(task_id, terminate=True, signal='SIGTERM')
+        self.assertTrue(clear_lock_mock.call_args[0][0].endswith(
+            'core.common.tasks.bulk_import_to_import-content_update_if_exists-True_username-ocladmin'
+        ))
+
+    @patch('core.importers.views.AsyncResult')
+    @patch('core.importers.views.app')
+    def test_delete_400(self, celery_app_mock, async_result_mock):
+        response = self.client.delete(
+            "/importers/bulk-import/",
+            {'task_id': ''},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+        result_mock = Mock(
+            args=['content', 'ocladmin', True]  # content, username, update_if_exists
+        )
+        result_mock.name = 'core.common.tasks.bulk_import'
+        async_result_mock.return_value = result_mock
+
+        task_id = 'ace5abf4-3b7f-4e4a-b16f-d1c041088c3e-ocladmin~priority'
+        celery_app_mock.control.revoke.side_effect = Exception('foobar')
+        response = self.client.delete(
+            "/importers/bulk-import/",
+            {'task_id': task_id, 'signal': 'SIGKILL'},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data, dict(errors=('foobar',)))
+        celery_app_mock.control.revoke.assert_called_once_with(task_id, terminate=True, signal='SIGKILL')
+
+    @patch('core.importers.views.AsyncResult')
+    def test_delete_403(self, async_result_mock):
+        random_user = UserProfileFactory(username='random_user')
+        response = self.client.delete(
+            "/importers/bulk-import/",
+            {'task_id': ''},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+        async_result_mock.return_value = Mock(
+            args=['content', 'ocladmin', True]  # content, username, update_if_exists
+        )
+
+        task_id = 'ace5abf4-3b7f-4e4a-b16f-d1c041088c3e-ocladmin~priority'
+        response = self.client.delete(
+            "/importers/bulk-import/",
+            {'task_id': task_id, 'signal': 'SIGKILL'},
+            HTTP_AUTHORIZATION='Token ' + random_user.get_token(),
+        )
+
+        self.assertEqual(response.status_code, 403)
