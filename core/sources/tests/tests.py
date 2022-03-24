@@ -745,6 +745,19 @@ class SourceTest(OCLTestCase):
         self.assertEqual(resolved_version.canonical_url, None)
         self.assertFalse(resolved_version.is_fqdn)
 
+    @patch('core.mappings.documents.MappingDocument.update')
+    @patch('core.concepts.documents.ConceptDocument.update')
+    def test_index_children(self, concept_document_update, mapping_document_update):
+        source = OrganizationSourceFactory()
+        concept1 = ConceptFactory(parent=source)
+        concept2 = ConceptFactory(parent=source)
+        MappingFactory(parent=source, from_concept=concept1, to_concept=concept2)
+
+        source.index_children()
+
+        concept_document_update.assert_called_once_with(ANY, parallel=True)
+        mapping_document_update.assert_called_once_with(ANY, parallel=True)
+
 
 class TasksTest(OCLTestCase):
     @patch('core.sources.models.Source.index_children')
