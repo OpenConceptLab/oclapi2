@@ -68,8 +68,6 @@ class BundleSerializer(serializers.Serializer):  # pylint: disable=abstract-meth
                  'searchset', 'collection'], source='bundle_type')
     meta = BundleMetaSerializer(read_only=True, source='timestamp')
     total = IntegerField(read_only=True)
-    concepts = IntegerField(read_only=True, source='concepts_count')  # TODO: use extension
-    mappings = IntegerField(read_only=True, source='mappings_count')  # TODO: use extension
     entry = JSONField(read_only=True, source='entries')
 
     class Meta:
