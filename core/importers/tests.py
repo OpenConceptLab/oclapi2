@@ -762,6 +762,23 @@ class BulkImportViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 202)
         self.assertEqual(response.data, dict(task=task_id, state='PENDING', username='foobar', queue='normal'))
 
+    @patch('core.importers.views.flower_get')
+    def test_get_flower_failed(self, flower_get_mock):
+        flower_get_mock.side_effect = Exception('Service Down')
+
+        response = self.client.get(
+            '/importers/bulk-import/?username=ocladmin',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(
+            response.data,
+            dict(detail='Flower service returned unexpected result. Maybe check healthcheck.',
+                 exception=str('Service Down'))
+        )
+
     def test_post_400(self):
         response = self.client.post(
             '/importers/bulk-import/?update_if_exists=1',
