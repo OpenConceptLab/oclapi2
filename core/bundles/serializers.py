@@ -62,9 +62,11 @@ class FhirBundleSerializer(CommonSerializer):
 
 # TODO: Adjust BundleSerializer to be FHIR compliant based on FhirBundleSerializer and remove FhirBundleSerializer
 class BundleSerializer(serializers.Serializer):  # pylint: disable=abstract-method
-    type = CharField(read_only=True, source='resource_type')  # TODO: use resourceType
-    bundle_type = CharField(read_only=True)  # TODO: use type
-    timestamp = DateTimeField(read_only=True)  # TODO: use meta.lastUpdated
+    resourceType = CharField(read_only=True, source='resource_type')
+    type = ChoiceField(
+        choices=['document', 'message', 'transaction', 'transaction-response', 'batch', 'batch-response', 'history',
+                 'searchset', 'collection'], source='bundle_type')
+    meta = BundleMetaSerializer(read_only=True, source='timestamp')
     total = IntegerField(read_only=True)
     concepts = IntegerField(read_only=True, source='concepts_count')  # TODO: use extension
     mappings = IntegerField(read_only=True, source='mappings_count')  # TODO: use extension
@@ -72,7 +74,7 @@ class BundleSerializer(serializers.Serializer):  # pylint: disable=abstract-meth
 
     class Meta:
         fields = (
-            'resource_type', 'bundle_type', 'timestamp', 'total', 'concepts', 'mappings', 'entry'
+            'resourceType', 'type', 'meta', 'total', 'concepts', 'mappings', 'entry'
         )
 
     def __init__(self, *args, **kwargs):
