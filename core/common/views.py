@@ -180,8 +180,6 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
     def get_search_string(self, lower=True, decode=True):
         search_str = self.request.query_params.dict().get(SEARCH_PARAM, '').strip()
-        if self.is_concept_document():
-            search_str = search_str.replace('-', '_')
         if lower:
             search_str = search_str.lower()
         if decode:
