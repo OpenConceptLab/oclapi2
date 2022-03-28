@@ -132,7 +132,7 @@ class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
             parent_resource = Collection.get_version(source, container_version or HEAD, filters)
         self.kwargs['parent_resource'] = self.parent_resource = parent_resource
 
-    def post(self, request, **kwargs):  # pylint: disable=unused-argument
+    def post(self, request, **_):
         self.set_parent_resource()
         if not self.parent_resource:
             raise Http404()
@@ -140,10 +140,9 @@ class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
             **request.data, 'parent_id': self.parent_resource.id, 'name': request.data.get('id', None)
         })
         if serializer.is_valid():
-            self.object = serializer.save()
+            serializer.save()
             if serializer.is_valid():
                 headers = self.get_success_headers(serializer.data)
-                serializer = ConceptDetailSerializer(self.object, context=dict(request=request))
                 return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -384,9 +383,11 @@ class ConceptVersionsView(ConceptBaseView, ConceptDictionaryMixin, ListWithHeade
     permission_classes = (CanViewParentDictionary,)
 
     def get_queryset(self):
-        queryset = super().get_queryset()
-        self.check_object_permissions(self.request, queryset.first())
-        return queryset.exclude(id=F('versioned_object_id'))
+        concept = super().get_queryset().filter(id=F('versioned_object_id')).first()
+        if not concept:
+            raise Http404()
+        self.check_object_permissions(self.request, concept)
+        return concept.versions
 
     def get_serializer_class(self):
         return ConceptVersionDetailSerializer if self.is_verbose() else ConceptVersionListSerializer

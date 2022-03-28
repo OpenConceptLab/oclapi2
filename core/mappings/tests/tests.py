@@ -162,13 +162,13 @@ class MappingTest(OCLTestCase):
 
     def test_persist_clone(self):
         source_head = OrganizationSourceFactory(version=HEAD)
-        source_version0 = OrganizationSourceFactory(
+        OrganizationSourceFactory(
             version='v0', mnemonic=source_head.mnemonic, organization=source_head.organization
         )
 
         self.assertEqual(source_head.versions.count(), 2)
 
-        mapping = MappingFactory(parent=source_version0)
+        mapping = MappingFactory(parent=source_head)
         cloned_mapping = mapping.clone(mapping.created_by)
 
         self.assertEqual(
@@ -185,13 +185,12 @@ class MappingTest(OCLTestCase):
         self.assertNotEqual(mapping.id, persisted_mapping.id)
         self.assertEqual(persisted_mapping.from_concept_id, mapping.from_concept_id)
         self.assertEqual(persisted_mapping.to_concept_id, mapping.to_concept_id)
-        self.assertEqual(persisted_mapping.parent, source_version0)
-        self.assertEqual(persisted_mapping.sources.count(), 2)
-        self.assertEqual(source_head.mappings.first().id, persisted_mapping.id)
+        self.assertEqual(persisted_mapping.parent, source_head)
+        self.assertEqual(persisted_mapping.sources.count(), 1)
         self.assertEqual(
             persisted_mapping.uri,
-            f'/orgs/{source_version0.organization.mnemonic}/sources/{source_version0.mnemonic}/'
-            f'{source_version0.version}/mappings/{persisted_mapping.mnemonic}/{persisted_mapping.version}/'
+            f'/orgs/{source_head.organization.mnemonic}/sources/{source_head.mnemonic}/'
+            f'mappings/{persisted_mapping.mnemonic}/{persisted_mapping.version}/'
         )
         self.assertEqual(
             persisted_mapping.version_url, persisted_mapping.uri

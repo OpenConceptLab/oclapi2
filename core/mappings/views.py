@@ -263,12 +263,12 @@ class MappingVersionsView(MappingBaseView, ConceptDictionaryMixin, ListWithHeade
     permission_classes = (CanViewParentDictionary,)
 
     def get_queryset(self):
-        queryset = super().get_queryset()
-        instance = queryset.first()
-
+        instance = super().get_queryset().filter(id=F('versioned_object_id')).first()
+        if not instance:
+            raise Http404()
         self.check_object_permissions(self.request, instance)
 
-        return queryset.exclude(id=F('versioned_object_id'))
+        return instance.versions
 
     def get_serializer_class(self):
         return MappingVersionDetailSerializer if self.is_verbose() else MappingVersionListSerializer

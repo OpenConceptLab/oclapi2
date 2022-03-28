@@ -445,7 +445,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             queryset = queryset.filter(
                 cls.get_filter_by_container_criterion(
                     'sources', source, org, user, container_version,
-                    is_latest_released, latest_released_version
+                    is_latest_released, latest_released_version, 'parent'
                 )
             )
 
@@ -514,7 +514,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     def create_new_version_for(
             cls, instance, data, user, create_parent_version=True, add_prev_version_children=True,
     ):  # pylint: disable=too-many-arguments
-        instance.id = None # Clear id so it is persisted as a new object
+        instance.id = None  # Clear id so it is persisted as a new object
         instance.version = data.get('version', None)
         instance.concept_class = data.get('concept_class', instance.concept_class)
         instance.datatype = data.get('datatype', instance.datatype)
@@ -652,7 +652,6 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             concept.version = str(concept.id)
             concept.is_latest_version = not create_initial_version
             parent_resource = concept.parent
-            parent_resource_head = parent_resource.head
             concept.public_access = parent_resource.public_access
             concept.save()
             concept.set_locales()
@@ -662,9 +661,9 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                 initial_version = cls.create_initial_version(concept)
                 initial_version.names.set(concept.names.all())
                 initial_version.descriptions.set(concept.descriptions.all())
-                initial_version.sources.set([parent_resource, parent_resource_head])
+                initial_version.sources.set([parent_resource])
 
-            concept.sources.set([parent_resource, parent_resource_head])
+            concept.sources.set([parent_resource])
             concept.update_mappings()
             if parent_concept_uris:
                 if get(settings, 'TEST_MODE', False):
@@ -709,7 +708,6 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         obj.updated_by = user
         obj.version = obj.version or generate_temp_version()
         parent = obj.parent
-        parent_head = parent.head
         persisted = False
         versioned_object = obj.versioned_object
         prev_latest_version = versioned_object.versions.exclude(id=obj.id).filter(is_latest_version=True).first()
@@ -731,6 +729,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                         prev_latest_version._index = obj._index  # pylint: disable=protected-access
                         prev_latest_version.is_latest_version = False
                         prev_latest_version.save(update_fields=['is_latest_version', '_index'])
+                        prev_latest_version.sources.remove(parent)
                         if add_prev_version_children:
                             if get(settings, 'TEST_MODE', False):
                                 process_hierarchy_for_new_parent_concept_version(prev_latest_version.id, obj.id)
@@ -740,7 +739,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                                     queue='concurrent'
                                 )
 
-                    obj.sources.set(compact([parent, parent_head]))
+                    obj.sources.set([parent])
                     persisted = True
                     cls.resume_indexing()
                     if get(settings, 'TEST_MODE', False):
@@ -769,9 +768,9 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                     prev_latest_version._index = True  # pylint: disable=protected-access
                     prev_latest_version.is_latest_version = True
                     prev_latest_version.save(update_fields=['is_latest_version', '_index'])
+                    prev_latest_version.sources.add(parent)
                 if obj.id:
                     obj.remove_locales()
-                    obj.sources.remove(parent_head)
                     obj.delete()
                 errors['non_field_errors'] = [PERSIST_CLONE_ERROR]
 

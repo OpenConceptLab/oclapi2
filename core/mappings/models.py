@@ -383,12 +383,11 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
             if mapping.mnemonic == temp_version:
                 mapping.mnemonic = str(mapping.id)
             parent = mapping.parent
-            parent_head = parent.head
             mapping.public_access = parent.public_access
             mapping.save()
             initial_version = cls.create_initial_version(mapping)
-            initial_version.sources.set([parent, parent_head])
-            mapping.sources.set([parent, parent_head])
+            initial_version.sources.set([parent])
+            mapping.sources.set([parent])
             if mapping._counted is True:
                 parent.update_mappings_count()
         except ValidationError as ex:
@@ -431,7 +430,6 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         obj.created_by = user
         obj.updated_by = user
         parent = obj.parent
-        parent_head = parent.head
         persisted = False
         prev_latest_version = cls.objects.filter(
             versioned_object_id=obj.versioned_object_id, is_latest_version=True).first()
@@ -449,8 +447,9 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
                         prev_latest_version.is_latest_version = False
                         prev_latest_version._index = obj._index  # pylint: disable=protected-access
                         prev_latest_version.save(update_fields=['is_latest_version', '_index'])
+                        prev_latest_version.sources.remove(parent)
 
-                    obj.sources.set(compact([parent, parent_head]))
+                    obj.sources.set([parent])
                     persisted = True
                     cls.resume_indexing()
 
@@ -467,11 +466,11 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
             cls.resume_indexing()
             if not persisted:
                 if obj.id:
-                    obj.sources.remove(parent_head)
                     if prev_latest_version:
                         prev_latest_version._index = True  # pylint: disable=protected-access
                         prev_latest_version.is_latest_version = True
                         prev_latest_version.save(update_fields=['is_latest_version', '_index'])
+                        prev_latest_version.sources.add(parent)
                     obj.delete()
                 errors['non_field_errors'] = [PERSIST_CLONE_ERROR]
 
@@ -517,7 +516,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
             queryset = queryset.filter(
                 cls.get_filter_by_container_criterion(
                     'sources', source, org, user, container_version,
-                    is_latest_released, latest_released_version
+                    is_latest_released, latest_released_version, 'parent'
                 )
             )
 

@@ -665,10 +665,10 @@ class ConceptTest(OCLTestCase):
         concept = ConceptFactory(
             descriptions=(es_locale, en_locale),
             names=(en_locale,),
-            sources=(source_version0,),
-            parent=source_version0
+            parent=source_head
         )
-        cloned_concept = Concept.version_for_concept(concept, 'v1', source_version0)
+        source_version0.concepts.add(concept)
+        cloned_concept = Concept.version_for_concept(concept, 'v1', source_head)
 
         self.assertEqual(
             Concept.persist_clone(cloned_concept),
@@ -682,13 +682,12 @@ class ConceptTest(OCLTestCase):
         ).first()
         self.assertEqual(persisted_concept.names.count(), 1)
         self.assertEqual(persisted_concept.descriptions.count(), 2)
-        self.assertEqual(persisted_concept.parent, source_version0)
-        self.assertEqual(persisted_concept.sources.count(), 2)
-        self.assertEqual(source_head.concepts.first().id, persisted_concept.id)
+        self.assertEqual(persisted_concept.parent, source_head)
+        self.assertEqual(persisted_concept.sources.count(), 1)
         self.assertEqual(
             persisted_concept.uri,
-            f'/orgs/{source_version0.organization.mnemonic}/sources/{source_version0.mnemonic}/'
-            f'{source_version0.version}/concepts/{persisted_concept.mnemonic}/{persisted_concept.version}/'
+            f'/orgs/{source_head.organization.mnemonic}/sources/{source_head.mnemonic}/'
+            f'concepts/{persisted_concept.mnemonic}/{persisted_concept.version}/'
         )
         self.assertEqual(
             persisted_concept.version_url, persisted_concept.uri
@@ -1030,8 +1029,9 @@ class ConceptTest(OCLTestCase):
         source_version2 = OrganizationSourceFactory(
             version='v2', mnemonic=source.mnemonic, organization=source.organization)
 
-        cloned_concept = Concept.version_for_concept(concept, 'v1', source_version2)
+        cloned_concept = Concept.version_for_concept(concept, 'v1', source)
         Concept.persist_clone(cloned_concept, concept.created_by)
+
         self.assertEqual(concept.versions.count(), 2)
 
         concept_v1 = concept.get_latest_version()
@@ -1052,8 +1052,7 @@ class ConceptTest(OCLTestCase):
 
         concepts = Concept.from_uri_queryset(source_version2.uri + 'concepts/')
 
-        self.assertEqual(concepts.count(), 1)
-        self.assertEqual(concepts.first().id, concept_v1.id)
+        self.assertEqual(concepts.count(), 0)
 
         concepts = Concept.from_uri_queryset(source_version1.uri + 'concepts/')
         self.assertEqual(concepts.count(), 1)
@@ -1068,21 +1067,23 @@ class ConceptTest(OCLTestCase):
         source_version1 = OrganizationSourceFactory(
             version='v1', mnemonic=source.mnemonic, organization=source.organization)
         source_version1.seed_concepts(index=False)
-        source_version2 = OrganizationSourceFactory(
+        OrganizationSourceFactory(
             version='v2', mnemonic=source.mnemonic, organization=source.organization)
 
-        cloned_concept = Concept.version_for_concept(concept, 'v1', source_version2)
+        cloned_concept = Concept.version_for_concept(concept, 'v1', source)
         Concept.persist_clone(cloned_concept, concept.created_by)
         self.assertEqual(concept.versions.count(), 2)
 
         concept_v1 = concept.get_latest_version()
         collection = OrganizationCollectionFactory()
-        collection_version1 = OrganizationCollectionFactory(
-            version='v1', mnemonic=collection.mnemonic, organization=collection.organization)
-        expansion = ExpansionFactory(collection_version=collection_version1)
-        reference = CollectionReference(expression=concept_v1.version_url, collection=collection_version1)
+        reference = CollectionReference(expression=concept_v1.version_url, collection=collection)
         reference.clean()
         reference.save()
+
+        collection_version1 = OrganizationCollectionFactory(
+            version='v1', mnemonic=collection.mnemonic, organization=collection.organization)
+        collection_version1.seed_references()
+        expansion = ExpansionFactory(collection_version=collection_version1)
         expansion.seed_children(index=False)
 
         self.assertEqual(expansion.concepts.count(), 1)
@@ -1102,7 +1103,8 @@ class ConceptTest(OCLTestCase):
         self.assertEqual(concepts.first().id, concept_v1.id)
 
         concepts = Concept.from_uri_queryset(collection.uri + 'concepts/')
-        self.assertEqual(concepts.count(), 0)
+        self.assertEqual(concepts.count(), 1)
+        self.assertEqual(concepts.first().id, concept_v1.id)
 
     def test_cascade_as_hierarchy(self):
         source = OrganizationSourceFactory()

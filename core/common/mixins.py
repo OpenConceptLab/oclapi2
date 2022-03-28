@@ -529,21 +529,20 @@ class SourceChildMixin:
 
     @classmethod
     def get_filter_by_container_criterion(  # pylint: disable=too-many-arguments
-            cls, container_prefix, parent, org, user, container_version, is_latest_released, latest_released_version
+            cls, container_prefix, parent, org, user, container_version, is_latest_released, latest_released_version,
+            parent_attr=None
     ):
-        criteria = cls.get_exact_or_criteria(f'{container_prefix}__mnemonic', parent)
+        parent_attr = parent_attr or container_prefix
+        criteria = cls.get_exact_or_criteria(f'{parent_attr}__mnemonic', parent)
 
-        if not container_version and not is_latest_released:
-            criteria &= Q(**{f'{container_prefix}__version': HEAD})
         if user:
-            criteria &= cls.get_exact_or_criteria(f'{container_prefix}__user__username', user)
+            criteria &= Q(**{f'{parent_attr}__user__username': user})
         if org:
-            criteria &= cls.get_exact_or_criteria(f'{container_prefix}__organization__mnemonic', org)
+            criteria &= Q(**{f'{parent_attr}__organization__mnemonic': org})
         if is_latest_released:
-            criteria &= cls.get_exact_or_criteria(
-                f'{container_prefix}__version', get(latest_released_version, 'version'))
+            criteria &= Q(**{f'{container_prefix}__version': get(latest_released_version, 'version')})
         if container_version and not is_latest_released:
-            criteria &= cls.get_exact_or_criteria(f'{container_prefix}__version', container_version)
+            criteria &= Q(**{f'{container_prefix}__version': container_version})
 
         return criteria
 
