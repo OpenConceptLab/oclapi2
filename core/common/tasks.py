@@ -495,7 +495,10 @@ def delete_concept(concept_id):  # pragma: no cover
     return 1
 
 
-@app.task
+@app.task(
+    ignore_result=True, autoretry_for=(Exception, WorkerLostError, ), retry_kwargs={'max_retries': 2, 'countdown': 2},
+    acks_late=True, reject_on_worker_lost=True
+)
 def batch_index_resources(resource, filters, update_indexed=False):
     model = get_resource_class_from_resource_name(resource)
     if model:
@@ -507,7 +510,10 @@ def batch_index_resources(resource, filters, update_indexed=False):
     return 1
 
 
-@app.task
+@app.task(
+    ignore_result=True, autoretry_for=(Exception, WorkerLostError, ), retry_kwargs={'max_retries': 2, 'countdown': 2},
+    acks_late=True, reject_on_worker_lost=True
+)
 def index_expansion_concepts(expansion_id):
     from core.collections.models import Expansion
     expansion = Expansion.objects.filter(id=expansion_id).first()
@@ -516,7 +522,10 @@ def index_expansion_concepts(expansion_id):
         expansion.batch_index(expansion.concepts, ConceptDocument)
 
 
-@app.task
+@app.task(
+    ignore_result=True, autoretry_for=(Exception, WorkerLostError, ), retry_kwargs={'max_retries': 2, 'countdown': 2},
+    acks_late=True, reject_on_worker_lost=True
+)
 def index_expansion_mappings(expansion_id):
     from core.collections.models import Expansion
     expansion = Expansion.objects.filter(id=expansion_id).first()
@@ -548,7 +557,10 @@ def make_hierarchy(concept_map):  # pragma: no cover
             logger.info('Could not find parent %s', parent_concept_uri)
 
 
-@app.task
+@app.task(
+    ignore_result=True, autoretry_for=(Exception, WorkerLostError, ), retry_kwargs={'max_retries': 2, 'countdown': 2},
+    acks_late=True, reject_on_worker_lost=True
+)
 def index_source_concepts(source_id):
     from core.sources.models import Source
     source = Source.objects.filter(id=source_id).first()
