@@ -58,7 +58,7 @@ class CodeSystemListLookupView(ConceptRetrieveUpdateDestroyView):
 
         return queryset
 
-    def get_serializer(self, instance):  # pylint: disable=W0221
+    def get_serializer(self, instance=None):  # pylint: disable=arguments-differ
         if instance:
             return ParametersSerializer.from_concept(instance)
         return ParametersSerializer()
@@ -102,7 +102,7 @@ class CodeSystemListValidateCodeView(ConceptRetrieveUpdateDestroyView):
 
         return instance
 
-    def get_serializer(self, instance):  # pylint: disable=W0221
+    def get_serializer(self, instance=None):  # pylint: disable=arguments-differ
         if instance:
             return ParametersSerializer({'parameter': [
                 {
