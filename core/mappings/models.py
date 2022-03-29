@@ -4,7 +4,7 @@ from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator
 from django.db import models, IntegrityError, transaction
 from django.db.models import Q, F
-from pydash import get, compact
+from pydash import get
 
 from core.common.constants import INCLUDE_RETIRED_PARAM, NAMESPACE_REGEX, HEAD, LATEST
 from core.common.mixins import SourceChildMixin
