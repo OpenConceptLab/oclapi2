@@ -504,8 +504,12 @@ def batch_index_resources(resource, filters, update_indexed=False):
     if model:
         queryset = model.objects.filter(**filters)
         model.batch_index(queryset, model.get_search_document())
-        if update_indexed:
-            queryset.update(_index=True)
+
+        from core.concepts.models import Concept
+        from core.mappings.models import Mapping
+        if model in [Concept, Mapping]:
+            if update_indexed:
+                queryset.update(_index=True)
 
     return 1
 

@@ -51,6 +51,7 @@ class ResourceIndexView(APIView):
 
         ids = self.request.data.get('ids', None)
         uri = self.request.data.get('uri', None)
+        update_indexed = self.request.data.get('update_indexed', False)
 
         filters = None
 
@@ -64,8 +65,8 @@ class ResourceIndexView(APIView):
             return Response(status=status.HTTP_400_BAD_REQUEST)
 
         if get(settings, 'TEST_MODE', False):
-            batch_index_resources(resource, filters)
+            batch_index_resources(resource, filters, update_indexed)
         else:
-            batch_index_resources.delay(resource, filters)
+            batch_index_resources.delay(resource, filters, update_indexed)
 
         return Response(status=status.HTTP_202_ACCEPTED)

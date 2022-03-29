@@ -572,12 +572,12 @@ class ReferenceImporter(BaseResourceImporter):
                 )
                 if not get(settings, 'TEST_MODE', False):
                     for ref in added_references:
-                        if ref.concepts:
+                        if ref.concepts.exists():
                             batch_index_resources.apply_async(
                                 ('concept', dict(id__in=list(ref.concepts.values_list('id', flat=True)))),
                                 queue='indexing'
                             )
-                        if ref.mappings:
+                        if ref.mappings.exists():
                             batch_index_resources.apply_async(
                                 ('mapping', dict(id__in=list(ref.mappings.values_list('id', flat=True)))),
                                 queue='indexing'
