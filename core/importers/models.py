@@ -424,6 +424,8 @@ class ConceptImporter(BaseResourceImporter):
                 )
                 return errors or UPDATED
 
+            if 'update_comment' in self.data:
+                self.data['comment'] = self.data['update_comment']
             self.instance = Concept.persist_new(
                 data={**self.data, '_counted': None, '_index': False}, user=self.user, create_parent_version=False)
             if self.instance.id:
