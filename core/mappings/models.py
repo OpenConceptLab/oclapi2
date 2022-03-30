@@ -260,6 +260,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
     @classmethod
     def create_initial_version(cls, mapping, **kwargs):
         initial_version = mapping.clone()
+        initial_version.comment = mapping.comment
         initial_version.save(**kwargs)
         initial_version.version = initial_version.id
         initial_version.released = False

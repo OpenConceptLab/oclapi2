@@ -503,6 +503,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     @classmethod
     def create_initial_version(cls, concept, **kwargs):
         initial_version = cls.version_for_concept(concept, generate_temp_version())
+        initial_version.comment = concept.comment
         initial_version.save(**kwargs)
         initial_version.version = initial_version.id
         initial_version.released = True

@@ -426,6 +426,7 @@ class ConceptImporter(BaseResourceImporter):
 
             if 'update_comment' in self.data:
                 self.data['comment'] = self.data['update_comment']
+                self.data.pop('update_comment')
             self.instance = Concept.persist_new(
                 data={**self.data, '_counted': None, '_index': False}, user=self.user, create_parent_version=False)
             if self.instance.id:
@@ -536,6 +537,9 @@ class MappingImporter(BaseResourceImporter):
                 self.instance._index = False  # pylint: disable=protected-access
                 errors = Mapping.create_new_version_for(self.instance, self.data, self.user)
                 return errors or UPDATED
+            if 'update_comment' in self.data:
+                self.data['comment'] = self.data['update_comment']
+                self.data.pop('update_comment')
             self.instance = Mapping.persist_new({**self.data, '_counted': None, '_index': False}, self.user)
             if self.instance.id:
                 return CREATED
