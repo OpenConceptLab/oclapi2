@@ -1,3 +1,19 @@
+##### 2.0.111 - Wed Jan 12 05:40:32 2022 +0000
+- [OpenConceptLab/ocl_issues#1183](https://github.com/OpenConceptLab/ocl_issues/issues/1183) | added  parameters in swagger
+- [OpenConceptLab/ocl_issues#1183](https://github.com/OpenConceptLab/ocl_issues/issues/1183) | concept  reverse
+- [OpenConceptLab/ocl_issues#1183](https://github.com/OpenConceptLab/ocl_issues/issues/1183) | reverse mapping serializer
+- [OpenConceptLab/ocl_issues#1169](https://github.com/OpenConceptLab/ocl_issues/issues/1169) | hierarchy concepts before mapping concepts
+- [OpenConceptLab/ocl_issues#1169](https://github.com/OpenConceptLab/ocl_issues/issues/1169) | ordering by map type
+- [OpenConceptLab/ocl_issues#1179](https://github.com/OpenConceptLab/ocl_issues/issues/1179) | source/collection | active concepts/mappings counts to be None when not set rather than 0
+- [OpenConceptLab/ocl_issues#1175](https://github.com/OpenConceptLab/ocl_issues/issues/1175) | Source/Collection DELETE | fixing test
+- [OpenConceptLab/ocl_issues#1175](https://github.com/OpenConceptLab/ocl_issues/issues/1175) | Source/Collection DELETE | fixing test
+- [OpenConceptLab/ocl_issues#1175](https://github.com/OpenConceptLab/ocl_issues/issues/1175) | Source/Collection DELETE | making s3 exports delete async task
+- [OpenConceptLab/ocl_issues#1169](https://github.com/OpenConceptLab/ocl_issues/issues/1169) | mapping serializer | added to_concept_code/to_concept_url
+- Fixing flaky test for openmrs concept schema
+- Fixing test
+- Added missing tests
+- [OpenConceptLab/ocl_issues#1163](https://github.com/OpenConceptLab/ocl_issues/issues/1163) | importers | handling when no 'type' is provided
+- coverage.sh | fail if tests fail
 ##### 2.0.107 - Wed Dec 29 07:07:52 2021 +0000
 - [OpenConceptLab/ocl_issues#712](https://github.com/OpenConceptLab/ocl_issues/issues/712) | Admin can hard delete users (except self)
 - [OpenConceptLab/ocl_issues#1169](https://github.com/OpenConceptLab/ocl_issues/issues/1169) | added display_name in  hierarchy response
