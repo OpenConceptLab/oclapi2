@@ -703,7 +703,7 @@ class Expansion(BaseResourceModel):
     def seed_children(self, index=True):
         return self.add_references(self.collection_version.references, index)
 
-    def wait_until_processed(self):
+    def wait_until_processed(self):  # pragma: no cover
         processing = self.is_processing
         while processing:
             print("Expansion is still processing, sleeping for 5 secs...")
