@@ -10,7 +10,10 @@ from core.common.constants import HEAD, ACCESS_TYPE_EDIT, ACCESS_TYPE_NONE, ACCE
 from core.common.tasks import seed_children_to_new_version
 from core.common.tasks import update_source_active_concepts_count
 from core.common.tasks import update_source_active_mappings_count
+from core.common.tasks import index_source_mappings, index_source_concepts
 from core.common.tests import OCLTestCase
+from core.mappings.documents import MappingDocument
+from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory, LocalizedTextFactory
 from core.mappings.tests.factories import MappingFactory
@@ -823,3 +826,17 @@ class TasksTest(OCLTestCase):
 
         source.refresh_from_db()
         self.assertEqual(source.active_concepts, 1)
+
+    @patch('core.sources.models.Source.mappings')
+    @patch('core.sources.models.Source.batch_index')
+    def test_index_source_mappings(self, batch_index_mock, source_mappings_mock):
+        source = OrganizationSourceFactory()
+        index_source_mappings(source.id)
+        batch_index_mock.assert_called_once_with(source_mappings_mock, MappingDocument)
+
+    @patch('core.sources.models.Source.concepts')
+    @patch('core.sources.models.Source.batch_index')
+    def test_index_source_mappings(self, batch_index_mock, source_concepts_mock):
+        source = OrganizationSourceFactory()
+        index_source_concepts(source.id)
+        batch_index_mock.assert_called_once_with(source_concepts_mock, ConceptDocument)
