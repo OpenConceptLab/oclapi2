@@ -4,6 +4,7 @@ from mock import patch, Mock, PropertyMock
 
 from core.collections.documents import CollectionDocument
 from core.collections.models import CollectionReference, Collection, Expansion
+from core.collections.models import ExpansionParameters
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
 from core.collections.utils import is_mapping, is_concept, is_version_specified, \
     get_concept_by_expression
@@ -643,3 +644,23 @@ class ExpansionTest(OCLTestCase):
         self.assertTrue(Expansion(uri='foobar', collection_version=Collection(expansion_uri='foobar')).is_default)
         self.assertFalse(Expansion(uri='foobar', collection_version=Collection(expansion_uri='foo')).is_default)
         self.assertFalse(Expansion(uri='foobar', collection_version=Collection(expansion_uri=None)).is_default)
+
+
+class ExpansionParametersTest(OCLTestCase):
+    def test_apply(self):
+        ConceptFactory(id=1, retired=False, mnemonic='active')
+        ConceptFactory(id=2, retired=True, mnemonic='retired')
+        queryset = Concept.objects.filter(id__in=[1, 2])
+
+        result = ExpansionParameters(dict(activeOnly=True)).apply(queryset)
+        self.assertEqual(result.count(), 1)
+        self.assertEqual(result.first().id, 1)
+
+        result = ExpansionParameters(dict(activeOnly=False)).apply(queryset)
+        self.assertEqual(result.count(), 2)
+        self.assertEqual(
+            list(result.order_by('id').values_list('id', flat=True)),
+            [1, 2]
+        )
+
+
