@@ -351,6 +351,7 @@ class ConceptParentsView(ConceptBaseView, ListWithHeadersMixin):
 
 class ConceptReactivateView(ConceptBaseView, UpdateAPIView):
     serializer_class = ConceptDetailSerializer
+    permission_classes = (CanEditParentDictionary, )
 
     def get_object(self, queryset=None):
         instance = self.get_queryset().filter(id=F('versioned_object_id')).first()
@@ -359,12 +360,6 @@ class ConceptReactivateView(ConceptBaseView, UpdateAPIView):
 
         self.check_object_permissions(self.request, instance)
         return instance
-
-    def get_permissions(self):
-        if self.request.method in ['GET']:
-            return [CanViewParentDictionary(), ]
-
-        return [CanEditParentDictionary(), ]
 
     def update(self, request, *args, **kwargs):
         concept = self.get_object()

@@ -1428,3 +1428,84 @@ class ConceptListViewTest(OCLAPITestCase):
         self.assertEqual(class_b_facet[0], 'classb')
         self.assertTrue(class_b_facet[1] >= 1)
         self.assertFalse(class_b_facet[2])
+
+
+class ConceptNameRetrieveUpdateDestroyViewTest(OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.name = LocalizedTextFactory(locale='fr', name='froobar')
+        self.concept = ConceptFactory(names=[self.name])
+        self.token = self.concept.created_by.get_token()
+        self.url = f'{self.concept.url}names/{self.name.id}/'
+
+    def test_get_404(self):
+        response = self.client.get(
+            '/orgs/foo/sources/source/concepts/1234/names/1234/',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+        )
+
+        self.assertEqual(response.status_code, 404)
+        response = self.client.get(
+            self.concept.url + 'names/1234/',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_get_200(self):
+        self.assertEqual(self.concept.versions.count(), 1)
+
+        response = self.client.get(
+            self.url,
+            HTTP_AUTHORIZATION='Token ' + self.token,
+
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['uuid'], str(self.name.id))
+        self.assertEqual(response.data['type'], 'ConceptName')
+        self.assertEqual(response.data['name'], 'froobar')
+        self.assertEqual(response.data['locale'], 'fr')
+
+    def test_put_200(self):
+        self.assertEqual(self.concept.versions.count(), 1)
+
+        response = self.client.put(
+            self.url,
+            dict(name='brar'),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.concept.versions.count(), 2)
+        self.assertEqual(self.concept.get_latest_version().names.first().name, 'brar')
+        self.assertEqual(self.concept.get_latest_version().prev_version.names.first().name, 'froobar')
+        self.assertEqual(self.concept.names.first().name, 'brar')
+
+
+class ConceptReactivateViewTest(OCLAPITestCase):
+    def test_put(self):
+        name = LocalizedTextFactory()
+        concept = ConceptFactory(retired=True, names=[name])
+        self.assertTrue(concept.retired)
+        self.assertTrue(concept.get_latest_version().retired)
+        token = concept.created_by.get_token()
+
+        response = self.client.put(
+            concept.url + 'reactivate/',
+            HTTP_AUTHORIZATION='Token ' + token,
+        )
+
+        self.assertEqual(response.status_code, 204)
+        concept.refresh_from_db()
+        self.assertFalse(concept.retired)
+        self.assertFalse(concept.get_latest_version().retired)
+        self.assertTrue(concept.get_latest_version().prev_version.retired)
+
+        response = self.client.put(
+            concept.url + 'reactivate/',
+            HTTP_AUTHORIZATION='Token ' + token,
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data, {'__all__': 'Concept is already not retired'})
