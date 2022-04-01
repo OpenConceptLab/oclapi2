@@ -1643,3 +1643,36 @@ class ConceptCollectionMembershipViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 0)
+
+
+class ConceptSummaryViewTest(OCLAPITestCase):
+    def test_get_200(self):
+        parent_concept = ConceptFactory(
+            names=[LocalizedTextFactory(), LocalizedTextFactory()])
+        child_concept = ConceptFactory(
+            names=[LocalizedTextFactory(), LocalizedTextFactory()],
+            descriptions=[LocalizedTextFactory()]
+        )
+        child_concept.parent_concepts.add(parent_concept)
+
+        response = self.client.get(parent_concept.url + 'summary/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['uuid'], str(parent_concept.id))
+        self.assertEqual(response.data['id'], parent_concept.mnemonic)
+        self.assertEqual(response.data['descriptions'], 0)
+        self.assertEqual(response.data['names'], 2)
+        self.assertEqual(response.data['versions'], 1)
+        self.assertEqual(response.data['children'], 1)
+        self.assertEqual(response.data['parents'], 0)
+
+        response = self.client.get(child_concept.url + 'summary/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['uuid'], str(child_concept.id))
+        self.assertEqual(response.data['id'], child_concept.mnemonic)
+        self.assertEqual(response.data['descriptions'], 1)
+        self.assertEqual(response.data['names'], 2)
+        self.assertEqual(response.data['versions'], 1)
+        self.assertEqual(response.data['children'], 0)
+        self.assertEqual(response.data['parents'], 1)
