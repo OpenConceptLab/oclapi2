@@ -170,7 +170,8 @@ class ConceptSummaryView(ConceptBaseView, RetrieveAPIView):
 
 
 class ConceptCollectionMembershipView(ConceptBaseView, ListWithHeadersMixin):
-    def get_serializer_class(self):
+    @staticmethod
+    def get_serializer_class():
         from core.collections.serializers import CollectionVersionListSerializer
         return CollectionVersionListSerializer
 

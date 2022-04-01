@@ -4,6 +4,7 @@ from unittest.mock import patch
 from django.conf import settings
 from mock import ANY
 
+from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
 from core.common.constants import CUSTOM_VALIDATION_SCHEMA_OPENMRS
 from core.common.tests import OCLAPITestCase
 from core.concepts.documents import ConceptDocument
@@ -1600,6 +1601,45 @@ class ConceptChildrenViewTest(OCLAPITestCase):
         )
 
         response = self.client.get(child_concept1.url + 'children/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 0)
+
+
+class ConceptCollectionMembershipViewTest(OCLAPITestCase):
+    def test_get_200(self):
+        parent = OrganizationSourceFactory()
+        concept1 = ConceptFactory(parent=parent)
+        concept2 = ConceptFactory()  # random owner/parent
+        collection1 = OrganizationCollectionFactory(organization=parent.organization)
+        expansion1 = ExpansionFactory(collection_version=collection1)
+        collection1.expansion_uri = expansion1.uri
+        collection1.save()
+        collection2 = OrganizationCollectionFactory(organization=parent.organization)
+        expansion2 = ExpansionFactory(collection_version=collection2)
+        collection2.expansion_uri = expansion2.uri
+        collection2.save()
+        collection3 = OrganizationCollectionFactory()  # random owner/parent
+        expansion3 = ExpansionFactory(collection_version=collection3)
+        collection3.expansion_uri = expansion3.uri
+        collection3.save()
+        expansion1.concepts.add(concept1.get_latest_version())
+        expansion2.concepts.add(concept1.get_latest_version())
+        expansion3.concepts.add(concept1.get_latest_version())
+        expansion1.concepts.add(concept2.get_latest_version())
+        expansion2.concepts.add(concept2.get_latest_version())
+        expansion3.concepts.add(concept2.get_latest_version())
+
+        response = self.client.get(concept1.url + 'collection-versions/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 2)
+        self.assertEqual(
+            sorted([data['url'] for data in response.data]),
+            sorted([collection2.url, collection1.url])
+        )
+
+        response = self.client.get(concept2.url + 'collection-versions/')
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 0)
