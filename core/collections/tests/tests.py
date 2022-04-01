@@ -765,6 +765,19 @@ class ExpansionTest(OCLTestCase):
         self.assertEqual(expansion.concepts.first().id, concept2.id)
         self.assertEqual(expansion.mappings.first().id, mapping2.id)
 
+    def test_is_auto_generated(self):
+        self.assertFalse(Expansion().is_auto_generated)
+        self.assertFalse(Expansion(mnemonic=None).is_auto_generated)
+        self.assertFalse(Expansion(mnemonic='').is_auto_generated)
+        self.assertFalse(Expansion(mnemonic='foobar').is_auto_generated)
+        self.assertFalse(Expansion(mnemonic='autoexpand-v1').is_auto_generated)
+        self.assertFalse(
+            Expansion(mnemonic='autoexpand-v1', collection_version=Collection(version='v2')).is_auto_generated)
+        self.assertTrue(
+            Expansion(mnemonic='autoexpand-v2', collection_version=Collection(version='v2')).is_auto_generated)
+        self.assertTrue(
+            Expansion(mnemonic='autoexpand-HEAD', collection_version=Collection(version='HEAD')).is_auto_generated)
+
 
 class ExpansionParametersTest(OCLTestCase):
     def test_apply(self):

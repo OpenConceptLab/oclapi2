@@ -349,7 +349,8 @@ class Collection(ConceptContainerModel):
         if self.should_auto_expand:
             expansion = self.expansion
             if not expansion:
-                expansion = Expansion(mnemonic=f'autoexpand-{self.version}', collection_version=self)
+                expansion = Expansion(
+                    mnemonic=Expansion.get_auto_expand_mnemonic(self.version), collection_version=self)
                 expansion.save()
                 self.expansion_uri = expansion.uri
                 self.save()
@@ -367,7 +368,7 @@ class Collection(ConceptContainerModel):
         should_auto_expand = self.should_auto_expand
 
         if should_auto_expand and not self.expansions.exists() and not get(expansion_data, 'mnemonic'):
-            expansion_data['mnemonic'] = f'autoexpand-{self.version}'
+            expansion_data['mnemonic'] = Expansion.get_auto_expand_mnemonic(self.version)
             expansion_data['is_processing'] = True
         expansion = Expansion.persist(index=index, **expansion_data, collection_version=self, sync=sync)
 
@@ -578,6 +579,18 @@ class Expansion(BaseResourceModel):
         'collections.Collection', related_name='expansions', on_delete=models.CASCADE)
     is_processing = models.BooleanField(default=False)
 
+    @property
+    def is_auto_generated(self):
+        return self.mnemonic == self.auto_generated_mnemonic
+
+    @property
+    def auto_generated_mnemonic(self):
+        return self.get_auto_expand_mnemonic(get(self, 'collection_version.version'))
+
+    @staticmethod
+    def get_auto_expand_mnemonic(version):
+        return f"autoexpand-{version}"
+
     @staticmethod
     def get_resource_url_kwarg():
         return 'expansion'
@@ -682,14 +695,15 @@ class Expansion(BaseResourceModel):
         index_concepts = False
         index_mappings = False
 
+        is_auto_generated = self.is_auto_generated
         for reference in refs:
             if reference.is_concept:
-                concepts = reference.fetch_concepts(self.created_by)
+                concepts = reference.concepts if is_auto_generated else reference.fetch_concepts(self.created_by)
                 if concepts.exists():
                     self.concepts.add(*self.apply_parameters(concepts))
                     index_concepts = True
             elif reference.is_mapping:
-                mappings = reference.fetch_mappings(self.created_by)
+                mappings = reference.mappings if is_auto_generated else reference.fetch_mappings(self.created_by)
                 if mappings.exists():
                     self.mappings.add(*self.apply_parameters(mappings))
                     index_mappings = True
