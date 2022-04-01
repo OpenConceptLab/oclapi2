@@ -779,3 +779,30 @@ class MappingExtraRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(self.mapping.versions.first().extras, dict(foo='bar', tao='ching'))
         self.mapping.refresh_from_db()
         self.assertEqual(self.mapping.extras, dict(tao='ching'))
+
+
+class MappingReactivateViewTest(OCLAPITestCase):
+    def test_put(self):
+        mapping = MappingFactory(retired=True)
+        self.assertTrue(mapping.retired)
+        self.assertTrue(mapping.get_latest_version().retired)
+        token = mapping.created_by.get_token()
+
+        response = self.client.put(
+            mapping.url + 'reactivate/',
+            HTTP_AUTHORIZATION='Token ' + token,
+        )
+
+        self.assertEqual(response.status_code, 204)
+        mapping.refresh_from_db()
+        self.assertFalse(mapping.retired)
+        self.assertFalse(mapping.get_latest_version().retired)
+        self.assertTrue(mapping.get_latest_version().prev_version.retired)
+
+        response = self.client.put(
+            mapping.url + 'reactivate/',
+            HTTP_AUTHORIZATION='Token ' + token,
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data, {'__all__': 'Mapping is already not retired'})

@@ -232,6 +232,7 @@ class MappingCollectionMembershipView(MappingBaseView, ListWithHeadersMixin):
 
 class MappingReactivateView(MappingBaseView, UpdateAPIView):
     serializer_class = MappingDetailSerializer
+    permission_classes = (CanEditParentDictionary, )
 
     def get_object(self, queryset=None):
         instance = self.get_queryset().filter(id=F('versioned_object_id')).first()
@@ -239,12 +240,6 @@ class MappingReactivateView(MappingBaseView, UpdateAPIView):
             raise Http404()
         self.check_object_permissions(self.request, instance)
         return instance
-
-    def get_permissions(self):
-        if self.request.method in ['GET']:
-            return [CanViewParentDictionary(), ]
-
-        return [CanEditParentDictionary(), ]
 
     def update(self, request, *args, **kwargs):
         mapping = self.get_object()
