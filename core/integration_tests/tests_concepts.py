@@ -1509,3 +1509,48 @@ class ConceptReactivateViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.data, {'__all__': 'Concept is already not retired'})
+
+
+class ConceptParentsViewTest(OCLAPITestCase):
+    def test_get_200(self):
+        parent_concept1 = ConceptFactory()
+        parent_concept2 = ConceptFactory()
+        child_concept = ConceptFactory()
+        child_concept.parent_concepts.set([parent_concept1, parent_concept2])
+
+        response = self.client.get(child_concept.url + 'parents/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 2)
+        self.assertEqual(
+            sorted([data['url'] for data in response.data]),
+            [parent_concept1.uri, parent_concept2.uri]
+        )
+
+        response = self.client.get(parent_concept1.url + 'parents/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 0)
+
+
+class ConceptChildrenViewTest(OCLAPITestCase):
+    def test_get_200(self):
+        parent_concept = ConceptFactory()
+        child_concept1 = ConceptFactory()
+        child_concept2 = ConceptFactory()
+        child_concept1.parent_concepts.set([parent_concept])
+        child_concept2.parent_concepts.set([parent_concept])
+
+        response = self.client.get(parent_concept.url + 'children/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 2)
+        self.assertEqual(
+            sorted([data['url'] for data in response.data]),
+            [child_concept1.uri, child_concept2.uri]
+        )
+
+        response = self.client.get(child_concept1.url + 'children/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 0)
