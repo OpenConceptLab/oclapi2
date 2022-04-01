@@ -613,6 +613,23 @@ class MappingRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.mapping.refresh_from_db()
         self.assertTrue(self.mapping.retired)
 
+    def test_hard_delete_403(self):
+        response = self.client.delete(
+            self.mapping.uri + '?hardDelete=true',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_hard_delete_204(self):
+        token = UserProfileFactory(is_superuser=True, is_staff=True).get_token()
+        response = self.client.delete(
+            self.mapping.uri + '?hardDelete=true',
+            HTTP_AUTHORIZATION='Token ' + token,
+        )
+
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(Mapping.objects.filter(id=self.mapping.id).exists())
+
 
 class MappingVersionsViewTest(OCLAPITestCase):
     def setUp(self):

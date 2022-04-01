@@ -313,7 +313,7 @@ class MappingExtraRetrieveUpdateDestroyView(SourceChildExtraRetrieveUpdateDestro
     model = Mapping
 
 
-class MappingDebugRetrieveDestroyView(ListAPIView):
+class MappingDebugRetrieveDestroyView(ListAPIView):  # pragma: no cover
     permission_classes = (IsAdminUser, )
     serializer_class = MappingVersionDetailSerializer
 
