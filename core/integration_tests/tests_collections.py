@@ -1660,6 +1660,7 @@ class CollectionVersionExpansionConceptMappingsViewTest(OCLAPITestCase):
             sorted([mapping.url, mapping2.url])
         )
 
+
 class CollectionVersionConceptMappingsViewTest(OCLAPITestCase):
     def test_get_200(self):
         org = OrganizationFactory()
@@ -1703,3 +1704,50 @@ class CollectionVersionConceptMappingsViewTest(OCLAPITestCase):
             sorted([data['url'] for data in response.data]),
             sorted([mapping.url, mapping2.url])
         )
+
+
+class CollectionVersionExpansionMappingsViewTest(OCLAPITestCase):
+    def test_get(self):
+        org = OrganizationFactory()
+        source = OrganizationSourceFactory(organization=org)
+        collection = OrganizationCollectionFactory(organization=org)
+        expansion = ExpansionFactory(collection_version=collection)
+        concept = ConceptFactory(parent=source)
+        mapping = MappingFactory(from_concept=concept, parent=source)
+        reference = CollectionReference(expression=concept.url, collection=collection)
+        reference.save()
+        expansion.concepts.add(concept)
+        reference.concepts.add(concept)
+        expansion.mappings.add(mapping)
+
+        response = self.client.get(collection.url + 'expansions/e1/mappings/')
+
+        self.assertEqual(response.status_code, 404)
+
+        response = self.client.get(expansion.url + 'mappings/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+
+class CollectionVersionExpansionConceptsViewTest(OCLAPITestCase):
+    def test_get(self):
+        org = OrganizationFactory()
+        source = OrganizationSourceFactory(organization=org)
+        collection = OrganizationCollectionFactory(organization=org)
+        expansion = ExpansionFactory(collection_version=collection)
+        concept = ConceptFactory(parent=source)
+        mapping = MappingFactory(from_concept=concept, parent=source)
+        reference = CollectionReference(expression=concept.url, collection=collection)
+        reference.save()
+        expansion.concepts.add(concept)
+        reference.concepts.add(concept)
+        expansion.mappings.add(mapping)
+
+        response = self.client.get(collection.url + 'expansions/e1/concepts/')
+
+        self.assertEqual(response.status_code, 404)
+
+        response = self.client.get(expansion.url + 'concepts/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
