@@ -948,3 +948,39 @@ class SourceHierarchyViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data, 'hierarchy-response')
         hierarchy_mock.assert_called_once_with(offset=100, limit=1000)
+
+
+class SourceMappingsIndexViewTest(OCLAPITestCase):
+    @patch('core.sources.views.index_source_mappings')
+    def test_post_202(self, index_source_mappings_task_mock):
+        index_source_mappings_task_mock.delay = Mock(return_value=Mock(state='PENDING', task_id='task-id-123'))
+        source = OrganizationSourceFactory(id=100)
+        user = UserProfileFactory(is_superuser=True, is_staff=True, username='soop')
+
+        response = self.client.post(
+            source.url + 'mappings/indexes/',
+            HTTP_AUTHORIZATION=f'Token {user.get_token()}'
+        )
+
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(
+            response.data, {'state': 'PENDING', 'username': 'soop', 'task': 'task-id-123', 'queue': 'default'})
+        index_source_mappings_task_mock.delay.assert_called_once_with(100)
+
+
+class SourceConceptsIndexViewTest(OCLAPITestCase):
+    @patch('core.sources.views.index_source_concepts')
+    def test_post_202(self, index_source_concepts_task_mock):
+        index_source_concepts_task_mock.delay = Mock(return_value=Mock(state='PENDING', task_id='task-id-123'))
+        source = OrganizationSourceFactory(id=100)
+        user = UserProfileFactory(is_superuser=True, is_staff=True, username='soop')
+
+        response = self.client.post(
+            source.url + 'concepts/indexes/',
+            HTTP_AUTHORIZATION=f'Token {user.get_token()}'
+        )
+
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(
+            response.data, {'state': 'PENDING', 'username': 'soop', 'task': 'task-id-123', 'queue': 'default'})
+        index_source_concepts_task_mock.delay.assert_called_once_with(100)
