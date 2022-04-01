@@ -327,6 +327,38 @@ class CollectionTest(OCLTestCase):
         self.assertEqual(batch_index_mock.mock_calls[0].args, ('concepts-qs', ConceptDocument))
         self.assertEqual(batch_index_mock.mock_calls[1].args, ('mappings-qs', MappingDocument))
 
+    def test_get_cascaded_mapping_uris_from_concept_expressions(self):
+        concept1 = ConceptFactory()
+        concept2 = ConceptFactory(parent=concept1.parent)
+        mapping1 = MappingFactory(
+            from_concept=concept1, to_concept=concept2, parent=concept1.parent)
+        mapping2 = MappingFactory(from_concept=concept1)
+        mapping3 = MappingFactory(to_concept=concept2, parent=concept1.parent)
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection)
+        expansion.mappings.set([mapping1, mapping2, mapping3])
+
+        expressions = [
+            concept1.get_latest_version().url, concept2.get_latest_version().url
+        ]
+
+        self.assertEqual(
+            collection.get_cascaded_mapping_uris_from_concept_expressions(
+                expressions
+            ),
+            []
+        )
+
+        collection.expansion_uri = expansion.url
+        collection.save()
+
+        self.assertEqual(
+            collection.get_cascaded_mapping_uris_from_concept_expressions(
+                expressions
+            ),
+            [mapping1.url, mapping2.url]
+        )
+
 
 class CollectionReferenceTest(OCLTestCase):
     def test_uri(self):
