@@ -632,15 +632,17 @@ def delete_s3_objects(path):
         S3.delete_objects(path)
 
 
+# needs to be deleted once all source HEADs migrated
 @app.task
-def source_head_concepts_dedup(source_id):
+def source_head_concepts_dedup(source_id):  # pragma: no cover
     from core.sources.models import Source
     source = Source.objects.get(id=source_id)
     source.keep_concept_latest_versions_on_head()
 
 
+# needs to be deleted once all source HEADs migrated
 @app.task
-def source_head_mappings_dedup(source_id):
+def source_head_mappings_dedup(source_id):  # pragma: no cover
     from core.sources.models import Source
     source = Source.objects.get(id=source_id)
     source.keep_mapping_latest_versions_on_head()
