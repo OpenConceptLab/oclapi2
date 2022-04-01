@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 from django.conf import settings
 from mock import ANY
@@ -376,6 +377,54 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         self.assertTrue(latest_version.retired)
         self.assertTrue(concept.retired)
         self.assertTrue(latest_version.comment, 'Deleting it')
+
+    def test_db_hard_delete_204(self):
+        names = [LocalizedTextFactory()]
+        concept = ConceptFactory(parent=self.source, names=names)
+        concepts_url = f"/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}/concepts/{concept.mnemonic}/"
+
+        response = self.client.delete(
+            concepts_url + '?db=true&hardDelete=true',
+            {'update_comment': 'Deleting it'},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(Concept.objects.filter(id=concept.id).exists())
+        self.assertFalse(Concept.objects.filter(mnemonic=concept.mnemonic).exists())
+
+    def test_hard_delete_204(self):
+        names = [LocalizedTextFactory()]
+        concept = ConceptFactory(parent=self.source, names=names)
+        concepts_url = f"/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}/concepts/{concept.mnemonic}/"
+
+        response = self.client.delete(
+            concepts_url + '?hardDelete=true',
+            {'update_comment': 'Deleting it'},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(Concept.objects.filter(id=concept.id).exists())
+        self.assertFalse(Concept.objects.filter(mnemonic=concept.mnemonic).exists())
+
+    @patch('core.concepts.views.delete_concept')
+    def test_async_hard_delete_204(self, delete_conceot_task_mock):
+        names = [LocalizedTextFactory()]
+        concept = ConceptFactory(parent=self.source, names=names)
+        concepts_url = f"/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}/concepts/{concept.mnemonic}/"
+
+        response = self.client.delete(
+            concepts_url + '?async=true&hardDelete=true',
+            {'update_comment': 'Deleting it'},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 204)
+        delete_conceot_task_mock.delay.assert_called_once_with(concept.id)
 
     def test_delete_404(self):
         concepts_url = f"/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}/concepts/foobar/"
