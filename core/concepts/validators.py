@@ -1,7 +1,5 @@
-from django.conf import settings
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
-from pydash import get
 
 from core.common.constants import (
     NA, YES, NO, CUSTOM_VALIDATION_SCHEMA_OPENMRS, FIVE_MINS, HEAD, REFERENCE_VALUE_SOURCE_MNEMONICS
@@ -26,7 +24,6 @@ class ValidatorSpecifier:
         self.validator_map = {
             CUSTOM_VALIDATION_SCHEMA_OPENMRS: OpenMRSConceptValidator
         }
-        self._test_cache = {}
         self.reference_values = {}
         self.repo = None
         self.validation_schema = None
@@ -41,8 +38,6 @@ class ValidatorSpecifier:
         return self
 
     def with_reference_values(self):
-        if get(settings, 'TEST_MODE', False):
-            return self.with_reference_values_from_dict()  # django.core.cache doesn't work with parallel tests
         ocl_org_filter = Organization.objects.get(mnemonic='OCL')
         if 'reference_sources' not in cache:
             cache.set(
@@ -58,24 +53,6 @@ class ValidatorSpecifier:
             if source.mnemonic not in cache:
                 cache.set(source.mnemonic, self._get_reference_values(source), FIVE_MINS)
             reference_values = cache.get(source.mnemonic)
-            self.reference_values[source.mnemonic] = reference_values
-
-        return self
-
-    def with_reference_values_from_dict(self):
-        ocl_org_filter = Organization.objects.get(mnemonic='OCL')
-
-        if 'reference_sources' not in self._test_cache:
-            self._test_cache['reference_sources'] = ocl_org_filter.source_set.filter(
-                mnemonic__in=REFERENCE_VALUE_SOURCE_MNEMONICS, version=HEAD)
-
-        sources = self._test_cache.get('reference_sources')
-
-        self.reference_values = {}
-        for source in sources:
-            if source.mnemonic not in cache:
-                self._test_cache[source.mnemonic] = self._get_reference_values(source)
-            reference_values = self._test_cache.get(source.mnemonic)
             self.reference_values[source.mnemonic] = reference_values
 
         return self
