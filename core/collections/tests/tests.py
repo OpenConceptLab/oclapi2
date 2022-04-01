@@ -645,6 +645,13 @@ class ExpansionTest(OCLTestCase):
         self.assertFalse(Expansion(uri='foobar', collection_version=Collection(expansion_uri='foo')).is_default)
         self.assertFalse(Expansion(uri='foobar', collection_version=Collection(expansion_uri=None)).is_default)
 
+    def test_clean(self):
+        expansion = Expansion(parameters=None)
+
+        expansion.clean()
+
+        self.assertIsNotNone(expansion.parameters)
+
 
 class ExpansionParametersTest(OCLTestCase):
     def test_apply(self):
