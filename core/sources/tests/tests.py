@@ -11,6 +11,7 @@ from core.common.tasks import seed_children_to_new_version
 from core.common.tasks import update_source_active_concepts_count
 from core.common.tasks import update_source_active_mappings_count
 from core.common.tasks import index_source_mappings, index_source_concepts
+from core.common.tasks import update_validation_schema
 from core.common.tests import OCLTestCase
 from core.mappings.documents import MappingDocument
 from core.concepts.documents import ConceptDocument
@@ -840,3 +841,31 @@ class TasksTest(OCLTestCase):
         source = OrganizationSourceFactory()
         index_source_concepts(source.id)
         batch_index_mock.assert_called_once_with(source_concepts_mock, ConceptDocument)
+
+    @patch('core.sources.models.Source.validate_child_concepts')
+    def test_update_validation_schema_success(self, validate_child_concepts_mock):
+        validate_child_concepts_mock.return_value = None
+        source = OrganizationSourceFactory()
+
+        self.assertEqual(source.custom_validation_schema, None)
+
+        update_validation_schema('source', source.id, 'OpenMRS')
+
+        source.refresh_from_db()
+        self.assertEqual(source.custom_validation_schema, 'OpenMRS')
+        validate_child_concepts_mock.assert_called_once()
+
+    @patch('core.sources.models.Source.validate_child_concepts')
+    def test_update_validation_schema_failure(self, validate_child_concepts_mock):
+        validate_child_concepts_mock.return_value = dict(errors='Failed')
+        source = OrganizationSourceFactory()
+
+        self.assertEqual(source.custom_validation_schema, None)
+        self.assertEqual(
+            update_validation_schema('source', source.id, 'OpenMRS'),
+            {'failed_concept_validations': {'errors': 'Failed'}}
+        )
+
+        source.refresh_from_db()
+        self.assertEqual(source.custom_validation_schema, None)
+        validate_child_concepts_mock.assert_called_once()
