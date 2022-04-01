@@ -17,6 +17,7 @@ from rest_framework.test import APITestCase
 
 from core.collections.models import Collection
 from core.common.constants import HEAD, OCL_ORG_ID, SUPER_ADMIN_USER_ID
+from core.common.tasks import delete_s3_objects
 from core.common.utils import (
     compact_dict_by_values, to_snake_case, flower_get, task_exists, parse_bulk_import_task_id,
     to_camel_case,
@@ -789,3 +790,10 @@ class BaseModelTest(OCLTestCase):
     def test_app_name(self):
         self.assertEqual(Concept().app_name, 'concepts')
         self.assertEqual(Source().app_name, 'sources')
+
+
+class TaskTest(OCLTestCase):
+    @patch('core.common.tasks.S3')
+    def test_delete_s3_objects(self, s3_mock):
+        delete_s3_objects('/some/path')
+        s3_mock.delete_objects.assert_called_once_with('/some/path')
