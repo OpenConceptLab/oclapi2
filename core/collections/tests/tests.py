@@ -782,5 +782,3 @@ class ExpansionParametersTest(OCLTestCase):
             list(result.order_by('id').values_list('id', flat=True)),
             [1, 2]
         )
-
-
