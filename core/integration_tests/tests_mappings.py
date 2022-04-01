@@ -806,3 +806,42 @@ class MappingReactivateViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.data, {'__all__': 'Mapping is already not retired'})
+
+
+class MappingCollectionMembershipViewTest(OCLAPITestCase):
+    def test_get_200(self):
+        parent = OrganizationSourceFactory()
+        mapping1 = MappingFactory(parent=parent)
+        mapping2 = MappingFactory()  # random owner/parent
+        collection1 = OrganizationCollectionFactory(organization=parent.organization)
+        expansion1 = ExpansionFactory(collection_version=collection1)
+        collection1.expansion_uri = expansion1.uri
+        collection1.save()
+        collection2 = OrganizationCollectionFactory(organization=parent.organization)
+        expansion2 = ExpansionFactory(collection_version=collection2)
+        collection2.expansion_uri = expansion2.uri
+        collection2.save()
+        collection3 = OrganizationCollectionFactory()  # random owner/parent
+        expansion3 = ExpansionFactory(collection_version=collection3)
+        collection3.expansion_uri = expansion3.uri
+        collection3.save()
+        expansion1.mappings.add(mapping1.get_latest_version())
+        expansion2.mappings.add(mapping1.get_latest_version())
+        expansion3.mappings.add(mapping1.get_latest_version())
+        expansion1.mappings.add(mapping2.get_latest_version())
+        expansion2.mappings.add(mapping2.get_latest_version())
+        expansion3.mappings.add(mapping2.get_latest_version())
+
+        response = self.client.get(mapping1.url + 'collection-versions/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 2)
+        self.assertEqual(
+            sorted([data['url'] for data in response.data]),
+            sorted([collection2.url, collection1.url])
+        )
+
+        response = self.client.get(mapping2.url + 'collection-versions/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 0)
