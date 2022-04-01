@@ -806,8 +806,8 @@ class TasksTest(OCLTestCase):
 
     def test_update_source_active_mappings_count(self):
         source = OrganizationSourceFactory()
-        mapping1 = MappingFactory(parent=source)
-        mapping2 = MappingFactory(retired=True, parent=source)
+        MappingFactory(parent=source)
+        MappingFactory(retired=True, parent=source)
 
         self.assertEqual(source.active_mappings, None)
 
@@ -818,8 +818,8 @@ class TasksTest(OCLTestCase):
 
     def test_update_source_active_concepts_count(self):
         source = OrganizationSourceFactory()
-        concept1 = ConceptFactory(parent=source)
-        concept2 = ConceptFactory(retired=True, parent=source)
+        ConceptFactory(parent=source)
+        ConceptFactory(retired=True, parent=source)
 
         self.assertEqual(source.active_concepts, None)
 
@@ -830,14 +830,14 @@ class TasksTest(OCLTestCase):
 
     @patch('core.sources.models.Source.mappings')
     @patch('core.sources.models.Source.batch_index')
-    def test_index_source_mappings(self, batch_index_mock, source_mappings_mock):
+    def test_index_source_mappings(self, batch_index_mock, source_mappings_mock):  # pylint: disable=no-self-use
         source = OrganizationSourceFactory()
         index_source_mappings(source.id)
         batch_index_mock.assert_called_once_with(source_mappings_mock, MappingDocument)
 
     @patch('core.sources.models.Source.concepts')
     @patch('core.sources.models.Source.batch_index')
-    def test_index_source_mappings(self, batch_index_mock, source_concepts_mock):
+    def test_index_source_concepts(self, batch_index_mock, source_concepts_mock):  # pylint: disable=no-self-use
         source = OrganizationSourceFactory()
         index_source_concepts(source.id)
         batch_index_mock.assert_called_once_with(source_concepts_mock, ConceptDocument)

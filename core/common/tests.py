@@ -794,6 +794,6 @@ class BaseModelTest(OCLTestCase):
 
 class TaskTest(OCLTestCase):
     @patch('core.common.tasks.S3')
-    def test_delete_s3_objects(self, s3_mock):
+    def test_delete_s3_objects(self, s3_mock):  # pylint: disable=no-self-use
         delete_s3_objects('/some/path')
         s3_mock.delete_objects.assert_called_once_with('/some/path')
