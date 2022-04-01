@@ -896,3 +896,55 @@ class SourceVersionSummaryViewTest(OCLAPITestCase):
         self.source.refresh_from_db()
         self.assertEqual(self.source.active_mappings, 1)
         self.assertEqual(self.source.active_concepts, 2)
+
+
+class SourceSummaryViewTest(OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.source = OrganizationSourceFactory()
+        self.concept1 = ConceptFactory(parent=self.source)
+        self.concept2 = ConceptFactory(parent=self.source)
+        self.mapping = MappingFactory(from_concept=self.concept1, to_concept=self.concept2, parent=self.source)
+
+    def test_get_200(self):
+        self.source.active_concepts = 2
+        self.source.active_mappings = 1
+        self.source.save()
+
+        response = self.client.get(self.source.url + 'summary/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['uuid'], str(self.source.id))
+        self.assertEqual(response.data['id'], self.source.mnemonic)
+        self.assertEqual(response.data['active_concepts'], 2)
+        self.assertEqual(response.data['active_mappings'], 1)
+
+    def test_put_200(self):
+        self.source.refresh_from_db()
+        self.assertEqual(self.source.active_mappings, None)
+        self.assertEqual(self.source.active_concepts, None)
+
+        admin_token = UserProfileFactory(is_superuser=True, is_staff=True).get_token()
+
+        response = self.client.put(
+            self.source.url + 'summary/',
+            HTTP_AUTHORIZATION=f'Token {admin_token}'
+        )
+
+        self.assertEqual(response.status_code, 202)
+        self.source.refresh_from_db()
+        self.assertEqual(self.source.active_mappings, 1)
+        self.assertEqual(self.source.active_concepts, 2)
+
+
+class SourceHierarchyViewTest(OCLAPITestCase):
+    @patch('core.sources.models.Source.hierarchy')
+    def test_get_200(self, hierarchy_mock):
+        source = OrganizationSourceFactory()
+        hierarchy_mock.return_value = 'hierarchy-response'
+
+        response = self.client.get(source.url + 'hierarchy/?limit=1000&offset=100')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, 'hierarchy-response')
+        hierarchy_mock.assert_called_once_with(offset=100, limit=1000)
