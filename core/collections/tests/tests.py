@@ -652,6 +652,42 @@ class ExpansionTest(OCLTestCase):
 
         self.assertIsNotNone(expansion.parameters)
 
+    def test_delete_expressions_all(self):
+        collection = OrganizationCollectionFactory()
+        concept1 = ConceptFactory()
+        concept2 = ConceptFactory(parent=concept1.parent)
+        mapping = MappingFactory(
+            from_concept=concept1, to_concept=concept2, parent=concept1.parent)
+        expansion = ExpansionFactory(collection_version=collection)
+        expansion.concepts.set([concept1, concept2])
+        expansion.mappings.set([mapping])
+
+        expansion.delete_expressions('*')
+
+        self.assertEqual(expansion.concepts.count(), 0)
+        self.assertEqual(expansion.mappings.count(), 0)
+
+    def test_delete_expressions_specific(self):
+        collection = OrganizationCollectionFactory()
+        concept1 = ConceptFactory()
+        concept2 = ConceptFactory(parent=concept1.parent)
+        mapping1 = MappingFactory(
+            from_concept=concept1, to_concept=concept2, parent=concept1.parent)
+        mapping2 = MappingFactory(
+            to_concept=concept1, from_concept=concept2, parent=concept1.parent)
+        expansion = ExpansionFactory(collection_version=collection)
+        expansion.concepts.set([concept1, concept2])
+        expansion.mappings.set([mapping1, mapping2])
+
+        expansion.delete_expressions(
+            [concept1.url, mapping1.url]
+        )
+
+        self.assertEqual(expansion.concepts.count(), 1)
+        self.assertEqual(expansion.mappings.count(), 1)
+        self.assertEqual(expansion.concepts.first().id, concept2.id)
+        self.assertEqual(expansion.mappings.first().id, mapping2.id)
+
 
 class ExpansionParametersTest(OCLTestCase):
     def test_apply(self):
