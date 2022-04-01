@@ -204,6 +204,15 @@ class MappingTest(OCLTestCase):
         self.assertEqual(Mapping.get_serializer_class(brief=True), MappingMinimalSerializer)
         self.assertEqual(Mapping.get_serializer_class(brief=True, reverse=True), MappingReverseMinimalSerializer)
 
+    def test_clean(self):
+        mapping = Mapping()
+        with self.assertRaises(ValidationError) as ex:
+            mapping.clean()
+        self.assertEqual(
+            ex.exception.messages,
+            ["Must specify a 'from_concept'. Must specify either 'to_concept_url' or 'to_source_url' & 'to_concept_code'."]   # pylint: disable=line-too-long
+        )
+
 
 class OpenMRSMappingValidatorTest(OCLTestCase):
     def setUp(self):
