@@ -9,6 +9,8 @@ from core.collections.utils import is_mapping, is_concept, is_version_specified,
     get_concept_by_expression
 from core.common.constants import CUSTOM_VALIDATION_SCHEMA_OPENMRS
 from core.common.tasks import add_references, seed_children_to_new_version
+from core.common.tasks import update_collection_active_mappings_count
+from core.common.tasks import update_collection_active_concepts_count
 from core.common.tests import OCLTestCase
 from core.common.utils import drop_version
 from core.concepts.documents import ConceptDocument
@@ -558,6 +560,40 @@ class TasksTest(OCLTestCase):
         self.assertEqual(expansion.mappings.count(), 1)
         export_collection_task.delay.assert_called_once_with(collection_v1.id)
         index_children_mock.assert_called_once()
+
+    def test_update_collection_active_mappings_count(self):
+        mapping1 = MappingFactory()
+        mapping2 = MappingFactory(retired=True)
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection)
+        collection.expansion_uri = expansion.url
+        expansion.mappings.add(mapping1)
+        expansion.mappings.add(mapping2)
+        collection.save()
+
+        self.assertEqual(collection.active_mappings, None)
+
+        update_collection_active_mappings_count(collection.id)
+
+        collection.refresh_from_db()
+        self.assertEqual(collection.active_mappings, 1)
+
+    def test_update_collection_active_concepts_count(self):
+        concept1 = ConceptFactory()
+        concept2 = ConceptFactory(retired=True)
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection)
+        expansion.concepts.add(concept1)
+        expansion.concepts.add(concept2)
+        collection.expansion_uri = expansion.url
+        collection.save()
+
+        self.assertEqual(collection.active_concepts, None)
+
+        update_collection_active_concepts_count(collection.id)
+
+        collection.refresh_from_db()
+        self.assertEqual(collection.active_concepts, 1)
 
 
 class ExpansionTest(OCLTestCase):

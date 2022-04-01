@@ -8,6 +8,8 @@ from core.collections.tests.factories import OrganizationCollectionFactory
 from core.common.constants import HEAD, ACCESS_TYPE_EDIT, ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW, \
     CUSTOM_VALIDATION_SCHEMA_OPENMRS
 from core.common.tasks import seed_children_to_new_version
+from core.common.tasks import update_source_active_concepts_count
+from core.common.tasks import update_source_active_mappings_count
 from core.common.tests import OCLTestCase
 from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory, LocalizedTextFactory
@@ -797,3 +799,27 @@ class TasksTest(OCLTestCase):
         self.assertEqual(source_v1.mappings.count(), 1)
         export_source_task.delay.assert_called_once_with(source_v1.id)
         index_children_mock.assert_called_once()
+
+    def test_update_source_active_mappings_count(self):
+        source = OrganizationSourceFactory()
+        mapping1 = MappingFactory(parent=source)
+        mapping2 = MappingFactory(retired=True, parent=source)
+
+        self.assertEqual(source.active_mappings, None)
+
+        update_source_active_mappings_count(source.id)
+
+        source.refresh_from_db()
+        self.assertEqual(source.active_mappings, 1)
+
+    def test_update_source_active_concepts_count(self):
+        source = OrganizationSourceFactory()
+        concept1 = ConceptFactory(parent=source)
+        concept2 = ConceptFactory(retired=True, parent=source)
+
+        self.assertEqual(source.active_concepts, None)
+
+        update_source_active_concepts_count(source.id)
+
+        source.refresh_from_db()
+        self.assertEqual(source.active_concepts, 1)
