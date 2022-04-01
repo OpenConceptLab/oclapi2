@@ -858,3 +858,41 @@ class SourceLogoViewTest(OCLAPITestCase):
         upload_base64_mock.assert_called_once_with(
             'base64-data', 'users/username/sources/source1/logo.png', False, True
         )
+
+class SourceVersionSummaryViewTest(OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.source = OrganizationSourceFactory()
+        self.concept1 = ConceptFactory(parent=self.source)
+        self.concept2 = ConceptFactory(parent=self.source)
+        self.mapping = MappingFactory(from_concept=self.concept1, to_concept=self.concept2, parent=self.source)
+
+    def test_get_200(self):
+        self.source.active_concepts = 2
+        self.source.active_mappings = 1
+        self.source.save()
+
+        response = self.client.get(self.source.url + 'HEAD/summary/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['uuid'], str(self.source.id))
+        self.assertEqual(response.data['id'], 'HEAD')
+        self.assertEqual(response.data['active_concepts'], 2)
+        self.assertEqual(response.data['active_mappings'], 1)
+
+    def test_put_200(self):
+        self.source.refresh_from_db()
+        self.assertEqual(self.source.active_mappings, None)
+        self.assertEqual(self.source.active_concepts, None)
+
+        admin_token = UserProfileFactory(is_superuser=True, is_staff=True).get_token()
+
+        response = self.client.put(
+            self.source.url + 'HEAD/summary/',
+            HTTP_AUTHORIZATION=f'Token {admin_token}'
+        )
+
+        self.assertEqual(response.status_code, 202)
+        self.source.refresh_from_db()
+        self.assertEqual(self.source.active_mappings, 1)
+        self.assertEqual(self.source.active_concepts, 2)
