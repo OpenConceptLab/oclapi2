@@ -1572,6 +1572,24 @@ class ReferenceExpressionResolveViewTest(OCLAPITestCase):
         self.assertFalse('result' in unknown_resolution)
 
 
+        response = self.client.post(
+            '/$resolveReference/',
+            '/orgs/foobar/',
+            HTTP_AUTHORIZATION='Token ' + token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+
+        unknown_resolution = response.data[0]
+        self.assertFalse(unknown_resolution['resolved'])
+        self.assertIsNotNone(unknown_resolution['timestamp'])
+        self.assertEqual(unknown_resolution['resolution_url'], '/orgs/foobar/')
+        self.assertEqual(unknown_resolution['request'], '/orgs/foobar/')
+        self.assertFalse('result' in unknown_resolution)
+
+
 class CollectionVersionExpansionMappingRetrieveViewTest(OCLAPITestCase):
     def test_get_200(self):
         collection = OrganizationCollectionFactory()
@@ -1602,3 +1620,42 @@ class CollectionVersionExpansionConceptRetrieveViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['id'], str(concept.mnemonic))
         self.assertEqual(response.data['type'], 'Concept')
+
+
+class CollectionVersionExpansionConceptMappingsViewTest(OCLAPITestCase):
+    def test_get_200(self):
+        org = OrganizationFactory()
+        source = OrganizationSourceFactory(organization=org)
+        collection = OrganizationCollectionFactory(organization=org)
+        expansion = ExpansionFactory(collection_version=collection)
+        concept = ConceptFactory(parent=source)
+        mapping = MappingFactory(from_concept=concept, parent=source)
+        mapping2 = MappingFactory(from_concept=concept) # random owner/parent
+        reference = CollectionReference(expression=concept.url, collection=collection)
+        reference.save()
+        expansion.concepts.add(concept)
+        reference.concepts.add(concept)
+
+        response = self.client.get(expansion.url + f'concepts/{concept.mnemonic}/mappings/?brief=true')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 0)
+
+        expansion.mappings.add(mapping2)
+
+        response = self.client.get(expansion.url + f'concepts/{concept.mnemonic}/mappings/?brief=true')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['url'], mapping2.url)
+
+        expansion.mappings.add(mapping)
+
+        response = self.client.get(expansion.url + f'concepts/{concept.mnemonic}/mappings/?brief=true')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 2)
+        self.assertEqual(
+            sorted([data['url'] for data in response.data]),
+            sorted([mapping.url, mapping2.url])
+        )
