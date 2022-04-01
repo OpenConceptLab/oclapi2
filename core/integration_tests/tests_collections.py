@@ -1659,3 +1659,47 @@ class CollectionVersionExpansionConceptMappingsViewTest(OCLAPITestCase):
             sorted([data['url'] for data in response.data]),
             sorted([mapping.url, mapping2.url])
         )
+
+class CollectionVersionConceptMappingsViewTest(OCLAPITestCase):
+    def test_get_200(self):
+        org = OrganizationFactory()
+        source = OrganizationSourceFactory(organization=org)
+        collection = OrganizationCollectionFactory(organization=org)
+        expansion = ExpansionFactory(collection_version=collection)
+        concept = ConceptFactory(parent=source)
+        mapping = MappingFactory(from_concept=concept, parent=source)
+        mapping2 = MappingFactory(from_concept=concept) # random owner/parent
+        reference = CollectionReference(expression=concept.url, collection=collection)
+        reference.save()
+        expansion.concepts.add(concept)
+        reference.concepts.add(concept)
+
+        response = self.client.get(collection.url + f'concepts/{concept.mnemonic}/mappings/?brief=true')
+
+        self.assertEqual(response.status_code, 404)
+
+        expansion.mappings.add(mapping2)
+
+        response = self.client.get(collection.url + f'concepts/{concept.mnemonic}/mappings/?brief=true')
+
+        self.assertEqual(response.status_code, 404)
+
+        collection.expansion_uri = expansion.uri
+        collection.save()
+
+        response = self.client.get(collection.url + f'concepts/{concept.mnemonic}/mappings/?brief=true')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['url'], mapping2.url)
+
+        expansion.mappings.add(mapping)
+
+        response = self.client.get(collection.url + f'concepts/{concept.mnemonic}/mappings/?brief=true')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 2)
+        self.assertEqual(
+            sorted([data['url'] for data in response.data]),
+            sorted([mapping.url, mapping2.url])
+        )
