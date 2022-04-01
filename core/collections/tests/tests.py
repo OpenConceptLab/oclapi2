@@ -408,6 +408,51 @@ class CollectionReferenceTest(OCLTestCase):
         self.assertEqual(concepts.count(), 2)
         self.assertListEqual(list(concepts.all()), list(concept.versions.all()))
 
+    @patch('core.collections.models.api_get')
+    def test_fetch_uris(self, api_get_mock):
+        concept = ConceptFactory()
+        latest_version = concept.get_latest_version()
+        api_get_mock.return_value = [
+            dict(
+                id=concept.mnemonic,
+                url=concept.uri,
+                version_url=latest_version.url
+            )
+        ]
+
+        ref = CollectionReference(expression=latest_version.version_url)
+
+        self.assertEqual(
+            ref.fetch_uris(concept.created_by), [latest_version.version_url]
+        )
+        api_get_mock.assert_called_once_with(
+            latest_version.version_url, concept.created_by
+        )
+
+    def test_fetch_concepts_via_api(self):
+        concept = ConceptFactory()
+        ref = CollectionReference(expression='/some/expression/?q=foobar')
+        ref.fetch_uris = Mock(return_value=[concept.url])
+        user_mock = Mock()
+
+        concepts = ref.fetch_concepts(user_mock)
+
+        self.assertEqual(concepts.count(), 1)
+        self.assertEqual(concepts.first(), concept)
+        ref.fetch_uris.assert_called_once_with(user_mock)
+
+    def test_fetch_mappings_via_api(self):
+        mapping = MappingFactory()
+        ref = CollectionReference(expression='/some/expression/?q=foobar')
+        ref.fetch_uris = Mock(return_value=[mapping.url])
+        user_mock = Mock()
+
+        mappings = ref.fetch_mappings(user_mock)
+
+        self.assertEqual(mappings.count(), 1)
+        self.assertEqual(mappings.first(), mapping)
+        ref.fetch_uris.assert_called_once_with(user_mock)
+
 
 class CollectionUtilsTest(OCLTestCase):
     def test_is_mapping(self):
