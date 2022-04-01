@@ -216,7 +216,8 @@ class SourceRetrieveUpdateDestroyView(SourceBaseView, ConceptDictionaryUpdateMix
         return Response({'detail': get(result, 'messages', [DELETE_FAILURE])}, status=status.HTTP_400_BAD_REQUEST)
 
 
-class SourceHEADResourceVersionsDedupView(SourceBaseView):
+# needs to be deleted once all source HEADs migrated
+class SourceHEADResourceVersionsDedupView(SourceBaseView):  # pragma: no cover
     permission_classes = [IsAdminUser]
 
     def get_object(self, queryset=None):
