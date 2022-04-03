@@ -1,9 +1,8 @@
-from django.conf.urls import url
-from django.urls import include, path
+from django.urls import include, path, re_path
 from . import views
 
 urlpatterns = [
-    url('', include('health_check.urls')),
+    re_path('', include('health_check.urls')),
     path('critical/', views.CriticalHealthcheckView.as_view(), name='critical-healthcheck'),
     path('flower/', views.FlowerHealthcheckView.as_view(), name='flower-healthcheck'),
     path('db/', views.DBHealthcheckView.as_view(), name='db-healthcheck'),
