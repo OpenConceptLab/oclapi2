@@ -416,7 +416,8 @@ class UserListViewTest(OCLAPITestCase):
         self.assertEqual(len(response.data), 0)
 
     def test_get_200_with_inactive_user(self):
-        UserProfileFactory(is_active=False, username='inactive')
+        inactive_user = UserProfileFactory(is_active=False, username='inactive')
+        UserProfileDocument().update([inactive_user])
 
         response = self.client.get(
             '/users/',
