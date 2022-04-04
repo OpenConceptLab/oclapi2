@@ -16,6 +16,14 @@ from core.settings import DEFAULT_LOCALE
 from core.users.models import UserProfile
 
 
+class CollectionMinimalSerializer(ModelSerializer):
+    id = CharField(source='mnemonic')
+
+    class Meta:
+        model = Collection
+        fields = ('id', 'url')
+
+
 class CollectionListSerializer(ModelSerializer):
     short_code = CharField(source='mnemonic')
     owner = CharField(source='parent_resource')

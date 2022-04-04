@@ -32,7 +32,7 @@ from core.collections.serializers import (
     CollectionCreateSerializer, CollectionReferenceSerializer, CollectionVersionDetailSerializer,
     CollectionVersionListSerializer, CollectionVersionExportSerializer, CollectionSummaryDetailSerializer,
     CollectionVersionSummaryDetailSerializer, CollectionReferenceDetailSerializer, ExpansionSerializer,
-    ExpansionDetailSerializer, ReferenceExpressionResolveSerializer)
+    ExpansionDetailSerializer, ReferenceExpressionResolveSerializer, CollectionMinimalSerializer)
 from core.collections.utils import is_version_specified
 from core.common.constants import (
     HEAD, RELEASED_PARAM, PROCESSING_PARAM, OK_MESSAGE,
@@ -165,6 +165,8 @@ class CollectionListView(CollectionBaseView, ConceptDictionaryCreateMixin, ListW
         return public_queryset.union(private_queryset)
 
     def get_serializer_class(self):
+        if self.is_brief():
+            return CollectionMinimalSerializer
         if self.request.method == 'GET' and self.is_verbose():
             return CollectionDetailSerializer
         if self.request.method == 'POST':

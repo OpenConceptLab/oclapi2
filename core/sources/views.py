@@ -35,7 +35,7 @@ from core.sources.search import SourceSearch
 from core.sources.serializers import (
     SourceDetailSerializer, SourceListSerializer, SourceCreateSerializer, SourceVersionDetailSerializer,
     SourceVersionListSerializer, SourceVersionExportSerializer, SourceSummaryDetailSerializer,
-    SourceVersionSummaryDetailSerializer)
+    SourceVersionSummaryDetailSerializer, SourceMinimalSerializer)
 
 logger = logging.getLogger('oclapi')
 
@@ -118,6 +118,8 @@ class SourceListView(SourceBaseView, ConceptDictionaryCreateMixin, ListWithHeade
         return public_queryset.union(private_queryset)
 
     def get_serializer_class(self):
+        if self.is_brief():
+            return SourceMinimalSerializer
         if self.request.method == 'GET' and self.is_verbose():
             return SourceDetailSerializer
         if self.request.method == 'POST':

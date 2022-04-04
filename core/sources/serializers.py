@@ -14,6 +14,14 @@ from core.sources.models import Source
 from core.users.models import UserProfile
 
 
+class SourceMinimalSerializer(ModelSerializer):
+    id = CharField(source='mnemonic')
+
+    class Meta:
+        model = Source
+        fields = ('id', 'url')
+
+
 class SourceListSerializer(ModelSerializer):
     short_code = CharField(source='mnemonic')
     owner = CharField(source='parent_resource')

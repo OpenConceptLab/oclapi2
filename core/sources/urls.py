@@ -1,11 +1,11 @@
-from django.urls import re_path, include
+from django.urls import re_path, include, path
 
 from core.common.constants import NAMESPACE_PATTERN
 from core.sources.feeds import SourceFeed
 from . import views
 
 urlpatterns = [
-    re_path(r'^$', views.SourceListView.as_view(), name='source-list'),
+    path('', views.SourceListView.as_view(), name='source-list'),
     re_path(
         fr"^(?P<source>{NAMESPACE_PATTERN})/$",
         views.SourceRetrieveUpdateDestroyView.as_view(),

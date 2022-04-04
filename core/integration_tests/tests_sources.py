@@ -74,6 +74,15 @@ class SourceListViewTest(OCLAPITestCase):
         for attr in ['active_concepts', 'active_mappings', 'versions']:
             self.assertTrue(attr in response.data[0]['summary'])
 
+        response = self.client.get(
+            self.organization.sources_url + '?brief=true',
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0], dict(id=source.mnemonic, url=source.uri))
+
     def test_get_200_zip(self):
         response = self.client.get(
             self.organization.sources_url,

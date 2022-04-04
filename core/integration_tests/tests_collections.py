@@ -79,6 +79,15 @@ class CollectionListViewTest(OCLAPITestCase):
             dict(versions=1, active_concepts=1, active_mappings=0, active_references=1, expansions=1)
         )
 
+        response = self.client.get(
+            f'/orgs/{coll.parent.mnemonic}/collections/?brief=true',
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0], dict(id=coll.mnemonic, url=coll.uri))
+
     def test_post_201(self):
         org = OrganizationFactory(mnemonic='org')
         user = UserProfileFactory(organizations=[org], username='user')
