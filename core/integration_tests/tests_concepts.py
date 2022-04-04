@@ -1454,6 +1454,20 @@ class ConceptListViewTest(OCLAPITestCase):
         self.assertEqual(len(response.data), 2)
 
         response = self.client.get(
+            self.source.concepts_url + '?q=MySource&limit=1',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+
+        response = self.client.get(
+            self.source.concepts_url + '?q=My Source',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 2)
+
+        response = self.client.get(
             self.source.uri + 'v1/concepts/?q=MySource&sortAsc=last_update',
             HTTP_AUTHORIZATION='Token ' + self.random_user.get_token(),
         )
