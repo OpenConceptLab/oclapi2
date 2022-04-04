@@ -220,7 +220,7 @@ class UserOrganizationListViewTest(OCLAPITestCase):
         )
 
         response = self.client.get(
-            f'/user/orgs/?q=private',
+            '/user/orgs/?q=private',
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -233,7 +233,7 @@ class UserOrganizationListViewTest(OCLAPITestCase):
         )
 
         response = self.client.get(
-            f'/user/orgs/?q=private&updatedSince=2021-01-01',
+            '/user/orgs/?q=private&updatedSince=2021-01-01',
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -246,7 +246,7 @@ class UserOrganizationListViewTest(OCLAPITestCase):
         )
 
         response = self.client.get(
-            f'/user/orgs/?q=private&updatedSince=3022-01-01',
+            '/user/orgs/?q=private&updatedSince=3022-01-01',
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -255,7 +255,7 @@ class UserOrganizationListViewTest(OCLAPITestCase):
         self.assertEqual(len(response.data), 0)
 
         response = self.client.get(
-            f'/user/orgs/?q=',
+            '/user/orgs/?q=',
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -268,7 +268,7 @@ class UserOrganizationListViewTest(OCLAPITestCase):
         )
 
         response = self.client.get(
-            f'/user/orgs/?q=foobar',
+            '/user/orgs/?q=foobar',
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
