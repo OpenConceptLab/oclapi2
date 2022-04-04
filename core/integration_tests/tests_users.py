@@ -7,6 +7,7 @@ from core.common.tests import OCLAPITestCase
 from core.orgs.documents import OrganizationDocument
 from core.orgs.tests.factories import OrganizationFactory
 from core.users.constants import VERIFY_EMAIL_MESSAGE, VERIFICATION_TOKEN_MISMATCH
+from core.users.documents import UserProfileDocument
 from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
 
@@ -376,6 +377,7 @@ class UserListViewTest(OCLAPITestCase):
     def setUp(self):
         super().setUp()
         self.superuser = UserProfile.objects.get(username='ocladmin')
+        UserProfileDocument().update([self.superuser])
 
     def test_get_200(self):
         response = self.client.get(
@@ -397,6 +399,22 @@ class UserListViewTest(OCLAPITestCase):
         self.assertEqual(response.data[0]['username'], 'ocladmin')
         self.assertEqual(response.data[0]['email'], self.superuser.email)
 
+        response = self.client.get(
+            '/users/?q=ocl',
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+
+        response = self.client.get(
+            '/users/?q=foobar',
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 0)
+
     def test_get_200_with_inactive_user(self):
         UserProfileFactory(is_active=False, username='inactive')
 
@@ -417,6 +435,24 @@ class UserListViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 2)
         self.assertEqual(sorted(user['username'] for user in response.data), sorted(['ocladmin', 'inactive']))
+
+        response = self.client.get(
+            '/users/?includeInactive=true&q=',
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 2)
+        self.assertEqual(sorted(user['username'] for user in response.data), sorted(['ocladmin', 'inactive']))
+
+        response = self.client.get(
+            '/users/?includeInactive=true&q=inactive',
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['username'], 'inactive')
 
     def test_get_summary_200(self):
         response = self.client.get(
