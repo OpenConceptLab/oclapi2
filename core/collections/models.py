@@ -637,13 +637,17 @@ class Expansion(BaseResourceModel):
             else:
                 index_expansion_mappings.apply_async((self.id, ), queue='indexing')
 
-    def delete_references(self, references):
+    @staticmethod
+    def to_ref_list(references):
         if isinstance(references, CollectionReference):
-            refs = [references]
-        elif isinstance(references, list):
-            refs = references
+            return [references]
+        if isinstance(references, list):
+            return references
         else:
-            refs = references.all()
+            return references.all()
+
+    def delete_references(self, references):
+        refs = self.to_ref_list(references)
 
         index_concepts = False
         index_mappings = False
@@ -685,12 +689,7 @@ class Expansion(BaseResourceModel):
             batch_index_resources.apply_async(('mapping', mappings_filters), queue='indexing')
 
     def add_references(self, references, index=True):
-        if isinstance(references, CollectionReference):
-            refs = [references]
-        elif isinstance(references, list):
-            refs = references
-        else:
-            refs = references.all()
+        refs = self.to_ref_list(references)
 
         index_concepts = False
         index_mappings = False
