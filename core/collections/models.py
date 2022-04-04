@@ -643,8 +643,7 @@ class Expansion(BaseResourceModel):
             return [references]
         if isinstance(references, list):
             return references
-        else:
-            return references.all()
+        return references.all()
 
     def delete_references(self, references):
         refs = self.to_ref_list(references)
