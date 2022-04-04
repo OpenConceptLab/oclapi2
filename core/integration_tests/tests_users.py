@@ -4,6 +4,7 @@ from rest_framework.exceptions import ErrorDetail
 
 from core.common.constants import ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT
 from core.common.tests import OCLAPITestCase
+from core.orgs.documents import OrganizationDocument
 from core.orgs.tests.factories import OrganizationFactory
 from core.users.constants import VERIFY_EMAIL_MESSAGE, VERIFICATION_TOKEN_MISMATCH
 from core.users.models import UserProfile
@@ -175,6 +176,10 @@ class UserOrganizationListViewTest(OCLAPITestCase):
         self.user_org_private = OrganizationFactory(mnemonic='user-private-org', public_access=ACCESS_TYPE_NONE)
         self.user.organizations.set([self.user_org_private, self.user_org_public])
         self.token = self.user.get_token()
+        OrganizationDocument().update([
+            self.org_private, self.org_public_view, self.org_public_edit,
+            self.user_org_public, self.user_org_private
+        ])
 
     def test_get_200(self):
         response = self.client.get(
@@ -194,6 +199,76 @@ class UserOrganizationListViewTest(OCLAPITestCase):
         response = self.client.get(
             f'/users/{random_user.username}/orgs/',
             HTTP_AUTHORIZATION='Token ' + random_user.get_token(),
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 0)
+
+        response = self.client.get(
+            f'/users/{self.user.username}/orgs/?q=private',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(
+            [org['id'] for org in response.data],
+            ['user-private-org']
+        )
+
+        response = self.client.get(
+            f'/user/orgs/?q=private',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(
+            [org['id'] for org in response.data],
+            ['user-private-org']
+        )
+
+        response = self.client.get(
+            f'/user/orgs/?q=private&updatedSince=2021-01-01',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(
+            [org['id'] for org in response.data],
+            ['user-private-org']
+        )
+
+        response = self.client.get(
+            f'/user/orgs/?q=private&updatedSince=3022-01-01',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 0)
+
+        response = self.client.get(
+            f'/user/orgs/?q=',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 2)
+        self.assertEqual(
+            sorted([org['id'] for org in response.data]),
+            sorted(['user-private-org', 'user-public-view-org'])
+        )
+
+        response = self.client.get(
+            f'/user/orgs/?q=foobar',
+            HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
 
