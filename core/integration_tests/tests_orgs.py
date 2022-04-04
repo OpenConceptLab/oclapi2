@@ -1,10 +1,14 @@
 from mock import patch
 from rest_framework.exceptions import ErrorDetail
 
+from core.collections.documents import CollectionDocument
+from core.collections.tests.factories import OrganizationCollectionFactory, UserCollectionFactory
 from core.common.constants import ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT
 from core.common.tests import OCLAPITestCase
 from core.orgs.models import Organization
 from core.orgs.tests.factories import OrganizationFactory
+from core.sources.documents import SourceDocument
+from core.sources.tests.factories import OrganizationSourceFactory, UserSourceFactory
 from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
 
@@ -564,3 +568,123 @@ class OrganizationOverviewViewTest(OCLAPITestCase):
         self.assertEqual(response.data['overview'], dict(foo='bar'))
         self.org.refresh_from_db()
         self.assertEqual(self.org.overview, dict(foo='bar'))
+
+
+class OrganizationSourceListViewTest(OCLAPITestCase):
+    def test_get(self):
+        user = UserProfileFactory(username='batman')
+        token = user.get_token()
+        org1 = OrganizationFactory(mnemonic='gotham')
+        org2 = OrganizationFactory(mnemonic='wayne-enterprise')
+        org1.members.add(user)
+        org2.members.add(user)
+        source1 = OrganizationSourceFactory(mnemonic='city', organization=org1)
+        source2 = OrganizationSourceFactory(mnemonic='corporate', organization=org2)
+        source3 = UserSourceFactory(mnemonic='bat-cave', user=user)
+
+        SourceDocument().update([source1, source2, source3])
+
+        response = self.client.get('/users/batman/orgs/sources/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 2)
+        self.assertEqual(
+            [data['short_code'] for data in response.data],
+            ['corporate', 'city']
+        )
+        self.assertEqual(
+            [data['owner_url'] for data in response.data],
+            ['/orgs/wayne-enterprise/', '/orgs/gotham/']
+        )
+
+        response = self.client.get(
+            '/user/orgs/sources/',
+            HTTP_AUTHORIZATION=f'Token {token}'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 2)
+        self.assertEqual(
+            [data['short_code'] for data in response.data],
+            ['corporate', 'city']
+        )
+
+        response = self.client.get(
+            '/user/orgs/sources/?q=city',
+            HTTP_AUTHORIZATION=f'Token {token}'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(
+            [data['short_code'] for data in response.data],
+            ['city']
+        )
+
+        response = self.client.get(
+            '/user/orgs/sources/?q=batman',
+            HTTP_AUTHORIZATION=f'Token {token}'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 0)
+
+
+class OrganizationCollectionListViewTest(OCLAPITestCase):
+    def test_get(self):
+        user = UserProfileFactory(username='batman')
+        token = user.get_token()
+        org1 = OrganizationFactory(mnemonic='gotham')
+        org2 = OrganizationFactory(mnemonic='wayne-enterprise')
+        org1.members.add(user)
+        org2.members.add(user)
+        coll1 = OrganizationCollectionFactory(mnemonic='city', organization=org1)
+        coll2 = OrganizationCollectionFactory(mnemonic='corporate', organization=org2)
+        coll3 = UserCollectionFactory(mnemonic='bat-cave', user=user)
+
+        CollectionDocument().update([coll1, coll2, coll3])
+
+        response = self.client.get('/users/batman/orgs/collections/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 2)
+        self.assertEqual(
+            [data['short_code'] for data in response.data],
+            ['corporate', 'city']
+        )
+        self.assertEqual(
+            [data['owner_url'] for data in response.data],
+            ['/orgs/wayne-enterprise/', '/orgs/gotham/']
+        )
+
+        response = self.client.get(
+            '/user/orgs/collections/',
+            HTTP_AUTHORIZATION=f'Token {token}'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 2)
+        self.assertEqual(
+            [data['short_code'] for data in response.data],
+            ['corporate', 'city']
+        )
+
+        response = self.client.get(
+            '/user/orgs/collections/?q=city',
+            HTTP_AUTHORIZATION=f'Token {token}'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(
+            [data['short_code'] for data in response.data],
+            ['city']
+        )
+
+        response = self.client.get(
+            '/user/orgs/collections/?q=batman',
+            HTTP_AUTHORIZATION=f'Token {token}'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 0)
