@@ -207,10 +207,12 @@ class Source(ConceptContainerModel):
         self.batch_index(self.concepts, ConceptDocument)
         self.batch_index(self.mappings, MappingDocument)
 
-    def keep_concept_latest_versions_on_head(self):
+    # only for data correction for Source HEAD resources
+    def keep_concept_latest_versions_on_head(self):  # pragma: no cover
         self.concepts.set(
             self.concepts.filter(models.Q(is_latest_version=True) | models.Q(id=F('versioned_object_id'))))
 
-    def keep_mapping_latest_versions_on_head(self):
+    # only for data correction for Source HEAD resources
+    def keep_mapping_latest_versions_on_head(self):  # pragma: no cover
         self.mappings.set(
             self.mappings.filter(models.Q(is_latest_version=True) | models.Q(id=F('versioned_object_id'))))

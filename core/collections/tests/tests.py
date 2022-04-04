@@ -778,6 +778,26 @@ class ExpansionTest(OCLTestCase):
         self.assertTrue(
             Expansion(mnemonic='autoexpand-HEAD', collection_version=Collection(version='HEAD')).is_auto_generated)
 
+    def test_get_mappings_for_concept(self):
+        concept1 = ConceptFactory()
+        concept2 = ConceptFactory(parent=concept1.parent)
+        mapping1 = MappingFactory(parent=concept1.parent, from_concept=concept1, to_concept=concept2)
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection)
+        expansion.concepts.set([concept1, concept2])
+        expansion.mappings.set([mapping1])
+
+        mappings = expansion.get_mappings_for_concept(concept1)
+        self.assertEqual(mappings.count(), 1)
+        self.assertEqual(mappings.first().id, mapping1.id)
+
+        mappings = expansion.get_mappings_for_concept(concept2)
+        self.assertEqual(mappings.count(), 0)
+
+        mappings = expansion.get_mappings_for_concept(concept=concept2, include_indirect=True)
+        self.assertEqual(mappings.count(), 1)
+        self.assertEqual(mappings.first().id, mapping1.id)
+
 
 class ExpansionParametersTest(OCLTestCase):
     def test_apply(self):
