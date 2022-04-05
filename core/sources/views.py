@@ -221,6 +221,7 @@ class SourceRetrieveUpdateDestroyView(SourceBaseView, ConceptDictionaryUpdateMix
 # needs to be deleted once all source HEADs migrated
 class SourceHEADResourceVersionsDedupView(SourceBaseView):  # pragma: no cover
     permission_classes = [IsAdminUser]
+    serializer_class = TaskSerializer
 
     def get_object(self, queryset=None):
         instance = self.get_queryset().filter(version='HEAD').first()
