@@ -6,7 +6,7 @@ from django.db import migrations
 def add_org_creator_as_member(apps, schema_editor):
     Organization = apps.get_model('orgs', 'Organization')
     for org in Organization.objects.all():
-        org.members.add(org.created_by, org.created_by)
+        org.members.add(org.created_by, org.updated_by)
 
 
 class Migration(migrations.Migration):
