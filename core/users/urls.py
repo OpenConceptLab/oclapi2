@@ -1,4 +1,3 @@
-from django.conf.urls import url
 from django.urls import re_path, include, path
 
 from core.common.constants import NAMESPACE_PATTERN
@@ -7,8 +6,8 @@ from . import views
 
 urlpatterns = [
     re_path(r'^$', views.UserListView.as_view(), name='userprofile-list'),
-    url('login/', views.TokenAuthenticationView.as_view(), name='user-login'),
-    url('signup/', views.UserSignup.as_view(), name='user-signup'),
+    path('login/', views.TokenAuthenticationView.as_view(), name='user-login'),
+    path('signup/', views.UserSignup.as_view(), name='user-signup'),
     re_path(
         r'^(?P<user>' + NAMESPACE_PATTERN + ')/$',
         views.UserDetailView.as_view(),

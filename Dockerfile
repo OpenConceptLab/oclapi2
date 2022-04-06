@@ -1,4 +1,4 @@
-FROM python:3.9.6-alpine as builder
+FROM python:3.10.0-alpine as builder
 ENV PYTHONUNBUFFERED 1
 ENV PYTHONDONTWRITEBYTECODE 1
 
@@ -13,7 +13,7 @@ ADD requirements.txt /code/
 
 RUN pip wheel --no-cache-dir --wheel-dir /code/wheels -r requirements.txt
 
-FROM python:3.9.6-alpine
+FROM python:3.10.0-alpine
 ENV PYTHONUNBUFFERED 1
 ENV PYTHONDONTWRITEBYTECODE 1
 

@@ -13,7 +13,6 @@ Including another URLconf
     1. Import the include() function: from django.urls import include, path
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
-from django.conf.urls import url
 from django.urls import path, include, re_path
 from drf_yasg import openapi
 from drf_yasg.views import get_schema_view
@@ -47,9 +46,9 @@ urlpatterns = [
     path('version/', APIVersionView.as_view(), name='api-version'),
     path('changelog/', ChangeLogView.as_view(), name='changelog'),
     path('feedback/', FeedbackView.as_view(), name='feedback'),
-    url(r'^swagger(?P<format>\.json|\.yaml)$', SchemaView.without_ui(cache_timeout=0), name='schema-json'),
-    url(r'^swagger/$', SchemaView.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui'),
-    url(r'^redoc/$', SchemaView.with_ui('redoc', cache_timeout=0), name='schema-redoc'),
+    re_path(r'^swagger(?P<format>\.json|\.yaml)$', SchemaView.without_ui(cache_timeout=0), name='schema-json'),
+    re_path(r'^swagger/$', SchemaView.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui'),
+    re_path(r'^redoc/$', SchemaView.with_ui('redoc', cache_timeout=0), name='schema-redoc'),
     path('healthcheck/', include('core.common.healthcheck.urls')),
     path('admin/reports/authored/', report_views.AuthoredView.as_view(), name='authored-report'),
     path('admin/reports/monthly-usage/', report_views.MonthlyUsageView.as_view(), name='monthly-usage-report'),
@@ -81,5 +80,5 @@ urlpatterns = [
         BulkImportView.as_view(),
         name='bulk_import_detail_url'
     ),
-    url('manage/bulkimport/', BulkImportView.as_view(), name='bulk_import_urls'),
+    path('manage/bulkimport/', BulkImportView.as_view(), name='bulk_import_urls'),
 ]

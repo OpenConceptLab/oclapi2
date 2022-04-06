@@ -6,7 +6,8 @@ import shutil
 import tempfile
 import uuid
 import zipfile
-from collections import MutableMapping, OrderedDict  # pylint: disable=no-name-in-module,deprecated-class
+from collections import OrderedDict
+from collections.abc import MutableMapping  # pylint: disable=no-name-in-module,deprecated-class
 from threading import local
 from urllib import parse
 
