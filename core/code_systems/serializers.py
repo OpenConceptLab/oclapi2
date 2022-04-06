@@ -321,7 +321,7 @@ class CodeSystemDetailSerializer(serializers.ModelSerializer):
             source.version = version
         else:
             source.version = '0.1'
-        source.id = None  # pylint: disable=C0103
+        source.id = None  # pylint: disable=invalid-name
         errors = Source.persist_new_version(source, user)
         self._errors.update(errors)
 
