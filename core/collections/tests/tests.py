@@ -267,54 +267,6 @@ class CollectionTest(OCLTestCase):
         collection.expansion.concepts.add(concept)
         self.assertEqual(collection.last_child_update, concept.updated_at)
 
-    def test_fix_auto_expansion(self):
-        self.assertIsNone(Collection(autoexpand=False, version='v1').fix_auto_expansion())
-        self.assertIsNone(Collection(autoexpand_head=False, version='HEAD').fix_auto_expansion())
-
-        concept = ConceptFactory()
-        mapping = MappingFactory()
-        collection = OrganizationCollectionFactory(version='HEAD', autoexpand_head=True)
-        expansion = ExpansionFactory(collection_version=collection)
-        collection.expansion_uri = expansion.uri
-        collection.save()
-        collection_v1 = OrganizationCollectionFactory(
-            organization=collection.organization, mnemonic=collection.mnemonic, version='v1', autoexpand=True)
-
-        collection.concepts.add(concept)
-        collection.mappings.add(mapping)
-        collection_v1.concepts.add(concept)
-        collection_v1.mappings.add(mapping)
-
-        self.assertEqual(collection.concepts.count(), 1)
-        self.assertEqual(collection.mappings.count(), 1)
-        self.assertTrue(collection.expansions.exists())
-        self.assertFalse(collection.expansion.concepts.exists())
-        self.assertFalse(collection.expansion.concepts.exists())
-
-        self.assertEqual(collection_v1.concepts.count(), 1)
-        self.assertEqual(collection_v1.mappings.count(), 1)
-        self.assertFalse(collection_v1.expansions.exists())
-
-        v1_expansion = collection_v1.fix_auto_expansion()
-        self.assertIsNotNone(v1_expansion.id)
-        self.assertEqual(collection_v1.expansion_uri, v1_expansion.uri)
-
-        self.assertEqual(collection_v1.concepts.count(), 1)
-        self.assertEqual(collection_v1.mappings.count(), 1)
-        self.assertEqual(collection_v1.expansions.count(), 1)
-        self.assertEqual(collection_v1.expansion.concepts.count(), 1)
-        self.assertEqual(collection_v1.expansion.mappings.count(), 1)
-
-        head_expansion = collection.fix_auto_expansion()
-        self.assertEqual(head_expansion.id, expansion.id)
-        self.assertEqual(collection.expansion_uri, head_expansion.uri)
-
-        self.assertEqual(collection.concepts.count(), 1)
-        self.assertEqual(collection.mappings.count(), 1)
-        self.assertEqual(collection.expansions.count(), 1)
-        self.assertEqual(head_expansion.concepts.count(), 1)
-        self.assertEqual(head_expansion.mappings.count(), 1)
-
     @patch('core.collections.models.Collection.expansion', new_callable=PropertyMock)
     @patch('core.collections.models.Collection.batch_index')
     def test_index_children(self, batch_index_mock, expansion_mock):
@@ -584,16 +536,12 @@ class TasksTest(OCLTestCase):
         )
         self.assertEqual(collection_v1.expansions.count(), 0)
         self.assertEqual(collection_v1.references.count(), 0)
-        self.assertEqual(collection_v1.concepts.count(), 0)
-        self.assertEqual(collection_v1.mappings.count(), 0)
 
         seed_children_to_new_version('collection', collection_v1.id, False)  # pylint: disable=no-value-for-parameter
         collection_v1.refresh_from_db()
 
         self.assertEqual(collection_v1.expansions.count(), 1)
         self.assertEqual(collection_v1.references.count(), 2)
-        self.assertEqual(collection_v1.concepts.count(), 0)
-        self.assertEqual(collection_v1.mappings.count(), 0)
         expansion = collection_v1.expansion
         self.assertEqual(expansion.concepts.count(), 1)
         self.assertEqual(expansion.mappings.count(), 1)
@@ -623,16 +571,12 @@ class TasksTest(OCLTestCase):
 
         self.assertEqual(collection_v1.expansions.count(), 0)
         self.assertEqual(collection_v1.references.count(), 0)
-        self.assertEqual(collection_v1.concepts.count(), 0)
-        self.assertEqual(collection_v1.mappings.count(), 0)
 
         seed_children_to_new_version('collection', collection_v1.id)  # pylint: disable=no-value-for-parameter
         collection_v1.refresh_from_db()
 
         self.assertEqual(collection_v1.expansions.count(), 1)
         self.assertEqual(collection_v1.references.count(), 2)
-        self.assertEqual(collection_v1.concepts.count(), 0)
-        self.assertEqual(collection_v1.mappings.count(), 0)
         expansion = collection_v1.expansions.first()
         self.assertEqual(expansion.concepts.count(), 1)
         self.assertEqual(expansion.mappings.count(), 1)

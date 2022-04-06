@@ -524,7 +524,7 @@ class SourceVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
 
         collection = OrganizationCollectionFactory(public_access='None', autoexpand_head=False)
         collection.add_references([concept.uri])
-        self.assertEqual(collection.concepts.count(), 0)  # no expansions
+        self.assertEqual(collection.expansions.count(), 0)
         self.assertEqual(collection.references.count(), 1)
 
         response = self.client.delete(

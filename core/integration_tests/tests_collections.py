@@ -172,7 +172,6 @@ class CollectionListViewTest(OCLAPITestCase):
         self.assertEqual(collection.expansion.concepts.count(), 1)
         self.assertEqual(collection.expansion.active_concepts, 1)
         self.assertEqual(collection.expansion.active_mappings, 0)
-        self.assertEqual(collection.concepts.count(), 0)
         self.assertTrue(collection.references.filter(expression=concept.uri).exists())
         self.assertEqual(
             response.data,
@@ -205,7 +204,6 @@ class CollectionListViewTest(OCLAPITestCase):
         self.assertEqual(str(collection.id), response.data['uuid'])
         self.assertIsNone(collection.expansion_uri)
         self.assertEqual(collection.expansions.count(), 0)
-        self.assertEqual(collection.concepts.count(), 0)
 
         concept = ConceptFactory()
         response = self.client.put(
@@ -221,7 +219,6 @@ class CollectionListViewTest(OCLAPITestCase):
         self.assertEqual(collection.expansions.count(), 0)
         self.assertEqual(collection.active_concepts, None)
         self.assertEqual(collection.active_mappings, None)
-        self.assertEqual(collection.concepts.count(), 0)
         self.assertTrue(collection.references.filter(expression=concept.uri).exists())
         self.assertEqual(
             response.data,
@@ -1117,13 +1114,16 @@ class CollectionVersionListViewTest(OCLAPITestCase):
         self.user = UserProfileFactory()
         self.token = self.user.get_token()
         self.collection = UserCollectionFactory(mnemonic='coll', user=self.user)
+        self.expansion = ExpansionFactory(collection_version=self.collection)
+        self.collection.expansion_uri = self.expansion.uri
+        self.collection.save()
         self.concept = ConceptFactory()
         self.reference = CollectionReference(expression=self.concept.uri, collection=self.collection)
         self.reference.full_clean()
         self.reference.save()
-        self.collection.concepts.set(self.reference.concepts.all())
+        self.expansion.concepts.set(self.reference.concepts.all())
         self.assertEqual(self.collection.references.count(), 1)
-        self.assertEqual(self.collection.concepts.count(), 1)
+        self.assertEqual(self.expansion.concepts.count(), 1)
 
     def test_get_200(self):
         response = self.client.get(
@@ -1169,8 +1169,6 @@ class CollectionVersionListViewTest(OCLAPITestCase):
         self.assertIsNotNone(last_created_version.expansion_uri)
         self.assertEqual(last_created_version.expansions.count(), 1)
         self.assertEqual(last_created_version.references.count(), 1)
-        self.assertEqual(last_created_version.concepts.count(), 0)
-        self.assertEqual(last_created_version.mappings.count(), 0)
 
         expansion = last_created_version.expansions.first()
         self.assertEqual(expansion.concepts.count(), 1)
@@ -1195,8 +1193,6 @@ class CollectionVersionListViewTest(OCLAPITestCase):
         self.assertIsNone(last_created_version.expansion_uri)
         self.assertEqual(last_created_version.expansions.count(), 0)
         self.assertEqual(last_created_version.references.count(), 1)
-        self.assertEqual(last_created_version.concepts.count(), 0)
-        self.assertEqual(last_created_version.mappings.count(), 0)
 
 
 class ExportCollectionTaskTest(OCLAPITestCase):
