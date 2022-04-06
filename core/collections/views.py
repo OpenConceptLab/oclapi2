@@ -586,13 +586,6 @@ class CollectionVersionRetrieveUpdateDestroyView(CollectionBaseView, RetrieveAPI
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-    def patch(self, request, *args, **kwargs):  # to fix/create default expansion for the version
-        instance = self.get_object()
-        expansion = instance.fix_auto_expansion()
-        if expansion and expansion.id:
-            return Response(ExpansionDetailSerializer(expansion).data, status=status.HTTP_200_OK)
-        return Response(status=status.HTTP_400_BAD_REQUEST)
-
     def delete(self, _, **kwargs):  # pylint: disable=unused-argument
         instance = self.get_object()
 

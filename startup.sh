@@ -21,9 +21,6 @@ python manage.py import_lookup_values
 echo "Populating text from extras.about"
 python manage.py populate_text_from_extras_about
 
-echo "Migrating old style collection to new style"
-python manage.py collection_expansions
-
 if [[ "$ENVIRONMENT" = "development" ]]; then
   echo "Starting up the development server"
   python manage.py runserver 0.0.0.0:${API_PORT:-8000}
