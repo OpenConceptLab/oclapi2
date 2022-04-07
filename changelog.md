@@ -1,3 +1,19 @@
+##### 2.1.3 - Thu Apr 7 09:24:30 2022 +0000
+- [OpenConceptLab/ocl_issues#1262](https://github.com/OpenConceptLab/ocl_issues/issues/1262) | (attempting) fixing whitenoise static files issue
+- [OpenConceptLab/ocl_issues#1206](https://github.com/OpenConceptLab/ocl_issues/issues/1206) | removed old collection concepts/mappings relations
+- [OpenConceptLab/ocl_issues#1206](https://github.com/OpenConceptLab/ocl_issues/issues/1206) | removed code to migrate old style to new style collection
+- [OpenConceptLab/ocl_issues#1155](https://github.com/OpenConceptLab/ocl_issues/issues/1155) | Merge pull request #209 from OpenConceptLab/django4
+- [OpenConceptLab/ocl_issues#1262](https://github.com/OpenConceptLab/ocl_issues/issues/1262) | add response serializer
+- [OpenConceptLab/ocl_issues#1262](https://github.com/OpenConceptLab/ocl_issues/issues/1262) | API route for head resources dedup
+- Org data migration | adding creator and updator in members list
+- [OpenConceptLab/ocl_issues#1247](https://github.com/OpenConceptLab/ocl_issues/issues/1247) | collection/source apis | brief response
+- Refactoing | extracted common code
+- Expansion test for getting mappings from a concept
+- user search view test
+- user org search view test
+- user org collections/sources list test
+- Concept Search | multi words wild card test
+- Upgraded to Django4
 ##### 2.1.0 - Mon Apr 4 08:57:29 2022 +0530
 - Upgraded to 2.1.0
 - Expansion | do not re-evaluate references for auto expansion
