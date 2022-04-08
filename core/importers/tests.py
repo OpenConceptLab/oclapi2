@@ -430,6 +430,31 @@ class BulkImportInlineTest(OCLTestCase):
         self.assertEqual(len(importer.permission_denied), 0)
         batch_index_resources_mock.apply_async.assert_called()
 
+    @patch('core.importers.models.batch_index_resources')
+    def test_csv_import_with_retired_concepts(self, batch_index_resources_mock):
+        file_content = open(
+            os.path.join(os.path.dirname(__file__), '..', 'samples/ocl_csv_with_retired_concepts.csv'), 'r').read()
+        data = OclStandardCsvToJsonConverter(
+            input_list=csv_file_data_to_input_list(file_content), allow_special_characters=True).process()
+        importer = BulkImportInline(data, 'ocladmin', True)
+        importer.run()
+
+        self.assertEqual(importer.processed, 10)
+        self.assertEqual(len(importer.created), 10)
+        self.assertEqual(len(importer.failed), 0)
+        self.assertEqual(len(importer.exists), 0)
+        self.assertEqual(len(importer.updated), 0)
+        self.assertEqual(len(importer.invalid), 0)
+        self.assertEqual(len(importer.others), 0)
+        self.assertEqual(len(importer.permission_denied), 0)
+        batch_index_resources_mock.apply_async.assert_called()
+
+        self.assertEqual(Concept.objects.filter(parent__mnemonic='MyDemoSource', is_latest_version=True).count(), 4)
+        self.assertEqual(
+            Concept.objects.filter(parent__mnemonic='MyDemoSource', is_latest_version=True, retired=True).count(), 1)
+        self.assertEqual(
+            Concept.objects.filter(parent__mnemonic='MyDemoSource', is_latest_version=True, retired=False).count(), 3)
+
     @unittest.skip('[Skipped] OPENMRS CSV Import Sample')
     @patch('core.importers.models.batch_index_resources')
     def test_openmrs_schema_csv_import(self, batch_index_resources_mock):
