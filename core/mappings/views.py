@@ -59,7 +59,7 @@ class MappingListView(MappingBaseView, ListWithHeadersMixin, CreateModelMixin):
     def get_queryset(self):
         is_latest_version = 'collection' not in self.kwargs and 'version' not in self.kwargs or \
                             get(self.kwargs, 'version') == HEAD
-        if self.parent_resource:
+        if get(self, 'parent_resource'):
             parent = self.parent_resource
             queryset = parent.mappings_set if parent.is_head else parent.mappings
             queryset = Mapping.apply_attribute_based_filters(queryset, self.params)
