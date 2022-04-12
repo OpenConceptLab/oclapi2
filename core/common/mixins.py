@@ -28,11 +28,12 @@ logger = logging.getLogger('oclapi')
 
 class CustomPaginator:
     def __init__(self, request, total_count, queryset, page_size):
-        self.total = total_count
         self.request = request
         self.queryset = queryset
         self.page_size = page_size
         self.page_number = int(request.GET.get('page', '1') or '1')
+        self.total = total_count or self.queryset.count()
+        self.queryset.count = None
         self.paginator = Paginator(self.queryset, self.page_size)
         self.page_object = self.paginator.get_page(self.page_number)
         self.page_count = ceil(int(self.total_count) / int(self.page_size))
@@ -47,7 +48,7 @@ class CustomPaginator:
 
     @cached_property
     def total_count(self):
-        return get(self, 'total') or self.queryset.count()
+        return self.total
 
     def __get_query_params(self):
         return self.request.GET.copy()
