@@ -99,7 +99,7 @@ class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
                 Q(parent__user_id=user.id) | Q(parent__organization__members__id=user.id))
             queryset = public_queryset.union(private_queryset)
 
-        return queryset.prefetch_related('names')
+        return queryset.filter(is_active=True).prefetch_related('names')
 
     @swagger_auto_schema(
         manual_parameters=[

@@ -77,7 +77,7 @@ class MappingListView(MappingBaseView, ListWithHeadersMixin, CreateModelMixin):
                 Q(parent__user_id=user.id) | Q(parent__organization__members__id=user.id))
             queryset = public_queryset.union(private_queryset)
 
-        return queryset
+        return queryset.filter(is_active=True)
 
     @swagger_auto_schema(
         manual_parameters=[
