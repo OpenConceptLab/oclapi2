@@ -81,7 +81,7 @@ class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
         if get(self, 'parent_resource'):
             parent = self.parent_resource
             queryset = parent.concepts_set if parent.is_head else parent.concepts
-            queryset = Concept.apply_attribute_based_filters(queryset, self.params)
+            queryset = Concept.apply_attribute_based_filters(queryset, self.params).filter(is_active=True)
         else:
             queryset = super().get_queryset()
         if is_latest_version:
@@ -101,7 +101,7 @@ class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
                 Q(parent__user_id=user.id) | Q(parent__organization__members__id=user.id))
             queryset = public_queryset.union(private_queryset)
 
-        return queryset.filter(is_active=True)
+        return queryset
 
     @swagger_auto_schema(
         manual_parameters=[
