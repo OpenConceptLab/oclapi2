@@ -688,7 +688,7 @@ class CollectionVersionExpansionConceptsView(CollectionVersionExpansionChildrenV
         return ConceptDetailSerializer if self.is_verbose() else ConceptListSerializer
 
     def get_queryset(self):
-        return super().get_queryset().concepts
+        return super().get_queryset().concepts.filter()
 
 
 class CollectionVersionExpansionMappingsView(CollectionVersionExpansionChildrenView):
@@ -702,7 +702,7 @@ class CollectionVersionExpansionMappingsView(CollectionVersionExpansionChildrenV
         return MappingDetailSerializer if self.is_verbose() else MappingListSerializer
 
     def get_queryset(self):
-        return super().get_queryset().mappings
+        return super().get_queryset().mappings.filter()
 
 
 class CollectionVersionConceptsView(CollectionBaseView, ListWithHeadersMixin):
@@ -723,7 +723,7 @@ class CollectionVersionConceptsView(CollectionBaseView, ListWithHeadersMixin):
     def get_queryset(self):
         expansion = self.get_object()
         if expansion:
-            return expansion.concepts
+            return expansion.concepts.filter()
 
         return Concept.objects.none()
 
@@ -882,7 +882,7 @@ class CollectionVersionMappingsView(CollectionBaseView, ListWithHeadersMixin):
     def get_queryset(self):
         expansion = self.get_object()
         if expansion:
-            return expansion.mappings
+            return expansion.mappings.filter()
 
         return Mapping.objects.none()
 
