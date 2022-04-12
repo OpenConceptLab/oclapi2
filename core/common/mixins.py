@@ -17,11 +17,11 @@ from rest_framework.response import Response
 
 from core.common.constants import HEAD, ACCESS_TYPE_EDIT, ACCESS_TYPE_VIEW, ACCESS_TYPE_NONE, INCLUDE_FACETS, \
     LIST_DEFAULT_LIMIT, HTTP_COMPRESS_HEADER, CSV_DEFAULT_LIMIT, FACETS_ONLY, NOT_FOUND, \
-    MUST_SPECIFY_EXTRA_PARAM_IN_BODY
+    MUST_SPECIFY_EXTRA_PARAM_IN_BODY, INCLUDE_RETIRED_PARAM
 from core.common.permissions import HasPrivateAccess, HasOwnership, CanViewConceptDictionary
 from core.common.services import S3
 from .utils import write_csv_to_s3, get_csv_from_s3, get_query_params_from_url_string, compact_dict_by_values, \
-    to_owner_uri
+    to_owner_uri, parse_updated_since_param
 
 logger = logging.getLogger('oclapi')
 
@@ -388,6 +388,20 @@ class SourceContainerMixin:
 
 
 class SourceChildMixin:
+    @staticmethod
+    def apply_attribute_based_filters(queryset, params):
+        is_latest = params.get('is_latest', None) in [True, 'true']
+        include_retired = params.get(INCLUDE_RETIRED_PARAM, None) in [True, 'true']
+        updated_since = parse_updated_since_param(params)
+        if is_latest:
+            queryset = queryset.filter(is_latest_version=True)
+        if not include_retired and not params.get('concept', None) and not params.get('mapping', None):
+            queryset = queryset.filter(retired=False)
+        if updated_since:
+            queryset = queryset.filter(updated_at__gte=updated_since)
+
+        return queryset
+
     @property
     def source_versions(self):
         return self.sources.exclude(version=HEAD).values_list('uri', flat=True)

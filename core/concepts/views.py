@@ -78,7 +78,10 @@ class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
     def get_queryset(self):
         is_latest_version = 'collection' not in self.kwargs and 'version' not in self.kwargs or get(
             self.kwargs, 'version') == HEAD
-        queryset = super().get_queryset().prefetch_related('names')
+        if self.parent_resource:
+            queryset = Concept.apply_attribute_based_filters(self.parent_resource.concepts, self.params)
+        else:
+            queryset = super().get_queryset()
         if is_latest_version:
             queryset = queryset.filter(id=F('versioned_object_id'))
 
@@ -87,19 +90,16 @@ class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
 
         user = self.request.user
 
-        if get(user, 'is_staff'):
-            return queryset
-
         if get(user, 'is_anonymous'):
-            return queryset.exclude(public_access=ACCESS_TYPE_NONE)
+            queryset = queryset.exclude(public_access=ACCESS_TYPE_NONE)
+        elif not get(user, 'is_staff'):
+            public_queryset = queryset.exclude(public_access=ACCESS_TYPE_NONE)
+            private_queryset = queryset.filter(public_access=ACCESS_TYPE_NONE)
+            private_queryset = private_queryset.filter(
+                Q(parent__user_id=user.id) | Q(parent__organization__members__id=user.id))
+            queryset = public_queryset.union(private_queryset)
 
-        public_queryset = queryset.exclude(public_access=ACCESS_TYPE_NONE)
-        private_queryset = queryset.filter(public_access=ACCESS_TYPE_NONE)
-        private_queryset = private_queryset.filter(
-            Q(parent__user_id=user.id) | Q(parent__organization__members__id=user.id))
-        queryset = public_queryset.union(private_queryset)
-
-        return queryset
+        return queryset.prefetch_related('names')
 
     @swagger_auto_schema(
         manual_parameters=[

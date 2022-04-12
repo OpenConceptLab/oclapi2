@@ -6,12 +6,12 @@ from django.db import models, IntegrityError, transaction, connection
 from django.db.models import F, Q
 from pydash import get, compact
 
-from core.common.constants import ISO_639_1, INCLUDE_RETIRED_PARAM, LATEST, HEAD
+from core.common.constants import ISO_639_1, LATEST, HEAD
 from core.common.mixins import SourceChildMixin
 from core.common.models import VersionedModel
 from core.common.tasks import process_hierarchy_for_new_concept, process_hierarchy_for_concept_version, \
     process_hierarchy_for_new_parent_concept_version
-from core.common.utils import parse_updated_since_param, generate_temp_version, drop_version, \
+from core.common.utils import generate_temp_version, drop_version, \
     encode_string, decode_string, named_tuple_fetchall
 from core.concepts.constants import CONCEPT_TYPE, LOCALES_FULLY_SPECIFIED, LOCALES_SHORT, LOCALES_SEARCH_INDEX_TERM, \
     CONCEPT_WAS_RETIRED, CONCEPT_IS_ALREADY_RETIRED, CONCEPT_IS_ALREADY_NOT_RETIRED, CONCEPT_WAS_UNRETIRED, \
@@ -415,9 +415,6 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         container_version = params.get('version', None)
         concept = params.get('concept', None)
         concept_version = params.get('concept_version', None)
-        is_latest = params.get('is_latest', None) in [True, 'true']
-        include_retired = params.get(INCLUDE_RETIRED_PARAM, None) in [True, 'true']
-        updated_since = parse_updated_since_param(params)
         latest_released_version = None
         is_latest_released = container_version == LATEST
         if is_latest_released:
@@ -456,14 +453,8 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             queryset = queryset.filter(mnemonic__in=mnemonics)
         if concept_version:
             queryset = queryset.filter(version=concept_version)
-        if is_latest:
-            queryset = queryset.filter(is_latest_version=True)
-        if not include_retired and not concept:
-            queryset = queryset.filter(retired=False)
-        if updated_since:
-            queryset = queryset.filter(updated_at__gte=updated_since)
 
-        return queryset
+        return cls.apply_attribute_based_filters(queryset, params)
 
     def clone(self):
         concept_version = Concept(

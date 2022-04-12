@@ -6,10 +6,10 @@ from django.db import models, IntegrityError, transaction
 from django.db.models import Q, F
 from pydash import get
 
-from core.common.constants import INCLUDE_RETIRED_PARAM, NAMESPACE_REGEX, HEAD, LATEST
+from core.common.constants import NAMESPACE_REGEX, HEAD, LATEST
 from core.common.mixins import SourceChildMixin
 from core.common.models import VersionedModel
-from core.common.utils import parse_updated_since_param, separate_version, to_parent_uri, generate_temp_version, \
+from core.common.utils import separate_version, to_parent_uri, generate_temp_version, \
     encode_string, is_url_encoded_string
 from core.mappings.constants import MAPPING_TYPE, MAPPING_IS_ALREADY_RETIRED, MAPPING_WAS_RETIRED, \
     MAPPING_IS_ALREADY_NOT_RETIRED, MAPPING_WAS_UNRETIRED, PERSIST_CLONE_ERROR, PERSIST_CLONE_SPECIFY_USER_ERROR, \
@@ -487,9 +487,6 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         container_version = params.get('version', None)
         mapping = params.get('mapping', None)
         mapping_version = params.get('mapping_version', None)
-        is_latest = params.get('is_latest', None) in [True, 'true']
-        include_retired = params.get(INCLUDE_RETIRED_PARAM, None) in [True, 'true']
-        updated_since = parse_updated_since_param(params)
         latest_released_version = None
         is_latest_released = container_version == LATEST
         if is_latest_released:
@@ -525,14 +522,8 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
             queryset = queryset.filter(mnemonic__exact=mapping)
         if mapping_version:
             queryset = queryset.filter(version=mapping_version)
-        if is_latest:
-            queryset = queryset.filter(is_latest_version=True)
-        if not include_retired and not mapping:
-            queryset = queryset.filter(retired=False)
-        if updated_since:
-            queryset = queryset.filter(updated_at__gte=updated_since)
 
-        return queryset
+        return cls.apply_attribute_based_filters(queryset, params)
 
     def is_from_same_as_to(self):
         return self.from_concept_code == self.to_concept_code and self.from_source_url == self.to_source_url
