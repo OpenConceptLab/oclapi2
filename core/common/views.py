@@ -178,9 +178,6 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     def get_exact_search_fields(self):
         return [field for field, config in get(self, 'es_fields', {}).items() if config.get('exact', False)]
 
-    def has_search_param(self):
-        return SEARCH_PARAM in self.request.query_params
-
     def get_search_string(self, lower=True, decode=True):
         search_str = self.request.query_params.dict().get(SEARCH_PARAM, '').strip()
         if lower:
@@ -604,7 +601,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             raise ex
 
     def should_perform_es_search(self):
-        return self.has_search_param() or self.has_searchable_extras_fields() or bool(self.get_faceted_filters())
+        return bool(self.get_search_string()) or self.has_searchable_extras_fields() or bool(self.get_faceted_filters())
 
     def has_searchable_extras_fields(self):
         return bool(
