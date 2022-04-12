@@ -60,7 +60,9 @@ class MappingListView(MappingBaseView, ListWithHeadersMixin, CreateModelMixin):
         is_latest_version = 'collection' not in self.kwargs and 'version' not in self.kwargs or \
                             get(self.kwargs, 'version') == HEAD
         if self.parent_resource:
-            queryset = Mapping.apply_attribute_based_filters(self.parent_resource.mappings, self.params)
+            parent = self.parent_resource
+            queryset = parent.mappings_set if parent.is_head else parent.mappings
+            queryset = Mapping.apply_attribute_based_filters(queryset, self.params)
         else:
             queryset = super().get_queryset()
         if is_latest_version:

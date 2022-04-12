@@ -34,9 +34,19 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
                       models.Index(name='mappings_ver_public_cond', fields=['public_access'],
                                    condition=(Q(is_active=True) & Q(retired=False) & Q(id=F('versioned_object_id')) &
                                               ~Q(public_access='None'))),
+                      models.Index(name='mappings_public_cond2', fields=['parent_id'],
+                                   condition=(Q(is_active=True) & Q(retired=False) & Q(is_latest_version=True) &
+                                              ~Q(public_access='None'))),
+                      models.Index(name='mappings_ver_public_cond2', fields=['parent_id'],
+                                   condition=(Q(is_active=True) & Q(retired=False) & Q(id=F('versioned_object_id')) &
+                                              ~Q(public_access='None'))),
                       models.Index(name='mappings_all_for_count', fields=['is_active'],
                                    condition=(Q(is_active=True) & Q(retired=False) & Q(is_latest_version=True))),
                       models.Index(name='mappings_ver_all_for_count', fields=['is_active'],
+                                   condition=(Q(is_active=True) & Q(retired=False) & Q(id=F('versioned_object_id')))),
+                      models.Index(name='mappings_all_for_count2', fields=['parent_id'],
+                                   condition=(Q(is_active=True) & Q(retired=False) & Q(is_latest_version=True))),
+                      models.Index(name='mappings_ver_all_for_count2', fields=['parent_id'],
                                    condition=(Q(is_active=True) & Q(retired=False) & Q(id=F('versioned_object_id')))),
                       models.Index(name='mappings_all_for_sort', fields=['-updated_at'],
                                    condition=(Q(is_active=True) & Q(retired=False) & Q(is_latest_version=True))),
