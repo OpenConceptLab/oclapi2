@@ -396,7 +396,7 @@ class ConceptImporter(BaseResourceImporter):
         ).first()
         super().parse()
         self.data['parent'] = source
-        self.data['name'] = self.data['mnemonic'] = self.data.pop('id')
+        self.data['name'] = self.data['mnemonic'] = str(self.data.pop('id', ''))
         if not is_url_encoded_string(self.data['mnemonic']):
             self.data['mnemonic'] = encode_string(self.data['mnemonic'])
 
