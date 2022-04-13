@@ -744,7 +744,7 @@ class ExpansionTest(OCLTestCase):
 
 
 class ExpansionParametersTest(OCLTestCase):
-    def test_apply(self):
+    def test_apply_active_only(self):
         ConceptFactory(id=1, retired=False, mnemonic='active')
         ConceptFactory(id=2, retired=True, mnemonic='retired')
         queryset = Concept.objects.filter(id__in=[1, 2])
@@ -754,6 +754,27 @@ class ExpansionParametersTest(OCLTestCase):
         self.assertEqual(result.first().id, 1)
 
         result = ExpansionParameters(dict(activeOnly=False)).apply(queryset)
+        self.assertEqual(result.count(), 2)
+        self.assertEqual(
+            list(result.order_by('id').values_list('id', flat=True)),
+            [1, 2]
+        )
+
+    def test_apply_text_filter(self):
+        ConceptFactory(id=1, mnemonic='foobar')
+        ConceptFactory(id=2, mnemonic='bar')
+        queryset = Concept.objects.filter(id__in=[1, 2])
+        ConceptDocument().update(queryset)  # needed for parallel test execution
+
+        result = ExpansionParameters(dict(filter='foo tao')).apply(queryset)
+        self.assertEqual(result.count(), 1)
+        self.assertEqual(result.first().id, 1)
+
+        result = ExpansionParameters(dict(filter='foobar')).apply(queryset)
+        self.assertEqual(result.count(), 1)
+        self.assertEqual(result.first().id, 1)
+
+        result = ExpansionParameters(dict(filter='bar')).apply(queryset)
         self.assertEqual(result.count(), 2)
         self.assertEqual(
             list(result.order_by('id').values_list('id', flat=True)),

@@ -16,11 +16,12 @@ from core.collections.constants import (
 from core.collections.utils import is_concept, is_mapping
 from core.common.constants import (
     DEFAULT_REPOSITORY_TYPE, ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT,
-    ACCESS_TYPE_NONE, SEARCH_PARAM)
+    ACCESS_TYPE_NONE, SEARCH_PARAM, ES_REQUEST_TIMEOUT)
 from core.common.models import ConceptContainerModel, BaseResourceModel
 from core.common.tasks import seed_children_to_expansion, batch_index_resources, index_expansion_concepts, \
     index_expansion_mappings
-from core.common.utils import drop_version, to_owner_uri, generate_temp_version, api_get
+from core.common.utils import drop_version, to_owner_uri, generate_temp_version, api_get, es_id_in,\
+    es_wildcard_search, get_resource_class_from_resource_name, get_exact_search_fields
 from core.concepts.constants import LOCALES_FULLY_SPECIFIED
 from core.concepts.models import Concept
 from core.mappings.models import Mapping
@@ -598,8 +599,8 @@ class Expansion(BaseResourceModel):
     def owner_url(self):
         return to_owner_uri(self.uri)
 
-    def apply_parameters(self, queryset):
-        parameters = ExpansionParameters(self.parameters)
+    def apply_parameters(self, queryset, is_concept_queryset):
+        parameters = ExpansionParameters(self.parameters, is_concept_queryset)
         return parameters.apply(queryset)
 
     def index_concepts(self):
@@ -677,12 +678,12 @@ class Expansion(BaseResourceModel):
             if reference.is_concept:
                 concepts = reference.concepts if is_auto_generated else reference.fetch_concepts(self.created_by)
                 if concepts.exists():
-                    self.concepts.add(*self.apply_parameters(concepts))
+                    self.concepts.add(*self.apply_parameters(concepts, True))
                     index_concepts = True
             elif reference.is_mapping:
                 mappings = reference.mappings if is_auto_generated else reference.fetch_mappings(self.created_by)
                 if mappings.exists():
-                    self.mappings.add(*self.apply_parameters(mappings))
+                    self.mappings.add(*self.apply_parameters(mappings, False))
                     index_mappings = True
 
         if index:
@@ -747,34 +748,54 @@ class Expansion(BaseResourceModel):
 
 class ExpansionParameters:
     ACTIVE = 'activeOnly'
+    TEXT_FILTER = 'filter'
 
-    def __init__(self, parameters):
+    def __init__(self, parameters, is_concept_queryset=True):
         self.parameters = parameters
         self.parameter_classes = {}
-        self.filters = {}
+        self.db_filters = {}
+        self.is_concept_queryset = is_concept_queryset
         self.to_parameter_classes()
-        self.get_filters()
 
     def to_parameter_classes(self):
         for parameter, value in self.parameters.items():
             if parameter == self.ACTIVE:
                 self.parameter_classes[parameter] = ExpansionActiveParameter(value=value)
+            elif parameter == self.TEXT_FILTER:
+                self.parameter_classes[parameter] = ExpansionTextFilterParameter(value=value)
 
     def apply(self, queryset):
-        queryset = queryset.filter(**self.filters)
+        queryset = self.apply_db_filters(queryset)
+        queryset = self.apply_es_filters(queryset)
         return queryset
 
-    def get_filters(self):
+    def apply_db_filters(self, queryset):
+        self.make_db_filters()
+        return queryset.filter(**self.db_filters)
+
+    def apply_es_filters(self, queryset):
         for _, klass in self.parameter_classes.items():
-            if klass.can_apply_filters:
-                self.filters = {**self.filters, **klass.filters}
+            if klass.es_filters:
+                queryset = klass.apply(queryset, self.is_concept_queryset)
+        return queryset
+
+    def make_db_filters(self):
+        for _, klass in self.parameter_classes.items():
+            if klass.db_filters:
+                self.db_filters = {**self.db_filters, **klass.filters}
 
 
 class ExpansionParameter:
-    can_apply_filters = True
+    db_filters = True
+    es_filters = False
 
     def __init__(self, value):
         self.value = value
+
+
+class ExpansionESParameter(ExpansionParameter):
+    es_filters = True
+    db_filters = False
 
 
 class ExpansionActiveParameter(ExpansionParameter):
@@ -784,5 +805,20 @@ class ExpansionActiveParameter(ExpansionParameter):
     def filters(self):
         if self.value is True:
             return self.default_filters
-
         return {}
+
+
+class ExpansionTextFilterParameter(ExpansionESParameter):
+    def apply(self, queryset, is_concept_queryset):
+        if self.value and isinstance(self.value, str):
+            klass = get_resource_class_from_resource_name('concept' if is_concept_queryset else 'mapping')
+            document = klass.get_search_document()
+            search = document.search()
+            search = es_id_in(search, queryset.values_list('id', flat=True))
+            search = es_wildcard_search(
+                search, self.value, get_exact_search_fields(klass),
+                name_attr='_name' if is_concept_queryset else 'name'
+            )
+            queryset = search.params(request_timeout=ES_REQUEST_TIMEOUT).to_queryset()
+
+        return queryset

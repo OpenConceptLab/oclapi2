@@ -1,5 +1,6 @@
 import json
 import mimetypes
+import operator
 import os
 import random
 import shutil
@@ -8,6 +9,7 @@ import uuid
 import zipfile
 from collections import OrderedDict
 from collections.abc import MutableMapping  # pylint: disable=no-name-in-module,deprecated-class
+from functools import reduce
 from threading import local
 from urllib import parse
 
@@ -17,6 +19,7 @@ from dateutil import parser
 from django.conf import settings
 from django.urls import NoReverseMatch, reverse, get_resolver, resolve, Resolver404
 from djqscsv import csv_file_for
+from elasticsearch_dsl import Q as es_Q
 from pydash import flatten, compact, get
 from requests.auth import HTTPBasicAuth
 from rest_framework.utils import encoders
@@ -738,3 +741,56 @@ def chunks(lst, size):
     """Yield successive n-sized chunks from lst."""
     for i in range(0, len(lst), size):
         yield lst[i:i + size]
+
+
+def es_id_in(search, ids):
+    return search.query(reduce(operator.ior, [es_Q('match', _id=_id) for _id in ids]))
+
+
+def get_es_wildcard_search_criterion(search_str, name_attr='name'):
+    def get_query(_str):
+        return es_Q(
+            "wildcard", id=dict(value=_str, boost=2)
+        ) | es_Q(
+            "wildcard", **{name_attr: dict(value=_str, boost=5)}
+        ) | es_Q(
+            "query_string", query=f"*{_str}*"
+        )
+
+    if search_str:
+        words = search_str.split()
+        criterion = get_query(words[0])
+        for word in words[1:]:
+            criterion |= get_query(word)
+    else:
+        criterion = get_query(search_str)
+
+    return criterion
+
+
+def get_es_exact_search_criterion(search_str, fields):
+    def get_query(attr):
+        words = search_str.split(' ')
+        criteria = es_Q('match', **{attr: words[0]})
+        for word in words[1:]:
+            criteria &= es_Q('match', **{attr: word})
+        return criteria
+
+    criterion = get_query(fields.pop())
+    for field in fields:
+        criterion |= get_query(field)
+
+    return criterion
+
+
+def es_wildcard_search(search, search_str, exact_search_fields, name_attr='name'):
+    if not search_str:
+        return search
+
+    return search.query(
+        get_es_wildcard_search_criterion(
+            search_str, name_attr) | get_es_exact_search_criterion(search_str, exact_search_fields))
+
+
+def get_exact_search_fields(klass):
+    return [field for field, config in get(klass, 'es_fields', {}).items() if config.get('exact', False)]
