@@ -744,7 +744,9 @@ def chunks(lst, size):
 
 
 def es_id_in(search, ids):
-    return search.query(reduce(operator.ior, [es_Q('match', _id=_id) for _id in ids]))
+    if ids:
+        return search.query(reduce(operator.ior, [es_Q('match', _id=_id) for _id in ids]))
+    return search
 
 
 def get_es_wildcard_search_criterion(search_str, name_attr='name'):
