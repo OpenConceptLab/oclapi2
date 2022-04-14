@@ -433,7 +433,7 @@ class UtilsTest(OCLTestCase):
         self.assertEqual(api_get('/some-url', user), 'api-response')
 
         http_get_mock.assert_called_once_with(
-            'http://api:8000/some-url',
+            'http://localhost:8000/some-url',
             headers=dict(Authorization=f'Token {user.get_token()}')
         )
 

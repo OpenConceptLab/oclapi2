@@ -688,7 +688,7 @@ def to_parent_uri_from_kwargs(params):
 
 def api_get(url, user, **kwargs):
     response = requests.get(
-        settings.API_INTERNAL_BASE_URL + url, headers=user.auth_headers,
+        settings.API_BASE_URL + url, headers=user.auth_headers,
         **kwargs
     )
     return response.json()
