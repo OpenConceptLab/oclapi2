@@ -285,8 +285,6 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             filters['collection'] = kwargs['collection']
             filters['collection_owner_url'] = f'/users/{kwargs["user"]}/' if is_user_specified else \
                 f'/orgs/{kwargs["org"]}/'
-            if 'expansion' in self.kwargs:
-                filters['expansion'] = self.kwargs.get('expansion')
         else:
             if is_user_specified:
                 filters['ownerType'] = USER_OBJECT_TYPE
