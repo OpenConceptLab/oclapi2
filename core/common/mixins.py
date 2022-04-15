@@ -30,9 +30,15 @@ class CustomPaginator:
     def __init__(self, request, total_count, queryset, page_size):
         self.request = request
         self.queryset = queryset
+        self.total = total_count or self.queryset.count()
         self.page_size = page_size
         self.page_number = int(request.GET.get('page', '1') or '1')
-        self.total = total_count or self.queryset.count()
+        bottom = (self.page_number - 1) * self.page_size
+        top = bottom + self.page_size
+        if top >= self.total:
+            top = self.total
+
+        self.queryset = self.queryset[bottom:top]
         self.queryset.count = None
         self.paginator = Paginator(self.queryset, self.page_size)
         self.page_object = self.paginator.get_page(self.page_number)
