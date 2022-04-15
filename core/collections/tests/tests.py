@@ -780,3 +780,112 @@ class ExpansionParametersTest(OCLTestCase):
             list(result.order_by('id').values_list('id', flat=True)),
             [1, 2]
         )
+
+    def test_apply_exclude_system_filter(self):
+        source1 = OrganizationSourceFactory(
+            mnemonic='s1', version='HEAD', canonical_url='https://s1.com')
+        source1_v1 = OrganizationSourceFactory(
+            mnemonic='s1', version='v1', canonical_url='https://s1.com', organization=source1.organization)
+        source2 = OrganizationSourceFactory(
+            mnemonic='s2', version='HEAD', canonical_url='https://s2.com')
+        source2_v1 = OrganizationSourceFactory(
+            mnemonic='s2', version='v1', canonical_url='https://s2.com', organization=source2.organization)
+
+        concept1 = ConceptFactory(id=1, parent=source1)
+        concept2 = ConceptFactory(id=2, parent=source1)  # pylint: disable=unused-variable
+        concept3 = ConceptFactory(id=3, parent=source2)
+        concept4 = ConceptFactory(id=4, parent=source2)  # pylint: disable=unused-variable
+        concept1.sources.set([source1, source1_v1])
+        concept3.sources.set([source2, source2_v1])
+
+        queryset = Concept.objects.filter(id__in=[1, 2, 3, 4])
+
+        result = ExpansionParameters({'exclude-system': ''}).apply(queryset)
+        self.assertEqual(result.count(), 4)
+        self.assertEqual(list(result.order_by('id').values_list('id', flat=True)), [1, 2, 3, 4])
+
+        result = ExpansionParameters({'exclude-system': None}).apply(queryset)
+        self.assertEqual(result.count(), 4)
+        self.assertEqual(list(result.order_by('id').values_list('id', flat=True)), [1, 2, 3, 4])
+
+        result = ExpansionParameters({'exclude-system': 'https://s1.com'}).apply(queryset)
+        self.assertEqual(result.count(), 2)
+        self.assertEqual(list(result.order_by('id').values_list('id', flat=True)), [3, 4])
+
+        result = ExpansionParameters({'exclude-system': 'https://s1.com|HEAD'}).apply(queryset)
+        self.assertEqual(result.count(), 2)
+        self.assertEqual(list(result.order_by('id').values_list('id', flat=True)), [3, 4])
+
+        result = ExpansionParameters({'exclude-system': 'https://s1.com|v1'}).apply(queryset)
+        self.assertEqual(result.count(), 3)
+        self.assertEqual(list(result.order_by('id').values_list('id', flat=True)), [2, 3, 4])
+
+        result = ExpansionParameters({'exclude-system': 'https://s1.com|v1,https://s2.com|v1'}).apply(queryset)
+        self.assertEqual(result.count(), 2)
+        self.assertEqual(list(result.order_by('id').values_list('id', flat=True)), [2, 4])
+
+        result = ExpansionParameters({'exclude-system': 'https://s1.com,https://s2.com'}).apply(queryset)
+        self.assertEqual(result.count(), 0)
+
+        result = ExpansionParameters({'exclude-system': 'https://s1.com,https://s2.com|v1'}).apply(queryset)
+        self.assertEqual(result.count(), 1)
+        self.assertEqual(list(result.order_by('id').values_list('id', flat=True)), [4])
+
+        result = ExpansionParameters({'exclude - system': 'https://s1.com,https://s2.com|v1'}).apply(queryset)
+        self.assertEqual(result.count(), 1)
+        self.assertEqual(list(result.order_by('id').values_list('id', flat=True)), [4])
+
+    def test_apply_include_system_filter(self):
+        source1 = OrganizationSourceFactory(
+            mnemonic='s1', version='HEAD', canonical_url='https://s1.com')
+        source1_v1 = OrganizationSourceFactory(
+            mnemonic='s1', version='v1', canonical_url='https://s1.com', organization=source1.organization)
+        source2 = OrganizationSourceFactory(
+            mnemonic='s2', version='HEAD', canonical_url='https://s2.com')
+        source2_v1 = OrganizationSourceFactory(
+            mnemonic='s2', version='v1', canonical_url='https://s2.com', organization=source2.organization)
+
+        concept1 = ConceptFactory(id=1, parent=source1)
+        concept2 = ConceptFactory(id=2, parent=source1)  # pylint: disable=unused-variable
+        concept3 = ConceptFactory(id=3, parent=source2)
+        concept4 = ConceptFactory(id=4, parent=source2)  # pylint: disable=unused-variable
+        concept1.sources.set([source1, source1_v1])
+        concept3.sources.set([source2, source2_v1])
+
+        queryset = Concept.objects.filter(id__in=[1, 2, 3, 4])
+
+        result = ExpansionParameters({'system-version': ''}).apply(queryset)
+        self.assertEqual(result.count(), 4)
+        self.assertEqual(list(result.order_by('id').values_list('id', flat=True)), [1, 2, 3, 4])
+
+        result = ExpansionParameters({'system-version': None}).apply(queryset)
+        self.assertEqual(result.count(), 4)
+        self.assertEqual(list(result.order_by('id').values_list('id', flat=True)), [1, 2, 3, 4])
+
+        result = ExpansionParameters({'system-version': 'https://s1.com'}).apply(queryset)
+        self.assertEqual(result.count(), 2)
+        self.assertEqual(list(result.order_by('id').values_list('id', flat=True)), [1, 2])
+
+        result = ExpansionParameters({'system-version': 'https://s1.com|HEAD'}).apply(queryset)
+        self.assertEqual(result.count(), 2)
+        self.assertEqual(list(result.order_by('id').values_list('id', flat=True)), [1, 2])
+
+        result = ExpansionParameters({'system-version': 'https://s1.com|v1'}).apply(queryset)
+        self.assertEqual(result.count(), 1)
+        self.assertEqual(list(result.order_by('id').values_list('id', flat=True)), [1])
+
+        result = ExpansionParameters({'system-version': 'https://s1.com|v1,https://s2.com|v1'}).apply(queryset)
+        self.assertEqual(result.count(), 2)
+        self.assertEqual(list(result.order_by('id').values_list('id', flat=True)), [1, 3])
+
+        result = ExpansionParameters({'system-version': 'https://s1.com,https://s2.com'}).apply(queryset)
+        self.assertEqual(result.count(), 4)
+        self.assertEqual(list(result.order_by('id').values_list('id', flat=True)), [1, 2, 3, 4])
+
+        result = ExpansionParameters({'system-version': 'https://s1.com,https://s2.com|v1'}).apply(queryset)
+        self.assertEqual(result.count(), 3)
+        self.assertEqual(list(result.order_by('id').values_list('id', flat=True)), [1, 2, 3])
+
+        result = ExpansionParameters({'system - version': 'https://s1.com,https://s2.com|v1'}).apply(queryset)
+        self.assertEqual(result.count(), 3)
+        self.assertEqual(list(result.order_by('id').values_list('id', flat=True)), [1, 2, 3])

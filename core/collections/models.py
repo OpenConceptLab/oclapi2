@@ -16,7 +16,7 @@ from core.collections.constants import (
 from core.collections.utils import is_concept, is_mapping
 from core.common.constants import (
     DEFAULT_REPOSITORY_TYPE, ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT,
-    ACCESS_TYPE_NONE, SEARCH_PARAM, ES_REQUEST_TIMEOUT)
+    ACCESS_TYPE_NONE, SEARCH_PARAM, ES_REQUEST_TIMEOUT, HEAD)
 from core.common.models import ConceptContainerModel, BaseResourceModel
 from core.common.tasks import seed_children_to_expansion, batch_index_resources, index_expansion_concepts, \
     index_expansion_mappings
@@ -538,10 +538,10 @@ def default_expansion_parameters():
         "excludeNested": True,
         "excludeNotForUI": True,
         "excludePostCoordinated": True,
-        "exclude - system": "",
-        "system - version": "",
-        "check - system - version": "",
-        "force - system - version": ""
+        "exclude-system": "",
+        "system-version": "",
+        "check-system-version": "",
+        "force-system-version": ""
     }
 
 
@@ -749,56 +749,62 @@ class Expansion(BaseResourceModel):
 class ExpansionParameters:
     ACTIVE = 'activeOnly'
     TEXT_FILTER = 'filter'
+    EXCLUDE_SYSTEM = 'exclude-system'
+    INCLUDE_SYSTEM = 'system-version'
 
     def __init__(self, parameters, is_concept_queryset=True):
         self.parameters = parameters
         self.parameter_classes = {}
-        self.db_filters = {}
+        self.before_filters = {}
         self.is_concept_queryset = is_concept_queryset
         self.to_parameter_classes()
 
     def to_parameter_classes(self):
         for parameter, value in self.parameters.items():
+            parameter = parameter.replace(' ', '')
             if parameter == self.ACTIVE:
                 self.parameter_classes[parameter] = ExpansionActiveParameter(value=value)
             elif parameter == self.TEXT_FILTER:
                 self.parameter_classes[parameter] = ExpansionTextFilterParameter(value=value)
+            elif parameter == self.EXCLUDE_SYSTEM:
+                self.parameter_classes[parameter] = ExpansionExcludeSystemParameter(value=value)
+            elif parameter == self.INCLUDE_SYSTEM:
+                self.parameter_classes[parameter] = ExpansionIncludeSystemParameter(value=value)
 
     def apply(self, queryset):
-        queryset = self.apply_db_filters(queryset)
-        queryset = self.apply_es_filters(queryset)
+        queryset = self.apply_before_filters(queryset)
+        queryset = self.apply_after_filters(queryset)
         return queryset
 
-    def apply_db_filters(self, queryset):
-        self.make_db_filters()
-        return queryset.filter(**self.db_filters)
+    def apply_before_filters(self, queryset):
+        self.make_before_filters()
+        return queryset.filter(**self.before_filters)
 
-    def apply_es_filters(self, queryset):
+    def apply_after_filters(self, queryset):
         for _, klass in self.parameter_classes.items():
-            if klass.es_filters:
+            if klass.after_filter:
                 queryset = klass.apply(queryset, self.is_concept_queryset)
         return queryset
 
-    def make_db_filters(self):
+    def make_before_filters(self):
         for _, klass in self.parameter_classes.items():
-            if klass.db_filters:
-                self.db_filters = {**self.db_filters, **klass.filters}
+            if klass.before_filter:
+                self.before_filters = {**self.before_filters, **klass.filters}
 
 
 class ExpansionParameter:
-    db_filters = True
-    es_filters = False
+    before_filter = False   # returns db criterion, they can only be applied on DB queries
+    after_filter = False   # takes queryset to run custom code or anything after
 
     def __init__(self, value):
         self.value = value
 
-
-class ExpansionESParameter(ExpansionParameter):
-    es_filters = True
-    db_filters = False
+    def is_valid_string(self):
+        return self.value and isinstance(self.value, str)
 
 
 class ExpansionActiveParameter(ExpansionParameter):
+    before_filter = True
     default_filters = dict(is_active=True, retired=False)
 
     @property
@@ -808,9 +814,11 @@ class ExpansionActiveParameter(ExpansionParameter):
         return {}
 
 
-class ExpansionTextFilterParameter(ExpansionESParameter):
+class ExpansionTextFilterParameter(ExpansionParameter):
+    after_filter = True
+
     def apply(self, queryset, is_concept_queryset):
-        if self.value and isinstance(self.value, str):
+        if self.is_valid_string():
             klass = get_resource_class_from_resource_name('concept' if is_concept_queryset else 'mapping')
             document = klass.get_search_document()
             search = document.search()
@@ -822,3 +830,45 @@ class ExpansionTextFilterParameter(ExpansionESParameter):
             queryset = search.params(request_timeout=ES_REQUEST_TIMEOUT).to_queryset()
 
         return queryset
+
+
+class ExpansionSystemParameter(ExpansionParameter):
+    after_filter = True
+
+    def __get_criterion(self):
+        criterion = models.Q()
+        for system in self.value.split(','):
+            canonical_url = system
+            version = None
+            if '|' in system:
+                canonical_url, version = system.split('|')
+            criterion |= models.Q(canonical_url=canonical_url, version=version or HEAD)
+
+        return criterion
+
+    def get_systems(self):
+        from core.sources.models import Source
+        return Source.objects.filter(self.__get_criterion())
+
+    @staticmethod
+    def filter_queryset(queryset, systems):
+        raise NotImplementedError
+
+    def apply(self, queryset, _=None):
+        if self.is_valid_string():
+            systems = self.get_systems()
+            if systems.exists():
+                queryset = self.filter_queryset(queryset, systems)
+        return queryset
+
+
+class ExpansionExcludeSystemParameter(ExpansionSystemParameter):
+    @staticmethod
+    def filter_queryset(queryset, systems):
+        return queryset.exclude(sources__in=systems)
+
+
+class ExpansionIncludeSystemParameter(ExpansionSystemParameter):
+    @staticmethod
+    def filter_queryset(queryset, systems):
+        return queryset.filter(sources__in=systems)
