@@ -874,6 +874,7 @@ class CollectionVersionMappingsView(CollectionBaseView, ListWithHeadersMixin):
     def get_object(self, queryset=None):
         instance = get_object_or_404(self.get_base_queryset())
         self.check_object_permissions(self.request, instance)
+        self.request.instance = instance
         return instance.expansion
 
     def get_serializer_class(self):
@@ -897,6 +898,7 @@ class CollectionVersionMappingRetrieveView(CollectionBaseView, RetrieveAPIView):
         expansion = instance.expansion
         if not expansion:
             raise Http404()
+        self.request.instance = instance
         mappings = expansion.mappings.filter(mnemonic=self.kwargs['mapping'])
         if 'mapping_version' in self.kwargs:
             mappings = mappings.filter(version=self.kwargs['mapping_version'])
@@ -923,6 +925,7 @@ class CollectionVersionExpansionMappingRetrieveView(CollectionBaseView, Retrieve
         expansion = instance.expansions.filter(mnemonic=self.kwargs['expansion']).first()
         if not expansion:
             raise Http404()
+        self.request.instance = instance
         mappings = expansion.mappings.filter(mnemonic=self.kwargs['mapping'])
         if 'mapping_version' in self.kwargs:
             mappings = mappings.filter(version=self.kwargs['mapping_version'])
