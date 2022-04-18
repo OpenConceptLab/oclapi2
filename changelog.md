@@ -1,3 +1,24 @@
+##### 2.2.4 - Sat Apr 16 05:39:57 2022 +0000
+Tue Sep 14 18:39:45 2021 +0530
+- [OpenConceptLab/ocl_issues#1280](https://github.com/OpenConceptLab/ocl_issues/issues/1280) | added references in collection/expansion mapping version detail
+- [OpenConceptLab/ocl_issues#1265](https://github.com/OpenConceptLab/ocl_issues/issues/1265) | expansion parameter to include/exclude system version
+- [OpenConceptLab/ocl_issues#1262](https://github.com/OpenConceptLab/ocl_issues/issues/1262) | Making sure limit offset is applied in list queries
+- Importers Errbit | fixing mapping failed index attempt issue
+- [OpenConceptLab/ocl_issues#1265](https://github.com/OpenConceptLab/ocl_issues/issues/1265) | using API_BASE_URL in place of internal url
+- [OpenConceptLab/ocl_issues#1265](https://github.com/OpenConceptLab/ocl_issues/issues/1265) | fixing empty queryset search
+- [OpenConceptLab/ocl_issues#1265](https://github.com/OpenConceptLab/ocl_issues/issues/1265) | added expansion in facets filters
+- [OpenConceptLab/ocl_issues#1265](https://github.com/OpenConceptLab/ocl_issues/issues/1265) | Expansions | added 'filter' parameter
+- Concept Importer | handling integer ids
+- Upgraded to 2.2.0
+- [OpenConceptLab/ocl_issues#1274](https://github.com/OpenConceptLab/ocl_issues/issues/1274) | concept/mappings list | correcting global queryset
+- [OpenConceptLab/ocl_issues#1274](https://github.com/OpenConceptLab/ocl_issues/issues/1274) | concept/mappings list | fixing parent resource set
+- [OpenConceptLab/ocl_issues#1274](https://github.com/OpenConceptLab/ocl_issues/issues/1274) | concept/mappings list | removing joins for HEAD parent calls | added indexes
+- Errbit | collection expansion concepts/mappings CSV list fix
+- [OpenConceptLab/ocl_issues#1274](https://github.com/OpenConceptLab/ocl_issues/issues/1274) | concept list | not prefetching names
+- [OpenConceptLab/ocl_issues#1274](https://github.com/OpenConceptLab/ocl_issues/issues/1274) | reusing count query
+- [OpenConceptLab/ocl_issues#1274](https://github.com/OpenConceptLab/ocl_issues/issues/1274) | Concept/Mapping list view | added is_active clause
+- [OpenConceptLab/ocl_issues#1274](https://github.com/OpenConceptLab/ocl_issues/issues/1274) | Concept/Mapping list view | removing a join from query
+- [OpenConceptLab/ocl_issues#1272](https://github.com/OpenConceptLab/ocl_issues/issues/1272) | test for concept retired TRUE/FALSE CSV converter -> import
 ##### 2.1.3 - Thu Apr 7 09:24:30 2022 +0000
 - [OpenConceptLab/ocl_issues#1262](https://github.com/OpenConceptLab/ocl_issues/issues/1262) | (attempting) fixing whitenoise static files issue
 - [OpenConceptLab/ocl_issues#1206](https://github.com/OpenConceptLab/ocl_issues/issues/1206) | removed old collection concepts/mappings relations
