@@ -12,11 +12,6 @@ urlpatterns = [
         name='source-detail'
     ),
     re_path(
-        fr"^(?P<source>{NAMESPACE_PATTERN})/dedup-resources/$",
-        views.SourceHEADResourceVersionsDedupView.as_view(),
-        name='source-head-dedup-resources'
-    ),
-    re_path(
         fr"^(?P<source>{NAMESPACE_PATTERN})/client-configs/$",
         views.SourceClientConfigsView.as_view(),
         name='source-client-configs'

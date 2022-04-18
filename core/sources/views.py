@@ -24,8 +24,7 @@ from core.common.permissions import CanViewConceptDictionary, CanEditConceptDict
 from core.common.serializers import TaskSerializer
 from core.common.swagger_parameters import q_param, limit_param, sort_desc_param, sort_asc_param, exact_match_param, \
     page_param, verbose_param, include_retired_param, updated_since_param, include_facets_header, compress_header
-from core.common.tasks import export_source, index_source_concepts, index_source_mappings, delete_source, \
-    source_head_concepts_dedup, source_head_mappings_dedup
+from core.common.tasks import export_source, index_source_concepts, index_source_mappings, delete_source
 from core.common.utils import parse_boolean_query_param, compact_dict_by_values
 from core.common.views import BaseAPIView, BaseLogoView
 from core.sources.constants import DELETE_FAILURE, DELETE_SUCCESS, VERSION_ALREADY_EXISTS
@@ -216,24 +215,6 @@ class SourceRetrieveUpdateDestroyView(SourceBaseView, ConceptDictionaryUpdateMix
             return Response({'detail': DELETE_SUCCESS}, status=status.HTTP_204_NO_CONTENT)
 
         return Response({'detail': get(result, 'messages', [DELETE_FAILURE])}, status=status.HTTP_400_BAD_REQUEST)
-
-
-# needs to be deleted once all source HEADs migrated
-class SourceHEADResourceVersionsDedupView(SourceBaseView):  # pragma: no cover
-    permission_classes = [IsAdminUser]
-    serializer_class = TaskSerializer
-
-    def get_object(self, queryset=None):
-        instance = self.get_queryset().filter(version='HEAD').first()
-        if not instance:
-            raise Http404()
-        return instance
-
-    def post(self, request, **_):  # pylint: disable=unused-argument
-        source = self.get_object()
-        source_head_concepts_dedup.delay(source.id)
-        source_head_mappings_dedup.delay(source.id)
-        return Response(status=status.HTTP_202_ACCEPTED)
 
 
 class SourceVersionListView(SourceVersionBaseView, CreateAPIView, ListWithHeadersMixin):
