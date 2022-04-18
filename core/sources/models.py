@@ -1,12 +1,9 @@
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import UniqueConstraint, F
-from django.urls import resolve
-from pydash import get, compact
+from pydash import compact
 
-from core.common.constants import HEAD
 from core.common.models import ConceptContainerModel
-from core.common.utils import get_query_params_from_url_string
 from core.concepts.models import LocalizedText
 from core.sources.constants import SOURCE_TYPE, SOURCE_VERSION_TYPE, HIERARCHY_ROOT_MUST_BELONG_TO_SAME_SOURCE, \
     HIERARCHY_MEANINGS
@@ -61,22 +58,6 @@ class Source(ConceptContainerModel):
     def get_search_document():
         from core.sources.documents import SourceDocument
         return SourceDocument
-
-    @classmethod
-    def head_from_uri(cls, uri):
-        queryset = cls.objects.none()
-        if not uri:
-            return queryset
-
-        try:
-            kwargs = get(resolve(uri), 'kwargs', {})
-            query_params = get_query_params_from_url_string(uri)  # parsing query parameters
-            kwargs.update(query_params)
-            queryset = cls.get_base_queryset(kwargs).filter(version=HEAD)
-        except:  # pylint: disable=bare-except
-            pass
-
-        return queryset
 
     @classmethod
     def get_base_queryset(cls, params):

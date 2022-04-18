@@ -7,16 +7,16 @@ from core.collections.models import Collection
 from core.collections.tests.factories import OrganizationCollectionFactory
 from core.common.constants import HEAD, ACCESS_TYPE_EDIT, ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW, \
     CUSTOM_VALIDATION_SCHEMA_OPENMRS
+from core.common.tasks import index_source_mappings, index_source_concepts
 from core.common.tasks import seed_children_to_new_version
 from core.common.tasks import update_source_active_concepts_count
 from core.common.tasks import update_source_active_mappings_count
-from core.common.tasks import index_source_mappings, index_source_concepts
 from core.common.tasks import update_validation_schema
 from core.common.tests import OCLTestCase
-from core.mappings.documents import MappingDocument
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory, LocalizedTextFactory
+from core.mappings.documents import MappingDocument
 from core.mappings.tests.factories import MappingFactory
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.documents import SourceDocument
@@ -371,15 +371,6 @@ class SourceTest(OCLTestCase):
 
     def test_get_search_document(self):
         self.assertEqual(Source.get_search_document(), SourceDocument)
-
-    def test_head_from_uri(self):
-        source = OrganizationSourceFactory(version='HEAD')
-        self.assertEqual(Source.head_from_uri('').count(), 0)
-        self.assertEqual(Source.head_from_uri('foobar').count(), 0)
-
-        queryset = Source.head_from_uri(source.uri)
-        self.assertEqual(queryset.count(), 1)
-        self.assertEqual(queryset.first(), source)
 
     def test_released_versions(self):
         source = OrganizationSourceFactory()
