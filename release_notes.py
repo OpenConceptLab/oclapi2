@@ -35,7 +35,7 @@ def commits_with_issue_number_grep_statement():
 
 
 def get_commit_sha_from_message(message):
-    return run_shell_cmd("git log --oneline --grep={} --format=format:%H".format(message))
+    return run_shell_cmd("git log --oneline --grep={} --format=format:%H".format(message)).split('\n')[0]
 
 
 def get_release_date(message):
