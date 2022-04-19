@@ -766,6 +766,20 @@ class ConceptContainerModel(VersionedModel):
             return False
         return get(user, 'is_staff') or self.user_id == user.id or self.organization.members.filter(id=user.id).exists()
 
+    @classmethod
+    def resolve_expression_to_version(cls, expression):
+        url = expression
+        namespace = None
+        version = None
+        instance = None
+        if isinstance(expression, dict) and get(expression, 'url'):
+            url = expression['url']
+            namespace = expression.get('namespace', None)
+            version = expression.get('version', None)
+        if url:
+            instance = cls.resolve_reference_expression(url, namespace, version)
+        return instance
+
     @staticmethod
     def resolve_reference_expression(url, namespace=None, version=None):
         lookup_url = url
