@@ -377,7 +377,8 @@ class CollectionReferenceDetailSerializer(CollectionReferenceSerializer):
     class Meta:
         model = CollectionReference
         fields = (
-            *CollectionReferenceSerializer.Meta.fields, 'last_resolved_at', 'created_at', 'updated_at',
+            *CollectionReferenceSerializer.Meta.fields,
+            'last_resolved_at', 'created_at', 'updated_at', 'code', 'version', 'namespace', 'filter', 'display'
         )
 
 

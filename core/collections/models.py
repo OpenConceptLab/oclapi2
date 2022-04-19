@@ -415,11 +415,21 @@ class CollectionReference(models.Model):
     original_expression = None
     created_by = None
 
+    # core
     id = models.BigAutoField(primary_key=True)
     expression = models.TextField()
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     last_resolved_at = models.DateTimeField(default=timezone.now, null=True)
+
+    # FHIR specs
+    code = models.CharField(null=True, blank=True, max_length=255)
+    version = models.CharField(null=True, blank=True, max_length=255)
+    namespace = models.TextField(null=True, blank=True)
+    display = models.TextField(null=True, blank=True)
+    filter = models.JSONField(null=True, blank=True)
+
+    # associations
     concepts = models.ManyToManyField('concepts.Concept', related_name='references', through=ReferencedConcept)
     mappings = models.ManyToManyField('mappings.Mapping', related_name='references', through=ReferencedMapping)
     collection = models.ForeignKey('collections.Collection', related_name='references', on_delete=models.CASCADE)
