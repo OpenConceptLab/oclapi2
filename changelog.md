@@ -1,5 +1,4 @@
 ##### 2.2.4 - Sat Apr 16 05:39:57 2022 +0000
-Tue Sep 14 18:39:45 2021 +0530
 - [OpenConceptLab/ocl_issues#1280](https://github.com/OpenConceptLab/ocl_issues/issues/1280) | added references in collection/expansion mapping version detail
 - [OpenConceptLab/ocl_issues#1265](https://github.com/OpenConceptLab/ocl_issues/issues/1265) | expansion parameter to include/exclude system version
 - [OpenConceptLab/ocl_issues#1262](https://github.com/OpenConceptLab/ocl_issues/issues/1262) | Making sure limit offset is applied in list queries
