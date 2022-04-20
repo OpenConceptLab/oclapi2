@@ -27,7 +27,7 @@ logger = logging.getLogger('oclapi')
 
 
 class CustomPaginator:
-    def __init__(self, request, total_count, queryset, page_size, is_sliced=False):
+    def __init__(self, request, total_count, queryset, page_size, is_sliced=False):  # pylint: disable=too-many-arguments
         self.request = request
         self.queryset = queryset
         self.total = total_count or self.queryset.count()
