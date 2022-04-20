@@ -16,11 +16,11 @@ from core.collections.constants import (
 from core.collections.utils import is_concept, is_mapping
 from core.common.constants import (
     DEFAULT_REPOSITORY_TYPE, ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT,
-    ACCESS_TYPE_NONE, SEARCH_PARAM, ES_REQUEST_TIMEOUT, HEAD)
+    ACCESS_TYPE_NONE, SEARCH_PARAM, ES_REQUEST_TIMEOUT)
 from core.common.models import ConceptContainerModel, BaseResourceModel
 from core.common.tasks import seed_children_to_expansion, batch_index_resources, index_expansion_concepts, \
     index_expansion_mappings
-from core.common.utils import drop_version, to_owner_uri, generate_temp_version, api_get, es_id_in,\
+from core.common.utils import drop_version, to_owner_uri, generate_temp_version, api_get, es_id_in, \
     es_wildcard_search, get_resource_class_from_resource_name, get_exact_search_fields
 from core.concepts.constants import LOCALES_FULLY_SPECIFIED
 from core.concepts.models import Concept
@@ -852,33 +852,49 @@ class ExpansionSystemParameter(ExpansionParameter):
             version = None
             if '|' in system:
                 canonical_url, version = system.split('|')
-            criterion |= models.Q(canonical_url=canonical_url, version=version or HEAD)
+            filters = dict(canonical_url=canonical_url)
+            if version:
+                filters['version'] = version
+            criterion |= models.Q(**filters)
 
         return criterion
 
-    def get_systems(self):
+    def get_code_systems(self):
         from core.sources.models import Source
         return Source.objects.filter(self.__get_criterion())
 
+    def get_value_sets(self):
+        return Collection.objects.filter(self.__get_criterion())
+
     @staticmethod
-    def filter_queryset(queryset, systems):
+    def filter_queryset(queryset, code_systems, value_sets):
         raise NotImplementedError
 
     def apply(self, queryset, _=None):
         if self.is_valid_string():
-            systems = self.get_systems()
-            if systems.exists():
-                queryset = self.filter_queryset(queryset, systems)
+            queryset = self.filter_queryset(queryset, self.get_code_systems(), self.get_value_sets())
         return queryset
 
 
 class ExpansionExcludeSystemParameter(ExpansionSystemParameter):
     @staticmethod
-    def filter_queryset(queryset, systems):
-        return queryset.exclude(sources__in=systems)
+    def filter_queryset(queryset, code_systems, value_sets):
+        criteria = models.Q()
+
+        if code_systems.exists():
+            criteria |= models.Q(sources__in=code_systems)
+        if value_sets.exists():
+            criteria |= models.Q(expansion_set__collection_version__in=value_sets)
+        return queryset.exclude(criteria)
 
 
 class ExpansionIncludeSystemParameter(ExpansionSystemParameter):
     @staticmethod
-    def filter_queryset(queryset, systems):
-        return queryset.filter(sources__in=systems)
+    def filter_queryset(queryset, code_systems, value_sets):
+        criteria = models.Q()
+
+        if code_systems.exists():
+            criteria |= models.Q(sources__in=code_systems)
+        if value_sets.exists():
+            criteria |= models.Q(expansion_set__collection_version__in=value_sets)
+        return queryset.filter(criteria)
