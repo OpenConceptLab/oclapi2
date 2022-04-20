@@ -776,10 +776,10 @@ class ExpansionParameters:
                 self.parameter_classes[parameter] = ExpansionActiveParameter(value=value)
             elif parameter == self.TEXT_FILTER:
                 self.parameter_classes[parameter] = ExpansionTextFilterParameter(value=value)
-            elif parameter == self.EXCLUDE_SYSTEM:
-                self.parameter_classes[parameter] = ExpansionExcludeSystemParameter(value=value)
             elif parameter == self.INCLUDE_SYSTEM:
                 self.parameter_classes[parameter] = ExpansionIncludeSystemParameter(value=value)
+            elif parameter == self.EXCLUDE_SYSTEM:
+                self.parameter_classes[parameter] = ExpansionExcludeSystemParameter(value=value)
 
     def apply(self, queryset):
         queryset = self.apply_before_filters(queryset)
