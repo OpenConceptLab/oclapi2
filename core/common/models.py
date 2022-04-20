@@ -349,7 +349,7 @@ class ConceptContainerModel(VersionedModel):
     publisher = models.TextField(null=True, blank=True)
     purpose = models.TextField(null=True, blank=True)
     copyright = models.TextField(null=True, blank=True)
-    revision_date = models.DateField(null=True, blank=True)
+    revision_date = models.DateTimeField(null=True, blank=True)
     text = models.TextField(null=True, blank=True)  # for about description (markup)
     client_configs = GenericRelation(
         'client_configs.ClientConfig', object_id_field='resource_id', content_type_field='resource_type'
@@ -821,6 +821,12 @@ class ConceptContainerModel(VersionedModel):
             instance.canonical_url = resolution_url
 
         return instance
+
+    def clean(self):
+        super().clean()
+
+        if self.released and not self.revision_date:
+            self.revision_date = timezone.now()
 
 
 class CelerySignalProcessor(RealTimeSignalProcessor):
