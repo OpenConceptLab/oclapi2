@@ -27,18 +27,18 @@ logger = logging.getLogger('oclapi')
 
 
 class CustomPaginator:
-    def __init__(self, request, total_count, queryset, page_size):
+    def __init__(self, request, total_count, queryset, page_size, is_sliced=False):
         self.request = request
         self.queryset = queryset
         self.total = total_count or self.queryset.count()
         self.page_size = int(page_size)
         self.page_number = int(request.GET.get('page', '1') or '1')
-        bottom = (self.page_number - 1) * self.page_size
-        top = bottom + self.page_size
-        if top >= self.total:
-            top = self.total
-
-        self.queryset = self.queryset[bottom:top]
+        if not is_sliced:
+            bottom = (self.page_number - 1) * self.page_size
+            top = bottom + self.page_size
+            if top >= self.total:
+                top = self.total
+            self.queryset = self.queryset[bottom:top]
         self.queryset.count = None
         self.paginator = Paginator(self.queryset, self.page_size)
         self.page_object = self.paginator.get_page(self.page_number)
@@ -141,7 +141,8 @@ class ListWithHeadersMixin(ListModelMixin):
             if not self.limit or int(self.limit) == 0 or int(self.limit) > 1000:
                 self.limit = LIST_DEFAULT_LIMIT
             paginator = CustomPaginator(
-                request=request, queryset=sorted_list, page_size=self.limit, total_count=self.total_count
+                request=request, queryset=sorted_list, page_size=self.limit, total_count=self.total_count,
+                is_sliced=self.should_perform_es_search()
             )
             headers = paginator.headers
             results = paginator.current_page_results
