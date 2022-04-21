@@ -19,7 +19,7 @@ from core.common.exceptions import Http400
 from core.common.mixins import ListWithHeadersMixin
 from core.common.swagger_parameters import last_login_before_param, last_login_since_param, updated_since_param, \
     date_joined_since_param, date_joined_before_param
-from core.common.utils import parse_updated_since_param, parse_updated_since
+from core.common.utils import parse_updated_since_param, from_string_to_date
 from core.common.views import BaseAPIView, BaseLogoView
 from core.orgs.models import Organization
 from core.users.constants import VERIFICATION_TOKEN_MISMATCH, VERIFY_EMAIL_MESSAGE, REACTIVATE_USER_MESSAGE
@@ -80,13 +80,13 @@ class UserBaseView(BaseAPIView):
         if updated_since:
             self.queryset = self.queryset.filter(updated_at__gte=updated_since)
         if last_login_since:
-            self.queryset = self.queryset.filter(last_login__gte=parse_updated_since(last_login_since))
+            self.queryset = self.queryset.filter(last_login__gte=from_string_to_date(last_login_since))
         if last_login_before:
-            self.queryset = self.queryset.filter(last_login__lt=parse_updated_since(last_login_before))
+            self.queryset = self.queryset.filter(last_login__lt=from_string_to_date(last_login_before))
         if date_joined_since:
-            self.queryset = self.queryset.filter(created_at__gte=parse_updated_since(date_joined_since))
+            self.queryset = self.queryset.filter(created_at__gte=from_string_to_date(date_joined_since))
         if date_joined_before:
-            self.queryset = self.queryset.filter(created_at__lt=parse_updated_since(date_joined_before))
+            self.queryset = self.queryset.filter(created_at__lt=from_string_to_date(date_joined_before))
         if not self.should_include_inactive():
             self.queryset = self.queryset.filter(is_active=True)
         return self.queryset

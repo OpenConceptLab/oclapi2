@@ -148,10 +148,10 @@ def get_kwargs_for_view(view_name):
 
 
 def parse_updated_since_param(params):
-    return parse_updated_since(params.get(UPDATED_SINCE_PARAM))
+    return from_string_to_date(params.get(UPDATED_SINCE_PARAM))
 
 
-def parse_updated_since(updated_since):  # pragma: no cover
+def from_string_to_date(updated_since):  # pragma: no cover
     if updated_since:
         try:
             return parser.parse(updated_since)
