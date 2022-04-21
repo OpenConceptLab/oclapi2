@@ -761,6 +761,7 @@ class ExpansionParameters:
     TEXT_FILTER = 'filter'
     EXCLUDE_SYSTEM = 'exclude-system'
     INCLUDE_SYSTEM = 'system-version'
+    DATE = 'date'
 
     def __init__(self, parameters, is_concept_queryset=True):
         self.parameters = parameters
@@ -780,6 +781,8 @@ class ExpansionParameters:
                 self.parameter_classes[parameter] = ExpansionIncludeSystemParameter(value=value)
             elif parameter == self.EXCLUDE_SYSTEM:
                 self.parameter_classes[parameter] = ExpansionExcludeSystemParameter(value=value)
+            elif parameter == self.DATE:
+                self.parameter_classes[parameter] = ExpansionDateParameter(value=value)
 
     def apply(self, queryset):
         queryset = self.apply_before_filters(queryset)
@@ -791,8 +794,10 @@ class ExpansionParameters:
         return queryset.filter(**self.before_filters)
 
     def apply_after_filters(self, queryset):
-        for _, klass in self.parameter_classes.items():
-            if klass.after_filter:
+        # order of parameters matters here
+        for parameter in [self.INCLUDE_SYSTEM, self.DATE, self.EXCLUDE_SYSTEM, self.TEXT_FILTER]:
+            klass = get(self.parameter_classes, parameter)
+            if klass and klass.after_filter:
                 queryset = klass.apply(queryset, self.is_concept_queryset)
         return queryset
 
@@ -845,7 +850,7 @@ class ExpansionTextFilterParameter(ExpansionParameter):
 class ExpansionSystemParameter(ExpansionParameter):
     after_filter = True
 
-    def __get_criterion(self):
+    def get_criterion(self):
         criterion = models.Q()
         for system in self.value.split(','):
             canonical_url = system
@@ -861,10 +866,10 @@ class ExpansionSystemParameter(ExpansionParameter):
 
     def get_code_systems(self):
         from core.sources.models import Source
-        return Source.objects.filter(self.__get_criterion())
+        return Source.objects.filter(self.get_criterion())
 
     def get_value_sets(self):
-        return Collection.objects.filter(self.__get_criterion())
+        return Collection.objects.filter(self.get_criterion())
 
     @staticmethod
     def filter_queryset(queryset, code_systems, value_sets):
@@ -891,10 +896,29 @@ class ExpansionExcludeSystemParameter(ExpansionSystemParameter):
 class ExpansionIncludeSystemParameter(ExpansionSystemParameter):
     @staticmethod
     def filter_queryset(queryset, code_systems, value_sets):
-        criteria = models.Q()
+        return queryset.filter(
+            models.Q(sources__in=code_systems) |
+            models.Q(expansion_set__collection_version__in=value_sets)
+        )
 
-        if code_systems.exists():
-            criteria |= models.Q(sources__in=code_systems)
-        if value_sets.exists():
-            criteria |= models.Q(expansion_set__collection_version__in=value_sets)
-        return queryset.filter(criteria)
+
+class ExpansionDateParameter(ExpansionIncludeSystemParameter):
+    @staticmethod
+    def get_date_filter(date):
+        if date.count('-') >= 3 or date.count(":"):
+            return dict(revision_date=date)
+        parts = date.split('-')
+        filters = dict(revision_date__year=parts[0])
+        if len(parts) > 1:
+            filters['revision_date__month'] = parts[1]
+        if len(parts) > 2:
+            filters['revision_date__day'] = parts[2]
+
+        return filters
+
+    def get_criterion(self):
+        criterion = models.Q()
+        for date in self.value.split(','):
+            criterion |= models.Q(**self.get_date_filter(date))
+
+        return criterion

@@ -290,25 +290,16 @@ class CollectionTest(OCLTestCase):
         expansion = ExpansionFactory(collection_version=collection)
         expansion.mappings.set([mapping1, mapping2, mapping3])
 
-        expressions = [
-            concept1.get_latest_version().url, concept2.get_latest_version().url
-        ]
+        expressions = [concept1.get_latest_version().url, concept2.get_latest_version().url]
 
-        self.assertEqual(
-            collection.get_cascaded_mapping_uris_from_concept_expressions(
-                expressions
-            ),
-            []
-        )
+        self.assertEqual(collection.get_cascaded_mapping_uris_from_concept_expressions(expressions), [])
 
         collection.expansion_uri = expansion.url
         collection.save()
 
         self.assertEqual(
-            collection.get_cascaded_mapping_uris_from_concept_expressions(
-                expressions
-            ),
-            [mapping1.url, mapping2.url]
+            sorted(collection.get_cascaded_mapping_uris_from_concept_expressions(expressions)),
+            sorted([mapping1.url, mapping2.url])
         )
 
 
@@ -879,6 +870,12 @@ class ExpansionParametersTest(OCLTestCase):
         self.assertEqual(result.count(), 5)
         self.assertEqual(list(result.order_by('id').values_list('id', flat=True)), [1, 2, 3, 4, 6])
 
+        result = ExpansionParameters(
+            {'exclude-system': 'http://c2.com|v1'}).apply(queryset)
+        result = result.distinct('id')
+        self.assertEqual(result.count(), 6)
+        self.assertEqual(list(result.order_by('id').values_list('id', flat=True)), [1, 2, 3, 4, 5, 6])
+
     def test_apply_include_system_filter(self):  # pylint: disable=too-many-locals,too-many-statements
         source1 = OrganizationSourceFactory(
             mnemonic='s1', version='HEAD', canonical_url='https://s1.com')
@@ -978,3 +975,84 @@ class ExpansionParametersTest(OCLTestCase):
         result = result.distinct('id')
         self.assertEqual(result.count(), 1)
         self.assertEqual(list(result.order_by('id').values_list('id', flat=True)), [5])
+
+        result = ExpansionParameters(
+            {'system-version': 'http://c2.com|v1'}).apply(queryset)
+        self.assertEqual(result.count(), 0)
+
+    def test_apply_date_filter(self):  # pylint: disable=too-many-locals,too-many-statements
+        source1 = OrganizationSourceFactory(
+            mnemonic='s1', version='HEAD', canonical_url='https://s1.com')
+        source1_v1 = OrganizationSourceFactory(
+            mnemonic='s1', version='v1', canonical_url='https://s1.com', organization=source1.organization,
+            revision_date='2020-02-01'
+        )
+        collection = OrganizationCollectionFactory(
+            mnemonic='c1', canonical_url='http://c1.com', version='HEAD')
+        collection_v1 = OrganizationCollectionFactory(
+            mnemonic='c1', canonical_url='http://c1.com', version='v1', organization=collection.organization,
+            revision_date='2021-03-01 10:09:08'
+        )
+        expansion_v1 = ExpansionFactory(mnemonic='e2', collection_version=collection_v1)
+
+        concept1 = ConceptFactory(id=1, parent=source1)
+        concept2 = ConceptFactory(id=2, parent=source1)
+        concept3 = ConceptFactory(id=3)
+        concept4 = ConceptFactory(id=4)
+        concept1.sources.set([source1, source1_v1])
+        concept2.sources.set([source1])
+        expansion_v1.concepts.add(concept1, concept3, concept4)
+
+        queryset = Concept.objects.filter(id__in=[1, 2, 3, 4])
+        result = ExpansionParameters({'date': ''}).apply(queryset)
+        result = result.distinct('id')
+        self.assertEqual(result.count(), 4)
+        self.assertEqual(list(result.order_by('id').values_list('id', flat=True)), [1, 2, 3, 4])
+
+        result = ExpansionParameters({'date': '2020'}).apply(queryset)
+        result = result.distinct('id')
+        self.assertEqual(result.count(), 1)
+        self.assertEqual(list(result.order_by('id').values_list('id', flat=True)), [1])
+
+        result = ExpansionParameters({'date': '2021'}).apply(queryset)
+        result = result.distinct('id')
+        self.assertEqual(result.count(), 3)
+        self.assertEqual(list(result.order_by('id').values_list('id', flat=True)), [1, 3, 4])
+
+        result = ExpansionParameters({'date': '2021-03'}).apply(queryset)
+        result = result.distinct('id')
+        self.assertEqual(result.count(), 3)
+        self.assertEqual(list(result.order_by('id').values_list('id', flat=True)), [1, 3, 4])
+
+        result = ExpansionParameters({'date': '2020-02-01'}).apply(queryset)
+        result = result.distinct('id')
+        self.assertEqual(result.count(), 1)
+        self.assertEqual(list(result.order_by('id').values_list('id', flat=True)), [1])
+
+        result = ExpansionParameters({'date': '2020,2021'}).apply(queryset)
+        result = result.distinct('id')
+        self.assertEqual(result.count(), 3)
+        self.assertEqual(list(result.order_by('id').values_list('id', flat=True)), [1, 3, 4])
+
+        result = ExpansionParameters({'date': '2020,2022'}).apply(queryset)
+        result = result.distinct('id')
+        self.assertEqual(result.count(), 1)
+        self.assertEqual(list(result.order_by('id').values_list('id', flat=True)), [1])
+
+        result = ExpansionParameters({'date': '2020-02,2021-03'}).apply(queryset)
+        result = result.distinct('id')
+        self.assertEqual(result.count(), 3)
+        self.assertEqual(list(result.order_by('id').values_list('id', flat=True)), [1, 3, 4])
+
+        result = ExpansionParameters({'date': '2021-03-02'}).apply(queryset)
+        result = result.distinct('id')
+        self.assertEqual(result.count(), 0)
+
+        result = ExpansionParameters({'date': '2020-02-01 00:00:00'}).apply(queryset)
+        result = result.distinct('id')
+        self.assertEqual(result.count(), 1)
+        self.assertEqual(list(result.order_by('id').values_list('id', flat=True)), [1])
+
+        result = ExpansionParameters({'date': '2020-02-01 00:00:01'}).apply(queryset)
+        result = result.distinct('id')
+        self.assertEqual(result.count(), 0)
