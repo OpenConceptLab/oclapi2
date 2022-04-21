@@ -4,7 +4,7 @@ from rest_framework.serializers import ModelSerializer
 
 from core.common.constants import MAPPING_LOOKUP_CONCEPTS, MAPPING_LOOKUP_SOURCES, MAPPING_LOOKUP_FROM_CONCEPT, \
     MAPPING_LOOKUP_TO_CONCEPT, MAPPING_LOOKUP_FROM_SOURCE, MAPPING_LOOKUP_TO_SOURCE, INCLUDE_EXTRAS_PARAM, \
-    INCLUDE_SOURCE_VERSIONS, INCLUDE_COLLECTION_VERSIONS
+    INCLUDE_SOURCE_VERSIONS, INCLUDE_COLLECTION_VERSIONS, INCLUDE_VERBOSE_REFERENCES
 from core.common.fields import EncodedDecodedCharField
 from core.concepts.serializers import ConceptListSerializer, ConceptDetailSerializer
 from core.mappings.models import Mapping
@@ -55,8 +55,8 @@ class MappingListSerializer(ModelSerializer):
         self.include_from_concept = self.query_params.get(MAPPING_LOOKUP_FROM_CONCEPT) in ['true', True]
         self.include_to_concept = self.query_params.get(MAPPING_LOOKUP_TO_CONCEPT) in ['true', True]
         self.include_concepts = self.query_params.get(MAPPING_LOOKUP_CONCEPTS) in ['true', True]
-
         self.include_extras = self.query_params.get(INCLUDE_EXTRAS_PARAM) in ['true', True]
+        self.include_verbose_references = self.query_params.get(INCLUDE_VERBOSE_REFERENCES) in ['true', True]
 
         if not self.include_concepts:
             if not self.include_from_concept:
@@ -83,6 +83,9 @@ class MappingListSerializer(ModelSerializer):
     def get_references(self, obj):
         collection = get(self, 'context.request.instance')
         if collection:
+            if self.include_verbose_references:
+                from core.collections.serializers import CollectionReferenceSerializer
+                return CollectionReferenceSerializer(obj.collection_references(collection), many=True).data
             return obj.collection_references_uris(collection)
         return None
 

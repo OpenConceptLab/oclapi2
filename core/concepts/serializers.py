@@ -6,7 +6,7 @@ from rest_framework.serializers import ModelSerializer
 from core.common.constants import INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_MAPPINGS_PARAM, INCLUDE_EXTRAS_PARAM, \
     INCLUDE_PARENT_CONCEPTS, INCLUDE_CHILD_CONCEPTS, INCLUDE_SOURCE_VERSIONS, INCLUDE_COLLECTION_VERSIONS, \
     CREATE_PARENT_VERSION_QUERY_PARAM, INCLUDE_HIERARCHY_PATH, INCLUDE_PARENT_CONCEPT_URLS, \
-    INCLUDE_CHILD_CONCEPT_URLS, HEAD, INCLUDE_SUMMARY
+    INCLUDE_CHILD_CONCEPT_URLS, HEAD, INCLUDE_SUMMARY, INCLUDE_VERBOSE_REFERENCES
 from core.common.fields import EncodedDecodedCharField
 from core.common.utils import to_parent_uri_from_kwargs
 from core.concepts.models import Concept, LocalizedText
@@ -135,6 +135,7 @@ class ConceptAbstractSerializer(ModelSerializer):
         self.include_hierarchy_path = self.query_params.get(INCLUDE_HIERARCHY_PATH) in ['true', True]
         self.include_extras = self.query_params.get(INCLUDE_EXTRAS_PARAM) in ['true', True]
         self.include_summary = self.query_params.get(INCLUDE_SUMMARY) in ['true', True]
+        self.include_verbose_references = self.query_params.get(INCLUDE_VERBOSE_REFERENCES) in ['true', True]
         if CREATE_PARENT_VERSION_QUERY_PARAM in self.query_params:
             self.create_parent_version = self.query_params.get(CREATE_PARENT_VERSION_QUERY_PARAM) in ['true', True]
         else:
@@ -171,6 +172,9 @@ class ConceptAbstractSerializer(ModelSerializer):
     def get_references(self, obj):
         collection = get(self, 'context.request.instance')
         if collection:
+            if self.include_verbose_references:
+                from core.collections.serializers import CollectionReferenceSerializer
+                return CollectionReferenceSerializer(obj.collection_references(collection), many=True).data
             return obj.collection_references_uris(collection)
         return None
 
