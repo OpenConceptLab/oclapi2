@@ -26,8 +26,25 @@ class CodeSystemListView(SourceListView):
 
     def apply_query_filters(self, queryset):
         url = self.request.query_params.get('url')
+        language = self.request.query_params.get('language')
+        experimental = self.request.query_params.get('experimental')
+        status = self.request.query_params.get('status')
         if url:
             queryset = queryset.filter(canonical_url=url)
+        if language:
+            queryset = queryset.filter(locale=language)
+        if experimental:
+            queryset = queryset.filter(experimental=experimental)
+        if status:
+            if status == 'retired':
+                queryset = queryset.filter(retired=True)
+            elif status == 'active':
+                queryset = queryset.filter(released=True)
+            elif status == 'draft':
+                queryset = queryset.filter(released=False)
+
+        # TODO: implement other filters
+
         return queryset
 
     def apply_filters(self, queryset):

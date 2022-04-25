@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from rest_framework.fields import CharField, IntegerField, SerializerMethodField, ChoiceField
+from rest_framework.fields import CharField, DateField, BooleanField, IntegerField, SerializerMethodField, ChoiceField
 
 from core import settings
 from core.common.serializers import ReadSerializerMixin
@@ -45,6 +45,14 @@ class CodeSystemConceptPropertySerializer(serializers.Field):
                 ret['concept_class'] = item['value']
             elif item['code'] == 'datatype':
                 ret['datatype'] = item['value']
+
+        if 'retired' not in ret:
+            ret['retired'] = False
+        if 'concept_class' not in ret:
+            ret['concept_class'] = 'Misc'
+        if 'datatype' not in ret:
+            ret['datatype'] = 'N/A'
+
         return ret
 
     def to_representation(self, value):
@@ -72,7 +80,7 @@ class CodeSystemConceptSerializer(ReadSerializerMixin, serializers.Serializer):
     display = CodeSystemConceptDisplaySerializer(source='*', required=False)
     definition = SerializerMethodField()
     designation = CodeSystemConceptDesignationSerializer(source='names', many=True, required=False)
-    property = CodeSystemConceptPropertySerializer(source='*')
+    property = CodeSystemConceptPropertySerializer(source='*', required=False)
 
     class Meta:
         model = Concept
@@ -169,11 +177,11 @@ class CodeSystemDetailSerializer(serializers.ModelSerializer):
     concept = CodeSystemConceptField(source='*', required=False)
     identifier = CodeSystemIdentifierSerializer(many=True, required=False)
 
-    caseSensitive = CharField(source='case_sensitive', required=False)
-    versionNeeded = CharField(source='version_needed', required=False)
+    caseSensitive = BooleanField(source='case_sensitive', required=False)
+    versionNeeded = BooleanField(source='version_needed', required=False)
     collectionReference = CharField(source='collection_reference', required=False)
     hierarchyMeaning = CharField(source='hierarchy_meaning', required=False)
-    revisionDate = CharField(source='revision_date', required=False)
+    revisionDate = DateField(source='revision_date', required=False)
 
     class Meta:
         model = Source
@@ -249,7 +257,7 @@ class CodeSystemDetailSerializer(serializers.ModelSerializer):
         """ Add OCL identifier if not present """
         if not self.find_ocl_identifier(rep['identifier']):
             rep['identifier'].append({
-                'system': settings.API_BASE_URL,
+                    'system': settings.API_BASE_URL,
                 'value': self.convert_ocl_to_fhir_url(instance),
                 'type': {
                     'text': 'Accession ID',
