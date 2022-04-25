@@ -225,7 +225,10 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
         def get_query(attr):
             words = search_str.split(' ')
-            criteria = Q('match', **{attr: words[0]})
+            if words[0] != search_str:
+                criteria = Q('match', **{attr: search_str}) | Q('match', **{attr: words[0]})
+            else:
+                criteria = Q('match', **{attr: words[0]})
             for word in words[1:]:
                 criteria &= Q('match', **{attr: word})
             return criteria
@@ -564,13 +567,22 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             name_attr = '_name'
 
         def get_query(_str):
-            return Q(
-                "wildcard", id=dict(value=_str, boost=2)
+            query = Q(
+                "wildcard", id=dict(value=_str, boost=3)
             ) | Q(
                 "wildcard", **{name_attr: dict(value=_str, boost=5)}
             ) | Q(
                 "query_string", query=self.get_wildcard_search_string(_str)
             )
+            if self.is_concept_document():
+                query |= Q(
+                    "wildcard",
+                    synonyms=dict(
+                        value=self.get_wildcard_search_string(self.get_search_string(decode=False, lower=False)),
+                        boost=2
+                    )
+                )
+            return query
 
         if not search_string:
             return get_query(search_string)
