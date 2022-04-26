@@ -286,7 +286,15 @@ API_SUPERUSER_TOKEN = os.environ.get('API_SUPERUSER_TOKEN', '891b4b17feab99f3ff7
 REDIS_PORT = os.environ.get('REDIS_PORT', 6379)
 REDIS_DB = 0
 REDIS_HOST = os.environ.get('REDIS_HOST', 'redis')
-REDIS_URL = f"redis://{REDIS_HOST}:{REDIS_PORT}"  # needed for healthcheck
+REDIS_URL = f"redis://{REDIS_HOST}:{REDIS_PORT}"
+
+# django cache
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.redis.RedisCache',
+        'LOCATION': REDIS_URL,
+    }
+}
 
 # Celery
 CELERY_ENABLE_UTC = True
