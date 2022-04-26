@@ -289,12 +289,13 @@ REDIS_HOST = os.environ.get('REDIS_HOST', 'redis')
 REDIS_URL = f"redis://{REDIS_HOST}:{REDIS_PORT}"
 
 # django cache
-CACHES = {
-    'default': {
-        'BACKEND': 'django.core.cache.backends.redis.RedisCache',
-        'LOCATION': REDIS_URL,
+if ENV and ENV not in ['ci']:
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.redis.RedisCache',
+            'LOCATION': REDIS_URL,
+        }
     }
-}
 
 # Celery
 CELERY_ENABLE_UTC = True
