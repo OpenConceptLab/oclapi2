@@ -6,7 +6,7 @@ from rest_framework.serializers import ModelSerializer
 from core.common.constants import INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_MAPPINGS_PARAM, INCLUDE_EXTRAS_PARAM, \
     INCLUDE_PARENT_CONCEPTS, INCLUDE_CHILD_CONCEPTS, INCLUDE_SOURCE_VERSIONS, INCLUDE_COLLECTION_VERSIONS, \
     CREATE_PARENT_VERSION_QUERY_PARAM, INCLUDE_HIERARCHY_PATH, INCLUDE_PARENT_CONCEPT_URLS, \
-    INCLUDE_CHILD_CONCEPT_URLS, HEAD, INCLUDE_SUMMARY, INCLUDE_VERBOSE_REFERENCES
+    INCLUDE_CHILD_CONCEPT_URLS, HEAD, INCLUDE_SUMMARY, INCLUDE_VERBOSE_REFERENCES, VERBOSE_PARAM
 from core.common.fields import EncodedDecodedCharField
 from core.common.utils import to_parent_uri_from_kwargs
 from core.concepts.models import Concept, LocalizedText
@@ -215,6 +215,29 @@ class ConceptAbstractSerializer(ModelSerializer):
         if self.include_summary:
             return ConceptSummarySerializer(obj).data
         return None
+
+
+class ConceptLookupListSerializer(ModelSerializer):
+    uuid = CharField(source='id')
+    id = EncodedDecodedCharField(source='mnemonic')
+    url = CharField(read_only=True, source='uri')
+
+    class Meta:
+        model = Concept
+        fields = ('uuid', 'id', 'display_name', 'url')
+
+    def __init__(self, *args, **kwargs):  # pylint: disable=too-many-branches
+        request = get(kwargs, 'context.request')
+        params = get(request, 'query_params')
+        self.query_params = params.dict() if params else {}
+        self.is_verbose = self.query_params.get(VERBOSE_PARAM) in ['true', True]
+        try:
+            if not self.is_verbose:
+                self.fields.pop('display_name', None)
+        except:  # pylint: disable=bare-except
+            pass
+
+        super().__init__(*args, **kwargs)
 
 
 class ConceptListSerializer(ConceptAbstractSerializer):

@@ -1,10 +1,18 @@
 from django.urls import path
+from django.views.decorators.cache import cache_page
 
 from core.concepts.feeds import ConceptFeed
 from . import views
 
 urlpatterns = [
     path('', views.ConceptListView.as_view(), name='concept-list'),
+    path(
+        'lookup/',
+        cache_page(
+            timeout=60 * 60 * 24, key_prefix='cache_lookup'
+        )(views.ConceptLookupValuesView.as_view()),
+        name='concept-lookup-list'
+    ),
     path(
         "<str:concept>/",
         views.ConceptRetrieveUpdateDestroyView.as_view(),

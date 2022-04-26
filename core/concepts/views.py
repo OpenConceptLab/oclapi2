@@ -4,9 +4,9 @@ from drf_yasg.utils import swagger_auto_schema
 from pydash import get
 from rest_framework import status
 from rest_framework.generics import RetrieveAPIView, DestroyAPIView, ListCreateAPIView, RetrieveUpdateDestroyAPIView, \
-    UpdateAPIView
+    UpdateAPIView, ListAPIView
 from rest_framework.mixins import CreateModelMixin
-from rest_framework.permissions import IsAuthenticatedOrReadOnly, IsAdminUser
+from rest_framework.permissions import IsAuthenticatedOrReadOnly, IsAdminUser, AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -25,7 +25,7 @@ from core.common.swagger_parameters import (
 from core.common.tasks import delete_concept, make_hierarchy
 from core.common.utils import to_parent_uri_from_kwargs
 from core.common.views import SourceChildCommonBaseView, SourceChildExtrasView, \
-    SourceChildExtraRetrieveUpdateDestroyView
+    SourceChildExtraRetrieveUpdateDestroyView, BaseAPIView
 from core.concepts.constants import PARENT_VERSION_NOT_LATEST_CANNOT_UPDATE_CONCEPT
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept, LocalizedText
@@ -35,7 +35,7 @@ from core.concepts.serializers import (
     ConceptDetailSerializer, ConceptListSerializer, ConceptDescriptionSerializer, ConceptNameSerializer,
     ConceptVersionDetailSerializer,
     ConceptVersionListSerializer, ConceptSummarySerializer, ConceptMinimalSerializer,
-    ConceptChildrenSerializer, ConceptParentsSerializer)
+    ConceptChildrenSerializer, ConceptParentsSerializer, ConceptLookupListSerializer)
 from core.mappings.serializers import MappingListSerializer
 
 
@@ -53,6 +53,54 @@ class ConceptBaseView(SourceChildCommonBaseView):
 
     def get_queryset(self):
         return Concept.get_base_queryset(self.params)
+
+    def set_parent_resource(self, __pop=True):
+        parent_resource = None
+        source = self.kwargs.pop('source', None) if __pop else self.kwargs.get('source', None)
+        collection = self.kwargs.pop('collection', None) if __pop else self.kwargs.get('collection', None)
+        container_version = self.kwargs.pop('version', HEAD) if __pop else self.kwargs.get('version', HEAD)
+        if 'org' in self.kwargs:
+            filters = dict(organization__mnemonic=self.kwargs['org'])
+        else:
+            username = self.request.user.username if self.user_is_self else self.kwargs.get('user')
+            filters = dict(user__username=username)
+        if source:
+            from core.sources.models import Source
+            parent_resource = Source.get_version(source, container_version or HEAD, filters)
+        if collection:
+            from core.collections.models import Collection
+            parent_resource = Collection.get_version(source, container_version or HEAD, filters)
+        self.kwargs['parent_resource'] = self.parent_resource = parent_resource
+
+
+# this is a cached view (expiry 24 hours)
+# used for TermBrowser forms lookup values -- map-types/locales/datatypes/etc
+class ConceptLookupValuesView(ListAPIView, BaseAPIView):  # pragma: no cover
+    serializer_class = ConceptLookupListSerializer
+    permission_classes = (AllowAny, )
+
+    def set_parent_resource(self):
+        parent_resource = None
+        source = self.kwargs.get('source', None)
+        if 'org' in self.kwargs:
+            filters = dict(organization__mnemonic=self.kwargs['org'])
+        else:
+            username = self.request.user.username if self.user_is_self else self.kwargs.get('user')
+            filters = dict(user__username=username)
+        if source:
+            from core.sources.models import Source
+            parent_resource = Source.get_version(source, HEAD, filters)
+        self.kwargs['parent_resource'] = self.parent_resource = parent_resource
+
+    def get_queryset(self):
+        self.set_parent_resource()
+        if self.parent_resource:
+            queryset = self.parent_resource.concepts_set.filter(id=F('versioned_object_id'))
+            if self.is_verbose():
+                queryset = queryset.prefetch_related('names')
+            return queryset
+
+        raise Http404()
 
 
 class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
@@ -115,24 +163,6 @@ class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
         if self.parent_resource:
             self.check_object_permissions(request, self.parent_resource)
         return self.list(request, *args, **kwargs)
-
-    def set_parent_resource(self, __pop=True):
-        parent_resource = None
-        source = self.kwargs.pop('source', None) if __pop else self.kwargs.get('source', None)
-        collection = self.kwargs.pop('collection', None) if __pop else self.kwargs.get('collection', None)
-        container_version = self.kwargs.pop('version', HEAD) if __pop else self.kwargs.get('version', HEAD)
-        if 'org' in self.kwargs:
-            filters = dict(organization__mnemonic=self.kwargs['org'])
-        else:
-            username = self.request.user.username if self.user_is_self else self.kwargs.get('user')
-            filters = dict(user__username=username)
-        if source:
-            from core.sources.models import Source
-            parent_resource = Source.get_version(source, container_version or HEAD, filters)
-        if collection:
-            from core.collections.models import Collection
-            parent_resource = Collection.get_version(source, container_version or HEAD, filters)
-        self.kwargs['parent_resource'] = self.parent_resource = parent_resource
 
     def post(self, request, **_):
         self.set_parent_resource()
