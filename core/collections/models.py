@@ -410,6 +410,8 @@ class CollectionReference(models.Model):
     class Meta:
         db_table = 'collection_references'
 
+    ALLOWED_FILTER_OPS = ['=', 'in', 'not-in']
+
     _concepts = None
     _mappings = None
     original_expression = None
@@ -484,12 +486,40 @@ class CollectionReference(models.Model):
         return Mapping.from_uri_queryset(self.expression)
 
     def clean(self):
+        if not self.is_valid_filter():
+            raise ValidationError(dict(filter=['Invalid filter schema.']))
+
         self.original_expression = str(self.expression)
 
         self.create_entities_from_expressions()
         is_resolved = bool((self._mappings and self._mappings.exists()) or (self._concepts and self._concepts.exists()))
         if not is_resolved:
             self.last_resolved_at = None
+
+    def is_valid_filter(self):
+        if not self.filter:
+            return True
+
+        if not isinstance(self.filter, list):
+            return False
+        if len(self.filter) != len(compact(self.filter)):
+            return False
+
+        return all(map(self.__is_valid_filter_schema, self.filter))
+
+    def get_allowed_filter_properties(self):
+        if self.is_concept:
+            return ['datatype', 'concept_class', 'q', 'external_id']
+        if self.is_mapping:
+            return ['map_type', 'q', 'external_id']
+        return []
+
+    def __is_valid_filter_schema(self, filter_def):
+        return isinstance(filter_def, dict) and \
+               sorted(filter_def.keys()) == sorted(['property', 'op', 'value']) and \
+               {type(val) for val in filter_def.values()} == {str} and \
+               filter_def['op'] in self.ALLOWED_FILTER_OPS and \
+               filter_def['property'] in self.get_allowed_filter_properties()
 
     def save(self, force_insert=False, force_update=False, using=None,
              update_fields=None):

@@ -428,6 +428,86 @@ class CollectionReferenceTest(OCLTestCase):
         self.assertEqual(mappings.first(), mapping)
         ref.fetch_uris.assert_called_once_with(user_mock)
 
+    def test_concept_filter_schema(self):
+        ref = CollectionReference(expression='/concepts/', filter=None)
+        ref.clean()
+        ref = CollectionReference(expression='/concepts/', filter='')
+        ref.clean()
+        ref = CollectionReference(expression='/concepts/', filter=[])
+        ref.clean()
+
+        with self.assertRaises(ValidationError):
+            ref = CollectionReference(expression='/concepts/', filter=[{}, {}])
+            ref.clean()
+
+        with self.assertRaises(ValidationError):
+            ref = CollectionReference(expression='/concepts/', filter=[{'foo': 'bar'}])
+            ref.clean()
+        with self.assertRaises(ValidationError):
+            ref = CollectionReference(expression='/concepts/', filter=[{'property': 'bar'}])
+            ref.clean()
+        with self.assertRaises(ValidationError):
+            ref = CollectionReference(
+                expression='/concepts/', filter=[{'property': 'map_type', 'value': 'foobar', 'op': '='}])
+            ref.clean()
+        with self.assertRaises(ValidationError):
+            ref = CollectionReference(
+                expression='/concepts/', filter=[{'property': 'concept_class', 'value': 'foobar', 'op': 'foobar'}])
+            ref.clean()
+        with self.assertRaises(ValidationError) as ex:
+            ref = CollectionReference(
+                expression='/concepts/', filter=[{'property': 'concept_class', 'value': 'foobar', 'op': 'not in'}])
+            ref.clean()
+
+        self.assertEqual(ex.exception.message_dict, dict(filter=['Invalid filter schema.']))
+
+        ref = CollectionReference(
+            expression='/concepts/', filter=[{'property': 'concept_class', 'value': 'foobar', 'op': '='}])
+        ref.clean()
+        ref = CollectionReference(
+            expression='/concepts/', filter=[{'property': 'external_id', 'value': 'foobar', 'op': 'in'}])
+        ref.clean()
+
+    def test_mapping_filter_schema(self):
+        ref = CollectionReference(expression='/mappings/', filter=None)
+        ref.clean()
+        ref = CollectionReference(expression='/mappings/', filter='')
+        ref.clean()
+        ref = CollectionReference(expression='/mappings/', filter=[])
+        ref.clean()
+
+        with self.assertRaises(ValidationError):
+            ref = CollectionReference(expression='/mappings/', filter=[{}, {}])
+            ref.clean()
+
+        with self.assertRaises(ValidationError):
+            ref = CollectionReference(expression='/mappings/', filter=[{'foo': 'bar'}])
+            ref.clean()
+        with self.assertRaises(ValidationError):
+            ref = CollectionReference(expression='/mappings/', filter=[{'property': 'bar'}])
+            ref.clean()
+        with self.assertRaises(ValidationError):
+            ref = CollectionReference(
+                expression='/mappings/', filter=[{'property': 'concept_class', 'value': 'foobar', 'op': '='}])
+            ref.clean()
+        with self.assertRaises(ValidationError):
+            ref = CollectionReference(
+                expression='/mappings/', filter=[{'property': 'map_type', 'value': 'foobar', 'op': 'foobar'}])
+            ref.clean()
+        with self.assertRaises(ValidationError) as ex:
+            ref = CollectionReference(
+                expression='/mappings/', filter=[{'property': 'map_type', 'value': 'foobar', 'op': 'not in'}])
+            ref.clean()
+
+        self.assertEqual(ex.exception.message_dict, dict(filter=['Invalid filter schema.']))
+
+        ref = CollectionReference(
+            expression='/mappings/', filter=[{'property': 'map_type', 'value': 'foobar', 'op': '='}])
+        ref.clean()
+        ref = CollectionReference(
+            expression='/mappings/', filter=[{'property': 'external_id', 'value': 'foobar', 'op': 'in'}])
+        ref.clean()
+
 
 class CollectionUtilsTest(OCLTestCase):
     def test_is_mapping(self):
