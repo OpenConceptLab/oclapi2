@@ -5,6 +5,7 @@ from mock import patch, Mock, PropertyMock
 from core.collections.documents import CollectionDocument
 from core.collections.models import CollectionReference, Collection, Expansion
 from core.collections.models import ExpansionParameters
+from core.collections.parsers import CollectionReferenceExpressionStringToStructuredParser
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
 from core.collections.utils import is_mapping, is_concept, is_version_specified, \
     get_concept_by_expression
@@ -329,19 +330,37 @@ class CollectionReferenceTest(OCLTestCase):
 
     def test_reference_type(self):
         reference = CollectionReference(expression='')
-        self.assertFalse(reference.reference_type)
+        self.assertEqual(reference.reference_type, 'concepts')
 
         reference = CollectionReference(expression=None)
-        self.assertFalse(reference.reference_type)
-
-        reference = CollectionReference(
-            expression='/parent/parent-mnemonic/sources/source-mnemonic/concepts/concept-mnemonic/'
-        )
         self.assertEqual(reference.reference_type, 'concepts')
 
         reference = CollectionReference(
-            expression='/parent/parent-mnemonic/sources/source-mnemonic/mappings/mapping-mnemonic/'
+            expression='/parent/parent-mnemonic/sources/source-mnemonic/concepts/concept-mnemonic/',
+            reference_type=None
         )
+        reference.clean()
+        self.assertEqual(reference.reference_type, 'concepts')
+
+        reference = CollectionReference(
+            expression='/parent/parent-mnemonic/sources/source-mnemonic/concepts/concept-mnemonic/',
+            reference_type='mappings'  # if you set wrong it stays as is
+        )
+        reference.clean()
+        self.assertEqual(reference.reference_type, 'mappings')
+
+        reference = CollectionReference(
+            expression='/parent/parent-mnemonic/sources/source-mnemonic/mappings/mapping-mnemonic/',
+            reference_type=None
+        )
+        reference.clean()
+        self.assertEqual(reference.reference_type, 'mappings')
+
+        reference = CollectionReference(
+            expression='/parent/parent-mnemonic/sources/source-mnemonic/mappings/mapping-mnemonic/',
+            reference_type='mappings'
+        )
+        reference.clean()
         self.assertEqual(reference.reference_type, 'mappings')
 
     def test_reference_as_concept_version(self):
@@ -1136,3 +1155,359 @@ class ExpansionParametersTest(OCLTestCase):
         result = ExpansionParameters({'date': '2020-02-01 00:00:01'}).apply(queryset)
         result = result.distinct('id')
         self.assertEqual(result.count(), 0)
+
+
+class CollectionReferenceExpressionStringToStructuredParserTest(OCLTestCase):
+    @staticmethod
+    def get_structure(**kwargs):
+        parser = CollectionReferenceExpressionStringToStructuredParser(
+            **kwargs
+        )
+        parser.parse()
+        return parser.to_reference_structure()
+
+    def test_parse_concept_expressions(self):
+        reference = self.get_structure(expression='/concepts/')
+        self.assertEqual(
+            reference,
+            dict(
+                expression='/concepts/',
+                system=None,
+                valueset=None,
+                filter=None,
+                cascade=None,
+                reference_type='concepts',
+                version=None,
+                code=None
+            )
+        )
+
+        reference = self.get_structure(expression='/concepts/?q=foobar&conceptClass=drug')
+        self.assertEqual(
+            reference,
+            dict(
+                expression='/concepts/?q=foobar&conceptClass=drug',
+                system=None,
+                valueset=None,
+                filter=[
+                    dict(property='q', value='foobar', op='='),
+                    dict(property='conceptClass', value='drug', op='='),
+                ],
+                cascade=None,
+                reference_type='concepts',
+                version=None,
+                code=None
+            )
+        )
+
+        reference = self.get_structure(expression='/orgs/MyOrg/sources/MySource/concepts/')
+        self.assertEqual(
+            reference,
+            dict(
+                expression='/orgs/MyOrg/sources/MySource/concepts/',
+                system='/orgs/MyOrg/sources/MySource/',
+                valueset=None,
+                filter=None,
+                cascade=None,
+                reference_type='concepts',
+                version=None,
+                code=None
+            )
+        )
+
+        reference = self.get_structure(expression='/orgs/MyOrg/sources/MySource/v1/concepts/')
+        self.assertEqual(
+            reference,
+            dict(
+                expression='/orgs/MyOrg/sources/MySource/v1/concepts/',
+                system='/orgs/MyOrg/sources/MySource/',
+                valueset=None,
+                filter=None,
+                cascade=None,
+                reference_type='concepts',
+                version='v1',
+                code=None
+            )
+        )
+
+        reference = self.get_structure(expression='/orgs/MyOrg/sources/MySource/v1/concepts/1234/')
+        self.assertEqual(
+            reference,
+            dict(
+                expression='/orgs/MyOrg/sources/MySource/v1/concepts/1234/',
+                system='/orgs/MyOrg/sources/MySource/',
+                valueset=None,
+                filter=None,
+                cascade=None,
+                reference_type='concepts',
+                version='v1',
+                code='1234'
+            )
+        )
+
+        reference = self.get_structure(expression='/orgs/MyOrg/sources/MySource/concepts/1234/')
+        self.assertEqual(
+            reference,
+            dict(
+                expression='/orgs/MyOrg/sources/MySource/concepts/1234/',
+                system='/orgs/MyOrg/sources/MySource/',
+                valueset=None,
+                filter=None,
+                cascade=None,
+                reference_type='concepts',
+                version=None,
+                code='1234'
+            )
+        )
+
+        reference = self.get_structure(
+            expression='/orgs/MyOrg/sources/MySource/concepts/1234/', cascade='sourceToConcept')
+        self.assertEqual(
+            reference,
+            dict(
+                expression='/orgs/MyOrg/sources/MySource/concepts/1234/',
+                system='/orgs/MyOrg/sources/MySource/',
+                valueset=None,
+                filter=None,
+                cascade='sourceToConcept',
+                reference_type='concepts',
+                version=None,
+                code='1234'
+            )
+        )
+
+        reference = self.get_structure(expression='/orgs/MyOrg/sources/MySource/concepts/?q=foo&external_id=alpha,beta')
+        self.assertEqual(
+            reference,
+            dict(
+                expression='/orgs/MyOrg/sources/MySource/concepts/?q=foo&external_id=alpha,beta',
+                system='/orgs/MyOrg/sources/MySource/',
+                valueset=None,
+                filter=[
+                    dict(property='q', value='foo', op='='),
+                    dict(property='external_id', value='alpha,beta', op='='),
+                ],
+                cascade=None,
+                reference_type='concepts',
+                version=None,
+                code=None
+            )
+        )
+
+        reference = self.get_structure(expression='/orgs/MyOrg/collections/Coll/concepts/?q=foo&external_id=alpha,beta')
+        self.assertEqual(
+            reference,
+            dict(
+                expression='/orgs/MyOrg/collections/Coll/concepts/?q=foo&external_id=alpha,beta',
+                system=None,
+                valueset=[
+                    '/orgs/MyOrg/collections/Coll/'
+                ],
+                filter=[
+                    dict(property='q', value='foo', op='='),
+                    dict(property='external_id', value='alpha,beta', op='='),
+                ],
+                cascade=None,
+                reference_type='concepts',
+                version=None,
+                code=None
+            )
+        )
+        reference = self.get_structure(expression='/orgs/MyOrg/collections/Coll/v1/concepts/1234/')
+        self.assertEqual(
+            reference,
+            dict(
+                expression='/orgs/MyOrg/collections/Coll/v1/concepts/1234/',
+                system=None,
+                valueset=[
+                    '/orgs/MyOrg/collections/Coll/|v1'
+                ],
+                filter=None,
+                cascade=None,
+                reference_type='concepts',
+                version=None,
+                code='1234'
+            )
+        )
+
+        reference = self.get_structure(expression='/orgs/MyOrg/collections/Coll/v1/concepts/1234/3456/')
+        self.assertEqual(
+            reference,
+            dict(
+                expression='/orgs/MyOrg/collections/Coll/v1/concepts/1234/3456/',
+                system=None,
+                valueset=[
+                    '/orgs/MyOrg/collections/Coll/|v1'
+                ],
+                filter=None,
+                cascade=None,
+                reference_type='concepts',
+                version=None,
+                code='1234'
+            )
+        )
+
+    def test_parse_mapping_expressions(self):
+        reference = self.get_structure(expression='/mappings/')
+        self.assertEqual(
+            reference,
+            dict(
+                expression='/mappings/',
+                system=None,
+                valueset=None,
+                filter=None,
+                cascade=None,
+                reference_type='mappings',
+                version=None,
+                code=None
+            )
+        )
+
+        reference = self.get_structure(expression='/mappings/?q=foobar&mapType=Q-AND-A')
+        self.assertEqual(
+            reference,
+            dict(
+                expression='/mappings/?q=foobar&mapType=Q-AND-A',
+                system=None,
+                valueset=None,
+                filter=[
+                    dict(property='q', value='foobar', op='='),
+                    dict(property='mapType', value='Q-AND-A', op='='),
+                ],
+                cascade=None,
+                reference_type='mappings',
+                version=None,
+                code=None
+            )
+        )
+
+        reference = self.get_structure(expression='/orgs/MyOrg/sources/MySource/mappings/')
+        self.assertEqual(
+            reference,
+            dict(
+                expression='/orgs/MyOrg/sources/MySource/mappings/',
+                system='/orgs/MyOrg/sources/MySource/',
+                valueset=None,
+                filter=None,
+                cascade=None,
+                reference_type='mappings',
+                version=None,
+                code=None
+            )
+        )
+
+        reference = self.get_structure(expression='/orgs/MyOrg/sources/MySource/v1/mappings/')
+        self.assertEqual(
+            reference,
+            dict(
+                expression='/orgs/MyOrg/sources/MySource/v1/mappings/',
+                system='/orgs/MyOrg/sources/MySource/',
+                valueset=None,
+                filter=None,
+                cascade=None,
+                reference_type='mappings',
+                version='v1',
+                code=None
+            )
+        )
+
+        reference = self.get_structure(expression='/orgs/MyOrg/sources/MySource/v1/mappings/1234/')
+        self.assertEqual(
+            reference,
+            dict(
+                expression='/orgs/MyOrg/sources/MySource/v1/mappings/1234/',
+                system='/orgs/MyOrg/sources/MySource/',
+                valueset=None,
+                filter=None,
+                cascade=None,
+                reference_type='mappings',
+                version='v1',
+                code='1234'
+            )
+        )
+
+        reference = self.get_structure(expression='/orgs/MyOrg/sources/MySource/mappings/1234/')
+        self.assertEqual(
+            reference,
+            dict(
+                expression='/orgs/MyOrg/sources/MySource/mappings/1234/',
+                system='/orgs/MyOrg/sources/MySource/',
+                valueset=None,
+                filter=None,
+                cascade=None,
+                reference_type='mappings',
+                version=None,
+                code='1234'
+            )
+        )
+
+        reference = self.get_structure(expression='/orgs/MyOrg/sources/MySource/mappings/?q=foo&external_id=alpha,beta')
+        self.assertEqual(
+            reference,
+            dict(
+                expression='/orgs/MyOrg/sources/MySource/mappings/?q=foo&external_id=alpha,beta',
+                system='/orgs/MyOrg/sources/MySource/',
+                valueset=None,
+                filter=[
+                    dict(property='q', value='foo', op='='),
+                    dict(property='external_id', value='alpha,beta', op='='),
+                ],
+                cascade=None,
+                reference_type='mappings',
+                version=None,
+                code=None
+            )
+        )
+
+        reference = self.get_structure(expression='/orgs/MyOrg/collections/Coll/mappings/?q=foo&external_id=alpha,beta')
+        self.assertEqual(
+            reference,
+            dict(
+                expression='/orgs/MyOrg/collections/Coll/mappings/?q=foo&external_id=alpha,beta',
+                system=None,
+                valueset=[
+                    '/orgs/MyOrg/collections/Coll/'
+                ],
+                filter=[
+                    dict(property='q', value='foo', op='='),
+                    dict(property='external_id', value='alpha,beta', op='='),
+                ],
+                cascade=None,
+                reference_type='mappings',
+                version=None,
+                code=None
+            )
+        )
+        reference = self.get_structure(expression='/orgs/MyOrg/collections/Coll/v1/mappings/1234/')
+        self.assertEqual(
+            reference,
+            dict(
+                expression='/orgs/MyOrg/collections/Coll/v1/mappings/1234/',
+                system=None,
+                valueset=[
+                    '/orgs/MyOrg/collections/Coll/|v1'
+                ],
+                filter=None,
+                cascade=None,
+                reference_type='mappings',
+                version=None,
+                code='1234'
+            )
+        )
+
+        reference = self.get_structure(expression='/orgs/MyOrg/collections/Coll/v1/mappings/1234/3456/')
+        self.assertEqual(
+            reference,
+            dict(
+                expression='/orgs/MyOrg/collections/Coll/v1/mappings/1234/3456/',
+                system=None,
+                valueset=[
+                    '/orgs/MyOrg/collections/Coll/|v1'
+                ],
+                filter=None,
+                cascade=None,
+                reference_type='mappings',
+                version=None,
+                code='1234'
+            )
+        )
