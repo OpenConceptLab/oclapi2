@@ -6,7 +6,8 @@ from core.collections.documents import CollectionDocument
 from core.collections.models import CollectionReference, Collection, Expansion
 from core.collections.models import ExpansionParameters
 from core.collections.parsers import CollectionReferenceExpressionStringParser, \
-    CollectionReferenceSourceAllExpressionParser, CollectionReferenceOldStyleToExpandedStructureParser
+    CollectionReferenceSourceAllExpressionParser, CollectionReferenceOldStyleToExpandedStructureParser, \
+    CollectionReferenceParser
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
 from core.collections.utils import is_mapping, is_concept, is_version_specified, \
     get_concept_by_expression
@@ -1163,7 +1164,7 @@ class CollectionReferenceExpressionStringParserTest(OCLTestCase):
     def get_structure(**kwargs):
         parser = CollectionReferenceExpressionStringParser(**kwargs)
         parser.parse()
-        return parser.to_reference_structure()
+        return parser.to_reference_structure()[0]
 
     def test_parse_concept_expressions(self):
         reference = self.get_structure(expression='/concepts/')
@@ -1650,6 +1651,182 @@ class CollectionReferenceOldStyleToExpandedStructureParserTest(OCLTestCase):
     def get_expanded_references(**kwargs):
         parser = CollectionReferenceOldStyleToExpandedStructureParser(**kwargs)
         parser.parse()
+        parser.to_reference_structure()
+        return parser.to_objects()
+
+    def test_parse_string_expression_generic(self):
+        references = self.get_expanded_references(
+            expression=dict(expressions=[
+                "/orgs/MyOrg/sources/MySource/concepts/c-1234/",
+                "/orgs/MyOrg/sources/MySource/mappings/m-1234/",
+                "/users/Me/sources/MySource/concepts/?q=foobar",
+                "/users/Me/sources/MySource/v1/concepts/?q=foobar&datatype=rule",
+                "/users/Me/collections/MyColl/v1/mappings/?mapType=Q-AND-A",
+            ])
+        )
+        self.assertEqual(len(references), 5)
+
+        reference = references[0]
+        self.assertEqual(reference.expression, "/orgs/MyOrg/sources/MySource/concepts/c-1234/")
+        self.assertEqual(reference.system, "/orgs/MyOrg/sources/MySource/")
+        self.assertEqual(reference.code, "c-1234")
+        self.assertEqual(reference.reference_type, 'concepts')
+        self.assertIsNone(reference.version)
+        self.assertIsNone(reference.valueset)
+        self.assertIsNone(reference.filter)
+        self.assertIsNone(reference.cascade)
+
+        reference = references[1]
+        self.assertEqual(reference.expression, "/orgs/MyOrg/sources/MySource/mappings/m-1234/")
+        self.assertEqual(reference.system, "/orgs/MyOrg/sources/MySource/")
+        self.assertEqual(reference.code, "m-1234")
+        self.assertEqual(reference.reference_type, 'mappings')
+        self.assertIsNone(reference.version)
+        self.assertIsNone(reference.valueset)
+        self.assertIsNone(reference.filter)
+        self.assertIsNone(reference.cascade)
+
+        reference = references[2]
+        self.assertEqual(reference.expression, "/users/Me/sources/MySource/concepts/?q=foobar")
+        self.assertEqual(reference.system, "/users/Me/sources/MySource/")
+        self.assertEqual(reference.reference_type, 'concepts')
+        self.assertEqual(reference.filter, [dict(property='q', value='foobar', op='=')])
+        self.assertIsNone(reference.version)
+        self.assertIsNone(reference.valueset)
+        self.assertIsNone(reference.cascade)
+        self.assertIsNone(reference.code)
+
+        reference = references[3]
+        self.assertEqual(reference.expression, "/users/Me/sources/MySource/v1/concepts/?q=foobar&datatype=rule")
+        self.assertEqual(reference.system, "/users/Me/sources/MySource/")
+        self.assertEqual(reference.reference_type, 'concepts')
+        self.assertEqual(
+            reference.filter,
+            [dict(property='q', value='foobar', op='='), dict(property='datatype', value='rule', op='=')])
+        self.assertEqual(reference.version, 'v1')
+        self.assertIsNone(reference.valueset)
+        self.assertIsNone(reference.cascade)
+        self.assertIsNone(reference.code)
+
+        reference = references[4]
+        self.assertEqual(reference.expression, "/users/Me/collections/MyColl/v1/mappings/?mapType=Q-AND-A")
+        self.assertEqual(reference.valueset, ["/users/Me/collections/MyColl/|v1"])
+        self.assertEqual(reference.reference_type, 'mappings')
+        self.assertEqual(
+            reference.filter,
+            [dict(property='mapType', value='Q-AND-A', op='=')])
+        self.assertIsNone(reference.version)
+        self.assertIsNone(reference.system)
+        self.assertIsNone(reference.cascade)
+        self.assertIsNone(reference.code)
+
+    def test_parse_string_expression_concepts_mappings_explicit(self):
+        references = self.get_expanded_references(
+            expression=dict(concepts=[
+                "/orgs/MyOrg/sources/MySource/concepts/c-1234/",
+                "/users/Me/sources/MySource/concepts/?q=foobar",
+                "/users/Me/sources/MySource/v1/concepts/?q=foobar&datatype=rule",
+            ], mappings=[
+                "/orgs/MyOrg/sources/MySource/mappings/m-1234/",
+                "/users/Me/collections/MyColl/v1/mappings/?mapType=Q-AND-A",
+            ])
+        )
+        self.assertEqual(len(references), 5)
+
+        reference = references[0]
+        self.assertTrue(isinstance(reference, CollectionReference))
+        self.assertEqual(reference.expression, "/orgs/MyOrg/sources/MySource/concepts/c-1234/")
+        self.assertEqual(reference.system, "/orgs/MyOrg/sources/MySource/")
+        self.assertEqual(reference.code, "c-1234")
+        self.assertEqual(reference.reference_type, 'concepts')
+        self.assertIsNone(reference.version)
+        self.assertIsNone(reference.valueset)
+        self.assertIsNone(reference.filter)
+        self.assertIsNone(reference.cascade)
+
+        reference = references[1]
+        self.assertTrue(isinstance(reference, CollectionReference))
+        self.assertEqual(reference.expression, "/users/Me/sources/MySource/concepts/?q=foobar")
+        self.assertEqual(reference.system, "/users/Me/sources/MySource/")
+        self.assertEqual(reference.reference_type, 'concepts')
+        self.assertEqual(reference.filter, [dict(property='q', value='foobar', op='=')])
+        self.assertIsNone(reference.version)
+        self.assertIsNone(reference.valueset)
+        self.assertIsNone(reference.cascade)
+        self.assertIsNone(reference.code)
+
+        reference = references[2]
+        self.assertTrue(isinstance(reference, CollectionReference))
+        self.assertEqual(reference.expression, "/users/Me/sources/MySource/v1/concepts/?q=foobar&datatype=rule")
+        self.assertEqual(reference.system, "/users/Me/sources/MySource/")
+        self.assertEqual(reference.reference_type, 'concepts')
+        self.assertEqual(
+            reference.filter,
+            [dict(property='q', value='foobar', op='='), dict(property='datatype', value='rule', op='=')])
+        self.assertEqual(reference.version, 'v1')
+        self.assertIsNone(reference.valueset)
+        self.assertIsNone(reference.cascade)
+        self.assertIsNone(reference.code)
+
+        reference = references[3]
+        self.assertTrue(isinstance(reference, CollectionReference))
+        self.assertEqual(reference.expression, "/orgs/MyOrg/sources/MySource/mappings/m-1234/")
+        self.assertEqual(reference.system, "/orgs/MyOrg/sources/MySource/")
+        self.assertEqual(reference.code, "m-1234")
+        self.assertEqual(reference.reference_type, 'mappings')
+        self.assertIsNone(reference.version)
+        self.assertIsNone(reference.valueset)
+        self.assertIsNone(reference.filter)
+        self.assertIsNone(reference.cascade)
+
+        reference = references[4]
+        self.assertTrue(isinstance(reference, CollectionReference))
+        self.assertEqual(reference.expression, "/users/Me/collections/MyColl/v1/mappings/?mapType=Q-AND-A")
+        self.assertEqual(reference.valueset, ["/users/Me/collections/MyColl/|v1"])
+        self.assertEqual(reference.reference_type, 'mappings')
+        self.assertEqual(
+            reference.filter,
+            [dict(property='mapType', value='Q-AND-A', op='=')])
+        self.assertIsNone(reference.version)
+        self.assertIsNone(reference.system)
+        self.assertIsNone(reference.cascade)
+        self.assertIsNone(reference.code)
+
+    def test_parse_source_all_resources_expression(self):
+        references = self.get_expanded_references(
+            expression=dict(concepts="*", mappings="*", uri='/orgs/MyOrg/sources/MySource/')
+        )
+        self.assertEqual(len(references), 2)
+
+        reference = references[0]
+        self.assertTrue(isinstance(reference, CollectionReference))
+        self.assertEqual(reference.expression, "/orgs/MyOrg/sources/MySource/concepts/")
+        self.assertEqual(reference.system, "/orgs/MyOrg/sources/MySource/")
+        self.assertEqual(reference.reference_type, 'concepts')
+        self.assertIsNone(reference.version)
+        self.assertIsNone(reference.code)
+        self.assertIsNone(reference.valueset)
+        self.assertIsNone(reference.filter)
+        self.assertIsNone(reference.cascade)
+
+        reference = references[1]
+        self.assertTrue(isinstance(reference, CollectionReference))
+        self.assertEqual(reference.expression, "/orgs/MyOrg/sources/MySource/mappings/")
+        self.assertEqual(reference.system, "/orgs/MyOrg/sources/MySource/")
+        self.assertEqual(reference.reference_type, 'mappings')
+        self.assertIsNone(reference.version)
+        self.assertIsNone(reference.code)
+        self.assertIsNone(reference.valueset)
+        self.assertIsNone(reference.filter)
+        self.assertIsNone(reference.cascade)
+
+
+class CollectionReferenceParserTest(OCLTestCase):
+    @staticmethod
+    def get_expanded_references(**kwargs):
+        parser = CollectionReferenceParser(**kwargs)
+        parser.parse()
+        parser.to_reference_structure()
         return parser.to_objects()
 
     def test_parse_string_expression_generic(self):
