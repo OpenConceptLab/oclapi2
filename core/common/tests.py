@@ -628,6 +628,10 @@ class UtilsTest(OCLTestCase):
             to_parent_uri("https://foobar.com/users/user/sources/source/mappings/mapping1/v1/"),
             "https://foobar.com/users/user/sources/source/"
         )
+        self.assertEqual(
+            to_parent_uri("/concepts/"),
+            "/"
+        )
 
     def test_jsonify_safe(self):
         self.assertEqual(jsonify_safe(None), None)
