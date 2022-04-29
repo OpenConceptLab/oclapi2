@@ -578,7 +578,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                 query |= Q(
                     "wildcard",
                     synonyms=dict(
-                        value=self.get_wildcard_search_string(self.get_search_string(decode=False, lower=False)),
+                        value=self.get_wildcard_search_string(self.get_search_string(decode=False, lower=True)),
                         boost=2
                     )
                 )

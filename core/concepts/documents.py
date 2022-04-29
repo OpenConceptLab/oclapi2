@@ -17,7 +17,7 @@ class ConceptDocument(Document):
     _name = fields.KeywordField(attr='display_name', normalizer='lowercase')
     last_update = fields.DateField(attr='updated_at')
     locale = fields.ListField(fields.KeywordField())
-    synonyms = fields.ListField(fields.KeywordField())
+    synonyms = fields.ListField(fields.KeywordField(normalizer="lowercase"))
     source = fields.KeywordField(attr='parent_resource', normalizer="lowercase")
     owner = fields.KeywordField(attr='owner_name', normalizer="lowercase")
     owner_type = fields.KeywordField(attr='owner_type')
@@ -70,7 +70,7 @@ class ConceptDocument(Document):
 
     @staticmethod
     def prepare_synonyms(instance):
-        return list(instance.names.values_list('name', flat=True))
+        return list(map(lambda x: x.lower(), instance.names.filter(name__isnull=False).values_list('name', flat=True)))
 
     @staticmethod
     def prepare_source_version(instance):
