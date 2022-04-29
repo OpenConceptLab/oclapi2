@@ -5,7 +5,8 @@ from mock import patch, Mock, PropertyMock
 from core.collections.documents import CollectionDocument
 from core.collections.models import CollectionReference, Collection, Expansion
 from core.collections.models import ExpansionParameters
-from core.collections.parsers import CollectionReferenceExpressionStringToStructuredParser
+from core.collections.parsers import CollectionReferenceExpressionStringToStructuredParser, \
+    CollectionReferenceSourceAllExpressionToStructuredParser
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
 from core.collections.utils import is_mapping, is_concept, is_version_specified, \
     get_concept_by_expression
@@ -1510,4 +1511,139 @@ class CollectionReferenceExpressionStringToStructuredParserTest(OCLTestCase):
                 version=None,
                 code='1234'
             )
+        )
+
+
+class CollectionReferenceSourceAllExpressionToStructuredParserTest(OCLTestCase):
+    @staticmethod
+    def get_structure(**kwargs):
+        parser = CollectionReferenceSourceAllExpressionToStructuredParser(
+            **kwargs
+        )
+        parser.parse()
+        return parser.to_reference_structure()
+
+    def test_parse(self):
+        reference = self.get_structure(
+            expression=dict(uri="/users/Me/sources/MySource/", concepts="*", mappings="*"))
+        self.assertEqual(
+            reference,
+            [
+                dict(
+                    expression='/users/Me/sources/MySource/concepts/',
+                    system='/users/Me/sources/MySource/',
+                    valueset=None,
+                    filter=None,
+                    cascade=None,
+                    reference_type='concepts',
+                    version=None,
+                    code=None
+                ),
+                dict(
+                    expression='/users/Me/sources/MySource/mappings/',
+                    system='/users/Me/sources/MySource/',
+                    valueset=None,
+                    filter=None,
+                    cascade=None,
+                    reference_type='mappings',
+                    version=None,
+                    code=None
+                )
+            ]
+        )
+        reference = self.get_structure(
+            expression=dict(uri="/users/Me/sources/MySource/v1/", concepts="*", mappings="*"))
+        self.assertEqual(
+            reference,
+            [
+                dict(
+                    expression='/users/Me/sources/MySource/v1/concepts/',
+                    system='/users/Me/sources/MySource/',
+                    valueset=None,
+                    filter=None,
+                    cascade=None,
+                    reference_type='concepts',
+                    version='v1',
+                    code=None
+                ),
+                dict(
+                    expression='/users/Me/sources/MySource/v1/mappings/',
+                    system='/users/Me/sources/MySource/',
+                    valueset=None,
+                    filter=None,
+                    cascade=None,
+                    reference_type='mappings',
+                    version='v1',
+                    code=None
+                )
+            ]
+        )
+
+        reference = self.get_structure(
+            expression=dict(uri="/users/Me/sources/MySource/v1/", concepts="*"))
+        self.assertEqual(
+            reference,
+            [
+                dict(
+                    expression='/users/Me/sources/MySource/v1/concepts/',
+                    system='/users/Me/sources/MySource/',
+                    valueset=None,
+                    filter=None,
+                    cascade=None,
+                    reference_type='concepts',
+                    version='v1',
+                    code=None
+                ),
+            ]
+        )
+        reference = self.get_structure(
+            expression=dict(uri="/users/Me/sources/MySource/v1/", mappings="*"))
+        self.assertEqual(
+            reference,
+            [
+                dict(
+                    expression='/users/Me/sources/MySource/v1/mappings/',
+                    system='/users/Me/sources/MySource/',
+                    valueset=None,
+                    filter=None,
+                    cascade=None,
+                    reference_type='mappings',
+                    version='v1',
+                    code=None
+                ),
+            ]
+        )
+        reference = self.get_structure(
+            expression=dict(uri="/users/Me/sources/MySource/", concepts="*"))
+        self.assertEqual(
+            reference,
+            [
+                dict(
+                    expression='/users/Me/sources/MySource/concepts/',
+                    system='/users/Me/sources/MySource/',
+                    valueset=None,
+                    filter=None,
+                    cascade=None,
+                    reference_type='concepts',
+                    version=None,
+                    code=None
+                ),
+            ]
+        )
+        reference = self.get_structure(
+            expression=dict(uri="/users/Me/sources/MySource/", mappings="*"))
+        self.assertEqual(
+            reference,
+            [
+                dict(
+                    expression='/users/Me/sources/MySource/mappings/',
+                    system='/users/Me/sources/MySource/',
+                    valueset=None,
+                    filter=None,
+                    cascade=None,
+                    reference_type='mappings',
+                    version=None,
+                    code=None
+                ),
+            ]
         )

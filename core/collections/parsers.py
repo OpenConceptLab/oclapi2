@@ -3,18 +3,54 @@ from urllib import parse
 from django.urls import resolve
 from pydash import get
 
-from core.collections.constants import CONCEPT_REFERENCE_TYPE, MAPPING_REFERENCE_TYPE
+from core.collections.constants import CONCEPT_REFERENCE_TYPE, MAPPING_REFERENCE_TYPE, ALL_SYMBOL
 from core.collections.models import CollectionReference
 from core.collections.utils import is_concept, is_mapping
 from core.common.utils import to_parent_uri
+
+
+class CollectionReferenceSourceAllExpressionToStructuredParser:
+    """
+    1. This parser is specifically to convert old style source concepts/mappings all expression to expanded syntax
+    2. This only works for OCL relative urls
+    3. Accepts expression in the form of:
+        {
+            "uri": "/orgs/MyOrg/sources/MySource/<?version>/",
+            "concepts": "*",
+            "mappings": "*"
+        }
+    """
+    def __init__(self, expression):
+        self.expression = expression
+        self.expression_str = None
+
+    def set_expression_string(self):
+        self.expression_str = self.expression.get('uri', '')
+
+    def parse(self):
+        self.set_expression_string()
+
+    def to_reference_structure(self):
+        references = []
+        if self.expression.get('concepts') == ALL_SYMBOL:
+            parser = CollectionReferenceExpressionStringToStructuredParser(self.expression_str + 'concepts/')
+            parser.parse()
+            references.append(parser.to_reference_structure())
+        if self.expression.get('mappings') == ALL_SYMBOL:
+            parser = CollectionReferenceExpressionStringToStructuredParser(self.expression_str + 'mappings/')
+            parser.parse()
+            references.append(parser.to_reference_structure())
+
+        return references
 
 
 class CollectionReferenceExpressionStringToStructuredParser:
     """
     1. This parser is specifically to convert old style reference syntax to new expanded reference syntax.
     2. This only works for OCL relative uris
+    3. Accepts only string expressions
     """
-    def __init__(self, expression, cascade=None):  # expression may be a string or object
+    def __init__(self, expression, cascade=None):
         self.expression = expression
         self.cascade = cascade
         self.is_unknown = False
