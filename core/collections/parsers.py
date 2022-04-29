@@ -1,7 +1,7 @@
 from urllib import parse
 
 from django.urls import resolve
-from pydash import get
+from pydash import get, compact
 
 from core.collections.constants import CONCEPT_REFERENCE_TYPE, MAPPING_REFERENCE_TYPE, ALL_SYMBOL
 from core.collections.models import CollectionReference
@@ -9,7 +9,39 @@ from core.collections.utils import is_concept, is_mapping
 from core.common.utils import to_parent_uri
 
 
-class CollectionReferenceSourceAllExpressionToStructuredParser:
+class CollectionReferenceOldStyleToExpandedStructureParser:
+    def __init__(self, expression, cascade=None):
+        self.expression = expression
+        self.cascade = cascade
+        self.references = []
+        self.parsers = []
+        self.instances = []
+
+    def parse(self):
+        if isinstance(self.expression, dict):
+            if self.expression.get('uri'):
+                self.parsers.append(CollectionReferenceSourceAllExpressionParser(self.expression))
+
+            for attr in ['concepts', 'mappings', 'expressions']:
+                if self.expression.get(attr) and isinstance(self.expression.get(attr), list):
+                    for expression in self.expression[attr]:
+                        self.parsers.append(CollectionReferenceExpressionStringParser(expression, self.cascade))
+        elif isinstance(self.expression, list):
+            self.parsers.append(CollectionReferenceExpressionStringParser(self.expression, self.cascade))
+        for parser in self.parsers:
+            parser.parse()
+            references = parser.to_reference_structure()
+            if not isinstance(references, list):
+                references = compact([references])
+            self.references += references
+
+    def to_objects(self):
+        for reference in self.references:
+            self.instances.append(CollectionReference(**reference))
+        return self.instances
+
+
+class CollectionReferenceSourceAllExpressionParser:
     """
     1. This parser is specifically to convert old style source concepts/mappings all expression to expanded syntax
     2. This only works for OCL relative urls
@@ -33,18 +65,18 @@ class CollectionReferenceSourceAllExpressionToStructuredParser:
     def to_reference_structure(self):
         references = []
         if self.expression.get('concepts') == ALL_SYMBOL:
-            parser = CollectionReferenceExpressionStringToStructuredParser(self.expression_str + 'concepts/')
+            parser = CollectionReferenceExpressionStringParser(self.expression_str + 'concepts/')
             parser.parse()
             references.append(parser.to_reference_structure())
         if self.expression.get('mappings') == ALL_SYMBOL:
-            parser = CollectionReferenceExpressionStringToStructuredParser(self.expression_str + 'mappings/')
+            parser = CollectionReferenceExpressionStringParser(self.expression_str + 'mappings/')
             parser.parse()
             references.append(parser.to_reference_structure())
 
         return references
 
 
-class CollectionReferenceExpressionStringToStructuredParser:
+class CollectionReferenceExpressionStringParser:
     """
     1. This parser is specifically to convert old style reference syntax to new expanded reference syntax.
     2. This only works for OCL relative uris
