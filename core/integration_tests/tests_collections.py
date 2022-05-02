@@ -53,8 +53,7 @@ class CollectionListViewTest(OCLAPITestCase):
             self.assertFalse(attr in response.data[0])
 
         concept = ConceptFactory()
-        coll.add_references([concept.uri])
-
+        coll.add_expressions(dict(expressions=[concept.uri]), coll.created_by)
         response = self.client.get(
             f'/orgs/{coll.parent.mnemonic}/collections/?contains={concept.uri}'
             f'&includeReferences=true',
@@ -158,7 +157,8 @@ class CollectionListViewTest(OCLAPITestCase):
         self.assertEqual(collection.expansion.mnemonic, 'autoexpand-HEAD')
         self.assertEqual(collection.expansion.concepts.count(), 0)
 
-        concept = ConceptFactory()
+        source = OrganizationSourceFactory(organization=org)
+        concept = ConceptFactory(parent=source)
         response = self.client.put(
             '/orgs/org/collections/coll/references/',
             dict(data=dict(concepts=[concept.uri])),
@@ -204,8 +204,8 @@ class CollectionListViewTest(OCLAPITestCase):
         self.assertEqual(str(collection.id), response.data['uuid'])
         self.assertIsNone(collection.expansion_uri)
         self.assertEqual(collection.expansions.count(), 0)
-
-        concept = ConceptFactory()
+        source = OrganizationSourceFactory(organization=org)
+        concept = ConceptFactory(parent=source)
         response = self.client.put(
             '/orgs/org/collections/coll/references/',
             dict(data=dict(concepts=[concept.uri])),
@@ -544,9 +544,7 @@ class CollectionReferencesViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 202)
         self.assertEqual(response.data, [])
-        add_references_mock.delay.assert_called_once_with(
-            self.user.id, dict(concepts='*'), self.collection.id, False, False, False
-        )
+        add_references_mock.delay.assert_called_once_with(self.user.id, dict(concepts='*'), self.collection.id, '', '')
 
     def test_put_200_specific_expression(self):
         response = self.client.put(
@@ -1209,7 +1207,10 @@ class ExportCollectionTaskTest(OCLAPITestCase):
         collection.expansion_uri = expansion.uri
         collection.save()
 
-        collection.add_references([concept1.uri, concept2.uri, mapping.uri])
+        collection.add_expressions(
+            data=dict(expressions=[concept1.uri, concept2.uri, mapping.uri]), user=collection.created_by,
+            transform='resourceversions'
+        )
         collection.refresh_from_db()
 
         export_collection(collection.id)  # pylint: disable=no-value-for-parameter
@@ -1282,7 +1283,8 @@ class CollectionConceptsViewTest(OCLAPITestCase):
         concept1 = ConceptFactory(parent=source1, mnemonic='concept')
         concept2 = ConceptFactory(parent=source2, mnemonic='concept')
         concept3 = ConceptFactory(parent=source2, mnemonic='concept3')
-        self.collection.add_references([concept1.uri, concept2.uri, concept3.uri])
+        self.collection.add_expressions(
+            dict(expressions=[concept1.uri, concept2.uri, concept3.uri]), self.collection.created_by)
 
         response = self.client.get(
             self.collection.concepts_url,
@@ -1323,7 +1325,7 @@ class CollectionConceptsViewTest(OCLAPITestCase):
         source2 = OrganizationSourceFactory()
         concept1 = ConceptFactory(parent=source1, mnemonic='concept')
         concept2 = ConceptFactory(parent=source2, mnemonic='concept')
-        self.collection.add_references([concept1.uri, concept2.uri])
+        self.collection.add_expressions(dict(expressions=[concept1.uri, concept2.uri]), self.collection.created_by)
 
         response = self.client.get(
             self.collection.concepts_url + 'concept/',
@@ -1340,16 +1342,16 @@ class CollectionConceptsViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data['uuid'], str(concept2.get_latest_version().id))
+        self.assertEqual(response.data['uuid'], str(concept2.id))
 
         response = self.client.get(
-            self.collection.concepts_url + f'concept/{concept2.get_latest_version().version}/?uri=' + concept2.uri,
+            self.collection.concepts_url + f'concept/{concept2.version}/?uri=' + concept2.uri,
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data['uuid'], str(concept2.get_latest_version().id))
+        self.assertEqual(response.data['uuid'], str(concept2.id))
 
 
 class CollectionMappingsViewTest(OCLAPITestCase):
@@ -1377,7 +1379,8 @@ class CollectionMappingsViewTest(OCLAPITestCase):
         mapping1 = MappingFactory(parent=source1, mnemonic='mapping')
         mapping2 = MappingFactory(parent=source2, mnemonic='mapping')
         mapping3 = MappingFactory(parent=source2, mnemonic='mapping3')
-        self.collection.add_references([mapping1.uri, mapping2.uri, mapping3.uri])
+        self.collection.add_expressions(
+            dict(expressions=[mapping1.uri, mapping2.uri, mapping3.uri]), self.collection.created_by)
 
         response = self.client.get(
             self.collection.mappings_url,
@@ -1418,8 +1421,7 @@ class CollectionMappingsViewTest(OCLAPITestCase):
         source2 = OrganizationSourceFactory()
         mapping1 = MappingFactory(parent=source1, mnemonic='mapping')
         mapping2 = MappingFactory(parent=source2, mnemonic='mapping')
-        self.collection.add_references([mapping1.uri, mapping2.uri])
-
+        self.collection.add_expressions(dict(expressions=[mapping1.uri, mapping2.uri]), self.collection.created_by)
         response = self.client.get(
             self.collection.mappings_url + 'mapping/',
             HTTP_AUTHORIZATION='Token ' + self.token,
@@ -1435,16 +1437,16 @@ class CollectionMappingsViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data['uuid'], str(mapping2.get_latest_version().id))
+        self.assertEqual(response.data['uuid'], str(mapping2.id))
 
         response = self.client.get(
-            self.collection.mappings_url + f'mapping/{mapping2.get_latest_version().version}/?uri=' + mapping2.uri,
+            self.collection.mappings_url + f'mapping/{mapping2.version}/?uri=' + mapping2.uri,
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data['uuid'], str(mapping2.get_latest_version().id))
+        self.assertEqual(response.data['uuid'], str(mapping2.id))
 
 
 class CollectionLogoViewTest(OCLAPITestCase):

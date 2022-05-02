@@ -523,7 +523,7 @@ class SourceVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         concept = ConceptFactory(parent=self.source_v1)
 
         collection = OrganizationCollectionFactory(public_access='None', autoexpand_head=False)
-        collection.add_references([concept.uri])
+        collection.add_expressions(dict(expressions=[concept.uri]), collection.created_by)
         self.assertEqual(collection.expansions.count(), 0)
         self.assertEqual(collection.references.count(), 1)
 
@@ -555,7 +555,7 @@ class SourceVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         collection.expansion_uri = expansion.uri
         collection.autoexpand_head = True
         collection.save()
-        collection.add_references([concept2.uri])
+        collection.add_expressions(dict(expressions=[concept2.uri]), collection.created_by)
         self.assertEqual(collection.expansion.concepts.count(), 1)
         self.assertEqual(collection.references.count(), 2)
 

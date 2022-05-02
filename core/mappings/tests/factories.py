@@ -2,6 +2,7 @@ import factory
 from factory import SubFactory
 from pydash import get
 
+from core.common.constants import HEAD
 from core.concepts.tests.factories import ConceptFactory
 from core.mappings.constants import SAME_AS
 from core.mappings.models import Mapping
@@ -28,6 +29,7 @@ class MappingFactory(factory.django.DjangoModelFactory):
     from_concept = SubFactory(ConceptFactory)
     to_concept = SubFactory(ConceptFactory)
     map_type = SAME_AS
+    version = HEAD
 
     @factory.post_generation
     def populate_fields(self, create, _):

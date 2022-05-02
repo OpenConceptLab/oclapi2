@@ -143,7 +143,7 @@ class OrganizationTest(OCLTestCase):
         expansion = ExpansionFactory(collection_version=collection)
         collection.expansion_uri = expansion.uri
         collection.save()
-        collection.add_references([concept.uri, mapping.uri])
+        collection.add_expressions(dict(expressions=[concept.uri, mapping.uri]), collection.created_by)
 
         self.assertEqual(org.source_set.count(), 1)
         self.assertEqual(org.collection_set.count(), 1)

@@ -3,16 +3,18 @@ from urllib import parse
 from django.urls import resolve
 from pydash import get, compact, flatten
 
-from core.collections.constants import CONCEPT_REFERENCE_TYPE, MAPPING_REFERENCE_TYPE, ALL_SYMBOL
-from core.collections.models import CollectionReference
+from core.collections.constants import CONCEPT_REFERENCE_TYPE, MAPPING_REFERENCE_TYPE, ALL_SYMBOL, SOURCE_TO_CONCEPTS, \
+    SOURCE_MAPPINGS
 from core.collections.utils import is_concept, is_mapping
-from core.common.utils import to_parent_uri
+from core.common.utils import to_parent_uri, drop_version
 
 
 class CollectionReferenceAbstractParser:
-    def __init__(self, expression, cascade=None):
+    def __init__(self, expression, transform=None, cascade=None, user=None):
         self.expression = expression
+        self.transform = transform
         self.cascade = cascade
+        self.user = user
         self.references = []
         self.parsers = []
         self.instances = []
@@ -21,13 +23,14 @@ class CollectionReferenceAbstractParser:
         pass
 
     def to_reference_structure(self):
+        self.references = []
         for parser in self.parsers:
-            references = parser.to_reference_structure()
-            self.references += references
+            self.references += parser.to_reference_structure()
         self.references = compact(flatten(self.references))
         return self.references
 
     def to_objects(self):
+        from core.collections.models import CollectionReference
         for reference in self.references:
             self.instances.append(CollectionReference(**reference))
         return self.instances
@@ -45,11 +48,33 @@ class CollectionReferenceParser(CollectionReferenceAbstractParser):
 
     def parse(self):
         if self.is_old_style_expression():
-            self.parsers.append(CollectionReferenceOldStyleToExpandedStructureParser(self.expression, self.cascade))
+            self.parsers.append(
+                CollectionReferenceOldStyleToExpandedStructureParser(
+                    self.expression, self.transform, self.cascade, self.user))
         else:
-            self.parsers.append(CollectionReferenceExpandedStructureParser(self.expression, self.cascade))
+            self.parsers.append(
+                CollectionReferenceExpandedStructureParser(
+                    self.expression, self.transform, self.cascade, self.user))
         for parser in self.parsers:
             parser.parse()
+
+    def to_objects(self):
+        from core.collections.models import CollectionReference
+        cascade_to_concepts = self.cascade == SOURCE_TO_CONCEPTS
+        cascade_mappings = self.cascade == SOURCE_MAPPINGS
+        should_cascade_now = cascade_mappings or cascade_to_concepts
+        for reference in self.references:
+            collection_reference = CollectionReference(**reference)
+            if should_cascade_now and collection_reference.code:
+                uris = collection_reference.get_related_uris()
+                for uri in uris:
+                    existing_uris = [collection_reference.expression, drop_version(collection_reference.expression)]
+                    if uri not in existing_uris and drop_version(uri) not in existing_uris:
+                        parser = CollectionReferenceExpressionStringParser(uri, self.transform)
+                        parser.parse()
+                        self.instances.append(CollectionReference(**parser.to_reference_structure()[0]))
+            self.instances.append(collection_reference)
+        return self.instances
 
 
 class CollectionReferenceExpandedStructureParser(CollectionReferenceAbstractParser):
@@ -62,7 +87,7 @@ class CollectionReferenceExpandedStructureParser(CollectionReferenceAbstractPars
             for expression in self.expression:
                 self.references.append(self.to_reference_structure(expression))
 
-    def to_reference_structure(self, expression=None):
+    def to_reference_structure(self, expression=None):  # pylint: disable=arguments-differ
         expression = expression or self.expression
         self.references = [dict(
             expression=None,
@@ -73,6 +98,7 @@ class CollectionReferenceExpandedStructureParser(CollectionReferenceAbstractPars
             cascade=get(expression, 'cascade') or self.cascade,
             filter=get(expression, 'filter'),
             code=get(expression, 'code'),
+            created_by=self.user
         )]
         return self.references
 
@@ -86,13 +112,16 @@ class CollectionReferenceOldStyleToExpandedStructureParser(CollectionReferenceAb
             for attr in ['concepts', 'mappings', 'expressions']:
                 if self.expression.get(attr) and isinstance(self.expression.get(attr), list):
                     for expression in self.expression[attr]:
-                        self.parsers.append(CollectionReferenceExpressionStringParser(expression, self.cascade))
+                        self.parsers.append(CollectionReferenceExpressionStringParser(
+                            expression, self.transform, self.cascade, self.user))
         elif isinstance(self.expression, list):
             for expression in self.expression:
                 if isinstance(expression, str):
-                    self.parsers.append(CollectionReferenceExpressionStringParser(expression, self.cascade))
+                    self.parsers.append(
+                        CollectionReferenceExpressionStringParser(expression, self.transform, self.cascade, self.user))
         elif isinstance(self.expression, str):
-            self.parsers.append(CollectionReferenceExpressionStringParser(self.expression, self.cascade))
+            self.parsers.append(
+                CollectionReferenceExpressionStringParser(self.expression, self.transform, self.cascade, self.user))
         for parser in self.parsers:
             parser.parse()
 
@@ -109,8 +138,8 @@ class CollectionReferenceSourceAllExpressionParser(CollectionReferenceAbstractPa
         }
     """
 
-    def __init__(self, expression, cascade=None):
-        super().__init__(expression, cascade)
+    def __init__(self, expression, transform=None, cascade=None, user=None):
+        super().__init__(expression, transform, cascade, user)
         self.expression_str = None
 
     def set_expression_string(self):
@@ -120,12 +149,15 @@ class CollectionReferenceSourceAllExpressionParser(CollectionReferenceAbstractPa
         self.set_expression_string()
 
     def to_reference_structure(self):
+        self.references = []
         if self.expression.get('concepts') == ALL_SYMBOL:
-            parser = CollectionReferenceExpressionStringParser(self.expression_str + 'concepts/')
+            parser = CollectionReferenceExpressionStringParser(
+                self.expression_str + 'concepts/', self.transform, self.cascade, self.user)
             parser.parse()
             self.references.append(parser.to_reference_structure())
         if self.expression.get('mappings') == ALL_SYMBOL:
-            parser = CollectionReferenceExpressionStringParser(self.expression_str + 'mappings/')
+            parser = CollectionReferenceExpressionStringParser(
+                self.expression_str + 'mappings/', self.transform, self.cascade, self.user)
             parser.parse()
             self.references.append(parser.to_reference_structure())
 
@@ -139,14 +171,15 @@ class CollectionReferenceExpressionStringParser(CollectionReferenceAbstractParse
     3. Accepts only string expressions
     """
 
-    def __init__(self, expression, cascade=None):
-        super().__init__(expression, cascade)
+    def __init__(self, expression, transform=None, cascade=None, user=None):
+        super().__init__(expression, transform, cascade, user)
         self.is_unknown = False
         self.reference_type = None
         self.system = None
         self.version = None
         self.filter = None
         self.code = None
+        self.resource_version = None
         self.valueset = None
         self.kwargs = None
 
@@ -186,6 +219,7 @@ class CollectionReferenceExpressionStringParser(CollectionReferenceAbstractParse
 
     def set_filter(self):
         if '?' in self.expression:
+            from core.collections.models import CollectionReference
             self.filter = []
             querystring = self.expression.split('?')[1]
             params = parse.parse_qs(querystring)
@@ -203,13 +237,16 @@ class CollectionReferenceExpressionStringParser(CollectionReferenceAbstractParse
     def set_code(self):
         self.code = get(self.kwargs, 'concept') or get(self.kwargs, 'mapping')
 
+    def set_resource_version(self):
+        self.resource_version = get(self.kwargs, 'concept_version') or get(self.kwargs, 'mapping_version')
+
     def check_unknown_expression(self):
         self.is_unknown = not self.kwargs
 
     def resolve_expression(self):
         try:
             self.kwargs = resolve(self.expression.split('?')[0]).kwargs
-        except:
+        except:  # pylint: disable=bare-except
             self.kwargs = False
 
     def parse(self):
@@ -223,6 +260,7 @@ class CollectionReferenceExpressionStringParser(CollectionReferenceAbstractParse
             self.set_system()
             self.set_valueset()
             self.set_code()
+            self.set_resource_version()
 
     def to_reference_structure(self):
         self.references = [dict(
@@ -232,7 +270,10 @@ class CollectionReferenceExpressionStringParser(CollectionReferenceAbstractParse
             system=self.system,
             version=self.version,
             code=self.code,
+            resource_version=self.resource_version,
             valueset=self.valueset,
             filter=self.filter,
+            transform=self.transform,
+            created_by=self.user
         )]
         return self.references

@@ -764,7 +764,9 @@ class ConceptContainerModel(VersionedModel):
     def can_view_all_content(self, user):
         if get(user, 'is_anonymous'):
             return False
-        return get(user, 'is_staff') or self.user_id == user.id or self.organization.members.filter(id=user.id).exists()
+        return get(
+            user, 'is_staff'
+        ) or self.public_can_view or self.user_id == user.id or self.organization.members.filter(id=user.id).exists()
 
     @classmethod
     def resolve_expression_to_version(cls, expression):

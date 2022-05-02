@@ -340,21 +340,17 @@ class CollectionReferencesView(
 
     def update(self, request, *args, **kwargs):  # pylint: disable=too-many-locals,unused-argument # Fixme: Sny
         collection = self.get_object()
-        cascade_to_concepts = self.should_cascade_to_concepts()
-        cascade_mappings = cascade_to_concepts or self.should_cascade_mappings()
-        transform_to_resource_version = self.should_transform_to_resource_version()
         data = request.data.get('data')
         concept_expressions = data.get('concepts', [])
         mapping_expressions = data.get('mappings', [])
         expressions = data.get('expressions', [])
+        cascade = self.request.query_params.get('cascade', '').lower()
+        transform = self.request.query_params.get('transformReferences', '').lower()
 
         adding_all = mapping_expressions == '*' or concept_expressions == '*'
 
         if adding_all:
-            result = add_references.delay(
-                self.request.user.id, data, collection.id, cascade_mappings, cascade_to_concepts,
-                transform_to_resource_version
-            )
+            result = add_references.delay(self.request.user.id, data, collection.id, cascade, transform)
             return Response(
                 dict(
                     state=result.state, username=request.user.username, task=result.task_id, queue='default'
@@ -362,9 +358,7 @@ class CollectionReferencesView(
                 status=status.HTTP_202_ACCEPTED
             )
 
-        (added_references, errors) = collection.add_expressions(
-            data, request.user, cascade_mappings, cascade_to_concepts, transform_to_resource_version
-        )
+        (added_references, errors) = collection.add_expressions(data, request.user, cascade, transform)
 
         all_expressions = expressions + concept_expressions + mapping_expressions
         added_expressions = set()
@@ -382,11 +376,12 @@ class CollectionReferencesView(
             if response_item:
                 response.append(response_item)
 
-        for ref in added_references:
-            if ref.concepts:
-                collection.batch_index(ref.concepts, ConceptDocument)
-            if ref.mappings:
-                collection.batch_index(ref.mappings, MappingDocument)
+        if collection.expansion_uri:
+            for ref in added_references:
+                if ref.concepts:
+                    collection.batch_index(ref.concepts, ConceptDocument)
+                if ref.mappings:
+                    collection.batch_index(ref.mappings, MappingDocument)
 
         return Response(response, status=status.HTTP_200_OK)
 

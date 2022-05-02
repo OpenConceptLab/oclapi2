@@ -1,5 +1,4 @@
 from django.core.exceptions import ValidationError
-from django.db.models import QuerySet
 from mock import patch, Mock, PropertyMock
 
 from core.collections.documents import CollectionDocument
@@ -13,10 +12,9 @@ from core.collections.utils import is_mapping, is_concept, is_version_specified,
     get_concept_by_expression
 from core.common.constants import CUSTOM_VALIDATION_SCHEMA_OPENMRS
 from core.common.tasks import add_references, seed_children_to_new_version
-from core.common.tasks import update_collection_active_mappings_count
 from core.common.tasks import update_collection_active_concepts_count
+from core.common.tasks import update_collection_active_mappings_count
 from core.common.tests import OCLTestCase
-from core.common.utils import drop_version
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory, LocalizedTextFactory
@@ -43,7 +41,7 @@ class CollectionTest(OCLTestCase):
     def test_is_versioned(self):
         self.assertTrue(Collection().is_versioned)
 
-    def test_add_references(self):
+    def test_add_expressions(self):
         collection = OrganizationCollectionFactory()
         expansion = ExpansionFactory(collection_version=collection)
         collection.expansion_uri = expansion.uri
@@ -57,16 +55,16 @@ class CollectionTest(OCLTestCase):
         concept = ConceptFactory(parent=source, sources=[source])
         concept_expression = concept.uri
 
-        collection.add_references([concept_expression])
+        collection.add_expressions(dict(expressions=[concept_expression]), collection.created_by)
         collection.refresh_from_db()
 
         self.assertEqual(collection.expansion.concepts.count(), 1)
         self.assertEqual(collection.references.count(), 1)
         self.assertEqual(collection.references.first().expression, concept.uri)
-        self.assertEqual(collection.expansion.concepts.first().id, concept.get_latest_version().id)
+        self.assertEqual(collection.expansion.concepts.first().id, concept.id)
         self.assertEqual(collection.active_concepts, 1)
 
-        _, errors = collection.add_references([concept_expression])
+        _, errors = collection.add_expressions(dict(concepts=[concept_expression]), collection.created_by)
         self.assertEqual(
             errors, {concept_expression: ['Concept or Mapping reference name must be unique in a collection.']}
         )
@@ -75,7 +73,7 @@ class CollectionTest(OCLTestCase):
         self.assertEqual(collection.references.count(), 1)
         self.assertEqual(collection.active_concepts, 1)
 
-    def test_add_references_openmrs_schema(self):
+    def test_add_expressions_openmrs_schema(self):
         collection = OrganizationCollectionFactory(custom_validation_schema=CUSTOM_VALIDATION_SCHEMA_OPENMRS)
         expansion = ExpansionFactory(collection_version=collection)
         collection.expansion_uri = expansion.uri
@@ -88,15 +86,15 @@ class CollectionTest(OCLTestCase):
         concept = ConceptFactory(parent=source, sources=[source])
         concept_expression = concept.uri
 
-        collection.add_references([concept_expression])
+        collection.add_expressions(dict(expressions=[concept_expression]), collection.created_by)
 
         self.assertEqual(collection.references.count(), 1)
         self.assertEqual(collection.references.first().expression, concept.uri)
         self.assertEqual(collection.expansion.concepts.count(), 1)
-        self.assertEqual(collection.expansion.concepts.first(), concept.get_latest_version())
+        self.assertEqual(collection.expansion.concepts.first(), concept)
 
         concept2 = ConceptFactory(parent=source, sources=[source])
-        collection.add_references([concept2.uri])
+        collection.add_expressions(dict(expressions=[concept2.uri]), collection.created_by)
 
         self.assertEqual(collection.expansion.concepts.count(), 2)
         self.assertEqual(collection.references.count(), 2)
@@ -110,7 +108,7 @@ class CollectionTest(OCLTestCase):
         concept1 = ConceptFactory(parent=source)
         concept2 = ConceptFactory(parent=source)
         mapping = MappingFactory(from_concept=concept1, to_concept=concept2, parent=source)
-        collection.add_references([concept1.uri, concept2.uri, mapping.uri])
+        collection.add_expressions(dict(expressions=[concept1.uri, concept2.uri, mapping.uri]), collection.created_by)
 
         self.assertEqual(collection.expansion.concepts.count(), 2)
         self.assertEqual(collection.expansion.mappings.count(), 1)
@@ -122,7 +120,7 @@ class CollectionTest(OCLTestCase):
         self.assertEqual(collection.expansion.concepts.count(), 1)
         self.assertEqual(collection.expansion.mappings.count(), 0)
         self.assertEqual(collection.references.count(), 1)
-        self.assertEqual(collection.expansion.concepts.first().uri, concept1.get_latest_version().uri)
+        self.assertEqual(collection.expansion.concepts.first().uri, concept1.uri)
         self.assertEqual(collection.references.first().expression, concept1.uri)
 
     def test_seed_references(self):
@@ -144,7 +142,7 @@ class CollectionTest(OCLTestCase):
         concept = ConceptFactory(parent=source, sources=[source])
         concept_expression = concept.uri
 
-        collection1.add_references([concept_expression])
+        collection1.add_expressions(dict(expressions=[concept_expression]), collection1.created_by)
 
         self.assertEqual(collection1.references.count(), 1)
         self.assertEqual(collection2.references.count(), 0)
@@ -377,78 +375,6 @@ class CollectionReferenceTest(OCLTestCase):
         self.assertTrue(isinstance(reference._concepts[0], Concept))  # pylint: disable=protected-access
         self.assertEqual(reference._concepts[0].id, concept.get_latest_version().id)  # pylint: disable=protected-access
 
-    def test_get_concepts(self):
-        reference = CollectionReference()
-        reference.expression = '/unknown/uri/'
-
-        unknown_expression_concepts = reference.get_concepts()
-
-        self.assertTrue(isinstance(unknown_expression_concepts, QuerySet))
-        self.assertFalse(unknown_expression_concepts.exists())
-
-        concept = ConceptFactory()
-        reference.expression = concept.uri
-
-        concepts = reference.get_concepts()
-
-        self.assertTrue(isinstance(concepts, QuerySet))
-        self.assertEqual(concepts.count(), 1)
-        self.assertEqual(concepts.first(), concept.get_latest_version())
-
-        ConceptFactory(parent=concept.parent, version='v1', mnemonic=concept.mnemonic, versioned_object=concept)
-        reference.expression = drop_version(concept.uri) + 'versions/'
-
-        concepts = reference.get_concepts().order_by('created_at')
-
-        self.assertTrue(isinstance(concepts, QuerySet))
-        self.assertEqual(concepts.count(), 2)
-        self.assertListEqual(list(concepts.all()), list(concept.versions.all()))
-
-    @patch('core.collections.models.api_get')
-    def test_fetch_uris(self, api_get_mock):
-        concept = ConceptFactory()
-        latest_version = concept.get_latest_version()
-        api_get_mock.return_value = [
-            dict(
-                id=concept.mnemonic,
-                url=concept.uri,
-                version_url=latest_version.url
-            )
-        ]
-
-        ref = CollectionReference(expression=latest_version.version_url)
-
-        self.assertEqual(
-            ref.fetch_uris(concept.created_by), [latest_version.version_url]
-        )
-        api_get_mock.assert_called_once_with(
-            latest_version.version_url, concept.created_by
-        )
-
-    def test_fetch_concepts_via_api(self):
-        concept = ConceptFactory()
-        ref = CollectionReference(expression='/some/expression/?q=foobar')
-        ref.fetch_uris = Mock(return_value=[concept.url])
-        user_mock = Mock()
-
-        concepts = ref.fetch_concepts(user_mock)
-
-        self.assertEqual(concepts.count(), 1)
-        self.assertEqual(concepts.first(), concept)
-        ref.fetch_uris.assert_called_once_with(user_mock)
-
-    def test_fetch_mappings_via_api(self):
-        mapping = MappingFactory()
-        ref = CollectionReference(expression='/some/expression/?q=foobar')
-        ref.fetch_uris = Mock(return_value=[mapping.url])
-        user_mock = Mock()
-
-        mappings = ref.fetch_mappings(user_mock)
-
-        self.assertEqual(mappings.count(), 1)
-        self.assertEqual(mappings.first(), mapping)
-        ref.fetch_uris.assert_called_once_with(user_mock)
-
     def test_concept_filter_schema(self):
         ref = CollectionReference(expression='/concepts/', filter=None)
         ref.clean()
@@ -490,44 +416,217 @@ class CollectionReferenceTest(OCLTestCase):
         ref.clean()
 
     def test_mapping_filter_schema(self):
-        ref = CollectionReference(expression='/mappings/', filter=None)
+        ref = CollectionReference(expression='/mappings/', filter=None, reference_type='mappings')
         ref.clean()
-        ref = CollectionReference(expression='/mappings/', filter='')
+        ref = CollectionReference(expression='/mappings/', filter='', reference_type='mappings')
         ref.clean()
-        ref = CollectionReference(expression='/mappings/', filter=[])
+        ref = CollectionReference(expression='/mappings/', filter=[], reference_type='mappings')
         ref.clean()
 
         with self.assertRaises(ValidationError):
-            ref = CollectionReference(expression='/mappings/', filter=[{}, {}])
+            ref = CollectionReference(expression='/mappings/', filter=[{}, {}], reference_type='mappings')
             ref.clean()
 
         with self.assertRaises(ValidationError):
-            ref = CollectionReference(expression='/mappings/', filter=[{'foo': 'bar'}])
+            ref = CollectionReference(expression='/mappings/', filter=[{'foo': 'bar'}], reference_type='mappings')
             ref.clean()
         with self.assertRaises(ValidationError):
-            ref = CollectionReference(expression='/mappings/', filter=[{'property': 'bar'}])
-            ref.clean()
-        with self.assertRaises(ValidationError):
-            ref = CollectionReference(
-                expression='/mappings/', filter=[{'property': 'concept_class', 'value': 'foobar', 'op': '='}])
+            ref = CollectionReference(expression='/mappings/', filter=[{'property': 'bar'}], reference_type='mappings')
             ref.clean()
         with self.assertRaises(ValidationError):
             ref = CollectionReference(
-                expression='/mappings/', filter=[{'property': 'map_type', 'value': 'foobar', 'op': 'foobar'}])
+                expression='/mappings/',
+                reference_type='mappings',
+                filter=[{'property': 'concept_class', 'value': 'foobar', 'op': '='}])
+            ref.clean()
+        with self.assertRaises(ValidationError):
+            ref = CollectionReference(
+                expression='/mappings/',
+                reference_type='mappings',
+                filter=[{'property': 'map_type', 'value': 'foobar', 'op': 'foobar'}])
             ref.clean()
         with self.assertRaises(ValidationError) as ex:
             ref = CollectionReference(
-                expression='/mappings/', filter=[{'property': 'map_type', 'value': 'foobar', 'op': 'not in'}])
+                expression='/mappings/',
+                reference_type='mappings',
+                filter=[{'property': 'map_type', 'value': 'foobar', 'op': 'not in'}])
             ref.clean()
 
         self.assertEqual(ex.exception.message_dict, dict(filter=['Invalid filter schema.']))
 
         ref = CollectionReference(
-            expression='/mappings/', filter=[{'property': 'map_type', 'value': 'foobar', 'op': '='}])
+            expression='/mappings/',
+            reference_type='mappings',
+            filter=[{'property': 'map_type', 'value': 'foobar', 'op': '='}])
         ref.clean()
         ref = CollectionReference(
-            expression='/mappings/', filter=[{'property': 'external_id', 'value': 'foobar', 'op': 'in'}])
+            expression='/mappings/',
+            reference_type='mappings',
+            filter=[{'property': 'external_id', 'value': 'foobar', 'op': 'in'}])
         ref.clean()
+
+    def test_get_concepts(self):  # pylint: disable=too-many-locals,too-many-statements
+        source = OrganizationSourceFactory()
+        source_v1 = OrganizationSourceFactory(organization=source.organization, mnemonic=source.mnemonic, version='v1')
+        coll1 = OrganizationCollectionFactory()
+        coll1_v1 = OrganizationCollectionFactory(organization=coll1.organization, mnemonic=coll1.mnemonic, version='v1')
+        coll2 = OrganizationCollectionFactory()
+        coll2_v1 = OrganizationCollectionFactory(organization=coll2.organization, mnemonic=coll2.mnemonic, version='v1')
+
+        concept1 = ConceptFactory(parent=source)
+        prev_latest_version = concept1.get_latest_version()
+        prev_latest_version.is_latest_version = True
+        prev_latest_version.save()
+        Concept.create_new_version_for(concept1.clone(), {}, concept1.created_by)
+        concept1_latest = concept1.get_latest_version()
+
+        concept1.sources.add(source)
+        concept1_latest.sources.add(source)
+        prev_latest_version.sources.add(source_v1)
+        expansion_coll1 = ExpansionFactory(collection_version=coll1)
+        coll1.expansion_uri = expansion_coll1.uri
+        coll1.save()
+        expansion_coll1_v1 = ExpansionFactory(collection_version=coll1_v1)
+        coll1_v1.expansion_uri = expansion_coll1_v1.uri
+        coll1_v1.save()
+
+        concept2 = ConceptFactory(parent=source)
+        expansion_coll1_v1.concepts.add(concept1_latest)
+
+        mapping1 = MappingFactory(from_concept=concept1, to_concept=concept2, parent=source)
+
+        reference = CollectionReference(system=source.uri, created_by=source.created_by)
+        concepts, mappings = reference.get_concepts()
+
+        self.assertEqual(concepts.count(), 2)
+        self.assertEqual(
+            sorted(list(concepts.values_list('id', flat=True))), sorted([concept1.id, concept2.id])
+        )
+        self.assertEqual(mappings.count(), 0)
+
+        reference = CollectionReference(
+            system=source.uri, created_by=source.created_by, cascade=dict(method='sourcemappings')
+        )
+        concepts, mappings = reference.get_concepts()
+
+        self.assertEqual(concepts.count(), 2)
+        self.assertEqual(
+            sorted(list(concepts.values_list('id', flat=True))), sorted([concept1.id, concept2.id])
+        )
+        self.assertEqual(mappings.count(), 1)
+        self.assertEqual(mappings.first().id, mapping1.id)
+
+        reference = CollectionReference(
+            system=source.uri,
+            code=concept1.mnemonic,
+            created_by=source.created_by,
+            cascade=dict(method='sourcemappings')
+        )
+        concepts, mappings = reference.get_concepts()
+
+        self.assertEqual(concepts.count(), 1)
+        self.assertEqual(
+            sorted(list(concepts.values_list('id', flat=True))), sorted([concept1.id])
+        )
+        self.assertEqual(mappings.count(), 1)
+        self.assertEqual(mappings.first().id, mapping1.id)
+
+        reference = CollectionReference(
+            system=source.uri,
+            code=concept1.mnemonic,
+            created_by=source.created_by,
+            cascade=dict(method='sourcetoconcepts')
+        )
+        concepts, mappings = reference.get_concepts()
+
+        self.assertEqual(concepts.count(), 2)
+        self.assertEqual(
+            sorted(list(concepts.values_list('id', flat=True))), sorted([concept1.id, concept2.id])
+        )
+        self.assertEqual(mappings.count(), 1)
+        self.assertEqual(mappings.first().id, mapping1.id)
+
+        reference = CollectionReference(
+            system=source.uri,
+            code=concept1.mnemonic,
+            created_by=source.created_by,
+            cascade=dict(method='sourcetoconcepts'),
+            transform='resourceVersions'
+        )
+        concepts, mappings = reference.get_concepts()
+
+        self.assertEqual(concepts.count(), 2)
+        self.assertEqual(
+            sorted(list(concepts.values_list('id', flat=True))),
+            sorted([concept1_latest.id, concept2.get_latest_version().id])
+        )
+        self.assertEqual(mappings.count(), 1)
+        self.assertEqual(mappings.first().id, mapping1.get_latest_version().id)
+
+        reference = CollectionReference(
+            system=source.uri,
+            valueset=[coll1_v1.uri, coll2_v1.uri],
+            created_by=source.created_by
+        )
+        concepts, mappings = reference.get_concepts()
+
+        self.assertEqual(concepts.count(), 0)
+        self.assertEqual(mappings.count(), 0)
+
+        reference = CollectionReference(
+            system=source.uri,
+            valueset=[coll1_v1.uri],
+            created_by=source.created_by,
+            transform='resourceversions'
+        )
+        concepts, mappings = reference.get_concepts()
+
+        self.assertEqual(concepts.count(), 1)
+        self.assertEqual(
+            sorted(list(concepts.values_list('id', flat=True))), sorted([concept1_latest.id])
+        )
+        self.assertEqual(mappings.count(), 0)
+
+        reference = CollectionReference(
+            system=source.uri,
+            created_by=source.created_by,
+            code=concept1.mnemonic,
+            transform='resourceversions'
+        )
+        concepts, mappings = reference.get_concepts()
+
+        self.assertEqual(concepts.count(), 1)
+        self.assertEqual(
+            sorted(list(concepts.values_list('id', flat=True))), sorted([concept1_latest.id])
+        )
+        self.assertEqual(mappings.count(), 0)
+
+        reference = CollectionReference(
+            system=source.uri,
+            created_by=source.created_by,
+            code=concept1.mnemonic,
+        )
+        concepts, mappings = reference.get_concepts()
+
+        self.assertEqual(concepts.count(), 1)
+        self.assertEqual(
+            sorted(list(concepts.values_list('id', flat=True))), sorted([concept1.id])
+        )
+        self.assertEqual(mappings.count(), 0)
+
+        reference = CollectionReference(
+            system=f"{source.uri}|v1",
+            created_by=source.created_by,
+            code=concept1.mnemonic,
+            resource_version=prev_latest_version.version
+        )
+        concepts, mappings = reference.get_concepts()
+
+        self.assertEqual(concepts.count(), 1)
+        self.assertEqual(
+            sorted(list(concepts.values_list('id', flat=True))), sorted([prev_latest_version.id])
+        )
+        self.assertEqual(mappings.count(), 0)
 
 
 class CollectionUtilsTest(OCLTestCase):
@@ -589,10 +688,10 @@ class TasksTest(OCLTestCase):
         errors = add_references(
             collection.created_by.id,
             dict(expressions=[
-                obj.get_latest_version().version_url for obj in [concept1, concept2, mapping2]
+                obj.get_latest_version().url for obj in [concept1, concept2, mapping2]
             ]),
             collection.id,
-            True
+            'sourcemappings'
         )
 
         self.assertEqual(errors, {})
@@ -601,8 +700,8 @@ class TasksTest(OCLTestCase):
                 collection.references.values_list('expression', flat=True)
             )),
             sorted([
-                concept1.get_latest_version().version_url, concept2.get_latest_version().version_url,
-                mapping1.url, mapping2.get_latest_version().version_url,
+                concept1.get_latest_version().url, concept2.get_latest_version().url,
+                mapping1.url, mapping2.get_latest_version().url,
             ])
         )
 
@@ -617,7 +716,10 @@ class TasksTest(OCLTestCase):
         mapping = MappingFactory()
         concept_latest_version = concept.get_latest_version()
         mapping_latest_version = mapping.get_latest_version()
-        collection.add_references([concept_latest_version.version_url, mapping_latest_version.version_url])
+        collection.add_expressions(
+            dict(expressions=[concept_latest_version.version_url, mapping_latest_version.version_url]),
+            collection.created_by
+        )
 
         self.assertEqual(collection.references.count(), 2)
         self.assertEqual(collection.expansion.concepts.count(), 1)
@@ -651,7 +753,10 @@ class TasksTest(OCLTestCase):
         mapping = MappingFactory()
         concept_latest_version = concept.get_latest_version()
         mapping_latest_version = mapping.get_latest_version()
-        collection.add_references([concept_latest_version.version_url, mapping_latest_version.version_url])
+        collection.add_expressions(
+            dict(expressions=[concept_latest_version.version_url, mapping_latest_version.version_url]),
+            collection.created_by
+        )
 
         self.assertEqual(collection.references.count(), 2)
         self.assertEqual(collection.expansion.concepts.count(), 1)
@@ -1178,7 +1283,10 @@ class CollectionReferenceExpressionStringParserTest(OCLTestCase):
                 cascade=None,
                 reference_type='concepts',
                 version=None,
-                code=None
+                code=None,
+                resource_version=None,
+                transform=None,
+                created_by=None,
             )
         )
 
@@ -1196,7 +1304,10 @@ class CollectionReferenceExpressionStringParserTest(OCLTestCase):
                 cascade=None,
                 reference_type='concepts',
                 version=None,
-                code=None
+                code=None,
+                resource_version=None,
+                transform=None,
+                created_by=None,
             )
         )
 
@@ -1211,7 +1322,10 @@ class CollectionReferenceExpressionStringParserTest(OCLTestCase):
                 cascade=None,
                 reference_type='concepts',
                 version=None,
-                code=None
+                code=None,
+                resource_version=None,
+                transform=None,
+                created_by=None,
             )
         )
 
@@ -1226,7 +1340,10 @@ class CollectionReferenceExpressionStringParserTest(OCLTestCase):
                 cascade=None,
                 reference_type='concepts',
                 version='v1',
-                code=None
+                code=None,
+                resource_version=None,
+                transform=None,
+                created_by=None,
             )
         )
 
@@ -1241,7 +1358,10 @@ class CollectionReferenceExpressionStringParserTest(OCLTestCase):
                 cascade=None,
                 reference_type='concepts',
                 version='v1',
-                code='1234'
+                code='1234',
+                resource_version=None,
+                transform=None,
+                created_by=None,
             )
         )
 
@@ -1256,7 +1376,10 @@ class CollectionReferenceExpressionStringParserTest(OCLTestCase):
                 cascade=None,
                 reference_type='concepts',
                 version=None,
-                code='1234'
+                code='1234',
+                resource_version=None,
+                transform=None,
+                created_by=None,
             )
         )
 
@@ -1272,7 +1395,10 @@ class CollectionReferenceExpressionStringParserTest(OCLTestCase):
                 cascade='sourceToConcept',
                 reference_type='concepts',
                 version=None,
-                code='1234'
+                code='1234',
+                resource_version=None,
+                transform=None,
+                created_by=None,
             )
         )
 
@@ -1290,7 +1416,10 @@ class CollectionReferenceExpressionStringParserTest(OCLTestCase):
                 cascade=None,
                 reference_type='concepts',
                 version=None,
-                code=None
+                code=None,
+                resource_version=None,
+                transform=None,
+                created_by=None,
             )
         )
 
@@ -1310,7 +1439,10 @@ class CollectionReferenceExpressionStringParserTest(OCLTestCase):
                 cascade=None,
                 reference_type='concepts',
                 version=None,
-                code=None
+                code=None,
+                resource_version=None,
+                transform=None,
+                created_by=None,
             )
         )
         reference = self.get_structure(expression='/orgs/MyOrg/collections/Coll/v1/concepts/1234/')
@@ -1326,7 +1458,10 @@ class CollectionReferenceExpressionStringParserTest(OCLTestCase):
                 cascade=None,
                 reference_type='concepts',
                 version=None,
-                code='1234'
+                code='1234',
+                resource_version=None,
+                transform=None,
+                created_by=None,
             )
         )
 
@@ -1343,7 +1478,10 @@ class CollectionReferenceExpressionStringParserTest(OCLTestCase):
                 cascade=None,
                 reference_type='concepts',
                 version=None,
-                code='1234'
+                code='1234',
+                resource_version='3456',
+                transform=None,
+                created_by=None,
             )
         )
 
@@ -1359,7 +1497,10 @@ class CollectionReferenceExpressionStringParserTest(OCLTestCase):
                 cascade=None,
                 reference_type='mappings',
                 version=None,
-                code=None
+                code=None,
+                resource_version=None,
+                transform=None,
+                created_by=None,
             )
         )
 
@@ -1377,7 +1518,10 @@ class CollectionReferenceExpressionStringParserTest(OCLTestCase):
                 cascade=None,
                 reference_type='mappings',
                 version=None,
-                code=None
+                code=None,
+                resource_version=None,
+                transform=None,
+                created_by=None,
             )
         )
 
@@ -1392,7 +1536,10 @@ class CollectionReferenceExpressionStringParserTest(OCLTestCase):
                 cascade=None,
                 reference_type='mappings',
                 version=None,
-                code=None
+                code=None,
+                resource_version=None,
+                transform=None,
+                created_by=None,
             )
         )
 
@@ -1407,7 +1554,10 @@ class CollectionReferenceExpressionStringParserTest(OCLTestCase):
                 cascade=None,
                 reference_type='mappings',
                 version='v1',
-                code=None
+                code=None,
+                resource_version=None,
+                transform=None,
+                created_by=None,
             )
         )
 
@@ -1422,7 +1572,10 @@ class CollectionReferenceExpressionStringParserTest(OCLTestCase):
                 cascade=None,
                 reference_type='mappings',
                 version='v1',
-                code='1234'
+                code='1234',
+                resource_version=None,
+                transform=None,
+                created_by=None,
             )
         )
 
@@ -1437,7 +1590,10 @@ class CollectionReferenceExpressionStringParserTest(OCLTestCase):
                 cascade=None,
                 reference_type='mappings',
                 version=None,
-                code='1234'
+                code='1234',
+                resource_version=None,
+                transform=None,
+                created_by=None,
             )
         )
 
@@ -1455,7 +1611,10 @@ class CollectionReferenceExpressionStringParserTest(OCLTestCase):
                 cascade=None,
                 reference_type='mappings',
                 version=None,
-                code=None
+                code=None,
+                resource_version=None,
+                transform=None,
+                created_by=None,
             )
         )
 
@@ -1475,7 +1634,10 @@ class CollectionReferenceExpressionStringParserTest(OCLTestCase):
                 cascade=None,
                 reference_type='mappings',
                 version=None,
-                code=None
+                code=None,
+                resource_version=None,
+                transform=None,
+                created_by=None,
             )
         )
         reference = self.get_structure(expression='/orgs/MyOrg/collections/Coll/v1/mappings/1234/')
@@ -1491,7 +1653,10 @@ class CollectionReferenceExpressionStringParserTest(OCLTestCase):
                 cascade=None,
                 reference_type='mappings',
                 version=None,
-                code='1234'
+                code='1234',
+                resource_version=None,
+                transform=None,
+                created_by=None,
             )
         )
 
@@ -1508,7 +1673,10 @@ class CollectionReferenceExpressionStringParserTest(OCLTestCase):
                 cascade=None,
                 reference_type='mappings',
                 version=None,
-                code='1234'
+                code='1234',
+                resource_version='3456',
+                transform=None,
+                created_by=None,
             )
         )
 
@@ -1534,7 +1702,10 @@ class CollectionReferenceSourceAllExpressionParserTest(OCLTestCase):
                     cascade=None,
                     reference_type='concepts',
                     version=None,
-                    code=None
+                    code=None,
+                    resource_version=None,
+                    transform=None,
+                    created_by=None,
                 ),
                 dict(
                     expression='/users/Me/sources/MySource/mappings/',
@@ -1544,7 +1715,10 @@ class CollectionReferenceSourceAllExpressionParserTest(OCLTestCase):
                     cascade=None,
                     reference_type='mappings',
                     version=None,
-                    code=None
+                    code=None,
+                    resource_version=None,
+                    transform=None,
+                    created_by=None,
                 )
             ]
         )
@@ -1561,7 +1735,10 @@ class CollectionReferenceSourceAllExpressionParserTest(OCLTestCase):
                     cascade=None,
                     reference_type='concepts',
                     version='v1',
-                    code=None
+                    code=None,
+                    resource_version=None,
+                    transform=None,
+                    created_by=None,
                 ),
                 dict(
                     expression='/users/Me/sources/MySource/v1/mappings/',
@@ -1571,7 +1748,10 @@ class CollectionReferenceSourceAllExpressionParserTest(OCLTestCase):
                     cascade=None,
                     reference_type='mappings',
                     version='v1',
-                    code=None
+                    code=None,
+                    resource_version=None,
+                    transform=None,
+                    created_by=None,
                 )
             ]
         )
@@ -1589,7 +1769,10 @@ class CollectionReferenceSourceAllExpressionParserTest(OCLTestCase):
                     cascade=None,
                     reference_type='concepts',
                     version='v1',
-                    code=None
+                    code=None,
+                    resource_version=None,
+                    transform=None,
+                    created_by=None,
                 ),
             ]
         )
@@ -1606,7 +1789,10 @@ class CollectionReferenceSourceAllExpressionParserTest(OCLTestCase):
                     cascade=None,
                     reference_type='mappings',
                     version='v1',
-                    code=None
+                    code=None,
+                    resource_version=None,
+                    transform=None,
+                    created_by=None,
                 ),
             ]
         )
@@ -1623,7 +1809,10 @@ class CollectionReferenceSourceAllExpressionParserTest(OCLTestCase):
                     cascade=None,
                     reference_type='concepts',
                     version=None,
-                    code=None
+                    code=None,
+                    resource_version=None,
+                    transform=None,
+                    created_by=None,
                 ),
             ]
         )
@@ -1640,7 +1829,10 @@ class CollectionReferenceSourceAllExpressionParserTest(OCLTestCase):
                     cascade=None,
                     reference_type='mappings',
                     version=None,
-                    code=None
+                    code=None,
+                    resource_version=None,
+                    transform=None,
+                    created_by=None,
                 ),
             ]
         )
@@ -1720,7 +1912,7 @@ class CollectionReferenceOldStyleToExpandedStructureParserTest(OCLTestCase):
         self.assertIsNone(reference.cascade)
         self.assertIsNone(reference.code)
 
-    def test_parse_string_expression_concepts_mappings_explicit(self):
+    def test_parse_string_expression_concepts_mappings_explicit(self):  # pylint: disable=too-many-statements
         references = self.get_expanded_references(
             expression=dict(concepts=[
                 "/orgs/MyOrg/sources/MySource/concepts/c-1234/",
@@ -1895,7 +2087,7 @@ class CollectionReferenceParserTest(OCLTestCase):
         self.assertIsNone(reference.cascade)
         self.assertIsNone(reference.code)
 
-    def test_parse_string_expression_concepts_mappings_explicit(self):
+    def test_parse_string_expression_concepts_mappings_explicit(self):  # pylint: disable=too-many-statements
         references = self.get_expanded_references(
             expression=dict(concepts=[
                 "/orgs/MyOrg/sources/MySource/concepts/c-1234/",

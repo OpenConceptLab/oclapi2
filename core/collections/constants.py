@@ -30,3 +30,10 @@ VERSION_ALREADY_EXISTS = "Collection version '{}' already exist."
 SOURCE_MAPPINGS = 'sourcemappings'
 SOURCE_TO_CONCEPTS = 'sourcetoconcepts'
 TRANSFORM_TO_RESOURCE_VERSIONS = 'resourceversions'
+
+CONCEPT_REFERENCE_TYPE = 'concepts'
+MAPPING_REFERENCE_TYPE = 'mappings'
+REFERENCE_TYPE_CHOICES = (
+    (CONCEPT_REFERENCE_TYPE, 'Concepts'),
+    (MAPPING_REFERENCE_TYPE, 'Mappings')
+)

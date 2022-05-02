@@ -45,7 +45,7 @@ class MappingListViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 0)
 
-        collection.add_references(expressions=[mapping.uri])
+        collection.add_expressions(dict(expressions=[mapping.uri]), collection.created_by)
 
         response = self.client.get(collection.mappings_url, format='json')
 
