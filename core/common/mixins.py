@@ -18,7 +18,8 @@ from rest_framework.response import Response
 from core.common.constants import HEAD, ACCESS_TYPE_EDIT, ACCESS_TYPE_VIEW, ACCESS_TYPE_NONE, INCLUDE_FACETS, \
     LIST_DEFAULT_LIMIT, HTTP_COMPRESS_HEADER, CSV_DEFAULT_LIMIT, FACETS_ONLY, NOT_FOUND, \
     MUST_SPECIFY_EXTRA_PARAM_IN_BODY, INCLUDE_RETIRED_PARAM
-from core.common.permissions import HasPrivateAccess, HasOwnership, CanViewConceptDictionary
+from core.common.permissions import HasPrivateAccess, HasOwnership, CanViewConceptDictionary, \
+    CanViewConceptDictionaryVersion
 from core.common.services import S3
 from .utils import write_csv_to_s3, get_csv_from_s3, get_query_params_from_url_string, compact_dict_by_values, \
     to_owner_uri, parse_updated_since_param
@@ -591,6 +592,8 @@ class SourceChildMixin:
 
 
 class ConceptContainerExportMixin:
+    permission_classes = (CanViewConceptDictionaryVersion, )
+
     def get_object(self):
         queryset = self.get_queryset()
         if 'version' not in self.kwargs:
@@ -600,6 +603,8 @@ class ConceptContainerExportMixin:
 
         if not instance:
             raise Http404()
+
+        self.check_object_permissions(self.request, instance)
 
         return instance
 
