@@ -37,7 +37,7 @@ from core.collections.utils import is_version_specified
 from core.common.constants import (
     HEAD, RELEASED_PARAM, PROCESSING_PARAM, OK_MESSAGE,
     ACCESS_TYPE_NONE, INCLUDE_RETIRED_PARAM, INCLUDE_INVERSE_MAPPINGS_PARAM)
-from core.common.exceptions import Http409
+from core.common.exceptions import Http409, Http405
 from core.common.mixins import (
     ConceptDictionaryCreateMixin, ListWithHeadersMixin, ConceptDictionaryUpdateMixin,
     ConceptContainerExportMixin,
@@ -265,15 +265,23 @@ class CollectionRetrieveUpdateDestroyView(CollectionBaseView, ConceptDictionaryU
         return Response({'detail': get(result, 'messages', [DELETE_FAILURE])}, status=status.HTTP_400_BAD_REQUEST)
 
 
-class CollectionReferenceView(CollectionBaseView, RetrieveAPIView):
+class CollectionReferenceView(CollectionBaseView, RetrieveAPIView, DestroyAPIView):
     serializer_class = CollectionReferenceDetailSerializer
-    permission_classes = (CanViewConceptDictionary, )
+
+    def get_permissions(self):
+        if self.request.method == 'DELETE':
+            return [IsAuthenticated(), CanViewConceptDictionary()]
+
+        return [CanViewConceptDictionary()]
 
     def get_object(self, queryset=None):
         collection = super().get_queryset().filter(is_active=True).order_by('-created_at').first()
 
         if not collection:
             raise Http404()
+
+        if self.request.method == 'DELETE' and not collection.is_head:
+            raise Http405()
 
         self.check_object_permissions(self.request, collection)
 
@@ -282,6 +290,11 @@ class CollectionReferenceView(CollectionBaseView, RetrieveAPIView):
             raise Http404()
 
         return reference
+
+    def destroy(self, request, *args, **kwargs):  # pylint: disable=unused-argument
+        reference = self.get_object()
+        reference.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class CollectionReferencesView(

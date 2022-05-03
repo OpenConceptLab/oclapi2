@@ -1736,6 +1736,7 @@ class CollectionVersionExpansionMappingsViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 1)
 
+
 class CollectionVersionExpansionConceptsViewTest(OCLAPITestCase):
     def test_get(self):
         org = OrganizationFactory()
@@ -1758,3 +1759,70 @@ class CollectionVersionExpansionConceptsViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 1)
+
+
+class CollectionReferenceViewTest(OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.collection = OrganizationCollectionFactory()
+        self.reference = CollectionReference(
+            expression='/concepts/', collection=self.collection, reference_type='concepts')
+        self.reference.save()
+
+    def test_get_404(self):
+        response = self.client.get(
+            self.collection.parent.url + 'collections/foobar/references/' + str(self.reference.id) + '/')
+
+        self.assertEqual(response.status_code, 404)
+
+        response = self.client.get(
+            self.collection.url + 'references/123/')
+
+        self.assertEqual(response.status_code, 404)
+
+        response = self.client.get(
+            self.collection.url + 'v1/references/' + str(self.reference.id) + '/')
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_get_200(self):
+        response = self.client.get(self.reference.uri)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['uri'], self.reference.uri)
+        self.assertEqual(response.data['id'], self.reference.id)
+
+        response = self.client.get(self.collection.url + 'HEAD/references/'  + str(self.reference.id) + '/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['uri'], self.reference.uri)
+        self.assertEqual(response.data['id'], self.reference.id)
+
+    def test_delete_401(self):
+        response = self.client.delete(self.reference.uri)
+
+        self.assertEqual(response.status_code, 401)
+
+    def test_delete_204(self):
+        response = self.client.delete(
+            self.reference.uri,
+            HTTP_AUTHORIZATION='Token ' + self.collection.created_by.get_token(),
+        )
+
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(self.collection.references.count(), 0)
+
+    def test_delete_collection_version_reference_405(self):
+        collection_v1 = OrganizationCollectionFactory(
+            mnemonic=self.collection.mnemonic, version='v1', organization=self.collection.organization)
+        reference = CollectionReference(
+            expression='/concepts/', collection=collection_v1, reference_type='concepts')
+        reference.save()
+
+        response = self.client.delete(
+            collection_v1.url + 'references/' + str(reference.id) + '/',
+            HTTP_AUTHORIZATION='Token ' + self.collection.created_by.get_token(),
+        )
+
+        self.assertEqual(response.status_code, 405)
+        self.assertEqual(collection_v1.references.count(), 1)
