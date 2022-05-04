@@ -501,7 +501,7 @@ class CollectionReference(models.Model):
 
     def __is_exact_search_filter(self):
         return bool(next(
-            (filter_def for filter_def in self.filter if
+            (filter_def for filter_def in self.filter if  # pylint:disable=not-an-iterable
              filter_def['property'] == 'exact_match' and filter_def['value'] == 'on'),
             False
         ))
