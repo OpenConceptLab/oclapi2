@@ -416,7 +416,8 @@ class CollectionReferenceTest(OCLTestCase):
         ref.clean()
 
     def test_mapping_filter_schema(self):
-        MappingFactory()  # to create mappings index in ES
+        mapping = MappingFactory()
+        MappingDocument().update([mapping])  # to create mappings index in ES
 
         ref = CollectionReference(expression='/mappings/', filter=None, reference_type='mappings')
         ref.clean()
