@@ -628,6 +628,100 @@ class CollectionReferenceTest(OCLTestCase):
         )
         self.assertEqual(mappings.count(), 0)
 
+    def test_build_expression(self):
+        self.assertEqual(
+            CollectionReference(expression='/foobar/').build_expression(), '/foobar/')
+        self.assertEqual(
+            CollectionReference(expression='/foobar/', system='http://foo.com').build_expression(), '/foobar/')
+
+        reference = CollectionReference(
+            system='http://source.com',
+            version='v1',
+            valueset=['http//coll.com', 'https://coll-global.com'],
+            namespace='/orgs/MyOrg/',
+            code='c1',
+            reference_type='concepts',
+            resource_version='123'
+        )
+        self.assertEqual(reference.build_expression(), 'http://source.com|v1/concepts/c1/123/')
+
+        reference = CollectionReference(
+            system='http://source.com',
+            version='v1',
+            namespace='/orgs/MyOrg/',
+            code='c1',
+            reference_type='concepts',
+            resource_version='123'
+        )
+        self.assertEqual(reference.build_expression(), 'http://source.com|v1/concepts/c1/123/')
+
+        reference = CollectionReference(
+            system='http://source.com',
+            namespace='/orgs/MyOrg/',
+            version='v1',
+        )
+        self.assertEqual(reference.build_expression(), 'http://source.com|v1')
+
+        reference = CollectionReference(
+            system='http://source.com',
+            namespace='/orgs/MyOrg/',
+        )
+        self.assertEqual(reference.build_expression(), 'http://source.com')
+
+        reference = CollectionReference(
+            system='/orgs/MyOrg/sources/MySource/',
+            version='v1',
+            valueset=['http//coll.com', 'https://coll-global.com'],
+            namespace='/orgs/MyOrg/',
+            code='c1',
+            reference_type='concepts',
+            resource_version='123'
+        )
+        self.assertEqual(reference.build_expression(), '/orgs/MyOrg/sources/MySource/v1/concepts/c1/123/')
+
+        reference = CollectionReference(
+            system='/orgs/MyOrg/sources/MySource/',
+            reference_type='concepts',
+        )
+        self.assertEqual(reference.build_expression(), '/orgs/MyOrg/sources/MySource/concepts/')
+
+        reference = CollectionReference(
+            reference_type='concepts',
+        )
+        self.assertEqual(reference.build_expression(), '/concepts/')
+
+        reference = CollectionReference(
+            reference_type='mappings',
+        )
+        self.assertEqual(reference.build_expression(), '/mappings/')
+
+        reference = CollectionReference(
+            system='/orgs/MyOrg/sources/MySource/',
+            reference_type='concepts',
+            filter=[dict(property='q', value='foo', operator='='), dict(property='name', value='foobar', operator='=')]
+        )
+        self.assertEqual(
+            reference.build_expression(), '/orgs/MyOrg/sources/MySource/concepts/?q=foo&name=foobar'
+        )
+
+        reference = CollectionReference(
+            valueset=['/orgs/MyOrg/collections/Coll/'],
+            reference_type='concepts',
+            filter=[dict(property='q', value='foo', operator='='), dict(property='name', value='foobar', operator='=')]
+        )
+        self.assertEqual(
+            reference.build_expression(), '/orgs/MyOrg/collections/Coll/concepts/?q=foo&name=foobar'
+        )
+
+        reference = CollectionReference(
+            valueset=['/orgs/MyOrg/collections/Coll/', '/orgs/MyOrg/collections/Coll1/'],
+            reference_type='concepts',
+            filter=[dict(property='q', value='foo', operator='='), dict(property='name', value='foobar', operator='=')]
+        )
+        self.assertEqual(
+            reference.build_expression(), '/orgs/MyOrg/collections/Coll/concepts/?q=foo&name=foobar'
+        )
+
 
 class CollectionUtilsTest(OCLTestCase):
     def test_is_mapping(self):

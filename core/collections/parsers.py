@@ -98,6 +98,8 @@ class CollectionReferenceExpandedStructureParser(CollectionReferenceAbstractPars
             cascade=get(expression, 'cascade') or self.cascade,
             filter=get(expression, 'filter'),
             code=get(expression, 'code'),
+            resource_version=get(expression, 'resource_version'),
+            transform=get(expression, 'transform'),
             created_by=self.user
         )]
         return self.references

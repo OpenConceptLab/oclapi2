@@ -184,6 +184,7 @@ class Collection(ConceptContainerModel):
         errors = {}
         added_references = []
         for reference in references:
+            reference.expression = reference.build_expression()
             reference.collection = self
             reference.created_by = user
             try:
@@ -367,6 +368,35 @@ class CollectionReference(models.Model):
             **kwargs,
         )
 
+    def build_expression(self):
+        if self.expression:
+            return self.expression
+
+        expression = ''
+        if self.system:
+            is_canonical = self.system.startswith('http://') or self.system.startswith('https://')
+            expression = self.system
+            if self.version:
+                expression += '|' + self.version if is_canonical else self.version
+        elif self.valueset and isinstance(self.valueset, list):
+            expression = self.valueset[0]
+
+        is_canonical = expression.startswith('https://') or expression.startswith('http://')
+        if self.code or self.filter or not is_canonical:
+            if self.is_concept:
+                expression += 'concepts/' if expression.endswith('/') else '/concepts/'
+            elif self.is_mapping:
+                expression += 'mappings/' if expression.endswith('/') else '/mappings/'
+
+            if expression:
+                if self.code:
+                    expression += self.code + '/'
+                    if self.resource_version:
+                        expression += self.resource_version + '/'
+                elif self.filter:
+                    expression += '?' + self.filter_to_querystring()
+        return expression
+
     @cached_property
     def uri(self):
         return self.calculate_uri(self.collection)
@@ -537,6 +567,9 @@ class CollectionReference(models.Model):
             self.last_resolved_at = None
         if not self.reference_type:
             self.reference_type = MAPPING_REFERENCE_TYPE if self.is_mapping else CONCEPT_REFERENCE_TYPE
+
+        if self.expression is None:
+            self.expression = self.build_expression()
 
     def filter_to_querystring(self):
         if self.filter:
