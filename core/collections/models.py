@@ -379,7 +379,7 @@ class CollectionReference(models.Model):
             if self.version:
                 expression += '|' + self.version if is_canonical else self.version
         elif self.valueset and isinstance(self.valueset, list):
-            expression = self.valueset[0]
+            expression = self.valueset[0]  # pylint: disable=unsubscriptable-object
 
         is_canonical = expression.startswith('https://') or expression.startswith('http://')
         if self.code or self.filter or not is_canonical:
