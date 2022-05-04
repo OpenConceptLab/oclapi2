@@ -23,7 +23,7 @@ from core.common.models import ConceptContainerModel, BaseResourceModel
 from core.common.tasks import seed_children_to_expansion, batch_index_resources, index_expansion_concepts, \
     index_expansion_mappings
 from core.common.utils import drop_version, to_owner_uri, generate_temp_version, es_id_in, \
-    es_wildcard_search, get_resource_class_from_resource_name, get_exact_search_fields, to_snake_case
+    es_wildcard_search, get_resource_class_from_resource_name, get_exact_search_fields, to_snake_case, es_exact_search
 from core.concepts.constants import LOCALES_FULLY_SPECIFIED
 from core.concepts.models import Concept
 from core.mappings.models import Mapping
@@ -436,7 +436,7 @@ class CollectionReference(models.Model):
                 mapping_queryset |= result['mappings']
 
         if self.should_apply_filter():
-            queryset = self.apply_filters(queryset, Concept.get_search_document())
+            queryset = self.apply_filters(queryset, Concept)
 
         if self.should_transform_to_latest_version():
             queryset = self.transform_to_latest_version(queryset, Concept)
@@ -457,7 +457,7 @@ class CollectionReference(models.Model):
                 queryset = queryset.filter(version=self.resource_version)
 
         if self.should_apply_filter():
-            queryset = self.apply_filters(queryset, Mapping.get_search_document())
+            queryset = self.apply_filters(queryset, Mapping)
 
         if self.should_transform_to_latest_version():
             queryset = self.transform_to_latest_version(queryset, Mapping)
@@ -499,18 +499,31 @@ class CollectionReference(models.Model):
             cascade_params = {**cascade_params, **self.cascade}
         return cascade_params
 
-    def apply_filters(self, queryset, document):
+    def __is_exact_search_filter(self):
+        return bool(next(
+            (filter_def for filter_def in self.filter if
+             filter_def['property'] == 'exact_match' and filter_def['value'] == 'on'),
+            False
+        ))
+
+    def apply_filters(self, queryset, resource_klass):
         if self.filter:
+            document = resource_klass.get_search_document()
             search = document.search()
             search = es_id_in(search, queryset.values_list('id', flat=True))
+            is_exact_search = self.__is_exact_search_filter()
             for filter_def in self.filter:  # pylint: disable=not-an-iterable
+                if to_snake_case(filter_def['property']) == 'exact_match':
+                    continue
                 val = filter_def['value']
                 exact_search_fields = get_exact_search_fields(
-                    Concept) if filter_def['property'] == 'q' else [to_snake_case(filter_def['property'])]
-                search = es_wildcard_search(
-                    search, val, exact_search_fields,
-                    name_attr='_name'
-                )
+                    resource_klass) if filter_def['property'] == 'q' else [to_snake_case(filter_def['property'])]
+                if is_exact_search:
+                    search = es_exact_search(search, val, exact_search_fields)
+                else:
+                    search = es_wildcard_search(
+                        search, val, exact_search_fields, name_attr='_name' if self.is_concept else 'name'
+                    )
             queryset = search.params(request_timeout=ES_REQUEST_TIMEOUT_ASYNC).to_queryset()
         return queryset
 
@@ -600,18 +613,19 @@ class CollectionReference(models.Model):
         return all(map(self.__is_valid_filter_schema, self.filter))
 
     def get_allowed_filter_properties(self):
+        common = ['q', 'exact_match']
         if self.is_concept:
-            return [*Concept.es_fields.keys(), 'q']
+            return [*Concept.es_fields.keys(), *common]
         if self.is_mapping:
-            return [*Mapping.es_fields.keys(), 'q']
-        return []
+            return [*Mapping.es_fields.keys(), *common]
+        return common
 
     def __is_valid_filter_schema(self, filter_def):
         return isinstance(filter_def, dict) and \
                sorted(filter_def.keys()) == sorted(['property', 'op', 'value']) and \
                {type(val) for val in filter_def.values()} == {str} and \
                filter_def['op'] in self.ALLOWED_FILTER_OPS and \
-               filter_def['property'] in self.get_allowed_filter_properties()
+               to_snake_case(filter_def['property']) in self.get_allowed_filter_properties()
 
     def save(self, force_insert=False, force_update=False, using=None,
              update_fields=None):

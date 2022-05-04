@@ -794,5 +794,12 @@ def es_wildcard_search(search, search_str, exact_search_fields, name_attr='name'
             search_str, name_attr) | get_es_exact_search_criterion(search_str, exact_search_fields))
 
 
+def es_exact_search(search, search_str, exact_search_fields):
+    if not search_str:
+        return search
+
+    return search.query(get_es_exact_search_criterion(search_str, exact_search_fields))
+
+
 def get_exact_search_fields(klass):
     return [field for field, config in get(klass, 'es_fields', {}).items() if config.get('exact', False)]
