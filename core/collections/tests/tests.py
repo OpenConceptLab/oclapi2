@@ -416,6 +416,7 @@ class CollectionReferenceTest(OCLTestCase):
         ref.clean()
 
     def test_mapping_filter_schema(self):
+        MappingDocument().update([])
         ref = CollectionReference(expression='/mappings/', filter=None, reference_type='mappings')
         ref.clean()
         ref = CollectionReference(expression='/mappings/', filter='', reference_type='mappings')
