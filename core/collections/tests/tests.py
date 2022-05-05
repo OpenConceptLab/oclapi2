@@ -2283,3 +2283,182 @@ class CollectionReferenceParserTest(OCLTestCase):
         self.assertIsNone(reference.valueset)
         self.assertIsNone(reference.filter)
         self.assertIsNone(reference.cascade)
+
+    def test_parse_new_style(self):  # pylint: disable=too-many-statements
+        references = self.get_expanded_references(
+            expression={"url": "http://hl7.org/fhir/ValueSet/my-valueset|0.8", "code": "1948"}
+        )
+        self.assertEqual(len(references), 1)
+        self.assertEqual(references[0].system, "http://hl7.org/fhir/ValueSet/my-valueset|0.8")
+        self.assertEqual(references[0].code, "1948")
+        self.assertIsNone(references[0].version)
+        self.assertEqual(
+            references[0].build_expression(), "http://hl7.org/fhir/ValueSet/my-valueset|0.8/concepts/1948/")
+
+        references = self.get_expanded_references(
+            expression={"system": "http://hl7.org/fhir/CodeSystem/my-codeystem", "code": "1948"}
+        )
+        self.assertEqual(len(references), 1)
+        self.assertEqual(references[0].system, "http://hl7.org/fhir/CodeSystem/my-codeystem")
+        self.assertEqual(references[0].code, "1948")
+        self.assertIsNone(references[0].version)
+        self.assertEqual(
+            references[0].build_expression(), "http://hl7.org/fhir/CodeSystem/my-codeystem/concepts/1948/")
+
+        references = self.get_expanded_references(
+            expression={
+              "system": "http://hl7.org/fhir/CodeSystem/my-codeystem",
+              "version": "0.8",
+              "namespace": "/orgs/foobar/",
+              "filter": [
+                {
+                  "property": "datatype",
+                  "op": "=",
+                  "value": "Numeric"
+                }
+              ],
+              "valueSet": [
+                "http://hl7.org/fhir/ValueSet/my-valueset1",
+                "http://hl7.org/fhir/ValueSet/my-valueset2"
+              ]
+            }
+        )
+        self.assertEqual(len(references), 1)
+        self.assertEqual(references[0].system, "http://hl7.org/fhir/CodeSystem/my-codeystem")
+        self.assertEqual(references[0].version, "0.8")
+        self.assertEqual(references[0].namespace, "/orgs/foobar/")
+        self.assertEqual(
+            references[0].valueset,
+            ["http://hl7.org/fhir/ValueSet/my-valueset1", "http://hl7.org/fhir/ValueSet/my-valueset2"]
+        )
+        self.assertEqual(
+            references[0].filter,
+            [
+                {
+                    "property": "datatype",
+                    "op": "=",
+                    "value": "Numeric"
+                }
+            ]
+        )
+        self.assertEqual(references[0].reference_type, 'concepts')
+        self.assertIsNone(references[0].code)
+        self.assertEqual(
+            references[0].build_expression(),
+            "http://hl7.org/fhir/CodeSystem/my-codeystem|0.8/concepts/?datatype=Numeric"
+        )
+
+        references = self.get_expanded_references(
+            expression={
+              "system": "http://hl7.org/fhir/CodeSystem/my-codeystem",
+              "filter": [
+                {
+                  "property": "datatype",
+                  "op": "=",
+                  "value": "Numeric"
+                }
+              ],
+            }
+        )
+        self.assertEqual(len(references), 1)
+        self.assertEqual(references[0].system, "http://hl7.org/fhir/CodeSystem/my-codeystem")
+        self.assertIsNone(references[0].version)
+        self.assertEqual(
+            references[0].filter,
+            [
+                {
+                    "property": "datatype",
+                    "op": "=",
+                    "value": "Numeric"
+                }
+            ]
+        )
+        self.assertIsNone(references[0].code)
+        self.assertEqual(references[0].reference_type, 'concepts')
+        self.assertEqual(
+            references[0].build_expression(),
+            "http://hl7.org/fhir/CodeSystem/my-codeystem/concepts/?datatype=Numeric"
+        )
+
+        references = self.get_expanded_references(
+            expression={
+              "valueSet": "http://hl7.org/fhir/ValueSet/my-valueset1",
+              "filter": [
+                {
+                  "property": "datatype",
+                  "op": "=",
+                  "value": "Numeric"
+                }
+              ],
+            }
+        )
+        self.assertEqual(len(references), 1)
+        self.assertEqual(references[0].valueset, ["http://hl7.org/fhir/ValueSet/my-valueset1"])
+        self.assertIsNone(references[0].version)
+        self.assertEqual(
+            references[0].filter,
+            [
+                {
+                    "property": "datatype",
+                    "op": "=",
+                    "value": "Numeric"
+                }
+            ]
+        )
+        self.assertIsNone(references[0].code)
+        self.assertEqual(references[0].reference_type, 'concepts')
+        self.assertEqual(
+            references[0].build_expression(),
+            "http://hl7.org/fhir/ValueSet/my-valueset1/concepts/?datatype=Numeric"
+        )
+
+        references = self.get_expanded_references(
+            expression={
+              "system": "http://hl7.org/fhir/CodeSystem/my-codeystem",
+              "concept": [
+                {"code": "1948", "display": "abcd"},
+                {"code": "1234"}
+              ],
+              "mapping": ["93", "urjdk"]
+            }
+        )
+
+        self.assertEqual(len(references), 4)
+        reference = references[0]
+        self.assertEqual(reference.system, "http://hl7.org/fhir/CodeSystem/my-codeystem")
+        self.assertEqual(reference.code, "1948")
+        self.assertEqual(reference.display, "abcd")
+        self.assertEqual(reference.reference_type, "concepts")
+        self.assertIsNone(reference.version)
+
+        reference = references[1]
+        self.assertEqual(reference.system, "http://hl7.org/fhir/CodeSystem/my-codeystem")
+        self.assertEqual(reference.code, "1234")
+        self.assertEqual(reference.reference_type, "concepts")
+        self.assertIsNone(reference.display)
+        self.assertIsNone(reference.version)
+
+        reference = references[2]
+        self.assertEqual(reference.system, "http://hl7.org/fhir/CodeSystem/my-codeystem")
+        self.assertEqual(reference.code, "93")
+        self.assertEqual(reference.reference_type, "mappings")
+        self.assertIsNone(reference.version)
+
+        reference = references[3]
+        self.assertEqual(reference.system, "http://hl7.org/fhir/CodeSystem/my-codeystem")
+        self.assertEqual(reference.code, "urjdk")
+        self.assertEqual(reference.reference_type, "mappings")
+        self.assertIsNone(reference.version)
+
+        references = self.get_expanded_references(expression={
+            "valueSet": "http://hl7.org/fhir/ValueSet/my-valueset1",
+            "code": "1948"
+        })
+        self.assertEqual(len(references), 1)
+        self.assertIsNone(references[0].system)
+        self.assertIsNone(references[0].version)
+        self.assertIsNone(references[0].resource_version)
+        self.assertEqual(references[0].valueset, ["http://hl7.org/fhir/ValueSet/my-valueset1"])
+        self.assertEqual(references[0].reference_type, "concepts")
+        self.assertEqual(references[0].code, "1948")
+        self.assertEqual(references[0].build_expression(), "http://hl7.org/fhir/ValueSet/my-valueset1/concepts/1948/")

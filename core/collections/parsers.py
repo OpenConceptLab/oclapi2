@@ -22,6 +22,14 @@ class CollectionReferenceAbstractParser:
     def parse(self):
         pass
 
+    @staticmethod
+    def get_formatted_valueset(valueset):
+        if valueset:
+            if isinstance(valueset, str):
+                return [valueset]
+            return valueset
+        return None
+
     def to_reference_structure(self):
         self.references = []
         for parser in self.parsers:
@@ -32,6 +40,7 @@ class CollectionReferenceAbstractParser:
     def to_objects(self):
         from core.collections.models import CollectionReference
         for reference in self.references:
+            reference['valueset'] = self.get_formatted_valueset(reference.get('valueset'))
             self.instances.append(CollectionReference(**reference))
         return self.instances
 
@@ -40,6 +49,8 @@ class CollectionReferenceParser(CollectionReferenceAbstractParser):
     def is_old_style_expression(self):
         return isinstance(self.expression, str) or (
                 isinstance(self.expression, dict) and (
+                    'system' not in self.expression and 'valueset' not in self.expression
+                ) and (
                     'uri' in self.expression or
                     'concepts' in self.expression or
                     'mappings' in self.expression or
@@ -64,6 +75,7 @@ class CollectionReferenceParser(CollectionReferenceAbstractParser):
         cascade_mappings = self.cascade == SOURCE_MAPPINGS
         should_cascade_now = cascade_mappings or cascade_to_concepts
         for reference in self.references:
+            reference['valueset'] = self.get_formatted_valueset(reference.get('valueset'))
             collection_reference = CollectionReference(**reference)
             if should_cascade_now and collection_reference.code:
                 uris = collection_reference.get_related_uris()
@@ -72,7 +84,9 @@ class CollectionReferenceParser(CollectionReferenceAbstractParser):
                     if uri not in existing_uris and drop_version(uri) not in existing_uris:
                         parser = CollectionReferenceExpressionStringParser(uri, self.transform)
                         parser.parse()
-                        self.instances.append(CollectionReference(**parser.to_reference_structure()[0]))
+                        _reference = parser.to_reference_structure()[0]
+                        _reference['valueset'] = self.get_formatted_valueset(_reference.get('valueset'))
+                        self.instances.append(CollectionReference(**_reference))
             self.instances.append(collection_reference)
         return self.instances
 
@@ -88,20 +102,73 @@ class CollectionReferenceExpandedStructureParser(CollectionReferenceAbstractPars
                 self.references.append(self.to_reference_structure(expression))
 
     def to_reference_structure(self, expression=None):  # pylint: disable=arguments-differ
+        self.references = []
         expression = expression or self.expression
-        self.references = [dict(
-            expression=None,
-            system=get(expression, 'system'),
-            version=get(expression, 'version'),
-            reference_type=get(expression, 'reference_type', 'concepts'),
-            valueset=get(expression, 'valueset'),
-            cascade=get(expression, 'cascade') or self.cascade,
-            filter=get(expression, 'filter'),
-            code=get(expression, 'code'),
-            resource_version=get(expression, 'resource_version'),
-            transform=get(expression, 'transform'),
-            created_by=self.user
-        )]
+        concept = self.expression.get('concept', None)
+        mapping = self.expression.get('mapping', None)
+        if concept:
+            if not isinstance(concept, list):
+                concept = [concept]
+            for _concept in concept:
+                code = _concept if isinstance(_concept, str) else _concept.get('code', None)
+                display = None if isinstance(_concept, str) else _concept.get('display', None)
+                resource_version = None if isinstance(_concept, str) else _concept.get('resource_version', None)
+                self.references.append(
+                    dict(
+                        expression=None,
+                        namespace=get(expression, 'namespace'),
+                        system=get(expression, 'system') or get(expression, 'url'),
+                        version=get(expression, 'version'),
+                        reference_type='concepts',
+                        valueset=get(expression, 'valueset') or get(expression, 'valueSet'),
+                        cascade=get(expression, 'cascade') or self.cascade,
+                        filter=get(expression, 'filter'),
+                        code=code,
+                        resource_version=resource_version,
+                        transform=get(expression, 'transform'),
+                        created_by=self.user,
+                        display=display
+                    )
+                )
+        if mapping:
+            if not isinstance(mapping, list):
+                mapping = [mapping]
+            for _mapping in mapping:
+                code = _mapping if isinstance(_mapping, str) else _mapping.get('code', None)
+                resource_version = None if isinstance(_mapping, str) else _mapping.get('resource_version', None)
+                self.references.append(
+                    dict(
+                        expression=None,
+                        namespace=get(expression, 'namespace'),
+                        system=get(expression, 'system') or get(expression, 'url'),
+                        version=get(expression, 'version'),
+                        reference_type='mappings',
+                        valueset=get(expression, 'valueset') or get(expression, 'valueSet'),
+                        cascade=get(expression, 'cascade') or self.cascade,
+                        filter=get(expression, 'filter'),
+                        code=code,
+                        resource_version=resource_version,
+                        transform=get(expression, 'transform'),
+                        created_by=self.user,
+                        display=None
+                    )
+                )
+        if not concept and not mapping:
+            self.references = [dict(
+                expression=None,
+                namespace=get(expression, 'namespace'),
+                system=get(expression, 'system') or get(expression, 'url'),
+                version=get(expression, 'version'),
+                reference_type=get(expression, 'reference_type', 'concepts'),
+                valueset=get(expression, 'valueset') or get(expression, 'valueSet'),
+                cascade=get(expression, 'cascade') or self.cascade,
+                filter=get(expression, 'filter'),
+                code=get(expression, 'code'),
+                resource_version=get(expression, 'resource_version'),
+                transform=get(expression, 'transform'),
+                created_by=self.user,
+                display=get(expression, 'display')
+            )]
         return self.references
 
 
