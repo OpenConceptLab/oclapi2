@@ -49,7 +49,7 @@ from core.common.permissions import (
 from core.common.swagger_parameters import q_param, compress_header, page_param, verbose_param, exact_match_param, \
     include_facets_header, sort_asc_param, sort_desc_param, updated_since_param, include_retired_param, limit_param
 from core.common.tasks import add_references, export_collection, delete_collection
-from core.common.utils import compact_dict_by_values, parse_boolean_query_param, drop_version
+from core.common.utils import compact_dict_by_values, parse_boolean_query_param
 from core.common.views import BaseAPIView, BaseLogoView
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept
@@ -356,7 +356,6 @@ class CollectionReferencesView(
         data = request.data.get('data')
         concept_expressions = data.get('concepts', [])
         mapping_expressions = data.get('mappings', [])
-        expressions = data.get('expressions', [])
         cascade = self.request.query_params.get('cascade', '').lower()
         transform = self.request.query_params.get('transformReferences', '').lower()
 
@@ -373,14 +372,12 @@ class CollectionReferencesView(
 
         (added_references, errors) = collection.add_expressions(data, request.user, cascade, transform)
 
-        all_expressions = expressions + concept_expressions + mapping_expressions
         added_expressions = set()
-        added_original_expressions = set(all_expressions)
+        added_original_expressions = set()
         for reference in added_references:
             added_expressions.add(reference.expression)
             added_expression = reference.original_expression or reference.expression
-            if drop_version(added_expression) not in all_expressions:
-                added_original_expressions.add(added_expression)
+            added_original_expressions.add(added_expression)
 
         response = []
 
