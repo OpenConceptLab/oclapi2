@@ -1,3 +1,21 @@
+##### 2.2.7 - Sat Apr 30 03:52:38 2022 +0000
+- [OpenConceptLab/ocl_issues#1285](https://github.com/OpenConceptLab/ocl_issues/issues/1285) | Repo export behind permission
+- [OpenConceptLab/ocl_issues#1283](https://github.com/OpenConceptLab/ocl_issues/issues/1283) | Concept synonyms indexing | using lowecase normalizer
+- [OpenConceptLab/ocl_issues#1275](https://github.com/OpenConceptLab/ocl_issues/issues/1275) | reference filter field schema validation
+- [OpenConceptLab/ocl_issues#1277](https://github.com/OpenConceptLab/ocl_issues/issues/1277) | not using redis cache backend on CI
+- [OpenConceptLab/ocl_issues#1277](https://github.com/OpenConceptLab/ocl_issues/issues/1277) | Using cached lookup API for all lookups
+- [OpenConceptLab/ocl_issues#1277](https://github.com/OpenConceptLab/ocl_issues/issues/1277) | added django cache backend as redis
+- [OpenConceptLab/ocl_issues#1283](https://github.com/OpenConceptLab/ocl_issues/issues/1283) | concept search criteria | added synonyms search criteria with wildcards
+- Postgres-Dev | upgraded to 14.2-alpine
+- Bump django from 4.0.3 to 4.0.4
+- [OpenConceptLab/ocl_issues#1265](https://github.com/OpenConceptLab/ocl_issues/issues/1265) | Expansion Parameters | fixed order of parameters evaluation
+- [OpenConceptLab/ocl_issues#1280](https://github.com/OpenConceptLab/ocl_issues/issues/1280) | added verbose references in collection's concept/mapping responses via query param
+- [OpenConceptLab/ocl_issues#1265](https://github.com/OpenConceptLab/ocl_issues/issues/1265) | Source/Collection | making revision_date datetime field and setting on version release
+- [OpenConceptLab/ocl_issues#1265](https://github.com/OpenConceptLab/ocl_issues/issues/1265) | expansion parameter | include/exclude system version considers valuesets as well
+- [OpenConceptLab/ocl_issues#1265](https://github.com/OpenConceptLab/ocl_issues/issues/1265) | expansion parameter | applying include system before exclude
+- [OpenConceptLab/ocl_issues#1275](https://github.com/OpenConceptLab/ocl_issues/issues/1275) | refactored resolve reference operation
+- [OpenConceptLab/ocl_issues#1275](https://github.com/OpenConceptLab/ocl_issues/issues/1275) | CollectionReference | added attributes for structured reference
+- [OpenConceptLab/ocl_issues#1262](https://github.com/OpenConceptLab/ocl_issues/issues/1262) | API for source head resources dedup deleted
 ##### 2.2.4 - Sat Apr 16 05:39:57 2022 +0000
 - [OpenConceptLab/ocl_issues#1280](https://github.com/OpenConceptLab/ocl_issues/issues/1280) | added references in collection/expansion mapping version detail
 - [OpenConceptLab/ocl_issues#1265](https://github.com/OpenConceptLab/ocl_issues/issues/1265) | expansion parameter to include/exclude system version
