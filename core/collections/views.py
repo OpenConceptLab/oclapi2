@@ -371,13 +371,15 @@ class CollectionReferencesView(
             )
 
         (added_references, errors) = collection.add_expressions(data, request.user, cascade, transform)
-
         added_expressions = set()
         added_original_expressions = set()
         for reference in added_references:
             added_expressions.add(reference.expression)
             added_expression = reference.original_expression or reference.expression
             added_original_expressions.add(added_expression)
+        if errors:
+            for expression in errors:
+                added_original_expressions.add(expression)
 
         response = []
 
