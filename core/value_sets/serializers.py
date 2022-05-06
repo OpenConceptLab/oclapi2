@@ -141,7 +141,7 @@ class ValueSetDetailSerializer(serializers.ModelSerializer):
                 self._errors.update(errors)
                 return collection
 
-        collection.id = None
+        collection.id = None  # pylint: disable=invalid-name
         collection.version = collection_version
         errors = Collection.persist_new_version(collection, user)
         self._errors.update(errors)
