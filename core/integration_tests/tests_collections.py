@@ -1555,6 +1555,17 @@ class CollectionVersionSummaryViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 202)
         update_children_counts_mock.assert_called_once()
 
+    def test_get(self):
+        collection = OrganizationCollectionFactory(version='v1')
+
+        response = self.client.get(
+            collection.uri + 'summary/',
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['id'], collection.version)
+
 
 class CollectionLatestVersionSummaryViewTest(OCLAPITestCase):
     def test_get(self):
