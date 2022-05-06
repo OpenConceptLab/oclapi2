@@ -104,6 +104,8 @@ class CollectionReferenceExpandedStructureParser(CollectionReferenceAbstractPars
     def to_reference_structure(self, expression=None):  # pylint: disable=arguments-differ
         self.references = []
         expression = expression or self.expression
+        if isinstance(get(expression, 'url'), list):
+            return self.references
         concept = self.expression.get('concept', None)
         mapping = self.expression.get('mapping', None)
         if concept:

@@ -779,6 +779,24 @@ class CollectionReferencesViewTest(OCLAPITestCase):
         self.assertTrue(self.collection.references.filter(expression=concept2_latest_version.uri).exists())
         self.assertTrue(self.collection.references.filter(expression=concept3.uri).exists())
 
+    def test_put_bad_expressions(self):
+        expression = {
+           "data": {
+                "url": [
+                    "http://worldhealthorganization.github.io/ddcc/ValueSet/DDCC-QR-Format-ValueSet"
+                ]
+            }
+        }
+        response = self.client.put(
+            self.collection.uri + 'references/',
+            expression,
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, [])
+
 
 class CollectionVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
     def setUp(self):

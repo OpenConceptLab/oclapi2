@@ -531,7 +531,7 @@ class CollectionReference(models.Model):
     def get_resource_queryset_from_system_and_valueset(self, resource_klass, resource_relation):
         system_version = self.resolve_system_version()
         valueset_versions = self.resolve_valueset_versions()
-        queryset = resource_klass.objects.none()
+        queryset = None
         if system_version and system_version.can_view_all_content(self.created_by):
             queryset = get(system_version, resource_relation).filter()
             if system_version.is_head and not self.resource_version:
@@ -543,7 +543,10 @@ class CollectionReference(models.Model):
             for valueset in valueset_versions:
                 if valueset.expansion_uri and valueset.can_view_all_content(self.created_by):
                     rel = get(valueset.expansion, resource_relation)
-                    queryset &= rel.all()
+                    if queryset is None:
+                        queryset = rel.all()
+                    else:
+                        queryset &= rel.all()
         if not system_version and not valueset_versions and self.expression:
             queryset = resource_klass.from_uri_queryset(self.expression)
 
