@@ -94,20 +94,21 @@ class CollectionReferenceParser(CollectionReferenceAbstractParser):
 class CollectionReferenceExpandedStructureParser(CollectionReferenceAbstractParser):
     """ New style parser """
 
-    def parse(self):
+    def to_reference_structure(self):
+        self.references = []
         if isinstance(self.expression, dict):
-            self.references.append(self.to_reference_structure())
+            self._to_reference_structure()
         elif isinstance(self.expression, list):
             for expression in self.expression:
-                self.references.append(self.to_reference_structure(expression))
+                self._to_reference_structure(expression)
+        return self.references
 
-    def to_reference_structure(self, expression=None):  # pylint: disable=arguments-differ
-        self.references = []
+    def _to_reference_structure(self, expression=None):  # pylint: disable=arguments-differ
         expression = expression or self.expression
         if isinstance(get(expression, 'url'), list):
             return self.references
-        concept = self.expression.get('concept', None)
-        mapping = self.expression.get('mapping', None)
+        concept = expression.get('concept', None)
+        mapping = expression.get('mapping', None)
         if concept:
             if not isinstance(concept, list):
                 concept = [concept]
@@ -156,7 +157,7 @@ class CollectionReferenceExpandedStructureParser(CollectionReferenceAbstractPars
                     )
                 )
         if not concept and not mapping:
-            self.references = [dict(
+            self.references.append(dict(
                 expression=None,
                 namespace=get(expression, 'namespace'),
                 system=get(expression, 'system') or get(expression, 'url'),
@@ -170,7 +171,7 @@ class CollectionReferenceExpandedStructureParser(CollectionReferenceAbstractPars
                 transform=get(expression, 'transform'),
                 created_by=self.user,
                 display=get(expression, 'display')
-            )]
+            ))
         return self.references
 
 
@@ -218,21 +219,14 @@ class CollectionReferenceSourceAllExpressionParser(CollectionReferenceAbstractPa
 
     def parse(self):
         self.set_expression_string()
-
-    def to_reference_structure(self):
-        self.references = []
         if self.expression.get('concepts') == ALL_SYMBOL:
-            parser = CollectionReferenceExpressionStringParser(
-                self.expression_str + 'concepts/', self.transform, self.cascade, self.user)
-            parser.parse()
-            self.references.append(parser.to_reference_structure())
+            self.parsers.append(CollectionReferenceExpressionStringParser(
+                self.expression_str + 'concepts/', self.transform, self.cascade, self.user))
         if self.expression.get('mappings') == ALL_SYMBOL:
-            parser = CollectionReferenceExpressionStringParser(
-                self.expression_str + 'mappings/', self.transform, self.cascade, self.user)
+            self.parsers.append(CollectionReferenceExpressionStringParser(
+                self.expression_str + 'mappings/', self.transform, self.cascade, self.user))
+        for parser in self.parsers:
             parser.parse()
-            self.references.append(parser.to_reference_structure())
-
-        return flatten(self.references)
 
 
 class CollectionReferenceExpressionStringParser(CollectionReferenceAbstractParser):
@@ -334,7 +328,7 @@ class CollectionReferenceExpressionStringParser(CollectionReferenceAbstractParse
             self.set_resource_version()
 
     def to_reference_structure(self):
-        self.references = [dict(
+        self.references.append(dict(
             expression=self.expression,
             reference_type=self.reference_type,
             cascade=self.cascade,
@@ -346,5 +340,5 @@ class CollectionReferenceExpressionStringParser(CollectionReferenceAbstractParse
             filter=self.filter,
             transform=self.transform,
             created_by=self.user
-        )]
+        ))
         return self.references

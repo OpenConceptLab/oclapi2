@@ -1943,7 +1943,37 @@ class CollectionReferenceOldStyleToExpandedStructureParserTest(OCLTestCase):
         parser.to_reference_structure()
         return parser.to_objects()
 
-    def test_parse_string_expression_generic(self):
+    def test_parse_string_expression_generic(self):  # pylint: disable=too-many-statements
+        references = self.get_expanded_references(
+            expression=[
+                "/orgs/MyOrg/sources/MySource/concepts/c-1234/",
+            ]
+        )
+        self.assertEqual(len(references), 1)
+        reference = references[0]
+        self.assertEqual(reference.expression, "/orgs/MyOrg/sources/MySource/concepts/c-1234/")
+        self.assertEqual(reference.system, "/orgs/MyOrg/sources/MySource/")
+        self.assertEqual(reference.code, "c-1234")
+        self.assertEqual(reference.reference_type, 'concepts')
+        self.assertIsNone(reference.version)
+        self.assertIsNone(reference.valueset)
+        self.assertIsNone(reference.filter)
+        self.assertIsNone(reference.cascade)
+
+        references = self.get_expanded_references(
+            expression="/orgs/MyOrg/sources/MySource/concepts/c-1234/"
+        )
+        self.assertEqual(len(references), 1)
+        reference = references[0]
+        self.assertEqual(reference.expression, "/orgs/MyOrg/sources/MySource/concepts/c-1234/")
+        self.assertEqual(reference.system, "/orgs/MyOrg/sources/MySource/")
+        self.assertEqual(reference.code, "c-1234")
+        self.assertEqual(reference.reference_type, 'concepts')
+        self.assertIsNone(reference.version)
+        self.assertIsNone(reference.valueset)
+        self.assertIsNone(reference.filter)
+        self.assertIsNone(reference.cascade)
+
         references = self.get_expanded_references(
             expression=dict(expressions=[
                 "/orgs/MyOrg/sources/MySource/concepts/c-1234/",
@@ -2462,3 +2492,49 @@ class CollectionReferenceParserTest(OCLTestCase):
         self.assertEqual(references[0].reference_type, "concepts")
         self.assertEqual(references[0].code, "1948")
         self.assertEqual(references[0].build_expression(), "http://hl7.org/fhir/ValueSet/my-valueset1/concepts/1948/")
+
+        references = self.get_expanded_references(
+            expression={
+              "system": "http://hl7.org/fhir/CodeSystem/my-codeystem",
+              "concept": "1948",
+              "mapping": "93"
+            }
+        )
+
+        self.assertEqual(len(references), 2)
+        reference = references[0]
+        self.assertEqual(reference.system, "http://hl7.org/fhir/CodeSystem/my-codeystem")
+        self.assertEqual(reference.code, "1948")
+        self.assertEqual(reference.reference_type, "concepts")
+        self.assertIsNone(reference.version)
+        self.assertIsNone(reference.display)
+
+        reference = references[1]
+        self.assertEqual(reference.system, "http://hl7.org/fhir/CodeSystem/my-codeystem")
+        self.assertEqual(reference.code, "93")
+        self.assertEqual(reference.reference_type, "mappings")
+        self.assertIsNone(reference.version)
+
+        references = self.get_expanded_references(
+            expression=[{
+              "system": "http://hl7.org/fhir/CodeSystem/my-codeystem",
+              "concept": "1948",
+            }, {
+              "system": "http://hl7.org/fhir/CodeSystem/my-codeystem",
+              "mapping": "93"
+            }]
+        )
+
+        self.assertEqual(len(references), 2)
+        reference = references[0]
+        self.assertEqual(reference.system, "http://hl7.org/fhir/CodeSystem/my-codeystem")
+        self.assertEqual(reference.code, "1948")
+        self.assertEqual(reference.reference_type, "concepts")
+        self.assertIsNone(reference.version)
+        self.assertIsNone(reference.display)
+
+        reference = references[1]
+        self.assertEqual(reference.system, "http://hl7.org/fhir/CodeSystem/my-codeystem")
+        self.assertEqual(reference.code, "93")
+        self.assertEqual(reference.reference_type, "mappings")
+        self.assertIsNone(reference.version)
