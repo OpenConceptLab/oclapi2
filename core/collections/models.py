@@ -807,25 +807,22 @@ class Expansion(BaseResourceModel):
 
         index_concepts = False
         index_mappings = False
-        mappings = Mapping.objects.none()
         is_auto_generated = self.is_auto_generated
+
         for reference in refs:
-            if reference.is_concept:
-                if is_auto_generated:
-                    concepts = reference.concepts
-                else:
-                    concepts, mappings = reference.get_concepts()
-                if concepts.exists():
-                    self.concepts.add(*self.apply_parameters(concepts, True))
-                    index_concepts = True
-                if mappings.exists():
-                    self.mappings.add(*self.apply_parameters(mappings, False))
-                    index_mappings = True
-            elif reference.is_mapping:
-                mappings = reference.mappings if is_auto_generated else reference.get_mappings()
-                if mappings.exists():
-                    self.mappings.add(*self.apply_parameters(mappings, False))
-                    index_mappings = True
+            if is_auto_generated:
+                concepts = reference.concepts
+                mappings = reference.mappings
+            else:
+                concepts, mappings = reference.get_concepts()
+                mappings |= reference.get_mappings()
+
+            if concepts.exists():
+                self.concepts.add(*self.apply_parameters(concepts, True))
+                index_concepts = True
+            if mappings.exists():
+                self.mappings.add(*self.apply_parameters(mappings, False))
+                index_mappings = True
 
         if index:
             if index_concepts:
