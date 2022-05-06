@@ -1,13 +1,19 @@
 from rest_framework import serializers
-from rest_framework.fields import CharField, DateField, SerializerMethodField
+from rest_framework.fields import CharField, DateField, SerializerMethodField, ChoiceField
 
 from core.code_systems.serializers import CodeSystemConceptSerializer
 from core.collections.models import Collection, CollectionReference
 from core.collections.serializers import CollectionCreateOrUpdateSerializer
-from core.common.serializers import StatusField, IdentifierSerializer
+from core.common.serializers import StatusField, IdentifierSerializer, ReadSerializerMixin
 from core.orgs.models import Organization
 from core.sources.models import Source
 from core.users.models import UserProfile
+
+
+class FilterValueSetSerializer(ReadSerializerMixin, serializers.Serializer):
+    property = CharField()
+    op = ChoiceField(choices=['='])
+    value = CharField()
 
 
 class ValueSetConceptSerializer(CodeSystemConceptSerializer):
@@ -37,54 +43,60 @@ class ComposeValueSetField(serializers.Field):
                 if not source:
                     raise Exception(f'Cannot find system "{system}" and version "{system_version}"')
 
-                for concept in include['concept']:
-                    mnemonic = concept['code']
-                    concept = source.first().concepts.filter(mnemonic=mnemonic)
-                    if concept:
-                        reference = {
-                            'expression': concept.first().uri,
-                            'version': system_version
-                        }
-                        references.append(reference)
-                    else:
-                        raise Exception(f'Cannot find concept "{mnemonic}" in system "{source_uri}"')
-            res = { 'references': references }
+                if 'concept' in include:
+                    for concept in include['concept']:
+                        mnemonic = concept['code']
+                        concept = source.first().concepts.filter(mnemonic=mnemonic)
+                        if concept:
+                            reference = {
+                                'expression': concept.first().uri,
+                                'version': system_version
+                            }
+                            references.append(reference)
+                        else:
+                            raise Exception(f'Cannot find concept "{mnemonic}" in system "{source_uri}"')
+
+                self.include_filter(include, references, source_uri, system_version)
+
+            res = {'references': references}
             if 'lockedDate' in data:
                 res['locked_date'] = data['lockedDate']
             return res
 
         return {}
 
+    @staticmethod
+    def include_filter(include, references, source_uri, system_version):
+        if 'filter' in include:
+            filters = FilterValueSetSerializer(data=include['filter'], many=True)
+            filters.is_valid(raise_exception=True)
+            if references:
+                # Due to the way include.concept is modeled as individual references
+                # we need to apply filter to each reference
+                for reference in references:
+                    reference['filter'] = filters.validated_data
+            else:
+                # No include.concept then include the whole system and filter
+                reference = {
+                    'expression': source_uri,
+                    'version': system_version,
+                    'filter': filters.validated_data
+                }
+                references.append(reference)
+
     def to_representation(self, value):
         includes = []
         inactive = False
         for reference in value.references.all():
             for concept in reference.concepts.all():
+                source = concept.sources.exclude(version='HEAD').order_by('created_at').first()
                 if concept.retired:
                     inactive = True
-                matching_include = None
-                source = concept.sources.exclude(version='HEAD').order_by('created_at').first()
                 if not source:
                     # Concept is only in HEAD source
                     # TODO: find a better solution than omitting
                     continue
-                # TODO: is this use or uri as concept_system correct?
-                concept_system = source.canonical_url if source.canonical_url else \
-                    IdentifierSerializer.convert_ocl_uri_to_fhir_url(source.uri)
-                concept_system_version = reference.version if reference.version else source.version
-                for include in includes:
-                    if include['system'] == concept_system \
-                            and include['version'] == concept_system_version:
-                        matching_include = include
-                        break
-                if not matching_include:
-                    matching_include = {
-                        'system': concept_system,
-                        'version': concept_system_version,
-                        'concept': []
-                    }
-                    includes.append(matching_include)
-
+                matching_include = self.find_or_create_include(includes, source, reference)
                 matching_include['concept'].append(ValueSetConceptSerializer(concept).data)
 
         if includes:
@@ -93,6 +105,32 @@ class ComposeValueSetField(serializers.Field):
                     'include': includes}
 
         return None
+
+    @staticmethod
+    def find_or_create_include(includes, source, reference):
+        matching_include = None
+
+        # TODO: is this use or uri as concept_system correct?
+        concept_system = source.canonical_url if source.canonical_url else \
+            IdentifierSerializer.convert_ocl_uri_to_fhir_url(source.uri)
+        concept_system_version = reference.version if reference.version else source.version
+
+        for include in includes:
+            if include['system'] == concept_system \
+                    and include['version'] == concept_system_version:
+                matching_include = include
+                break
+        if not matching_include:
+            matching_include = {
+                'system': concept_system,
+                'version': concept_system_version,
+                'concept': [],
+            }
+            if reference.filter:
+                # Include filter in newly added include
+                matching_include['filter'] = FilterValueSetSerializer(reference.filter, many=True).data
+            includes.append(matching_include)
+        return matching_include
 
 
 class ValueSetDetailSerializer(serializers.ModelSerializer):
@@ -133,7 +171,8 @@ class ValueSetDetailSerializer(serializers.ModelSerializer):
         references = []
         if 'references' in validated_data:
             references = [CollectionReference(expression=reference['expression'], version=reference['version'],
-                                              collection=collection) for reference in validated_data['references']]
+                                              collection=collection, filter=reference.get('filter'))
+                          for reference in validated_data['references']]
 
         if references:
             _, errors = collection.add_references(references, user)

@@ -2,6 +2,7 @@ import logging
 
 from core.bundles.serializers import FhirBundleSerializer
 from core.collections.views import CollectionListView, CollectionRetrieveUpdateDestroyView
+from core.parameters.serializers import ParametersSerializer
 from core.value_sets.serializers import ValueSetDetailSerializer
 
 logger = logging.getLogger('oclapi')
@@ -72,3 +73,17 @@ class ValueSetRetrieveUpdateView(CollectionRetrieveUpdateDestroyView):
 
     def get_detail_serializer(self, obj):
         return ValueSetDetailSerializer(obj)
+
+
+class ValueSetExpandView(CollectionRetrieveUpdateDestroyView):
+    serializer_class = ParametersSerializer
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+
+        return queryset
+
+    def get_serializer(self, instance=None):  # pylint: disable=arguments-differ
+        if instance:
+            return ParametersSerializer.from_concept(instance)
+        return ParametersSerializer()
