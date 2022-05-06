@@ -151,8 +151,13 @@ class CollectionListView(CollectionBaseView, ConceptDictionaryCreateMixin, ListW
     facet_class = CollectionSearch
     default_filters = dict(is_active=True, version=HEAD)
 
+    # pylint: disable=R0201
+    def apply_filters(self, queryset):
+        return queryset
+
     def get_queryset(self):
         queryset = super().get_queryset()
+        queryset = self.apply_filters(queryset)
         user = self.request.user
         if get(user, 'is_staff'):
             return queryset

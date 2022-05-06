@@ -2,7 +2,7 @@ from rest_framework import serializers
 from rest_framework.fields import CharField, DateField, BooleanField, IntegerField, SerializerMethodField, ChoiceField
 
 from core import settings
-from core.common.serializers import ReadSerializerMixin
+from core.common.serializers import ReadSerializerMixin, StatusField, IdentifierSerializer
 from core.concepts.models import Concept, LocalizedText
 from core.concepts.serializers import ConceptDetailSerializer
 from core.orgs.models import Organization
@@ -119,36 +119,6 @@ class CodeSystemPropertySerializer(ReadSerializerMixin, serializers.Serializer):
     type = CharField()
 
 
-class CodeSystemIdentifierTypeCodingSerializer(ReadSerializerMixin, serializers.Serializer):
-    system = CharField(default='http://hl7.org/fhir/v2/0203', required=False)
-    code = CharField(default='ACSN', required=False)
-    display = CharField(default='Accession ID', required=False)
-
-
-class CodeSystemIdentifierTypeSerializer(ReadSerializerMixin, serializers.Serializer):
-    text = CharField(default='Accession ID', required=False)
-    coding = CodeSystemIdentifierTypeCodingSerializer(many=True, required=False)
-
-
-class CodeSystemIdentifierSerializer(ReadSerializerMixin, serializers.Serializer):
-    system = CharField(default=settings.API_BASE_URL, required=False)
-    value = CharField(required=False)
-    type = CodeSystemIdentifierTypeSerializer(required=False)
-
-
-class CodeSystemStatusField(serializers.Field):
-
-    def to_internal_value(self, data):
-        return {'retired': data == 'retired', 'released': data == 'released'}
-
-    def to_representation(self, value):
-        if value.retired:
-            return 'retired'
-        if value.released:
-            return 'active'
-        return 'draft'
-
-
 class CodeSystemConceptField(serializers.Field):
 
     def to_internal_value(self, data):
@@ -167,7 +137,7 @@ class CodeSystemDetailSerializer(serializers.ModelSerializer):
     id = CharField(source='mnemonic')
     url = CharField(source='canonical_url', required=False)
     title = CharField(source='full_name', required=False)
-    status = CodeSystemStatusField(source='*')
+    status = StatusField(source='*')
     language = CharField(source='default_locale', required=False)
     count = IntegerField(source='active_concepts', read_only=True)
     content = ChoiceField(source='content_type', choices=['not-present', 'example', 'fragment', 'complete',
@@ -175,7 +145,7 @@ class CodeSystemDetailSerializer(serializers.ModelSerializer):
     property = SerializerMethodField()
     meta = SerializerMethodField()
     concept = CodeSystemConceptField(source='*', required=False)
-    identifier = CodeSystemIdentifierSerializer(many=True, required=False)
+    identifier = IdentifierSerializer(many=True, required=False)
 
     caseSensitive = BooleanField(source='case_sensitive', required=False)
     versionNeeded = BooleanField(source='version_needed', required=False)
@@ -213,88 +183,14 @@ class CodeSystemDetailSerializer(serializers.ModelSerializer):
     def to_representation(self, instance):
         try:
             rep = super().to_representation(instance)
-            self.include_ocl_identifier(instance, rep)
+            IdentifierSerializer.include_ocl_identifier(instance.uri, rep)
         except Exception as error:
             raise Exception(f'Failed to represent "{instance.uri}" as CodeSystem') from error
         return rep
 
-    @staticmethod
-    def parse_identifier(accession_id):
-        id_parts = accession_id.strip().strip('/').split('/')
-        if len(id_parts) != 4:
-            raise serializers.ValidationError('Identifier must be in a format: '
-                                              '/{owner_type}/{owner_id}/CodeSystem/{code_system_id}')
-
-        identifier = {'owner_type': id_parts[0], 'owner_id': id_parts[1], 'resource_type': id_parts[2],
-                      'resource_id': id_parts[3]}
-        return identifier
-
-    def validate_identifier(self, value):
-        accession_id = self.find_ocl_identifier(value)
-        if accession_id:
-            identifier = self.parse_identifier(accession_id)
-            if identifier['owner_type'] not in ['users', 'orgs']:
-                raise serializers.ValidationError(
-                    f"Owner type='{identifier['owner_type']}' is invalid. It must be 'users' or 'orgs'")
-            if identifier['resource_type'] != 'CodeSystem':
-                raise serializers.ValidationError(
-                    f"Resource type='{identifier['resource_type']}' is invalid. It must be 'CodeSystem'")
-            if identifier['owner_type'] == 'users':
-                owner_exists = UserProfile.objects.filter(username=identifier['owner_id']).exists()
-            else:
-                owner_exists = Organization.objects.filter(mnemonic=identifier['owner_id']).exists()
-            if not owner_exists:
-                raise serializers.ValidationError(
-                    f"Owner of type='{identifier['owner_type']}' and id='{identifier['owner_id']}' not found.")
-        else:
-            raise serializers.ValidationError("OCL accession identifier is required: { "
-                                              "'value': '/{owner_type}/{owner_id}/CodeSystem/{code_system_id}' }, "
-                                              "'type': {'coding': [{'code': 'ACSN', "
-                                              "'system': 'http://hl7.org/fhir/v2/0203'}]}}")
-        return value
-
-    def include_ocl_identifier(self, instance, rep):
-        """ Add OCL identifier if not present """
-        if not self.find_ocl_identifier(rep['identifier']):
-            rep['identifier'].append({
-                    'system': settings.API_BASE_URL,
-                'value': self.convert_ocl_to_fhir_url(instance),
-                'type': {
-                    'text': 'Accession ID',
-                    'coding': [{
-                        'system': 'http://hl7.org/fhir/v2/0203',
-                        'code': 'ACSN',
-                        'display': 'Accession ID'
-                    }]
-                }
-            })
-
-    @staticmethod
-    def convert_ocl_to_fhir_url(instance):
-        uri = instance.uri.replace('sources', 'CodeSystem').replace('collections', 'ValueSet')
-        if len(uri.split('/')) > 4:
-            uri = uri.rsplit('/', 2)[0] + '/'
-        return uri
-
-    @staticmethod
-    def find_ocl_identifier(identifiers):
-        found = None
-        for ident in identifiers:
-            if isinstance(ident.get('type', {}).get('coding', None), list):
-                codings = ident['type']['coding']
-                for coding in codings:
-                    if coding.get('code', None) == 'ACSN' and \
-                            coding.get('system', None) == 'http://hl7.org/fhir/v2/0203':
-                        found = ident.get('value', None)
-                        if found:
-                            break
-                if found:
-                    break
-        return found
-
     def get_ocl_identifier(self):
-        ident = self.find_ocl_identifier(self.validated_data['identifier'])
-        ident = self.parse_identifier(ident)
+        ident = IdentifierSerializer.find_ocl_identifier(self.validated_data['identifier'])
+        ident = IdentifierSerializer.parse_identifier(ident)
         return ident
 
     def create(self, validated_data):
@@ -302,9 +198,10 @@ class CodeSystemDetailSerializer(serializers.ModelSerializer):
             concepts = validated_data.pop('concepts')
         else:
             concepts = []
+        uri = self.context['request'].path + validated_data['mnemonic']
+        ident = IdentifierSerializer.include_ocl_identifier(uri, validated_data)
         source = SourceCreateOrUpdateSerializer().prepare_object(validated_data)
 
-        ident = self.get_ocl_identifier()
         if ident['owner_type'] == 'orgs':
             source.set_parent(Organization.objects.filter(mnemonic=ident['owner_id']).first())
         else:

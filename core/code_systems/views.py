@@ -25,17 +25,20 @@ class CodeSystemListView(SourceListView):
         return super().get_filter_params(False)
 
     def apply_query_filters(self, queryset):
+        query_fields = list(self.serializer_class.Meta.fields)
+
         url = self.request.query_params.get('url')
-        language = self.request.query_params.get('language')
-        experimental = self.request.query_params.get('experimental')
-        status = self.request.query_params.get('status')
         if url:
             queryset = queryset.filter(canonical_url=url)
+            query_fields.remove('url')
+
+        language = self.request.query_params.get('language')
         if language:
             queryset = queryset.filter(locale=language)
-        if experimental:
-            queryset = queryset.filter(experimental=experimental)
+            query_fields.remove('language')
+        status = self.request.query_params.get('status')
         if status:
+            query_fields.remove('status')
             if status == 'retired':
                 queryset = queryset.filter(retired=True)
             elif status == 'active':
@@ -43,7 +46,11 @@ class CodeSystemListView(SourceListView):
             elif status == 'draft':
                 queryset = queryset.filter(released=False)
 
-        # TODO: implement other filters
+        for query_field in query_fields:
+            query_value = self.request.query_params.get(query_field)
+            if query_value:
+                kwargs = {query_field: query_value}
+                queryset = queryset.filter(**kwargs)
 
         return queryset
 
