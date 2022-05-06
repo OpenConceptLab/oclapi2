@@ -551,7 +551,8 @@ class CollectionReference(models.Model):
 
     def resolve_system_version(self):
         if self.system:
-            version = Collection.resolve_reference_expression(self.system, self.namespace, self.version)
+            from core.sources.models import Source
+            version = Source.resolve_reference_expression(self.system, self.namespace, self.version)
             if version.id:
                 return version
         return None
