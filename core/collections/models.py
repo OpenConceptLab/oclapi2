@@ -24,7 +24,7 @@ from core.common.tasks import seed_children_to_expansion, batch_index_resources,
     index_expansion_mappings
 from core.common.utils import drop_version, to_owner_uri, generate_temp_version, es_id_in, \
     es_wildcard_search, get_resource_class_from_resource_name, get_exact_search_fields, to_snake_case, \
-    es_exact_search, paginate_es_to_queryset
+    es_exact_search, es_to_pks, batch_qs
 from core.concepts.constants import LOCALES_FULLY_SPECIFIED
 from core.concepts.models import Concept
 from core.mappings.models import Mapping
@@ -509,9 +509,9 @@ class CollectionReference(models.Model):
 
     def apply_filters(self, queryset, resource_klass):
         if self.filter:
+            pks = []
             document = resource_klass.get_search_document()
             search = document.search()
-            search = es_id_in(search, queryset.values_list('id', flat=True))
             is_exact_search = self.__is_exact_search_filter()
             for filter_def in self.filter:  # pylint: disable=not-an-iterable
                 if to_snake_case(filter_def['property']) == 'exact_match':
@@ -522,13 +522,17 @@ class CollectionReference(models.Model):
                     if is_exact_search:
                         search = es_exact_search(search, val, exact_search_fields)
                     else:
-                        search = es_wildcard_search(
-                            search, val, exact_search_fields, name_attr='_name' if self.is_concept else 'name')
+                        name_attr = '_name' if self.is_concept else 'name'
+                        search = es_wildcard_search(search, val, exact_search_fields, name_attr)
                 else:
                     search = search.filter("match", **{to_snake_case(filter_def["property"]): filter_def["value"]})
 
-            search = search.params(request_timeout=ES_REQUEST_TIMEOUT_ASYNC)
-            queryset = paginate_es_to_queryset(search, resource_klass)
+            for _queryset in batch_qs(queryset.order_by('id'), 500):
+                # iterating on queryset because ES has max_clause limit default to 1024
+                search_within_queryset = es_id_in(search, list(_queryset.values_list('id', flat=True)))
+                pks += es_to_pks(search_within_queryset.params(request_timeout=ES_REQUEST_TIMEOUT_ASYNC))
+            return resource_klass.objects.filter(id__in=set(pks)) if pks else resource_klass.objects.none()
+
         return queryset
 
     # returns intersection of system and valueset resources considering creator permissions
@@ -966,15 +970,18 @@ class ExpansionTextFilterParameter(ExpansionParameter):
 
     def apply(self, queryset, is_concept_queryset):
         if self.is_valid_string():
+            pks = []
             klass = get_resource_class_from_resource_name('concept' if is_concept_queryset else 'mapping')
             document = klass.get_search_document()
             search = document.search()
-            search = es_id_in(search, queryset.values_list('id', flat=True))
             search = es_wildcard_search(
                 search, self.value, get_exact_search_fields(klass),
                 name_attr='_name' if is_concept_queryset else 'name'
             )
-            queryset = search.params(request_timeout=ES_REQUEST_TIMEOUT).to_queryset()
+            for _queryset in batch_qs(queryset.order_by('id'), 500):
+                new_search = es_id_in(search, list(_queryset.values_list('id', flat=True)))
+                pks += es_to_pks(new_search.params(request_timeout=ES_REQUEST_TIMEOUT))
+            queryset = klass.objects.filter(id__in=set(pks)) if pks else klass.objects.none()
 
         return queryset
 

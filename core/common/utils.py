@@ -2,7 +2,6 @@
 
 import json
 import mimetypes
-import operator
 import os
 import random
 import shutil
@@ -11,7 +10,6 @@ import uuid
 import zipfile
 from collections import OrderedDict
 from collections.abc import MutableMapping  # pylint: disable=no-name-in-module,deprecated-class
-from functools import reduce
 from threading import local
 from urllib import parse
 
@@ -747,7 +745,7 @@ def chunks(lst, size):
 
 def es_id_in(search, ids):
     if ids:
-        return search.query(reduce(operator.ior, [es_Q('match', _id=_id) for _id in ids]))
+        return search.query("terms", _id=ids)
     return search
 
 
@@ -807,7 +805,7 @@ def get_exact_search_fields(klass):
     return [field for field, config in get(klass, 'es_fields', {}).items() if config.get('exact', False)]
 
 
-def paginate_es_to_queryset(search, model):
+def es_to_pks(search):
     # doesn't care about the order
     limit = 25
     offset = 0
@@ -820,4 +818,21 @@ def paginate_es_to_queryset(search, model):
             pks += [hit.meta.id for hit in hits]
         offset += limit
         limit += limit
-    return model.objects.filter(pk__in=pks)
+    return pks
+
+
+def batch_qs(qs, batch_size=1000):
+    """
+    Returns a sub-queryset for each batch in the given queryset.
+
+    Usage:
+        # Make sure to order your querset
+        article_qs = Article.objects.order_by('id')
+        for qs in batch_qs(article_qs):
+            for article in qs:
+                print article.body
+    """
+    total = qs.count()
+    for start in range(0, total, batch_size):
+        end = min(start + batch_size, total)
+        yield qs[start:end]
