@@ -156,6 +156,9 @@ def add_references(  # pylint: disable=too-many-arguments,too-many-locals
             from core.mappings.models import Mapping
             from core.mappings.documents import MappingDocument
             Mapping.batch_index(ref.mappings, MappingDocument)
+    if errors:
+        logger.error('Errors while adding references....')
+        logger.error(errors)
 
     return errors
 
