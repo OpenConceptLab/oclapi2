@@ -1653,19 +1653,74 @@ class ReferenceExpressionResolveViewTest(OCLAPITestCase):
 
 
 class CollectionVersionExpansionMappingRetrieveViewTest(OCLAPITestCase):
-    def test_get_200(self):
-        collection = OrganizationCollectionFactory()
-        expansion = ExpansionFactory(collection_version=collection)
-        mapping = MappingFactory()
-        reference = CollectionReference(expression=mapping.url, collection=collection)
-        reference.save()
-        expansion.mappings.add(mapping)
-        reference.mappings.add(mapping)
+    def setUp(self):
+        super().setUp()
+        self.collection = OrganizationCollectionFactory()
+        self.mapping = MappingFactory()
+        self.expansion = ExpansionFactory(collection_version=self.collection)
+        self.reference = CollectionReference(expression=self.mapping.url, collection=self.collection)
+        self.reference.save()
+        self.expansion.mappings.add(self.mapping)
+        self.reference.mappings.add(self.mapping)
 
-        response = self.client.get(expansion.url + f'mappings/{mapping.mnemonic}/')
+    def test_get_200(self):
+        response = self.client.get(self.expansion.url + f'mappings/{self.mapping.mnemonic}/')
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data['id'], str(mapping.mnemonic))
+        self.assertEqual(response.data['id'], str(self.mapping.mnemonic))
         self.assertEqual(response.data['type'], 'Mapping')
+
+    def test_get_404(self):
+        response = self.client.get(self.collection.url + f'expansions/e1/mappings/{self.mapping.mnemonic}/')
+        self.assertEqual(response.status_code, 404)
+
+        response = self.client.get(self.expansion.url + f'mappings/{self.mapping.mnemonic}/1234/')
+        self.assertEqual(response.status_code, 404)
+
+    def test_get_409(self):
+        mapping2 = MappingFactory(mnemonic=self.mapping.mnemonic)
+        self.expansion.mappings.add(mapping2)
+        self.reference.mappings.add(mapping2)
+
+        response = self.client.get(self.expansion.url + f'mappings/{self.mapping.mnemonic}/')
+        self.assertEqual(response.status_code, 409)
+
+        response = self.client.get(
+            self.expansion.url + f'mappings/{self.mapping.mnemonic}/?uri={mapping2.url}'
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['uuid'], str(mapping2.id))
+
+
+class CollectionVersionMappingRetrieveViewTest(OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.collection = OrganizationCollectionFactory()
+        self.mapping = MappingFactory()
+        self.reference = CollectionReference(expression=self.mapping.url, collection=self.collection)
+        self.reference.save()
+        self.reference.mappings.add(self.mapping)
+
+    def test_get_200(self):
+        expansion = ExpansionFactory(collection_version=self.collection)
+        expansion.mappings.add(self.mapping)
+        self.collection.expansion_uri = expansion.uri
+        self.collection.save()
+        response = self.client.get(self.collection.url + f'mappings/{self.mapping.mnemonic}/')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['id'], str(self.mapping.mnemonic))
+        self.assertEqual(response.data['type'], 'Mapping')
+
+    def test_get_404(self):
+        response = self.client.get(self.collection.url + f'/mappings/{self.mapping.mnemonic}/')
+        self.assertEqual(response.status_code, 404)
+
+        expansion = ExpansionFactory(collection_version=self.collection)
+        expansion.mappings.add(self.mapping)
+        self.collection.expansion_uri = expansion.uri
+        self.collection.save()
+
+        response = self.client.get(self.collection.url + f'mappings/{self.mapping.mnemonic}/1234/')
+        self.assertEqual(response.status_code, 404)
 
 
 class CollectionVersionExpansionConceptRetrieveViewTest(OCLAPITestCase):
