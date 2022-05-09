@@ -738,10 +738,11 @@ class CollectionVersionConceptsView(CollectionBaseView, ListWithHeadersMixin):
 
     def get_queryset(self):
         expansion = self.get_object()
+        queryset = Concept.objects.none()
         if expansion:
-            return expansion.concepts.filter()
+            queryset = expansion.concepts.filter()
 
-        return Concept.objects.none()
+        return queryset
 
     def get(self, request, *args, **kwargs):
         return self.list(request, *args, **kwargs)

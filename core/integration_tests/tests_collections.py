@@ -1633,7 +1633,6 @@ class ReferenceExpressionResolveViewTest(OCLAPITestCase):
         self.assertEqual(unknown_resolution['request'], '/orgs/foobar/')
         self.assertFalse('result' in unknown_resolution)
 
-
         response = self.client.post(
             '/$resolveReference/',
             '/orgs/foobar/',
@@ -2025,3 +2024,40 @@ class CollectionReferenceViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 405)
         self.assertEqual(collection_v1.references.count(), 1)
+
+
+class CollectionVersionExpansionViewTest(OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.collection = OrganizationCollectionFactory()
+        self.expansion_default = ExpansionFactory(collection_version=self.collection)
+        self.expansion = ExpansionFactory(collection_version=self.collection)
+        self.collection.expansion_uri = self.expansion_default.uri
+        self.collection.save()
+        self.assertEqual(self.collection.expansions.count(), 2)
+
+    def test_delete_404(self):
+        response = self.client.delete(
+            self.collection.url + 'expansions/e1/',
+            HTTP_AUTHORIZATION='Token ' + self.collection.created_by.get_token(),
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_delete_400(self):
+        response = self.client.delete(
+            self.expansion_default.url,
+            HTTP_AUTHORIZATION='Token ' + self.collection.created_by.get_token(),
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data, dict(erors=['Cannot delete default expansion']))
+
+    def test_delete_204(self):
+        response = self.client.delete(
+            self.expansion.url,
+            HTTP_AUTHORIZATION='Token ' + self.collection.created_by.get_token(),
+        )
+
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(self.collection.expansions.count(), 1)
