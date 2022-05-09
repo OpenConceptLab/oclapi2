@@ -1,3 +1,5 @@
+# pylint: disable=cyclic-import # only occurring in dev env
+
 import json
 import mimetypes
 import operator
@@ -803,3 +805,19 @@ def es_exact_search(search, search_str, exact_search_fields):
 
 def get_exact_search_fields(klass):
     return [field for field, config in get(klass, 'es_fields', {}).items() if config.get('exact', False)]
+
+
+def paginate_es_to_queryset(search, model):
+    # doesn't care about the order
+    limit = 25
+    offset = 0
+    result_count = 25
+    pks = []
+    while result_count > 0:
+        hits = search[offset:limit].execute().hits
+        result_count = len(hits)
+        if result_count:
+            pks += [hit.meta.id for hit in hits]
+        offset += limit
+        limit += limit
+    return model.objects.filter(pk__in=pks)

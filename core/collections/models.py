@@ -23,7 +23,8 @@ from core.common.models import ConceptContainerModel, BaseResourceModel
 from core.common.tasks import seed_children_to_expansion, batch_index_resources, index_expansion_concepts, \
     index_expansion_mappings
 from core.common.utils import drop_version, to_owner_uri, generate_temp_version, es_id_in, \
-    es_wildcard_search, get_resource_class_from_resource_name, get_exact_search_fields, to_snake_case, es_exact_search
+    es_wildcard_search, get_resource_class_from_resource_name, get_exact_search_fields, to_snake_case, \
+    es_exact_search, paginate_es_to_queryset
 from core.concepts.constants import LOCALES_FULLY_SPECIFIED
 from core.concepts.models import Concept
 from core.mappings.models import Mapping
@@ -516,15 +517,18 @@ class CollectionReference(models.Model):
                 if to_snake_case(filter_def['property']) == 'exact_match':
                     continue
                 val = filter_def['value']
-                exact_search_fields = get_exact_search_fields(
-                    resource_klass) if filter_def['property'] == 'q' else [to_snake_case(filter_def['property'])]
-                if is_exact_search:
-                    search = es_exact_search(search, val, exact_search_fields)
+                if filter_def['property'] == 'q':
+                    exact_search_fields = get_exact_search_fields(resource_klass)
+                    if is_exact_search:
+                        search = es_exact_search(search, val, exact_search_fields)
+                    else:
+                        search = es_wildcard_search(
+                            search, val, exact_search_fields, name_attr='_name' if self.is_concept else 'name')
                 else:
-                    search = es_wildcard_search(
-                        search, val, exact_search_fields, name_attr='_name' if self.is_concept else 'name'
-                    )
-            queryset = search.params(request_timeout=ES_REQUEST_TIMEOUT_ASYNC).to_queryset()
+                    search = search.filter("match", **{to_snake_case(filter_def["property"]): filter_def["value"]})
+
+            search = search.params(request_timeout=ES_REQUEST_TIMEOUT_ASYNC)
+            queryset = paginate_es_to_queryset(search, resource_klass)
         return queryset
 
     # returns intersection of system and valueset resources considering creator permissions
