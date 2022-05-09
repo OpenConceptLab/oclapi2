@@ -2061,3 +2061,59 @@ class CollectionVersionExpansionViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 204)
         self.assertEqual(self.collection.expansions.count(), 1)
+
+
+class CollectionVersionExpansionsViewTest(OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.collection = OrganizationCollectionFactory()
+        self.token = self.collection.created_by.get_token()
+
+    def test_post(self):
+        response = self.client.post(
+            self.collection.url + 'HEAD/expansions/',
+            dict(mnemonic='e1'),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+        self.assertIsNone(self.collection.expansion_uri)
+
+        response = self.client.post(
+            self.collection.url + 'HEAD/expansions/',
+            dict(mnemonic='e1', parameters=dict(activeOnly=False)),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data['mnemonic'], 'e1')
+        self.assertIsNotNone(response.data['id'])
+        self.assertIsNotNone(response.data['parameters'])
+
+        self.collection.refresh_from_db()
+        self.assertEqual(self.collection.expansions.count(), 1)
+        self.assertIsNotNone(self.collection.expansion_uri)
+
+    def test_get(self):
+        response = self.client.get(
+            self.collection.url + 'HEAD/expansions/',
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, [])
+
+        expansion = ExpansionFactory(mnemonic='e1', collection_version=self.collection)
+
+        response = self.client.get(
+            self.collection.url + 'HEAD/expansions/',
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['id'], expansion.id)
+        self.assertEqual(response.data[0]['mnemonic'], 'e1')
