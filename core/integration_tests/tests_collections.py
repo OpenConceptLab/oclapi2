@@ -1724,19 +1724,47 @@ class CollectionVersionMappingRetrieveViewTest(OCLAPITestCase):
 
 
 class CollectionVersionExpansionConceptRetrieveViewTest(OCLAPITestCase):
-    def test_get_200(self):
-        collection = OrganizationCollectionFactory()
-        expansion = ExpansionFactory(collection_version=collection)
-        concept = ConceptFactory()
-        reference = CollectionReference(expression=concept.url, collection=collection)
-        reference.save()
-        expansion.concepts.add(concept)
-        reference.concepts.add(concept)
+    def setUp(self):
+        super().setUp()
+        self.collection = OrganizationCollectionFactory()
+        self.expansion = ExpansionFactory(collection_version=self.collection)
+        self.concept = ConceptFactory()
+        self.reference = CollectionReference(expression=self.concept.url, collection=self.collection)
+        self.reference.save()
+        self.expansion.concepts.add(self.concept)
+        self.reference.concepts.add(self.concept)
 
-        response = self.client.get(expansion.url + f'concepts/{concept.mnemonic}/')
+    def test_get_200(self):
+        response = self.client.get(self.expansion.url + f'concepts/{self.concept.mnemonic}/')
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data['id'], str(concept.mnemonic))
+        self.assertEqual(response.data['id'], str(self.concept.mnemonic))
         self.assertEqual(response.data['type'], 'Concept')
+
+    def test_get_404(self):
+        response = self.client.get(
+            self.collection.url + f'expansions/e1/concepts/{self.concept.mnemonic}/')
+
+        self.assertEqual(response.status_code, 404)
+
+        response = self.client.get(
+            self.expansion.url + f'concepts/{self.concept.mnemonic}/1234/')
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_get_409(self):
+        concept2 = ConceptFactory(mnemonic=self.concept.mnemonic)
+        self.expansion.concepts.add(concept2)
+        self.reference.concepts.add(concept2)
+        response = self.client.get(
+            self.expansion.url + f'concepts/{self.concept.mnemonic}/')
+
+        self.assertEqual(response.status_code, 409)
+
+        response = self.client.get(
+            self.expansion.url + f'concepts/{self.concept.mnemonic}/?uri={concept2.uri}'
+        )
+
+        self.assertEqual(response.status_code, 200)
 
 
 class CollectionVersionExpansionConceptMappingsViewTest(OCLAPITestCase):
