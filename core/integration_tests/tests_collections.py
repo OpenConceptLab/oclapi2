@@ -1740,87 +1740,148 @@ class CollectionVersionExpansionConceptRetrieveViewTest(OCLAPITestCase):
 
 
 class CollectionVersionExpansionConceptMappingsViewTest(OCLAPITestCase):
-    def test_get_200(self):
-        org = OrganizationFactory()
-        source = OrganizationSourceFactory(organization=org)
-        collection = OrganizationCollectionFactory(organization=org)
-        expansion = ExpansionFactory(collection_version=collection)
-        concept = ConceptFactory(parent=source)
-        mapping = MappingFactory(from_concept=concept, parent=source)
-        mapping2 = MappingFactory(from_concept=concept) # random owner/parent
-        reference = CollectionReference(expression=concept.url, collection=collection)
-        reference.save()
-        expansion.concepts.add(concept)
-        reference.concepts.add(concept)
+    def setUp(self):
+        super().setUp()
+        self.org = OrganizationFactory()
+        self.source = OrganizationSourceFactory(organization=self.org)
+        self.collection = OrganizationCollectionFactory(organization=self.org)
+        self.expansion = ExpansionFactory(collection_version=self.collection)
+        self.concept = ConceptFactory(parent=self.source)
+        self.mapping = MappingFactory(from_concept=self.concept, parent=self.source)
+        self.mapping2 = MappingFactory(from_concept=self.concept) # random owner/parent
+        self.reference = CollectionReference(expression=self.concept.url, collection=self.collection)
+        self.reference.save()
+        self.expansion.concepts.add(self.concept)
+        self.reference.concepts.add(self.concept)
 
-        response = self.client.get(expansion.url + f'concepts/{concept.mnemonic}/mappings/?brief=true')
+    def test_get_200(self):
+        response = self.client.get(
+            self.expansion.url + f'concepts/{self.concept.mnemonic}/mappings/?brief=true')
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 0)
 
-        expansion.mappings.add(mapping2)
+        self.expansion.mappings.add(self.mapping2)
 
-        response = self.client.get(expansion.url + f'concepts/{concept.mnemonic}/mappings/?brief=true')
+        response = self.client.get(self.expansion.url + f'concepts/{self.concept.mnemonic}/mappings/?brief=true')
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 1)
-        self.assertEqual(response.data[0]['url'], mapping2.url)
+        self.assertEqual(response.data[0]['url'], self.mapping2.url)
 
-        expansion.mappings.add(mapping)
+        self.expansion.mappings.add(self.mapping)
 
-        response = self.client.get(expansion.url + f'concepts/{concept.mnemonic}/mappings/?brief=true')
+        response = self.client.get(
+            self.expansion.url + f'concepts/{self.concept.mnemonic}/mappings/?brief=true')
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 2)
         self.assertEqual(
             sorted([data['url'] for data in response.data]),
-            sorted([mapping.url, mapping2.url])
+            sorted([self.mapping.url, self.mapping2.url])
         )
+
+    def test_get_404(self):
+        response = self.client.get(
+            self.collection.url + f'expansions/e1/concepts/{self.concept.mnemonic}/mappings/?brief=true')
+
+        self.assertEqual(response.status_code, 404)
+
+        response = self.client.get(
+            self.expansion.url + f'concepts/{self.concept.mnemonic}/1234/mappings/?brief=true')
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_get_409(self):
+        concept2 = ConceptFactory(mnemonic=self.concept.mnemonic)
+        self.expansion.concepts.add(concept2)
+        self.reference.concepts.add(concept2)
+        response = self.client.get(
+            self.expansion.url + f'concepts/{self.concept.mnemonic}/mappings/?brief=true')
+
+        self.assertEqual(response.status_code, 409)
+
+        response = self.client.get(
+            self.expansion.url + f'concepts/{self.concept.mnemonic}/mappings/?brief=true&uri={concept2.uri}'
+        )
+
+        self.assertEqual(response.status_code, 200)
 
 
 class CollectionVersionConceptMappingsViewTest(OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.org = OrganizationFactory()
+        self.source = OrganizationSourceFactory(organization=self.org)
+        self.collection = OrganizationCollectionFactory(organization=self.org)
+        self.expansion = ExpansionFactory(collection_version=self.collection)
+        self.concept = ConceptFactory(parent=self.source)
+        self.mapping = MappingFactory(from_concept=self.concept, parent=self.source)
+        self.mapping2 = MappingFactory(from_concept=self.concept)  # random owner/parent
+        self.reference = CollectionReference(expression=self.concept.url, collection=self.collection)
+        self.reference.save()
+        self.expansion.concepts.add(self.concept)
+        self.reference.concepts.add(self.concept)
+
     def test_get_200(self):
-        org = OrganizationFactory()
-        source = OrganizationSourceFactory(organization=org)
-        collection = OrganizationCollectionFactory(organization=org)
-        expansion = ExpansionFactory(collection_version=collection)
-        concept = ConceptFactory(parent=source)
-        mapping = MappingFactory(from_concept=concept, parent=source)
-        mapping2 = MappingFactory(from_concept=concept) # random owner/parent
-        reference = CollectionReference(expression=concept.url, collection=collection)
-        reference.save()
-        expansion.concepts.add(concept)
-        reference.concepts.add(concept)
-
-        response = self.client.get(collection.url + f'concepts/{concept.mnemonic}/mappings/?brief=true')
+        response = self.client.get(
+            self.collection.url + f'concepts/{self.concept.mnemonic}/mappings/?brief=true')
 
         self.assertEqual(response.status_code, 404)
 
-        expansion.mappings.add(mapping2)
+        self.expansion.mappings.add(self.mapping2)
 
-        response = self.client.get(collection.url + f'concepts/{concept.mnemonic}/mappings/?brief=true')
+        response = self.client.get(
+            self.collection.url + f'concepts/{self.concept.mnemonic}/mappings/?brief=true')
 
         self.assertEqual(response.status_code, 404)
 
-        collection.expansion_uri = expansion.uri
-        collection.save()
+        self.collection.expansion_uri = self.expansion.uri
+        self.collection.save()
 
-        response = self.client.get(collection.url + f'concepts/{concept.mnemonic}/mappings/?brief=true')
+        response = self.client.get(
+            self.collection.url + f'concepts/{self.concept.mnemonic}/mappings/?brief=true')
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 1)
-        self.assertEqual(response.data[0]['url'], mapping2.url)
+        self.assertEqual(response.data[0]['url'], self.mapping2.url)
 
-        expansion.mappings.add(mapping)
+        self.expansion.mappings.add(self.mapping)
 
-        response = self.client.get(collection.url + f'concepts/{concept.mnemonic}/mappings/?brief=true')
+        response = self.client.get(
+            self.collection.url + f'concepts/{self.concept.mnemonic}/mappings/?brief=true')
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 2)
         self.assertEqual(
             sorted([data['url'] for data in response.data]),
-            sorted([mapping.url, mapping2.url])
+            sorted([self.mapping.url, self.mapping2.url])
         )
+
+    def test_get_404(self):
+        self.collection.expansion_uri = self.expansion.uri
+        self.collection.save()
+        response = self.client.get(
+            self.collection.url + f'concepts/{self.concept.mnemonic}/1234/mappings/?brief=true')
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_get_409(self):
+        concept2 = ConceptFactory(mnemonic=self.concept.mnemonic)
+        self.expansion.concepts.add(concept2)
+        self.reference.concepts.add(concept2)
+        self.collection.expansion_uri = self.expansion.uri
+        self.collection.save()
+        response = self.client.get(
+            self.collection.url + f'concepts/{self.concept.mnemonic}/mappings/?brief=true')
+
+        self.assertEqual(response.status_code, 409)
+
+        response = self.client.get(
+            self.collection.url + f'concepts/{self.concept.mnemonic}/mappings/?brief=true&uri={concept2.uri}'
+        )
+
+        self.assertEqual(response.status_code, 200)
 
 
 class CollectionVersionExpansionMappingsViewTest(OCLAPITestCase):

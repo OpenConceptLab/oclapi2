@@ -898,10 +898,12 @@ class CollectionVersionMappingsView(CollectionBaseView, ListWithHeadersMixin):
 
     def get_queryset(self):
         expansion = self.get_object()
-        if expansion:
-            return expansion.mappings.filter()
+        queryset = Mapping.objects.none()
 
-        return Mapping.objects.none()
+        if expansion:
+            queryset = expansion.mappings.filter()
+
+        return queryset
 
     def get(self, request, *args, **kwargs):
         return self.list(request, *args, **kwargs)
