@@ -807,7 +807,8 @@ def get_exact_search_fields(klass):
 
 def es_to_pks(search):
     # doesn't care about the order
-    limit = 25
+    default_limit = 25
+    limit = default_limit
     offset = 0
     result_count = 25
     pks = []
@@ -816,8 +817,8 @@ def es_to_pks(search):
         result_count = len(hits)
         if result_count:
             pks += [hit.meta.id for hit in hits]
-        offset += limit
-        limit += limit
+        offset += default_limit
+        limit += default_limit
     return pks
 
 
