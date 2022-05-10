@@ -2,11 +2,11 @@ from rest_framework import serializers
 from rest_framework.fields import CharField, DateField, SerializerMethodField, ChoiceField
 
 from core.code_systems.serializers import CodeSystemConceptSerializer
-from core.collections.models import Collection, CollectionReference
+from core.collections.models import Collection
+from core.collections.parsers import CollectionReferenceParser
 from core.collections.serializers import CollectionCreateOrUpdateSerializer
 from core.common.serializers import StatusField, IdentifierSerializer, ReadSerializerMixin
 from core.orgs.models import Organization
-from core.sources.models import Source
 from core.users.models import UserProfile
 
 
@@ -31,58 +31,19 @@ class ComposeValueSetField(serializers.Field):
         if 'include' in data:
             references = []
             for include in data['include']:
-                system = include['system']
-                system_version = include['version']
-                source = Source.objects.filter(canonical_url=system, version=system_version)
-                if not source:
-                    source_uri = '/' + system.strip('/') + '/' + system_version + '/'
-                    source = Source.objects.filter(uri=source_uri)
-                else:
-                    source_uri = source.first().uri
-
-                if not source:
-                    raise Exception(f'Cannot find system "{system}" and version "{system_version}"')
-
-                if 'concept' in include:
-                    for concept in include['concept']:
-                        mnemonic = concept['code']
-                        concept = source.first().concepts.filter(mnemonic=mnemonic)
-                        if concept:
-                            reference = {
-                                'expression': concept.first().uri,
-                                'version': system_version
-                            }
-                            references.append(reference)
-                        else:
-                            raise Exception(f'Cannot find concept "{mnemonic}" in system "{source_uri}"')
-
-                self.include_filter(include, references, source_uri, system_version)
-
-            res = {'references': references}
+                parser = CollectionReferenceParser(expression=include)
+                parser.parse()
+                parser.to_reference_structure()
+                refs = parser.to_objects()
+                for ref in refs:
+                    ref.expression = ref.build_expression()
+                references += refs
+            res = dict(references=references)
             if 'lockedDate' in data:
                 res['locked_date'] = data['lockedDate']
             return res
 
         return {}
-
-    @staticmethod
-    def include_filter(include, references, source_uri, system_version):
-        if 'filter' in include:
-            filters = FilterValueSetSerializer(data=include['filter'], many=True)
-            filters.is_valid(raise_exception=True)
-            if references:
-                # Due to the way include.concept is modeled as individual references
-                # we need to apply filter to each reference
-                for reference in references:
-                    reference['filter'] = filters.validated_data
-            else:
-                # No include.concept then include the whole system and filter
-                reference = {
-                    'expression': source_uri,
-                    'version': system_version,
-                    'filter': filters.validated_data
-                }
-                references.append(reference)
 
     def to_representation(self, value):
         includes = []
@@ -100,9 +61,8 @@ class ComposeValueSetField(serializers.Field):
                 matching_include['concept'].append(ValueSetConceptSerializer(concept).data)
 
         if includes:
-            return {'lockedDate': self.lockedDate.to_representation(value.locked_date),
-                    'inactive': inactive,
-                    'include': includes}
+            return dict(
+                lockedDate=self.lockedDate.to_representation(value.locked_date), inactive=inactive, include=includes)
 
         return None
 
@@ -113,11 +73,10 @@ class ComposeValueSetField(serializers.Field):
         # TODO: is this use or uri as concept_system correct?
         concept_system = source.canonical_url if source.canonical_url else \
             IdentifierSerializer.convert_ocl_uri_to_fhir_url(source.uri)
-        concept_system_version = reference.version if reference.version else source.version
+        concept_system_version = reference.version or source.version
 
         for include in includes:
-            if include['system'] == concept_system \
-                    and include['version'] == concept_system_version:
+            if include['system'] == concept_system and include['version'] == concept_system_version:
                 matching_include = include
                 break
         if not matching_include:
@@ -147,8 +106,8 @@ class ValueSetDetailSerializer(serializers.ModelSerializer):
     class Meta:
         model = Collection
         fields = ('resourceType', 'id', 'version', 'url', 'title', 'status', 'meta', 'identifier', 'date', 'contact',
-                  'jurisdiction', 'name', 'description', 'publisher', 'purpose',
-                  'copyright', 'experimental', 'immutable', 'text', 'compose')
+                  'jurisdiction', 'name', 'description', 'publisher', 'purpose', 'copyright', 'experimental',
+                  'immutable', 'text', 'compose')
 
     def create(self, validated_data):
         uri = self.context['request'].path + validated_data['mnemonic']
@@ -157,10 +116,8 @@ class ValueSetDetailSerializer(serializers.ModelSerializer):
         collection_version = collection.version if collection.version != 'HEAD' else '0.1'
         collection.version = 'HEAD'
 
-        if ident['owner_type'] == 'orgs':
-            collection.set_parent(Organization.objects.filter(mnemonic=ident['owner_id']).first())
-        else:
-            collection.set_parent(UserProfile.objects.filter(username=ident['owner_id']).first())
+        parent_klass = Organization if ident['owner_type'] == 'orgs' else UserProfile
+        collection.set_parent(parent_klass.objects.filter(**{parent_klass.mnemonic_attr: ident['owner_id']}).first())
 
         user = self.context['request'].user
         errors = Collection.persist_new(collection, user)
@@ -168,12 +125,7 @@ class ValueSetDetailSerializer(serializers.ModelSerializer):
             self._errors.update(errors)
             return collection
 
-        references = []
-        if 'references' in validated_data:
-            references = [CollectionReference(expression=reference['expression'], version=reference['version'],
-                                              collection=collection, filter=reference.get('filter'))
-                          for reference in validated_data['references']]
-
+        references = validated_data.get('references', [])
         if references:
             _, errors = collection.add_references(references, user)
             if errors:
@@ -189,12 +141,7 @@ class ValueSetDetailSerializer(serializers.ModelSerializer):
 
     def update(self, instance, validated_data):
         # Find HEAD first
-        if instance.organization:
-            head_collection = Collection.objects.filter(mnemonic=instance.mnemonic, organization=instance.organization,
-                                                        version='HEAD').get()
-        else:
-            head_collection = Collection.objects.filter(mnemonic=instance.mnemonic, user=instance.user,
-                                                        version='HEAD').get()
+        head_collection = instance.head
 
         collection = CollectionCreateOrUpdateSerializer().prepare_object(validated_data, instance)
 
@@ -214,19 +161,15 @@ class ValueSetDetailSerializer(serializers.ModelSerializer):
             self._errors.update(errors)
             return collection
 
-        #Update references
-        new_references = []
-        if 'references' in validated_data:
-            new_references = [CollectionReference(expression=reference['expression'], version=reference['version'],
-                                                  collection=collection) for reference in validated_data['references']]
-
+        # Update references
+        new_references = validated_data.get('references', [])
         existing_references = []
         for reference in collection.references.all():
             for new_reference in new_references:
                 if reference.expression == new_reference.expression:
                     existing_references.append(new_reference)
 
-        new_references = [e for e in new_references if e not in existing_references]
+        new_references = [reference for reference in new_references if reference not in existing_references]
 
         if new_references:
             _, errors = collection.add_references(new_references, user)
@@ -243,7 +186,6 @@ class ValueSetDetailSerializer(serializers.ModelSerializer):
 
         return collection
 
-
     def to_representation(self, instance):
         try:
             rep = super().to_representation(instance)
@@ -258,4 +200,4 @@ class ValueSetDetailSerializer(serializers.ModelSerializer):
 
     @staticmethod
     def get_meta(obj):
-        return {'lastUpdated': obj.updated_at}
+        return dict(lastUpdated=obj.updated_at)
