@@ -2,11 +2,11 @@ from rest_framework import serializers
 from rest_framework.fields import CharField, DateField, SerializerMethodField, ChoiceField
 
 from core.code_systems.serializers import CodeSystemConceptSerializer
-from core.collections.models import Collection, CollectionReference
+from core.collections.models import Collection
+from core.collections.parsers import CollectionReferenceParser
 from core.collections.serializers import CollectionCreateOrUpdateSerializer
 from core.common.serializers import StatusField, IdentifierSerializer, ReadSerializerMixin
 from core.orgs.models import Organization
-from core.sources.models import Source
 from core.users.models import UserProfile
 
 
@@ -31,34 +31,14 @@ class ComposeValueSetField(serializers.Field):
         if 'include' in data:
             references = []
             for include in data['include']:
-                system = include['system']
-                system_version = include['version']
-                source = Source.objects.filter(canonical_url=system, version=system_version)
-                if not source:
-                    source_uri = '/' + system.strip('/') + '/' + system_version + '/'
-                    source = Source.objects.filter(uri=source_uri)
-                else:
-                    source_uri = source.first().uri
-
-                if not source:
-                    raise Exception(f'Cannot find system "{system}" and version "{system_version}"')
-
-                if 'concept' in include:
-                    for concept in include['concept']:
-                        mnemonic = concept['code']
-                        concept = source.first().concepts.filter(mnemonic=mnemonic)
-                        if concept:
-                            reference = {
-                                'expression': concept.first().uri,
-                                'version': system_version
-                            }
-                            references.append(reference)
-                        else:
-                            raise Exception(f'Cannot find concept "{mnemonic}" in system "{source_uri}"')
-
-                self.include_filter(include, references, source_uri, system_version)
-
-            res = {'references': references}
+                parser = CollectionReferenceParser(expression=include)
+                parser.parse()
+                parser.to_reference_structure()
+                refs = parser.to_objects()
+                for ref in refs:
+                    ref.expression = ref.build_expression()
+                references += refs
+            res = dict(references=references)
             if 'lockedDate' in data:
                 res['locked_date'] = data['lockedDate']
             return res
@@ -168,12 +148,7 @@ class ValueSetDetailSerializer(serializers.ModelSerializer):
             self._errors.update(errors)
             return collection
 
-        references = []
-        if 'references' in validated_data:
-            references = [CollectionReference(expression=reference['expression'], version=reference['version'],
-                                              collection=collection, filter=reference.get('filter'))
-                          for reference in validated_data['references']]
-
+        references = validated_data.get('references', [])
         if references:
             _, errors = collection.add_references(references, user)
             if errors:
@@ -214,12 +189,8 @@ class ValueSetDetailSerializer(serializers.ModelSerializer):
             self._errors.update(errors)
             return collection
 
-        #Update references
-        new_references = []
-        if 'references' in validated_data:
-            new_references = [CollectionReference(expression=reference['expression'], version=reference['version'],
-                                                  collection=collection) for reference in validated_data['references']]
-
+        # Update references
+        new_references = validated_data.get('references', [])
         existing_references = []
         for reference in collection.references.all():
             for new_reference in new_references:
@@ -242,7 +213,6 @@ class ValueSetDetailSerializer(serializers.ModelSerializer):
         self._errors.update(errors)
 
         return collection
-
 
     def to_representation(self, instance):
         try:

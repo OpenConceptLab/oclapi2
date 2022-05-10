@@ -17,7 +17,7 @@ class ValueSetTest(OCLTestCase):
         super().setUp()
         self.org = OrganizationFactory()
 
-        self.org_source = OrganizationSourceFactory(organization=self.org, canonical_url='/some/url')
+        self.org_source = OrganizationSourceFactory(organization=self.org, canonical_url='http://some/url')
         self.org_source_v1 = OrganizationSourceFactory.build(version='v1', mnemonic=self.org_source.mnemonic,
                                                              organization=self.org_source.parent)
         Source.persist_new_version(self.org_source_v1, self.org_source.created_by)
@@ -29,7 +29,7 @@ class ValueSetTest(OCLTestCase):
 
         self.user = UserProfileFactory()
         self.user_token = self.user.get_token()
-        self.user_source = UserSourceFactory(user=self.user, public_access='None', canonical_url='/some/url')
+        self.user_source = UserSourceFactory(user=self.user, public_access='None', canonical_url='http://some/url')
         self.user_source_v1 = UserSourceFactory.build(version='v1', mnemonic=self.user_source.mnemonic,
                                                       user=self.user_source.parent)
         Source.persist_new_version(self.user_source_v1, self.user_source.created_by)
@@ -62,7 +62,7 @@ class ValueSetTest(OCLTestCase):
         self.assertEqual(resource['identifier'][0]['value'], '/orgs/' + self.org.mnemonic
                          + '/ValueSet/' + self.collection.mnemonic + '/')
         self.assertEqual(len(resource['compose']['include']), 1)
-        self.assertEqual(resource['compose']['include'][0]['system'], '/some/url')
+        self.assertEqual(resource['compose']['include'][0]['system'], 'http://some/url')
         self.assertEqual(resource['compose']['include'][0]['version'], self.org_source_v2.version)
         self.assertEqual(len(resource['compose']['include'][0]['concept']), 2)
 
@@ -76,7 +76,7 @@ class ValueSetTest(OCLTestCase):
         self.assertEqual(resource['identifier'][0]['value'], '/orgs/' + self.org.mnemonic
                          + '/ValueSet/' + self.collection.mnemonic + '/')
         self.assertEqual(len(resource['compose']['include']), 1)
-        self.assertEqual(resource['compose']['include'][0]['system'], '/some/url')
+        self.assertEqual(resource['compose']['include'][0]['system'], 'http://some/url')
         self.assertEqual(resource['compose']['include'][0]['version'], self.org_source_v2.version)
         self.assertEqual(len(resource['compose']['include'][0]['concept']), 2)
 
@@ -88,18 +88,24 @@ class ValueSetTest(OCLTestCase):
                                     , format='json')
         resource = response.data
         self.assertEqual(resource['version'], 'v1')
-        self.assertEqual(resource['identifier'][0]['value'], '/users/' + self.user.mnemonic
-                         + '/ValueSet/c2/')
+        self.assertEqual(resource['identifier'][0]['value'], '/users/' + self.user.mnemonic + '/ValueSet/c2/')
         self.assertEqual(resource['compose'], None)
 
     def test_can_create_with_compose(self):
-        response = self.client.post(f'/users/{self.user.mnemonic}/ValueSet/',
-                                    HTTP_AUTHORIZATION='Token ' + self.user_token, data={
-                'resourceType': 'ValueSet', 'id': 'c2', 'url': 'http://c2.com', 'status': 'draft',
-                'name': 'collection1', 'description': 'This is a test collection', 'compose': {
+        response = self.client.post(
+            f'/users/{self.user.mnemonic}/ValueSet/',
+            HTTP_AUTHORIZATION='Token ' + self.user_token,
+            data={
+                'resourceType': 'ValueSet',
+                'id': 'c2',
+                'url': 'http://c2.com',
+                'status': 'draft',
+                'name': 'collection1',
+                'description': 'This is a test collection',
+                'compose': {
                     'include': [
                         {
-                            'system': '/some/url',
+                            'system': 'http://some/url',
                             'version': self.org_source_v2.version,
                             'concept': [
                                 {
@@ -108,14 +114,16 @@ class ValueSetTest(OCLTestCase):
                             ]
                         }
                     ]
-                }}
-                                    , format='json')
+                }
+            },
+            format='json'
+        )
         resource = response.data
         self.assertEqual(resource['version'], '0.1')
         self.assertEqual(resource['identifier'][0]['value'], '/users/' + self.user.mnemonic
                          + '/ValueSet/c2/')
         self.assertEqual(len(resource['compose']['include']), 1)
-        self.assertEqual(resource['compose']['include'][0]['system'], '/some/url')
+        self.assertEqual(resource['compose']['include'][0]['system'], 'http://some/url')
         self.assertEqual(resource['compose']['include'][0]['version'], self.org_source_v2.version)
         self.assertEqual(len(resource['compose']['include'][0]['concept']), 1)
 
@@ -213,7 +221,7 @@ class ValueSetTest(OCLTestCase):
                 'name': 'collection1', 'description': 'This is a test collection', 'compose': {
                     'include': [
                         {
-                            'system': '/some/url',
+                            'system': 'http://some/url',
                             'version': self.org_source_v2.version,
                             'concept': [
                                 {
@@ -229,7 +237,7 @@ class ValueSetTest(OCLTestCase):
         self.assertEqual(resource['identifier'][0]['value'], '/orgs/' + self.org.mnemonic
                          + '/ValueSet/c1/')
         self.assertEqual(len(resource['compose']['include']), 1)
-        self.assertEqual(resource['compose']['include'][0]['system'], '/some/url')
+        self.assertEqual(resource['compose']['include'][0]['system'], 'http://some/url')
         self.assertEqual(resource['compose']['include'][0]['version'], self.org_source_v2.version)
         self.assertEqual(len(resource['compose']['include'][0]['concept']), 2)
         self.assertEqual(resource['compose']['include'][0]['concept'][0]['code'], self.concept_1.mnemonic)
