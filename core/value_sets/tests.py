@@ -1,6 +1,7 @@
 from core.collections.models import CollectionReference
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
 from core.common.tests import OCLAPITestCase
+from core.concepts.documents import ConceptDocument
 from core.concepts.tests.factories import ConceptFactory
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.models import Source
@@ -141,6 +142,8 @@ class ValueSetTest(OCLAPITestCase):
         self.assertEqual(len(resource['compose']['include'][0]['concept']), 1)
 
     def test_create_with_filter_and_system(self):
+        ConceptDocument().update(self.org_source_v2.concepts.all())
+
         response = self.client.post(
             f'/users/{self.user.username}/ValueSet/',
             HTTP_AUTHORIZATION='Token ' + self.user_token,
@@ -179,6 +182,8 @@ class ValueSetTest(OCLAPITestCase):
         self.assertEqual(len(resource['compose']['include'][0]['concept']), 1)
 
     def test_create_with_filter_and_concept(self):
+        ConceptDocument().update(self.org_source_v2.concepts.all())
+
         response = self.client.post(
             f'/users/{self.user.mnemonic}/ValueSet/',
             HTTP_AUTHORIZATION='Token ' + self.user_token,
