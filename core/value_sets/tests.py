@@ -1,5 +1,3 @@
-import unittest
-
 from rest_framework.test import APIClient
 
 from core.collections.models import CollectionReference
@@ -127,7 +125,6 @@ class ValueSetTest(OCLTestCase):
         self.assertEqual(resource['compose']['include'][0]['version'], self.org_source_v2.version)
         self.assertEqual(len(resource['compose']['include'][0]['concept']), 1)
 
-    @unittest.skip
     def test_create_with_filter_and_system(self):
         response = self.client.post(f'/users/{self.user.mnemonic}/ValueSet/',
                                     HTTP_AUTHORIZATION='Token ' + self.user_token, data={
@@ -135,7 +132,7 @@ class ValueSetTest(OCLTestCase):
                 'name': 'collection1', 'description': 'This is a test collection', 'compose': {
                     'include': [
                         {
-                            'system': '/some/url',
+                            'system': 'http://some/url',
                             'version': self.org_source_v2.version,
                             'filter': [
                                 {
@@ -153,11 +150,10 @@ class ValueSetTest(OCLTestCase):
         self.assertEqual(resource['identifier'][0]['value'], '/users/' + self.user.mnemonic
                          + '/ValueSet/c2/')
         self.assertEqual(len(resource['compose']['include']), 1)
-        self.assertEqual(resource['compose']['include'][0]['system'], '/some/url')
+        self.assertEqual(resource['compose']['include'][0]['system'], 'http://some/url')
         self.assertEqual(resource['compose']['include'][0]['version'], self.org_source_v2.version)
         self.assertEqual(len(resource['compose']['include'][0]['concept']), 1)
 
-    @unittest.skip
     def test_create_with_filter_and_concept(self):
         response = self.client.post(f'/users/{self.user.mnemonic}/ValueSet/',
                                     HTTP_AUTHORIZATION='Token ' + self.user_token, data={
@@ -165,23 +161,16 @@ class ValueSetTest(OCLTestCase):
                 'name': 'collection1', 'description': 'This is a test collection', 'compose': {
                     'include': [
                         {
-                            'system': '/some/url',
+                            'system': 'http://some/url',
                             'version': self.org_source_v2.version,
-                            'concept': [
-                                {
-                                    'code': self.concept_1.mnemonic
-                                },
-                                {
-                                    'code': self.concept_2.mnemonic
-                                }
-                            ],
                             'filter': [
                                 {
                                     'property': 'q',
                                     'op': '=',
                                     'value': self.concept_2.mnemonic
                                 }
-                            ]
+                            ],
+                            'concept': [],  # concept/code shouldn't be defined if filters are defined
                         }
                     ]
                 }}
@@ -191,7 +180,7 @@ class ValueSetTest(OCLTestCase):
         self.assertEqual(resource['identifier'][0]['value'], '/users/' + self.user.mnemonic
                          + '/ValueSet/c2/')
         self.assertEqual(len(resource['compose']['include']), 1)
-        self.assertEqual(resource['compose']['include'][0]['system'], '/some/url')
+        self.assertEqual(resource['compose']['include'][0]['system'], 'http://some/url')
         self.assertEqual(resource['compose']['include'][0]['version'], self.org_source_v2.version)
         self.assertEqual(len(resource['compose']['include'][0]['concept']), 1)
         self.assertEqual(resource['compose']['include'][0]['concept'][0]['code'], self.concept_2.mnemonic)

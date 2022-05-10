@@ -45,25 +45,6 @@ class ComposeValueSetField(serializers.Field):
 
         return {}
 
-    @staticmethod
-    def include_filter(include, references, source_uri, system_version):
-        if 'filter' in include:
-            filters = FilterValueSetSerializer(data=include['filter'], many=True)
-            filters.is_valid(raise_exception=True)
-            if references:
-                # Due to the way include.concept is modeled as individual references
-                # we need to apply filter to each reference
-                for reference in references:
-                    reference['filter'] = filters.validated_data
-            else:
-                # No include.concept then include the whole system and filter
-                reference = {
-                    'expression': source_uri,
-                    'version': system_version,
-                    'filter': filters.validated_data
-                }
-                references.append(reference)
-
     def to_representation(self, value):
         includes = []
         inactive = False
