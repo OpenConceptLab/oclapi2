@@ -370,7 +370,7 @@ class CollectionReferenceSerializer(ModelSerializer):
 
     class Meta:
         model = CollectionReference
-        fields = ('expression', 'reference_type', 'id', 'last_resolved_at', 'uri', 'uuid')
+        fields = ('expression', 'reference_type', 'id', 'last_resolved_at', 'uri', 'uuid', 'include')
 
 
 class CollectionReferenceDetailSerializer(CollectionReferenceSerializer):
@@ -379,7 +379,7 @@ class CollectionReferenceDetailSerializer(CollectionReferenceSerializer):
         fields = (
             *CollectionReferenceSerializer.Meta.fields,
             'code', 'resource_version', 'namespace', 'system', 'version', 'valueset', 'cascade', 'filter', 'display',
-            'created_at', 'updated_at',
+            'created_at', 'updated_at', 'include'
         )
 
 

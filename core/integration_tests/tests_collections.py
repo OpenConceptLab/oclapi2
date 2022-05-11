@@ -664,6 +664,28 @@ class CollectionReferencesViewTest(OCLAPITestCase):
         self.assertEqual(self.collection.active_mappings, 3)
         self.assertTrue(self.collection.references.filter(expression=latest_version.uri).exists())
 
+        response = self.client.put(
+            self.collection.uri + 'references/',
+            dict(
+                data=dict(
+                    system=latest_version.parent.url,
+                    code=latest_version.mnemonic,
+                    resource_version=latest_version.version,
+                    cascade='sourcemappings',
+                    exclude=True
+                )
+            ),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+        self.assertEqual(response.status_code, 200)
+        self.collection.refresh_from_db()
+        self.assertEqual(self.collection.references.count(), 7)
+        self.assertEqual(self.collection.expansion.concepts.count(), 3)
+        self.assertEqual(self.collection.expansion.mappings.count(), 2)
+        self.assertEqual(self.collection.active_concepts, 3)
+        self.assertEqual(self.collection.active_mappings, 2)
+
     def test_put_expression_with_cascade_to_concepts(self):
         source1 = OrganizationSourceFactory()
         source2 = OrganizationSourceFactory()

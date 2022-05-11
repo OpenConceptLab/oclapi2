@@ -23,6 +23,15 @@ class CollectionReferenceAbstractParser:
         pass
 
     @staticmethod
+    def get_include_value(expression):
+        include = True
+        if get(expression, 'exclude') and expression['exclude']:
+            include = False
+        if get(expression, 'include'):
+            include = bool(expression['include'])
+        return include
+
+    @staticmethod
     def get_formatted_valueset(valueset):
         if valueset:
             if isinstance(valueset, str):
@@ -130,7 +139,8 @@ class CollectionReferenceExpandedStructureParser(CollectionReferenceAbstractPars
                         resource_version=resource_version,
                         transform=get(expression, 'transform'),
                         created_by=self.user,
-                        display=display
+                        display=display,
+                        include=self.get_include_value(expression)
                     )
                 )
         if mapping:
@@ -153,7 +163,8 @@ class CollectionReferenceExpandedStructureParser(CollectionReferenceAbstractPars
                         resource_version=resource_version,
                         transform=get(expression, 'transform'),
                         created_by=self.user,
-                        display=None
+                        display=None,
+                        include=self.get_include_value(expression)
                     )
                 )
         if not concept and not mapping:
@@ -170,7 +181,8 @@ class CollectionReferenceExpandedStructureParser(CollectionReferenceAbstractPars
                 resource_version=get(expression, 'resource_version'),
                 transform=get(expression, 'transform'),
                 created_by=self.user,
-                display=get(expression, 'display')
+                display=get(expression, 'display'),
+                include=self.get_include_value(expression)
             ))
         return self.references
 
@@ -246,6 +258,8 @@ class CollectionReferenceExpressionStringParser(CollectionReferenceAbstractParse
         self.code = None
         self.resource_version = None
         self.valueset = None
+        self.display = None
+        self.include = True
         self.kwargs = None
 
     def is_source_expression(self):
@@ -339,6 +353,8 @@ class CollectionReferenceExpressionStringParser(CollectionReferenceAbstractParse
             valueset=self.valueset,
             filter=self.filter,
             transform=self.transform,
-            created_by=self.user
+            created_by=self.user,
+            display=self.display,
+            include=self.include
         ))
         return self.references

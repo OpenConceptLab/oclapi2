@@ -4,7 +4,7 @@ from django.conf import settings
 from django.contrib.postgres.fields import ArrayField
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
-from django.db.models import UniqueConstraint, F
+from django.db.models import UniqueConstraint, F, QuerySet
 from django.utils import timezone
 from django.utils.functional import cached_property
 from pydash import get, compact
@@ -132,7 +132,8 @@ class Collection(ConceptContainerModel):
             reference.full_clean()
         else:
             reference.last_resolved_at = None
-        if reference.expression and self.references.filter(expression=reference.expression).exists():
+        if reference.expression and self.references.filter(
+                expression=reference.expression, include=reference.include).exists():
             raise ValidationError({reference.expression: [REFERENCE_ALREADY_EXISTS]})
 
         if self.is_openmrs_schema and self.expansion_uri:
@@ -344,6 +345,7 @@ class CollectionReference(models.Model):
     valueset = ArrayField(models.TextField(), null=True, blank=True)
     cascade = models.JSONField(null=True, blank=True)
     transform = models.CharField(null=True, blank=True, max_length=255)
+    include = models.BooleanField(default=True)
 
     resource_version = models.CharField(null=True, blank=True, max_length=255)
 
@@ -769,8 +771,16 @@ class Expansion(BaseResourceModel):
             return references
         return references.all()
 
+    @classmethod
+    def to_ref_list_separated(cls, references):
+        refs = cls.to_ref_list(references)
+        if isinstance(refs, QuerySet):
+            return refs.filter(include=True), refs.exclude(include=True)
+        else:
+            return [ref for ref in refs if ref.include], [ref for ref in refs if not ref.include]
+
     def delete_references(self, references):
-        refs = self.to_ref_list(references)
+        refs, _ = self.to_ref_list_separated(references)
 
         index_concepts = False
         index_mappings = False
@@ -811,25 +821,37 @@ class Expansion(BaseResourceModel):
             batch_index_resources.apply_async(('mapping', mappings_filters), queue='indexing')
 
     def add_references(self, references, index=True):
-        refs = self.to_ref_list(references)
+        include_refs, exclude_refs = self.to_ref_list_separated(references)
 
         index_concepts = False
         index_mappings = False
         is_auto_generated = self.is_auto_generated
 
-        for reference in refs:
+        def get_ref_results(ref):
             if is_auto_generated:
-                concepts = reference.concepts
-                mappings = reference.mappings
+                _concepts = ref.concepts.all()
+                _mappings = ref.mappings.all()
             else:
-                concepts, mappings = reference.get_concepts()
-                mappings |= reference.get_mappings()
+                _concepts, _mappings = ref.get_concepts()
+                _mappings |= ref.get_mappings()
+            return _concepts, _mappings
 
+        for reference in include_refs:
+            concepts, mappings = get_ref_results(reference)
             if concepts.exists():
                 self.concepts.add(*self.apply_parameters(concepts, True))
                 index_concepts = True
             if mappings.exists():
                 self.mappings.add(*self.apply_parameters(mappings, False))
+                index_mappings = True
+
+        for reference in exclude_refs:
+            concepts, mappings = get_ref_results(reference)
+            if concepts.exists():
+                self.concepts.remove(*concepts)
+                index_concepts = True
+            if mappings.exists():
+                self.mappings.remove(*mappings)
                 index_mappings = True
 
         if index:

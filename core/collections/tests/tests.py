@@ -1384,6 +1384,8 @@ class CollectionReferenceExpressionStringParserTest(OCLTestCase):
                 resource_version=None,
                 transform=None,
                 created_by=None,
+                display=None,
+                include=True
             )
         )
 
@@ -1405,6 +1407,8 @@ class CollectionReferenceExpressionStringParserTest(OCLTestCase):
                 resource_version=None,
                 transform=None,
                 created_by=None,
+                display=None,
+                include=True
             )
         )
 
@@ -1423,6 +1427,8 @@ class CollectionReferenceExpressionStringParserTest(OCLTestCase):
                 resource_version=None,
                 transform=None,
                 created_by=None,
+                display=None,
+                include=True
             )
         )
 
@@ -1441,6 +1447,8 @@ class CollectionReferenceExpressionStringParserTest(OCLTestCase):
                 resource_version=None,
                 transform=None,
                 created_by=None,
+                display=None,
+                include=True
             )
         )
 
@@ -1459,6 +1467,8 @@ class CollectionReferenceExpressionStringParserTest(OCLTestCase):
                 resource_version=None,
                 transform=None,
                 created_by=None,
+                display=None,
+                include=True
             )
         )
 
@@ -1477,6 +1487,8 @@ class CollectionReferenceExpressionStringParserTest(OCLTestCase):
                 resource_version=None,
                 transform=None,
                 created_by=None,
+                display=None,
+                include=True
             )
         )
 
@@ -1496,6 +1508,8 @@ class CollectionReferenceExpressionStringParserTest(OCLTestCase):
                 resource_version=None,
                 transform=None,
                 created_by=None,
+                display=None,
+                include=True
             )
         )
 
@@ -1517,6 +1531,8 @@ class CollectionReferenceExpressionStringParserTest(OCLTestCase):
                 resource_version=None,
                 transform=None,
                 created_by=None,
+                display=None,
+                include=True
             )
         )
 
@@ -1540,6 +1556,8 @@ class CollectionReferenceExpressionStringParserTest(OCLTestCase):
                 resource_version=None,
                 transform=None,
                 created_by=None,
+                display=None,
+                include=True
             )
         )
         reference = self.get_structure(expression='/orgs/MyOrg/collections/Coll/v1/concepts/1234/')
@@ -1559,6 +1577,8 @@ class CollectionReferenceExpressionStringParserTest(OCLTestCase):
                 resource_version=None,
                 transform=None,
                 created_by=None,
+                display=None,
+                include=True
             )
         )
 
@@ -1579,6 +1599,8 @@ class CollectionReferenceExpressionStringParserTest(OCLTestCase):
                 resource_version='3456',
                 transform=None,
                 created_by=None,
+                display=None,
+                include=True
             )
         )
 
@@ -1598,6 +1620,8 @@ class CollectionReferenceExpressionStringParserTest(OCLTestCase):
                 resource_version=None,
                 transform=None,
                 created_by=None,
+                display=None,
+                include=True
             )
         )
 
@@ -1619,6 +1643,8 @@ class CollectionReferenceExpressionStringParserTest(OCLTestCase):
                 resource_version=None,
                 transform=None,
                 created_by=None,
+                display=None,
+                include=True
             )
         )
 
@@ -1637,6 +1663,8 @@ class CollectionReferenceExpressionStringParserTest(OCLTestCase):
                 resource_version=None,
                 transform=None,
                 created_by=None,
+                display=None,
+                include=True
             )
         )
 
@@ -1655,6 +1683,8 @@ class CollectionReferenceExpressionStringParserTest(OCLTestCase):
                 resource_version=None,
                 transform=None,
                 created_by=None,
+                display=None,
+                include=True
             )
         )
 
@@ -1673,6 +1703,8 @@ class CollectionReferenceExpressionStringParserTest(OCLTestCase):
                 resource_version=None,
                 transform=None,
                 created_by=None,
+                display=None,
+                include=True
             )
         )
 
@@ -1691,6 +1723,8 @@ class CollectionReferenceExpressionStringParserTest(OCLTestCase):
                 resource_version=None,
                 transform=None,
                 created_by=None,
+                display=None,
+                include=True
             )
         )
 
@@ -1712,6 +1746,8 @@ class CollectionReferenceExpressionStringParserTest(OCLTestCase):
                 resource_version=None,
                 transform=None,
                 created_by=None,
+                display=None,
+                include=True
             )
         )
 
@@ -1735,6 +1771,8 @@ class CollectionReferenceExpressionStringParserTest(OCLTestCase):
                 resource_version=None,
                 transform=None,
                 created_by=None,
+                display=None,
+                include=True
             )
         )
         reference = self.get_structure(expression='/orgs/MyOrg/collections/Coll/v1/mappings/1234/')
@@ -1754,6 +1792,8 @@ class CollectionReferenceExpressionStringParserTest(OCLTestCase):
                 resource_version=None,
                 transform=None,
                 created_by=None,
+                display=None,
+                include=True
             )
         )
 
@@ -1774,6 +1814,8 @@ class CollectionReferenceExpressionStringParserTest(OCLTestCase):
                 resource_version='3456',
                 transform=None,
                 created_by=None,
+                display=None,
+                include=True
             )
         )
 
@@ -1803,6 +1845,8 @@ class CollectionReferenceSourceAllExpressionParserTest(OCLTestCase):
                     resource_version=None,
                     transform=None,
                     created_by=None,
+                    display=None,
+                    include=True
                 ),
                 dict(
                     expression='/users/Me/sources/MySource/mappings/',
@@ -1816,6 +1860,8 @@ class CollectionReferenceSourceAllExpressionParserTest(OCLTestCase):
                     resource_version=None,
                     transform=None,
                     created_by=None,
+                    display=None,
+                    include=True
                 )
             ]
         )
@@ -1836,6 +1882,8 @@ class CollectionReferenceSourceAllExpressionParserTest(OCLTestCase):
                     resource_version=None,
                     transform=None,
                     created_by=None,
+                    display=None,
+                    include=True
                 ),
                 dict(
                     expression='/users/Me/sources/MySource/v1/mappings/',
@@ -1849,6 +1897,8 @@ class CollectionReferenceSourceAllExpressionParserTest(OCLTestCase):
                     resource_version=None,
                     transform=None,
                     created_by=None,
+                    display=None,
+                    include=True
                 )
             ]
         )
@@ -1870,6 +1920,8 @@ class CollectionReferenceSourceAllExpressionParserTest(OCLTestCase):
                     resource_version=None,
                     transform=None,
                     created_by=None,
+                    display=None,
+                    include=True
                 ),
             ]
         )
@@ -1890,6 +1942,8 @@ class CollectionReferenceSourceAllExpressionParserTest(OCLTestCase):
                     resource_version=None,
                     transform=None,
                     created_by=None,
+                    display=None,
+                    include=True
                 ),
             ]
         )
@@ -1910,6 +1964,8 @@ class CollectionReferenceSourceAllExpressionParserTest(OCLTestCase):
                     resource_version=None,
                     transform=None,
                     created_by=None,
+                    display=None,
+                    include=True
                 ),
             ]
         )
@@ -1930,6 +1986,8 @@ class CollectionReferenceSourceAllExpressionParserTest(OCLTestCase):
                     resource_version=None,
                     transform=None,
                     created_by=None,
+                    display=None,
+                    include=True
                 ),
             ]
         )
