@@ -358,6 +358,7 @@ class CollectionReference(models.Model):
         return CollectionReference(
             expression=self.expression,
             reference_type=self.reference_type,
+            created_by=self.created_by,
             filter=self.filter,
             display=self.display,
             namespace=self.namespace,
@@ -367,6 +368,7 @@ class CollectionReference(models.Model):
             valueset=self.valueset,
             cascade=self.cascade,
             transform=self.transform,
+            include=self.include,
             resource_version=self.resource_version,
             **kwargs,
         )
