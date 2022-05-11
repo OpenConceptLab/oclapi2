@@ -546,7 +546,7 @@ class CollectionReferencesViewTest(OCLAPITestCase):
         self.assertEqual(response.data, [])
         add_references_mock.delay.assert_called_once_with(self.user.id, dict(concepts='*'), self.collection.id, '', '')
 
-    def test_put_200_specific_expression(self):
+    def test_put_200_specific_expression(self):  # pylint: disable=too-many-statements
         response = self.client.put(
             self.collection.uri + 'references/',
             dict(data=dict(concepts=[self.concept.uri])),
