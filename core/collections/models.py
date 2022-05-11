@@ -400,6 +400,14 @@ class CollectionReference(models.Model):
                     expression += '?' + self.filter_to_querystring()
         return expression
 
+    @property
+    def concepts_count(self):
+        return self.concepts.count()
+
+    @property
+    def mappings_count(self):
+        return self.mappings.count()
+
     @cached_property
     def uri(self):
         return self.calculate_uri(self.collection)

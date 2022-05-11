@@ -310,7 +310,10 @@ class CollectionReferenceView(CollectionBaseView, RetrieveAPIView, DestroyAPIVie
 class CollectionReferencesView(
         CollectionBaseView, ConceptDictionaryUpdateMixin, RetrieveAPIView, DestroyAPIView, ListWithHeadersMixin
 ):
-    serializer_class = CollectionReferenceSerializer
+    def get_serializer_class(self):
+        if self.is_verbose():
+            return CollectionReferenceDetailSerializer
+        return CollectionReferenceSerializer
 
     def get_permissions(self):
         if self.request.method in ['GET', 'HEAD']:
