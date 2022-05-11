@@ -193,11 +193,14 @@ class CollectionReferenceOldStyleToExpandedStructureParser(CollectionReferenceAb
             if self.expression.get('uri'):
                 self.parsers.append(CollectionReferenceSourceAllExpressionParser(self.expression))
 
+            include = self.get_include_value(self.expression)
             for attr in ['concepts', 'mappings', 'expressions']:
                 if self.expression.get(attr) and isinstance(self.expression.get(attr), list):
                     for expression in self.expression[attr]:
-                        self.parsers.append(CollectionReferenceExpressionStringParser(
-                            expression, self.transform, self.cascade, self.user))
+                        parser = CollectionReferenceExpressionStringParser(
+                            expression, self.transform, self.cascade, self.user)
+                        parser.include = include
+                        self.parsers.append(parser)
         elif isinstance(self.expression, list):
             for expression in self.expression:
                 if isinstance(expression, str):
