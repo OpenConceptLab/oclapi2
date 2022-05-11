@@ -784,8 +784,7 @@ class Expansion(BaseResourceModel):
         refs = cls.to_ref_list(references)
         if isinstance(refs, QuerySet):
             return refs.filter(include=True), refs.exclude(include=True)
-        else:
-            return [ref for ref in refs if ref.include], [ref for ref in refs if not ref.include]
+        return [ref for ref in refs if ref.include], [ref for ref in refs if not ref.include]
 
     def delete_references(self, references):
         refs, _ = self.to_ref_list_separated(references)
