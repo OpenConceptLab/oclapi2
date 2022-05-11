@@ -24,7 +24,7 @@ from core.common.tasks import seed_children_to_expansion, batch_index_resources,
     index_expansion_mappings
 from core.common.utils import drop_version, to_owner_uri, generate_temp_version, es_id_in, \
     es_wildcard_search, get_resource_class_from_resource_name, get_exact_search_fields, to_snake_case, \
-    es_exact_search, es_to_pks, batch_qs
+    es_exact_search, es_to_pks, batch_qs, split_list_by_condition
 from core.concepts.constants import LOCALES_FULLY_SPECIFIED
 from core.concepts.models import Concept
 from core.mappings.models import Mapping
@@ -786,7 +786,7 @@ class Expansion(BaseResourceModel):
         refs = cls.to_ref_list(references)
         if isinstance(refs, QuerySet):
             return refs.filter(include=True), refs.exclude(include=True)
-        return [ref for ref in refs if ref.include], [ref for ref in refs if not ref.include]
+        return split_list_by_condition(refs, lambda ref: ref.include)
 
     def delete_references(self, references):
         refs, _ = self.to_ref_list_separated(references)
@@ -829,8 +829,15 @@ class Expansion(BaseResourceModel):
             batch_index_resources.apply_async(('concept', concepts_filters), queue='indexing')
             batch_index_resources.apply_async(('mapping', mappings_filters), queue='indexing')
 
-    def add_references(self, references, index=True):
+    def add_references(self, references, index=True, is_adding_all_references=False):
         include_refs, exclude_refs = self.to_ref_list_separated(references)
+
+        if not is_adding_all_references:
+            existing_exclude_refs = self.collection_version.references.exclude(include=True)
+            if isinstance(exclude_refs, QuerySet):
+                exclude_refs |= existing_exclude_refs
+            else:
+                exclude_refs += [*existing_exclude_refs.all()]
 
         index_concepts = False
         index_mappings = False
@@ -870,7 +877,7 @@ class Expansion(BaseResourceModel):
                 self.index_mappings()
 
     def seed_children(self, index=True):
-        return self.add_references(self.collection_version.references, index)
+        return self.add_references(self.collection_version.references, index, True)
 
     def wait_until_processed(self):  # pragma: no cover
         processing = self.is_processing

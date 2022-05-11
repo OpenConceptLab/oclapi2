@@ -15,7 +15,7 @@ from moto import mock_s3
 from requests.auth import HTTPBasicAuth
 from rest_framework.test import APITestCase
 
-from core.collections.models import Collection
+from core.collections.models import Collection, CollectionReference
 from core.common.constants import HEAD, OCL_ORG_ID, SUPER_ADMIN_USER_ID
 from core.common.tasks import delete_s3_objects
 from core.common.utils import (
@@ -23,7 +23,8 @@ from core.common.utils import (
     to_camel_case,
     drop_version, is_versioned_uri, separate_version, to_parent_uri, jsonify_safe, es_get,
     get_resource_class_from_resource_name, flatten_dict, is_csv_file, is_url_encoded_string, to_parent_uri_from_kwargs,
-    set_current_user, get_current_user, set_request_url, get_request_url, nested_dict_values, chunks, api_get)
+    set_current_user, get_current_user, set_request_url, get_request_url, nested_dict_values, chunks, api_get,
+    split_list_by_condition)
 from core.concepts.models import Concept, LocalizedText
 from core.mappings.models import Mapping
 from core.orgs.models import Organization
@@ -784,6 +785,25 @@ class UtilsTest(OCLTestCase):
         self.assertEqual(list(chunks([1, 2, 3, 4], 2)), [[1, 2], [3, 4]])
         self.assertEqual(list(chunks([1, 2, 3, 4], 7)), [[1, 2, 3, 4]])
         self.assertEqual(list(chunks([1, 2, 3, 4], 4)), [[1, 2, 3, 4]])
+
+    def test_split_list_by_condition(self):
+        even, odd = split_list_by_condition([2, 3, 4, 5, 6, 7], lambda x: x % 2 == 0)
+        self.assertEqual(even, [2, 4, 6])
+        self.assertEqual(odd, [3, 5, 7])
+
+        even, odd = split_list_by_condition([3, 5, 7], lambda num: num % 2 == 0)
+        self.assertEqual(even, [])
+        self.assertEqual(odd, [3, 5, 7])
+
+        ref1 = CollectionReference(id=1, include=True)
+        ref2 = CollectionReference(id=2, include=False)
+        ref3 = CollectionReference(id=3, include=False)
+        ref4 = CollectionReference(id=3, include=True)
+
+        include, exclude = split_list_by_condition([ref1, ref2, ref3, ref4], lambda ref: ref.include)
+
+        self.assertEqual(include, [ref1, ref4])
+        self.assertEqual(exclude, [ref2, ref3])
 
 
 class BaseModelTest(OCLTestCase):

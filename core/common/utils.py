@@ -837,3 +837,11 @@ def batch_qs(qs, batch_size=1000):
     for start in range(0, total, batch_size):
         end = min(start + batch_size, total)
         yield qs[start:end]
+
+
+def split_list_by_condition(items, predicate):
+    include, exclude = [], []
+    for item in items:
+        (exclude, include)[predicate(item)].append(item)
+
+    return include, exclude
