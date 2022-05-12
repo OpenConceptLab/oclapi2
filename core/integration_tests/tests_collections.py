@@ -493,6 +493,18 @@ class CollectionReferencesViewTest(OCLAPITestCase):
         self.assertEqual(self.collection.references.count(), 0)
         self.assertEqual(self.collection.expansion.concepts.count(), 0)
 
+    def test_delete_204_bulk_reference_ids(self):
+        response = self.client.delete(
+            self.collection.uri + 'references/',
+            dict(ids=[self.reference.id]),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(self.collection.references.count(), 0)
+        self.assertEqual(self.collection.expansion.concepts.count(), 0)
+
     def test_delete_204_specific_expression(self):
         response = self.client.delete(
             self.collection.uri + 'references/',

@@ -354,13 +354,21 @@ class CollectionReferencesView(
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
         expressions = request.data.get("references") or request.data.get("expressions")
-        if not expressions:
+        reference_ids = request.data.get("ids")
+        if not expressions and not reference_ids:
             return Response(status=status.HTTP_400_BAD_REQUEST)
 
-        if self.should_cascade_mappings() and expressions != '*':
+        if self.should_cascade_mappings() and expressions != '*' and expressions:
             expressions += instance.get_cascaded_mapping_uris_from_concept_expressions(expressions)
 
-        instance.delete_references(expressions)
+        if expressions:
+            instance.delete_references(expressions)
+        if reference_ids:
+            references = instance.references.filter(id__in=reference_ids)
+            if instance.expansion_uri:
+                instance.expansion.delete_references(references)
+            references.delete()
+
         return Response({'message': OK_MESSAGE}, status=status.HTTP_204_NO_CONTENT)
 
     def update(self, request, *args, **kwargs):  # pylint: disable=too-many-locals,unused-argument # Fixme: Sny
