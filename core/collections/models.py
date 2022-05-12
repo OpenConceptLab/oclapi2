@@ -13,7 +13,7 @@ from core.collections.constants import (
     COLLECTION_TYPE, REFERENCE_ALREADY_EXISTS, CONCEPT_FULLY_SPECIFIED_NAME_UNIQUE_PER_COLLECTION_AND_LOCALE,
     CONCEPT_PREFERRED_NAME_UNIQUE_PER_COLLECTION_AND_LOCALE, COLLECTION_VERSION_TYPE,
     REFERENCE_TYPE_CHOICES, CONCEPT_REFERENCE_TYPE, MAPPING_REFERENCE_TYPE, SOURCE_MAPPINGS, SOURCE_TO_CONCEPTS,
-    TRANSFORM_TO_RESOURCE_VERSIONS)
+    TRANSFORM_TO_RESOURCE_VERSIONS, COLLECTION_REFERENCE_TYPE)
 from core.collections.parsers import CollectionReferenceParser
 from core.collections.utils import is_concept, is_mapping
 from core.common.constants import (
@@ -224,7 +224,7 @@ class Collection(ConceptContainerModel):
         return self.expansions.count()
 
     def delete_references(self, expressions):
-        if expressions == '*':
+        if expressions == '*':  # Deprecated: Old way
             references_to_be_deleted = self.references
             if self.expansion_uri:
                 self.expansion.delete_expressions(expressions)
@@ -353,6 +353,10 @@ class CollectionReference(models.Model):
     concepts = models.ManyToManyField('concepts.Concept', related_name='references', through=ReferencedConcept)
     mappings = models.ManyToManyField('mappings.Mapping', related_name='references', through=ReferencedMapping)
     collection = models.ForeignKey('collections.Collection', related_name='references', on_delete=models.CASCADE)
+
+    @property
+    def resource_type(self):
+        return COLLECTION_REFERENCE_TYPE
 
     def clone(self, **kwargs):
         return CollectionReference(
@@ -794,22 +798,24 @@ class Expansion(BaseResourceModel):
         index_concepts = False
         index_mappings = False
         for reference in refs:
-            if reference.is_concept:
-                concepts = reference.concepts
-                if concepts.exists():
-                    index_concepts = True
-                    self.concepts.set(self.concepts.exclude(id__in=concepts.values_list('id', flat=True)))
-            elif reference.is_mapping:
-                mappings = reference.mappings
-                if mappings.exists():
-                    index_mappings = True
-                    self.mappings.set(self.mappings.exclude(id__in=mappings.values_list('id', flat=True)))
+            concepts = reference.concepts
+            if concepts.exists():
+                index_concepts = True
+                self.concepts.set(self.concepts.exclude(id__in=concepts.values_list('id', flat=True)))
+            mappings = reference.mappings
+            if mappings.exists():
+                index_mappings = True
+                self.mappings.set(self.mappings.exclude(id__in=mappings.values_list('id', flat=True)))
         if index_concepts:
             self.index_concepts()
         if index_mappings:
             self.index_mappings()
 
-    def delete_expressions(self, expressions):
+        references_to_readd = self.collection_version.references.exclude(
+            id__in=[ref.id for ref in self.to_ref_list(references)])
+        self.add_references(references_to_readd, True, True, False)
+
+    def delete_expressions(self, expressions):  # Deprecated: Old way, must use delete_references instead
         concepts_filters = None
         mappings_filters = None
         if expressions == '*':
@@ -829,7 +835,7 @@ class Expansion(BaseResourceModel):
             batch_index_resources.apply_async(('concept', concepts_filters), queue='indexing')
             batch_index_resources.apply_async(('mapping', mappings_filters), queue='indexing')
 
-    def add_references(self, references, index=True, is_adding_all_references=False):
+    def add_references(self, references, index=True, is_adding_all_references=False, attempt_reevaluate=True):
         include_refs, exclude_refs = self.to_ref_list_separated(references)
 
         if not is_adding_all_references:
@@ -844,12 +850,12 @@ class Expansion(BaseResourceModel):
         is_auto_generated = self.is_auto_generated
 
         def get_ref_results(ref):
-            if is_auto_generated:
-                _concepts = ref.concepts.all()
-                _mappings = ref.mappings.all()
-            else:
+            if attempt_reevaluate and not is_auto_generated:
                 _concepts, _mappings = ref.get_concepts()
                 _mappings |= ref.get_mappings()
+            else:
+                _concepts = ref.concepts.all()
+                _mappings = ref.mappings.all()
             return _concepts, _mappings
 
         for reference in include_refs:

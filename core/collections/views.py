@@ -298,10 +298,9 @@ class CollectionReferenceView(CollectionBaseView, RetrieveAPIView, DestroyAPIVie
 
     def destroy(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         reference = self.get_object()
-        if reference.include:
-            collection = reference.collection
-            if collection.expansion_uri:
-                collection.expansion.delete_references(reference)
+        collection = reference.collection
+        if collection.expansion_uri:
+            collection.expansion.delete_references(reference)
         reference.delete()
 
         return Response(status=status.HTTP_204_NO_CONTENT)

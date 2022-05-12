@@ -367,10 +367,11 @@ class CollectionVersionDetailSerializer(CollectionCreateOrUpdateSerializer):
 class CollectionReferenceSerializer(ModelSerializer):
     reference_type = CharField(read_only=True)
     uuid = CharField(source='id', read_only=True)
+    type = CharField(source='resource_type', read_only=True)
 
     class Meta:
         model = CollectionReference
-        fields = ('expression', 'reference_type', 'id', 'last_resolved_at', 'uri', 'uuid', 'include')
+        fields = ('expression', 'reference_type', 'id', 'last_resolved_at', 'uri', 'uuid', 'include', 'type')
 
 
 class CollectionReferenceDetailSerializer(CollectionReferenceSerializer):
