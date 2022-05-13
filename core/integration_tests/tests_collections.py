@@ -633,7 +633,7 @@ class CollectionReferencesViewTest(OCLAPITestCase):
 
         concept3 = ConceptFactory()
         latest_version = concept3.get_latest_version()
-        MappingFactory(from_concept=latest_version, parent=concept3.parent)
+        MappingFactory(from_concept=concept3, parent=concept3.parent)
 
         response = self.client.put(
             self.collection.uri + 'references/?cascade=sourcemappings',
@@ -652,7 +652,7 @@ class CollectionReferencesViewTest(OCLAPITestCase):
 
         concept4 = ConceptFactory()
         latest_version = concept4.get_latest_version()
-        MappingFactory(from_concept=latest_version, parent=concept4.parent)
+        MappingFactory(from_concept=concept4, parent=concept4.parent)
 
         response = self.client.put(
             self.collection.uri + 'references/',
@@ -741,7 +741,7 @@ class CollectionReferencesViewTest(OCLAPITestCase):
             sorted([data['expression'] for data in response.data]),
             sorted([
                 concept1.get_latest_version().uri, mapping1.uri,
-                mapping1.to_concept.get_latest_version().uri
+                mapping1.to_concept.versioned_object.uri
             ])
         )
 
@@ -759,7 +759,7 @@ class CollectionReferencesViewTest(OCLAPITestCase):
             sorted([data['expression'] for data in response.data]),
             sorted([
                 concept4.get_latest_version().uri, mapping4.uri,
-                mapping4.to_concept.get_latest_version().uri
+                mapping4.to_concept.versioned_object.uri
             ])
         )
 

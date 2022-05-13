@@ -18,7 +18,7 @@ from core.collections.parsers import CollectionReferenceParser
 from core.collections.utils import is_concept, is_mapping
 from core.common.constants import (
     DEFAULT_REPOSITORY_TYPE, ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT,
-    ES_REQUEST_TIMEOUT, ES_REQUEST_TIMEOUT_ASYNC)
+    ES_REQUEST_TIMEOUT, ES_REQUEST_TIMEOUT_ASYNC, HEAD)
 from core.common.models import ConceptContainerModel, BaseResourceModel
 from core.common.tasks import seed_children_to_expansion, batch_index_resources, index_expansion_concepts, \
     index_expansion_mappings
@@ -503,14 +503,15 @@ class CollectionReference(models.Model):
 
     def get_concept_cascade_params(self):
         if isinstance(self.cascade, dict) and self.cascade and 'method' in self.cascade:
-            method = self.cascade.pop('method')
+            method = self.cascade.pop('method', '')
         else:
-            method = self.cascade
+            method = self.cascade or ''
 
         cascade_params = {
-            'source_mappings': method == SOURCE_MAPPINGS,
-            'source_to_concepts': method == SOURCE_TO_CONCEPTS,
-            'cascade_levels': 1 if self.cascade == method else get(self.cascade, 'level', '*')
+            'source_mappings': method.lower() == SOURCE_MAPPINGS,
+            'source_to_concepts': method.lower() == SOURCE_TO_CONCEPTS,
+            'cascade_levels': 1 if self.cascade == method else get(self.cascade, 'level', '*'),
+            'source_version': HEAD
         }
         if isinstance(self.cascade, dict):
             cascade_params = {**cascade_params, **self.cascade}

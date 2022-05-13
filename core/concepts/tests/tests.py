@@ -1174,6 +1174,16 @@ class ConceptTest(OCLTestCase):
             root.url
         )
 
+    def test_cascade_with_source_version(self):
+        source = OrganizationSourceFactory()
+        concept_A = ConceptFactory(mnemonic='A', parent=source)
+        concept_A_1 = concept_A.get_latest_version()
+        concept_B = ConceptFactory(mnemonic='B', parent=source)
+        concept_B_1 = concept_B.get_latest_version()
+        mapping_AB = MappingFactory(mnemonic='AB', parent=source, from_concept=concept_A, to_concept=concept_B)
+        mapping_AB_1 = mapping_AB.get_latest_version()
+        concept_A_2 = ConceptFactory(mnemonic='A', parent=source, version='A.2')
+
 
 class OpenMRSConceptValidatorTest(OCLTestCase):
     def setUp(self):

@@ -557,7 +557,7 @@ class CollectionReferenceTest(OCLTestCase):
             transform='resourceVersions'
         )
         concepts, mappings = reference.get_concepts()
-
+        concepts = concepts.distinct('id')
         self.assertEqual(concepts.count(), 2)
         self.assertEqual(
             sorted(list(concepts.values_list('id', flat=True))),
@@ -800,6 +800,14 @@ class TasksTest(OCLTestCase):
                 concept1.get_latest_version().url, concept2.get_latest_version().url,
                 mapping1.url, mapping2.get_latest_version().url,
             ])
+        )
+        self.assertEqual(
+            sorted(list(expansion.concepts.values_list('uri', flat=True))),
+            sorted([concept1.get_latest_version().url, concept2.get_latest_version().url])
+        )
+        self.assertEqual(
+            sorted(list(expansion.mappings.values_list('uri', flat=True))),
+            sorted([mapping1.url, mapping2.get_latest_version().url])
         )
 
     @patch('core.collections.models.Collection.index_children')
