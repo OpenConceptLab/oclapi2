@@ -948,7 +948,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             LocalizedText.objects.filter(description_locales=self).delete()
         return super().delete(using=using, keep_parents=keep_parents)
 
-    def cascade(  # pylint: disable=too-many-arguments
+    def cascade(  # pylint: disable=too-many-arguments,too-many-locals
             self, source_version=None, source_mappings=True, source_to_concepts=True, mappings_criteria=None,
             cascade_mappings=True, cascade_hierarchy=True, cascade_levels='*',
             include_mappings=True, reverse=False, max_results=1000
@@ -1008,7 +1008,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         iterate(cascade_levels)
         return result
 
-    def cascade_as_hierarchy(  # pylint: disable=too-many-arguments
+    def cascade_as_hierarchy(  # pylint: disable=too-many-arguments,too-many-locals
             self, source_version=None, source_mappings=True, source_to_concepts=True, mappings_criteria=None,
             cascade_mappings=True, cascade_hierarchy=True, cascade_levels='*',
             include_mappings=True, reverse=False, _=None
