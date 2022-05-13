@@ -1,12 +1,13 @@
 from rest_framework import serializers
-from rest_framework.fields import CharField, DateField, SerializerMethodField, ChoiceField
+from rest_framework.fields import CharField, DateField, SerializerMethodField, ChoiceField, DateTimeField
 
 from core.code_systems.serializers import CodeSystemConceptSerializer
-from core.collections.models import Collection
+from core.collections.models import Collection, Expansion
 from core.collections.parsers import CollectionReferenceParser
 from core.collections.serializers import CollectionCreateOrUpdateSerializer
 from core.common.serializers import StatusField, IdentifierSerializer, ReadSerializerMixin
 from core.orgs.models import Organization
+from core.parameters.serializers import ParametersSerializer
 from core.users.models import UserProfile
 
 
@@ -22,6 +23,13 @@ class ValueSetConceptSerializer(CodeSystemConceptSerializer):
         super().__init__(*args, **kwargs)
         self.fields.pop('definition')
         self.fields.pop('property')
+
+
+class ValueSetExpansionConceptSerializer(CodeSystemConceptSerializer):
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields.pop('definition')
 
 
 class ComposeValueSetField(serializers.Field):
@@ -153,6 +161,7 @@ class ValueSetDetailSerializer(serializers.ModelSerializer):
         collection.id = head_collection.id
         collection.version = 'HEAD'
         collection.released = False  # HEAD must never be released
+        collection.expansion_uri = head_collection.expansion_uri
 
         user = self.context['request'].user
         errors = Collection.persist_changes(collection, user, None)
@@ -181,6 +190,7 @@ class ValueSetDetailSerializer(serializers.ModelSerializer):
         collection.version = collection_version
         collection.released = collection_released
         collection.id = None
+        collection.expansion_uri = None
         errors = Collection.persist_new_version(collection, user)
         self._errors.update(errors)
 
@@ -201,3 +211,48 @@ class ValueSetDetailSerializer(serializers.ModelSerializer):
     @staticmethod
     def get_meta(obj):
         return dict(lastUpdated=obj.updated_at)
+
+
+class ValueSetExpansionParametersSerializer(ParametersSerializer):
+
+    def to_internal_value(self, data):
+        parameters = {}
+
+        for parameter in data.get('parameter'):
+            name = parameter.get('name')
+            value = None
+            match name:
+                case 'filter':
+                    value = parameter.get('valueString')
+            if value:
+                parameters[name] = value
+
+        return {'parameters': parameters}
+
+
+class ValueSetExpansionField(serializers.Field):
+    timestamp = DateTimeField()
+
+    def to_internal_value(self, data):
+        return None
+
+    def to_representation(self, value):
+        # limit to 1000 concepts by default
+        # TODO: support graphQL to go around the limit
+        return {
+            'timestamp': self.timestamp.to_representation(value.created_at),
+            'contains': ValueSetExpansionConceptSerializer(value.concepts.order_by('id')[:1000], many=True).data
+        }
+
+
+class ValueSetExpansionSerializer(serializers.ModelSerializer):
+    resourceType = SerializerMethodField(method_name='get_resource_type')
+    expansion = ValueSetExpansionField(source='*')
+
+    class Meta:
+        model = Expansion
+        fields = ('resourceType', 'id', 'expansion')
+
+    @staticmethod
+    def get_resource_type(_):
+        return 'ValueSet'

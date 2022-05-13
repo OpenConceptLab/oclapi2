@@ -630,6 +630,9 @@ class CollectionVersionExpansionsView(CollectionBaseView, ListWithHeadersMixin, 
             return ExpansionDetailSerializer
         return ExpansionSerializer
 
+    def get_response_serializer_class(self): # pylint: disable=no-self-use
+        return ExpansionSerializer
+
     def get_permissions(self):
         if self.request.method == 'GET':
             return [CanViewConceptDictionaryVersion()]
@@ -652,9 +655,10 @@ class CollectionVersionExpansionsView(CollectionBaseView, ListWithHeadersMixin, 
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         version = self.get_object()
-        expansion = version.cascade_children_to_expansion(expansion_data=serializer.data)
-        headers = self.get_success_headers(serializer.data)
-        return Response(ExpansionSerializer(expansion).data, status=status.HTTP_201_CREATED, headers=headers)
+        expansion = version.cascade_children_to_expansion(expansion_data=serializer.validated_data)
+        headers = self.get_success_headers(serializer.validated_data)
+        return Response(self.get_response_serializer_class()(expansion).data, status=status.HTTP_201_CREATED,
+                        headers=headers)
 
 
 class CollectionVersionExpansionBaseView(CollectionBaseView):
