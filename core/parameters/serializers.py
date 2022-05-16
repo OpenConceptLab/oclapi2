@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from rest_framework.fields import CharField, SerializerMethodField, BooleanField
 
+from core.common.constants import HEAD
 from core.common.serializers import ReadSerializerMixin
 
 
@@ -26,7 +27,7 @@ class ParametersSerializer(ReadSerializerMixin, serializers.Serializer):
 
     @staticmethod
     def from_concept(concept):
-        source = concept.sources.filter(is_latest_version=True).exclude(version='HEAD').first()
+        source = concept.sources.filter(is_latest_version=True).exclude(version=HEAD).first()
         parameters = {
             'parameter': [
                 {

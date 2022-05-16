@@ -224,7 +224,7 @@ class SourceImporter(BaseResourceImporter):
 
         self.data['mnemonic'] = self.data.pop('id')
         self.data[owner_type] = owner
-        self.data['version'] = 'HEAD'
+        self.data['version'] = HEAD
 
         supported_locales = self.get('supported_locales')
         if isinstance(supported_locales, str):
@@ -307,7 +307,7 @@ class CollectionImporter(BaseResourceImporter):
 
         self.data['mnemonic'] = self.data.pop('id')
         self.data[owner_type] = owner
-        self.data['version'] = 'HEAD'
+        self.data['version'] = HEAD
 
         supported_locales = self.get('supported_locales')
         if isinstance(supported_locales, str):
@@ -561,7 +561,7 @@ class ReferenceImporter(BaseResourceImporter):
 
         if self.get('collection', None):
             self.queryset = Collection.objects.filter(
-                **{self.get_owner_type_filter(): self.get('owner')}, mnemonic=self.get('collection'), version='HEAD'
+                **{self.get_owner_type_filter(): self.get('owner')}, mnemonic=self.get('collection'), version=HEAD
             )
         elif self.get('collection_url', None):
             self.queryset = Collection.objects.filter(uri=self.get('collection_url'))

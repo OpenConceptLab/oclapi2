@@ -505,5 +505,5 @@ class SourceLatestVersionSummaryView(SourceVersionBaseView, RetrieveAPIView, Upd
 class SourceClientConfigsView(SourceBaseView, ResourceClientConfigsView):
     lookup_field = 'source'
     model = Source
-    queryset = Source.objects.filter(is_active=True, version='HEAD')
+    queryset = Source.objects.filter(is_active=True, version=HEAD)
     permission_classes = (CanViewConceptDictionary, )

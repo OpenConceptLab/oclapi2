@@ -1081,7 +1081,7 @@ class CollectionLatestVersionSummaryView(CollectionVersionBaseView, RetrieveAPIV
 class CollectionClientConfigsView(CollectionBaseView, ResourceClientConfigsView):
     lookup_field = 'collection'
     model = Collection
-    queryset = Collection.objects.filter(is_active=True, version='HEAD')
+    queryset = Collection.objects.filter(is_active=True, version=HEAD)
     permission_classes = (CanViewConceptDictionary, )
 
 
