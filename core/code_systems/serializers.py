@@ -1,6 +1,6 @@
 from pydash import get
 from rest_framework import serializers
-from rest_framework.fields import CharField, DateField, BooleanField, IntegerField, SerializerMethodField, ChoiceField, \
+from rest_framework.fields import CharField, BooleanField, IntegerField, SerializerMethodField, ChoiceField, \
     DateTimeField
 
 from core import settings
