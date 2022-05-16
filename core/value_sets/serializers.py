@@ -18,7 +18,6 @@ class FilterValueSetSerializer(ReadSerializerMixin, serializers.Serializer):
 
 
 class ValueSetConceptSerializer(CodeSystemConceptSerializer):
-
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields.pop('definition')
@@ -26,7 +25,6 @@ class ValueSetConceptSerializer(CodeSystemConceptSerializer):
 
 
 class ValueSetExpansionConceptSerializer(CodeSystemConceptSerializer):
-
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields.pop('definition')
@@ -214,7 +212,6 @@ class ValueSetDetailSerializer(serializers.ModelSerializer):
 
 
 class ValueSetExpansionParametersSerializer(ParametersSerializer):
-
     def to_internal_value(self, data):
         parameters = {}
 
@@ -233,7 +230,8 @@ class ValueSetExpansionParametersSerializer(ParametersSerializer):
 class ValueSetExpansionField(serializers.Field):
     timestamp = DateTimeField()
 
-    def to_internal_value(self, data):
+    @staticmethod
+    def to_internal_value( _):
         return None
 
     def to_representation(self, value):
