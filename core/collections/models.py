@@ -734,7 +734,7 @@ class Expansion(BaseResourceModel):
 
     @staticmethod
     def get_resource_url_kwarg():
-        return 'expansion'
+        return Expansion.get_url_kwarg()
 
     @staticmethod
     def get_url_kwarg():
