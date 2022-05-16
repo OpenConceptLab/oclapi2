@@ -5,10 +5,12 @@ from core.code_systems.serializers import CodeSystemConceptSerializer
 from core.collections.models import Collection, Expansion
 from core.collections.parsers import CollectionReferenceParser
 from core.collections.serializers import CollectionCreateOrUpdateSerializer
+from core.common.constants import HEAD
 from core.common.serializers import StatusField, IdentifierSerializer, ReadSerializerMixin
 from core.orgs.models import Organization
 from core.parameters.serializers import ParametersSerializer
 from core.users.models import UserProfile
+from core.value_sets.constants import RESOURCE_TYPE
 
 
 class FilterValueSetSerializer(ReadSerializerMixin, serializers.Serializer):
@@ -56,7 +58,7 @@ class ComposeValueSetField(serializers.Field):
         inactive = False
         for reference in value.references.all():
             for concept in reference.concepts.all():
-                source = concept.sources.exclude(version='HEAD').order_by('created_at').first()
+                source = concept.sources.exclude(version=HEAD).order_by('created_at').first()
                 if concept.retired:
                     inactive = True
                 if not source:
@@ -119,8 +121,8 @@ class ValueSetDetailSerializer(serializers.ModelSerializer):
         uri = self.context['request'].path + validated_data['mnemonic']
         ident = IdentifierSerializer.include_ocl_identifier(uri, validated_data)
         collection = CollectionCreateOrUpdateSerializer().prepare_object(validated_data)
-        collection_version = collection.version if collection.version != 'HEAD' else '0.1'
-        collection.version = 'HEAD'
+        collection_version = collection.version if collection.version != HEAD else '0.1'
+        collection.version = HEAD
 
         parent_klass = Organization if ident['owner_type'] == 'orgs' else UserProfile
         collection.set_parent(parent_klass.objects.filter(**{parent_klass.mnemonic_attr: ident['owner_id']}).first())
@@ -157,7 +159,7 @@ class ValueSetDetailSerializer(serializers.ModelSerializer):
 
         # Update HEAD first
         collection.id = head_collection.id
-        collection.version = 'HEAD'
+        collection.version = HEAD
         collection.released = False  # HEAD must never be released
         collection.expansion_uri = head_collection.expansion_uri
 
@@ -199,12 +201,12 @@ class ValueSetDetailSerializer(serializers.ModelSerializer):
             rep = super().to_representation(instance)
             IdentifierSerializer.include_ocl_identifier(instance.uri, rep)
         except Exception as error:
-            raise Exception(f'Failed to represent "{instance.uri}" as ValueSet') from error
+            raise Exception(f'Failed to represent "{instance.uri}" as {RESOURCE_TYPE}') from error
         return rep
 
     @staticmethod
     def get_resource_type(_):
-        return 'ValueSet'
+        return RESOURCE_TYPE
 
     @staticmethod
     def get_meta(obj):
@@ -253,4 +255,4 @@ class ValueSetExpansionSerializer(serializers.ModelSerializer):
 
     @staticmethod
     def get_resource_type(_):
-        return 'ValueSet'
+        return RESOURCE_TYPE

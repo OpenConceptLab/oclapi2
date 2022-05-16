@@ -3,6 +3,7 @@ from rest_framework import serializers
 from rest_framework.fields import CharField, DateField, BooleanField, IntegerField, SerializerMethodField, ChoiceField
 
 from core import settings
+from core.code_systems.constants import RESOURCE_TYPE
 from core.common.constants import HEAD
 from core.common.serializers import ReadSerializerMixin, StatusField, IdentifierSerializer
 from core.concepts.models import Concept, LocalizedText
@@ -159,7 +160,7 @@ class CodeSystemDetailSerializer(serializers.ModelSerializer):
 
     @staticmethod
     def get_resource_type(_):
-        return 'CodeSystem'
+        return RESOURCE_TYPE
 
     @staticmethod
     def get_property(_):
@@ -196,7 +197,7 @@ class CodeSystemDetailSerializer(serializers.ModelSerializer):
             rep = super().to_representation(instance)
             IdentifierSerializer.include_ocl_identifier(instance.uri, rep)
         except Exception as error:
-            raise Exception(f'Failed to represent "{instance.uri}" as CodeSystem') from error
+            raise Exception(f'Failed to represent "{instance.uri}" as {RESOURCE_TYPE}') from error
         return rep
 
     def get_ocl_identifier(self):
@@ -219,7 +220,7 @@ class CodeSystemDetailSerializer(serializers.ModelSerializer):
 
         user = self.context['request'].user
         version = source.version  # remember version if set
-        source.version = 'HEAD'
+        source.version = HEAD
         errors = Source.persist_new(source, user)
         if errors:
             self._errors.update(errors)
@@ -252,13 +253,11 @@ class CodeSystemDetailSerializer(serializers.ModelSerializer):
 
         # Update HEAD first
         # Determine existing source ID
-        existing_source = Source.objects.filter(
-            mnemonic=source.mnemonic, organization_id=source.organization_id, user_id=source.user_id, version='HEAD'
-        ).get()
-        source.id = existing_source.id
-        source.version = 'HEAD'
+        source_head = source.head
+        source.id = source_head.id
+        source.version = HEAD
         source.released = False  # HEAD must never be released
-        source.custom_validation_schema = existing_source.custom_validation_schema
+        source.custom_validation_schema = source_head.custom_validation_schema
 
         errors = Source.persist_changes(source, user, None)
 

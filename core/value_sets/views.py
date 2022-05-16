@@ -5,6 +5,7 @@ from django.db.models import F
 from core.bundles.serializers import FhirBundleSerializer
 from core.collections.views import CollectionListView, CollectionRetrieveUpdateDestroyView, \
     CollectionVersionExpansionsView
+from core.common.constants import HEAD
 from core.concepts.views import ConceptRetrieveUpdateDestroyView
 from core.parameters.serializers import ParametersSerializer
 from core.sources.models import Source
@@ -57,7 +58,7 @@ class ValueSetListView(CollectionListView):
         return queryset
 
     def apply_filters(self, queryset):
-        queryset = queryset.exclude(version='HEAD').filter(is_latest_version=True)
+        queryset = queryset.exclude(version=HEAD).filter(is_latest_version=True)
         return self.apply_query_filters(queryset)
 
     def get_serializer_class(self):
@@ -109,7 +110,7 @@ class ValueSetValidateCodeView(ConceptRetrieveUpdateDestroyView):
             if system_version:
                 concept_source = concept_source.filter(version=system_version)
             else:
-                concept_source = concept_source.filter(is_latest_version=True).exclude(version='HEAD')
+                concept_source = concept_source.filter(is_latest_version=True).exclude(version=HEAD)
             if concept_source:
                 queryset = queryset.filter(sources=concept_source.first(), mnemonic=code)
 
@@ -158,7 +159,7 @@ class ValueSetRetrieveUpdateView(CollectionRetrieveUpdateDestroyView):
 
     def get_queryset(self):
         queryset = super().get_queryset()
-        return queryset.exclude(version='HEAD')
+        return queryset.exclude(version=HEAD)
 
     def get_detail_serializer(self, obj):
         return ValueSetDetailSerializer(obj)
@@ -166,6 +167,7 @@ class ValueSetRetrieveUpdateView(CollectionRetrieveUpdateDestroyView):
 
 class ValueSetExpandView(CollectionVersionExpansionsView):
     sync = True
+
     def get_serializer_class(self):
         return ValueSetExpansionParametersSerializer
 

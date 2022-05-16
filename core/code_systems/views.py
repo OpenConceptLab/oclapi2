@@ -4,6 +4,7 @@ from django.db.models import F
 
 from core.bundles.serializers import FhirBundleSerializer
 from core.code_systems.serializers import CodeSystemDetailSerializer
+from core.common.constants import HEAD
 from core.concepts.views import ConceptRetrieveUpdateDestroyView
 from core.parameters.serializers import ParametersSerializer
 from core.sources.models import Source
@@ -55,7 +56,7 @@ class CodeSystemListView(SourceListView):
         return queryset
 
     def apply_filters(self, queryset):
-        queryset = queryset.exclude(version='HEAD').filter(is_latest_version=True)
+        queryset = queryset.exclude(version=HEAD).filter(is_latest_version=True)
         return self.apply_query_filters(queryset)
 
     def get_serializer_class(self):
@@ -76,7 +77,7 @@ class CodeSystemListLookupView(ConceptRetrieveUpdateDestroyView):
         code = self.request.query_params.get('code')
         system = self.request.query_params.get('system')
         if code and system:
-            source = Source.objects.filter(canonical_url=system, is_latest_version=True).exclude(version='HEAD').first()
+            source = Source.objects.filter(canonical_url=system, is_latest_version=True).exclude(version=HEAD).first()
             if source:
                 queryset = queryset.filter(sources=source, mnemonic=code)
 
@@ -105,7 +106,7 @@ class CodeSystemListValidateCodeView(ConceptRetrieveUpdateDestroyView):
             if version:
                 source = source.filter(version=version)
             else:
-                source = source.filter(is_latest_version=True).exclude(version='HEAD')
+                source = source.filter(is_latest_version=True).exclude(version=HEAD)
             if source:
                 queryset = queryset.filter(sources=source.first(), mnemonic=code)
 
@@ -153,7 +154,7 @@ class CodeSystemRetrieveUpdateView(SourceRetrieveUpdateDestroyView):
 
     def get_queryset(self):
         queryset = super().get_queryset()
-        return queryset.exclude(version='HEAD')
+        return queryset.exclude(version=HEAD)
 
     def get_detail_serializer(self, obj):
         return CodeSystemDetailSerializer(obj)

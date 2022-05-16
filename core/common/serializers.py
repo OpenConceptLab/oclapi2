@@ -2,8 +2,10 @@ from rest_framework.fields import CharField, JSONField
 from rest_framework.serializers import Serializer, Field, ValidationError
 
 from core import settings
+from core.code_systems.constants import RESOURCE_TYPE as CODE_SYSTEM_RESOURCE_TYPE
 from core.orgs.models import Organization
 from core.users.models import UserProfile
+from core.value_sets.constants import RESOURCE_TYPE as VALUESET_RESOURCE_TYPE
 
 
 class RootSerializer(Serializer):  # pylint: disable=abstract-method
@@ -74,16 +76,17 @@ class IdentifierSerializer(ReadSerializerMixin, Serializer):
     def parse_identifier(accession_id):
         id_parts = accession_id.strip().strip('/').split('/')
         if len(id_parts) != 4:
-            raise ValidationError('Identifier must be in a format: '
-                                              '/{owner_type}/{owner_id}/{resourceType}/{resource_id}/')
+            raise ValidationError(
+                'Identifier must be in a format: /{owner_type}/{owner_id}/{resourceType}/{resource_id}/')
 
-        identifier = {'owner_type': id_parts[0], 'owner_id': id_parts[1], 'resource_type': id_parts[2],
-                      'resource_id': id_parts[3]}
+        identifier = {
+            'owner_type': id_parts[0], 'owner_id': id_parts[1], 'resource_type': id_parts[2], 'resource_id': id_parts[3]
+        }
         return identifier
 
     @staticmethod
     def convert_ocl_uri_to_fhir_url(uri):
-        fhir_uri = uri.replace('sources', 'CodeSystem').replace('collections', 'ValueSet')
+        fhir_uri = uri.replace('sources', CODE_SYSTEM_RESOURCE_TYPE).replace('collections', VALUESET_RESOURCE_TYPE)
         fhir_uri = fhir_uri.strip('/')
         if len(fhir_uri.split('/')) > 4:
             fhir_uri = fhir_uri.rsplit('/', 1)[0]
@@ -119,9 +122,11 @@ class IdentifierSerializer(ReadSerializerMixin, Serializer):
             if identifier['owner_type'] not in ['users', 'orgs']:
                 raise ValidationError(
                     f"Owner type='{identifier['owner_type']}' is invalid. It must be 'users' or 'orgs'")
-            if identifier['resource_type'] not in ['CodeSystem', 'ValueSet']:
+            if identifier['resource_type'] not in [CODE_SYSTEM_RESOURCE_TYPE, VALUESET_RESOURCE_TYPE]:
                 raise ValidationError(
-                    f"Resource type='{identifier['resource_type']}' is invalid. It must be 'CodeSystem' or 'ValueSet'")
+                    f"Resource type='{identifier['resource_type']}' is invalid. "
+                    f"It must be '{CODE_SYSTEM_RESOURCE_TYPE}' or '{VALUESET_RESOURCE_TYPE}'"
+                )
             if identifier['owner_type'] == 'users':
                 owner_exists = UserProfile.objects.filter(username=identifier['owner_id']).exists()
             else:
