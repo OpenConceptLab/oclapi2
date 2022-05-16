@@ -1,5 +1,3 @@
-import unittest
-
 from core.collections.models import CollectionReference
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
 from core.common.tests import OCLAPITestCase
@@ -311,7 +309,6 @@ class ValueSetTest(OCLAPITestCase):
         self.assertEqual(resource['parameter'][0]['name'], 'result')
         self.assertEqual(resource['parameter'][0]['valueBoolean'], True)
 
-    @unittest.skip("Passes when run individually, but fails when run in a suite")
     def test_expand(self):
         self.client.post(
             f'/users/{self.user.mnemonic}/ValueSet/',
@@ -339,6 +336,8 @@ class ValueSetTest(OCLAPITestCase):
             },
             format='json'
         )
+
+        ConceptDocument().update(self.concept_1.parent.concepts_set.all())
 
         response = self.client.post('/users/' + self.user.mnemonic + '/ValueSet/c2/$expand/',
                                     HTTP_AUTHORIZATION='Token ' + self.user_token,
