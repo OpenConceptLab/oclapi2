@@ -128,22 +128,21 @@ class CodeSystemListValidateCodeView(ConceptRetrieveUpdateDestroyView):
 
     def get_serializer(self, instance=None):  # pylint: disable=arguments-differ
         if instance:
-            return ParametersSerializer({'parameter': [
+            return ParametersSerializer(
                 {
-                    'name': 'result',
-                    'valueBoolean': True
+                    'parameter': [
+                        {'name': 'result', 'valueBoolean': True}
+                    ]
                 }
-            ]})
-        return ParametersSerializer({'parameter': [
+            )
+        return ParametersSerializer(
             {
-                'name': 'result',
-                'valueBoolean': False
-            },
-            {
-                'name': 'message',
-                'valueString': 'The code is incorrect.'
+                'parameter': [
+                    {'name': 'result', 'valueBoolean': False},
+                    {'name': 'message', 'valueString': 'The code is incorrect.'}
+                ]
             }
-        ]})
+        )
 
 
 class CodeSystemRetrieveUpdateView(SourceRetrieveUpdateDestroyView):
