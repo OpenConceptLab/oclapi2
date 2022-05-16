@@ -77,7 +77,8 @@ class IdentifierSerializer(ReadSerializerMixin, Serializer):
         id_parts = accession_id.strip().strip('/').split('/')
         if len(id_parts) != 4:
             raise ValidationError(
-                'Identifier must be in a format: /{owner_type}/{owner_id}/{resourceType}/{resource_id}/')
+                'Identifier must be in a format: /{owner_type}/{owner_id}/{resourceType}/{resource_id}/, given: '
+                + accession_id)
 
         identifier = {
             'owner_type': id_parts[0], 'owner_id': id_parts[1], 'resource_type': id_parts[2], 'resource_id': id_parts[3]

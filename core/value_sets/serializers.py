@@ -230,6 +230,8 @@ class ValueSetExpansionParametersSerializer(ParametersSerializer):
 
 
 class ValueSetExpansionField(serializers.Field):
+    default_count = 1000
+    default_offset = 0
     timestamp = DateTimeField()
 
     @staticmethod
@@ -237,11 +239,13 @@ class ValueSetExpansionField(serializers.Field):
         return None
 
     def to_representation(self, value):
-        # limit to 1000 concepts by default
-        # TODO: support graphQL to go around the limit
         return {
+            'identifier': value.uri,
             'timestamp': self.timestamp.to_representation(value.created_at),
-            'contains': ValueSetExpansionConceptSerializer(value.concepts.order_by('id')[:1000], many=True).data
+            'total': value.concepts.count(),
+            'offset': self.default_offset,
+            'contains': ValueSetExpansionConceptSerializer(value.concepts.order_by('id')
+                                                           [self.default_offset:self.default_count], many=True).data
         }
 
 
