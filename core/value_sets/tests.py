@@ -300,10 +300,10 @@ class ValueSetTest(OCLAPITestCase):
         ])
         self.collection_v1.seed_references()
 
-        response = self.client.get('/orgs/' + self.org.mnemonic + '/ValueSet/'
-                                   + self.collection.mnemonic + '/$validate-code/?system=http://some/url&systemVersion='
-                                   + self.org_source_v2.version + '&code='
-                                   + self.concept_1.mnemonic)
+        response = self.client.get(
+            f'/orgs/{self.org.mnemonic}/ValueSet/{self.collection.mnemonic}/$validate-code/'
+            f'?system=http://some/url&systemVersion={self.org_source_v2.version}&code={self.concept_1.mnemonic}'
+        )
 
         resource = response.data
         self.assertEqual(resource['parameter'][0]['name'], 'result')
@@ -339,20 +339,23 @@ class ValueSetTest(OCLAPITestCase):
 
         ConceptDocument().update(self.concept_1.parent.concepts_set.all())
 
-        response = self.client.post('/users/' + self.user.mnemonic + '/ValueSet/c2/$expand/',
-                                    HTTP_AUTHORIZATION='Token ' + self.user_token,
-                                    data={
-                                        'resourceType': 'Parameters',
-                                        'parameter': [
-                                            {
-                                                'name': 'filter',
-                                                'valueString': self.concept_1.mnemonic
-                                            }
-                                        ]
-                                    },
-                                    format='json')
+        response = self.client.post(
+            '/users/' + self.user.mnemonic + '/ValueSet/c2/$expand/',
+            HTTP_AUTHORIZATION='Token ' + self.user_token,
+            data={
+                'resourceType': 'Parameters',
+                'parameter': [
+                    {
+                        'name': 'filter',
+                        'valueString': self.concept_1.mnemonic
+                    }
+                ]
+            },
+            format='json'
+        )
 
         resource = response.data
+
         self.assertEqual(resource['resourceType'], 'ValueSet')
         expansion = resource['expansion']
         self.assertIsNotNone(expansion['timestamp'])
