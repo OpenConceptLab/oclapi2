@@ -1,7 +1,9 @@
+from pydash import get
 from rest_framework import serializers
 from rest_framework.fields import CharField, DateField, BooleanField, IntegerField, SerializerMethodField, ChoiceField
 
 from core import settings
+from core.common.constants import HEAD
 from core.common.serializers import ReadSerializerMixin, StatusField, IdentifierSerializer
 from core.concepts.models import Concept, LocalizedText
 from core.concepts.serializers import ConceptDetailSerializer
@@ -12,7 +14,6 @@ from core.users.models import UserProfile
 
 
 class CodeSystemConceptDesignationUseSerializer(serializers.Field):
-
     def to_internal_value(self, data):
         if 'code' in data:
             return {'type': data['code']}
@@ -35,7 +36,6 @@ class CodeSystemConceptDesignationSerializer(serializers.ModelSerializer):
 
 
 class CodeSystemConceptPropertySerializer(serializers.Field):
-
     def to_internal_value(self, data):
         ret = {}
         for item in data:
@@ -70,9 +70,7 @@ class CodeSystemConceptDisplaySerializer(serializers.Field):
         return {'name': data}
 
     def to_representation(self, value):
-        if value.name:
-            return value.name
-        return value.display_name
+        return value.name or value.display_name
 
 
 class CodeSystemConceptSerializer(ReadSerializerMixin, serializers.Serializer):
@@ -106,10 +104,7 @@ class CodeSystemConceptSerializer(ReadSerializerMixin, serializers.Serializer):
 
     @staticmethod
     def get_definition(obj):
-        descriptions = obj.descriptions_for_default_locale
-        if descriptions:
-            return descriptions[0]
-        return ''
+        return get(obj.descriptions_for_default_locale, '0', '')
 
 
 class CodeSystemPropertySerializer(ReadSerializerMixin, serializers.Serializer):
@@ -120,7 +115,6 @@ class CodeSystemPropertySerializer(ReadSerializerMixin, serializers.Serializer):
 
 
 class CodeSystemConceptField(serializers.Field):
-
     def to_internal_value(self, data):
         concepts = CodeSystemConceptSerializer(data=data, many=True)
         concepts.is_valid(raise_exception=True)
@@ -140,8 +134,11 @@ class CodeSystemDetailSerializer(serializers.ModelSerializer):
     status = StatusField(source='*')
     language = CharField(source='default_locale', required=False)
     count = IntegerField(source='active_concepts', read_only=True)
-    content = ChoiceField(source='content_type', choices=['not-present', 'example', 'fragment', 'complete',
-                                                          'supplement'], allow_blank=True)
+    content = ChoiceField(
+        source='content_type',
+        choices=['not-present', 'example', 'fragment', 'complete', 'supplement'],
+        allow_blank=True
+    )
     property = SerializerMethodField()
     meta = SerializerMethodField()
     concept = CodeSystemConceptField(source='*', required=False)
@@ -166,15 +163,29 @@ class CodeSystemDetailSerializer(serializers.ModelSerializer):
 
     @staticmethod
     def get_property(_):
-        return CodeSystemPropertySerializer([
-            {'code': 'conceptclass', 'uri': settings.API_BASE_URL + '/orgs/OCL/sources/Classes/concepts',
-             'description': 'Standard list of concept classes.', 'type': 'string'},
-            {'code': 'datatype', 'uri': settings.API_BASE_URL + '/orgs/OCL/sources/Datatypes/concepts',
-             'description': 'Standard list of concept datatypes.', 'type': 'string'},
-            {'code': 'inactive', 'uri': 'http://hl7.org/fhir/concept-properties',
-             'description': 'True if the concept is not considered active.',
-             'type': 'coding'}
-        ], many=True).data
+        return CodeSystemPropertySerializer(
+            [
+                {
+                    'code': 'conceptclass',
+                    'uri': settings.API_BASE_URL + '/orgs/OCL/sources/Classes/concepts',
+                    'description': 'Standard list of concept classes.',
+                    'type': 'string'
+                },
+                {
+                    'code': 'datatype',
+                    'uri': settings.API_BASE_URL + '/orgs/OCL/sources/Datatypes/concepts',
+                    'description': 'Standard list of concept datatypes.',
+                    'type': 'string'
+                },
+                {
+                    'code': 'inactive',
+                    'uri': 'http://hl7.org/fhir/concept-properties',
+                    'description': 'True if the concept is not considered active.',
+                    'type': 'coding'
+                }
+            ],
+            many=True
+        ).data
 
     @staticmethod
     def get_meta(obj):
@@ -194,18 +205,17 @@ class CodeSystemDetailSerializer(serializers.ModelSerializer):
         return ident
 
     def create(self, validated_data):
-        if 'concepts' in validated_data:
-            concepts = validated_data.pop('concepts')
-        else:
-            concepts = []
+        concepts = validated_data.pop('concepts', [])
         uri = self.context['request'].path + validated_data['mnemonic']
         ident = IdentifierSerializer.include_ocl_identifier(uri, validated_data)
         source = SourceCreateOrUpdateSerializer().prepare_object(validated_data)
 
         if ident['owner_type'] == 'orgs':
-            source.set_parent(Organization.objects.filter(mnemonic=ident['owner_id']).first())
+            owner = Organization.objects.filter(mnemonic=ident['owner_id']).first()
         else:
-            source.set_parent(UserProfile.objects.filter(username=ident['owner_id']).first())
+            owner = UserProfile.objects.filter(username=ident['owner_id']).first()
+
+        source.set_parent(owner)
 
         user = self.context['request'].user
         version = source.version  # remember version if set
@@ -222,10 +232,8 @@ class CodeSystemDetailSerializer(serializers.ModelSerializer):
             Concept.persist_new(concept_serializer.validated_data)
 
         # Create new version
-        if version != 'HEAD':
-            source.version = version
-        else:
-            source.version = '0.1'
+        source.version = '0.1' if version == HEAD else version
+
         source.id = None  # pylint: disable=invalid-name
         errors = Source.persist_new_version(source, user)
         self._errors.update(errors)
@@ -233,10 +241,7 @@ class CodeSystemDetailSerializer(serializers.ModelSerializer):
         return source
 
     def update(self, instance, validated_data):
-        if 'concepts' in validated_data:
-            concepts = validated_data.pop('concepts')
-        else:
-            concepts = []
+        concepts = validated_data.pop('concepts', [])
         source = SourceCreateOrUpdateSerializer().prepare_object(validated_data, instance)
 
         # Preserve version specific values
@@ -247,11 +252,9 @@ class CodeSystemDetailSerializer(serializers.ModelSerializer):
 
         # Update HEAD first
         # Determine existing source ID
-        if source.organization:
-            existing_source = Source.objects.filter(mnemonic=source.mnemonic, organization=source.organization,
-                                                    version='HEAD').get()
-        else:
-            existing_source = Source.objects.filter(mnemonic=source.mnemonic, user=source.user, version='HEAD').get()
+        existing_source = Source.objects.filter(
+            mnemonic=source.mnemonic, organization_id=source.organization_id, user_id=source.user_id, version='HEAD'
+        ).get()
         source.id = existing_source.id
         source.version = 'HEAD'
         source.released = False  # HEAD must never be released
@@ -266,14 +269,13 @@ class CodeSystemDetailSerializer(serializers.ModelSerializer):
         for concept_item in concepts:
             concept_item.update({'parent_id': source.id})
             existing_concept = source.get_concepts_queryset().filter(mnemonic=concept_item['mnemonic'])
+            concept_serializer = ConceptDetailSerializer(
+                context=self.context, instance=existing_concept.first(), data=concept_item)
+            concept_serializer.is_valid(raise_exception=True)
+
             if existing_concept:
-                concept_serializer = ConceptDetailSerializer(context=self.context, instance=existing_concept.first(),
-                                                             data=concept_item)
-                concept_serializer.is_valid(raise_exception=True)
                 concept_serializer.save()
             else:
-                concept_serializer = ConceptDetailSerializer(context=self.context, data=concept_item)
-                concept_serializer.is_valid(raise_exception=True)
                 Concept.persist_new(concept_serializer.validated_data)
 
         # Create new version
