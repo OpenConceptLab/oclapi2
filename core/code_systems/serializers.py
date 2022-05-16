@@ -1,6 +1,7 @@
 from pydash import get
 from rest_framework import serializers
-from rest_framework.fields import CharField, DateField, BooleanField, IntegerField, SerializerMethodField, ChoiceField
+from rest_framework.fields import CharField, DateField, BooleanField, IntegerField, SerializerMethodField, ChoiceField, \
+    DateTimeField
 
 from core import settings
 from core.code_systems.constants import RESOURCE_TYPE
@@ -149,7 +150,7 @@ class CodeSystemDetailSerializer(serializers.ModelSerializer):
     versionNeeded = BooleanField(source='version_needed', required=False)
     collectionReference = CharField(source='collection_reference', required=False)
     hierarchyMeaning = CharField(source='hierarchy_meaning', required=False)
-    revisionDate = DateField(source='revision_date', required=False)
+    revisionDate = DateTimeField(source='revision_date', required=False)
 
     class Meta:
         model = Source
@@ -190,7 +191,7 @@ class CodeSystemDetailSerializer(serializers.ModelSerializer):
 
     @staticmethod
     def get_meta(obj):
-        return {'lastUpdated': obj.updated_at}
+        return {'lastUpdated': DateTimeField().to_representation(obj.updated_at)}
 
     def to_representation(self, instance):
         try:
