@@ -165,7 +165,7 @@ class ValueSetRetrieveUpdateView(CollectionRetrieveUpdateDestroyView):
 
 
 class ValueSetExpandView(CollectionVersionExpansionsView):
-
+    sync = True
     def get_serializer_class(self):
         return ValueSetExpansionParametersSerializer
 

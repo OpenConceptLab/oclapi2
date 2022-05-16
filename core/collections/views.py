@@ -625,6 +625,8 @@ class CollectionVersionRetrieveUpdateDestroyView(CollectionBaseView, RetrieveAPI
 
 
 class CollectionVersionExpansionsView(CollectionBaseView, ListWithHeadersMixin, CreateAPIView):
+    sync = False
+
     def get_serializer_class(self):
         if self.is_verbose():
             return ExpansionDetailSerializer
@@ -655,7 +657,8 @@ class CollectionVersionExpansionsView(CollectionBaseView, ListWithHeadersMixin, 
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         version = self.get_object()
-        expansion = version.cascade_children_to_expansion(expansion_data=serializer.validated_data)
+        expansion = version.cascade_children_to_expansion(
+            expansion_data=serializer.validated_data, index=True, sync=self.sync)
         headers = self.get_success_headers(serializer.validated_data)
         return Response(self.get_response_serializer_class()(expansion).data, status=status.HTTP_201_CREATED,
                         headers=headers)
