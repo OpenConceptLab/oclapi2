@@ -75,7 +75,7 @@ class IdentifierSerializer(ReadSerializerMixin, Serializer):
     @staticmethod
     def parse_identifier(accession_id):
         id_parts = accession_id.strip().strip('/').split('/')
-        if len(id_parts) != 4:
+        if len(id_parts) < 4:
             raise ValidationError(
                 'Identifier must be in a format: /{owner_type}/{owner_id}/{resourceType}/{resource_id}/, given: '
                 + accession_id)
@@ -89,9 +89,13 @@ class IdentifierSerializer(ReadSerializerMixin, Serializer):
     def convert_ocl_uri_to_fhir_url(uri):
         fhir_uri = uri.replace('sources', CODE_SYSTEM_RESOURCE_TYPE).replace('collections', VALUESET_RESOURCE_TYPE)
         fhir_uri = fhir_uri.strip('/')
-        if len(fhir_uri.split('/')) > 4:
-            fhir_uri = fhir_uri.rsplit('/', 1)[0]
-        return '/' + fhir_uri + '/'
+        parts = fhir_uri.split('/')
+        if len(parts) < 4:
+            raise ValidationError(
+                'Identifier must be in a format: /{owner_type}/{owner_id}/{resourceType}/{resource_id}/, given: '
+                + fhir_uri)
+        fhir_uri = '/' + '/'.join(parts[:4]) + '/'
+        return fhir_uri
 
     @staticmethod
     def include_ocl_identifier(uri, rep):
