@@ -22,7 +22,7 @@ from rest_framework.views import APIView
 from core import __version__
 from core.common.constants import SEARCH_PARAM, LIST_DEFAULT_LIMIT, CSV_DEFAULT_LIMIT, \
     LIMIT_PARAM, NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY, INCLUDE_RETIRED_PARAM, VERBOSE_PARAM, HEAD, LATEST, \
-    BRIEF_PARAM, ES_REQUEST_TIMEOUT, INCLUDE_INACTIVE
+    BRIEF_PARAM, ES_REQUEST_TIMEOUT, INCLUDE_INACTIVE, FHIR_LIMIT_PARAM
 from core.common.exceptions import Http400
 from core.common.mixins import PathWalkerMixin, ListWithHeadersMixin
 from core.common.serializers import RootSerializer
@@ -110,7 +110,8 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         if self.user_is_self and self.request.user.is_anonymous:
             raise Http404()
 
-        self.limit = request.query_params.dict().get(LIMIT_PARAM, LIST_DEFAULT_LIMIT)
+        params = request.query_params.dict()
+        self.limit = params.get(LIMIT_PARAM, None) or params.get(FHIR_LIMIT_PARAM, None) or LIST_DEFAULT_LIMIT
 
     def get_object(self, queryset=None):  # pylint: disable=arguments-differ
         # Determine the base queryset to use.
