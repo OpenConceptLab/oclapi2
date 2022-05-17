@@ -45,7 +45,7 @@ class FhirBundleSerializer(CommonSerializer):
                  'searchset', 'collection'])
     total = IntegerField(required=False)
     entry = BundleEntrySerializer(required=False, many=True)
-    link = BundleLinkSerializer(required=False)
+    link = SerializerMethodField()
     extension = BundleExtensionSerializer(required=False)
 
     @classmethod
@@ -58,6 +58,15 @@ class FhirBundleSerializer(CommonSerializer):
         for resource in resources:
             entry.append({'resource': resource})
         return entry
+
+    def get_link(self, _):
+        paginator = self.context.get('paginator')
+        links = [dict(relation='self', url=paginator.get_current_page_url())]
+        if paginator.has_previous():
+            links.append(dict(relation='prev', url=paginator.get_previous_page_url()))
+        if paginator.has_next():
+            links.append(dict(relation='next', url=paginator.get_next_page_url()))
+        return BundleLinkSerializer(links, many=True).data
 
 
 # TODO: Adjust BundleSerializer to be FHIR compliant based on FhirBundleSerializer and remove FhirBundleSerializer
