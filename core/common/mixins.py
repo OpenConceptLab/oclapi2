@@ -143,6 +143,7 @@ class ListWithHeadersMixin(ListModelMixin):
 
         headers = {}
         results = sorted_list
+        paginator = None
         if not compress:
             if not self.limit or int(self.limit) == 0 or int(self.limit) > 1000:
                 self.limit = LIST_DEFAULT_LIMIT
@@ -161,7 +162,7 @@ class ListWithHeadersMixin(ListModelMixin):
             response['num_found'] = len(sorted_list)
         return response
 
-    def serialize_list(self, results, paginator):
+    def serialize_list(self, results, paginator=None):
         result_dict = self.get_serializer(results, many=True).data
         if self.should_include_facets():
             data = dict(results=result_dict, facets=dict(fields=self.get_facets()))
