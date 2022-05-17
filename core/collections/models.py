@@ -802,11 +802,16 @@ class Expansion(BaseResourceModel):
             concepts = reference.concepts
             if concepts.exists():
                 index_concepts = True
-                self.concepts.set(self.concepts.exclude(id__in=concepts.values_list('id', flat=True)))
+                filters = dict(id__in=list(concepts.values_list('id', flat=True)))
+                self.concepts.set(self.concepts.exclude(**filters))
+                batch_index_resources.apply_async(('concept', filters), queue='indexing')
             mappings = reference.mappings
             if mappings.exists():
                 index_mappings = True
-                self.mappings.set(self.mappings.exclude(id__in=mappings.values_list('id', flat=True)))
+                filters = dict(id__in=list(mappings.values_list('id', flat=True)))
+                self.mappings.set(self.mappings.exclude(**filters))
+                batch_index_resources.apply_async(('mapping', filters), queue='indexing')
+
         if index_concepts:
             self.index_concepts()
         if index_mappings:
