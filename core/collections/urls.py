@@ -139,6 +139,11 @@ urlpatterns = [
         name='concept-version-detail'
     ),
     path(
+        "<str:collection>/<str:version>/expansions/<str:expansion>/concepts/index/",
+        views.ExpansionConceptsIndexView.as_view(),
+        name='expansion-concepts-index'
+    ),
+    path(
         "<str:collection>/<str:version>/expansions/<str:expansion>/concepts/<str:concept>/",
         views.CollectionVersionExpansionConceptRetrieveView.as_view(),
         name='concept-detail'
@@ -147,6 +152,11 @@ urlpatterns = [
         "<str:collection>/<str:version>/expansions/<str:expansion>/mappings/<str:mapping>/<str:mapping_version>/",
         views.CollectionVersionExpansionMappingRetrieveView.as_view(),
         name='mapping-version-detail'
+    ),
+    path(
+        "<str:collection>/<str:version>/expansions/<str:expansion>/mappings/index/",
+        views.ExpansionMappingsIndexView.as_view(),
+        name='expansion-mappings-index'
     ),
     path(
         "<str:collection>/<str:version>/expansions/<str:expansion>/mappings/<str:mapping>/",

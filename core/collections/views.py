@@ -46,9 +46,11 @@ from core.common.permissions import (
     CanViewConceptDictionary, CanEditConceptDictionary, HasAccessToVersionedObject,
     CanViewConceptDictionaryVersion
 )
+from core.common.serializers import TaskSerializer
 from core.common.swagger_parameters import q_param, compress_header, page_param, verbose_param, exact_match_param, \
     include_facets_header, sort_asc_param, sort_desc_param, updated_since_param, include_retired_param, limit_param
-from core.common.tasks import add_references, export_collection, delete_collection
+from core.common.tasks import add_references, export_collection, delete_collection, index_expansion_concepts, \
+    index_expansion_mappings
 from core.common.utils import compact_dict_by_values, parse_boolean_query_param
 from core.common.views import BaseAPIView, BaseLogoView
 from core.concepts.documents import ConceptDocument
@@ -737,6 +739,32 @@ class CollectionVersionExpansionMappingsView(CollectionVersionExpansionChildrenV
 
     def get_queryset(self):
         return super().get_queryset().mappings.filter()
+
+
+class ExpansionResourcesIndexView(CollectionVersionExpansionBaseView):
+    serializer_class = TaskSerializer
+    permission_classes = (IsAdminUser, )
+    resource = None
+
+    def post(self, request, *args, **kwargs):  # pylint: disable=unused-argument
+        expansion = self.get_object()
+        if self.resource == 'concepts':
+            result = index_expansion_concepts.delay(expansion.id)
+        else:
+            result = index_expansion_mappings.delay(expansion.id)
+
+        return Response(
+            dict(state=result.state, username=self.request.user.username, task=result.task_id, queue='default'),
+            status=status.HTTP_202_ACCEPTED
+        )
+
+
+class ExpansionConceptsIndexView(ExpansionResourcesIndexView):
+    resource = 'concepts'
+
+
+class ExpansionMappingsIndexView(ExpansionResourcesIndexView):
+    resource = 'mappings'
 
 
 class CollectionVersionConceptsView(CollectionBaseView, ListWithHeadersMixin):

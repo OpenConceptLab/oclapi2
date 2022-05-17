@@ -7,14 +7,14 @@ from core.collections.models import ExpansionParameters
 from core.collections.parsers import CollectionReferenceExpressionStringParser, \
     CollectionReferenceSourceAllExpressionParser, CollectionReferenceOldStyleToExpandedStructureParser, \
     CollectionReferenceParser
-from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
+from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory, UserCollectionFactory
 from core.collections.utils import is_mapping, is_concept, is_version_specified, \
     get_concept_by_expression
 from core.common.constants import CUSTOM_VALIDATION_SCHEMA_OPENMRS
 from core.common.tasks import add_references, seed_children_to_new_version
 from core.common.tasks import update_collection_active_concepts_count
 from core.common.tasks import update_collection_active_mappings_count
-from core.common.tests import OCLTestCase
+from core.common.tests import OCLTestCase, OCLAPITestCase
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory, LocalizedTextFactory
@@ -22,6 +22,7 @@ from core.mappings.documents import MappingDocument
 from core.mappings.tests.factories import MappingFactory
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.tests.factories import OrganizationSourceFactory
+from core.users.models import UserProfile
 
 
 class CollectionTest(OCLTestCase):
@@ -2604,3 +2605,47 @@ class CollectionReferenceParserTest(OCLTestCase):
         self.assertEqual(reference.code, "93")
         self.assertEqual(reference.reference_type, "mappings")
         self.assertIsNone(reference.version)
+
+
+class ExpansionConceptsIndexViewTest(OCLAPITestCase):
+    @patch('core.collections.views.index_expansion_concepts')
+    def test_post_200(self, index_expansion_concepts_task_mock):
+        index_expansion_concepts_task_mock.delay = Mock(return_value=Mock(state='PENDING', task_id='task-id-123'))
+        admin = UserProfile.objects.get(username='ocladmin')
+        collection = UserCollectionFactory(user=admin, created_by=admin, updated_by=admin)
+        expansion = ExpansionFactory(collection_version=collection, created_by=admin)
+        collection.expansion_uri = expansion.uri
+        collection.save()
+
+        response = self.client.post(
+            f"{expansion.uri}concepts/index/",
+            {},
+            HTTP_AUTHORIZATION=f"Token {admin.get_token()}",
+        )
+
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(
+            response.data, {'state': 'PENDING', 'username': 'ocladmin', 'task': 'task-id-123', 'queue': 'default'})
+        index_expansion_concepts_task_mock.delay.assert_called_once_with(expansion.id)
+
+
+class ExpansionMappingsIndexViewTest(OCLAPITestCase):
+    @patch('core.collections.views.index_expansion_mappings')
+    def test_post_200(self, index_expansion_mappings_task_mock):
+        index_expansion_mappings_task_mock.delay = Mock(return_value=Mock(state='PENDING', task_id='task-id-123'))
+        admin = UserProfile.objects.get(username='ocladmin')
+        collection = UserCollectionFactory(user=admin, created_by=admin, updated_by=admin)
+        expansion = ExpansionFactory(collection_version=collection, created_by=admin)
+        collection.expansion_uri = expansion.uri
+        collection.save()
+
+        response = self.client.post(
+            f"{expansion.uri}mappings/index/",
+            {},
+            HTTP_AUTHORIZATION=f"Token {admin.get_token()}",
+        )
+
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(
+            response.data, {'state': 'PENDING', 'username': 'ocladmin', 'task': 'task-id-123', 'queue': 'default'})
+        index_expansion_mappings_task_mock.delay.assert_called_once_with(expansion.id)
