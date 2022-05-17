@@ -1,5 +1,5 @@
 import logging
-
+from request_logging.middleware import LoggingMiddleware
 from core.common.constants import VERSION_HEADER, REQUEST_USER_HEADER
 from core.common.utils import set_current_user, set_request_url
 
@@ -10,6 +10,13 @@ MAX_BODY_LENGTH = 50000
 class BaseMiddleware:
     def __init__(self, get_response):
         self.get_response = get_response
+
+
+class CustomLoggerMiddleware(LoggingMiddleware):
+    def __call__(self, request):
+        if request.META.get('HTTP_USER_AGENT', '').startswith('ELB-HealthChecker'):
+            return self.get_response(request)
+        return super().__call__(request)
 
 
 class FixMalformedLimitParamMiddleware(BaseMiddleware):
