@@ -36,7 +36,7 @@ class BundleEntrySerializer(CommonSerializer):
     resource = JSONField()
 
 
-class FhirBundleSerializer(CommonSerializer):
+class FHIRBundleSerializer(CommonSerializer):
     # See https://www.hl7.org/fhir/bundle.html#tabs-json for all possible fields
     resourceType = SerializerMethodField(method_name='get_resource_type')
     meta = BundleMetaSerializer(read_only=True, required=False)
