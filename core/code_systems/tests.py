@@ -14,7 +14,8 @@ class SourceTest(OCLTestCase):
         super().setUp()
         self.org = OrganizationFactory()
 
-        self.org_source = OrganizationSourceFactory(organization=self.org, canonical_url='/some/url')
+        self.org_source = OrganizationSourceFactory(organization=self.org, canonical_url='/some/url',
+                                                    full_name='source name')
         self.org_source_v1 = OrganizationSourceFactory.build(
             version='v1', mnemonic=self.org_source.mnemonic, organization=self.org_source.parent)
         Source.persist_new_version(self.org_source_v1, self.org_source.created_by)
@@ -67,6 +68,17 @@ class SourceTest(OCLTestCase):
 
     def test_public_can_list(self):
         response = self.client.get('/fhir/CodeSystem/')
+
+        self.assertEqual(len(response.data['entry']), 1)
+        resource = response.data['entry'][0]['resource']
+        self.assertEqual(
+            resource['identifier'][0]['value'],
+            '/orgs/' + self.org.mnemonic + '/CodeSystem/' + self.org_source.mnemonic + '/'
+        )
+        self.assertEqual(resource['version'], 'v2')
+
+    def test_find_by_title(self):
+        response = self.client.get('/fhir/CodeSystem/?title=source name')
 
         self.assertEqual(len(response.data['entry']), 1)
         resource = response.data['entry'][0]['resource']

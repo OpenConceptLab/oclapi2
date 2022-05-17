@@ -5,6 +5,7 @@ from django.db.models import F
 from core.bundles.serializers import FHIRBundleSerializer
 from core.code_systems.serializers import CodeSystemDetailSerializer
 from core.common.constants import HEAD
+from core.common.fhir_helpers import translate_fhir_query
 from core.concepts.views import ConceptRetrieveUpdateDestroyView
 from core.parameters.serializers import ParametersSerializer
 from core.sources.models import Source
@@ -29,32 +30,7 @@ class CodeSystemListView(SourceListView):
 
     def apply_query_filters(self, queryset):
         query_fields = list(self.serializer_class.Meta.fields)
-
-        url = self.request.query_params.get('url')
-        if url:
-            queryset = queryset.filter(canonical_url=url)
-            query_fields.remove('url')
-
-        language = self.request.query_params.get('language')
-        if language:
-            queryset = queryset.filter(locale=language)
-            query_fields.remove('language')
-        status = self.request.query_params.get('status')
-        if status:
-            query_fields.remove('status')
-            if status == 'retired':
-                queryset = queryset.filter(retired=True)
-            elif status == 'active':
-                queryset = queryset.filter(released=True)
-            elif status == 'draft':
-                queryset = queryset.filter(released=False)
-
-        for query_field in query_fields:
-            query_value = self.request.query_params.get(query_field)
-            if query_value:
-                kwargs = {query_field: query_value}
-                queryset = queryset.filter(**kwargs)
-
+        queryset = translate_fhir_query(query_fields, self.request.query_params, queryset)
         return queryset
 
     def apply_filters(self, queryset):
