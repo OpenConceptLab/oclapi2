@@ -469,6 +469,7 @@ class CollectionReferencesViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 400)
 
+    @patch('core.collections.models.batch_index_resources', Mock(apply_async=Mock()))
     def test_delete_204_random(self):
         response = self.client.delete(
             self.collection.uri + 'references/',
@@ -481,6 +482,7 @@ class CollectionReferencesViewTest(OCLAPITestCase):
         self.assertEqual(self.collection.references.count(), 1)
         self.assertEqual(self.collection.expansion.concepts.count(), 1)
 
+    @patch('core.collections.models.batch_index_resources', Mock(apply_async=Mock()))
     def test_delete_204_all_expressions(self):
         response = self.client.delete(
             self.collection.uri + 'references/',
@@ -493,6 +495,7 @@ class CollectionReferencesViewTest(OCLAPITestCase):
         self.assertEqual(self.collection.references.count(), 0)
         self.assertEqual(self.collection.expansion.concepts.count(), 0)
 
+    @patch('core.collections.models.batch_index_resources', Mock(apply_async=Mock()))
     def test_delete_204_bulk_reference_ids(self):
         response = self.client.delete(
             self.collection.uri + 'references/',
@@ -505,6 +508,7 @@ class CollectionReferencesViewTest(OCLAPITestCase):
         self.assertEqual(self.collection.references.count(), 0)
         self.assertEqual(self.collection.expansion.concepts.count(), 0)
 
+    @patch('core.collections.models.batch_index_resources', Mock(apply_async=Mock()))
     def test_delete_204_specific_expression(self):
         response = self.client.delete(
             self.collection.uri + 'references/',
