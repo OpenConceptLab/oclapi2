@@ -2,7 +2,7 @@ import logging
 
 from django.db.models import F
 
-from core.bundles.serializers import FhirBundleSerializer
+from core.bundles.serializers import FHIRBundleSerializer
 from core.code_systems.serializers import CodeSystemDetailSerializer
 from core.common.constants import HEAD
 from core.concepts.views import ConceptRetrieveUpdateDestroyView
@@ -17,9 +17,11 @@ class CodeSystemListView(SourceListView):
     serializer_class = CodeSystemDetailSerializer
 
     @staticmethod
-    def bundle_response(data):
-        bundle = FhirBundleSerializer(
-            {'meta': {}, 'type': 'searchset', 'entry': FhirBundleSerializer.convert_to_entry(data)})
+    def bundle_response(data, paginator):
+        bundle = FHIRBundleSerializer(
+            {'meta': {}, 'type': 'searchset', 'entry': FHIRBundleSerializer.convert_to_entry(data)},
+            context=dict(paginator=paginator)
+        )
         return bundle.data
 
     def get_filter_params(self, default_version_to_head=True):

@@ -68,6 +68,11 @@ class CustomPaginator:
         query_params['page'] = str(self.current_page_number + 1)
         return self.__get_full_url() + '?' + query_params.urlencode()
 
+    def get_current_page_url(self):
+        query_params = self.__get_query_params()
+        query_params['page'] = str(self.current_page_number)
+        return self.__get_full_url() + '?' + query_params.urlencode()
+
     def get_previous_page_url(self):
         query_params = self.__get_query_params()
         query_params['page'] = str(self.current_page_number - 1)
@@ -138,6 +143,7 @@ class ListWithHeadersMixin(ListModelMixin):
 
         headers = {}
         results = sorted_list
+        paginator = None
         if not compress:
             if not self.limit or int(self.limit) == 0 or int(self.limit) > 1000:
                 self.limit = LIST_DEFAULT_LIMIT
@@ -147,8 +153,7 @@ class ListWithHeadersMixin(ListModelMixin):
             )
             headers = paginator.headers
             results = paginator.current_page_results
-
-        data = self.serialize_list(results)
+        data = self.serialize_list(results, paginator)
 
         response = Response(data)
         for key, value in headers.items():
@@ -157,12 +162,12 @@ class ListWithHeadersMixin(ListModelMixin):
             response['num_found'] = len(sorted_list)
         return response
 
-    def serialize_list(self, results):
+    def serialize_list(self, results, paginator=None):
         result_dict = self.get_serializer(results, many=True).data
         if self.should_include_facets():
             data = dict(results=result_dict, facets=dict(fields=self.get_facets()))
         elif hasattr(self.__class__, 'bundle_response'):
-            data = self.bundle_response(result_dict)
+            data = self.bundle_response(result_dict, paginator)
         else:
             data = result_dict
         return data
