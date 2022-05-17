@@ -100,7 +100,9 @@ class CollectionTest(OCLTestCase):
         self.assertEqual(collection.expansion.concepts.count(), 2)
         self.assertEqual(collection.references.count(), 2)
 
-    def test_delete_references(self):
+    @patch('core.collections.models.batch_index_resources')
+    def test_delete_references(self, batch_index_resources_mock):
+        batch_index_resources_mock.apply_async = Mock()
         collection = OrganizationCollectionFactory()
         expansion = ExpansionFactory(collection_version=collection)
         collection.expansion_uri = expansion.uri
@@ -123,6 +125,7 @@ class CollectionTest(OCLTestCase):
         self.assertEqual(collection.references.count(), 1)
         self.assertEqual(collection.expansion.concepts.first().uri, concept1.uri)
         self.assertEqual(collection.references.first().expression, concept1.uri)
+        batch_index_resources_mock.apply_async.assert_called()
 
     def test_seed_references(self):
         collection1 = OrganizationCollectionFactory()
