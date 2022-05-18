@@ -548,7 +548,10 @@ class CollectionReference(models.Model):
                 # iterating on queryset because ES has max_clause limit default to 1024
                 search_within_queryset = es_id_in(search, list(_queryset.values_list('id', flat=True)))
                 pks += es_to_pks(search_within_queryset.params(request_timeout=ES_REQUEST_TIMEOUT_ASYNC))
-            return resource_klass.objects.filter(id__in=set(pks)) if pks else resource_klass.objects.none()
+            if pks:
+                return resource_klass.objects.filter(
+                    id__in=resource_klass.objects.filter(id__in=set(pks)).values_list('versioned_object_id', flat=True))
+            return resource_klass.objects.none()
 
         return queryset
 
