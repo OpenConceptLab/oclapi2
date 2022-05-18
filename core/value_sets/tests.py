@@ -146,7 +146,7 @@ class ValueSetTest(OCLAPITestCase):
         self.assertEqual(len(resource['compose']['include'][0]['concept']), 1)
 
     def test_create_with_filter_and_system(self):
-        ConceptDocument().update(self.org_source_v2.concepts.all())
+        ConceptDocument().update(self.org_source_v2.head.concepts_set.all())
 
         response = self.client.post(
             f'/users/{self.user.username}/ValueSet/',
@@ -186,7 +186,7 @@ class ValueSetTest(OCLAPITestCase):
         self.assertEqual(len(resource['compose']['include'][0]['concept']), 1)
 
     def test_create_with_filter_and_concept(self):
-        ConceptDocument().update(self.org_source_v2.concepts.all())
+        ConceptDocument().update(self.org_source_v2.head.concepts_set.all())
 
         response = self.client.post(
             f'/users/{self.user.mnemonic}/ValueSet/',

@@ -454,7 +454,6 @@ class CollectionReference(models.Model):
 
         if self.should_apply_filter():
             queryset = self.apply_filters(queryset, Concept)
-
         if self.should_transform_to_latest_version():
             queryset = self.transform_to_latest_version(queryset, Concept)
             if self.code:
@@ -543,14 +542,16 @@ class CollectionReference(models.Model):
                         search = es_wildcard_search(search, val, exact_search_fields, name_attr)
                 else:
                     search = search.filter("match", **{to_snake_case(filter_def["property"]): filter_def["value"]})
-
             for _queryset in batch_qs(queryset.order_by('id'), 500):
                 # iterating on queryset because ES has max_clause limit default to 1024
                 search_within_queryset = es_id_in(search, list(_queryset.values_list('id', flat=True)))
                 pks += es_to_pks(search_within_queryset.params(request_timeout=ES_REQUEST_TIMEOUT_ASYNC))
             if pks:
+                resource_versions = resource_klass.objects.filter(id__in=set(pks))
+                if self.version or self.valueset or self.transform:
+                    return resource_versions
                 return resource_klass.objects.filter(
-                    id__in=resource_klass.objects.filter(id__in=set(pks)).values_list('versioned_object_id', flat=True))
+                    id__in=resource_versions.values_list('versioned_object_id', flat=True))
             return resource_klass.objects.none()
 
         return queryset
