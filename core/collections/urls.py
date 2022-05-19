@@ -98,6 +98,16 @@ urlpatterns = [
         name='collection-reference'
     ),
     re_path(
+        r'^(?P<collection>{pattern})/references/(?P<reference>{pattern})/concepts/$'.format(pattern=NAMESPACE_PATTERN),
+        views.CollectionReferenceConceptsView.as_view(),
+        name='collection-reference-concepts-list'
+    ),
+    re_path(
+        r'^(?P<collection>{pattern})/references/(?P<reference>{pattern})/mappings/$'.format(pattern=NAMESPACE_PATTERN),
+        views.CollectionReferenceMappingsView.as_view(),
+        name='collection-reference-mappings-list'
+    ),
+    re_path(
         fr"^(?P<collection>{NAMESPACE_PATTERN})/extras/$",
         views.CollectionExtrasView.as_view(),
         name='collection-extras'
@@ -245,6 +255,18 @@ urlpatterns = [
             pattern=NAMESPACE_PATTERN),
         views.CollectionReferenceView.as_view(),
         name='collectionversion-reference'
+    ),
+    re_path(
+        r'^(?P<collection>{pattern})/(?P<version>{pattern})/references/(?P<reference>{pattern})/concepts/$'.format(
+            pattern=NAMESPACE_PATTERN),
+        views.CollectionReferenceConceptsView.as_view(),
+        name='collectionversion-reference-concepts-list'
+    ),
+    re_path(
+        r'^(?P<collection>{pattern})/(?P<version>{pattern})/references/(?P<reference>{pattern})/mappings/$'.format(
+            pattern=NAMESPACE_PATTERN),
+        views.CollectionReferenceMappingsView.as_view(),
+        name='collectionversion-reference-mappings-list'
     ),
     re_path(
         r'^(?P<collection>{pattern})/(?P<version>{pattern})/references/$'.format(pattern=NAMESPACE_PATTERN),

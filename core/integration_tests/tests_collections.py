@@ -2064,6 +2064,87 @@ class CollectionReferenceViewTest(OCLAPITestCase):
         self.assertEqual(collection_v1.references.count(), 1)
 
 
+class CollectionReferenceConceptsViewTest(OCLAPITestCase):
+    def test_get(self):
+        response = self.client.get(
+            '/orgs/foo/collections/bar/references/123/concepts/',
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+        org = OrganizationFactory()
+        collection = OrganizationCollectionFactory(organization=org)
+        source = OrganizationSourceFactory(organization=org)
+        concept1 = ConceptFactory(parent=source)
+        concept2 = ConceptFactory(parent=source)
+
+        response = self.client.get(
+            collection.uri + 'references/123/concepts/',
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+        reference = CollectionReference(collection=collection, expression=source.uri + 'concepts/')
+        reference.save()
+        reference.concepts.set([concept1, concept2])
+
+        response = self.client.get(
+            reference.uri + 'concepts/',
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 2)
+        self.assertEqual(sorted([data['url'] for data in response.data]), sorted([concept1.uri, concept2.uri]))
+
+
+class CollectionReferenceMappingsViewTest(OCLAPITestCase):
+    def test_get(self):
+        response = self.client.get(
+            '/orgs/foo/collections/bar/references/123/mappings/',
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+        org = OrganizationFactory()
+        collection = OrganizationCollectionFactory(organization=org)
+        source = OrganizationSourceFactory(organization=org)
+        mapping1 = MappingFactory(parent=source)
+        mapping2 = MappingFactory(parent=source)
+
+        response = self.client.get(
+            collection.uri + 'references/123/mappings/',
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+        reference = CollectionReference(collection=collection, expression=source.uri + 'mappings/')
+        reference.save()
+        reference.mappings.set([mapping1, mapping2])
+
+        response = self.client.get(
+            reference.uri + 'mappings/',
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 2)
+        self.assertEqual(sorted([data['url'] for data in response.data]), sorted([mapping1.uri, mapping2.uri]))
+
+        response = self.client.get(
+            f"{collection.uri}HEAD/references/{reference.id}/mappings/",
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 2)
+        self.assertEqual(sorted([data['url'] for data in response.data]), sorted([mapping1.uri, mapping2.uri]))
+
+
 class CollectionVersionExpansionViewTest(OCLAPITestCase):
     def setUp(self):
         super().setUp()

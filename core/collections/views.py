@@ -308,6 +308,56 @@ class CollectionReferenceView(CollectionBaseView, RetrieveAPIView, DestroyAPIVie
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
+class CollectionReferenceAbstractResourcesView(CollectionBaseView, ListWithHeadersMixin):
+    def get_queryset(self):
+        collection = super().get_queryset().filter(is_active=True).order_by('-created_at').first()
+
+        if not collection:
+            raise Http404()
+
+        if self.request.method == 'DELETE' and not collection.is_head:
+            raise Http405()
+
+        self.check_object_permissions(self.request, collection)
+
+        reference = CollectionReference.objects.filter(id=self.kwargs.get('reference')).first()
+        if not reference:
+            raise Http404()
+
+        return reference
+
+    def get(self, request, *args, **kwargs):
+        return self.list(request, *args, **kwargs)
+
+
+class CollectionReferenceConceptsView(CollectionReferenceAbstractResourcesView):
+    is_searchable = True
+    document_model = ConceptDocument
+    es_fields = Concept.es_fields
+    facet_class = ConceptSearch
+
+    def get_serializer_class(self):
+        from core.concepts.serializers import ConceptVersionDetailSerializer, ConceptVersionListSerializer
+        return ConceptVersionDetailSerializer if self.is_verbose() else ConceptVersionListSerializer
+
+    def get_queryset(self):
+        return super().get_queryset().concepts
+
+
+class CollectionReferenceMappingsView(CollectionReferenceAbstractResourcesView):
+    is_searchable = True
+    document_model = MappingDocument
+    es_fields = Mapping.es_fields
+    facet_class = MappingSearch
+
+    def get_serializer_class(self):
+        from core.mappings.serializers import MappingVersionDetailSerializer, MappingVersionListSerializer
+        return MappingVersionDetailSerializer if self.is_verbose() else MappingVersionListSerializer
+
+    def get_queryset(self):
+        return super().get_queryset().mappings
+
+
 class CollectionReferencesView(
         CollectionBaseView, ConceptDictionaryUpdateMixin, RetrieveAPIView, DestroyAPIView, ListWithHeadersMixin
 ):
