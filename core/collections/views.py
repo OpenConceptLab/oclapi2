@@ -315,9 +315,6 @@ class CollectionReferenceAbstractResourcesView(CollectionBaseView, ListWithHeade
         if not collection:
             raise Http404()
 
-        if self.request.method == 'DELETE' and not collection.is_head:
-            raise Http405()
-
         self.check_object_permissions(self.request, collection)
 
         reference = CollectionReference.objects.filter(id=self.kwargs.get('reference')).first()
