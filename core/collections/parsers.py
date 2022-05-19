@@ -169,7 +169,7 @@ class CollectionReferenceExpandedStructureParser(CollectionReferenceAbstractPars
                 )
         if not concept and not mapping:
             self.references.append(dict(
-                expression=None,
+                expression=get(expression, 'expression', None),
                 namespace=get(expression, 'namespace'),
                 system=get(expression, 'system') or get(expression, 'url'),
                 version=get(expression, 'version'),

@@ -423,8 +423,9 @@ class CollectionReferencesView(
     def update(self, request, *args, **kwargs):  # pylint: disable=too-many-locals,unused-argument # Fixme: Sny
         collection = self.get_object()
         data = request.data.get('data')
-        concept_expressions = data.get('concepts', [])
-        mapping_expressions = data.get('mappings', [])
+        is_dict = isinstance(data, dict)
+        concept_expressions = data.get('concepts', []) if is_dict else []
+        mapping_expressions = data.get('mappings', []) if is_dict else []
         cascade = self.request.query_params.get('cascade', '').lower()
         transform = self.request.query_params.get('transformReferences', '').lower()
 
