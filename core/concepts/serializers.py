@@ -316,7 +316,7 @@ class ConceptSummarySerializer(ModelSerializer):
 
 
 class ConceptMinimalSerializer(ConceptAbstractSerializer):
-    id = CharField(source='mnemonic', read_only=True)
+    id = EncodedDecodedCharField(source='mnemonic', read_only=True)
     type = CharField(source='resource_type', read_only=True)
     url = CharField(source='uri', read_only=True)
 
@@ -326,8 +326,8 @@ class ConceptMinimalSerializer(ConceptAbstractSerializer):
 
 
 class ConceptMinimalSerializerRecursive(ConceptAbstractSerializer):
-    name = CharField(source='mnemonic', read_only=True)
-    id = CharField(source='mnemonic', read_only=True)
+    name = EncodedDecodedCharField(source='mnemonic', read_only=True)
+    id = EncodedDecodedCharField(source='mnemonic', read_only=True)
     type = CharField(source='resource_type', read_only=True)
     url = CharField(source='uri', read_only=True)
     entries = SerializerMethodField()
