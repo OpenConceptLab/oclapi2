@@ -866,7 +866,8 @@ class CollectionVersionConceptRetrieveView(CollectionBaseView, RetrieveAPIView):
         return concepts.first()
 
     def get_serializer_class(self):
-        return Concept.get_serializer_class(verbose=self.is_verbose(), version=True, brief=self.is_brief())
+        from core.concepts.serializers import ConceptVersionDetailSerializer
+        return ConceptVersionDetailSerializer
 
 
 class CollectionVersionExpansionConceptRetrieveView(CollectionBaseView, RetrieveAPIView):
@@ -893,7 +894,8 @@ class CollectionVersionExpansionConceptRetrieveView(CollectionBaseView, Retrieve
         return concepts.first()
 
     def get_serializer_class(self):
-        return Concept.get_serializer_class(verbose=self.is_verbose(), version=True, brief=self.is_brief())
+        from core.concepts.serializers import ConceptVersionDetailSerializer
+        return ConceptVersionDetailSerializer
 
 
 class CollectionVersionConceptMappingsView(CollectionBaseView, ListWithHeadersMixin):
@@ -1028,7 +1030,8 @@ class CollectionVersionMappingRetrieveView(CollectionBaseView, RetrieveAPIView):
         return mappings.first()
 
     def get_serializer_class(self):
-        return Mapping.get_serializer_class(verbose=self.is_verbose(), version=True, brief=self.is_brief())
+        from core.mappings.serializers import MappingVersionDetailSerializer
+        return MappingVersionDetailSerializer
 
 
 class CollectionVersionExpansionMappingRetrieveView(CollectionBaseView, RetrieveAPIView):
@@ -1055,7 +1058,8 @@ class CollectionVersionExpansionMappingRetrieveView(CollectionBaseView, Retrieve
         return mappings.first()
 
     def get_serializer_class(self):
-        return Mapping.get_serializer_class(verbose=self.is_verbose(), version=True, brief=self.is_brief())
+        from core.mappings.serializers import MappingVersionDetailSerializer
+        return MappingVersionDetailSerializer
 
 
 class CollectionExtrasBaseView(CollectionBaseView):
