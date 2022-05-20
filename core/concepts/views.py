@@ -134,9 +134,6 @@ class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
             queryset = super().get_queryset()
         if is_latest_version:
             queryset = queryset.filter(id=F('versioned_object_id'))
-        elif 'version' in self.kwargs:
-            queryset = queryset.order_by('versioned_object_id').distinct('versioned_object_id')
-            queryset = Concept.objects.filter(id__in=queryset.values_list('id', flat=True))
 
         if 'source' in self.kwargs and self.request.query_params.get('onlyParentLess', False) in ['true', True]:
             queryset = queryset.filter(parent_concepts__isnull=True)
