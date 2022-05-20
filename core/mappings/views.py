@@ -67,6 +67,9 @@ class MappingListView(MappingBaseView, ListWithHeadersMixin, CreateModelMixin):
             queryset = super().get_queryset()
         if is_latest_version:
             queryset = queryset.filter(id=F('versioned_object_id'))
+        elif 'version' in self.kwargs:
+            queryset = queryset.order_by('versioned_object_id').distinct('versioned_object_id')
+            queryset = Mapping.objects.filter(id__in=queryset.values_list('id', flat=True))
 
         user = self.request.user
 
