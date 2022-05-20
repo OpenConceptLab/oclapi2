@@ -509,8 +509,8 @@ class CollectionReference(models.Model):
         cascade_params = {
             'source_mappings': method.lower() == SOURCE_MAPPINGS,
             'source_to_concepts': method.lower() == SOURCE_TO_CONCEPTS,
-            'cascade_levels': 1 if self.cascade == method else get(self.cascade, 'level', '*'),
-            'source_version': HEAD
+            'cascade_levels': 1 if self.cascade == method else get(self.cascade, 'cascade_levels', '*'),
+            'source_version': self.version or HEAD
         }
         if isinstance(self.cascade, dict):
             cascade_params = {**cascade_params, **self.cascade}
