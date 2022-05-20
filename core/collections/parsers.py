@@ -25,10 +25,10 @@ class CollectionReferenceAbstractParser:
     @staticmethod
     def get_include_value(expression):
         include = True
-        if get(expression, 'exclude') and expression['exclude']:
-            include = False
-        if get(expression, 'include'):
-            include = bool(expression['include'])
+        if 'exclude' in expression:
+            include = not expression['exclude']
+        if 'include' in expression:
+            include = expression['include']
         return include
 
     @staticmethod
