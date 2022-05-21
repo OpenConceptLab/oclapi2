@@ -4,7 +4,7 @@ from django.conf import settings
 from django.contrib.postgres.fields import ArrayField
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
-from django.db.models import UniqueConstraint, F, QuerySet
+from django.db.models import UniqueConstraint, F, QuerySet, Q
 from django.utils import timezone
 from django.utils.functional import cached_property
 from pydash import get, compact
@@ -501,19 +501,26 @@ class CollectionReference(models.Model):
         return not self.code and self.filter
 
     def get_concept_cascade_params(self):
-        if isinstance(self.cascade, dict) and self.cascade and 'method' in self.cascade:
-            method = self.cascade.pop('method', '')
-        else:
-            method = self.cascade or ''
-
+        is_dict = isinstance(self.cascade, dict)
+        method = get(self.cascade, 'method') if is_dict and 'method' in self.cascade else self.cascade or ''
         cascade_params = {
+            'source_version': get(self.cascade, 'source_version') or self.version or HEAD,
             'source_mappings': method.lower() == SOURCE_MAPPINGS,
             'source_to_concepts': method.lower() == SOURCE_TO_CONCEPTS,
             'cascade_levels': 1 if self.cascade == method else get(self.cascade, 'cascade_levels', '*'),
-            'source_version': self.version or HEAD
         }
-        if isinstance(self.cascade, dict):
-            cascade_params = {**cascade_params, **self.cascade}
+        if is_dict:
+            for attr in ['cascade_mappings', 'cascade_hierarchy', 'include_mappings', 'reverse', 'max_results']:
+                if attr in self.cascade:
+                    cascade_params[attr] = get(self.cascade, attr)
+            map_types = get(self.cascade, 'map_types', None)
+            exclude_map_types = get(self.cascade, 'exclude_map_types', None)
+            mappings_criteria = Q()
+            if map_types:
+                mappings_criteria &= Q(map_type__in=compact(map_types.split(',')))
+            if exclude_map_types:
+                mappings_criteria &= ~Q(map_type__in=compact(exclude_map_types.split(',')))
+            cascade_params['mappings_criteria'] = mappings_criteria
         return cascade_params
 
     def __is_exact_search_filter(self):
