@@ -841,7 +841,7 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
                 prev_line = line
 
     @staticmethod
-    def chunker_list(seq, size, is_child):
+    def chunker_list(seq, size, is_child):  # pylint: disable=too-many-locals
         """
             1. returns n number of sequential chunks from l.
             2. makes sure concept versions are grouped in single list
@@ -859,7 +859,7 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
             si = (quotient+1)*(i if i < remainder else remainder) + quotient*(0 if i < remainder else i - remainder)
             current = list(sorted_seq[si:si + (quotient + 1 if i < remainder else quotient)])
             if not is_source_child or not get(result, '-1', None):
-                if len(current):
+                if current:
                     result.append(current)
                 continue
             prev = get(result, '-1', None)
@@ -875,7 +875,7 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
                         break
             if shift:
                 current = current[shift:]
-            if len(current):
+            if current:
                 result.append(current)
         return result
 
