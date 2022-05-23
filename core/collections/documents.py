@@ -62,6 +62,10 @@ class CollectionDocument(Document):
 
         if instance.identifier:
             value = jsonify_safe(instance.identifier)
+            if isinstance(value, dict):
+                value = flatten_dict(value)
+            if isinstance(value, str):
+                value = dict(value=value)
 
         return value or {}
 
