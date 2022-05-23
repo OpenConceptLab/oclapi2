@@ -841,8 +841,43 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
                 prev_line = line
 
     @staticmethod
-    def chunker_list(seq, size):
-        return (seq[i::size] for i in range(size))
+    def chunker_list(seq, size, is_child):
+        """
+            1. returns n number of sequential chunks from l.
+            2. makes sure concept versions are grouped in single list
+        """
+        sorted_seq = seq
+        is_source_child = False
+        if is_child:
+            part_type = get(seq, '0.type', '').lower()
+            is_source_child = part_type in ['concept']
+            if is_source_child:
+                sorted_seq = sorted(seq, key=lambda x: x['id'])
+        quotient, remainder = divmod(len(sorted_seq), size)
+        result = []
+        for i in range(size):
+            si = (quotient+1)*(i if i < remainder else remainder) + quotient*(0 if i < remainder else i - remainder)
+            current = list(sorted_seq[si:si + (quotient + 1 if i < remainder else quotient)])
+            if not is_source_child or not get(result, '-1', None):
+                if len(current):
+                    result.append(current)
+                continue
+            prev = get(result, '-1', None)
+            prev_last_id = get(prev, '-1.id', '').lower()
+            current_first_id = get(current, '0.id', '').lower()
+            shift = 0
+            if prev_last_id == current_first_id:
+                for resource in current:
+                    if resource['id'].lower() == prev_last_id:
+                        shift += 1
+                        result[-1].append(resource)
+                    else:
+                        break
+            if shift:
+                current = current[shift:]
+            if len(current):
+                result.append(current)
+        return result
 
     def is_any_process_alive(self):
         if not self.groups:
@@ -978,7 +1013,7 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
         )
 
     def queue_tasks(self, part_list, is_child):
-        chunked_lists = compact(self.chunker_list(part_list, self.parallel) if is_child else [part_list])
+        chunked_lists = compact(self.chunker_list(part_list, self.parallel, is_child))
         jobs = group(bulk_import_parts_inline.s(_list, self.username, self.update_if_exists) for _list in chunked_lists)
         group_result = jobs.apply_async(queue='concurrent')
         self.groups.append(group_result)

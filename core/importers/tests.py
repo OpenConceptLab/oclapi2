@@ -470,7 +470,6 @@ class BulkImportInlineTest(OCLTestCase):
         ).process()
         importer = BulkImportInline(data, 'ocladmin', True)
         importer.run()
-
         self.assertEqual(importer.processed, 31)
         self.assertEqual(len(importer.created), 21)
         self.assertEqual(len(importer.updated), 0)
@@ -623,13 +622,93 @@ class BulkImportParallelRunnerTest(OCLTestCase):
 
     def test_chunker_list(self):
         self.assertEqual(
-            list(BulkImportParallelRunner.chunker_list([1, 2, 3], 3)), [[1], [2], [3]]
+            list(BulkImportParallelRunner.chunker_list([1, 2, 3], 3, False)), [[1], [2], [3]]
         )
         self.assertEqual(
-            list(BulkImportParallelRunner.chunker_list([1, 2, 3], 2)), [[1, 3], [2]]
+            list(BulkImportParallelRunner.chunker_list([1, 2, 3], 2, False)), [[1, 2], [3]]
         )
         self.assertEqual(
-            list(BulkImportParallelRunner.chunker_list([1, 2, 3], 1)), [[1, 2, 3]]
+            list(BulkImportParallelRunner.chunker_list([1, 2, 3], 1, False)), [[1, 2, 3]]
+        )
+
+        concepts = [
+            {"type": "Concept", "id": "A", "update_comment": "A.1"},
+            {"type": "Concept", "id": "B", "update_comment": "B.1"},
+            {"type": "Concept", "id": "A", "update_comment": "A.2"},
+            {"type": "Concept", "id": "C", "update_comment": "C.1"},
+            {"type": "Concept", "id": "B", "update_comment": "B.2"},
+            {"type": "Concept", "id": "B", "update_comment": "B.3"},
+            {"type": "Concept", "id": "A", "update_comment": "A.3"}
+        ]
+
+        self.assertEqual(
+            list(BulkImportParallelRunner.chunker_list(concepts, 1, True)),
+            [
+                [
+                    {"type": "Concept", "id": "A", "update_comment": "A.1"},
+                    {"type": "Concept", "id": "A", "update_comment": "A.2"},
+                    {"type": "Concept", "id": "A", "update_comment": "A.3"},
+                    {"type": "Concept", "id": "B", "update_comment": "B.1"},
+                    {"type": "Concept", "id": "B", "update_comment": "B.2"},
+                    {"type": "Concept", "id": "B", "update_comment": "B.3"},
+                    {"type": "Concept", "id": "C", "update_comment": "C.1"},
+                ],
+            ]
+        )
+
+        self.assertEqual(
+            list(BulkImportParallelRunner.chunker_list(concepts, 2, True)),
+            [
+                [
+                    {"type": "Concept", "id": "A", "update_comment": "A.1"},
+                    {"type": "Concept", "id": "A", "update_comment": "A.2"},
+                    {"type": "Concept", "id": "A", "update_comment": "A.3"},
+                    {"type": "Concept", "id": "B", "update_comment": "B.1"},
+                    {"type": "Concept", "id": "B", "update_comment": "B.2"},
+                    {"type": "Concept", "id": "B", "update_comment": "B.3"},
+                ],
+                [
+                    {"type": "Concept", "id": "C", "update_comment": "C.1"},
+                ]
+            ]
+        )
+
+        self.assertEqual(
+            list(BulkImportParallelRunner.chunker_list(concepts, 3, True)),
+            [
+                [
+                    {"type": "Concept", "id": "A", "update_comment": "A.1"},
+                    {"type": "Concept", "id": "A", "update_comment": "A.2"},
+                    {"type": "Concept", "id": "A", "update_comment": "A.3"},
+                ],
+                [
+                    {"type": "Concept", "id": "B", "update_comment": "B.1"},
+                    {"type": "Concept", "id": "B", "update_comment": "B.2"},
+                    {"type": "Concept", "id": "B", "update_comment": "B.3"},
+                ],
+                [
+                    {"type": "Concept", "id": "C", "update_comment": "C.1"},
+                ]
+            ]
+        )
+
+        self.assertEqual(
+            list(BulkImportParallelRunner.chunker_list(concepts, 5, True)),
+            [
+                [
+                    {"type": "Concept", "id": "A", "update_comment": "A.1"},
+                    {"type": "Concept", "id": "A", "update_comment": "A.2"},
+                    {"type": "Concept", "id": "A", "update_comment": "A.3"},
+                ],
+                [
+                    {"type": "Concept", "id": "B", "update_comment": "B.1"},
+                    {"type": "Concept", "id": "B", "update_comment": "B.2"},
+                    {"type": "Concept", "id": "B", "update_comment": "B.3"},
+                ],
+                [
+                    {"type": "Concept", "id": "C", "update_comment": "C.1"},
+                ]
+            ]
         )
 
 
