@@ -24,7 +24,7 @@ from core.common.tasks import seed_children_to_expansion, batch_index_resources,
     index_expansion_mappings
 from core.common.utils import drop_version, to_owner_uri, generate_temp_version, es_id_in, \
     es_wildcard_search, get_resource_class_from_resource_name, get_exact_search_fields, to_snake_case, \
-    es_exact_search, es_to_pks, batch_qs, split_list_by_condition
+    es_exact_search, es_to_pks, batch_qs, split_list_by_condition, decode_string
 from core.concepts.constants import LOCALES_FULLY_SPECIFIED
 from core.concepts.models import Concept
 from core.mappings.models import Mapping
@@ -442,7 +442,7 @@ class CollectionReference(models.Model):
         mapping_queryset = Mapping.objects.none()
 
         if self.code:
-            queryset = queryset.filter(mnemonic=self.code)
+            queryset = queryset.filter(mnemonic=decode_string(self.code))
             if self.resource_version:
                 queryset = queryset.filter(version=self.resource_version)
         if self.cascade:
