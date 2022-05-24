@@ -466,9 +466,11 @@ class ConceptVersionDetailSerializer(ModelSerializer):
     child_concept_urls = ListField(read_only=True)
     source_versions = ListField(read_only=True)
     collection_versions = ListField(read_only=True)
+    references = SerializerMethodField()
 
     def __init__(self, *args, **kwargs):
-        params = get(kwargs, 'context.request.query_params')
+        request = get(kwargs, 'context.request')
+        params = get(request, 'query_params')
         self.view_kwargs = get(kwargs, 'context.view.kwargs', {})
 
         self.include_indirect_mappings = False
@@ -480,6 +482,7 @@ class ConceptVersionDetailSerializer(ModelSerializer):
         self.include_child_concepts = self.query_params.get(INCLUDE_CHILD_CONCEPTS) in ['true', True]
         self.include_parent_concept_urls = self.query_params.get(INCLUDE_PARENT_CONCEPT_URLS) in ['true', True]
         self.include_child_concept_urls = self.query_params.get(INCLUDE_CHILD_CONCEPT_URLS) in ['true', True]
+        self.include_verbose_references = self.query_params.get(INCLUDE_VERBOSE_REFERENCES) in ['true', True]
 
         try:
             if not self.include_parent_concepts:
@@ -490,6 +493,8 @@ class ConceptVersionDetailSerializer(ModelSerializer):
                 self.fields.pop('child_concept_urls')
             if not self.include_parent_concept_urls:
                 self.fields.pop('parent_concept_urls')
+            if not get(request, 'instance'):
+                self.fields.pop('references', None)
         except:  # pylint: disable=bare-except
             pass
 
@@ -503,8 +508,17 @@ class ConceptVersionDetailSerializer(ModelSerializer):
             'version', 'created_on', 'updated_on', 'version_created_on', 'version_created_by', 'update_comment',
             'is_latest_version', 'locale', 'url', 'owner_type', 'version_url', 'mappings', 'previous_version_url',
             'parent_concepts', 'child_concepts', 'parent_concept_urls', 'child_concept_urls',
-            'source_versions', 'collection_versions', 'versioned_object_id'
+            'source_versions', 'collection_versions', 'versioned_object_id', 'references'
         )
+
+    def get_references(self, obj):
+        collection = get(self, 'context.request.instance')
+        if collection:
+            if self.include_verbose_references:
+                from core.collections.serializers import CollectionReferenceSerializer
+                return CollectionReferenceSerializer(obj.collection_references(collection), many=True).data
+            return obj.collection_references_uris(collection)
+        return None
 
     def get_mappings(self, obj):
         from core.mappings.serializers import MappingDetailSerializer
