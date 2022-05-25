@@ -1,3 +1,5 @@
+from uuid import UUID
+
 import factory
 from pydash import omit
 
@@ -191,6 +193,70 @@ class ConceptTest(OCLTestCase):
             concept.uri,
             f'/orgs/{source.organization.mnemonic}/sources/{source.mnemonic}/concepts/{concept.mnemonic}/'
         )
+
+    def test_persist_new_with_autoid_sequential(self):
+        source = OrganizationSourceFactory(
+            version=HEAD, autoid_concept_mnemonic='sequential', autoid_concept_external_id='sequential')
+        concept = Concept.persist_new({
+            **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'parent': source, 'mnemonic': None,
+            'names': [LocalizedTextFactory.build(locale='en', name='English', locale_preferred=True)]
+        })
+
+        self.assertEqual(concept.errors, {})
+        self.assertIsNotNone(concept.id)
+        self.assertEqual(concept.mnemonic, '1')
+        self.assertEqual(concept.external_id, '1')
+
+        concept = Concept.persist_new({
+            **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'parent': source, 'mnemonic': None,
+            'names': [LocalizedTextFactory.build(locale='en', name='English', locale_preferred=True)]
+        })
+
+        self.assertEqual(concept.errors, {})
+        self.assertIsNotNone(concept.id)
+        self.assertEqual(concept.mnemonic, '2')
+        self.assertEqual(concept.external_id, '2')
+
+        for concept in Concept.objects.filter(mnemonic='1'):
+            concept.delete()
+
+        concept = Concept.persist_new({
+            **factory.build(dict, FACTORY_CLASS=ConceptFactory),
+            'parent': source,
+            'mnemonic': None,
+            'names': [LocalizedTextFactory.build(locale='en', name='English', locale_preferred=True)]
+        })
+
+        self.assertEqual(concept.errors, {})
+        self.assertIsNotNone(concept.id)
+        self.assertEqual(concept.mnemonic, '1')
+        self.assertEqual(concept.external_id, '1')
+
+    def test_persist_new_with_autoid_uuid(self):
+        source = OrganizationSourceFactory(
+            version=HEAD, autoid_concept_mnemonic='uuid', autoid_concept_external_id='uuid')
+        concept1 = Concept.persist_new({
+            **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'parent': source, 'mnemonic': None,
+            'names': [LocalizedTextFactory.build(locale='en', name='English', locale_preferred=True)]
+        })
+
+        self.assertEqual(concept1.errors, {})
+        self.assertIsNotNone(concept1.id)
+        self.assertIsInstance(concept1.mnemonic, UUID)
+        self.assertIsInstance(concept1.external_id, UUID)
+
+        concept2 = Concept.persist_new({
+            **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'parent': source, 'mnemonic': None,
+            'names': [LocalizedTextFactory.build(locale='en', name='English', locale_preferred=True)]
+        })
+
+        self.assertEqual(concept2.errors, {})
+        self.assertIsNotNone(concept2.id)
+        self.assertIsInstance(concept2.mnemonic, UUID)
+        self.assertIsInstance(concept2.external_id, UUID)
+
+        self.assertNotEqual(concept1.mnemonic, concept2.mnemonic)
+        self.assertNotEqual(concept1.external_id, concept2.external_id)
 
     def test_hierarchy_one_parent_child(self):
         parent_concept = ConceptFactory(

@@ -1,12 +1,15 @@
+import uuid
+
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import UniqueConstraint, F
 from pydash import compact
 
 from core.common.models import ConceptContainerModel
+from core.common.services import PostgresQL
 from core.concepts.models import LocalizedText
 from core.sources.constants import SOURCE_TYPE, SOURCE_VERSION_TYPE, HIERARCHY_ROOT_MUST_BELONG_TO_SAME_SOURCE, \
-    HIERARCHY_MEANINGS
+    HIERARCHY_MEANINGS, AUTO_ID_CHOICES, AUTO_ID_SEQUENTIAL, AUTO_ID_UUID
 
 
 class Source(ConceptContainerModel):
@@ -50,9 +53,62 @@ class Source(ConceptContainerModel):
     compositional = models.BooleanField(null=True, blank=True, default=None)
     version_needed = models.BooleanField(null=True, blank=True, default=None)
     hierarchy_root = models.ForeignKey('concepts.Concept', null=True, blank=True, on_delete=models.SET_NULL)
+    # auto-id
+    autoid_concept_mnemonic = models.CharField(null=True, blank=True, choices=AUTO_ID_CHOICES, max_length=10)
+    autoid_concept_external_id = models.CharField(null=True, blank=True, choices=AUTO_ID_CHOICES, max_length=10)
+    autoid_mapping_mnemonic = models.CharField(
+        null=True, blank=True, choices=AUTO_ID_CHOICES, max_length=10, default=AUTO_ID_SEQUENTIAL)
+    autoid_mapping_external_id = models.CharField(null=True, blank=True, choices=AUTO_ID_CHOICES, max_length=10)
 
     OBJECT_TYPE = SOURCE_TYPE
     OBJECT_VERSION_TYPE = SOURCE_VERSION_TYPE
+
+    @property
+    def is_sequential_concept_mnemonic(self):
+        return self.autoid_concept_mnemonic == AUTO_ID_SEQUENTIAL
+
+    @property
+    def is_sequential_concept_external_id(self):
+        return self.autoid_concept_external_id == AUTO_ID_SEQUENTIAL
+
+    @property
+    def is_sequential_mapping_mnemonic(self):
+        return self.autoid_mapping_mnemonic == AUTO_ID_SEQUENTIAL
+
+    @property
+    def is_sequential_mapping_external_id(self):
+        return self.autoid_mapping_external_id == AUTO_ID_SEQUENTIAL
+
+    @property
+    def concept_mnemonic_next(self):
+        return self.get_resource_next_attr_id(
+            self.concepts_set, self.autoid_concept_mnemonic, self.concepts_mnemonic_seq_name)
+
+    @property
+    def concept_external_id_next(self):
+        return self.get_resource_next_attr_id(
+            self.concepts_set, self.autoid_concept_external_id, self.concepts_external_id_seq_name)
+
+    @property
+    def mapping_mnemonic_next(self):
+        return self.get_resource_next_attr_id(
+            self.mappings_set, self.autoid_mapping_mnemonic, self.mappings_mnemonic_seq_name)
+
+    @property
+    def mapping_external_id_next(self):
+        return self.get_resource_next_attr_id(
+            self.mappings_set, self.autoid_mapping_external_id, self.mappings_external_id_seq_name)
+
+    @staticmethod
+    def get_resource_next_attr_id(queryset, attr_type, seq):
+        if attr_type == AUTO_ID_UUID:
+            return uuid.uuid4()
+        if attr_type == AUTO_ID_SEQUENTIAL:
+            next_value = PostgresQL.next_value(seq)
+            while queryset.filter(mnemonic=next_value).exists():
+                next_value = PostgresQL.next_value(seq)
+            return str(next_value)
+        return None
 
     @staticmethod
     def get_search_document():
@@ -188,3 +244,63 @@ class Source(ConceptContainerModel):
 
         self.batch_index(self.concepts, ConceptDocument)
         self.batch_index(self.mappings, MappingDocument)
+
+    def __get_resource_db_sequence_prefix(self):
+        return self.uri.replace('/', '_').replace('-', '_').replace('.', '_').replace('@', '_')
+
+    @property
+    def concepts_mnemonic_seq_name(self):
+        prefix = self.__get_resource_db_sequence_prefix()
+        return f"{prefix}_concepts_mnemonic_seq"
+
+    @property
+    def concepts_external_id_seq_name(self):
+        prefix = self.__get_resource_db_sequence_prefix()
+        return f"{prefix}_concepts_external_id_seq"
+
+    @property
+    def mappings_mnemonic_seq_name(self):
+        prefix = self.__get_resource_db_sequence_prefix()
+        return f"{prefix}_mappings_mnemonic_seq"
+
+    @property
+    def mappings_external_id_seq_name(self):
+        prefix = self.__get_resource_db_sequence_prefix()
+        return f"{prefix}_mappings_external_id_seq"
+
+    def save(
+        self, force_insert=False, force_update=False, using=None, update_fields=None
+    ):
+        is_new = not self.id
+
+        super().save(
+            force_insert=force_insert, force_update=force_update, using=using, update_fields=update_fields)
+
+        if self.id and is_new and self.is_head:
+            if self.is_sequential_concept_mnemonic:
+                PostgresQL.create_seq(self.concepts_mnemonic_seq_name, 'sources.uri')
+            if self.is_sequential_mapping_mnemonic:
+                PostgresQL.create_seq(self.mappings_mnemonic_seq_name, 'sources.uri')
+            if self.is_sequential_concept_external_id:
+                PostgresQL.create_seq(self.concepts_external_id_seq_name, 'sources.uri')
+            if self.is_sequential_mapping_external_id:
+                PostgresQL.create_seq(self.mappings_external_id_seq_name, 'sources.uri')
+
+    def post_delete_actions(self):
+        if self.is_head:
+            PostgresQL.drop_seq(self.concepts_mnemonic_seq_name)
+            PostgresQL.drop_seq(self.mappings_mnemonic_seq_name)
+
+    def concept_pre_delete_actions(self, concept):
+        if concept.is_versioned_object:
+            if concept.mnemonic.isnumeric() and self.is_sequential_concept_mnemonic:
+                PostgresQL.update_seq(self.concepts_mnemonic_seq_name, max(int(concept.mnemonic) - 1, 0))
+            if concept.external_id and concept.external_id.isnumeric() and self.is_sequential_concept_external_id:
+                PostgresQL.update_seq(self.concepts_external_id_seq_name, max(int(concept.external_id) - 1, 0))
+
+    def mapping_pre_delete_actions(self, mapping):
+        if mapping.is_versioned_object:
+            if mapping.mnemonic.isnumeric() and self.is_sequential_mapping_mnemonic:
+                PostgresQL.update_seq(self.mappings_mnemonic_seq_name, max(int(mapping.mnemonic) - 1, 0))
+            if mapping.external_id and mapping.external_id.isnumeric() and self.is_sequential_mapping_external_id:
+                PostgresQL.update_seq(self.mappings_external_id_seq_name, max(int(mapping.external_id) - 1, 0))

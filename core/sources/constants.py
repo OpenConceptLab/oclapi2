@@ -11,3 +11,9 @@ HIERARCHY_MEANINGS = (
     ('part-of', 'part-of'),
     ('classified-with', 'classified-with'),
 )
+AUTO_ID_SEQUENTIAL = 'sequential'
+AUTO_ID_UUID = 'uuid'
+AUTO_ID_CHOICES = (
+    (AUTO_ID_SEQUENTIAL, 'Sequential'),
+    (AUTO_ID_UUID, 'UUID')
+)

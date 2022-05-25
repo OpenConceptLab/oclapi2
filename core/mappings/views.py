@@ -189,6 +189,7 @@ class MappingRetrieveUpdateDestroyView(MappingBaseView, RetrieveAPIView, UpdateA
         if self.is_hard_delete_requested():
             mapping.delete()
             parent.update_mappings_count()
+            parent.mapping_pre_delete_actions(mapping)
             return Response(status=status.HTTP_204_NO_CONTENT)
 
         errors = mapping.retire(request.user, comment)

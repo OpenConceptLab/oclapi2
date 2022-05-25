@@ -491,8 +491,11 @@ def delete_concept(concept_id):  # pragma: no cover
     from core.concepts.models import Concept
 
     queryset = Concept.objects.filter(id=concept_id)
-    if queryset.exists():
-        queryset.delete()
+    concept = queryset.first()
+    if concept:
+        parent = concept.parent
+        concept.delete()
+        parent.update_concepts_count()
 
     return 1
 

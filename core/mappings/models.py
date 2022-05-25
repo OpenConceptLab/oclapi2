@@ -391,9 +391,11 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
             mapping.versioned_object_id = mapping.id
             mapping.version = str(mapping.id)
             mapping.is_latest_version = False
-            if mapping.mnemonic == temp_version:
-                mapping.mnemonic = str(mapping.id)
             parent = mapping.parent
+            if mapping.mnemonic == temp_version:
+                mapping.mnemonic = parent.mapping_mnemonic_next or str(mapping.id)
+            if not mapping.external_id:
+                mapping.external_id = parent.mapping_external_id_next
             mapping.public_access = parent.public_access
             mapping.save()
             initial_version = cls.create_initial_version(mapping)
@@ -549,3 +551,8 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
 
         from core.mappings.serializers import MappingDetailSerializer, MappingListSerializer
         return MappingDetailSerializer if verbose else MappingListSerializer
+
+    def delete(self, using=None, keep_parents=False):
+        if self.is_versioned_object:
+            self.parent.mapping_pre_delete_actions(self)
+        return super().delete(using=using, keep_parents=keep_parents)

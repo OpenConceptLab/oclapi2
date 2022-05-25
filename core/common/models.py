@@ -492,6 +492,10 @@ class ConceptContainerModel(VersionedModel):
         generic_export_path = self.generic_export_path(suffix=None)
         super().delete(using=using, keep_parents=keep_parents)
         delete_s3_objects.delay(generic_export_path)
+        self.post_delete_actions()
+
+    def post_delete_actions(self):
+        pass
 
     def delete_pins(self):
         if self.is_head:

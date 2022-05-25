@@ -639,10 +639,12 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
         parent_concept_uris = data.pop('parent_concept_urls', None)
         concept = Concept(**data)
-        concept.version = generate_temp_version()
+        temp_version = generate_temp_version()
+        concept.version = temp_version
         if user:
             concept.created_by = concept.updated_by = user
         concept.errors = {}
+        concept.mnemonic = concept.mnemonic or concept.version
         if concept.is_existing_in_parent():
             concept.errors = dict(__all__=[ALREADY_EXISTS])
             return concept
@@ -653,10 +655,14 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             concept.cloned_descriptions = descriptions
             concept.full_clean()
             concept.save()
+            parent_resource = concept.parent
+            if concept.mnemonic == temp_version:
+                concept.mnemonic = parent_resource.concept_mnemonic_next or str(concept.id)
+            if not concept.external_id:
+                concept.external_id = parent_resource.concept_external_id_next
             concept.versioned_object_id = concept.id
             concept.version = str(concept.id)
             concept.is_latest_version = not create_initial_version
-            parent_resource = concept.parent
             concept.public_access = parent_resource.public_access
             concept.save()
             concept.set_locales()
@@ -946,6 +952,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         if self.is_versioned_object:
             LocalizedText.objects.filter(name_locales=self).delete()
             LocalizedText.objects.filter(description_locales=self).delete()
+            self.parent.concept_pre_delete_actions(self)
         return super().delete(using=using, keep_parents=keep_parents)
 
     def cascade(  # pylint: disable=too-many-arguments,too-many-locals

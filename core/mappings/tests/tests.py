@@ -1,3 +1,5 @@
+from uuid import UUID
+
 import factory
 from django.core.exceptions import ValidationError
 
@@ -159,6 +161,70 @@ class MappingTest(OCLTestCase):
             mapping.uri,
             f'/orgs/{source.organization.mnemonic}/sources/{source.mnemonic}/mappings/{mapping.mnemonic}/'
         )
+
+    def test_persist_new_autoid_sequential(self):
+        source = OrganizationSourceFactory(
+            version=HEAD, autoid_mapping_mnemonic='sequential', autoid_mapping_external_id='sequential')
+        concept1 = ConceptFactory(parent=source)
+        concept2 = ConceptFactory(parent=source)
+        mapping = Mapping.persist_new({
+            **factory.build(dict, FACTORY_CLASS=MappingFactory), 'from_concept': concept1, 'to_concept': concept2,
+            'map_type': 'same-as', 'parent_id': source.id
+        }, source.created_by)
+
+        self.assertEqual(mapping.errors, {})
+        self.assertIsNotNone(mapping.id)
+        self.assertEqual(mapping.mnemonic, '1')
+        self.assertEqual(mapping.external_id, '1')
+
+        mapping = Mapping.persist_new({
+            **factory.build(dict, FACTORY_CLASS=MappingFactory), 'from_concept': concept1, 'to_concept': concept2,
+            'map_type': 'close-to', 'parent_id': source.id
+        }, source.created_by)
+
+        self.assertEqual(mapping.errors, {})
+        self.assertIsNotNone(mapping.id)
+        self.assertEqual(mapping.mnemonic, '2')
+        self.assertEqual(mapping.external_id, '2')
+
+        for mapping in Mapping.objects.filter(mnemonic='1'):
+            mapping.delete()
+
+        mapping = Mapping.persist_new({
+            **factory.build(dict, FACTORY_CLASS=MappingFactory), 'from_concept': concept1, 'to_concept': concept2,
+            'map_type': 'same-as', 'parent_id': source.id
+        }, source.created_by)
+
+        self.assertEqual(mapping.errors, {})
+        self.assertIsNotNone(mapping.id)
+        self.assertEqual(mapping.mnemonic, '1')
+        self.assertEqual(mapping.external_id, '1')
+
+    def test_persist_new_autoid_uuid(self):
+        source = OrganizationSourceFactory(
+            version=HEAD, autoid_mapping_mnemonic='uuid', autoid_mapping_external_id='uuid')
+        concept1 = ConceptFactory(parent=source)
+        concept2 = ConceptFactory(parent=source)
+        mapping1 = Mapping.persist_new({
+            **factory.build(dict, FACTORY_CLASS=MappingFactory), 'from_concept': concept1, 'to_concept': concept2,
+            'map_type': 'same-as', 'parent_id': source.id
+        }, source.created_by)
+
+        self.assertIsNotNone(mapping1.id)
+        self.assertIsInstance(mapping1.mnemonic, UUID)
+        self.assertIsInstance(mapping1.external_id, UUID)
+
+        mapping2 = Mapping.persist_new({
+            **factory.build(dict, FACTORY_CLASS=MappingFactory), 'from_concept': concept1, 'to_concept': concept2,
+            'map_type': 'close-to', 'parent_id': source.id
+        }, source.created_by)
+
+        self.assertIsNotNone(mapping2.id)
+        self.assertIsInstance(mapping2.mnemonic, UUID)
+        self.assertIsInstance(mapping2.external_id, UUID)
+
+        self.assertNotEqual(mapping2.mnemonic, mapping1.mnemonic)
+        self.assertNotEqual(mapping2.external_id, mapping1.external_id)
 
     def test_persist_clone(self):
         source_head = OrganizationSourceFactory(version=HEAD)

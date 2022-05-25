@@ -294,7 +294,12 @@ class ConceptRetrieveUpdateDestroyView(ConceptBaseView, RetrieveAPIView, UpdateA
         is_hard_delete_requested = self.is_hard_delete_requested()
         if self.is_db_delete_requested() and is_hard_delete_requested:
             parent_filters = Concept.get_parent_and_owner_filters_from_kwargs(self.kwargs)
-            result = Concept.objects.filter(mnemonic=self.kwargs['concept'], **parent_filters).delete()
+            concepts = Concept.objects.filter(mnemonic=self.kwargs['concept'], **parent_filters)
+            concept = concepts.filter(id=F('versioned_object_id')).first()
+            parent = concept.parent
+            result = concepts.delete()
+            parent.concept_pre_delete_actions(concept)
+            parent.update_concepts_count()
             return Response(result, status=status.HTTP_204_NO_CONTENT)
 
         concept = self.get_object()

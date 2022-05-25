@@ -8,6 +8,7 @@ from botocore.client import Config
 from botocore.exceptions import NoCredentialsError, ClientError
 from django.conf import settings
 from django.core.files.base import ContentFile
+from django.db import connection
 
 from core.settings import REDIS_HOST, REDIS_PORT, REDIS_DB
 
@@ -226,3 +227,27 @@ class RedisService:  # pragma: no cover
 
     def get_int(self, key):
         return int(self.conn.get(key).decode('utf-8'))
+
+
+class PostgresQL:
+    @staticmethod
+    def create_seq(seq_name, owned_by, min_value=0, start=1):
+        with connection.cursor() as cursor:
+            cursor.execute(
+                f"CREATE SEQUENCE IF NOT EXISTS {seq_name} MINVALUE {min_value} START {start} OWNED BY {owned_by};")
+
+    @staticmethod
+    def update_seq(seq_name, start):
+        with connection.cursor() as cursor:
+            cursor.execute(f"SELECT setval('{seq_name}', {start}, true);")
+
+    @staticmethod
+    def drop_seq(seq_name):
+        with connection.cursor() as cursor:
+            cursor.execute(f"DROP SEQUENCE IF EXISTS {seq_name};")
+
+    @staticmethod
+    def next_value(seq_name):
+        with connection.cursor() as cursor:
+            cursor.execute(f"SELECT nextval('{seq_name}');")
+            return cursor.fetchone()[0]

@@ -360,7 +360,7 @@ class ConceptMinimalSerializerRecursive(ConceptAbstractSerializer):
 class ConceptDetailSerializer(ConceptAbstractSerializer):
     version = CharField(read_only=True)
     type = CharField(source='versioned_resource_type', read_only=True)
-    id = EncodedDecodedCharField(source='mnemonic', required=True)
+    id = EncodedDecodedCharField(source='mnemonic', required=False)
     source = CharField(source='parent_resource', read_only=True)
     parent_id = UUIDField(write_only=True)
     owner = CharField(source='owner_name', read_only=True)

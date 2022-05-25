@@ -86,6 +86,8 @@ class SourceCreateOrUpdateSerializer(ModelSerializer):
                 'experimental', 'case_sensitive', 'collection_reference', 'hierarchy_meaning', 'compositional',
                 'version_needed', 'canonical_url', 'identifier', 'publisher', 'contact', 'jurisdiction', 'purpose',
                 'copyright', 'content_type', 'revision_date', 'text', 'meta',
+                'autoid_concept_mnemonic', 'autoid_concept_external_id',
+                'autoid_mapping_mnemonic', 'autoid_mapping_external_id',
         ]:
             setattr(source, attr, validated_data.get(attr, get(source, attr)))
 
@@ -233,13 +235,14 @@ class SourceDetailSerializer(SourceCreateOrUpdateSerializer):
         fields = (
             'type', 'uuid', 'id', 'short_code', 'name', 'full_name', 'description', 'source_type',
             'custom_validation_schema', 'public_access', 'default_locale', 'supported_locales', 'website',
-            'url', 'owner', 'owner_type', 'owner_url',
-            'created_on', 'updated_on', 'created_by', 'updated_by', 'extras', 'external_id', 'versions_url',
-            'version', 'concepts_url', 'mappings_url',
+            'url', 'owner', 'owner_type', 'owner_url', 'created_on', 'updated_on', 'created_by', 'updated_by',
+            'extras', 'external_id', 'versions_url', 'version', 'concepts_url', 'mappings_url',
             'canonical_url', 'identifier', 'publisher', 'contact', 'jurisdiction', 'purpose', 'copyright',
             'content_type', 'revision_date', 'logo_url', 'summary', 'text', 'client_configs',
             'experimental', 'case_sensitive', 'collection_reference', 'hierarchy_meaning', 'compositional',
-            'version_needed', 'hierarchy_root_url', 'hierarchy_root', 'meta'
+            'version_needed', 'hierarchy_root_url', 'hierarchy_root', 'meta',
+            'autoid_concept_mnemonic', 'autoid_concept_external_id',
+            'autoid_mapping_mnemonic', 'autoid_mapping_external_id',
         )
 
     def __init__(self, *args, **kwargs):
