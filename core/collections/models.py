@@ -74,12 +74,14 @@ class Collection(ConceptContainerModel):
     expansion_uri = models.TextField(null=True, blank=True)
 
     def set_active_concepts(self):
-        if self.expansion_uri:
-            self.active_concepts = self.expansion.concepts.filter(retired=False, is_active=True).count()
+        expansion = self.expansion
+        if expansion:
+            self.active_concepts = expansion.concepts.filter(retired=False, is_active=True).count()
 
     def set_active_mappings(self):
-        if self.expansion_uri:
-            self.active_mappings = self.expansion.mappings.filter(retired=False, is_active=True).count()
+        expansion = self.expansion
+        if expansion:
+            self.active_mappings = expansion.mappings.filter(retired=False, is_active=True).count()
 
     @staticmethod
     def get_search_document():
