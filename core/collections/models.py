@@ -360,6 +360,18 @@ class CollectionReference(models.Model):
     def resource_type(self):
         return COLLECTION_REFERENCE_TYPE
 
+    @property
+    def can_compute_against_other_system_version(self):
+        return (not self.system or not self.version) and not self.resource_version
+
+    def can_compute_against_system_version(self, system_version):
+        result = False
+        if self.can_compute_against_other_system_version and system_version:
+            self_system_version = self.resolve_system_version
+            if self_system_version:
+                result = drop_version(self_system_version.uri) == drop_version(system_version.uri)
+        return result
+
     def clone(self, **kwargs):
         return CollectionReference(
             expression=self.expression,
@@ -439,8 +451,8 @@ class CollectionReference(models.Model):
             self._mappings = self.get_mappings()
             self._fetched = True
 
-    def get_concepts(self):
-        queryset = self.get_resource_queryset_from_system_and_valueset(Concept, 'concepts')
+    def get_concepts(self, system_version=None):
+        queryset = self.get_resource_queryset_from_system_and_valueset(Concept, 'concepts', system_version)
         mapping_queryset = Mapping.objects.none()
 
         if self.code:
@@ -466,8 +478,8 @@ class CollectionReference(models.Model):
                 mapping_queryset = self.transform_to_latest_version(mapping_queryset, Mapping)
         return queryset, mapping_queryset
 
-    def get_mappings(self):
-        queryset = self.get_resource_queryset_from_system_and_valueset(Mapping, 'mappings')
+    def get_mappings(self, system_version=None):
+        queryset = self.get_resource_queryset_from_system_and_valueset(Mapping, 'mappings', system_version)
 
         if self.code:
             queryset = queryset.filter(mnemonic=self.code)
@@ -566,9 +578,9 @@ class CollectionReference(models.Model):
         return queryset
 
     # returns intersection of system and valueset resources considering creator permissions
-    def get_resource_queryset_from_system_and_valueset(self, resource_klass, resource_relation):
-        system_version = self.resolve_system_version()
-        valueset_versions = self.resolve_valueset_versions()
+    def get_resource_queryset_from_system_and_valueset(self, resource_klass, resource_relation, system_version=None):
+        system_version = system_version or self.resolve_system_version
+        valueset_versions = self.resolve_valueset_versions
         queryset = None
         if system_version and system_version.can_view_all_content(self.created_by):
             queryset = get(system_version, resource_relation).filter()
@@ -590,6 +602,7 @@ class CollectionReference(models.Model):
 
         return queryset
 
+    @cached_property
     def resolve_system_version(self):
         if self.system:
             from core.sources.models import Source
@@ -598,6 +611,7 @@ class CollectionReference(models.Model):
                 return version
         return None
 
+    @cached_property
     def resolve_valueset_versions(self):
         versions = []
         if isinstance(self.valueset, list):
@@ -866,12 +880,21 @@ class Expansion(BaseResourceModel):
 
         index_concepts = False
         index_mappings = False
-        is_auto_generated = self.is_auto_generated
+        should_reevaluate = attempt_reevaluate and not self.is_auto_generated
+        include_system_version = None
+        if should_reevaluate and self.parameters.get(ExpansionParameters.INCLUDE_SYSTEM):
+            system_version = self.parameters.get(ExpansionParameters.INCLUDE_SYSTEM)
+            include_system_version = ConceptContainerModel.resolve_reference_expression(system_version)
+            if not include_system_version.id:
+                include_system_version = None
 
         def get_ref_results(ref):
-            if attempt_reevaluate and not is_auto_generated:
-                _concepts, _mappings = ref.get_concepts()
-                _mappings |= ref.get_mappings()
+            # attempt_reevaluate is False for delete reference(s)
+            if should_reevaluate:
+                _system_version = include_system_version if ref.can_compute_against_system_version(
+                    include_system_version) else None
+                _concepts, _mappings = ref.get_concepts(_system_version)
+                _mappings |= ref.get_mappings(_system_version)
             else:
                 _concepts = ref.concepts.all()
                 _mappings = ref.mappings.all()
@@ -976,8 +999,6 @@ class ExpansionParameters:
                 self.parameter_classes[parameter] = ExpansionActiveParameter(value=value)
             elif parameter == self.TEXT_FILTER:
                 self.parameter_classes[parameter] = ExpansionTextFilterParameter(value=value)
-            elif parameter == self.INCLUDE_SYSTEM:
-                self.parameter_classes[parameter] = ExpansionIncludeSystemParameter(value=value)
             elif parameter == self.EXCLUDE_SYSTEM:
                 self.parameter_classes[parameter] = ExpansionExcludeSystemParameter(value=value)
             elif parameter == self.DATE:
@@ -994,7 +1015,7 @@ class ExpansionParameters:
 
     def apply_after_filters(self, queryset):
         # order of parameters matters here
-        for parameter in [self.INCLUDE_SYSTEM, self.DATE, self.EXCLUDE_SYSTEM, self.TEXT_FILTER]:
+        for parameter in [self.DATE, self.EXCLUDE_SYSTEM, self.TEXT_FILTER]:
             klass = get(self.parameter_classes, parameter)
             if klass and klass.after_filter:
                 queryset = klass.apply(queryset, self.is_concept_queryset)

@@ -1191,109 +1191,100 @@ class ExpansionParametersTest(OCLTestCase):
         self.assertEqual(result.count(), 6)
         self.assertEqual(list(result.order_by('id').values_list('id', flat=True)), [1, 2, 3, 4, 5, 6])
 
-    def test_apply_include_system_filter(self):  # pylint: disable=too-many-locals,too-many-statements
+    def test_include_system_filter(self):
         source1 = OrganizationSourceFactory(
             mnemonic='s1', version='HEAD', canonical_url='https://s1.com')
-        source1_v1 = OrganizationSourceFactory(
-            mnemonic='s1', version='v1', canonical_url='https://s1.com', organization=source1.organization)
         source2 = OrganizationSourceFactory(
             mnemonic='s2', version='HEAD', canonical_url='https://s2.com')
-        source2_v1 = OrganizationSourceFactory(
-            mnemonic='s2', version='v1', canonical_url='https://s2.com', organization=source2.organization)
+        source1_v1 = OrganizationSourceFactory(
+            mnemonic='s1', version='v1', canonical_url='https://s1.com', organization=source1.organization)
+        source1_latest = OrganizationSourceFactory(
+            mnemonic='s1', version='latest', canonical_url='https://s1.com', organization=source1.organization,
+            released=True)
+        source2_latest = OrganizationSourceFactory(
+            mnemonic='s2', version='latest', canonical_url='https://s2.com', organization=source2.organization,
+            released=True)
+        concept1 = ConceptFactory(mnemonic='c1', parent=source1)
+        concept2 = ConceptFactory(mnemonic='c1', parent=source2)
+        initial_version = concept1.get_latest_version()
 
-        concept1 = ConceptFactory(id=1, parent=source1)
-        concept2 = ConceptFactory(id=2, parent=source1)  # pylint: disable=unused-variable
-        concept3 = ConceptFactory(id=3, parent=source2)
-        concept4 = ConceptFactory(id=4, parent=source2)  # pylint: disable=unused-variable
-        concept1.sources.set([source1, source1_v1])
-        concept3.sources.set([source2, source2_v1])
+        errors = Concept.create_new_version_for(
+            concept1.clone(),
+            dict(extras='c1.1', names=[dict(locale='en', name='English', locale_preferred=True)]),
+            concept1.created_by
+        )
+        self.assertEqual(errors, {})
+        concept1_v1 = concept1.get_latest_version()
+        errors = Concept.create_new_version_for(
+            concept1.clone(),
+            dict(extras='c1.2', names=[dict(locale='en', name='English', locale_preferred=True)]),
+            concept1.created_by
+        )
+        self.assertEqual(errors, {})
+        concept1_latest = concept1.get_latest_version()
+
+        initial_version.sources.set([source1_v1])
+        concept1_v1.sources.set([source1_latest])
+        concept1_latest.sources.set([source1])
+        concept2.sources.set([source2, source2_latest])
 
         collection = OrganizationCollectionFactory(
             mnemonic='c1', canonical_url='http://c1.com', version='HEAD')
-        collection_v1 = OrganizationCollectionFactory(
-            mnemonic='c1', canonical_url='http://c1.com', version='v1', organization=collection.organization)
         expansion = ExpansionFactory(mnemonic='e1', collection_version=collection)
-        expansion_v1 = ExpansionFactory(mnemonic='e2', collection_version=collection_v1)
 
-        concept5 = ConceptFactory(id=5)
-        concept6 = ConceptFactory(id=6)
-        expansion_v1.concepts.add(concept5)
-        expansion.concepts.add(concept5, concept6)
+        ref1 = CollectionReference(system='https://s1.com', code=concept1.mnemonic)
+        expansion.parameters['system-version'] = 'https://s1.com|v1'
+        expansion.add_references(ref1)
 
-        queryset = Concept.objects.filter(id__in=[1, 2, 3, 4, 5, 6])
+        self.assertEqual(expansion.concepts.count(), 1)
+        self.assertEqual(expansion.concepts.first().id, initial_version.id)   # v1 source version concept c1
 
-        result = ExpansionParameters({'system-version': ''}).apply(queryset)
-        result = result.distinct('id')
-        self.assertEqual(result.count(), 6)
-        self.assertEqual(list(result.order_by('id').values_list('id', flat=True)), [1, 2, 3, 4, 5, 6])
+        expansion.concepts.clear()
 
-        result = ExpansionParameters({'system-version': None}).apply(queryset)
-        result = result.distinct('id')
-        self.assertEqual(result.count(), 6)
-        self.assertEqual(list(result.order_by('id').values_list('id', flat=True)), [1, 2, 3, 4, 5, 6])
+        ref2 = CollectionReference(system='https://s1.com', code=concept1.mnemonic)
+        expansion.parameters['system-version'] = None
+        expansion.add_references(ref2)
 
-        result = ExpansionParameters({'system-version': 'https://s1.com'}).apply(queryset)
-        result = result.distinct('id')
-        self.assertEqual(result.count(), 2)
-        self.assertEqual(list(result.order_by('id').values_list('id', flat=True)), [1, 2])
+        self.assertEqual(expansion.concepts.count(), 1)
+        self.assertEqual(expansion.concepts.first().id, concept1_v1.id)  # latest source version concept c1
 
-        result = ExpansionParameters({'system-version': 'https://s1.com|HEAD'}).apply(queryset)
-        result = result.distinct('id')
-        self.assertEqual(result.count(), 2)
-        self.assertEqual(list(result.order_by('id').values_list('id', flat=True)), [1, 2])
+        expansion.concepts.clear()
 
-        result = ExpansionParameters({'system-version': 'https://s1.com|v1'}).apply(queryset)
-        result = result.distinct('id')
-        self.assertEqual(result.count(), 1)
-        self.assertEqual(list(result.order_by('id').values_list('id', flat=True)), [1])
+        ref2 = CollectionReference(system='https://s1.com', code=concept1.mnemonic, version='HEAD')
+        expansion.parameters['system-version'] = None
+        expansion.add_references(ref2)
 
-        result = ExpansionParameters({'system-version': 'https://s1.com|v1,https://s2.com|v1'}).apply(queryset)
-        result = result.distinct('id')
-        self.assertEqual(result.count(), 2)
-        self.assertEqual(list(result.order_by('id').values_list('id', flat=True)), [1, 3])
+        self.assertEqual(expansion.concepts.count(), 1)
+        self.assertEqual(expansion.concepts.first().id, concept1.id)  # HEAD source version concept c1
 
-        result = ExpansionParameters({'system-version': 'https://s1.com,https://s2.com'}).apply(queryset)
-        result = result.distinct('id')
-        self.assertEqual(result.count(), 4)
-        self.assertEqual(list(result.order_by('id').values_list('id', flat=True)), [1, 2, 3, 4])
+        expansion.concepts.clear()
 
-        result = ExpansionParameters({'system-version': 'https://s1.com,https://s2.com|v1'}).apply(queryset)
-        result = result.distinct('id')
-        self.assertEqual(result.count(), 3)
-        self.assertEqual(list(result.order_by('id').values_list('id', flat=True)), [1, 2, 3])
+        ref2 = CollectionReference(system='https://s1.com', code=concept1.mnemonic)
+        expansion.parameters['system-version'] = None
+        expansion.add_references(ref2)
 
-        result = ExpansionParameters({'system - version': 'https://s1.com,https://s2.com|v1'}).apply(queryset)
-        result = result.distinct('id')
-        self.assertEqual(result.count(), 3)
-        self.assertEqual(list(result.order_by('id').values_list('id', flat=True)), [1, 2, 3])
+        self.assertEqual(expansion.concepts.count(), 1)
+        self.assertEqual(expansion.concepts.first().id, concept1_v1.id)  # latest source version concept c1
 
-        result = ExpansionParameters(
-            {'system-version': 'https://s1.com,https://s2.com|v1,http://c1.com'}).apply(queryset)
-        result = result.distinct('id')
-        self.assertEqual(result.count(), 5)
-        self.assertEqual(list(result.order_by('id').values_list('id', flat=True)), [1, 2, 3, 5, 6])
+        expansion.concepts.clear()
 
-        result = ExpansionParameters(
-            {'system-version': 'https://s1.com,https://s2.com,http://c1.com'}).apply(queryset)
-        result = result.distinct('id')
-        self.assertEqual(result.count(), 6)
-        self.assertEqual(list(result.order_by('id').values_list('id', flat=True)), [1, 2, 3, 4, 5, 6])
+        ref2 = CollectionReference(
+            system='https://s1.com', code=concept1.mnemonic, resource_version=concept1_v1.version)
+        expansion.parameters['system-version'] = 'https://s1.com|v1'
+        expansion.add_references(ref2)
 
-        result = ExpansionParameters(
-            {'system-version': 'http://c1.com'}).apply(queryset)
-        result = result.distinct('id')
-        self.assertEqual(result.count(), 2)
-        self.assertEqual(list(result.order_by('id').values_list('id', flat=True)), [5, 6])
+        self.assertEqual(expansion.concepts.count(), 1)
+        self.assertEqual(expansion.concepts.first().id, concept1_v1.id)  # locked resource version
 
-        result = ExpansionParameters(
-            {'system-version': 'http://c1.com|v1'}).apply(queryset)
-        result = result.distinct('id')
-        self.assertEqual(result.count(), 1)
-        self.assertEqual(list(result.order_by('id').values_list('id', flat=True)), [5])
+        expansion.concepts.clear()
 
-        result = ExpansionParameters(
-            {'system-version': 'http://c2.com|v1'}).apply(queryset)
-        self.assertEqual(result.count(), 0)
+        ref2 = CollectionReference(
+            system='https://s2.com', code=concept2.mnemonic)
+        expansion.parameters['system-version'] = 'https://s1.com|v1'
+        expansion.add_references(ref2)
+
+        self.assertEqual(expansion.concepts.count(), 1)
+        self.assertEqual(expansion.concepts.first().id, concept2.id)
 
     def test_apply_date_filter(self):  # pylint: disable=too-many-locals,too-many-statements
         source1 = OrganizationSourceFactory(
