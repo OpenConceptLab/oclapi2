@@ -868,7 +868,7 @@ class Expansion(BaseResourceModel):
             batch_index_resources.apply_async(('concept', concepts_filters), queue='indexing')
             batch_index_resources.apply_async(('mapping', mappings_filters), queue='indexing')
 
-    def add_references(self, references, index=True, is_adding_all_references=False, attempt_reevaluate=True):
+    def add_references(self, references, index=True, is_adding_all_references=False, attempt_reevaluate=True):  # pylint: disable=too-many-locals,too-many-branches
         include_refs, exclude_refs = self.to_ref_list_separated(references)
 
         if not is_adding_all_references:

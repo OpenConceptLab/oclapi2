@@ -1191,7 +1191,7 @@ class ExpansionParametersTest(OCLTestCase):
         self.assertEqual(result.count(), 6)
         self.assertEqual(list(result.order_by('id').values_list('id', flat=True)), [1, 2, 3, 4, 5, 6])
 
-    def test_include_system_filter(self):
+    def test_include_system_filter(self):  # pylint: disable=too-many-locals,too-many-statements
         source1 = OrganizationSourceFactory(
             mnemonic='s1', version='HEAD', canonical_url='https://s1.com')
         source2 = OrganizationSourceFactory(
