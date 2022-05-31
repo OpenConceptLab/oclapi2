@@ -518,7 +518,7 @@ class CollectionReference(models.Model):
         is_dict = isinstance(self.cascade, dict)
         method = get(self.cascade, 'method') if is_dict and 'method' in self.cascade else self.cascade or ''
         cascade_params = {
-            'source_version': get(self.cascade, 'source_version') or self.version or HEAD,
+            'repo_version': get(self.cascade, 'source_version') or self.version or HEAD,
             'source_mappings': method.lower() == SOURCE_MAPPINGS,
             'source_to_concepts': method.lower() == SOURCE_TO_CONCEPTS,
             'cascade_levels': 1 if self.cascade == method else get(self.cascade, 'cascade_levels', '*'),

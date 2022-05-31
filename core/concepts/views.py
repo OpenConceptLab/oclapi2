@@ -14,7 +14,6 @@ from core.bundles.models import Bundle
 from core.bundles.serializers import BundleSerializer
 from core.common.constants import (
     HEAD, INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_RETIRED_PARAM, ACCESS_TYPE_NONE)
-from core.common.exceptions import Http405
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryMixin
 from core.common.swagger_parameters import (
     q_param, limit_param, sort_desc_param, page_param, exact_match_param, sort_asc_param, verbose_param,
@@ -69,7 +68,7 @@ class ConceptBaseView(SourceChildCommonBaseView):
             parent_resource = Source.get_version(source, container_version or HEAD, filters)
         if collection:
             from core.collections.models import Collection
-            parent_resource = Collection.get_version(source, container_version or HEAD, filters)
+            parent_resource = Collection.get_version(collection, container_version or HEAD, filters)
         self.kwargs['parent_resource'] = self.parent_resource = parent_resource
 
 
@@ -327,11 +326,8 @@ class ConceptCascadeView(ConceptBaseView):
     serializer_class = BundleSerializer
 
     def get_object(self, queryset=None):
-        if 'collection' in self.kwargs:
-            raise Http405()
-
         queryset = self.get_queryset()
-        if 'concept_version' not in self.kwargs and 'version' not in self.kwargs:
+        if 'concept_version' not in self.kwargs and 'version' not in self.kwargs and 'collection' not in self.kwargs:
             queryset = queryset.filter(id=F('versioned_object_id'))
 
         instance = queryset.first()
@@ -351,9 +347,10 @@ class ConceptCascadeView(ConceptBaseView):
     )
     def get(self, request, **kwargs):  # pylint: disable=unused-argument
         instance = self.get_object()
+        self.set_parent_resource(False)
         bundle = Bundle(
             root=instance, params=self.request.query_params, verbose=self.is_verbose(),
-            source_version=self.kwargs.get('version', None)
+            repo_version=self.parent_resource
         )
         bundle.cascade()
         return Response(BundleSerializer(bundle, context=dict(request=request)).data)

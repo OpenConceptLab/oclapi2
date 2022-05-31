@@ -2,6 +2,7 @@ from django.urls import re_path, path
 
 from core.collections.feeds import CollectionFeed
 from core.common.constants import NAMESPACE_PATTERN
+from core.concepts.views import ConceptCascadeView
 from . import views
 
 urlpatterns = [
@@ -205,6 +206,11 @@ urlpatterns = [
         ),
         views.CollectionExtraRetrieveUpdateDestroyView.as_view(),
         name='collectionversion-extra'
+    ),
+    path(
+        "<str:collection>/<str:version>/concepts/<str:concept>/$cascade/",
+        ConceptCascadeView.as_view(),
+        name='concept-$cascade'
     ),
     path(
         "<str:collection>/<str:version>/concepts/<str:concept>/<str:concept_version>/mappings/",

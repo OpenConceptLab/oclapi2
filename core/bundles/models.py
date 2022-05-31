@@ -8,8 +8,8 @@ from core.common.constants import INCLUDE_MAPPINGS_PARAM, CASCADE_LEVELS_PARAM, 
 
 
 class Bundle:
-    def __init__(self, root, source_version, params=None, verbose=False):
-        self.source_version = source_version
+    def __init__(self, root, repo_version, params=None, verbose=False):
+        self.repo_version = repo_version
         self.params = params
         self.verbose = verbose
         self.brief = not self.verbose
@@ -111,7 +111,7 @@ class Bundle:
     def cascade_flat(self):
         self.set_cascade_parameters()
         result = self.root.cascade(
-            source_version=self.source_version,
+            repo_version=self.repo_version,
             source_mappings=self.cascade_method == SOURCE_MAPPINGS,
             source_to_concepts=self.cascade_method == SOURCE_TO_CONCEPTS,
             mappings_criteria=self.mappings_criteria,
@@ -129,7 +129,7 @@ class Bundle:
     def cascade_as_hierarchy(self):
         self.set_cascade_parameters()
         self.root.cascade_as_hierarchy(
-            source_version=self.source_version,
+            repo_version=self.repo_version,
             source_mappings=self.cascade_method == SOURCE_MAPPINGS,
             source_to_concepts=self.cascade_method == SOURCE_TO_CONCEPTS,
             mappings_criteria=self.mappings_criteria,

@@ -1184,7 +1184,7 @@ class ConceptTest(OCLTestCase):
         root_child_child2_child = ConceptFactory(parent=source, mnemonic='root-child-child2-child')
         root_child_child2_child.parent_concepts.add(root_child_child2)
 
-        root_cascaded = root.cascade_as_hierarchy()
+        root_cascaded = root.cascade_as_hierarchy(root.sources.filter(version='HEAD').first())
 
         self.assertTrue(isinstance(root_cascaded, Concept))
         self.assertEqual(root_cascaded.uri, root.uri)
@@ -1223,7 +1223,8 @@ class ConceptTest(OCLTestCase):
         root_child_child2_child = ConceptFactory(parent=source, mnemonic='root-child-child2-child')
         root_child_child2_child.parent_concepts.add(root_child_child2)
 
-        root_child_child2_child_cascaded = root_child_child2_child.cascade_as_hierarchy(reverse=True)
+        root_child_child2_child_cascaded = root_child_child2_child.cascade_as_hierarchy(
+            root_child_child2_child.sources.filter(version='HEAD').first(), reverse=True)
 
         self.assertEqual(root_child_child2_child_cascaded.uri, root_child_child2_child.uri)
         root_child_child2_child_cascaded_entries = root_child_child2_child_cascaded.cascaded_entries

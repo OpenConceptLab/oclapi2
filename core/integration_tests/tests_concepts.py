@@ -1041,7 +1041,7 @@ class ConceptMappingsViewTest(OCLAPITestCase):
 
 
 class ConceptCascadeViewTest(OCLAPITestCase):
-    def test_get_200(self):  # pylint: disable=too-many-statements
+    def test_get_200_for_source_version(self):  # pylint: disable=too-many-statements
         source1 = OrganizationSourceFactory()
         source2 = OrganizationSourceFactory()
         concept1 = ConceptFactory(parent=source1)
@@ -1376,6 +1376,188 @@ class ConceptCascadeViewTest(OCLAPITestCase):
         self.assertEqual(entry['id'], concept2.mnemonic)
         self.assertEqual(entry['type'], 'Concept')
         self.assertEqual(len(entry['entries']), 0)
+
+    def test_get_200_for_collection_version(self):  # pylint: disable=too-many-locals,too-many-statements
+        source1 = OrganizationSourceFactory()
+        source2 = OrganizationSourceFactory()
+        concept1 = ConceptFactory(parent=source1)
+        concept2 = ConceptFactory(parent=source1)
+        concept3 = ConceptFactory(parent=source2)
+        mapping1 = MappingFactory(from_concept=concept1, to_concept=concept2, parent=source1, map_type='map_type1')
+        mapping2 = MappingFactory(from_concept=concept2, to_concept=concept1, parent=source1, map_type='map_type1')
+        mapping3 = MappingFactory(from_concept=concept2, to_concept=concept3, parent=source1, map_type='map_type1')
+        mapping4 = MappingFactory(from_concept=concept1, to_concept=concept3, parent=source1, map_type='map_type2')
+        mapping5 = MappingFactory(from_concept=concept3, to_concept=concept1, parent=source2, map_type='map_type2')
+
+        collection1 = OrganizationCollectionFactory()
+        expansion1 = ExpansionFactory(collection_version=collection1)
+        collection2 = OrganizationCollectionFactory()
+        expansion2 = ExpansionFactory(collection_version=collection2)
+        expansion1.concepts.set([concept1, concept3])
+        expansion1.mappings.set([mapping1, mapping4, mapping5])
+        expansion2.concepts.set([concept1, concept2, concept3])
+        expansion2.mappings.set([mapping1, mapping2, mapping3, mapping4, mapping5])
+
+        response = self.client.get(
+            collection1.uri + 'HEAD/concepts/' + concept1.mnemonic + '/$cascade/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data['entry']), 1)
+        self.assertEqual(
+            sorted([data['url'] for data in response.data['entry']]),
+            sorted([concept1.uri])
+        )
+
+        collection1.expansion_uri = expansion1.uri
+        collection1.save()
+
+        response = self.client.get(
+            collection1.uri + 'HEAD/concepts/' + concept1.mnemonic + '/$cascade/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data['entry']), 5)
+        self.assertEqual(
+            sorted([data['url'] for data in response.data['entry']]),
+            sorted([
+                concept1.uri,
+                concept3.uri,
+                mapping1.uri,
+                mapping4.uri,
+                mapping5.uri
+            ])
+        )
+
+        response = self.client.get(
+            collection1.uri + 'HEAD/concepts/' + concept1.mnemonic + '/$cascade/?cascadeLevels=1')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data['entry']), 4)
+        self.assertEqual(
+            sorted([data['url'] for data in response.data['entry']]),
+            sorted([
+                concept1.uri,
+                concept3.uri,
+                mapping1.uri,
+                mapping4.uri,
+            ])
+        )
+
+        response = self.client.get(
+            collection1.uri + 'HEAD/concepts/' + concept2.mnemonic + '/$cascade/')
+
+        self.assertEqual(response.status_code, 404)
+
+        response = self.client.get(
+            collection1.uri + 'HEAD/concepts/' + concept3.mnemonic + '/$cascade/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data['entry']), 5)
+        self.assertEqual(
+            sorted([data['url'] for data in response.data['entry']]),
+            sorted([
+                concept3.uri,
+                concept1.uri,
+                mapping1.uri,
+                mapping4.uri,
+                mapping5.uri
+            ])
+        )
+
+        response = self.client.get(
+            collection1.uri + 'HEAD/concepts/' + concept3.mnemonic + '/$cascade/?mapTypes=map_type1')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data['entry']), 1)
+        self.assertEqual(
+            sorted([data['url'] for data in response.data['entry']]),
+            sorted([
+                concept3.uri,
+            ])
+        )
+
+        response = self.client.get(
+            collection1.uri + 'HEAD/concepts/' + concept3.mnemonic + '/$cascade/?cascadeLevels=1')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data['entry']), 3)
+        self.assertEqual(
+            sorted([data['url'] for data in response.data['entry']]),
+            sorted([
+                concept3.uri,
+                concept1.uri,
+                mapping5.uri
+            ])
+        )
+
+        collection2.expansion_uri = expansion2.uri
+        collection2.save()
+
+        response = self.client.get(
+            collection2.uri + 'HEAD/concepts/' + concept1.mnemonic + '/$cascade/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data['entry']), 8)
+        self.assertEqual(
+            sorted([data['url'] for data in response.data['entry']]),
+            sorted([
+                concept1.uri,
+                concept2.uri,
+                concept3.uri,
+                mapping1.uri,
+                mapping2.uri,
+                mapping3.uri,
+                mapping4.uri,
+                mapping5.uri,
+            ])
+        )
+
+        response = self.client.get(
+            collection2.uri + 'HEAD/concepts/' + concept2.mnemonic + '/$cascade/?excludeMapTypes=map_type2')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data['entry']), 6)
+        self.assertEqual(
+            sorted([data['url'] for data in response.data['entry']]),
+            sorted([
+                concept1.uri,
+                concept2.uri,
+                concept3.uri,
+                mapping1.uri,
+                mapping2.uri,
+                mapping3.uri,
+            ])
+        )
+
+        response = self.client.get(
+            collection2.uri + 'HEAD/concepts/' + concept2.mnemonic + '/$cascade/?reverse=true&cascadeLevels=1')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data['entry']), 3)
+        self.assertEqual(
+            sorted([data['url'] for data in response.data['entry']]),
+            sorted([
+                concept1.uri,
+                concept2.uri,
+                mapping1.uri,
+            ])
+        )
+
+        response = self.client.get(
+            collection2.uri + 'HEAD/concepts/' + concept2.mnemonic + '/$cascade/?reverse=true&cascadeLevels=2')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data['entry']), 6)
+        self.assertEqual(
+            sorted([data['url'] for data in response.data['entry']]),
+            sorted([
+                concept1.uri,
+                concept2.uri,
+                concept3.uri,
+                mapping1.uri,
+                mapping2.uri,
+                mapping5.uri,
+            ])
+        )
 
 
 class ConceptListViewTest(OCLAPITestCase):
