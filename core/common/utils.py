@@ -24,7 +24,8 @@ from pydash import flatten, compact, get
 from requests.auth import HTTPBasicAuth
 from rest_framework.utils import encoders
 
-from core.common.constants import UPDATED_SINCE_PARAM, BULK_IMPORT_QUEUES_COUNT, TEMP, CURRENT_USER, REQUEST_URL
+from core.common.constants import UPDATED_SINCE_PARAM, BULK_IMPORT_QUEUES_COUNT, CURRENT_USER, REQUEST_URL, \
+    TEMP_PREFIX
 from core.common.services import S3
 
 
@@ -533,7 +534,11 @@ def separate_version(expression):
 
 
 def generate_temp_version():
-    return f"{TEMP}-{str(uuid.uuid4())[:8]}"
+    return f"{TEMP_PREFIX}{str(uuid.uuid4())[:8]}"
+
+
+def startswith_temp_version(value):
+    return value.startswith(TEMP_PREFIX)
 
 
 def jsonify_safe(value):

@@ -12,7 +12,7 @@ from core.common.models import VersionedModel
 from core.common.tasks import process_hierarchy_for_new_concept, process_hierarchy_for_concept_version, \
     process_hierarchy_for_new_parent_concept_version
 from core.common.utils import generate_temp_version, drop_version, \
-    encode_string, decode_string, named_tuple_fetchall
+    encode_string, decode_string, named_tuple_fetchall, startswith_temp_version
 from core.concepts.constants import CONCEPT_TYPE, LOCALES_FULLY_SPECIFIED, LOCALES_SHORT, LOCALES_SEARCH_INDEX_TERM, \
     CONCEPT_WAS_RETIRED, CONCEPT_IS_ALREADY_RETIRED, CONCEPT_IS_ALREADY_NOT_RETIRED, CONCEPT_WAS_UNRETIRED, \
     PERSIST_CLONE_ERROR, PERSIST_CLONE_SPECIFY_USER_ERROR, ALREADY_EXISTS, CONCEPT_REGEX, MAX_LOCALES_LIMIT, \
@@ -625,7 +625,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         return self.parent.concepts_set.filter(mnemonic__exact=self.mnemonic).exists()
 
     @classmethod
-    def persist_new(cls, data, user=None, create_initial_version=True, create_parent_version=True):
+    def persist_new(cls, data, user=None, create_initial_version=True, create_parent_version=True):  # pylint: disable=too-many-statements
         names = [
             name if isinstance(name, LocalizedText) else LocalizedText.build(
                 name
@@ -656,8 +656,9 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             concept.full_clean()
             concept.save()
             parent_resource = concept.parent
-            if concept.mnemonic == temp_version:
+            if startswith_temp_version(concept.mnemonic):
                 concept.mnemonic = parent_resource.concept_mnemonic_next or str(concept.id)
+                concept.name = concept.mnemonic
             if not concept.external_id:
                 concept.external_id = parent_resource.concept_external_id_next
             concept.versioned_object_id = concept.id

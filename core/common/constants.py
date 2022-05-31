@@ -2,6 +2,8 @@ import re
 
 HEAD = 'HEAD'
 TEMP = '--TEMP--'
+TEMP_PREFIX = f"{TEMP}-"
+
 
 NAMESPACE_PATTERN = r'[a-zA-Z0-9\-\.\_\@]+'
 NAMESPACE_REGEX = re.compile(r'^' + NAMESPACE_PATTERN + '$')

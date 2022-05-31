@@ -22,7 +22,7 @@ from core.common.swagger_parameters import (
     cascade_map_types_params, cascade_exclude_map_types_params, cascade_hierarchy_param, cascade_mappings_param,
     include_mappings_param, cascade_levels_param, cascade_direction_param, cascade_view_hierarchy)
 from core.common.tasks import delete_concept, make_hierarchy
-from core.common.utils import to_parent_uri_from_kwargs
+from core.common.utils import to_parent_uri_from_kwargs, generate_temp_version
 from core.common.views import SourceChildCommonBaseView, SourceChildExtrasView, \
     SourceChildExtraRetrieveUpdateDestroyView, BaseAPIView
 from core.concepts.constants import PARENT_VERSION_NOT_LATEST_CANNOT_UPDATE_CONCEPT
@@ -167,9 +167,10 @@ class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
         self.set_parent_resource()
         if not self.parent_resource:
             raise Http404()
-        serializer = self.get_serializer(data={
-            **request.data, 'parent_id': self.parent_resource.id, 'name': request.data.get('id', None)
-        })
+        concept_id = request.data.get('id') or generate_temp_version()
+        serializer = self.get_serializer(
+            data={**request.data, 'parent_id': self.parent_resource.id, 'id': concept_id, 'name': concept_id}
+        )
         if serializer.is_valid():
             serializer.save()
             if serializer.is_valid():
