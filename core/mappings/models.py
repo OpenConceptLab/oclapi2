@@ -551,8 +551,3 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
 
         from core.mappings.serializers import MappingDetailSerializer, MappingListSerializer
         return MappingDetailSerializer if verbose else MappingListSerializer
-
-    def delete(self, using=None, keep_parents=False):
-        if self.is_versioned_object:
-            self.parent.mapping_pre_delete_actions(self)
-        return super().delete(using=using, keep_parents=keep_parents)

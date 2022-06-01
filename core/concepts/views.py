@@ -298,7 +298,6 @@ class ConceptRetrieveUpdateDestroyView(ConceptBaseView, RetrieveAPIView, UpdateA
             concept = concepts.filter(id=F('versioned_object_id')).first()
             parent = concept.parent
             result = concepts.delete()
-            parent.concept_pre_delete_actions(concept)
             parent.update_concepts_count()
             return Response(result, status=status.HTTP_204_NO_CONTENT)
 

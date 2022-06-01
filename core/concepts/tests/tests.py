@@ -229,6 +229,19 @@ class ConceptTest(OCLTestCase):
 
         self.assertEqual(concept.errors, {})
         self.assertIsNotNone(concept.id)
+        self.assertEqual(concept.mnemonic, '3')
+        self.assertEqual(concept.external_id, '3')
+
+        concept = Concept.persist_new({
+            **factory.build(dict, FACTORY_CLASS=ConceptFactory),
+            'mnemonic': '1',
+            'external_id': '1',
+            'parent': source,
+            'names': [LocalizedTextFactory.build(locale='en', name='English', locale_preferred=True)]
+        })
+
+        self.assertEqual(concept.errors, {})
+        self.assertIsNotNone(concept.id)
         self.assertEqual(concept.mnemonic, '1')
         self.assertEqual(concept.external_id, '1')
 

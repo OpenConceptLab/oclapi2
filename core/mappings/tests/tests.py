@@ -197,6 +197,16 @@ class MappingTest(OCLTestCase):
 
         self.assertEqual(mapping.errors, {})
         self.assertIsNotNone(mapping.id)
+        self.assertEqual(mapping.mnemonic, '3')
+        self.assertEqual(mapping.external_id, '3')
+
+        mapping = Mapping.persist_new({
+            **factory.build(dict, FACTORY_CLASS=MappingFactory), 'from_concept': concept1, 'to_concept': concept2,
+            'map_type': 'foobar', 'parent_id': source.id, 'mnemonic': '1', 'external_id': '1'
+        }, source.created_by)
+
+        self.assertEqual(mapping.errors, {})
+        self.assertIsNotNone(mapping.id)
         self.assertEqual(mapping.mnemonic, '1')
         self.assertEqual(mapping.external_id, '1')
 

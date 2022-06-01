@@ -81,33 +81,26 @@ class Source(ConceptContainerModel):
 
     @property
     def concept_mnemonic_next(self):
-        return self.get_resource_next_attr_id(
-            self.concepts_set, self.autoid_concept_mnemonic, self.concepts_mnemonic_seq_name)
+        return self.get_resource_next_attr_id(self.autoid_concept_mnemonic, self.concepts_mnemonic_seq_name)
 
     @property
     def concept_external_id_next(self):
-        return self.get_resource_next_attr_id(
-            self.concepts_set, self.autoid_concept_external_id, self.concepts_external_id_seq_name)
+        return self.get_resource_next_attr_id(self.autoid_concept_external_id, self.concepts_external_id_seq_name)
 
     @property
     def mapping_mnemonic_next(self):
-        return self.get_resource_next_attr_id(
-            self.mappings_set, self.autoid_mapping_mnemonic, self.mappings_mnemonic_seq_name)
+        return self.get_resource_next_attr_id(self.autoid_mapping_mnemonic, self.mappings_mnemonic_seq_name)
 
     @property
     def mapping_external_id_next(self):
-        return self.get_resource_next_attr_id(
-            self.mappings_set, self.autoid_mapping_external_id, self.mappings_external_id_seq_name)
+        return self.get_resource_next_attr_id(self.autoid_mapping_external_id, self.mappings_external_id_seq_name)
 
     @staticmethod
-    def get_resource_next_attr_id(queryset, attr_type, seq):
+    def get_resource_next_attr_id(attr_type, seq):
         if attr_type == AUTO_ID_UUID:
             return uuid.uuid4()
         if attr_type == AUTO_ID_SEQUENTIAL:
-            next_value = PostgresQL.next_value(seq)
-            while queryset.filter(mnemonic=next_value).exists():
-                next_value = PostgresQL.next_value(seq)
-            return str(next_value)
+            return str(PostgresQL.next_value(seq))
         return None
 
     @staticmethod
@@ -289,18 +282,6 @@ class Source(ConceptContainerModel):
     def post_delete_actions(self):
         if self.is_head:
             PostgresQL.drop_seq(self.concepts_mnemonic_seq_name)
+            PostgresQL.drop_seq(self.concepts_external_id_seq_name)
             PostgresQL.drop_seq(self.mappings_mnemonic_seq_name)
-
-    def concept_pre_delete_actions(self, concept):
-        if concept.is_versioned_object:
-            if concept.mnemonic.isnumeric() and self.is_sequential_concept_mnemonic:
-                PostgresQL.update_seq(self.concepts_mnemonic_seq_name, max(int(concept.mnemonic) - 1, 0))
-            if concept.external_id and concept.external_id.isnumeric() and self.is_sequential_concept_external_id:
-                PostgresQL.update_seq(self.concepts_external_id_seq_name, max(int(concept.external_id) - 1, 0))
-
-    def mapping_pre_delete_actions(self, mapping):
-        if mapping.is_versioned_object:
-            if mapping.mnemonic.isnumeric() and self.is_sequential_mapping_mnemonic:
-                PostgresQL.update_seq(self.mappings_mnemonic_seq_name, max(int(mapping.mnemonic) - 1, 0))
-            if mapping.external_id and mapping.external_id.isnumeric() and self.is_sequential_mapping_external_id:
-                PostgresQL.update_seq(self.mappings_external_id_seq_name, max(int(mapping.external_id) - 1, 0))
+            PostgresQL.drop_seq(self.mappings_external_id_seq_name)
