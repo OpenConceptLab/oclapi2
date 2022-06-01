@@ -287,7 +287,8 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         def should_update(is_seq, field, start_from):
             return field in dirty_fields and is_seq and start_from and start_from > 0
 
-        def to_seq(start_from): return int(start_from) - 1
+        def to_seq(start_from):
+            return int(start_from) - 1
 
         if should_update(
                 self.is_sequential_mapping_mnemonic, 'autoid_mapping_mnemonic_start_from',

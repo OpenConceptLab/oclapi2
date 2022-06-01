@@ -236,7 +236,7 @@ class MappingTest(OCLTestCase):
 
         self.assertEqual(mapping.errors, {})
         self.assertIsNotNone(mapping.id)
-        self.assertEqual(mapping.mnemonic, '101')
+        self.assertEqual(mapping.mnemonic, '100')
         self.assertEqual(mapping.external_id, '5')
 
         mapping = Mapping.persist_new({
@@ -249,7 +249,7 @@ class MappingTest(OCLTestCase):
 
         self.assertEqual(mapping.errors, {})
         self.assertIsNotNone(mapping.id)
-        self.assertEqual(mapping.mnemonic, '102')
+        self.assertEqual(mapping.mnemonic, '101')
         self.assertEqual(mapping.external_id, '6')
 
     def test_persist_new_autoid_uuid(self):

@@ -269,7 +269,7 @@ class ConceptTest(OCLTestCase):
 
         self.assertEqual(concept.errors, {})
         self.assertIsNotNone(concept.id)
-        self.assertEqual(concept.mnemonic, '101')
+        self.assertEqual(concept.mnemonic, '100')
         self.assertEqual(concept.external_id, '5')
 
         concept = Concept.persist_new({
@@ -281,7 +281,7 @@ class ConceptTest(OCLTestCase):
 
         self.assertEqual(concept.errors, {})
         self.assertIsNotNone(concept.id)
-        self.assertEqual(concept.mnemonic, '102')
+        self.assertEqual(concept.mnemonic, '101')
         self.assertEqual(concept.external_id, '6')
 
     def test_persist_new_with_autoid_uuid(self):
