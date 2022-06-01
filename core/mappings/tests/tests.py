@@ -239,6 +239,19 @@ class MappingTest(OCLTestCase):
         self.assertEqual(mapping.mnemonic, '101')
         self.assertEqual(mapping.external_id, '5')
 
+        mapping = Mapping.persist_new({
+            **factory.build(dict, FACTORY_CLASS=MappingFactory),
+            'from_concept': concept1,
+            'to_concept': concept2,
+            'map_type': 'same-as4',
+            'parent_id': source.id
+        }, source.created_by)
+
+        self.assertEqual(mapping.errors, {})
+        self.assertIsNotNone(mapping.id)
+        self.assertEqual(mapping.mnemonic, '102')
+        self.assertEqual(mapping.external_id, '6')
+
     def test_persist_new_autoid_uuid(self):
         source = OrganizationSourceFactory(
             version=HEAD, autoid_mapping_mnemonic='uuid', autoid_mapping_external_id='uuid')
