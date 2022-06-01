@@ -245,6 +245,33 @@ class ConceptTest(OCLTestCase):
         self.assertEqual(concept.mnemonic, '1')
         self.assertEqual(concept.external_id, '1')
 
+        concept = Concept.persist_new({
+            **factory.build(dict, FACTORY_CLASS=ConceptFactory),
+            'mnemonic': None,
+            'parent': source,
+            'names': [LocalizedTextFactory.build(locale='en', name='English', locale_preferred=True)]
+        })
+
+        self.assertEqual(concept.errors, {})
+        self.assertIsNotNone(concept.id)
+        self.assertEqual(concept.mnemonic, '4')
+        self.assertEqual(concept.external_id, '4')
+
+        source.autoid_concept_mnemonic_start_from = 100
+        source.save()
+
+        concept = Concept.persist_new({
+            **factory.build(dict, FACTORY_CLASS=ConceptFactory),
+            'mnemonic': None,
+            'parent': source,
+            'names': [LocalizedTextFactory.build(locale='en', name='English', locale_preferred=True)]
+        })
+
+        self.assertEqual(concept.errors, {})
+        self.assertIsNotNone(concept.id)
+        self.assertEqual(concept.mnemonic, '101')
+        self.assertEqual(concept.external_id, '5')
+
     def test_persist_new_with_autoid_uuid(self):
         source = OrganizationSourceFactory(
             version=HEAD, autoid_concept_mnemonic='uuid', autoid_concept_external_id='uuid')

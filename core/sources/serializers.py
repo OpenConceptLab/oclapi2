@@ -88,6 +88,8 @@ class SourceCreateOrUpdateSerializer(ModelSerializer):
                 'copyright', 'content_type', 'revision_date', 'text', 'meta',
                 'autoid_concept_mnemonic', 'autoid_concept_external_id',
                 'autoid_mapping_mnemonic', 'autoid_mapping_external_id',
+                'autoid_concept_mnemonic_start_from', 'autoid_concept_external_id_start_from',
+                'autoid_mapping_mnemonic_start_from', 'autoid_mapping_external_id_start_from',
         ]:
             setattr(source, attr, validated_data.get(attr, get(source, attr)))
 
@@ -243,6 +245,8 @@ class SourceDetailSerializer(SourceCreateOrUpdateSerializer):
             'version_needed', 'hierarchy_root_url', 'hierarchy_root', 'meta',
             'autoid_concept_mnemonic', 'autoid_concept_external_id',
             'autoid_mapping_mnemonic', 'autoid_mapping_external_id',
+            'autoid_concept_mnemonic_start_from', 'autoid_concept_external_id_start_from',
+            'autoid_mapping_mnemonic_start_from', 'autoid_mapping_external_id_start_from',
         )
 
     def __init__(self, *args, **kwargs):

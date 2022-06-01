@@ -21,6 +21,7 @@ class OrganizationSourceFactory(factory.django.DjangoModelFactory):
     description = 'This is a test source'
     organization = SubFactory(OrganizationFactory)
     version = HEAD
+    autoid_mapping_mnemonic = None
 
 
 class UserSourceFactory(factory.django.DjangoModelFactory):
@@ -37,3 +38,4 @@ class UserSourceFactory(factory.django.DjangoModelFactory):
     description = 'This is a test source'
     user = SubFactory(UserProfileFactory)
     version = HEAD
+    autoid_mapping_mnemonic = None

@@ -251,3 +251,9 @@ class PostgresQL:
         with connection.cursor() as cursor:
             cursor.execute(f"SELECT nextval('{seq_name}');")
             return cursor.fetchone()[0]
+
+    @staticmethod
+    def last_value(seq_name):
+        with connection.cursor() as cursor:
+            cursor.execute(f"SELECT last_value from {seq_name};")
+            return cursor.fetchone()[0]

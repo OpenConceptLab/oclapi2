@@ -129,7 +129,9 @@ class SourceListViewTest(OCLAPITestCase):
                 'jurisdiction', 'purpose', 'copyright', 'content_type', 'revision_date', 'logo_url', 'text',
                 'experimental', 'case_sensitive', 'collection_reference', 'hierarchy_meaning', 'compositional',
                 'version_needed', 'hierarchy_root_url', 'autoid_concept_mnemonic', 'autoid_mapping_mnemonic',
-                'autoid_concept_external_id', 'autoid_mapping_external_id'
+                'autoid_concept_external_id', 'autoid_mapping_external_id',
+                'autoid_concept_mnemonic_start_from', 'autoid_concept_external_id_start_from',
+                'autoid_mapping_mnemonic_start_from', 'autoid_mapping_external_id_start_from',
             ])
         )
         source = Source.objects.last()
@@ -210,7 +212,9 @@ class SourceCreateUpdateDestroyViewTest(OCLAPITestCase):
                 'jurisdiction', 'purpose', 'copyright', 'content_type', 'revision_date', 'logo_url', 'text',
                 'experimental', 'case_sensitive', 'collection_reference', 'hierarchy_meaning', 'compositional',
                 'version_needed', 'hierarchy_root_url', 'autoid_concept_mnemonic', 'autoid_mapping_mnemonic',
-                'autoid_concept_external_id', 'autoid_mapping_external_id'
+                'autoid_concept_external_id', 'autoid_mapping_external_id',
+                'autoid_concept_mnemonic_start_from', 'autoid_concept_external_id_start_from',
+                'autoid_mapping_mnemonic_start_from', 'autoid_mapping_external_id_start_from',
             ])
         )
         source = Source.objects.last()

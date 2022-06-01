@@ -7,12 +7,15 @@ from pydash import compact
 
 from core.common.models import ConceptContainerModel
 from core.common.services import PostgresQL
+from core.common.validators import validate_non_negative
 from core.concepts.models import LocalizedText
 from core.sources.constants import SOURCE_TYPE, SOURCE_VERSION_TYPE, HIERARCHY_ROOT_MUST_BELONG_TO_SAME_SOURCE, \
     HIERARCHY_MEANINGS, AUTO_ID_CHOICES, AUTO_ID_SEQUENTIAL, AUTO_ID_UUID
 
 
 class Source(ConceptContainerModel):
+    DEFAULT_AUTO_ID_START_FROM = 1
+
     es_fields = {
         'source_type': {'sortable': True, 'filterable': True, 'facet': True, 'exact': True},
         'mnemonic': {'sortable': True, 'filterable': True, 'exact': True},
@@ -59,6 +62,10 @@ class Source(ConceptContainerModel):
     autoid_mapping_mnemonic = models.CharField(
         null=True, blank=True, choices=AUTO_ID_CHOICES, max_length=10, default=AUTO_ID_SEQUENTIAL)
     autoid_mapping_external_id = models.CharField(null=True, blank=True, choices=AUTO_ID_CHOICES, max_length=10)
+    autoid_concept_mnemonic_start_from = models.IntegerField(default=1, validators=[validate_non_negative])
+    autoid_concept_external_id_start_from = models.IntegerField(default=1, validators=[validate_non_negative])
+    autoid_mapping_mnemonic_start_from = models.IntegerField(default=1, validators=[validate_non_negative])
+    autoid_mapping_external_id_start_from = models.IntegerField(default=1, validators=[validate_non_negative])
 
     OBJECT_TYPE = SOURCE_TYPE
     OBJECT_VERSION_TYPE = SOURCE_VERSION_TYPE
@@ -266,18 +273,49 @@ class Source(ConceptContainerModel):
     ):
         is_new = not self.id
 
-        super().save(
-            force_insert=force_insert, force_update=force_update, using=using, update_fields=update_fields)
+        super().save(force_insert=force_insert, force_update=force_update, using=using, update_fields=update_fields)
 
-        if self.id and is_new and self.is_head:
-            if self.is_sequential_concept_mnemonic:
-                PostgresQL.create_seq(self.concepts_mnemonic_seq_name, 'sources.uri')
-            if self.is_sequential_mapping_mnemonic:
-                PostgresQL.create_seq(self.mappings_mnemonic_seq_name, 'sources.uri')
-            if self.is_sequential_concept_external_id:
-                PostgresQL.create_seq(self.concepts_external_id_seq_name, 'sources.uri')
-            if self.is_sequential_mapping_external_id:
-                PostgresQL.create_seq(self.mappings_external_id_seq_name, 'sources.uri')
+        if self.id and self.is_head:
+            self.create_sequences() if is_new else self.update_sequences()  # pylint: disable=expression-not-assigned
+
+    def update_sequences(self):
+        def should_update(is_seq, start_from):
+            return is_seq and start_from and start_from != 1
+
+        if should_update(self.is_sequential_mapping_mnemonic, self.autoid_mapping_mnemonic_start_from):
+            PostgresQL.update_seq(
+                self.mappings_mnemonic_seq_name, self.autoid_mapping_mnemonic_start_from
+            )
+        if should_update(self.is_sequential_mapping_external_id, self.autoid_mapping_external_id_start_from):
+            PostgresQL.update_seq(
+                self.mappings_external_id_seq_name, self.autoid_mapping_external_id_start_from
+            )
+        if should_update(self.is_sequential_concept_mnemonic, self.autoid_concept_mnemonic_start_from):
+            PostgresQL.update_seq(
+                self.concepts_mnemonic_seq_name, self.autoid_concept_mnemonic_start_from
+            )
+        if should_update(self.is_sequential_concept_external_id, self.autoid_concept_external_id_start_from):
+            PostgresQL.update_seq(
+                self.concepts_external_id_seq_name, self.autoid_concept_external_id_start_from
+            )
+
+    def create_sequences(self):
+        if self.is_sequential_concept_mnemonic:
+            PostgresQL.create_seq(
+                self.concepts_mnemonic_seq_name, 'sources.uri', 0, self.autoid_concept_mnemonic_start_from
+            )
+        if self.is_sequential_mapping_mnemonic:
+            PostgresQL.create_seq(
+                self.mappings_mnemonic_seq_name, 'sources.uri', 0, self.autoid_mapping_mnemonic_start_from
+            )
+        if self.is_sequential_concept_external_id:
+            PostgresQL.create_seq(
+                self.concepts_external_id_seq_name, 'sources.uri', 0, self.autoid_concept_external_id_start_from
+            )
+        if self.is_sequential_mapping_external_id:
+            PostgresQL.create_seq(
+                self.mappings_external_id_seq_name, 'sources.uri', 0, self.autoid_mapping_external_id_start_from
+            )
 
     def post_delete_actions(self):
         if self.is_head:
