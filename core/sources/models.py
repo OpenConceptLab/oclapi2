@@ -285,28 +285,32 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
 
     def __update_sequences(self, dirty_fields=[]):  # pylint: disable=dangerous-default-value
         def should_update(is_seq, field, start_from):
-            return is_seq and start_from and field in dirty_fields
+            return field in dirty_fields and is_seq and start_from and start_from > 0
+
+        def to_seq(start_from): return int(start_from) - 1
 
         if should_update(
                 self.is_sequential_mapping_mnemonic, 'autoid_mapping_mnemonic_start_from',
                 self.autoid_mapping_mnemonic_start_from
         ):
-            PostgresQL.update_seq(self.mappings_mnemonic_seq_name, self.autoid_mapping_mnemonic_start_from)
+            PostgresQL.update_seq(self.mappings_mnemonic_seq_name, to_seq(self.autoid_mapping_mnemonic_start_from))
         if should_update(
                 self.is_sequential_mapping_external_id, 'autoid_mapping_external_id_start_from',
                 self.autoid_mapping_external_id_start_from
         ):
-            PostgresQL.update_seq(self.mappings_external_id_seq_name, self.autoid_mapping_external_id_start_from)
+            PostgresQL.update_seq(
+                self.mappings_external_id_seq_name, to_seq(self.autoid_mapping_external_id_start_from))
         if should_update(
                 self.is_sequential_concept_mnemonic, 'autoid_concept_mnemonic_start_from',
                 self.autoid_concept_mnemonic_start_from
         ):
-            PostgresQL.update_seq(self.concepts_mnemonic_seq_name, self.autoid_concept_mnemonic_start_from)
+            PostgresQL.update_seq(self.concepts_mnemonic_seq_name, to_seq(self.autoid_concept_mnemonic_start_from))
         if should_update(
                 self.is_sequential_concept_external_id, 'autoid_concept_external_id_start_from',
                 self.autoid_concept_external_id_start_from
         ):
-            PostgresQL.update_seq(self.concepts_external_id_seq_name, self.autoid_concept_external_id_start_from)
+            PostgresQL.update_seq(
+                self.concepts_external_id_seq_name, to_seq(self.autoid_concept_external_id_start_from))
 
     def __create_sequences(self):
         if self.is_sequential_concept_mnemonic:
