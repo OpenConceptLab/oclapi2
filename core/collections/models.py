@@ -912,10 +912,22 @@ class Expansion(BaseResourceModel):
         for reference in exclude_refs:
             concepts, mappings = get_ref_results(reference)
             if concepts.exists():
-                self.concepts.remove(*concepts)
+                if reference.resource_version:
+                    self.concepts.remove(*concepts)
+                else:
+                    self.concepts.set(
+                        self.concepts.exclude(
+                            versioned_object_id__in=concepts.values_list('versioned_object_id', flat=True))
+                    )
                 index_concepts = True
             if mappings.exists():
-                self.mappings.remove(*mappings)
+                if reference.resource_version:
+                    self.mappings.remove(*mappings)
+                else:
+                    self.mappings.set(
+                        self.mappings.exclude(
+                            versioned_object_id__in=mappings.values_list('versioned_object_id', flat=True))
+                    )
                 index_mappings = True
 
         if index:
