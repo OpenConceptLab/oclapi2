@@ -50,6 +50,10 @@ class MappingDocument(Document):
     created_by = fields.KeywordField(attr='created_by.username')
 
     @staticmethod
+    def get_boostable_search_attrs():
+        return dict(id=dict(boost=5), from_concept=dict(boost=3), to_concept=dict(boost=2))
+
+    @staticmethod
     def prepare_from_concept(instance):
         from_concept_name = get(instance, 'from_concept_name') or get(instance, 'from_concept.display_name')
         return [instance.from_concept_url, instance.from_concept_code, from_concept_name]

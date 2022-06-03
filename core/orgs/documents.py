@@ -27,6 +27,10 @@ class OrganizationDocument(Document):
         ]
 
     @staticmethod
+    def get_boostable_search_attrs():
+        return dict(mnemonic=dict(boost=5), name=dict(boost=4))
+
+    @staticmethod
     def prepare_extras(instance):
         value = {}
 

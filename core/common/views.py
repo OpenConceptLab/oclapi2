@@ -563,26 +563,20 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
     def get_wildcard_search_criterion(self):
         search_string = self.get_search_string()
-        name_attr = 'name'
-        if self.is_concept_document():
-            name_attr = '_name'
+        boost_attrs = self.document_model.get_boostable_search_attrs() or {}
 
         def get_query(_str):
-            query = Q(
-                "wildcard", id=dict(value=_str, boost=3)
-            ) | Q(
-                "wildcard", **{name_attr: dict(value=_str, boost=5)}
-            ) | Q(
-                "query_string", query=self.get_wildcard_search_string(_str)
-            )
-            if self.is_concept_document():
-                query |= Q(
-                    "wildcard",
-                    synonyms=dict(
-                        value=self.get_wildcard_search_string(self.get_search_string(decode=False, lower=True)),
-                        boost=2
-                    )
-                )
+            query = Q("query_string", query=self.get_wildcard_search_string(_str))
+            for attr, meta in boost_attrs.items():
+                is_wildcard = meta.get('wildcard', False)
+                decode = meta.get('decode', False)
+                lower = meta.get('lower', False)
+                _search_string = _str
+                if lower or decode:
+                    _search_string = self.get_search_string(decode=decode, lower=lower)
+                if is_wildcard:
+                    _search_string = self.get_wildcard_search_string(_search_string)
+                query |= Q("wildcard", **{attr: dict(value=_search_string, boost=meta['boost'])})
             return query
 
         if not search_string:

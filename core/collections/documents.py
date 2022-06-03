@@ -42,6 +42,10 @@ class CollectionDocument(Document):
         ]
 
     @staticmethod
+    def get_boostable_search_attrs():
+        return dict(mnemonic=dict(boost=5), name=dict(boost=4), canonical_url=dict(boost=3, lower=True, wildcard=True))
+
+    @staticmethod
     def prepare_locale(instance):
         return get(instance.supported_locales, [])
 

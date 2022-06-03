@@ -26,7 +26,7 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         'owner': {'sortable': True, 'filterable': True, 'facet': True, 'exact': True},
         'owner_type': {'sortable': False, 'filterable': True, 'facet': True},
         'custom_validation_schema': {'sortable': False, 'filterable': True, 'facet': True},
-        'canonical_url': {'sortable': True, 'filterable': True},
+        'canonical_url': {'sortable': True, 'filterable': True, 'exact': True},
         'experimental': {'sortable': False, 'filterable': False, 'facet': False},
         'hierarchy_meaning': {'sortable': False, 'filterable': True, 'facet': True},
         'external_id': {'sortable': False, 'filterable': True, 'facet': False, 'exact': False},
