@@ -59,6 +59,11 @@ urlpatterns = [
         name='concept-version-mappings'
     ),
     path(
+        "<str:collection>/concepts/<str:concept>/$cascade/",
+        ConceptCascadeView.as_view(),
+        name='concept-cascade'
+    ),
+    path(
         "<str:collection>/concepts/<str:concept>/<str:concept_version>/",
         views.CollectionVersionConceptRetrieveView.as_view(),
         name='concept-version-detail'
@@ -145,14 +150,19 @@ urlpatterns = [
         name='concept-version-mappings'
     ),
     path(
-        "<str:collection>/<str:version>/expansions/<str:expansion>/concepts/<str:concept>/<str:concept_version>/",
-        views.CollectionVersionExpansionConceptRetrieveView.as_view(),
-        name='concept-version-detail'
+        "<str:collection>/<str:version>/expansions/<str:expansion>/concepts/<str:concept>/$cascade/",
+        ConceptCascadeView.as_view(),
+        name='concept-cascade'
     ),
     path(
         "<str:collection>/<str:version>/expansions/<str:expansion>/concepts/index/",
         views.ExpansionConceptsIndexView.as_view(),
         name='expansion-concepts-index'
+    ),
+    path(
+        "<str:collection>/<str:version>/expansions/<str:expansion>/concepts/<str:concept>/<str:concept_version>/",
+        views.CollectionVersionExpansionConceptRetrieveView.as_view(),
+        name='concept-version-detail'
     ),
     path(
         "<str:collection>/<str:version>/expansions/<str:expansion>/concepts/<str:concept>/",
