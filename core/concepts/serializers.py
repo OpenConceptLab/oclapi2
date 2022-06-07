@@ -59,14 +59,13 @@ class ConceptLabelSerializer(ModelSerializer):
             'uuid', 'external_id', 'type', 'locale', 'locale_preferred'
         )
 
-    @staticmethod
-    def create(attrs, instance=None):  # pylint: disable=arguments-differ
+    def create(self, validated_data, instance=None):  # pylint: disable=arguments-differ
         concept_desc = instance if instance else LocalizedText()
-        concept_desc.name = attrs.get('name', concept_desc.name)
-        concept_desc.locale = attrs.get('locale', concept_desc.locale)
-        concept_desc.locale_preferred = attrs.get('locale_preferred', concept_desc.locale_preferred)
-        concept_desc.type = attrs.get('type', concept_desc.type)
-        concept_desc.external_id = attrs.get('external_id', concept_desc.external_id)
+        concept_desc.name = validated_data.get('name', concept_desc.name)
+        concept_desc.locale = validated_data.get('locale', concept_desc.locale)
+        concept_desc.locale_preferred = validated_data.get('locale_preferred', concept_desc.locale_preferred)
+        concept_desc.type = validated_data.get('type', concept_desc.type)
+        concept_desc.external_id = validated_data.get('external_id', concept_desc.external_id)
         concept_desc.save()
         return concept_desc
 
