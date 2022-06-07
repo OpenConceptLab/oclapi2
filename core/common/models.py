@@ -539,12 +539,10 @@ class ConceptContainerModel(VersionedModel):
     def cascade_children_to_expansion(**kwargs):
         pass
 
-    @staticmethod
-    def update_mappings():
+    def update_mappings(self):
         pass
 
-    @staticmethod
-    def seed_references():
+    def seed_references(self):
         pass
 
     @property
