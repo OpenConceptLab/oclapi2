@@ -56,8 +56,7 @@ class SourceBaseView(BaseAPIView):
             elif not has_owner_scope:
                 raise Http404()
 
-    @staticmethod
-    def get_detail_serializer(obj):
+    def get_detail_serializer(self, obj):
         return SourceDetailSerializer(obj)
 
     def get_filter_params(self, default_version_to_head=True):
@@ -98,7 +97,6 @@ class SourceListView(SourceBaseView, ConceptDictionaryCreateMixin, ListWithHeade
     facet_class = SourceSearch
     default_filters = dict(is_active=True, version=HEAD)
 
-    # pylint: disable=R0201
     def apply_filters(self, queryset):
         return queryset
 
