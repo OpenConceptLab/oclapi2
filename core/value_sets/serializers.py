@@ -234,8 +234,7 @@ class ValueSetExpansionField(serializers.Field):
     default_offset = 0
     timestamp = DateTimeField()
 
-    @staticmethod
-    def to_internal_value( _):
+    def to_internal_value(self, _):
         return None
 
     def to_representation(self, value):
