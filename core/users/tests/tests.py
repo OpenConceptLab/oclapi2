@@ -171,14 +171,14 @@ class UserProfileTest(OCLTestCase):
         self.assertEqual(user.auth_token.key, 'token')
 
     @patch('core.users.models.send_user_verification_email')
-    def test_send_verification_email(self, mail_mock):  # pylint: disable=no-self-use
+    def test_send_verification_email(self, mail_mock):
         user = UserProfile(id=189)
         user.send_verification_email()
 
         mail_mock.delay.assert_called_once_with(189)
 
     @patch('core.users.models.send_user_reset_password_email')
-    def test_send_reset_password_email(self, mail_mock):  # pylint: disable=no-self-use
+    def test_send_reset_password_email(self, mail_mock):
         user = UserProfile(id=189)
         user.send_reset_password_email()
 

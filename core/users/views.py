@@ -191,7 +191,7 @@ class UserEmailVerificationView(UserBaseView):
 class UserPasswordResetView(UserBaseView):
     permission_classes = (AllowAny, )
 
-    def post(self, request, *args, **kwargs):  # pylint: disable=unused-argument,no-self-use
+    def post(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         """Sends reset password mail"""
 
         email = request.data.get('email')
@@ -207,7 +207,7 @@ class UserPasswordResetView(UserBaseView):
         user.send_reset_password_email()
         return Response(status=status.HTTP_200_OK)
 
-    def put(self, request, *args, **kwargs):  # pylint: disable=unused-argument,no-self-use
+    def put(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         """Resets password"""
 
         token = request.data.get('token', None)

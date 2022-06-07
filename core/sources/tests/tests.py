@@ -744,7 +744,7 @@ class SourceTest(OCLTestCase):
 
     @patch('core.mappings.documents.MappingDocument.update')
     @patch('core.concepts.documents.ConceptDocument.update')
-    def test_index_children(self, concept_document_update, mapping_document_update):  # pylint: disable=no-self-use
+    def test_index_children(self, concept_document_update, mapping_document_update):
         source = OrganizationSourceFactory()
         concept1 = ConceptFactory(parent=source)
         concept2 = ConceptFactory(parent=source)
@@ -821,14 +821,14 @@ class TasksTest(OCLTestCase):
 
     @patch('core.sources.models.Source.mappings')
     @patch('core.sources.models.Source.batch_index')
-    def test_index_source_mappings(self, batch_index_mock, source_mappings_mock):  # pylint: disable=no-self-use
+    def test_index_source_mappings(self, batch_index_mock, source_mappings_mock):
         source = OrganizationSourceFactory()
         index_source_mappings(source.id)
         batch_index_mock.assert_called_once_with(source_mappings_mock, MappingDocument)
 
     @patch('core.sources.models.Source.concepts')
     @patch('core.sources.models.Source.batch_index')
-    def test_index_source_concepts(self, batch_index_mock, source_concepts_mock):  # pylint: disable=no-self-use
+    def test_index_source_concepts(self, batch_index_mock, source_concepts_mock):
         source = OrganizationSourceFactory()
         index_source_concepts(source.id)
         batch_index_mock.assert_called_once_with(source_concepts_mock, ConceptDocument)

@@ -201,8 +201,7 @@ class MappingRetrieveUpdateDestroyView(MappingBaseView, RetrieveAPIView, UpdateA
 
 
 class MappingCollectionMembershipView(MappingBaseView, ListWithHeadersMixin):
-    @staticmethod
-    def get_serializer_class():
+    def get_serializer_class(self):
         from core.collections.serializers import CollectionVersionListSerializer
         return CollectionVersionListSerializer
 

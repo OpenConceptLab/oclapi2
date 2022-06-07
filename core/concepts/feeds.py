@@ -27,7 +27,7 @@ class ConceptFeed(Feed, FeedFilterMixin):
     def title(self, obj):
         return f"Updates to {self.source.mnemonic}:{obj.mnemonic}"
 
-    def link(self, obj):  # pylint: disable=no-self-use
+    def link(self, obj):
         return obj.url
 
     def description(self, obj):
@@ -36,7 +36,7 @@ class ConceptFeed(Feed, FeedFilterMixin):
     def items(self, obj):
         return self.filter_queryset(Concept.objects.filter(versioned_object_id=obj.id))
 
-    def item_author_name(self, item):  # pylint: disable=no-self-use
+    def item_author_name(self, item):
         return item.created_by.username
 
     def item_title(self, item):
@@ -48,5 +48,5 @@ class ConceptFeed(Feed, FeedFilterMixin):
     def item_link(self, item):
         return item.url
 
-    def item_pubdate(self, item):  # pylint: disable=no-self-use
+    def item_pubdate(self, item):
         return item.created_at

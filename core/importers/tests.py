@@ -597,7 +597,7 @@ class BulkImportParallelRunnerTest(OCLTestCase):
         self.assertTrue(importer.elapsed_seconds > 0)
 
     @patch('core.importers.models.RedisService')
-    def test_notify_progress(self, redis_service_mock):  # pylint: disable=no-self-use
+    def test_notify_progress(self, redis_service_mock):
         redis_instance_mock = Mock(set_json=Mock())
         redis_service_mock.return_value = redis_instance_mock
         importer = BulkImportParallelRunner(

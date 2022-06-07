@@ -682,7 +682,7 @@ class CollectionVersionExpansionsView(CollectionBaseView, ListWithHeadersMixin, 
             return ExpansionDetailSerializer
         return ExpansionSerializer
 
-    def get_response_serializer_class(self): # pylint: disable=no-self-use
+    def get_response_serializer_class(self):
         return ExpansionSerializer
 
     def get_permissions(self):

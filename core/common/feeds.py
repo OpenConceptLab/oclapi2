@@ -53,7 +53,7 @@ class ConceptContainerFeed(Feed, FeedFilterMixin):
 
         return get_object_or_404(self.model, mnemonic=mnemonic, user=self.user, organization=self.org, version=HEAD)
 
-    def title(self, obj):  # pylint: disable=no-self-use
+    def title(self, obj):
         return f"Updates to {obj.mnemonic}"
 
     def link(self, obj):
