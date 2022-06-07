@@ -143,8 +143,7 @@ class BaseResourceImporter:
 
         return UserProfile.objects.filter(username=owner).first()
 
-    @staticmethod
-    def exists():
+    def exists(self):
         return False
 
     def clean(self):
