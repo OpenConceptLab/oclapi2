@@ -703,11 +703,11 @@ thread_locals = local()
 
 
 def set_current_user(func):
-    setattr(thread_locals, CURRENT_USER, func.__get__(func, local))
+    setattr(thread_locals, CURRENT_USER, func.__get__(func, local))  # pylint: disable=unnecessary-dunder-call
 
 
 def set_request_url(func):
-    setattr(thread_locals, REQUEST_URL, func.__get__(func, local))
+    setattr(thread_locals, REQUEST_URL, func.__get__(func, local))  # pylint: disable=unnecessary-dunder-call
 
 
 def get_current_user():
