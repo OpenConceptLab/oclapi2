@@ -101,8 +101,7 @@ class CollectionBaseView(BaseAPIView):
         context.update({'request': self.request, INCLUDE_REFERENCES_PARAM: self.should_include_references()})
         return context
 
-    @staticmethod
-    def get_detail_serializer(obj):
+    def get_detail_serializer(self, obj):
         return CollectionDetailSerializer(obj)
 
     def get_filter_params(self, default_version_to_head=True):
@@ -153,7 +152,6 @@ class CollectionListView(CollectionBaseView, ConceptDictionaryCreateMixin, ListW
     facet_class = CollectionSearch
     default_filters = dict(is_active=True, version=HEAD)
 
-    # pylint: disable=R0201
     def apply_filters(self, queryset):
         return queryset
 
