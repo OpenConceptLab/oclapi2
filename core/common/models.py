@@ -599,8 +599,12 @@ class ConceptContainerModel(VersionedModel):
         if user:
             obj.created_by = user
             obj.updated_by = user
-        serializer = SourceDetailSerializer if obj.__class__.__name__ == 'Source' else CollectionDetailSerializer
+        repo_resource_name = obj.__class__.__name__
+        serializer = SourceDetailSerializer if repo_resource_name == 'Source' else CollectionDetailSerializer
         head = obj.head
+        if not head:
+            errors[repo_resource_name.lower()] = 'Version Head not found.'
+            return errors
         obj.snapshot = serializer(head).data
         obj.update_version_data(head)
         obj.save(**kwargs)
