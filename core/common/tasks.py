@@ -1,3 +1,4 @@
+from json import JSONDecodeError
 
 from billiard.exceptions import WorkerLostError
 from celery.utils.log import get_task_logger
@@ -229,10 +230,14 @@ def bulk_import(to_import, username, update_if_exists):
 @app.task(base=QueueOnce, bind=True)
 def bulk_import_parallel_inline(self, to_import, username, update_if_exists, threads=5):
     from core.importers.models import BulkImportParallelRunner
-    return BulkImportParallelRunner(
-        content=to_import, username=username, update_if_exists=update_if_exists, parallel=threads,
-        self_task_id=self.request.id
-    ).run()
+    try:
+        importer = BulkImportParallelRunner(
+            content=to_import, username=username, update_if_exists=update_if_exists,
+            parallel=threads, self_task_id=self.request.id
+        )
+    except JSONDecodeError as ex:
+        return dict(error=f"Invalid JSON ({ex.msg})")
+    return importer.run()
 
 
 @app.task(base=QueueOnce)

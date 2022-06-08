@@ -1,4 +1,5 @@
 import base64
+import os
 import unittest
 import uuid
 from unittest.mock import patch, Mock, mock_open
@@ -17,7 +18,7 @@ from rest_framework.test import APITestCase
 
 from core.collections.models import Collection, CollectionReference
 from core.common.constants import HEAD, OCL_ORG_ID, SUPER_ADMIN_USER_ID
-from core.common.tasks import delete_s3_objects
+from core.common.tasks import delete_s3_objects, bulk_import_parallel_inline
 from core.common.utils import (
     compact_dict_by_values, to_snake_case, flower_get, task_exists, parse_bulk_import_task_id,
     to_camel_case,
@@ -821,3 +822,22 @@ class TaskTest(OCLTestCase):
     def test_delete_s3_objects(self, s3_mock):
         delete_s3_objects('/some/path')
         s3_mock.delete_objects.assert_called_once_with('/some/path')
+
+    @patch('core.importers.models.BulkImportParallelRunner.run')
+    def test_bulk_import_parallel_inline_invalid_json(self, import_run_mock):
+        content = open(os.path.join(os.path.dirname(__file__), '..', 'samples/invalid_import_json.json'), 'r').read()
+
+        result = bulk_import_parallel_inline(to_import=content, username='ocladmin', update_if_exists=False)  # pylint: disable=no-value-for-parameter
+
+        self.assertEqual(result, dict(error='Invalid JSON (Expecting property name enclosed in double quotes)'))
+        import_run_mock.assert_not_called()
+
+    @patch('core.importers.models.BulkImportParallelRunner.run')
+    def test_bulk_import_parallel_inline_valid_json(self, import_run_mock):
+        import_run_mock.return_value = 'Import Result'
+        content = open(os.path.join(os.path.dirname(__file__), '..', 'samples/sample_ocldev.json'), 'r').read()
+
+        result = bulk_import_parallel_inline(to_import=content, username='ocladmin', update_if_exists=False)  # pylint: disable=no-value-for-parameter
+
+        self.assertEqual(result, 'Import Result')
+        import_run_mock.assert_called_once()

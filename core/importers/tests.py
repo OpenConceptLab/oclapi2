@@ -2,6 +2,7 @@ import json
 import os
 import unittest
 import uuid
+from json import JSONDecodeError
 
 from celery_once import AlreadyQueued
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -500,6 +501,16 @@ class BulkImportInlineTest(OCLTestCase):
 
 
 class BulkImportParallelRunnerTest(OCLTestCase):
+    def test_invalid_json(self):
+        with self.assertRaises(JSONDecodeError) as ex:
+            BulkImportParallelRunner(
+                open(
+                    os.path.join(os.path.dirname(__file__), '..', 'samples/invalid_import_json.json'), 'r'
+                ).read(),
+                'ocladmin', True
+            )
+        self.assertEqual(ex.exception.msg, 'Expecting property name enclosed in double quotes')
+
     @patch('core.importers.models.RedisService')
     def test_make_parts(self, redis_service_mock):
         redis_service_mock.return_value = Mock()
