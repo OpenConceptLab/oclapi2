@@ -1,3 +1,5 @@
+import json
+
 from django_elasticsearch_dsl import Document, fields
 from django_elasticsearch_dsl.registries import registry
 
@@ -41,6 +43,8 @@ class UserProfileDocument(Document):
             if isinstance(value, dict):
                 value = flatten_dict(value)
 
+        if value:
+            value = json.loads(json.dumps(value).replace('-', '_'))
         return value or {}
 
     @staticmethod

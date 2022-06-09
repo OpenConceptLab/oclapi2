@@ -384,24 +384,26 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
     def get_extras_searchable_fields_from_query_params(self):
         query_params = self.request.query_params.dict()
-
+        is_source_child = self.is_source_child_document_model()
         result = {}
-
         for key, value in query_params.items():
             if key.startswith('extras.') and not key.startswith('extras.exists') and not key.startswith('extras.exact'):
                 parts = key.split('extras.')
-                result['extras.' + parts[1].replace('.', '__')] = value
+                value = value.replace('/', '\\/')
+                result['extras.' + parts[1].replace('.', '__')] = value if is_source_child else value.replace('-', '_')
 
         return result
 
     def get_extras_exact_fields_from_query_params(self):
         query_params = self.request.query_params.dict()
+        is_source_child = self.is_source_child_document_model()
         result = {}
         for key, value in query_params.items():
             if key.startswith('extras.exact'):
                 new_key = key.replace('.exact', '')
                 parts = new_key.split('extras.')
-                result['extras.' + parts[1].replace('.', '__')] = value
+                value = value.replace('/', '\\/')
+                result['extras.' + parts[1].replace('.', '__')] = value if is_source_child else value.replace('-', '_')
 
         return result
 
@@ -507,14 +509,12 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
             if extras_fields:
                 for field, value in extras_fields.items():
-                    value = value.replace('/', '\\/')
                     results = results.filter("query_string", query=value, fields=[field])
             if extras_fields_exists:
                 for field in extras_fields_exists:
                     results = results.query("exists", field=f"extras.{field}")
             if extras_fields_exact:
                 for field, value in extras_fields_exact.items():
-                    value = value.replace('/', '\\/')
                     results = results.query("match", **{field: value}, _expand__to_dot=False)
 
             if self._should_exclude_retired_from_search_results():
