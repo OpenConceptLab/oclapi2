@@ -23,7 +23,7 @@ from core.collections.constants import (
     HEAD_OF_MAPPING_ADDED_TO_COLLECTION, CONCEPT_ADDED_TO_COLLECTION_FMT, MAPPING_ADDED_TO_COLLECTION_FMT,
     DELETE_FAILURE, DELETE_SUCCESS, NO_MATCH, VERSION_ALREADY_EXISTS,
     SOURCE_MAPPINGS,
-    UNKNOWN_REFERENCE_ADDED_TO_COLLECTION_FMT, SOURCE_TO_CONCEPTS, TRANSFORM_TO_RESOURCE_VERSIONS)
+    UNKNOWN_REFERENCE_ADDED_TO_COLLECTION_FMT)
 from core.collections.documents import CollectionDocument
 from core.collections.models import Collection, CollectionReference
 from core.collections.search import CollectionSearch
@@ -467,12 +467,6 @@ class CollectionReferencesView(
 
     def should_cascade_mappings(self):
         return self.request.query_params.get('cascade', '').lower() == SOURCE_MAPPINGS
-
-    def should_cascade_to_concepts(self):
-        return self.request.query_params.get('cascade', '').lower() == SOURCE_TO_CONCEPTS
-
-    def should_transform_to_resource_version(self):
-        return self.request.query_params.get('transformReferences', '').lower() == TRANSFORM_TO_RESOURCE_VERSIONS
 
     def create_response_item(self, added_expressions, errors, expression):
         adding_expression_failed = len(errors) > 0 and expression in errors

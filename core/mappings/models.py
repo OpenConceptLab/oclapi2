@@ -537,9 +537,6 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
 
         return cls.apply_attribute_based_filters(queryset, params)
 
-    def is_from_same_as_to(self):
-        return self.from_concept_code == self.to_concept_code and self.from_source_url == self.to_source_url
-
     @staticmethod
     def get_serializer_class(verbose=False, version=False, brief=False, reverse=False):
         if brief:

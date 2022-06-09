@@ -182,12 +182,6 @@ class ExpansionSummarySerializer(ModelSerializer):
         fields = ('active_concepts', 'active_mappings')
 
 
-class ExpansionSummaryDetailSerializer(ExpansionSummarySerializer):
-    class Meta:
-        model = Expansion
-        fields = ExpansionSummarySerializer.Meta.fields + ('id', 'mnemonic')
-
-
 class CollectionSummarySerializer(ModelSerializer):
     versions = IntegerField(source='num_versions')
     expansions = IntegerField(source='expansions_count')

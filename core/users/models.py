@@ -167,9 +167,6 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
     def auth_headers(self):
         return dict(Authorization=f'Token {self.get_token()}')
 
-    def organizations_count(self):
-        return self.organizations.count()
-
     def deactivate(self):
         self.is_active = False
         self.verified = False

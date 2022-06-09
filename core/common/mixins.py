@@ -15,7 +15,7 @@ from rest_framework.generics import RetrieveUpdateDestroyAPIView
 from rest_framework.mixins import ListModelMixin, CreateModelMixin
 from rest_framework.response import Response
 
-from core.common.constants import HEAD, ACCESS_TYPE_EDIT, ACCESS_TYPE_VIEW, ACCESS_TYPE_NONE, INCLUDE_FACETS, \
+from core.common.constants import HEAD, ACCESS_TYPE_NONE, INCLUDE_FACETS, \
     LIST_DEFAULT_LIMIT, HTTP_COMPRESS_HEADER, CSV_DEFAULT_LIMIT, FACETS_ONLY, NOT_FOUND, \
     MUST_SPECIFY_EXTRA_PARAM_IN_BODY, INCLUDE_RETIRED_PARAM
 from core.common.permissions import HasPrivateAccess, HasOwnership, CanViewConceptDictionary, \
@@ -268,7 +268,6 @@ class SubResourceMixin(PathWalkerMixin):
     user_is_self = False
     parent_path_info = None
     parent_resource = None
-    base_or_clause = []
 
     def initialize(self, request, path_info_segment):
         self.user = request.user
@@ -290,7 +289,6 @@ class SubResourceMixin(PathWalkerMixin):
 
 
 class ConceptDictionaryMixin(SubResourceMixin):
-    base_or_clause = [Q(public_access=ACCESS_TYPE_EDIT), Q(public_access=ACCESS_TYPE_VIEW)]
     permission_classes = (HasPrivateAccess,)
 
 

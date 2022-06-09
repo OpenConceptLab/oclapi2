@@ -415,9 +415,6 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
         return unsaved_names
 
-    def get_latest_source_version(self):
-        return self.sources.order_by('created_at').first()
-
     @classmethod
     def get_base_queryset(cls, params):  # pylint: disable=too-many-branches,too-many-locals,too-many-statements
         queryset = cls.objects.filter(is_active=True)
@@ -813,9 +810,6 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
     def get_unidirectional_mappings(self):
         return self.__get_mappings_from_relation('mappings_from')
-
-    def get_latest_unidirectional_mappings(self):
-        return self.__get_mappings_from_relation('mappings_from', True)
 
     def get_indirect_mappings(self):
         return self.__get_mappings_from_relation('mappings_to')

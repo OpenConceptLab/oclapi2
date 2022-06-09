@@ -17,7 +17,7 @@ import requests
 from celery_once.helpers import queue_once_key
 from dateutil import parser
 from django.conf import settings
-from django.urls import NoReverseMatch, reverse, get_resolver, resolve, Resolver404
+from django.urls import NoReverseMatch, reverse, get_resolver
 from djqscsv import csv_file_for
 from elasticsearch_dsl import Q as es_Q
 from pydash import flatten, compact, get
@@ -176,16 +176,6 @@ def get_query_params_from_url_string(url):
         return dict(parse.parse_qsl(parse.urlsplit(url).query))
     except:  # pylint: disable=bare-except  # pragma: no cover
         return {}
-
-
-def is_valid_uri(uri):
-    try:
-        resolve(uri)
-        return True
-    except Resolver404:
-        pass
-
-    return False
 
 
 def get_class(kls):

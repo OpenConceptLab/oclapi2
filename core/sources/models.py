@@ -63,10 +63,14 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
     autoid_mapping_mnemonic = models.CharField(
         null=True, blank=True, choices=AUTO_ID_CHOICES, max_length=10, default=AUTO_ID_SEQUENTIAL)
     autoid_mapping_external_id = models.CharField(null=True, blank=True, choices=AUTO_ID_CHOICES, max_length=10)
-    autoid_concept_mnemonic_start_from = models.IntegerField(default=1, validators=[validate_non_negative])
-    autoid_concept_external_id_start_from = models.IntegerField(default=1, validators=[validate_non_negative])
-    autoid_mapping_mnemonic_start_from = models.IntegerField(default=1, validators=[validate_non_negative])
-    autoid_mapping_external_id_start_from = models.IntegerField(default=1, validators=[validate_non_negative])
+    autoid_concept_mnemonic_start_from = models.IntegerField(
+        default=DEFAULT_AUTO_ID_START_FROM, validators=[validate_non_negative])
+    autoid_concept_external_id_start_from = models.IntegerField(
+        default=DEFAULT_AUTO_ID_START_FROM, validators=[validate_non_negative])
+    autoid_mapping_mnemonic_start_from = models.IntegerField(
+        default=DEFAULT_AUTO_ID_START_FROM, validators=[validate_non_negative])
+    autoid_mapping_external_id_start_from = models.IntegerField(
+        default=DEFAULT_AUTO_ID_START_FROM, validators=[validate_non_negative])
 
     OBJECT_TYPE = SOURCE_TYPE
     OBJECT_VERSION_TYPE = SOURCE_VERSION_TYPE

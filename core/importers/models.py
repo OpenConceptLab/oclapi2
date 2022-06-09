@@ -912,9 +912,6 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
 
         return dict(summary=summary)
 
-    def get_sub_task_ids(self):
-        return {task.task_id: task.state for task in self.tasks}
-
     def notify_progress(self):
         if self.self_task_id:
             try:

@@ -26,7 +26,7 @@ class UserListSerializer(serializers.ModelSerializer):
 class UserSummarySerializer(serializers.ModelSerializer):
     sources = IntegerField(source='public_sources')
     collections = IntegerField(source='public_collections')
-    organizations = IntegerField(source='organizations_count')
+    organizations = IntegerField(source='orgs_count')
 
     class Meta:
         model = UserProfile

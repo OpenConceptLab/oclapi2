@@ -67,9 +67,6 @@ class BaseModel(models.Model):
     is_active = models.BooleanField(default=True)
     extras = models.JSONField(null=True, blank=True, default=dict)
     uri = models.TextField(null=True, blank=True, db_index=True)
-    extras_have_been_encoded = False
-    extras_have_been_decoded = False
-    is_being_saved = False
     _index = True
 
     @property

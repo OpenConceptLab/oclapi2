@@ -437,10 +437,6 @@ class CollectionReference(models.Model):
             return f'{collection.uri}references/{self.id}/'
         return None
 
-    @property
-    def without_version(self):
-        return drop_version(self.expression)
-
     def fetch_concepts(self, refetch=False):
         if not get(self, '_fetched') or refetch:
             self._concepts, self._mappings = self.get_concepts()
@@ -648,14 +644,6 @@ class CollectionReference(models.Model):
                 queries.append(f'{filter_def["property"]}={value}')
             return '&'.join(queries)
         return None
-
-    @cached_property
-    def expression_with_filters(self):
-        querystring = self.filter_to_querystring()
-        if querystring:
-            joiner = '&' if '?' in self.expression else '&'
-            return f"{self.expression}{joiner}{querystring}"
-        return self.expression
 
     def is_valid_filter(self):
         if not self.filter:
