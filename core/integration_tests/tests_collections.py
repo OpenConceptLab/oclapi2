@@ -408,7 +408,8 @@ class CollectionReferencesViewTest(OCLAPITestCase):
         self.collection.expansion_uri = self.expansion.uri
         self.collection.save()
         self.concept = ConceptFactory()
-        self.reference = CollectionReference(expression=self.concept.uri, collection=self.collection)
+        self.reference = CollectionReference(
+            expression=self.concept.uri, collection=self.collection, system=self.concept.parent.uri, version='HEAD')
         self.reference.full_clean()
         self.reference.save()
         self.expansion.concepts.set(self.reference.concepts.all())
@@ -1198,7 +1199,8 @@ class CollectionVersionListViewTest(OCLAPITestCase):
         self.collection.expansion_uri = self.expansion.uri
         self.collection.save()
         self.concept = ConceptFactory()
-        self.reference = CollectionReference(expression=self.concept.uri, collection=self.collection)
+        self.reference = CollectionReference(
+            expression=self.concept.uri, collection=self.collection, system=self.concept.parent.uri, version='HEAD')
         self.reference.full_clean()
         self.reference.save()
         self.expansion.concepts.set(self.reference.concepts.all())
@@ -1695,7 +1697,8 @@ class CollectionVersionExpansionMappingRetrieveViewTest(OCLAPITestCase):
         self.collection = OrganizationCollectionFactory()
         self.mapping = MappingFactory()
         self.expansion = ExpansionFactory(collection_version=self.collection)
-        self.reference = CollectionReference(expression=self.mapping.url, collection=self.collection)
+        self.reference = CollectionReference(
+            expression=self.mapping.url, collection=self.collection, system=self.mapping.parent.uri, version='HEAD')
         self.reference.save()
         self.expansion.mappings.add(self.mapping)
         self.reference.mappings.add(self.mapping)
@@ -1733,7 +1736,8 @@ class CollectionVersionMappingRetrieveViewTest(OCLAPITestCase):
         super().setUp()
         self.collection = OrganizationCollectionFactory()
         self.mapping = MappingFactory()
-        self.reference = CollectionReference(expression=self.mapping.url, collection=self.collection)
+        self.reference = CollectionReference(
+            expression=self.mapping.url, collection=self.collection, system=self.mapping.parent.uri, version='HEAD')
         self.reference.save()
         self.reference.mappings.add(self.mapping)
 
@@ -1766,7 +1770,8 @@ class CollectionVersionExpansionConceptRetrieveViewTest(OCLAPITestCase):
         self.collection = OrganizationCollectionFactory()
         self.expansion = ExpansionFactory(collection_version=self.collection)
         self.concept = ConceptFactory()
-        self.reference = CollectionReference(expression=self.concept.url, collection=self.collection)
+        self.reference = CollectionReference(
+            expression=self.concept.url, collection=self.collection, system=self.concept.parent.uri, version='HEAD')
         self.reference.save()
         self.expansion.concepts.add(self.concept)
         self.reference.concepts.add(self.concept)

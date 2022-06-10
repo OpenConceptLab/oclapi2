@@ -1194,7 +1194,10 @@ class ConceptTest(OCLTestCase):
 
         concept_v1 = concept.get_latest_version()
         collection = OrganizationCollectionFactory()
-        reference = CollectionReference(expression=concept_v1.version_url, collection=collection)
+        reference = CollectionReference(
+            expression=concept_v1.version_url, collection=collection, system=concept_v1.parent.uri, version='HEAD',
+            code=concept_v1.mnemonic, resource_version=concept_v1.version
+        )
         reference.clean()
         reference.save()
 

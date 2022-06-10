@@ -448,8 +448,10 @@ class CollectionReference(models.Model):
             self._fetched = True
 
     def get_concepts(self, system_version=None):
-        queryset = self.get_resource_queryset_from_system_and_valueset(Concept, 'concepts', system_version)
+        queryset = self.get_resource_queryset_from_system_and_valueset('concepts', system_version)
         mapping_queryset = Mapping.objects.none()
+        if queryset is None:
+            return Concept.objects.none(), mapping_queryset
 
         if self.code:
             queryset = queryset.filter(mnemonic=decode_string(self.code))
@@ -475,7 +477,9 @@ class CollectionReference(models.Model):
         return queryset, mapping_queryset
 
     def get_mappings(self, system_version=None):
-        queryset = self.get_resource_queryset_from_system_and_valueset(Mapping, 'mappings', system_version)
+        queryset = self.get_resource_queryset_from_system_and_valueset('mappings', system_version)
+        if queryset is None:
+            return Mapping.objects.none()
 
         if self.code:
             queryset = queryset.filter(mnemonic=self.code)
@@ -574,7 +578,7 @@ class CollectionReference(models.Model):
         return queryset
 
     # returns intersection of system and valueset resources considering creator permissions
-    def get_resource_queryset_from_system_and_valueset(self, resource_klass, resource_relation, system_version=None):
+    def get_resource_queryset_from_system_and_valueset(self, resource_relation, system_version=None):
         system_version = system_version or self.resolve_system_version
         valueset_versions = self.resolve_valueset_versions
         queryset = None
@@ -593,8 +597,6 @@ class CollectionReference(models.Model):
                         queryset = rel.all()
                     else:
                         queryset &= rel.all()
-        if not system_version and not valueset_versions and self.expression:
-            queryset = resource_klass.from_uri_queryset(self.expression)
 
         return queryset
 

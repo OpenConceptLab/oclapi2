@@ -192,11 +192,13 @@ class CollectionTest(OCLTestCase):
         collection.expansion_uri = expansion.uri
         collection.save()
         expansion.concepts.add(concept1)
-        concept1_reference = CollectionReference(expression=concept1.uri, collection=collection)
+        concept1_reference = CollectionReference(
+            expression=concept1.uri, collection=collection, system=concept1.parent.uri, version='HEAD')
         concept1_reference.save()
 
         concept2 = ConceptFactory(names=[ch_locale, en_locale])
-        concept2_reference = CollectionReference(expression=concept2.uri, collection=collection)
+        concept2_reference = CollectionReference(
+            expression=concept2.uri, collection=collection, system=concept2.parent.uri, version='HEAD')
 
         with self.assertRaises(ValidationError) as ex:
             collection.validate(concept2_reference)
@@ -214,13 +216,15 @@ class CollectionTest(OCLTestCase):
         collection.expansion_uri = expansion.uri
         collection.save()
         collection.expansion.concepts.add(concept1)
-        concept1_reference = CollectionReference(expression=concept1.uri, collection=collection)
+        concept1_reference = CollectionReference(
+            expression=concept1.uri, collection=collection, system=concept1.parent.uri, version='HEAD')
         concept1_reference.save()
 
         en_locale1 = LocalizedTextFactory(locale='en', locale_preferred=False, name='name')
         en_locale2 = LocalizedTextFactory(locale='en', locale_preferred=True, name='name')
         concept2 = ConceptFactory(names=[en_locale1, en_locale2])
-        concept2_reference = CollectionReference(expression=concept2.uri, collection=collection)
+        concept2_reference = CollectionReference(
+            expression=concept2.uri, collection=collection, system=concept2.parent.uri, version='HEAD')
 
         with self.assertRaises(ValidationError) as ex:
             collection.validate(concept2_reference)
@@ -372,12 +376,13 @@ class CollectionReferenceTest(OCLTestCase):
         concept = ConceptFactory()
         expression = concept.uri
 
-        reference = CollectionReference(expression=expression, collection=collection)
+        reference = CollectionReference(
+            expression=expression, collection=collection, system=concept.parent.uri, version='HEAD')
         reference.full_clean()
 
         self.assertEqual(len(reference._concepts), 1)  # pylint: disable=protected-access
         self.assertTrue(isinstance(reference._concepts[0], Concept))  # pylint: disable=protected-access
-        self.assertEqual(reference._concepts[0].id, concept.get_latest_version().id)  # pylint: disable=protected-access
+        self.assertEqual(reference._concepts[0].id, concept.id)  # pylint: disable=protected-access
 
     def test_concept_filter_schema(self):
         ref = CollectionReference(expression='/concepts/', filter=None)
@@ -633,6 +638,16 @@ class CollectionReferenceTest(OCLTestCase):
         self.assertEqual(
             sorted(list(concepts.values_list('id', flat=True))), sorted([prev_latest_version.id])
         )
+        self.assertEqual(mappings.count(), 0)
+
+        parser = CollectionReferenceParser(dict(expression='/concepts/'))
+        parser.parse()
+        parser.to_reference_structure()
+        references = parser.to_objects()
+        reference = references[0]
+        self.assertEqual(reference.expression, '/concepts/')
+        concepts, mappings = reference.get_concepts()
+        self.assertEqual(concepts.count(), 0)
         self.assertEqual(mappings.count(), 0)
 
     def test_build_expression(self):

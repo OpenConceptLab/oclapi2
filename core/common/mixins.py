@@ -491,7 +491,7 @@ class SourceChildMixin:
         return self.__class__.persist_clone(new_version, user)
 
     @classmethod
-    def from_uri_queryset(cls, uri):
+    def from_uri_queryset(cls, uri):  # soon to be deleted
         queryset = cls.objects.none()
         from core.collections.utils import is_concept
         is_concept_uri = is_concept(uri)

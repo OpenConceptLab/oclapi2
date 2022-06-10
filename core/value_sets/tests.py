@@ -55,8 +55,12 @@ class ValueSetTest(OCLAPITestCase):
 
     def test_public_can_find_globally(self):
         self.collection.add_references([
-            CollectionReference(expression=self.concept_1.uri, collection=self.collection),
-            CollectionReference(expression=self.concept_2.uri, collection=self.collection)
+            CollectionReference(
+                expression=self.concept_1.uri, collection=self.collection, code=self.concept_1.mnemonic,
+                system=self.concept_1.parent.uri, version='v2'),
+            CollectionReference(
+                expression=self.concept_2.uri, collection=self.collection, code=self.concept_2.mnemonic,
+                system=self.concept_2.parent.uri, version='v2')
         ])
         self.collection_v1.seed_references()
 
@@ -73,8 +77,12 @@ class ValueSetTest(OCLAPITestCase):
 
     def test_public_can_view(self):
         self.collection.add_references([
-            CollectionReference(expression=self.concept_1.uri, collection=self.collection),
-            CollectionReference(expression=self.concept_2.uri, collection=self.collection),
+            CollectionReference(
+                expression=self.concept_1.uri, collection=self.collection, code=self.concept_1.mnemonic,
+                system=self.concept_1.parent.uri, version='v2'),
+            CollectionReference(
+                expression=self.concept_2.uri, collection=self.collection, code=self.concept_2.mnemonic,
+                system=self.concept_2.parent.uri, version='v2'),
         ])
         self.collection_v1.seed_references()
 
@@ -252,7 +260,12 @@ class ValueSetTest(OCLAPITestCase):
         self.assertEqual(resource['compose'], None)
 
     def test_update_with_compose(self):
-        self.collection.add_references([CollectionReference(expression=self.concept_1.uri, collection=self.collection)])
+        self.collection.add_references([
+            CollectionReference(
+                expression=self.concept_1.uri, collection=self.collection, code=self.concept_1.mnemonic,
+                system=self.concept_1.parent.uri, version='v2'
+            )
+        ])
         self.collection_v1.seed_references()
 
         response = self.client.put(
@@ -295,8 +308,14 @@ class ValueSetTest(OCLAPITestCase):
 
     def test_validate_code(self):
         self.collection.add_references([
-            CollectionReference(expression=self.concept_1.uri, collection=self.collection),
-            CollectionReference(expression=self.concept_2.uri, collection=self.collection),
+            CollectionReference(
+                expression=self.concept_1.uri, collection=self.collection, code=self.concept_1.mnemonic,
+                system=self.concept_1.parent.uri, version='v2'
+            ),
+            CollectionReference(
+                expression=self.concept_2.uri, collection=self.collection, code=self.concept_2.mnemonic,
+                system=self.concept_2.parent.uri, version='v2'
+            ),
         ])
         self.collection_v1.seed_references()
 
