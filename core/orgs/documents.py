@@ -18,6 +18,7 @@ class OrganizationDocument(Document):
     name = fields.KeywordField(attr='name', normalizer="lowercase")
     mnemonic = fields.KeywordField(attr='mnemonic', normalizer="lowercase")
     extras = fields.ObjectField(dynamic=True)
+    user = fields.ListField(fields.KeywordField())
 
     class Django:
         model = Organization
@@ -43,3 +44,7 @@ class OrganizationDocument(Document):
         if value:
             value = json.loads(json.dumps(value).replace('-', '_'))
         return value or {}
+
+    @staticmethod
+    def prepare_user(instance):
+        return list(instance.members.values_list('username', flat=True))
