@@ -330,8 +330,14 @@ class ValueSetTest(OCLAPITestCase):
 
     def test_validate_code_negative(self):
         self.collection.add_references([
-            CollectionReference(expression=self.concept_1.uri, collection=self.collection),
-            CollectionReference(expression=self.concept_2.uri, collection=self.collection),
+            CollectionReference(
+                expression=self.concept_1.uri, collection=self.collection, code=self.concept_1.mnemonic,
+                system=self.concept_1.parent.uri, version='v2'
+            ),
+            CollectionReference(
+                expression=self.concept_2.uri, collection=self.collection, code=self.concept_2.mnemonic,
+                system=self.concept_2.parent.uri, version='v2'
+            ),
         ])
         self.collection_v1.seed_references()
 
@@ -346,8 +352,14 @@ class ValueSetTest(OCLAPITestCase):
 
     def test_validate_code_globally(self):
         self.collection.add_references([
-            CollectionReference(expression=self.concept_1.uri, collection=self.collection),
-            CollectionReference(expression=self.concept_2.uri, collection=self.collection),
+            CollectionReference(
+                expression=self.concept_1.uri, collection=self.collection, code=self.concept_1.mnemonic,
+                system=self.concept_1.parent.uri, version='v2'
+            ),
+            CollectionReference(
+                expression=self.concept_2.uri, collection=self.collection, code=self.concept_2.mnemonic,
+                system=self.concept_2.parent.uri, version='v2'
+            ),
         ])
         self.collection_v1.seed_references()
 
@@ -363,8 +375,14 @@ class ValueSetTest(OCLAPITestCase):
 
     def test_validate_code_globally_negative(self):
         self.collection.add_references([
-            CollectionReference(expression=self.concept_1.uri, collection=self.collection),
-            CollectionReference(expression=self.concept_2.uri, collection=self.collection),
+            CollectionReference(
+                expression=self.concept_1.uri, collection=self.collection, code=self.concept_1.mnemonic,
+                system=self.concept_1.parent.uri, version='v2'
+            ),
+            CollectionReference(
+                expression=self.concept_2.uri, collection=self.collection, code=self.concept_2.mnemonic,
+                system=self.concept_2.parent.uri, version='v2'
+            ),
         ])
         self.collection_v1.seed_references()
 
