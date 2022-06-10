@@ -3,6 +3,7 @@ import logging
 from django.db.models import F
 
 from core.bundles.serializers import FHIRBundleSerializer
+from core.collections.models import Collection
 from core.collections.views import CollectionListView, CollectionRetrieveUpdateDestroyView, \
     CollectionVersionExpansionsView
 from core.common.constants import HEAD
@@ -81,18 +82,31 @@ class ValueSetValidateCodeView(ConceptRetrieveUpdateDestroyView):
     def get_queryset(self):
         queryset = super().get_queryset()
         self.process_parameters()
+        url = self.parameters.get('url')
         code = self.parameters.get('code')
         system = self.parameters.get('system')
         display = self.parameters.get('display')
         system_version = self.parameters.get('systemVersion')
+
+        if url:
+            collection = Collection.objects.filter(canonical_url=url).exclude(version=HEAD)\
+                .filter(is_latest_version=True)
+            if not collection:
+                return queryset.none()
+            queryset = queryset.filter(references__collection=collection.first())
+
         if code and system:
             concept_source = Source.objects.filter(canonical_url=system)
+            if not concept_source:
+                return queryset.none()
             if system_version:
                 concept_source = concept_source.filter(version=system_version)
             else:
                 concept_source = concept_source.filter(is_latest_version=True).exclude(version=HEAD)
             if concept_source:
                 queryset = queryset.filter(sources=concept_source.first(), mnemonic=code)
+            else:
+                return queryset.none()
 
         if display:
             instance = queryset.first()

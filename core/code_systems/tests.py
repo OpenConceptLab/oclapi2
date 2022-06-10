@@ -1,15 +1,17 @@
+import json
+
 from rest_framework.test import APIClient
 
 from core.common.tests import OCLTestCase
 from core.concepts.models import Concept
-from core.concepts.tests.factories import ConceptFactory
+from core.concepts.tests.factories import ConceptFactory, LocalizedTextFactory
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory, UserSourceFactory
 from core.users.tests.factories import UserProfileFactory
 
 
-class SourceTest(OCLTestCase):
+class CodeSystemTest(OCLTestCase):
     def setUp(self):
         super().setUp()
         self.org = OrganizationFactory()
@@ -19,7 +21,7 @@ class SourceTest(OCLTestCase):
         self.org_source_v1 = OrganizationSourceFactory.build(
             version='v1', mnemonic=self.org_source.mnemonic, organization=self.org_source.parent)
         Source.persist_new_version(self.org_source_v1, self.org_source.created_by)
-        self.concept_1 = ConceptFactory(parent=self.org_source)
+        self.concept_1 = ConceptFactory(parent=self.org_source, names=[LocalizedTextFactory(name="concept_1_name")])
         self.concept_2 = ConceptFactory(parent=self.org_source)
         self.org_source_v2 = OrganizationSourceFactory.build(
             version='v2', mnemonic=self.org_source.mnemonic, organization=self.org_source.parent)
@@ -111,6 +113,60 @@ class SourceTest(OCLTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['id'], self.org_source.mnemonic)
         self.assertEqual(response.data['version'], 'v2')
+
+    def test_validate_code_for_code_system(self):
+        response = self.client.get(f'/fhir/CodeSystem/$validate-code'
+                                   f'?url={self.org_source.canonical_url}&code={self.concept_1.mnemonic}')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertJSONEqual(json.dumps(response.data), json.dumps(
+            {'resourceType': 'Parameters', 'parameter': [{'name': 'result', 'valueBoolean': True}]}))
+
+    def test_validate_code_for_code_system_negative(self):
+        response = self.client.get(f'/fhir/CodeSystem/$validate-code'
+                                   f'?url={self.org_source.canonical_url}&code=non_existing_code')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertJSONEqual(json.dumps(response.data), json.dumps(
+            {'resourceType': 'Parameters', 'parameter': [
+                {'name': 'result', 'valueBoolean': False},
+                {'name': 'message', 'valueString': 'The code is incorrect.'}
+            ]}))
+
+    def test_validate_code_with_display_for_code_system(self):
+        response = self.client.get(f'/fhir/CodeSystem/$validate-code'
+                                   f'?url={self.org_source.canonical_url}'
+                                   f'&code={self.concept_1.mnemonic}'
+                                   f'&display={self.concept_1.display_name}')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertJSONEqual(json.dumps(response.data), json.dumps(
+            {'resourceType': 'Parameters', 'parameter': [{'name': 'result', 'valueBoolean': True}]}))
+
+    def test_validate_code_with_display_for_code_system_negative(self):
+        response = self.client.get(f'/fhir/CodeSystem/$validate-code'
+                                   f'?url={self.org_source.canonical_url}'
+                                   f'&code={self.concept_1.mnemonic}'
+                                   f'&display=wrong_display')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertJSONEqual(json.dumps(response.data), json.dumps(
+            {'resourceType': 'Parameters', 'parameter': [
+                {'name': 'result', 'valueBoolean': False},
+                {'name': 'message', 'valueString': 'The code is incorrect.'}
+                ]}))
+
+    def test_lookup_for_code_system(self):
+        response = self.client.get(f'/fhir/CodeSystem/$lookup'
+                                   f'?system={self.org_source.canonical_url}'
+                                   f'&code={self.concept_1.mnemonic}')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertJSONEqual(json.dumps(response.data), json.dumps(
+            {'resourceType': 'Parameters', 'parameter': [
+                {'name': 'name', 'valueString': self.org_source.mnemonic},
+                {'name': 'version', 'valueString': self.org_source_v2.version},
+                {'name': 'display', 'valueString': self.concept_1.display_name}]}))
 
     def test_post_code_system_without_concepts(self):
         response = self.client.post(
@@ -261,7 +317,7 @@ class SourceTest(OCLTestCase):
         concept = source.get_concepts_queryset().first()
         self.assertEqual(concept.is_head, True)
         self.assertEqual(concept.mnemonic, 'test')
-        self.assertEqual(concept.display_name, 'test')
+        self.assertEqual(concept.display_name, 'Test')
         self.assertEqual(len(concept.names.all()), 2)
         # check if version persisted
         sources = Source.objects.filter(mnemonic='test', version='1.0', user=self.user)
@@ -273,7 +329,7 @@ class SourceTest(OCLTestCase):
         self.assertEqual(len(source.concepts.all()), 1)
         concept = source.concepts.first()
         self.assertEqual(concept.mnemonic, 'test')
-        self.assertEqual(concept.display_name, 'test')
+        self.assertEqual(concept.display_name, 'Test')
         self.assertEqual(concept.is_head, False)
         self.assertEqual(len(concept.names.all()), 2)
 
@@ -330,7 +386,7 @@ class SourceTest(OCLTestCase):
         concept = source.get_concepts_queryset().first()
         self.assertEqual(concept.is_head, True)
         self.assertEqual(concept.mnemonic, 'test')
-        self.assertEqual(concept.display_name, 'test')
+        self.assertEqual(concept.display_name, 'Test')
         self.assertEqual(len(concept.names.all()), 1)
         # check if version persisted
         sources = Source.objects.filter(mnemonic=self.user_source.mnemonic, version='1.0', user=self.user)
@@ -342,7 +398,7 @@ class SourceTest(OCLTestCase):
         self.assertEqual(len(source.concepts.all()), 1)
         concept = source.concepts.first()
         self.assertEqual(concept.mnemonic, 'test')
-        self.assertEqual(concept.display_name, 'test')
+        self.assertEqual(concept.display_name, 'Test')
         self.assertEqual(concept.is_head, False)
         self.assertEqual(len(concept.names.all()), 1)
 
@@ -448,11 +504,11 @@ class SourceTest(OCLTestCase):
         concepts = source.get_concepts_queryset().order_by('mnemonic').all()
         self.assertEqual(concepts[0].is_head, True)
         self.assertEqual(concepts[0].mnemonic, 'test')
-        self.assertEqual(concepts[0].display_name, 'test')
+        self.assertEqual(concepts[0].display_name, 'Test')
         self.assertEqual(len(concepts[0].names.all()), 1)
         self.assertEqual(concepts[1].is_head, True)
         self.assertEqual(concepts[1].mnemonic, 'test2')
-        self.assertEqual(concepts[1].display_name, 'test2')
+        self.assertEqual(concepts[1].display_name, 'Test2')
         self.assertEqual(len(concepts[1].names.all()), 1)
         # check if version persisted
         sources = Source.objects.filter(mnemonic=self.user_source.mnemonic, version='2.0', user=self.user)
@@ -464,10 +520,10 @@ class SourceTest(OCLTestCase):
         concepts = Concept.objects.filter(sources__id=source.id).order_by('mnemonic').all()
         self.assertEqual(len(concepts), 2)
         self.assertEqual(concepts[0].mnemonic, 'test')
-        self.assertEqual(concepts[0].display_name, 'test')
+        self.assertEqual(concepts[0].display_name, 'Test')
         self.assertEqual(concepts[0].is_head, False)
         self.assertEqual(len(concepts[0].names.all()), 1)
         self.assertEqual(concepts[1].mnemonic, 'test2')
-        self.assertEqual(concepts[1].display_name, 'test2')
+        self.assertEqual(concepts[1].display_name, 'Test2')
         self.assertEqual(concepts[1].is_head, False)
         self.assertEqual(len(concepts[1].names.all()), 1)

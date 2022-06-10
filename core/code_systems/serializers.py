@@ -1,7 +1,8 @@
-from pydash import get
+from collections import OrderedDict
+
 from rest_framework import serializers
 from rest_framework.fields import CharField, BooleanField, IntegerField, SerializerMethodField, ChoiceField, \
-    DateTimeField
+    DateTimeField, JSONField
 
 from core import settings
 from core.code_systems.constants import RESOURCE_TYPE
@@ -48,13 +49,6 @@ class CodeSystemConceptPropertySerializer(serializers.Field):
             elif item['code'] == 'datatype':
                 ret['datatype'] = item['value']
 
-        if 'retired' not in ret:
-            ret['retired'] = False
-        if 'concept_class' not in ret:
-            ret['concept_class'] = 'Misc'
-        if 'datatype' not in ret:
-            ret['datatype'] = 'N/A'
-
         return ret
 
     def to_representation(self, value):
@@ -69,16 +63,28 @@ class CodeSystemConceptPropertySerializer(serializers.Field):
 
 class CodeSystemConceptDisplaySerializer(serializers.Field):
     def to_internal_value(self, data):
-        return {'name': data}
+        # Handled by parent
+        return {}
 
     def to_representation(self, value):
-        return value.name or value.display_name
+        return value.display_name
+
+
+class CodeSystemConceptDefinitionSerializer(serializers.Field):
+    def to_internal_value(self, data):
+        return {'descriptions': [{'description': data, 'locale': settings.DEFAULT_LOCALE, 'locale_preferred': True}]}
+
+    def to_representation(self, value):
+        descriptions = value.descriptions_for_default_locale
+        if descriptions and len(descriptions) > 0:
+            return value.descriptions_for_default_locale[0]
+        return None
 
 
 class CodeSystemConceptSerializer(ReadSerializerMixin, serializers.Serializer):
     code = CharField(source='mnemonic')
     display = CodeSystemConceptDisplaySerializer(source='*', required=False)
-    definition = SerializerMethodField()
+    definition = CodeSystemConceptDefinitionSerializer(source='*', required=False)
     designation = CodeSystemConceptDesignationSerializer(source='names', many=True, required=False)
     property = CodeSystemConceptPropertySerializer(source='*', required=False)
 
@@ -88,25 +94,29 @@ class CodeSystemConceptSerializer(ReadSerializerMixin, serializers.Serializer):
 
     def to_internal_value(self, data):
         ret = super().to_internal_value(data)
+
+        if 'retired' not in ret:
+            ret['retired'] = False
+        if 'concept_class' not in ret:
+            ret['concept_class'] = 'Misc'
+        if 'datatype' not in ret:
+            ret['datatype'] = 'N/A'
+
         ret.update({'id': ret['mnemonic'], 'name': ret['mnemonic']})
         if 'names' not in ret:
             ret.update({'names': []})
 
         found = False
         for concept_name in ret['names']:
-            if concept_name['name'] == ret['name'] and concept_name['locale'] == settings.DEFAULT_LOCALE:
+            if concept_name['name'] == data['display'] and concept_name['locale'] == settings.DEFAULT_LOCALE:
                 concept_name['locale_preferred'] = True
                 found = True
                 break
 
         if not found:
-            ret['names'].append({'name': ret['name'], 'locale': settings.DEFAULT_LOCALE, 'locale_preferred': True})
+            ret['names'].append({'name': data['display'], 'locale': settings.DEFAULT_LOCALE, 'locale_preferred': True})
 
         return ret
-
-    @staticmethod
-    def get_definition(obj):
-        return get(obj.descriptions_for_default_locale, '0', '')
 
 
 class CodeSystemPropertySerializer(ReadSerializerMixin, serializers.Serializer):
@@ -151,13 +161,14 @@ class CodeSystemDetailSerializer(serializers.ModelSerializer):
     collectionReference = CharField(source='collection_reference', required=False)
     hierarchyMeaning = CharField(source='hierarchy_meaning', required=False)
     revisionDate = DateTimeField(source='revision_date', required=False)
+    text = JSONField(required=False)
 
     class Meta:
         model = Source
         fields = ('resourceType', 'url', 'title', 'status', 'id', 'language', 'count', 'content', 'property', 'meta',
                   'version', 'identifier', 'contact', 'jurisdiction', 'name', 'description', 'publisher', 'purpose',
                   'copyright', 'revisionDate', 'experimental', 'caseSensitive', 'compositional', 'versionNeeded',
-                  'collectionReference', 'hierarchyMeaning', 'concept')
+                  'collectionReference', 'hierarchyMeaning', 'concept', 'text')
 
     @staticmethod
     def get_resource_type(_):
@@ -199,7 +210,8 @@ class CodeSystemDetailSerializer(serializers.ModelSerializer):
             IdentifierSerializer.include_ocl_identifier(instance.uri, rep)
         except Exception as error:
             raise Exception(f'Failed to represent "{instance.uri}" as {RESOURCE_TYPE}') from error
-        return rep
+        # Remove fields with 'None' value
+        return OrderedDict([(key, rep[key]) for key in rep if rep[key] is not None])
 
     def get_ocl_identifier(self):
         ident = IdentifierSerializer.find_ocl_identifier(self.validated_data['identifier'])

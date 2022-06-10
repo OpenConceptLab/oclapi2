@@ -30,7 +30,7 @@ class ReadSerializerMixin:
 class StatusField(Field):
 
     def to_internal_value(self, data):
-        return {'retired': data == 'retired', 'released': data == 'released'}
+        return {'retired': data == 'retired', 'released': data == 'active'}
 
     def to_representation(self, value):
         if value.retired:

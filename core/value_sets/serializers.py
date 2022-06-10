@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from rest_framework.fields import CharField, DateField, SerializerMethodField, ChoiceField, DateTimeField
+from rest_framework.fields import CharField, DateField, SerializerMethodField, ChoiceField, DateTimeField, JSONField
 
 from core.code_systems.serializers import CodeSystemConceptSerializer
 from core.collections.models import Collection, Expansion
@@ -39,6 +39,7 @@ class ComposeValueSetField(serializers.Field):
         if 'include' in data:
             references = []
             for include in data['include']:
+                include.update({'transform': 'resourceversions'})
                 parser = CollectionReferenceParser(expression=include)
                 parser.parse()
                 parser.to_reference_structure()
@@ -108,8 +109,9 @@ class ValueSetDetailSerializer(serializers.ModelSerializer):
     status = StatusField(source='*')
     meta = SerializerMethodField()
     identifier = IdentifierSerializer(many=True, required=False)
-    date = DateField(source='revision_date', required=False)
+    date = DateTimeField(source='revision_date', required=False)
     compose = ComposeValueSetField(source='*', required=False)
+    text = JSONField(required=False)
 
     class Meta:
         model = Collection

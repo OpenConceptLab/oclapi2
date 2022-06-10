@@ -1,0 +1,86 @@
+{
+  "resourceType": "CodeSystem",
+  "id": "extended-content-codes",
+  "text": {
+    "status": "generated",
+    "div": "<div xmlns=\"http://www.w3.org/1999/xhtml\"><p>This code system http://who.int/cg/CodeSystem/extended-content-codes defines the following codes:</p><table class=\"codes\"><tr><td style=\"white-space:nowrap\"><b>Code</b></td><td><b>Display</b></td><td><b>Definition</b></td></tr><tr><td style=\"white-space:nowrap\">Minor surgery without immobilization<a name=\"extended-content-codes-Minorsurgerywithoutimmobilization\"> </a></td><td>Minor surgery without immobilization</td><td>Minor surgery without immobilization</td></tr><tr><td style=\"white-space:nowrap\">Diabetes &gt;20 years duration<a name=\"extended-content-codes-Diabetes.6220yearsduration\"> </a></td><td>Diabetes &gt;20 years duration</td><td>Diabetes &gt;20 years duration</td></tr><tr><td style=\"white-space:nowrap\">Other vascular disease &gt;20 years duration<a name=\"extended-content-codes-Othervasculardisease.6220yearsduration\"> </a></td><td>Other vascular disease &gt;20 years duration</td><td>Other vascular disease &gt;20 years duration</td></tr><tr><td style=\"white-space:nowrap\">Cigarettes smoked per day<a name=\"extended-content-codes-Cigarettessmokedperday\"> </a></td><td>Cigarettes smoked per day</td><td>Cigarettes smoked per day</td></tr><tr><td style=\"white-space:nowrap\">Complicated Valvular heart disease<a name=\"extended-content-codes-ComplicatedValvularheartdisease\"> </a></td><td>Complicated Valvular heart disease</td><td>Complicated Valvular heart disease</td></tr><tr><td style=\"white-space:nowrap\">Uncomplicated Valvular heart disease<a name=\"extended-content-codes-UncomplicatedValvularheartdisease\"> </a></td><td>Uncomplicated Valvular heart disease</td><td>Uncomplicated Valvular heart disease</td></tr><tr><td style=\"white-space:nowrap\">Tuberculosis - Non-pelvic<a name=\"extended-content-codes-Tuberculosis-Non-pelvic\"> </a></td><td>Tuberculosis - Non-pelvic</td><td>Tuberculosis - Non-pelvic</td></tr><tr><td style=\"white-space:nowrap\">Broad-spectrum antibiotics<a name=\"extended-content-codes-Broad-spectrumantibiotics\"> </a></td><td>Broad-spectrum antibiotics</td><td>Medications - Broad-spectrum antibiotics</td></tr><tr><td style=\"white-space:nowrap\">Backup Method Needed<a name=\"extended-content-codes-BackupMethodNeeded\"> </a></td><td>Backup contraception method needed</td><td>Backup contraception method needed</td></tr></table></div>"
+  },
+  "url": "http://who.int/cg/CodeSystem/extended-content-codes",
+  "version": "0.2.0",
+  "name": "extended-content_codes",
+  "title": "Extended Codes CodeSystem codes",
+  "status": "draft",
+  "experimental": false,
+  "date": "2022-05-19T14:53:15+00:00",
+  "publisher": "World Health Organization (WHO)",
+  "contact": [
+    {
+      "telecom": [
+        {
+          "system": "url",
+          "value": "https://www.who.int"
+        }
+      ]
+    }
+  ],
+  "description": "Set of codes identified as being needed but not found in existing Code Systems",
+  "jurisdiction": [
+    {
+      "coding": [
+        {
+          "system": "http://unstats.un.org/unsd/methods/m49/m49.htm",
+          "code": "001"
+        }
+      ]
+    }
+  ],
+  "caseSensitive": true,
+  "content": "complete",
+  "concept": [
+    {
+      "code": "Minor surgery without immobilization",
+      "display": "Minor surgery without immobilization",
+      "definition": "Minor surgery without immobilization"
+    },
+    {
+      "code": "Diabetes >20 years duration",
+      "display": "Diabetes >20 years duration",
+      "definition": "Diabetes >20 years duration"
+    },
+    {
+      "code": "Other vascular disease >20 years duration",
+      "display": "Other vascular disease >20 years duration",
+      "definition": "Other vascular disease >20 years duration"
+    },
+    {
+      "code": "Cigarettes smoked per day",
+      "display": "Cigarettes smoked per day",
+      "definition": "Cigarettes smoked per day"
+    },
+    {
+      "code": "Complicated Valvular heart disease",
+      "display": "Complicated Valvular heart disease",
+      "definition": "Complicated Valvular heart disease"
+    },
+    {
+      "code": "Uncomplicated Valvular heart disease",
+      "display": "Uncomplicated Valvular heart disease",
+      "definition": "Uncomplicated Valvular heart disease"
+    },
+    {
+      "code": "Tuberculosis - Non-pelvic",
+      "display": "Tuberculosis - Non-pelvic",
+      "definition": "Tuberculosis - Non-pelvic"
+    },
+    {
+      "code": "Broad-spectrum antibiotics",
+      "display": "Broad-spectrum antibiotics",
+      "definition": "Medications - Broad-spectrum antibiotics"
+    },
+    {
+      "code": "Backup Method Needed",
+      "display": "Backup contraception method needed",
+      "definition": "Backup contraception method needed"
+    }
+  ]
+}

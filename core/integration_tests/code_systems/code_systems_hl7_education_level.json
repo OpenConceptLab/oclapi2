@@ -1,0 +1,244 @@
+{
+  "resourceType" : "CodeSystem",
+  "id" : "v3-EducationLevel",
+  "language" : "en",
+  "text" : {
+    "status" : "generated",
+    "div" : "<div xmlns=\"http://www.w3.org/1999/xhtml\" xml:lang=\"en\" lang=\"en\"><p><b>Properties</b></p><table class=\"grid\"><tr><td><b>Code</b></td><td><b>URL</b></td><td><b>Type</b></td><td><b>Description</b></td></tr><tr><td>Specializes</td><td/><td>Coding</td><td>The child code is a more narrow version of the concept represented by the parent code.  I.e. Every child concept is also a valid parent concept.  Used to allow determination of subsumption.  Must be transitive, irreflexive, antisymmetric.</td></tr><tr><td>Generalizes</td><td/><td>Coding</td><td>Inverse of Specializes.  Only included as a derived relationship.</td></tr><tr><td>internalId</td><td>http://terminology.hl7.org/CodeSystem/utg-concept-properties#v3-internal-id</td><td>code</td><td>The internal identifier for the concept in the HL7 Access database repository.</td></tr><tr><td>status</td><td>http://hl7.org/fhir/concept-properties#status</td><td>code</td><td>Designation of a concept's state. Normally is not populated unless the state is retired.</td></tr></table><p>This code system http://terminology.hl7.org/CodeSystem/v3-EducationLevel defines the following codes:</p><table class=\"codes\"><tr><td style=\"white-space:nowrap\"><b>Code</b></td><td><b>Display</b></td><td><b>Definition</b></td><td><b>internalId</b></td><td><b>status</b></td></tr><tr><td style=\"white-space:nowrap\">ASSOC<a name=\"v3-EducationLevel-ASSOC\"> </a></td><td>Associate's or technical degree complete</td><td>Associate's or technical degree complete</td><td>19180</td><td>active</td></tr><tr><td style=\"white-space:nowrap\">BD<a name=\"v3-EducationLevel-BD\"> </a></td><td>College or baccalaureate degree complete</td><td>College or baccalaureate degree complete</td><td>19181</td><td>active</td></tr><tr><td style=\"white-space:nowrap\">ELEM<a name=\"v3-EducationLevel-ELEM\"> </a></td><td>Elementary School</td><td>Elementary School</td><td>19176</td><td>active</td></tr><tr><td style=\"white-space:nowrap\">GD<a name=\"v3-EducationLevel-GD\"> </a></td><td>Graduate or professional Degree complete</td><td>Graduate or professional Degree complete</td><td>19183</td><td>active</td></tr><tr><td style=\"white-space:nowrap\">HS<a name=\"v3-EducationLevel-HS\"> </a></td><td>High School or secondary school degree complete</td><td>High School or secondary school degree complete</td><td>19178</td><td>active</td></tr><tr><td style=\"white-space:nowrap\">PB<a name=\"v3-EducationLevel-PB\"> </a></td><td>Some post-baccalaureate education</td><td>Some post-baccalaureate education</td><td>19182</td><td>active</td></tr><tr><td style=\"white-space:nowrap\">POSTG<a name=\"v3-EducationLevel-POSTG\"> </a></td><td>Doctoral or post graduate education</td><td>Doctoral or post graduate education</td><td>19184</td><td>active</td></tr><tr><td style=\"white-space:nowrap\">SCOL<a name=\"v3-EducationLevel-SCOL\"> </a></td><td>Some College education</td><td>Some College education</td><td>19179</td><td>active</td></tr><tr><td style=\"white-space:nowrap\">SEC<a name=\"v3-EducationLevel-SEC\"> </a></td><td>Some secondary or high school education</td><td>Some secondary or high school education</td><td>19177</td><td>active</td></tr></table></div>"
+  },
+  "url" : "http://terminology.hl7.org/CodeSystem/v3-EducationLevel",
+  "identifier" : [
+    {
+      "system" : "urn:ietf:rfc:3986",
+      "value" : "urn:oid:2.16.840.1.113883.5.1077"
+    }
+  ],
+  "version" : "2.1.0",
+  "name" : "EducationLevel",
+  "title" : "Education Level",
+  "status" : "active",
+  "date" : "2019-03-20",
+  "publisher" : "HL7",
+  "contact" : [
+    {
+      "name" : "Health Level Seven, Inc."
+    }
+  ],
+  "description" : "Years of education that a person has completed",
+  "caseSensitive" : true,
+  "hierarchyMeaning" : "is-a",
+  "content" : "complete",
+  "property" : [
+    {
+      "extension" : [
+        {
+          "url" : "http://terminology.hl7.org/StructureDefinition/ext-mif-relationship-symmetry",
+          "valueCode" : "antisymmetric"
+        },
+        {
+          "url" : "http://terminology.hl7.org/StructureDefinition/ext-mif-relationship-transitivity",
+          "valueCode" : "transitive"
+        },
+        {
+          "url" : "http://terminology.hl7.org/StructureDefinition/ext-mif-relationship-reflexivity",
+          "valueCode" : "irreflexive"
+        },
+        {
+          "url" : "http://terminology.hl7.org/StructureDefinition/ext-mif-relationship-isNavigable",
+          "valueBoolean" : true
+        },
+        {
+          "url" : "http://terminology.hl7.org/StructureDefinition/ext-mif-relationship-relationshipKind",
+          "valueCode" : "Specializes"
+        },
+        {
+          "url" : "http://terminology.hl7.org/StructureDefinition/ext-mif-relationship-inverseName",
+          "valueString" : "Generalizes"
+        }
+      ],
+      "code" : "Specializes",
+      "description" : "The child code is a more narrow version of the concept represented by the parent code.  I.e. Every child concept is also a valid parent concept.  Used to allow determination of subsumption.  Must be transitive, irreflexive, antisymmetric.",
+      "type" : "Coding"
+    },
+    {
+      "extension" : [
+        {
+          "url" : "http://terminology.hl7.org/StructureDefinition/ext-mif-relationship-symmetry",
+          "valueCode" : "antisymmetric"
+        },
+        {
+          "url" : "http://terminology.hl7.org/StructureDefinition/ext-mif-relationship-transitivity",
+          "valueCode" : "transitive"
+        },
+        {
+          "url" : "http://terminology.hl7.org/StructureDefinition/ext-mif-relationship-reflexivity",
+          "valueCode" : "irreflexive"
+        },
+        {
+          "url" : "http://terminology.hl7.org/StructureDefinition/ext-mif-relationship-isNavigable",
+          "valueBoolean" : true
+        },
+        {
+          "url" : "http://terminology.hl7.org/StructureDefinition/ext-mif-relationship-relationshipKind",
+          "valueCode" : "Generalizes"
+        },
+        {
+          "url" : "http://terminology.hl7.org/StructureDefinition/ext-mif-relationship-inverseName",
+          "valueString" : "Specializes"
+        }
+      ],
+      "code" : "Generalizes",
+      "description" : "Inverse of Specializes.  Only included as a derived relationship.",
+      "type" : "Coding"
+    },
+    {
+      "code" : "internalId",
+      "uri" : "http://terminology.hl7.org/CodeSystem/utg-concept-properties#v3-internal-id",
+      "description" : "The internal identifier for the concept in the HL7 Access database repository.",
+      "type" : "code"
+    },
+    {
+      "code" : "status",
+      "uri" : "http://hl7.org/fhir/concept-properties#status",
+      "description" : "Designation of a concept's state. Normally is not populated unless the state is retired.",
+      "type" : "code"
+    }
+  ],
+  "concept" : [
+    {
+      "code" : "ASSOC",
+      "display" : "Associate's or technical degree complete",
+      "definition" : "Associate's or technical degree complete",
+      "property" : [
+        {
+          "code" : "status",
+          "valueCode" : "active"
+        },
+        {
+          "code" : "internalId",
+          "valueCode" : "19180"
+        }
+      ]
+    },
+    {
+      "code" : "BD",
+      "display" : "College or baccalaureate degree complete",
+      "definition" : "College or baccalaureate degree complete",
+      "property" : [
+        {
+          "code" : "status",
+          "valueCode" : "active"
+        },
+        {
+          "code" : "internalId",
+          "valueCode" : "19181"
+        }
+      ]
+    },
+    {
+      "code" : "ELEM",
+      "display" : "Elementary School",
+      "definition" : "Elementary School",
+      "property" : [
+        {
+          "code" : "status",
+          "valueCode" : "active"
+        },
+        {
+          "code" : "internalId",
+          "valueCode" : "19176"
+        }
+      ]
+    },
+    {
+      "code" : "GD",
+      "display" : "Graduate or professional Degree complete",
+      "definition" : "Graduate or professional Degree complete",
+      "property" : [
+        {
+          "code" : "status",
+          "valueCode" : "active"
+        },
+        {
+          "code" : "internalId",
+          "valueCode" : "19183"
+        }
+      ]
+    },
+    {
+      "code" : "HS",
+      "display" : "High School or secondary school degree complete",
+      "definition" : "High School or secondary school degree complete",
+      "property" : [
+        {
+          "code" : "status",
+          "valueCode" : "active"
+        },
+        {
+          "code" : "internalId",
+          "valueCode" : "19178"
+        }
+      ]
+    },
+    {
+      "code" : "PB",
+      "display" : "Some post-baccalaureate education",
+      "definition" : "Some post-baccalaureate education",
+      "property" : [
+        {
+          "code" : "status",
+          "valueCode" : "active"
+        },
+        {
+          "code" : "internalId",
+          "valueCode" : "19182"
+        }
+      ]
+    },
+    {
+      "code" : "POSTG",
+      "display" : "Doctoral or post graduate education",
+      "definition" : "Doctoral or post graduate education",
+      "property" : [
+        {
+          "code" : "status",
+          "valueCode" : "active"
+        },
+        {
+          "code" : "internalId",
+          "valueCode" : "19184"
+        }
+      ]
+    },
+    {
+      "code" : "SCOL",
+      "display" : "Some College education",
+      "definition" : "Some College education",
+      "property" : [
+        {
+          "code" : "status",
+          "valueCode" : "active"
+        },
+        {
+          "code" : "internalId",
+          "valueCode" : "19179"
+        }
+      ]
+    },
+    {
+      "code" : "SEC",
+      "display" : "Some secondary or high school education",
+      "definition" : "Some secondary or high school education",
+      "property" : [
+        {
+          "code" : "status",
+          "valueCode" : "active"
+        },
+        {
+          "code" : "internalId",
+          "valueCode" : "19177"
+        }
+      ]
+    }
+  ]
+}

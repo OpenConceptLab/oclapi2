@@ -328,6 +328,56 @@ class ValueSetTest(OCLAPITestCase):
         self.assertEqual(resource['parameter'][0]['name'], 'result')
         self.assertEqual(resource['parameter'][0]['valueBoolean'], True)
 
+    def test_validate_code_negative(self):
+        self.collection.add_references([
+            CollectionReference(expression=self.concept_1.uri, collection=self.collection),
+            CollectionReference(expression=self.concept_2.uri, collection=self.collection),
+        ])
+        self.collection_v1.seed_references()
+
+        response = self.client.get(
+            f'/orgs/{self.org.mnemonic}/ValueSet/{self.collection.mnemonic}/$validate-code/'
+            f'?system=http://non/existing&systemVersion={self.org_source_v2.version}&code={self.concept_1.mnemonic}'
+        )
+
+        resource = response.data
+        self.assertEqual(resource['parameter'][0]['name'], 'result')
+        self.assertEqual(resource['parameter'][0]['valueBoolean'], False)
+
+    def test_validate_code_globally(self):
+        self.collection.add_references([
+            CollectionReference(expression=self.concept_1.uri, collection=self.collection),
+            CollectionReference(expression=self.concept_2.uri, collection=self.collection),
+        ])
+        self.collection_v1.seed_references()
+
+        response = self.client.get(
+            f'/fhir/ValueSet/$validate-code/'
+            f'?url=http://c1.com&system=http://some/url&systemVersion={self.org_source_v2.version}'
+            f'&code={self.concept_1.mnemonic}'
+        )
+
+        resource = response.data
+        self.assertEqual(resource['parameter'][0]['name'], 'result')
+        self.assertEqual(resource['parameter'][0]['valueBoolean'], True)
+
+    def test_validate_code_globally_negative(self):
+        self.collection.add_references([
+            CollectionReference(expression=self.concept_1.uri, collection=self.collection),
+            CollectionReference(expression=self.concept_2.uri, collection=self.collection),
+        ])
+        self.collection_v1.seed_references()
+
+        response = self.client.get(
+            f'/fhir/ValueSet/$validate-code/'
+            f'?url=http://c1.com&system=http://some/url&systemVersion={self.org_source_v2.version}'
+            f'&code=non_existing'
+        )
+
+        resource = response.data
+        self.assertEqual(resource['parameter'][0]['name'], 'result')
+        self.assertEqual(resource['parameter'][0]['valueBoolean'], False)
+
     def test_expand(self):
         self.client.post(
             f'/users/{self.user.mnemonic}/ValueSet/',

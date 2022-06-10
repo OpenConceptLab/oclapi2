@@ -346,6 +346,8 @@ class CollectionReference(models.Model):
     version = models.CharField(null=True, blank=True, max_length=255)
     valueset = ArrayField(models.TextField(), null=True, blank=True)
     cascade = models.JSONField(null=True, blank=True)
+    # Use transform set to TRANSFORM_TO_RESOURCE_VERSIONS to indicate using the latest version instead of HEAD
+    # Applies to old style expression and FHIR ValueSets
     transform = models.CharField(null=True, blank=True, max_length=255)
     include = models.BooleanField(default=True)
 

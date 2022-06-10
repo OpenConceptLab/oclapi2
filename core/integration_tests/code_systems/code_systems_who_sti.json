@@ -1,0 +1,56 @@
+{
+  "resourceType": "CodeSystem",
+  "id": "extended-content-codes",
+  "text": {
+    "status": "generated",
+    "div": "<div xmlns=\"http://www.w3.org/1999/xhtml\"><p>This code system http://who.int/cg/CodeSystem/extended-content-codes defines the following codes:</p><table class=\"codes\"><tr><td style=\"white-space:nowrap\"><b>Code</b></td><td><b>Display</b></td><td><b>Definition</b></td></tr><tr><td style=\"white-space:nowrap\">Date of Screening<a name=\"extended-content-codes-DateofScreening\"> </a></td><td>Date of Screening</td><td>Date of Screening</td></tr><tr><td style=\"white-space:nowrap\">Screening Result<a name=\"extended-content-codes-ScreeningResult\"> </a></td><td>Screening Result</td><td>Screening Result</td></tr><tr><td style=\"white-space:nowrap\">Partner management recommended<a name=\"extended-content-codes-Partnermanagementrecommended\"> </a></td><td>Partner management recommended</td><td>Partner management recommended</td></tr></table></div>"
+  },
+  "url": "http://who.int/cg/CodeSystem/extended-content-codes",
+  "version": "0.2.0",
+  "name": "extended-content_codes",
+  "title": "Extended Codes CodeSystem codes",
+  "status": "draft",
+  "experimental": false,
+  "date": "2022-05-19T14:52:27+00:00",
+  "publisher": "World Health Organization (WHO)",
+  "contact": [
+    {
+      "telecom": [
+        {
+          "system": "url",
+          "value": "https://www.who.int"
+        }
+      ]
+    }
+  ],
+  "description": "Set of codes identified as being needed but not found in existing Code Systems",
+  "jurisdiction": [
+    {
+      "coding": [
+        {
+          "system": "http://unstats.un.org/unsd/methods/m49/m49.htm",
+          "code": "001"
+        }
+      ]
+    }
+  ],
+  "caseSensitive": true,
+  "content": "complete",
+  "concept": [
+    {
+      "code": "Date of Screening",
+      "display": "Date of Screening",
+      "definition": "Date of Screening"
+    },
+    {
+      "code": "Screening Result",
+      "display": "Screening Result",
+      "definition": "Screening Result"
+    },
+    {
+      "code": "Partner management recommended",
+      "display": "Partner management recommended",
+      "definition": "Partner management recommended"
+    }
+  ]
+}
