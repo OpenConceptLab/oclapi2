@@ -566,7 +566,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         boost_attrs = self.document_model.get_boostable_search_attrs() or {}
 
         def get_query(_str):
-            query = Q("query_string", query=self.get_wildcard_search_string(_str))
+            query = Q("query_string", query=self.get_wildcard_search_string(_str), boost=0)
             for attr, meta in boost_attrs.items():
                 is_wildcard = meta.get('wildcard', False)
                 decode = meta.get('decode', False)
