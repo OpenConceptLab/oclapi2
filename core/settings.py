@@ -51,6 +51,7 @@ CORS_EXPOSE_HEADERS = (
     'Content-Range',
     'X-OCL-API-VERSION',
     'X-OCL-REQUEST-USER',
+    'X-OCL-RESPONSE-TIME',
 )
 
 CORS_ORIGIN_ALLOW_ALL = True
