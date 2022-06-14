@@ -874,6 +874,7 @@ class SourceLogoViewTest(OCLAPITestCase):
             'base64-data', 'users/username/sources/source1/logo.png', False, True
         )
 
+
 class SourceVersionSummaryViewTest(OCLAPITestCase):
     def setUp(self):
         super().setUp()
@@ -999,3 +1000,59 @@ class SourceConceptsIndexViewTest(OCLAPITestCase):
         self.assertEqual(
             response.data, {'state': 'PENDING', 'username': 'soop', 'task': 'task-id-123', 'queue': 'default'})
         index_source_concepts_task_mock.delay.assert_called_once_with(100)
+
+
+class SourceVersionProcessingViewTest(OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.source = OrganizationSourceFactory()
+        self.token = self.source.created_by.get_token()
+
+    def test_get_200(self):
+        response = self.client.get(
+            self.source.uri + 'HEAD/processing/',
+            HTTP_AUTHORIZATION=f'Token {self.token}'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.content, b'False')
+
+        self.source.add_processing("Task123")
+
+        response = self.client.get(
+            self.source.uri + 'HEAD/processing/',
+            HTTP_AUTHORIZATION=f'Token {self.token}'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.content, b'True')
+
+        response = self.client.get(
+            self.source.uri + 'HEAD/processing/?debug=true',
+            HTTP_AUTHORIZATION=f'Token {self.token}'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, dict(is_processing=True, process_ids=['Task123']))
+
+    def test_post_200(self):
+        self.source.add_processing("Task123")
+        self.assertTrue(self.source.is_processing)
+
+        response = self.client.post(
+            self.source.uri + 'HEAD/processing/',
+            HTTP_AUTHORIZATION=f'Token {self.token}'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.source.refresh_from_db()
+        self.assertFalse(self.source.is_processing)
+
+        response = self.client.post(
+            self.source.uri + 'HEAD/processing/',
+            HTTP_AUTHORIZATION=f'Token {self.token}'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.source.refresh_from_db()
+        self.assertFalse(self.source.is_processing)
