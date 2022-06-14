@@ -1,6 +1,5 @@
 import base64
 import os
-import unittest
 import uuid
 from unittest.mock import patch, Mock, mock_open
 
@@ -231,7 +230,6 @@ class OCLTestCase(TestCase, BaseTestCase):
 
 
 class S3Test(TestCase):
-    @unittest.skip('Failing on CI')
     @mock_s3
     def test_upload(self):
         _conn = boto3.resource('s3', region_name='us-east-1')
@@ -339,7 +337,6 @@ class S3Test(TestCase):
             isinstance(mock_calls[0][1][1], ContentFile)
         )
 
-    @unittest.skip('Failing on CI')
     @mock_s3
     def test_remove(self):
         conn = boto3.resource('s3', region_name='us-east-1')
