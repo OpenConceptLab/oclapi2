@@ -245,6 +245,17 @@ class S3Test(TestCase):
             'content'
         )
 
+    @mock_s3
+    def test_exists(self):
+        _conn = boto3.resource('s3', region_name='us-east-1')
+        _conn.create_bucket(Bucket='oclapi2-dev')
+
+        self.assertFalse(S3.exists('some/path'))
+
+        S3.upload('some/path', 'content')
+
+        self.assertTrue(S3.exists('some/path'))
+
     @patch('core.common.services.S3._conn')
     def test_upload_public(self, client_mock):
         conn_mock = Mock()
