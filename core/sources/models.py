@@ -101,7 +101,10 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
 
     @property
     def mapping_mnemonic_next(self):
-        return self.get_resource_next_attr_id(self.autoid_mapping_mnemonic, self.mappings_mnemonic_seq_name)
+        try:
+            return self.get_resource_next_attr_id(self.autoid_mapping_mnemonic, self.mappings_mnemonic_seq_name)
+        except:  # pylint: disable=bare-except
+            return None
 
     @property
     def mapping_external_id_next(self):
