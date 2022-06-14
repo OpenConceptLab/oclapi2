@@ -1,4 +1,4 @@
-Django==4.0.4
+Django==4.0.5
 psycopg2==2.9.2
 gunicorn==20.1.0 #production server
 whitenoise==5.3.0 #serving swagger static files
@@ -29,7 +29,7 @@ django-ordered-model==3.4.3
 django-health-check>=3.16.2
 markdown==3.3.7
 mock==4.0.3
-django-request-logging==0.7.3
+django-request-logging==0.7.5
 django-cid==2.2
 django-dirtyfields==1.8.1
 jsonpath-ng==1.5.3
