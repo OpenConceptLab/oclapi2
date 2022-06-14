@@ -927,4 +927,3 @@ class PostgresQLTest(OCLTestCase):
 
         db_connection_mock.cursor.assert_called_once()
         cursor_context_mock.execute.assert_called_once_with("SELECT last_value from foobar_seq;")
-
