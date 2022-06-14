@@ -794,6 +794,52 @@ class SourceVersionExportViewTest(OCLAPITestCase):
         s3_exists_mock.assert_called_once_with(f"username/source1_v1.{self.v1_updated_at}.zip")
         export_source_mock.delay.assert_called_once_with(self.source_v1.id)
 
+    def test_delete_405(self):
+        random_user = UserProfileFactory()
+        response = self.client.delete(
+            self.source.uri + 'HEAD/export/',
+            HTTP_AUTHORIZATION='Token ' + random_user.get_token(),
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 405)
+
+    def test_delete_403(self):
+        random_user = UserProfileFactory()
+        response = self.client.delete(
+            self.source_v1.uri + 'export/',
+            HTTP_AUTHORIZATION='Token ' + random_user.get_token(),
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    @patch('core.sources.models.Source.has_export')
+    def test_delete_404_no_export(self, has_export_mock):
+        has_export_mock.return_value = False
+        response = self.client.delete(
+            self.source_v1.uri + 'export/',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+    @patch('core.sources.models.Source.export_path', new_callable=PropertyMock)
+    @patch('core.sources.models.Source.has_export')
+    @patch('core.common.services.S3.remove')
+    def test_delete_204(self, s3_remove_mock, has_export_mock, export_path_mock):
+        has_export_mock.return_value = True
+        export_path_mock.return_value = 'v1/export/path'
+        response = self.client.delete(
+            self.source_v1.uri + 'export/',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 204)
+        s3_remove_mock.assert_called_once_with('v1/export/path')
+
 
 class ExportSourceTaskTest(OCLAPITestCase):
     @patch('core.common.utils.S3')
