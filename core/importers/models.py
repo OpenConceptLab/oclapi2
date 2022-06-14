@@ -6,6 +6,7 @@ from datetime import datetime
 from celery import group
 from celery.utils.log import get_task_logger
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db.models import F
 from ocldev.oclfleximporter import OclFlexImporter
 from pydash import compact, get
@@ -824,7 +825,9 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
 
         for data in self.input_list:
             line = data if isinstance(data, dict) else json.loads(data)
-            data_type = line.get('type', None).lower()
+            data_type = line.get('type', '').lower()
+            if not data_type:
+                raise ValidationError('"type" should be present in each line')
             if data_type not in ['organization', 'source', 'collection']:
                 if prev_line:
                     prev_type = prev_line.get('type').lower()

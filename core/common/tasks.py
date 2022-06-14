@@ -5,6 +5,7 @@ from celery.utils.log import get_task_logger
 from celery_once import QueueOnce
 from django.apps import apps
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.core.mail import EmailMessage
 from django.core.management import call_command
 from django.template.loader import render_to_string
@@ -237,6 +238,8 @@ def bulk_import_parallel_inline(self, to_import, username, update_if_exists, thr
         )
     except JSONDecodeError as ex:
         return dict(error=f"Invalid JSON ({ex.msg})")
+    except ValidationError as ex:
+        return dict(error=f"Invalid Input ({ex.message})")
     return importer.run()
 
 

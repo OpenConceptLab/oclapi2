@@ -833,6 +833,16 @@ class TaskTest(OCLTestCase):
         import_run_mock.assert_not_called()
 
     @patch('core.importers.models.BulkImportParallelRunner.run')
+    def test_bulk_import_parallel_inline_invalid_without_resource_type(self, import_run_mock):
+        content = open(
+            os.path.join(os.path.dirname(__file__), '..', 'samples/invalid_import_without_type.json'), 'r').read()
+
+        result = bulk_import_parallel_inline(to_import=content, username='ocladmin', update_if_exists=False)  # pylint: disable=no-value-for-parameter
+
+        self.assertEqual(result, dict(error='Invalid Input ("type" should be present in each line)'))
+        import_run_mock.assert_not_called()
+
+    @patch('core.importers.models.BulkImportParallelRunner.run')
     def test_bulk_import_parallel_inline_valid_json(self, import_run_mock):
         import_run_mock.return_value = 'Import Result'
         content = open(os.path.join(os.path.dirname(__file__), '..', 'samples/sample_ocldev.json'), 'r').read()
