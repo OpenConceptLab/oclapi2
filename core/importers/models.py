@@ -576,7 +576,7 @@ class ReferenceImporter(BaseResourceImporter):
                 (added_references, _) = collection.add_expressions(
                     self.get('data'), self.user, self.get('__cascade', False)
                 )
-                if not get(settings, 'TEST_MODE', False):
+                if not get(settings, 'TEST_MODE', False):  # pragma: no cover
                     concept_ids = []
                     mapping_ids = []
                     for ref in added_references:
@@ -652,12 +652,12 @@ class BulkImportInline(BaseImporter):
         self.others.append(item)
 
     def notify_progress(self):
-        if self.self_task_id:
+        if self.self_task_id:  # pragma: no cover
             service = RedisService()
             service.set(self.self_task_id, self.processed)
 
     def run(self):  # pylint: disable=too-many-branches,too-many-statements,too-many-locals
-        if self.self_task_id:
+        if self.self_task_id:  # pragma: no cover
             print("****STARTED SUBPROCESS****")
             print(f"TASK ID: {self.self_task_id}")
             print("***************")
