@@ -593,8 +593,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         search_results = search_results.params(request_timeout=ES_REQUEST_TIMEOUT)
         self.total_count = search_results.count()
 
-        if isinstance(self.limit, str):
-            self.limit = int(self.limit)
+        self.limit = int(self.limit)
 
         self.limit = self.limit or LIST_DEFAULT_LIMIT
         page = max(int(self.request.GET.get('page') or '1'), 1)
@@ -602,7 +601,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         end = start + self.limit
         try:
             return search_results[start:end].to_queryset()
-        except RequestError as ex:
+        except RequestError as ex:  # pragma: no cover
             if get(ex, 'info.error.caused_by.reason', '').startswith('Result window is too large'):
                 raise Http400(detail='Only 10000 results are available. Please apply additional filters'
                                      ' or fine tune your query to get more accurate results.') from ex
