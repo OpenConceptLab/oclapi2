@@ -755,6 +755,20 @@ class SourceTest(OCLTestCase):
         concept_document_update.assert_called_once_with(ANY, parallel=True)
         mapping_document_update.assert_called_once_with(ANY, parallel=True)
 
+    def test_autoid_start_from_validate_non_negative(self):
+        for field in [
+            'autoid_concept_mnemonic_start_from', 'autoid_mapping_mnemonic_start_from',
+            'autoid_concept_external_id_start_from', 'autoid_mapping_external_id_start_from',
+        ]:
+            with self.assertRaises(ValidationError):
+                Source(**{field: -1}, mnemonic='foo', version='HEAD', name='foo').full_clean()
+
+        for field in [
+            'autoid_concept_mnemonic_start_from', 'autoid_mapping_mnemonic_start_from',
+            'autoid_concept_external_id_start_from', 'autoid_mapping_external_id_start_from',
+        ]:
+            Source(**{field: 1}, mnemonic='foo', version='HEAD', name='foo').full_clean()
+
 
 class TasksTest(OCLTestCase):
     @patch('core.sources.models.Source.index_children')
