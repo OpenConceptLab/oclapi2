@@ -1054,7 +1054,12 @@ class SourceVersionProcessingViewTest(OCLAPITestCase):
         self.source = OrganizationSourceFactory()
         self.token = self.source.created_by.get_token()
 
-    def test_get_200(self):
+    @patch('core.common.models.AsyncResult.failed')
+    @patch('core.common.models.AsyncResult.successful')
+    def test_get_200(self, async_result_success_mock, async_result_failure_mock):
+        async_result_success_mock.return_value = False
+        async_result_failure_mock.return_value = False
+
         response = self.client.get(
             self.source.uri + 'HEAD/processing/',
             HTTP_AUTHORIZATION=f'Token {self.token}'
@@ -1081,7 +1086,12 @@ class SourceVersionProcessingViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data, dict(is_processing=True, process_ids=['Task123']))
 
-    def test_post_200(self):
+    @patch('core.common.models.AsyncResult.failed')
+    @patch('core.common.models.AsyncResult.successful')
+    def test_post_200(self, async_result_success_mock, async_result_failure_mock):
+        async_result_success_mock.return_value = False
+        async_result_failure_mock.return_value = False
+
         self.source.add_processing("Task123")
         self.assertTrue(self.source.is_processing)
 
