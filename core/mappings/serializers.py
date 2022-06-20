@@ -155,6 +155,7 @@ class MappingReverseMinimalSerializer(ModelSerializer):
     url = CharField(source='uri', read_only=True)
     from_concept_code = EncodedDecodedCharField()
     target_concept_code = EncodedDecodedCharField(source='from_concept_code')
+    target_concept_name = SerializerMethodField()
     target_concept_url = CharField(source='from_concept_url')
     target_source_name = CharField(source='from_source_name', allow_blank=True, allow_null=True)
     target_source_owner = CharField(source='from_source_owner', allow_blank=True, allow_null=True)
@@ -163,8 +164,18 @@ class MappingReverseMinimalSerializer(ModelSerializer):
         model = Mapping
         fields = (
             'uuid', 'id', 'type', 'map_type', 'url', 'version_url', 'from_concept_code', 'from_concept_url',
-            'target_concept_code', 'target_concept_url', 'target_source_owner', 'target_source_name'
+            'target_concept_code', 'target_concept_url', 'target_source_owner', 'target_source_name',
+            'target_concept_name'
         )
+
+    @staticmethod
+    def get_target_concept_name(obj):
+        name = obj.from_concept_name
+        if not name and obj.parent_id != get(obj, 'from_concept.parent_id'):
+            # only returns for source different than self
+            name = get(obj, 'from_concept.display_name')
+
+        return name
 
 
 class MappingDetailSerializer(MappingListSerializer):
