@@ -738,6 +738,10 @@ class Expansion(BaseResourceModel):
     collection_version = models.ForeignKey(
         'collections.Collection', related_name='expansions', on_delete=models.CASCADE)
     is_processing = models.BooleanField(default=False)
+    resolved_collection_versions = models.ManyToManyField(
+        'collections.Collection', related_name='expansions_resolved_collection_versions_set')
+    resolved_source_versions = models.ManyToManyField(
+        'sources.Source', related_name='expansions_resolved_source_versions_set')
 
     @property
     def is_auto_generated(self):
@@ -860,8 +864,10 @@ class Expansion(BaseResourceModel):
             batch_index_resources.apply_async(('concept', concepts_filters), queue='indexing')
             batch_index_resources.apply_async(('mapping', mappings_filters), queue='indexing')
 
-    def add_references(self, references, index=True, is_adding_all_references=False, attempt_reevaluate=True):  # pylint: disable=too-many-locals,too-many-branches
+    def add_references(self, references, index=True, is_adding_all_references=False, attempt_reevaluate=True):  # pylint: disable=too-many-locals
         include_refs, exclude_refs = self.to_ref_list_separated(references)
+        resolved_valueset_versions = []
+        resolved_system_versions = []
 
         if not is_adding_all_references:
             existing_exclude_refs = self.collection_version.references.exclude(include=True)
@@ -882,9 +888,14 @@ class Expansion(BaseResourceModel):
 
         def get_ref_results(ref):
             # attempt_reevaluate is False for delete reference(s)
+            nonlocal resolved_valueset_versions
+            nonlocal resolved_system_versions
+            _system_version = include_system_version if ref.can_compute_against_system_version(
+                include_system_version) else None
+            resolved_valueset_versions += ref.resolve_valueset_versions
+            resolved_system_versions += [_system_version] if _system_version else [ref.resolve_system_version]
+
             if should_reevaluate:
-                _system_version = include_system_version if ref.can_compute_against_system_version(
-                    include_system_version) else None
                 _concepts, _mappings = ref.get_concepts(_system_version)
                 _mappings |= ref.get_mappings(_system_version)
             else:
@@ -894,39 +905,41 @@ class Expansion(BaseResourceModel):
 
         for reference in include_refs:
             concepts, mappings = get_ref_results(reference)
-            if concepts.exists():
-                self.concepts.add(*self.apply_parameters(concepts, True))
-                index_concepts = True
-            if mappings.exists():
-                self.mappings.add(*self.apply_parameters(mappings, False))
-                index_mappings = True
+            index_concepts = self.__include_resources(self.concepts, concepts, True)
+            index_mappings = self.__include_resources(self.mappings, mappings, False)
 
         for reference in exclude_refs:
             concepts, mappings = get_ref_results(reference)
-            if concepts.exists():
-                if reference.resource_version:
-                    self.concepts.remove(*concepts)
-                else:
-                    self.concepts.set(
-                        self.concepts.exclude(
-                            versioned_object_id__in=concepts.values_list('versioned_object_id', flat=True))
-                    )
-                index_concepts = True
-            if mappings.exists():
-                if reference.resource_version:
-                    self.mappings.remove(*mappings)
-                else:
-                    self.mappings.set(
-                        self.mappings.exclude(
-                            versioned_object_id__in=mappings.values_list('versioned_object_id', flat=True))
-                    )
-                index_mappings = True
+            index_concepts = self.__exclude_resources(reference, self.concepts, concepts)
+            index_mappings = self.__exclude_resources(reference, self.mappings, mappings)
+
+        self.resolved_collection_versions.add(*compact(resolved_valueset_versions))
+        self.resolved_source_versions.add(*compact(resolved_system_versions))
 
         if index:
-            if index_concepts:
-                self.index_concepts()
-            if index_mappings:
-                self.index_mappings()
+            self.index_resources(index_concepts, index_mappings)
+
+    def __include_resources(self, rel, resources, is_concept_queryset):
+        should_index = resources.exists()
+        if should_index:
+            rel.add(*self.apply_parameters(resources, is_concept_queryset))
+        return should_index
+
+    @staticmethod
+    def __exclude_resources(ref, rel, resources):
+        should_index = resources.exists()
+        if should_index:
+            if ref.resource_version:
+                rel.remove(*resources)
+            else:
+                rel.set(rel.exclude(versioned_object_id__in=rel.values_list('versioned_object_id', flat=True)))
+        return should_index
+
+    def index_resources(self, concepts, mappings):
+        if concepts:
+            self.index_concepts()
+        if mappings:
+            self.index_mappings()
 
     def seed_children(self, index=True):
         return self.add_references(self.collection_version.references, index, True)

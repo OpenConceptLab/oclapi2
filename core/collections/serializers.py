@@ -13,6 +13,7 @@ from core.common.constants import HEAD, DEFAULT_ACCESS_TYPE, NAMESPACE_REGEX, AC
     INCLUDE_CLIENT_CONFIGS, INVALID_EXPANSION_URL
 from core.orgs.models import Organization
 from core.settings import DEFAULT_LOCALE
+from core.sources.serializers import SourceVersionListSerializer
 from core.users.models import UserProfile
 
 
@@ -398,7 +399,9 @@ class ExpansionSerializer(ModelSerializer):
 
     class Meta:
         model = Expansion
-        fields = ('mnemonic', 'id', 'parameters', 'canonical_url', 'url', 'summary', 'is_processing')
+        fields = (
+            'mnemonic', 'id', 'parameters', 'canonical_url', 'url', 'summary', 'is_processing',
+        )
 
     def __init__(self, *args, **kwargs):
         params = get(kwargs, 'context.request.query_params')
@@ -430,12 +433,14 @@ class ExpansionDetailSerializer(ModelSerializer):
     parameters = JSONField()
     created_on = DateTimeField(source='created_at', read_only=True)
     created_by = DateTimeField(source='created_by.username', read_only=True)
+    resolved_collection_versions = CollectionVersionListSerializer(many=True, read_only=True)
+    resolved_source_versions = SourceVersionListSerializer(many=True, read_only=True)
 
     class Meta:
         model = Expansion
         fields = (
             'mnemonic', 'id', 'parameters', 'canonical_url', 'url', 'summary', 'created_on', 'created_by',
-            'is_processing'
+            'is_processing', 'resolved_collection_versions', 'resolved_source_versions'
         )
 
     def __init__(self, *args, **kwargs):

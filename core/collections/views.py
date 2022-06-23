@@ -729,7 +729,7 @@ class CollectionVersionExpansionBaseView(CollectionBaseView):
 
 
 class CollectionVersionExpansionView(CollectionVersionExpansionBaseView, RetrieveAPIView, DestroyAPIView):
-    serializer_class = ExpansionSerializer
+    serializer_class = ExpansionDetailSerializer
     permission_classes = (CanViewConceptDictionary, )
 
     def destroy(self, request, *args, **kwargs):  # pylint: disable=unused-argument
