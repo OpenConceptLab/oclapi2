@@ -466,12 +466,6 @@ class CollectionReference(models.Model):
                 queryset |= result['concepts']
                 mapping_queryset |= result['mappings']
 
-            # distinct is to eliminate self mappings
-            queryset = Concept.objects.filter(
-                id__in=queryset.values_list('id', flat=True).distinct('versioned_object_id'))
-            mapping_queryset = Mapping.objects.filter(
-                id__in=mapping_queryset.values_list('id', flat=True).distinct('versioned_object_id'))
-
         if self.should_apply_filter():
             queryset = self.apply_filters(queryset, Concept)
         if self.should_transform_to_latest_version():
