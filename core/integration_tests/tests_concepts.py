@@ -1819,12 +1819,12 @@ class ConceptCollectionMembershipViewTest(OCLAPITestCase):
         expansion3 = ExpansionFactory(collection_version=collection3)
         collection3.expansion_uri = expansion3.uri
         collection3.save()
-        expansion1.concepts.add(concept1.get_latest_version())
-        expansion2.concepts.add(concept1.get_latest_version())
-        expansion3.concepts.add(concept1.get_latest_version())
-        expansion1.concepts.add(concept2.get_latest_version())
-        expansion2.concepts.add(concept2.get_latest_version())
-        expansion3.concepts.add(concept2.get_latest_version())
+        expansion1.concepts.add(concept1)
+        expansion2.concepts.add(concept1)
+        expansion3.concepts.add(concept1)
+        expansion1.concepts.add(concept2)
+        expansion2.concepts.add(concept2)
+        expansion3.concepts.add(concept2)
 
         response = self.client.get(concept1.url + 'collection-versions/')
 

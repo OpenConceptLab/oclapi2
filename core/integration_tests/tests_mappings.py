@@ -842,12 +842,12 @@ class MappingCollectionMembershipViewTest(OCLAPITestCase):
         expansion3 = ExpansionFactory(collection_version=collection3)
         collection3.expansion_uri = expansion3.uri
         collection3.save()
-        expansion1.mappings.add(mapping1.get_latest_version())
-        expansion2.mappings.add(mapping1.get_latest_version())
-        expansion3.mappings.add(mapping1.get_latest_version())
-        expansion1.mappings.add(mapping2.get_latest_version())
-        expansion2.mappings.add(mapping2.get_latest_version())
-        expansion3.mappings.add(mapping2.get_latest_version())
+        expansion1.mappings.add(mapping1)
+        expansion2.mappings.add(mapping1)
+        expansion3.mappings.add(mapping1)
+        expansion1.mappings.add(mapping2)
+        expansion2.mappings.add(mapping2)
+        expansion3.mappings.add(mapping2)
 
         response = self.client.get(mapping1.url + 'collection-versions/')
 
