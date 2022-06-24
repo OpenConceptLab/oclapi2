@@ -208,7 +208,7 @@ class MappingCollectionMembershipView(MappingBaseView, ListWithHeadersMixin):
     def get_object(self, queryset=None):
         queryset = Mapping.get_base_queryset(self.params)
         if 'mapping_version' not in self.kwargs:
-            instance = queryset.filter(id=F('versioned_object_id'))
+            queryset = queryset.filter(id=F('versioned_object_id'))
         instance = queryset.first()
 
         if not instance:
