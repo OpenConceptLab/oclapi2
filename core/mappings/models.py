@@ -25,12 +25,16 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
                       models.Index(name='mappings_updated_4589ad_idx', fields=['-updated_at'],
                                    condition=(Q(is_active=True) & Q(retired=False) & Q(is_latest_version=True) &
                                               ~Q(public_access='None'))),
+                      models.Index(name='mappings_ver_updated_at_idx', fields=['-updated_at'],
+                                   condition=(Q(is_active=True) & Q(retired=False) & ~Q(public_access='None'))),
                       models.Index(name='mappings_vers_updated_idx', fields=['-updated_at'],
                                    condition=(Q(is_active=True) & Q(retired=False) & Q(id=F('versioned_object_id')) &
                                               ~Q(public_access='None'))),
                       models.Index(name='mappings_public_conditional', fields=['public_access'],
                                    condition=(Q(is_active=True) & Q(retired=False) & Q(is_latest_version=True) &
                                               ~Q(public_access='None'))),
+                      models.Index(name='mappings_ver_public', fields=['public_access'],
+                                   condition=(Q(is_active=True) & Q(retired=False) & ~Q(public_access='None'))),
                       models.Index(name='mappings_ver_public_cond', fields=['public_access'],
                                    condition=(Q(is_active=True) & Q(retired=False) & Q(id=F('versioned_object_id')) &
                                               ~Q(public_access='None'))),
@@ -42,6 +46,8 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
                                               ~Q(public_access='None'))),
                       models.Index(name='mappings_all_for_count', fields=['is_active'],
                                    condition=(Q(is_active=True) & Q(retired=False) & Q(is_latest_version=True))),
+                      models.Index(name='mappings_ver_for_count', fields=['is_active'],
+                                   condition=(Q(is_active=True) & Q(retired=False))),
                       models.Index(name='mappings_ver_all_for_count', fields=['is_active'],
                                    condition=(Q(is_active=True) & Q(retired=False) & Q(id=F('versioned_object_id')))),
                       models.Index(name='mappings_all_for_count2', fields=['parent_id'],
@@ -50,6 +56,8 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
                                    condition=(Q(is_active=True) & Q(retired=False) & Q(id=F('versioned_object_id')))),
                       models.Index(name='mappings_all_for_sort', fields=['-updated_at'],
                                    condition=(Q(is_active=True) & Q(retired=False) & Q(is_latest_version=True))),
+                      models.Index(name='mappings_ver_for_sort', fields=['-updated_at'],
+                                   condition=(Q(is_active=True) & Q(retired=False))),
                       models.Index(name='mappings_ver_all_for_sort', fields=['-updated_at'],
                                    condition=(Q(is_active=True) & Q(retired=False) & Q(id=F('versioned_object_id')))),
                   ] + VersionedModel.Meta.indexes

@@ -59,25 +59,26 @@ class MappingListView(MappingBaseView, ListWithHeadersMixin, CreateModelMixin):
     def get_queryset(self):
         is_latest_version = 'collection' not in self.kwargs and 'version' not in self.kwargs or \
                             get(self.kwargs, 'version') == HEAD
-        if get(self, 'parent_resource'):
-            parent = self.parent_resource
+        parent = get(self, 'parent_resource')
+        if parent:
             queryset = parent.mappings_set if parent.is_head else parent.mappings
             queryset = Mapping.apply_attribute_based_filters(queryset, self.params).filter(is_active=True)
         else:
             queryset = super().get_queryset()
+
         if is_latest_version:
             queryset = queryset.filter(id=F('versioned_object_id'))
 
-        user = self.request.user
-
-        if get(user, 'is_anonymous'):
-            queryset = queryset.exclude(public_access=ACCESS_TYPE_NONE)
-        elif not get(user, 'is_staff'):
-            public_queryset = queryset.exclude(public_access=ACCESS_TYPE_NONE)
-            private_queryset = queryset.filter(public_access=ACCESS_TYPE_NONE)
-            private_queryset = private_queryset.filter(
-                Q(parent__user_id=user.id) | Q(parent__organization__members__id=user.id))
-            queryset = public_queryset.union(private_queryset)
+        if not parent:
+            user = self.request.user
+            if get(user, 'is_anonymous'):
+                queryset = queryset.exclude(public_access=ACCESS_TYPE_NONE)
+            elif not get(user, 'is_staff'):
+                public_queryset = queryset.exclude(public_access=ACCESS_TYPE_NONE)
+                private_queryset = queryset.filter(public_access=ACCESS_TYPE_NONE)
+                private_queryset = private_queryset.filter(
+                    Q(parent__user_id=user.id) | Q(parent__organization__members__id=user.id))
+                queryset = public_queryset.union(private_queryset)
 
         return queryset
 
