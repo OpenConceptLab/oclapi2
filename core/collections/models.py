@@ -921,14 +921,24 @@ class Expansion(BaseResourceModel):
 
         self.resolved_collection_versions.add(*compact(resolved_valueset_versions))
         self.resolved_source_versions.add(*compact(resolved_system_versions))
-
+        self.dedupe_resources()
         if index:
             self.index_resources(index_concepts, index_mappings)
+
+    def dedupe_resources(self):
+        self.__dedupe_concepts()
+        self.__dedupe_mappings()
+
+    def __dedupe_concepts(self):
+        self.concepts.set(self.concepts.distinct('versioned_object_id'))
+
+    def __dedupe_mappings(self):
+        self.mappings.set(self.mappings.distinct('versioned_object_id'))
 
     def __include_resources(self, rel, resources, is_concept_queryset):
         should_index = resources.exists()
         if should_index:
-            rel.add(*self.apply_parameters(resources, is_concept_queryset).distinct('versioned_object_id'))
+            rel.add(*self.apply_parameters(resources, is_concept_queryset))
         return should_index
 
     @staticmethod
