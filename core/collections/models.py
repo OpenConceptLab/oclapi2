@@ -928,7 +928,7 @@ class Expansion(BaseResourceModel):
     def __include_resources(self, rel, resources, is_concept_queryset):
         should_index = resources.exists()
         if should_index:
-            rel.add(*self.apply_parameters(resources, is_concept_queryset))
+            rel.add(*self.apply_parameters(resources, is_concept_queryset).distinct('versioned_object_id'))
         return should_index
 
     @staticmethod
