@@ -207,10 +207,9 @@ class ConceptCollectionMembershipView(ConceptBaseView, ListWithHeadersMixin):
 
     def get_object(self, queryset=None):
         queryset = Concept.get_base_queryset(self.params)
-        if 'concept_version' in self.kwargs:
-            instance = queryset.first()
-        else:
-            instance = queryset.filter(id=F('versioned_object_id')).first().get_latest_version()
+        if 'concept_version' not in self.kwargs:
+            queryset = queryset.filter(id=F('versioned_object_id'))
+        instance = queryset.first()
 
         if not instance:
             raise Http404()
