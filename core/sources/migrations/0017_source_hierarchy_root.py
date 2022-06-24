@@ -8,12 +8,13 @@ class Migration(migrations.Migration):
 
     dependencies = [
         ('sources', '0016_auto_20210402_0419'),
+        ('concepts', '0001_initial'),
     ]
 
     operations = [
         migrations.AddField(
             model_name='source',
             name='hierarchy_root',
-            field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, to='concepts.Concept'),
+            field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, to='concepts.concept'),
         ),
     ]
