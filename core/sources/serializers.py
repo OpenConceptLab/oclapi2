@@ -58,6 +58,8 @@ class SourceVersionListSerializer(ModelSerializer):
 
 
 class SourceCreateOrUpdateSerializer(ModelSerializer):
+    canonical_url = CharField(allow_blank=True, allow_null=True, required=False)
+
     class Meta:
         model = Source
         lookup_field = 'mnemonic'
@@ -101,7 +103,6 @@ class SourceCreateOrUpdateSerializer(ModelSerializer):
             from core.concepts.models import Concept
             source.hierarchy_root = Concept.objects.filter(
                 uri=hierarchy_root_url).first() if hierarchy_root_url else None
-
         return source
 
     def update(self, instance, validated_data):

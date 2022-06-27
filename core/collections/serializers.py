@@ -63,6 +63,8 @@ class CollectionVersionListSerializer(ModelSerializer):
 
 
 class CollectionCreateOrUpdateSerializer(ModelSerializer):
+    canonical_url = CharField(allow_blank=True, allow_null=True, required=False)
+
     class Meta:
         model = Collection
         lookup_field = 'mnemonic'
