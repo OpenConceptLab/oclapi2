@@ -106,15 +106,18 @@ class CodeSystemConceptSerializer(ReadSerializerMixin, serializers.Serializer):
         if 'names' not in ret:
             ret.update({'names': []})
 
+        # Display is not required thus use code if missing
+        name = data.get('display', data.get('code'))
+
         found = False
         for concept_name in ret['names']:
-            if concept_name['name'] == data['display'] and concept_name['locale'] == settings.DEFAULT_LOCALE:
+            if concept_name['name'] == name and concept_name['locale'] == settings.DEFAULT_LOCALE:
                 concept_name['locale_preferred'] = True
                 found = True
                 break
 
         if not found:
-            ret['names'].append({'name': data['display'], 'locale': settings.DEFAULT_LOCALE, 'locale_preferred': True})
+            ret['names'].append({'name': name, 'locale': settings.DEFAULT_LOCALE, 'locale_preferred': True})
 
         return ret
 
