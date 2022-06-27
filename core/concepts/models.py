@@ -1,5 +1,5 @@
 from django.conf import settings
-from django.contrib.postgres.indexes import GinIndex
+from django.contrib.postgres.indexes import GinIndex, HashIndex
 from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator
 from django.db import models, IntegrityError, transaction, connection
@@ -25,7 +25,7 @@ class LocalizedText(models.Model):
         db_table = 'localized_texts'
 
         indexes = [
-            models.Index(fields=['name']),
+            HashIndex(fields=['name']),
             models.Index(fields=['type']),
             models.Index(fields=['locale']),
             models.Index(fields=['locale_preferred']),
