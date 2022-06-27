@@ -25,6 +25,7 @@ from .constants import (
     ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT, SUPER_ADMIN_USER_ID,
     HEAD, PERSIST_NEW_ERROR_MESSAGE, SOURCE_PARENT_CANNOT_BE_NONE, PARENT_RESOURCE_CANNOT_BE_NONE,
     CREATOR_CANNOT_BE_NONE, CANNOT_DELETE_ONLY_VERSION, CUSTOM_VALIDATION_SCHEMA_OPENMRS)
+from .fields import URIField
 from .tasks import handle_save, handle_m2m_changed, seed_children_to_new_version, update_validation_schema, \
     update_source_active_concepts_count, update_source_active_mappings_count
 
@@ -339,7 +340,7 @@ class ConceptContainerModel(VersionedModel):
     user = models.ForeignKey('users.UserProfile', on_delete=models.CASCADE, blank=True, null=True)
     _background_process_ids = ArrayField(models.CharField(max_length=255), default=list, null=True, blank=True)
 
-    canonical_url = models.URLField(null=True, blank=True)
+    canonical_url = URIField(null=True, blank=True)
     identifier = models.JSONField(null=True, blank=True, default=dict)
     contact = models.JSONField(null=True, blank=True, default=dict)
     jurisdiction = models.JSONField(null=True, blank=True, default=dict)

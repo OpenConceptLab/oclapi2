@@ -26,6 +26,27 @@ from core.users.models import UserProfile
 
 
 class CollectionTest(OCLTestCase):
+    def test_canonical_url_field(self):
+        collection = OrganizationCollectionFactory.build()
+        for uri in [
+            'https://coll.com', 'http://coll.com', 'ws:coll.com', 'mailto:foo@bar.com', 'tox:skyzohkey@ricin.im',
+            'tox:DFB4958A86122ACF81BB852DBC767DB8A3A7281A8EDBC83121B30C294E295869121B298FEEA2',
+            'urn:oid:2.16.840.1.113883.6.238', 'telnet://192.0.2.16:80/', 'localhost:9000',
+            'news:comp.infosystems.www.servers.unix', 'ldap://[2001:db8::7]/c=GB?objectClass?on',
+            'ftp://ftp.is.co.za/rfc/rfc1808.txt', 'urn:oasis:names:specification:docbook:dtd:xml:4.1.2',
+            '123.432.12.19:9000'
+        ]:
+            collection.canonical_url = uri
+            collection.full_clean()
+
+        for uri in [
+            'foobar', 'foobar.com', '123.432.12.19'
+        ]:
+            collection.canonical_url = uri
+            with self.assertRaises(ValidationError) as ex:
+                collection.full_clean()
+            self.assertEqual(ex.exception.message_dict, {'canonical_url': ['Enter a valid URI.']})
+
     def test_resource_version_type(self):
         self.assertEqual(Collection().resource_version_type, 'Collection Version')
 
