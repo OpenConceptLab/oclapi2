@@ -17,7 +17,7 @@ from core.common.services import S3
 from core.common.tasks import update_collection_active_concepts_count, update_collection_active_mappings_count, \
     delete_s3_objects
 from core.common.utils import reverse_resource, reverse_resource_version, parse_updated_since_param, drop_version, \
-    to_parent_uri
+    to_parent_uri, is_canonical_uri
 from core.common.utils import to_owner_uri
 from core.settings import DEFAULT_LOCALE
 from .constants import (
@@ -794,7 +794,7 @@ class ConceptContainerModel(VersionedModel):
 
         lookup_url = lookup_url.split('?')[0]
 
-        is_fqdn = lookup_url.startswith('http://') or url.startswith('https://')
+        is_fqdn = is_canonical_uri(lookup_url) or is_canonical_uri(url)
 
         criteria = models.Q(is_active=True, retired=False)
         if is_fqdn:

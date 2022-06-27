@@ -840,3 +840,7 @@ def split_list_by_condition(items, predicate):
         (exclude, include)[predicate(item)].append(item)
 
     return include, exclude
+
+
+def is_canonical_uri(string):
+    return ':' in string

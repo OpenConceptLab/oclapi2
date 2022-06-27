@@ -24,7 +24,7 @@ from core.common.tasks import seed_children_to_expansion, batch_index_resources,
     index_expansion_mappings
 from core.common.utils import drop_version, to_owner_uri, generate_temp_version, es_id_in, \
     es_wildcard_search, get_resource_class_from_resource_name, get_exact_search_fields, to_snake_case, \
-    es_exact_search, es_to_pks, batch_qs, split_list_by_condition, decode_string
+    es_exact_search, es_to_pks, batch_qs, split_list_by_condition, decode_string, is_canonical_uri
 from core.concepts.constants import LOCALES_FULLY_SPECIFIED
 from core.concepts.models import Concept
 from core.mappings.models import Mapping
@@ -399,14 +399,14 @@ class CollectionReference(models.Model):
 
         expression = ''
         if self.system:
-            is_canonical = self.system.startswith('http://') or self.system.startswith('https://')
+            is_canonical = is_canonical_uri(self.system)
             expression = self.system
             if self.version:
                 expression += '|' + self.version if is_canonical else self.version
         elif self.valueset and isinstance(self.valueset, list):
             expression = self.valueset[0]  # pylint: disable=unsubscriptable-object
 
-        is_canonical = expression.startswith('https://') or expression.startswith('http://')
+        is_canonical = is_canonical_uri(expression)
         if self.code or self.filter or not is_canonical:
             if self.is_concept:
                 expression += 'concepts/' if expression.endswith('/') else '/concepts/'
