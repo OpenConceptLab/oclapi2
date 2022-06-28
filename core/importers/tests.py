@@ -456,7 +456,6 @@ class BulkImportInlineTest(OCLTestCase):
         self.assertEqual(
             Concept.objects.filter(parent__mnemonic='MyDemoSource', is_latest_version=True, retired=False).count(), 3)
 
-    @unittest.skip('[Skipped] OPENMRS CSV Import Sample')
     @patch('core.importers.models.batch_index_resources')
     def test_openmrs_schema_csv_import(self, batch_index_resources_mock):
         call_command('import_lookup_values')

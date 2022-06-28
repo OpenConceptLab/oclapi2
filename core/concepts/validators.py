@@ -1,8 +1,7 @@
-from django.core.cache import cache
 from django.core.exceptions import ValidationError
 
 from core.common.constants import (
-    NA, YES, NO, CUSTOM_VALIDATION_SCHEMA_OPENMRS, FIVE_MINS, HEAD, REFERENCE_VALUE_SOURCE_MNEMONICS
+    NA, YES, NO, CUSTOM_VALIDATION_SCHEMA_OPENMRS, HEAD, REFERENCE_VALUE_SOURCE_MNEMONICS
 )
 from core.orgs.models import Organization
 from .constants import BASIC_DESCRIPTION_CANNOT_BE_EMPTY, BASIC_NAMES_CANNOT_BE_EMPTY
@@ -38,22 +37,11 @@ class ValidatorSpecifier:
         return self
 
     def with_reference_values(self):
-        ocl_org_filter = Organization.objects.get(mnemonic='OCL')
-        if 'reference_sources' not in cache:
-            cache.set(
-                'reference_sources',
-                ocl_org_filter.source_set.filter(mnemonic__in=REFERENCE_VALUE_SOURCE_MNEMONICS, version=HEAD),
-                FIVE_MINS
-            )
-
-        sources = cache.get('reference_sources')
-
+        ocl = Organization.objects.get(mnemonic='OCL')
+        sources = ocl.source_set.filter(mnemonic__in=REFERENCE_VALUE_SOURCE_MNEMONICS, version=HEAD)
         self.reference_values = {}
         for source in sources:
-            if source.mnemonic not in cache:
-                cache.set(source.mnemonic, self._get_reference_values(source), FIVE_MINS)
-            reference_values = cache.get(source.mnemonic)
-            self.reference_values[source.mnemonic] = reference_values
+            self.reference_values[source.mnemonic] = self._get_reference_values(source)
 
         return self
 
