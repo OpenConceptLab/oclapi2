@@ -260,7 +260,10 @@ class Collection(ConceptContainerModel):
         if should_auto_expand and not self.expansions.exists() and not get(expansion_data, 'mnemonic'):
             expansion_data['mnemonic'] = Expansion.get_auto_expand_mnemonic(self.version)
             expansion_data['is_processing'] = True
-        expansion = Expansion.persist(index=index, **expansion_data, collection_version=self, sync=sync)
+        if 'created_by_id' not in expansion_data:
+            expansion_data['created_by_id'] = self.created_by_id
+            expansion_data['updated_by_id'] = self.created_by_id
+        expansion = Expansion.persist(index=index, collection_version=self, sync=sync, **expansion_data)
 
         if should_auto_expand and not self.expansion_uri:
             self.expansion_uri = expansion.uri
