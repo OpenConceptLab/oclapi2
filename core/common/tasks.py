@@ -456,7 +456,7 @@ def delete_duplicate_locales(start_from=None):  # pragma: no cover
     total = queryset.count()
     batch_size = 1000
 
-    logger.info(f'{total:d} concepts with more than one locales. Getting them in batches of {batch_size:d}...')  # pylint: disable=logging-not-lazy
+    logger.info(f'{total:d} concepts with more than one locales. Getting them in batches of {batch_size:d}...')  # pylint: disable=logging-not-lazy,logging-fstring-interpolation
 
     for start in range(start_from, total, batch_size):
         end = min(start + batch_size, total)
