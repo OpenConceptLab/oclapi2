@@ -86,6 +86,7 @@ INSTALLED_APPS = [
     'core.importers',
     'core.pins',
     'core.client_configs',
+    'core.tasks',
 ]
 
 REST_FRAMEWORK = {
