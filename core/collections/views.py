@@ -540,7 +540,7 @@ class CollectionVersionReferencesView(CollectionVersionBaseView, ListWithHeaders
         return self.list(request, *args, **kwargs)
 
 
-class CollectionVersionReferencesLinkView(CollectionVersionBaseView, APIView):
+class CollectionVersionReferencesLinkView(CollectionVersionBaseView, APIView):  # pragma: no cover
     serializer_class = CollectionReferenceSerializer
     permission_classes = (IsAdminUser, )
 
@@ -557,7 +557,7 @@ class CollectionVersionReferencesLinkView(CollectionVersionBaseView, APIView):
         return Response(dict(task_id=task.id))
 
 
-class CollectionReferencesOldToNewStructureMigrationView(APIView):
+class CollectionReferencesOldToNewStructureMigrationView(APIView):  # pragma: no cover
     serializer_class = CollectionReferenceSerializer
     permission_classes = (IsAdminUser, )
 
