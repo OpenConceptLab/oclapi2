@@ -600,6 +600,18 @@ class UtilsTest(OCLTestCase):
             separate_version("/orgs/org/collections/coll/concepts/concept/"),
             (None, "/orgs/org/collections/coll/concepts/concept/")
         )
+        self.assertEqual(
+            separate_version("/orgs/org/collections/coll/123/"),
+            ("123", "/orgs/org/collections/coll/")
+        )
+        self.assertEqual(
+            separate_version("/orgs/org/sources/source/HEAD/"),
+            ("HEAD", "/orgs/org/sources/source/")
+        )
+        self.assertEqual(
+            separate_version("/orgs/org/sources/source/"),
+            (None, "/orgs/org/sources/source/")
+        )
 
     def test_to_parent_uri(self):
         self.assertEqual(
