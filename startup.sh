@@ -21,6 +21,9 @@ python manage.py import_lookup_values
 echo "Populating text from extras.about"
 python manage.py populate_text_from_extras_about
 
+echo "Reference Old to New"
+python manage.py reference_old_to_new
+
 if [[ "$ENVIRONMENT" = "development" ]]; then
   echo "Starting up the development server"
   python manage.py runserver 0.0.0.0:${API_PORT:-8000}
