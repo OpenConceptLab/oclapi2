@@ -10,6 +10,7 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         for reference in CollectionReference.objects.filter(
                 expression__isnull=False, system__isnull=True, valueset__isnull=True):
+            print(f"Migrating {reference.uri}: {reference.expression}...")
             parser = CollectionReferenceExpressionStringParser(expression=reference.expression)
             parser.parse()
             ref_struct = parser.to_reference_structure()[0]
