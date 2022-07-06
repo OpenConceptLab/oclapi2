@@ -665,6 +665,7 @@ def link_all_references_to_resources():  # pragma: no cover
     count = 1
     for reference in queryset:
         logger.info('(%d/%d) Linking Reference %s', count, total, reference.uri)
+        count += 1
         reference.link_resources()
 
 
