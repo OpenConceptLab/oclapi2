@@ -8,7 +8,6 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.mail import EmailMessage
 from django.core.management import call_command
-from django.db import models
 from django.template.loader import render_to_string
 from django_elasticsearch_dsl.registries import registry
 from pydash import get
