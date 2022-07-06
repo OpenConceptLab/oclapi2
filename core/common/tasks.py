@@ -671,7 +671,7 @@ def reference_old_to_new_structure():  # pragma: no cover
         parser = CollectionReferenceExpressionStringParser(expression=reference.expression)
         parser.parse()
         ref_struct = parser.to_reference_structure()[0]
-        reference.reference_type = ref_struct['reference_type']
+        reference.reference_type = ref_struct['reference_type'] or 'concepts'
         reference.system = ref_struct['system']
         reference.version = ref_struct['version']
         reference.code = ref_struct['code']
