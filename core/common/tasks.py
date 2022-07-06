@@ -661,9 +661,13 @@ def reference_old_to_new_structure():
     from core.collections.parsers import CollectionReferenceExpressionStringParser
     from core.collections.models import CollectionReference
 
-    for reference in CollectionReference.objects.filter(
-            expression__isnull=False, system__isnull=True, valueset__isnull=True):
-        logger.info('Migrating %s', reference.uri)
+    queryset = CollectionReference.objects.filter(expression__isnull=False, system__isnull=True, valueset__isnull=True)
+    total = queryset.count()
+    logger.info('Need to migrate %d references', total)
+    count = 1
+    for reference in queryset:
+        logger.info('(%d/%d) Migrating %s', count, total, reference.uri)
+        count += 1
         parser = CollectionReferenceExpressionStringParser(expression=reference.expression)
         parser.parse()
         ref_struct = parser.to_reference_structure()[0]
