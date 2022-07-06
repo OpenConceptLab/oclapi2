@@ -50,7 +50,7 @@ from core.common.serializers import TaskSerializer
 from core.common.swagger_parameters import q_param, compress_header, page_param, verbose_param, exact_match_param, \
     include_facets_header, sort_asc_param, sort_desc_param, updated_since_param, include_retired_param, limit_param
 from core.common.tasks import add_references, export_collection, delete_collection, index_expansion_concepts, \
-    index_expansion_mappings
+    index_expansion_mappings, link_references_to_resources, reference_old_to_new_structure
 from core.common.utils import compact_dict_by_values, parse_boolean_query_param
 from core.common.views import BaseAPIView, BaseLogoView
 from core.concepts.documents import ConceptDocument
@@ -538,6 +538,33 @@ class CollectionVersionReferencesView(CollectionVersionBaseView, ListWithHeaders
         references = object_version.references.filter(expression__icontains=search_query)
         self.object_list = references if sort == 'ASC' else list(reversed(references))
         return self.list(request, *args, **kwargs)
+
+
+class CollectionVersionReferencesLinkView(CollectionVersionBaseView, APIView):
+    serializer_class = CollectionReferenceSerializer
+    permission_classes = (IsAdminUser, )
+
+    def get_queryset(self):
+        query_params = self.request.query_params
+        search_query = query_params.get('q', '')
+        object_version = super().get_queryset().first()
+        if not object_version:
+            raise Http404()
+        return object_version.references.filter(expression__icontains=search_query)
+
+    def put(self, request, *args, **kwargs):  # pylint: disable=unused-argument
+        task = link_references_to_resources.delay(list(self.get_queryset().values_list('id', flat=True)))
+        return Response(dict(task_id=task.id))
+
+
+class CollectionReferencesOldToNewStructureMigrationView(APIView):
+    serializer_class = CollectionReferenceSerializer
+    permission_classes = (IsAdminUser, )
+
+    @staticmethod
+    def post(_):
+        task = reference_old_to_new_structure.delay()
+        return Response(dict(task_id=task.id))
 
 
 class CollectionVersionListView(CollectionVersionBaseView, CreateAPIView, ListWithHeadersMixin):

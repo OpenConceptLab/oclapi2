@@ -708,6 +708,16 @@ class CollectionReference(models.Model):
         self.fetch_concepts()
         return [*set(self._concepts.values_list('uri', flat=True)), *set(self._mappings.values_list('uri', flat=True))]
 
+    def link_resources(self):
+        collection = self.collection
+        expansion = collection.expansion
+        is_concept_expression = self.is_concept
+        if self.expression and not is_canonical_uri(self.expression) and expansion:
+            if is_concept_expression and not self.concepts.exists():
+                self.concepts.add(*expansion.concepts.filter(uri=self.expression))
+            if not is_concept_expression and not self.mappings.exists():
+                self.mappings.add(*expansion.mappings.filter(uri=self.expression))
+
 
 def default_expansion_parameters():
     return {

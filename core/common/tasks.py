@@ -646,3 +646,32 @@ def update_collection_active_mappings_count(collection_id):
 def delete_s3_objects(path):
     if path:
         S3.delete_objects(path)
+
+
+@app.task(ignore_result=True)
+def link_references_to_resources(reference_ids):
+    from core.collections.models import CollectionReference
+    for reference in CollectionReference.objects.filter(id__in=reference_ids):
+        logger.info('Linking Reference %s', reference.uri)
+        reference.link_resources()
+
+
+@app.task(ignore_result=True)
+def reference_old_to_new_structure():
+    from core.collections.parsers import CollectionReferenceExpressionStringParser
+    from core.collections.models import CollectionReference
+
+    for reference in CollectionReference.objects.filter(
+            expression__isnull=False, system__isnull=True, valueset__isnull=True):
+        logger.info('Migrating %s', reference.uri)
+        parser = CollectionReferenceExpressionStringParser(expression=reference.expression)
+        parser.parse()
+        ref_struct = parser.to_reference_structure()[0]
+        reference.reference_type = ref_struct['reference_type']
+        reference.system = ref_struct['system']
+        reference.version = ref_struct['version']
+        reference.code = ref_struct['code']
+        reference.resource_version = ref_struct['resource_version']
+        reference.valueset = ref_struct['valueset']
+        reference.filter = ref_struct['filter']
+        reference.save()
