@@ -8,6 +8,7 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.mail import EmailMessage
 from django.core.management import call_command
+from django.db import models
 from django.template.loader import render_to_string
 from django_elasticsearch_dsl.registries import registry
 from pydash import get
@@ -653,6 +654,18 @@ def link_references_to_resources(reference_ids):  # pragma: no cover
     from core.collections.models import CollectionReference
     for reference in CollectionReference.objects.filter(id__in=reference_ids):
         logger.info('Linking Reference %s', reference.uri)
+        reference.link_resources()
+
+
+@app.task(ignore_result=True)
+def link_all_references_to_resources():  # pragma: no cover
+    from core.collections.models import CollectionReference
+    queryset = CollectionReference.objects.filter(concepts__isnull=True, mappings__isnull=True)
+    total = queryset.count()
+    logger.info('Need to link %d references', total)
+    count = 1
+    for reference in queryset:
+        logger.info('(%d/%d) Linking Reference %s', count, total, reference.uri)
         reference.link_resources()
 
 

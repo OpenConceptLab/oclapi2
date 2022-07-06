@@ -13,6 +13,11 @@ urlpatterns = [
         name='collection-references-old-to-new'
     ),
     re_path(
+        'references/link-resources/',
+        views.CollectionReferencesLinkResourcesView.as_view(),
+        name='collection-references-old-to-new'
+    ),
+    re_path(
         fr"^(?P<collection>{NAMESPACE_PATTERN})/$",
         views.CollectionRetrieveUpdateDestroyView.as_view(),
         name='collection-detail'
