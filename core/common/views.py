@@ -10,6 +10,7 @@ from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
+from elastic_transport import TransportError
 from elasticsearch import RequestError
 from elasticsearch_dsl import Q
 from pydash import get
@@ -378,7 +379,10 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                 filters=filters, exact_match=is_exact_match_on
             )
             faceted_search.params(request_timeout=ES_REQUEST_TIMEOUT)
-            facets = faceted_search.execute().facets.to_dict()
+            try:
+                facets = faceted_search.execute().facets.to_dict()
+            except TransportError as ex:  # pragma: no cover
+                raise Http400(detail='Data too large.') from ex
 
         return facets
 
@@ -591,7 +595,10 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     def get_search_results_qs(self):
         search_results = self.__search_results
         search_results = search_results.params(request_timeout=ES_REQUEST_TIMEOUT)
-        self.total_count = search_results.count()
+        try:
+            self.total_count = search_results.count()
+        except TransportError as ex:
+            raise Http400(detail='Data too large.') from ex
 
         self.limit = int(self.limit)
 
@@ -606,6 +613,8 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                 raise Http400(detail='Only 10000 results are available. Please apply additional filters'
                                      ' or fine tune your query to get more accurate results.') from ex
             raise ex
+        except TransportError as ex:  # pragma: no cover
+            raise Http400(detail='Data too large.') from ex
 
     def should_perform_es_search(self):
         return bool(self.get_search_string()) or self.has_searchable_extras_fields() or bool(self.get_faceted_filters())
