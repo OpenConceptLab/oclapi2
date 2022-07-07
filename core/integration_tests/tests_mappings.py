@@ -359,6 +359,24 @@ class MappingListViewTest(OCLAPITestCase):
         self.assertEqual(mapping.to_source, concept.parent)
         self.assertEqual(mapping.to_concept, concept)
 
+        response = self.client.post(
+            source.mappings_url,
+            {
+                "map_type": "Same As",
+                "from_concept_code": "foo",
+                "from_concept_name": "foo",
+                "to_concept_code": "bar",
+                "to_concept_name": "bar"
+            },
+            HTTP_AUTHORIZATION='Token ' + self.token,
+        )
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data['from_concept_code'], 'foo')
+        self.assertEqual(response.data['from_concept_name'], 'foo')
+        self.assertEqual(response.data['to_concept_code'], 'bar')
+        self.assertEqual(response.data['to_concept_name'], 'bar')
+        self.assertIsNone(response.data['to_source_name'])
+
     def test_post_using_canonical_url_201(self):  # pylint: disable=too-many-statements
         source = UserSourceFactory(user=self.user, mnemonic='source')
         response = self.client.post(

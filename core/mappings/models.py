@@ -353,13 +353,14 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         self.to_source_version, self.to_source_url = get_source_info(
             to_source_url, to_concept_url, self.to_source_version, to_concept
         )
-
-        self.to_source = Source.objects.filter(
-            models.Q(uri=self.to_source_url) | models.Q(canonical_url=self.to_source_url)
-        ).filter(version=HEAD).first()
-        self.from_source = Source.objects.filter(
-            models.Q(uri=self.from_source_url) | models.Q(canonical_url=self.from_source_url)
-        ).filter(version=HEAD).first()
+        if self.to_source_url:
+            self.to_source = Source.objects.filter(
+                models.Q(uri=self.to_source_url) | models.Q(canonical_url=self.to_source_url)
+            ).filter(version=HEAD).first()
+        if self.from_source_url:
+            self.from_source = Source.objects.filter(
+                models.Q(uri=self.from_source_url) | models.Q(canonical_url=self.from_source_url)
+            ).filter(version=HEAD).first()
 
     def is_existing_in_parent(self):
         return self.parent.mappings_set.filter(mnemonic__exact=self.mnemonic).exists()
