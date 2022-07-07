@@ -10,8 +10,7 @@ from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
-from elastic_transport import TransportError
-from elasticsearch import RequestError
+from elasticsearch import RequestError, TransportError
 from elasticsearch_dsl import Q
 from pydash import get
 from rest_framework import response, generics, status
