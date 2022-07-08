@@ -1253,6 +1253,6 @@ class ReferenceExpressionResolveView(APIView):
 class ExpansionsLinkToRepoVersionsView(APIView):  # pragma: no cover
     permission_classes = (IsAdminUser, )
 
-    def put(self):
+    def put(self, _):
         task = link_expansions_repo_versions.delay()
         return Response(dict(task_id=task.id))
