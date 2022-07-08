@@ -18,6 +18,11 @@ urlpatterns = [
         name='collection-references-old-to-new'
     ),
     re_path(
+        'expansions/link-repo-versions/',
+        views.ExpansionsLinkToRepoVersionsView.as_view(),
+        name='expansion-link-repo-version'
+    ),
+    re_path(
         fr"^(?P<collection>{NAMESPACE_PATTERN})/$",
         views.CollectionRetrieveUpdateDestroyView.as_view(),
         name='collection-detail'

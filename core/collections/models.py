@@ -1017,6 +1017,22 @@ class Expansion(BaseResourceModel):
             criteria |= models.Q(to_concept__uri__in=concept_criteria)
         return self.mappings.filter(criteria)
 
+    @staticmethod
+    def get_should_link_repo_versions_criteria():
+        return models.Q(
+            resolved_source_versions__isnull=True, resolved_collection_versions__isnull=True,
+        ) & models.Q(models.Q(concepts__isnull=False) | models.Q(mappings__isnull=False))
+
+    def link_repo_versions(self):
+        from core.sources.models import Source
+        concept_source_ids = set(self.concepts.values_list('parent_id', flat=True))
+        mapping_source_ids = set(self.mappings.values_list('parent_id', flat=True))
+        sources = Source.objects.filter(id__in=[*concept_source_ids, *mapping_source_ids])
+        for source in sources:
+            version = source.get_latest_released_version() or source.get_latest_version() or source
+            if version:
+                self.resolved_source_versions.add(version)
+
 
 class ExpansionParameters:
     ACTIVE = 'activeOnly'

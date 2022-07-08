@@ -670,6 +670,19 @@ def link_all_references_to_resources():  # pragma: no cover
 
 
 @app.task(ignore_result=True)
+def link_expansions_repo_versions():  # pragma: no cover
+    from core.collections.models import Expansion
+    expansions = Expansion.objects.filter(Expansion.get_should_link_repo_versions_criteria())
+    total = expansions.count()
+    logger.info('Need to link %d references', total)
+    count = 1
+    for expansion in expansions:
+        logger.info('(%d/%d) Linking Reference %s', count, total, expansion.uri)
+        count += 1
+        expansion.link_repo_versions()
+
+
+@app.task(ignore_result=True)
 def reference_old_to_new_structure():  # pragma: no cover
     from core.collections.parsers import CollectionReferenceExpressionStringParser
     from core.collections.models import CollectionReference

@@ -1084,6 +1084,51 @@ class ExpansionTest(OCLTestCase):
         self.assertEqual(mappings.count(), 1)
         self.assertEqual(mappings.first().id, mapping1.id)
 
+    def test_get_should_link_repo_versions_criteria(self):
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection)
+        concept = ConceptFactory()
+        mapping = MappingFactory()
+
+        criteria = Expansion.get_should_link_repo_versions_criteria()
+
+        self.assertFalse(Expansion.objects.filter(criteria).exists())
+
+        expansion.concepts.add(concept)
+
+        expansions = Expansion.objects.filter(criteria)
+        self.assertTrue(expansions.exists())
+        self.assertEqual(expansions.count(), 1)
+        self.assertTrue(expansions.first(), expansion)
+
+        expansion.concepts.clear()
+        expansion.mappings.add(mapping)
+
+        expansions = Expansion.objects.filter(criteria)
+        self.assertTrue(expansions.exists())
+        self.assertEqual(expansions.count(), 1)
+        self.assertTrue(expansions.first(), expansion)
+
+        expansion.resolved_source_versions.add(mapping.parent)
+
+        expansions = Expansion.objects.filter(criteria)
+        self.assertFalse(expansions.exists())
+
+    def test_link_repo_versions(self):
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection)
+        concept = ConceptFactory()
+        mapping = MappingFactory()
+        expansion.concepts.add(concept)
+        expansion.mappings.add(mapping)
+
+        self.assertFalse(expansion.resolved_source_versions.exists())
+
+        expansion.link_repo_versions()
+
+        self.assertTrue(expansion.resolved_source_versions.exists())
+        self.assertEqual(expansion.resolved_source_versions.first(), concept.parent)
+
 
 class ExpansionParametersTest(OCLTestCase):
     def test_apply_active_only(self):
