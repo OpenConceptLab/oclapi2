@@ -288,6 +288,12 @@ urlpatterns = [
         name='collectionversion-reference'
     ),
     re_path(
+        r'^(?P<collection>{pattern})/(?P<version>{pattern})/references/(?P<reference>{pattern})/resolve/$'.format(
+            pattern=NAMESPACE_PATTERN),
+        views.CollectionReferenceResolveView.as_view(),
+        name='collectionversion-reference-resolve'
+    ),
+    re_path(
         r'^(?P<collection>{pattern})/(?P<version>{pattern})/references/(?P<reference>{pattern})/concepts/$'.format(
             pattern=NAMESPACE_PATTERN),
         views.CollectionReferenceConceptsView.as_view(),

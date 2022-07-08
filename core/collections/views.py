@@ -326,6 +326,25 @@ class CollectionReferenceAbstractResourcesView(CollectionBaseView, ListWithHeade
         return self.list(request, *args, **kwargs)
 
 
+# Right now only for testing/debugging
+class CollectionReferenceResolveView(CollectionReferenceAbstractResourcesView):  # pragma: no cover
+    def get_serializer_class(self):
+        from core.sources.serializers import SourceVersionListSerializer
+        return SourceVersionListSerializer
+
+    def get(self, request, *args, **kwargs):
+        reference = self.get_queryset()
+        system_version = reference.resolve_system_version
+        valueset_versions = reference.resolve_valueset_versions
+        data = []
+        if system_version:
+            from core.sources.serializers import SourceVersionListSerializer
+            data.append(SourceVersionListSerializer(system_version).data)
+        if valueset_versions:
+            data += CollectionVersionListSerializer(valueset_versions, many=True).data
+        return Response(data)
+
+
 class CollectionReferenceConceptsView(CollectionReferenceAbstractResourcesView):
     is_searchable = True
     document_model = ConceptDocument
