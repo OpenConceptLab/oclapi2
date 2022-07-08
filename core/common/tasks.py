@@ -672,14 +672,21 @@ def link_all_references_to_resources():  # pragma: no cover
 @app.task(ignore_result=True)
 def link_expansions_repo_versions():  # pragma: no cover
     from core.collections.models import Expansion
-    expansions = Expansion.objects.filter(Expansion.get_should_link_repo_versions_criteria())
+    expansions = Expansion.objects.filter()
     total = expansions.count()
-    logger.info('Need to link %d references', total)
+    logger.info('Total Expansions %d', total)
     count = 1
     for expansion in expansions:
-        logger.info('(%d/%d) Linking Reference %s', count, total, expansion.uri)
+        if (
+                expansion.concepts.exists() or expansion.mappings.exists()
+        ) and (
+                not expansion.resolved_source_versions.exists() and not expansion.resolved_collection_versions.exists()
+        ):
+            logger.info('(%d/%d) Linking Repo Version %s', count, total, expansion.uri)
+            expansion.link_repo_versions()
+        else:
+            logger.info('(%d/%d) Skipping already Linked %s', count, total, expansion.uri)
         count += 1
-        expansion.link_repo_versions()
 
 
 @app.task(ignore_result=True)
