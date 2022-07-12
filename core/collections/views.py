@@ -546,7 +546,10 @@ class CollectionReferencesView(
 
 
 class CollectionVersionReferencesView(CollectionVersionBaseView, ListWithHeadersMixin):
-    serializer_class = CollectionReferenceSerializer
+    def get_serializer_class(self):
+        if self.is_verbose():
+            return CollectionReferenceDetailSerializer
+        return CollectionReferenceSerializer
 
     def get(self, request, *args, **kwargs):
         query_params = self.request.query_params
