@@ -2,7 +2,7 @@ import logging
 import time
 
 from request_logging.middleware import LoggingMiddleware
-from core.common.constants import VERSION_HEADER, REQUEST_USER_HEADER, RESPONSE_TIME_HEADER
+from core.common.constants import VERSION_HEADER, REQUEST_USER_HEADER, RESPONSE_TIME_HEADER, REQUEST_URL_HEADER
 from core.common.utils import set_current_user, set_request_url
 
 request_logger = logging.getLogger('request_logger')
@@ -46,6 +46,7 @@ class ResponseHeadersMiddleware(BaseMiddleware):
         response[VERSION_HEADER] = settings.VERSION
         response[REQUEST_USER_HEADER] = str(getattr(request, 'user', None))
         response[RESPONSE_TIME_HEADER] = time.time() - start_time
+        response[REQUEST_URL_HEADER] = request.path
         return response
 
 
