@@ -142,11 +142,11 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
     def reset_password_url(self):
         return f"{web_url()}/#/accounts/{self.username}/password/reset/{self.verification_token}/"
 
-    def mark_verified(self, token):
+    def mark_verified(self, token, force=False):
         if self.verified:
             return True
 
-        if token == self.verification_token:
+        if token == self.verification_token or force:
             self.verified = True
             self.verification_token = None
             self.deactivated_at = None

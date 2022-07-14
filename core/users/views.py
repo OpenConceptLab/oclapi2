@@ -180,7 +180,7 @@ class UserEmailVerificationView(UserBaseView):
         if not user:
             return Response(status=status.HTTP_404_NOT_FOUND)
 
-        result = user.mark_verified(kwargs.get('verification_token'))
+        result = user.mark_verified(token=kwargs.get('verification_token'), force=user.is_staff)
         if result:
             update_last_login(None, user)
             return Response({'token': user.get_token()}, status=status.HTTP_200_OK)
