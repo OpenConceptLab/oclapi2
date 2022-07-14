@@ -201,9 +201,6 @@ class OCLAPITestCase(APITestCase, BaseTestCase):
         super().setUpClass()
         call_command("loaddata", "core/fixtures/base_entities.yaml")
 
-    def tearDown(self):
-        super().tearDown()
-
 
 class OCLTestCase(TestCase, BaseTestCase):
     @classmethod
@@ -211,9 +208,6 @@ class OCLTestCase(TestCase, BaseTestCase):
         super().setUpClass()
         call_command("loaddata", "core/fixtures/base_entities.yaml")
         call_command("loaddata", "core/fixtures/auth_groups.yaml")
-
-    def tearDown(self):
-        super().tearDown()
 
 
 class S3Test(TestCase):
