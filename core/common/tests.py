@@ -15,8 +15,8 @@ from moto import mock_s3
 from requests.auth import HTTPBasicAuth
 from rest_framework.test import APITestCase
 
-from core.collections.models import Collection, CollectionReference
-from core.common.constants import HEAD, OCL_ORG_ID, SUPER_ADMIN_USER_ID
+from core.collections.models import CollectionReference
+from core.common.constants import HEAD
 from core.common.tasks import delete_s3_objects, bulk_import_parallel_inline
 from core.common.utils import (
     compact_dict_by_values, to_snake_case, flower_get, task_exists, parse_bulk_import_task_id,
@@ -25,23 +25,12 @@ from core.common.utils import (
     get_resource_class_from_resource_name, flatten_dict, is_csv_file, is_url_encoded_string, to_parent_uri_from_kwargs,
     set_current_user, get_current_user, set_request_url, get_request_url, nested_dict_values, chunks, api_get,
     split_list_by_condition)
-from core.concepts.models import Concept, LocalizedText
-from core.mappings.models import Mapping
+from core.concepts.models import Concept
 from core.orgs.models import Organization
 from core.sources.models import Source
 from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
 from .services import S3, PostgresQL
-
-
-def delete_all():
-    Collection.objects.all().delete()
-    Mapping.objects.all().delete()
-    Concept.objects.all().delete()
-    LocalizedText.objects.all().delete()
-    Source.objects.all().delete()
-    Organization.objects.exclude(id=OCL_ORG_ID).all().delete()
-    UserProfile.objects.exclude(id=SUPER_ADMIN_USER_ID).all().delete()
 
 
 class CustomTestRunner(ColourRunnerMixin, DiscoverRunner):
@@ -214,7 +203,6 @@ class OCLAPITestCase(APITestCase, BaseTestCase):
 
     def tearDown(self):
         super().tearDown()
-        delete_all()
 
 
 class OCLTestCase(TestCase, BaseTestCase):
@@ -226,7 +214,6 @@ class OCLTestCase(TestCase, BaseTestCase):
 
     def tearDown(self):
         super().tearDown()
-        delete_all()
 
 
 class S3Test(TestCase):
