@@ -73,7 +73,6 @@ class UserSignupVerificationViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data, dict(token=created_user.get_token()))
         created_user.refresh_from_db()
         self.assertTrue(created_user.verified)
 
@@ -686,7 +685,7 @@ class UserStaffToggleViewTest(OCLAPITestCase):
     def setUp(self):
         super().setUp()
         self.superuser = UserProfile.objects.get(username='ocladmin')
-        self.user = UserProfileFactory()
+        self.user = UserProfileFactory(username='randomuser')
         self.assertFalse(self.user.is_staff)
         self.assertFalse(self.user.is_superuser)
 
@@ -700,7 +699,7 @@ class UserStaffToggleViewTest(OCLAPITestCase):
 
         self.user.refresh_from_db()
         self.assertTrue(self.user.is_staff)
-        self.assertTrue(self.user.is_superuser)
+        self.assertFalse(self.user.is_superuser)
 
         response = self.client.put(
             f'/users/{self.user.username}/staff/',

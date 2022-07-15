@@ -180,10 +180,9 @@ class UserEmailVerificationView(UserBaseView):
         if not user:
             return Response(status=status.HTTP_404_NOT_FOUND)
 
-        result = user.mark_verified(token=kwargs.get('verification_token'), force=user.is_staff)
+        result = user.mark_verified(token=kwargs.get('verification_token'), force=get(request.user, 'is_staff'))
         if result:
-            update_last_login(None, user)
-            return Response({'token': user.get_token()}, status=status.HTTP_200_OK)
+            return Response(status=status.HTTP_200_OK)
 
         return Response(dict(detail=VERIFICATION_TOKEN_MISMATCH), status=status.HTTP_401_UNAUTHORIZED)
 
@@ -303,8 +302,10 @@ class UserStaffToggleView(UserBaseView, UpdateAPIView):
         user = self.get_object()
         if user.username == self.request.user.username:
             raise Http400()
-        user.is_staff = not user.is_staff
-        user.is_superuser = not user.is_superuser
+        is_admin_already = user.is_staff
+        user.is_staff = not is_admin_already
+        if is_admin_already:
+            user.is_superuser = False
         user.save()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
