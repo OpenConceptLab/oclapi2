@@ -4,7 +4,7 @@ from django.conf import settings
 from django.contrib.postgres.fields import ArrayField
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
-from django.db.models import UniqueConstraint, F, QuerySet, Q
+from django.db.models import UniqueConstraint, F, QuerySet, Q, Max
 from django.utils import timezone
 from django.utils.functional import cached_property
 from pydash import get, compact
@@ -293,15 +293,17 @@ class Collection(ConceptContainerModel):
     @property
     def last_concept_update(self):
         updated_at = None
-        if self.expansion_uri and self.expansion.concepts.exists():
-            updated_at = self.expansion.concepts.latest('updated_at').updated_at
+        if self.expansion_uri:
+            updated_at = get(
+                self.expansion.concepts.aggregate(max_updated_at=Max('updated_at')), 'max_updated_at', None)
         return updated_at
 
     @property
     def last_mapping_update(self):
         updated_at = None
-        if self.expansion_uri and self.expansion.mappings.exists():
-            updated_at = self.expansion.mappings.latest('updated_at').updated_at
+        if self.expansion_uri:
+            updated_at = get(
+                self.expansion.mappings.aggregate(max_updated_at=Max('updated_at')), 'max_updated_at', None)
         return updated_at
 
     @property
