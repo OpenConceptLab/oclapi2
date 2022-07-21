@@ -9,6 +9,7 @@ from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
 
 from core.common.constants import HEAD, ACCESS_TYPE_NONE
+from core.common.exceptions import Http400
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryMixin
 from core.common.swagger_parameters import (
     q_param, limit_param, sort_desc_param, page_param, exact_match_param, sort_asc_param, verbose_param,
@@ -118,6 +119,8 @@ class MappingListView(MappingBaseView, ListWithHeadersMixin, CreateModelMixin):
         if not self.parent_resource:
             raise Http404()
         data = request.data.dict() if isinstance(request.data, QueryDict) else request.data
+        if isinstance(data, list):
+            raise Http400()
         serializer = self.get_serializer(data={
             **data, 'parent_id': self.parent_resource.id
         })

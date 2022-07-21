@@ -14,6 +14,7 @@ from core.bundles.models import Bundle
 from core.bundles.serializers import BundleSerializer
 from core.common.constants import (
     HEAD, INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_RETIRED_PARAM, ACCESS_TYPE_NONE)
+from core.common.exceptions import Http400
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryMixin
 from core.common.swagger_parameters import (
     q_param, limit_param, sort_desc_param, page_param, exact_match_param, sort_asc_param, verbose_param,
@@ -171,6 +172,8 @@ class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
         if not self.parent_resource:
             raise Http404()
         concept_id = request.data.get('id') or generate_temp_version()
+        if isinstance(request.data, list):
+            raise Http400()
         serializer = self.get_serializer(
             data={**request.data, 'parent_id': self.parent_resource.id, 'id': concept_id, 'name': concept_id}
         )
