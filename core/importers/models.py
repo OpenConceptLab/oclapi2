@@ -747,7 +747,7 @@ class BulkImportInline(BaseImporter):
     def detailed_summary(self):
         return f"Processed: {self.processed}/{self.total} | Created: {len(self.created)} | " \
             f"Updated: {len(self.updated)} | DELETED: {len(self.deleted)} | Existing: {len(self.exists)} | " \
-            f"Permision Denied: {len(self.permission_denied)} | " \
+            f"Permision Denied: {len(self.permission_denied)} | Failed: {len(self.failed)} | " \
             f"Time: {self.elapsed_seconds}secs"
 
     @property
