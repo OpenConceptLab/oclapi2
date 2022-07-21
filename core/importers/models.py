@@ -1013,7 +1013,8 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
 
     def queue_tasks(self, part_list, is_child):
         has_delete_action = not is_child and any(line.get('__action') == 'DELETE' for line in part_list)
-        chunked_lists = [part_list] if has_delete_action else compact(self.chunker_list(part_list, self.parallel, is_child))
+        chunked_lists = [part_list] if has_delete_action else compact(
+            self.chunker_list(part_list, self.parallel, is_child))
         jobs = group(bulk_import_parts_inline.s(_list, self.username, self.update_if_exists) for _list in chunked_lists)
         group_result = jobs.apply_async(queue='concurrent')
         self.groups.append(group_result)
