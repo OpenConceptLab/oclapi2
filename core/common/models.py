@@ -607,10 +607,11 @@ class ConceptContainerModel(VersionedModel):
         obj.update_version_data(head)
         obj.save(**kwargs)
 
-        if get(settings, 'TEST_MODE', False) or sync:
-            seed_children_to_new_version(obj.resource_type.lower(), obj.id, False, sync)
+        is_test_mode = get(settings, 'TEST_MODE', False)
+        if is_test_mode or sync:
+            seed_children_to_new_version(obj.resource_type.lower(), obj.id, not is_test_mode, sync)
         else:
-            seed_children_to_new_version.delay(obj.resource_type.lower(), obj.id, sync)
+            seed_children_to_new_version.delay(obj.resource_type.lower(), obj.id, True, sync)
 
         if obj.id:
             obj.sibling_versions.update(is_latest_version=False)
