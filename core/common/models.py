@@ -13,11 +13,10 @@ from django_elasticsearch_dsl.registries import registry
 from django_elasticsearch_dsl.signals import RealTimeSignalProcessor
 from pydash import get
 
-from core.common.services import S3
 from core.common.tasks import update_collection_active_concepts_count, update_collection_active_mappings_count, \
     delete_s3_objects
 from core.common.utils import reverse_resource, reverse_resource_version, parse_updated_since_param, drop_version, \
-    to_parent_uri, is_canonical_uri
+    to_parent_uri, is_canonical_uri, get_export_service
 from core.common.utils import to_owner_uri
 from core.settings import DEFAULT_LOCALE
 from .constants import (
@@ -199,13 +198,13 @@ class CommonLogoModel(models.Model):
     def logo_url(self):
         url = None
         if self.logo_path:
-            url = S3.public_url_for(self.logo_path)
+            url = get_export_service().public_url_for(self.logo_path)
 
         return url
 
     def upload_base64_logo(self, data, name):
         name = self.uri[1:] + name
-        self.logo_path = S3.upload_base64(data, name, False, True)
+        self.logo_path = get_export_service().upload_base64(data, name, False, True)
         self.save()
 
 
@@ -761,10 +760,10 @@ class ConceptContainerModel(VersionedModel):
         return path
 
     def get_export_url(self):
-        return S3.url_for(self.export_path)
+        return get_export_service().url_for(self.export_path)
 
     def has_export(self):
-        return S3.exists(self.export_path)
+        return get_export_service().exists(self.export_path)
 
     def can_view_all_content(self, user):
         if get(user, 'is_anonymous'):

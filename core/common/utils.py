@@ -26,7 +26,7 @@ from rest_framework.utils import encoders
 
 from core.common.constants import UPDATED_SINCE_PARAM, BULK_IMPORT_QUEUES_COUNT, CURRENT_USER, REQUEST_URL, \
     TEMP_PREFIX
-from core.common.services import S3
+from core.settings import EXPORT_SERVICE
 
 
 def get_latest_dir_in_path(path):  # pragma: no cover
@@ -50,12 +50,12 @@ def write_csv_to_s3(data, is_owner, **kwargs):  # pragma: no cover
         zip_file.write(csv_file.name)
 
     key = get_downloads_path(is_owner) + zip_file.filename
-    S3.upload_file(
+    get_export_service().upload_file(
         key=key, file_path=os.path.abspath(zip_file.filename), binary=True,
         metadata=dict(ContentType='application/zip'), headers={'content-type': 'application/zip'}
     )
     os.chdir(cwd)
-    return S3.url_for(key)
+    return get_export_service().url_for(key)
 
 
 def compact_dict_by_values(_dict):
@@ -74,8 +74,9 @@ def get_downloads_path(is_owner):  # pragma: no cover
 def get_csv_from_s3(filename, is_owner):  # pragma: no cover
     filename = get_downloads_path(is_owner) + filename + '.csv.zip'
 
-    if S3.exists(filename):
-        return S3.url_for(filename)
+    export_service = get_export_service()
+    if export_service.exists(filename):
+        return export_service.url_for(filename)
 
     return None
 
@@ -330,15 +331,16 @@ def write_export_file(
     logger.info('Done compressing.  Uploading...')
 
     s3_key = version.export_path
+    export_service = get_export_service()
     if version.is_head:
-        S3.delete_objects(version.generic_export_path(suffix=None))
+        export_service.delete_objects(version.generic_export_path(suffix=None))
 
-    upload_status_code = S3.upload_file(
+    upload_status_code = export_service.upload_file(
         key=s3_key, file_path=file_path, binary=True, metadata=dict(ContentType='application/zip'),
         headers={'content-type': 'application/zip'}
     )
     logger.info(f'Upload response status: {str(upload_status_code)}')
-    uploaded_path = S3.url_for(s3_key)
+    uploaded_path = export_service.url_for(s3_key)
     logger.info(f'Uploaded to {uploaded_path}.')
 
     if not get(settings, 'TEST_MODE', False):
@@ -844,3 +846,10 @@ def split_list_by_condition(items, predicate):
 
 def is_canonical_uri(string):
     return ':' in string
+
+
+def get_export_service():
+    parts = EXPORT_SERVICE.split('.')
+    klass = parts[-1]
+    mod = __import__('.'.join(parts[0:-1]), fromlist=[klass])
+    return getattr(mod, klass)

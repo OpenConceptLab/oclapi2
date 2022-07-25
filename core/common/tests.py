@@ -216,7 +216,7 @@ class S3Test(TestCase):
         _conn = boto3.resource('s3', region_name='us-east-1')
         _conn.create_bucket(Bucket='oclapi2-dev')
 
-        S3.upload('some/path', 'content')
+        S3._upload('some/path', 'content')  # pylint: disable=protected-access
 
         self.assertEqual(
             _conn.Object(
@@ -233,7 +233,7 @@ class S3Test(TestCase):
 
         self.assertFalse(S3.exists('some/path'))
 
-        S3.upload('some/path', 'content')
+        S3._upload('some/path', 'content')  # pylint: disable=protected-access
 
         self.assertTrue(S3.exists('some/path'))
 
@@ -243,7 +243,7 @@ class S3Test(TestCase):
         conn_mock.upload_fileobj = Mock(return_value='success')
         client_mock.return_value = conn_mock
 
-        self.assertEqual(S3.upload_public('some/path', 'content'), 'success')
+        self.assertEqual(S3._upload_public('some/path', 'content'), 'success')  # pylint: disable=protected-access
 
         conn_mock.upload_fileobj.assert_called_once_with(
             'content',
@@ -254,14 +254,14 @@ class S3Test(TestCase):
 
     def test_upload_file(self):
         with patch("builtins.open", mock_open(read_data="file-content")) as mock_file:
-            S3.upload = Mock(return_value=200)
+            S3._upload = Mock(return_value=200)  # pylint: disable=protected-access
             file_path = "path/to/file.ext"
             res = S3.upload_file(key=file_path, headers={'header1': 'val1'})
             self.assertEqual(res, 200)
-            S3.upload.assert_called_once_with(file_path, 'file-content', {'header1': 'val1'}, None)
+            S3._upload.assert_called_once_with(file_path, 'file-content', {'header1': 'val1'}, None)  # pylint: disable=protected-access
             mock_file.assert_called_once_with(file_path, 'r')
 
-    @patch('core.common.services.S3.upload')
+    @patch('core.common.services.S3._upload')
     def test_upload_base64(self, s3_upload_mock):
         file_content = base64.b64encode(b'file-content')
         uploaded_file_name_with_ext = S3.upload_base64(
@@ -283,7 +283,7 @@ class S3Test(TestCase):
             isinstance(mock_calls[0][1][1], ContentFile)
         )
 
-    @patch('core.common.services.S3.upload_public')
+    @patch('core.common.services.S3._upload_public')
     def test_upload_base64_public(self, s3_upload_mock):
         file_content = base64.b64encode(b'file-content')
         uploaded_file_name_with_ext = S3.upload_base64(
@@ -306,7 +306,7 @@ class S3Test(TestCase):
             isinstance(mock_calls[0][1][1], ContentFile)
         )
 
-    @patch('core.common.services.S3.upload')
+    @patch('core.common.services.S3._upload')
     def test_upload_base64_no_ext(self, s3_upload_mock):
         file_content = base64.b64encode(b'file-content')
         uploaded_file_name_with_ext = S3.upload_base64(
@@ -334,7 +334,7 @@ class S3Test(TestCase):
         conn = boto3.resource('s3', region_name='us-east-1')
         conn.create_bucket(Bucket='oclapi2-dev')
 
-        S3.upload('some/path', 'content')
+        S3._upload('some/path', 'content')  # pylint: disable=protected-access
         self.assertEqual(
             conn.Object(
                 'oclapi2-dev',
@@ -353,7 +353,7 @@ class S3Test(TestCase):
         _conn = boto3.resource('s3', region_name='us-east-1')
         _conn.create_bucket(Bucket='oclapi2-dev')
 
-        S3.upload('some/path', 'content')
+        S3._upload('some/path', 'content')  # pylint: disable=protected-access
         _url = S3.url_for('some/path')
 
         self.assertTrue(
@@ -819,8 +819,10 @@ class BaseModelTest(OCLTestCase):
 
 
 class TaskTest(OCLTestCase):
-    @patch('core.common.tasks.S3')
-    def test_delete_s3_objects(self, s3_mock):
+    @patch('core.common.tasks.get_export_service')
+    def test_delete_s3_objects(self, export_service_mock):
+        s3_mock = Mock(delete_objects=Mock())
+        export_service_mock.return_value = s3_mock
         delete_s3_objects('/some/path')
         s3_mock.delete_objects.assert_called_once_with('/some/path')
 

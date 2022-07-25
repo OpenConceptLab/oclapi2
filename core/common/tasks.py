@@ -14,8 +14,7 @@ from pydash import get
 
 from core.celery import app
 from core.common.constants import CONFIRM_EMAIL_ADDRESS_MAIL_SUBJECT, PASSWORD_RESET_MAIL_SUBJECT
-from core.common.services import S3
-from core.common.utils import write_export_file, web_url, get_resource_class_from_resource_name
+from core.common.utils import write_export_file, web_url, get_resource_class_from_resource_name, get_export_service
 
 logger = get_task_logger(__name__)
 
@@ -645,7 +644,7 @@ def update_collection_active_mappings_count(collection_id):
 @app.task
 def delete_s3_objects(path):
     if path:
-        S3.delete_objects(path)
+        get_export_service().delete_objects(path)
 
 
 @app.task(ignore_result=True)

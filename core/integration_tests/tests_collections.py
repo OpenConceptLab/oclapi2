@@ -1278,8 +1278,10 @@ class CollectionVersionListViewTest(OCLAPITestCase):
 
 
 class ExportCollectionTaskTest(OCLAPITestCase):
-    @patch('core.common.utils.S3')
-    def test_export_collection(self, s3_mock):  # pylint: disable=too-many-locals
+    @patch('core.common.utils.get_export_service')
+    def test_export_collection(self, export_service_mock):  # pylint: disable=too-many-locals
+        s3_mock = Mock()
+        export_service_mock.return_value = s3_mock
         s3_mock.url_for = Mock(return_value='https://s3-url')
         s3_mock.upload_file = Mock()
         source = OrganizationSourceFactory()

@@ -20,9 +20,8 @@ from core.common.constants import HEAD, ACCESS_TYPE_NONE, INCLUDE_FACETS, \
     MUST_SPECIFY_EXTRA_PARAM_IN_BODY, INCLUDE_RETIRED_PARAM
 from core.common.permissions import HasPrivateAccess, HasOwnership, CanViewConceptDictionary, \
     CanViewConceptDictionaryVersion
-from core.common.services import S3
 from .utils import write_csv_to_s3, get_csv_from_s3, get_query_params_from_url_string, compact_dict_by_values, \
-    to_owner_uri, parse_updated_since_param
+    to_owner_uri, parse_updated_since_param, get_export_service
 
 logger = logging.getLogger('oclapi')
 
@@ -678,7 +677,7 @@ class ConceptContainerExportMixin:
             return HttpResponseForbidden()
 
         if version.has_export():
-            S3.remove(version.export_path)
+            get_export_service().remove(version.export_path)
             return Response(status=status.HTTP_204_NO_CONTENT)
 
         return Response(status=status.HTTP_404_NOT_FOUND)

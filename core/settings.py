@@ -389,3 +389,4 @@ VERSION = __version__
 # Errbit
 ERRBIT_URL = os.environ.get('ERRBIT_URL', 'http://errbit:8080')
 ERRBIT_KEY = os.environ.get('ERRBIT_KEY', 'errbit-key')
+EXPORT_SERVICE = os.environ.get('EXPORT_SERVICE', 'core.common.services.S3')
