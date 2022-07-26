@@ -1,3 +1,6 @@
+##### 2.2.11 - Fri Jun 10 07:59:57 2022 +0000
+- [OpenConceptLab/ocl_issues#1311](https://github.com/OpenConceptLab/ocl_issues/issues/1311) | resources search attributes | correcting boost and attr meta
+- [OpenConceptLab/ocl_issues#1311](https://github.com/OpenConceptLab/ocl_issues/issues/1311) | org search attributes | correcting boost and attr meta
 ##### 2.2.10 - Fri Jun 10 05:40:43 2022 +0000
 - [OpenConceptLab/ocl_issues#1311](https://github.com/OpenConceptLab/ocl_issues/issues/1311) | wildcard search boost=0
 ##### 2.2.9 - Fri Jun 10 03:22:12 2022 +0000
