@@ -1,3 +1,5 @@
+##### 2.2.35 - Tue Jul 26 05:04:41 2022 +0000
+- [OpenConceptLab/ocl_issues#1339](https://github.com/OpenConceptLab/ocl_issues/issues/1339) | concept cascade to include/exclude retired results
 ##### 2.2.34 - Mon Jul 25 09:22:42 2022 +0000
 - Extract export service (S3) | can plugin upload/download service via settings
 ##### 2.2.33 - Fri Jul 22 02:26:02 2022 +0000
