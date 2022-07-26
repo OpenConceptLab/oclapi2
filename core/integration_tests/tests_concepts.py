@@ -1248,7 +1248,7 @@ class ConceptCascadeViewTest(OCLAPITestCase):
         entry = response.data['entry']
         self.assertEqual(
             list(entry.keys()),
-            ['uuid', 'id', 'name', 'type', 'url', 'version_url', 'terminal', 'entries', 'display_name']
+            ['uuid', 'id', 'name', 'type', 'url', 'version_url', 'terminal', 'entries', 'display_name', 'retired']
         )
         self.assertEqual(entry['uuid'], str(concept1.id))
         self.assertEqual(entry['name'], concept1.mnemonic)
@@ -1308,7 +1308,7 @@ class ConceptCascadeViewTest(OCLAPITestCase):
         entry = response.data['entry']
         self.assertEqual(
             list(entry.keys()),
-            ['uuid', 'id', 'name', 'type', 'url', 'version_url', 'terminal', 'entries', 'display_name']
+            ['uuid', 'id', 'name', 'type', 'url', 'version_url', 'terminal', 'entries', 'display_name', 'retired']
         )
         self.assertEqual(entry['uuid'], str(concept2.id))
         self.assertEqual(entry['name'], concept2.mnemonic)
@@ -1352,7 +1352,7 @@ class ConceptCascadeViewTest(OCLAPITestCase):
         entry = response.data['entry']
         self.assertEqual(
             list(entry.keys()),
-            ['uuid', 'id', 'name', 'type', 'url', 'version_url', 'terminal', 'entries', 'display_name']
+            ['uuid', 'id', 'name', 'type', 'url', 'version_url', 'terminal', 'entries', 'display_name', 'retired']
         )
         self.assertEqual(entry['uuid'], str(concept1.id))
         self.assertEqual(entry['name'], concept1.mnemonic)
@@ -1369,7 +1369,7 @@ class ConceptCascadeViewTest(OCLAPITestCase):
         entry = response.data['entry']
         self.assertEqual(
             list(entry.keys()),
-            ['uuid', 'id', 'name', 'type', 'url', 'version_url', 'terminal', 'entries', 'display_name']
+            ['uuid', 'id', 'name', 'type', 'url', 'version_url', 'terminal', 'entries', 'display_name', 'retired']
         )
         self.assertEqual(entry['uuid'], str(concept2.id))
         self.assertEqual(entry['name'], concept2.mnemonic)

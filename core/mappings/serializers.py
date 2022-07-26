@@ -135,7 +135,7 @@ class MappingMinimalSerializer(ModelSerializer):
         fields = (
             'uuid', 'id', 'type', 'map_type', 'url', 'version_url', 'to_concept_code', 'to_concept_url',
             'target_concept_code', 'target_concept_url', 'target_source_owner', 'target_source_name',
-            'target_concept_name'
+            'target_concept_name', 'retired'
         )
 
     @staticmethod
@@ -165,7 +165,7 @@ class MappingReverseMinimalSerializer(ModelSerializer):
         fields = (
             'uuid', 'id', 'type', 'map_type', 'url', 'version_url', 'from_concept_code', 'from_concept_url',
             'target_concept_code', 'target_concept_url', 'target_source_owner', 'target_source_name',
-            'target_concept_name'
+            'target_concept_name', 'retired'
         )
 
     @staticmethod

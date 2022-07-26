@@ -346,7 +346,7 @@ class ConceptCascadeView(ConceptBaseView):
         manual_parameters=[
             cascade_method_param, cascade_map_types_params, cascade_exclude_map_types_params,
             cascade_hierarchy_param, cascade_mappings_param, include_mappings_param, cascade_levels_param,
-            cascade_direction_param, cascade_view_hierarchy
+            cascade_direction_param, cascade_view_hierarchy, include_retired_param
         ]
     )
     def get(self, request, **kwargs):  # pylint: disable=unused-argument
