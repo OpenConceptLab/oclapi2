@@ -1,3 +1,6 @@
+##### 2.2.18 - Fri Jun 24 07:36:16 2022 +0000
+- Concept/Mapping | repo version query to not check for public access | added indexes for repo versions
+- Revert "OpenConceptLab/ocl_issues#1320 | reference cascade to use unique resources"
 ##### 2.2.16 - Fri Jun 24 05:36:31 2022 +0000
 - [OpenConceptLab/ocl_issues#1320](https://github.com/OpenConceptLab/ocl_issues/issues/1320) | expansion to add unique resources
 ##### 2.2.15 - Fri Jun 24 04:50:56 2022 +0000
