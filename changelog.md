@@ -1,3 +1,11 @@
+##### 2.2.20 - Wed Jun 29 05:10:39 2022 +0000
+- Expansions | corrected user signatures on create
+- Skipping csv test | getting hung sometimes
+- Errbit | not using cache for openmrs concept validator lookups
+- [OpenConceptLab/ocl_issues#1330](https://github.com/OpenConceptLab/ocl_issues/issues/1330) | LocalizedText.name is a Hash Index
+- [OpenConceptLab/ocl_issues#1329](https://github.com/OpenConceptLab/ocl_issues/issues/1329) | Source/Collection serializers | canonical_url as char field
+- [OpenConceptLab/ocl_issues#1329](https://github.com/OpenConceptLab/ocl_issues/issues/1329) | canonical_url check works for any uri scheme
+- [OpenConceptLab/ocl_issues#1329](https://github.com/OpenConceptLab/ocl_issues/issues/1329) | canonical_url can take any URI
 ##### 2.2.18 - Fri Jun 24 07:36:16 2022 +0000
 - Concept/Mapping | repo version query to not check for public access | added indexes for repo versions
 - Revert "OpenConceptLab/ocl_issues#1320 | reference cascade to use unique resources"
