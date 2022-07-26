@@ -1,3 +1,6 @@
+##### 2.2.33 - Fri Jul 22 02:26:02 2022 +0000
+- Errbit | Bulk create of mapping/concept via POST is not allowed
+- Fixing version export with version creation
 ##### 2.2.32 - Thu Jul 21 03:24:07 2022 +0000
 - Importer | Added Failed in summary
 - Importer | delete action needs to be in sync with others in the same group
