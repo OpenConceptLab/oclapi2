@@ -1,3 +1,5 @@
+##### 2.2.31 - Tue Jul 19 02:41:13 2022 +0000
+- Collection last child update query fix
 ##### 2.2.30 - Mon Jul 18 03:17:34 2022 +0000
 - [OpenConceptLab/ocl_issues#1335](https://github.com/OpenConceptLab/ocl_issues/issues/1335) | User Management | verification and admin toggle
 - [OpenConceptLab/ocl_issues#1336](https://github.com/OpenConceptLab/ocl_issues/issues/1336) | Speed up tests by getting rid of delete_all and relying on rollback
