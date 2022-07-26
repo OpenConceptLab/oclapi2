@@ -1,3 +1,9 @@
+##### 2.2.30 - Mon Jul 18 03:17:34 2022 +0000
+- [OpenConceptLab/ocl_issues#1335](https://github.com/OpenConceptLab/ocl_issues/issues/1335) | User Management | verification and admin toggle
+- [OpenConceptLab/ocl_issues#1336](https://github.com/OpenConceptLab/ocl_issues/issues/1336) | Speed up tests by getting rid of delete_all and relying on rollback
+- [OpenConceptLab/ocl_issues#1335](https://github.com/OpenConceptLab/ocl_issues/issues/1335) | Admin can force mark verified any user
+- Logs | added request method in response headers
+- Logs | added request url in response headers
 ##### 2.2.28 - Wed Jul 13 05:32:06 2022 +0000
 - Bump boto3 from 1.23.0 to 1.24.28 (#261)
 - Bump django-ordered-model from 3.4.3 to 3.6 (#260)
