@@ -1,3 +1,8 @@
+##### 2.2.26 - Fri Jul 8 08:59:11 2022 +0000
+- [OpenConceptLab/ocl_issues#1332](https://github.com/OpenConceptLab/ocl_issues/issues/1332) | fixing task to load less
+- [OpenConceptLab/ocl_issues#1332](https://github.com/OpenConceptLab/ocl_issues/issues/1332) | fixing method signature
+- Fixing task view test
+- [OpenConceptLab/ocl_issues#1332](https://github.com/OpenConceptLab/ocl_issues/issues/1332) | API/task for backfilling repo versions to expansions
 ##### 2.2.25 - Fri Jul 8 05:36:11 2022 +0000
 - CollectionReference | API to resolve reference
 ##### 2.2.24 - Thu Jul 7 07:02:23 2022 +0000
