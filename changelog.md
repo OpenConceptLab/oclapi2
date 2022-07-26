@@ -1,3 +1,6 @@
+##### 2.2.13 - Fri Jun 17 04:59:06 2022 +0000
+- importers.models | ignoring logs from coverage
+- non-negative validator test
 ##### 2.2.12 - Wed Jun 15 03:27:20 2022 +0000
 - Mocking Redis service
 - Bump django from 4.0.4 to 4.0.5
