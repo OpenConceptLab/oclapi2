@@ -1,3 +1,18 @@
+##### 2.2.12 - Wed Jun 15 03:27:20 2022 +0000
+- Mocking Redis service
+- Bump django from 4.0.4 to 4.0.5
+- increased coverage to 93
+- Repo version export delete test
+- Repo version processing view integration tests
+- missing S3 test
+- revived s3 test
+- upgraded moto to latest
+- unit tests for postgresql service for sequence CRUD
+- [OpenConceptLab/ocl_issues#1116](https://github.com/OpenConceptLab/ocl_issues/issues/1116) | Added Response time header
+- Errbit | bulk import task to throw error when 'type' is missing on any line
+- Fixing source mnemonic sequence not present for older sources
+- [OpenConceptLab/ocl_issues#1232](https://github.com/OpenConceptLab/ocl_issues/issues/1232) Fixing test
+- [OpenConceptLab/ocl_issues#1232](https://github.com/OpenConceptLab/ocl_issues/issues/1232) Adding tests and fixes
 ##### 2.2.11 - Fri Jun 10 07:59:57 2022 +0000
 - [OpenConceptLab/ocl_issues#1311](https://github.com/OpenConceptLab/ocl_issues/issues/1311) | resources search attributes | correcting boost and attr meta
 - [OpenConceptLab/ocl_issues#1311](https://github.com/OpenConceptLab/ocl_issues/issues/1311) | org search attributes | correcting boost and attr meta
