@@ -1,3 +1,9 @@
+##### 2.2.28 - Wed Jul 13 05:32:06 2022 +0000
+- Bump boto3 from 1.23.0 to 1.24.28 (#261)
+- Bump django-ordered-model from 3.4.3 to 3.6 (#260)
+- Collection version references | verbose response
+- Bump django-cid from 2.2 to 2.3 (#259)
+- Bump psycopg2 from 2.9.2 to 2.9.3 (#257)
 ##### 2.2.26 - Fri Jul 8 08:59:11 2022 +0000
 - [OpenConceptLab/ocl_issues#1332](https://github.com/OpenConceptLab/ocl_issues/issues/1332) | fixing task to load less
 - [OpenConceptLab/ocl_issues#1332](https://github.com/OpenConceptLab/ocl_issues/issues/1332) | fixing method signature
