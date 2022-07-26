@@ -1,3 +1,5 @@
+##### 2.2.8 - Mon May 2 04:00:50 2022 +0000
+- [OpenConceptLab/ocl_issues#1285](https://github.com/OpenConceptLab/ocl_issues/issues/1285) | Repo export behind permission
 ##### 2.2.7 - Sat Apr 30 03:52:38 2022 +0000
 - [OpenConceptLab/ocl_issues#1285](https://github.com/OpenConceptLab/ocl_issues/issues/1285) | Repo export behind permission
 - [OpenConceptLab/ocl_issues#1283](https://github.com/OpenConceptLab/ocl_issues/issues/1283) | Concept synonyms indexing | using lowecase normalizer
