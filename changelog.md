@@ -1,3 +1,9 @@
+##### 2.2.15 - Fri Jun 24 04:50:56 2022 +0000
+- Errbit | fixing mapping collection membership API
+- Errbit | fixing concept collection membership API
+- [OpenConceptLab/ocl_issues#1320](https://github.com/OpenConceptLab/ocl_issues/issues/1320) | reference cascade to use unique resources
+- [OpenConceptLab/ocl_issues#1307](https://github.com/OpenConceptLab/ocl_issues/issues/1307) | expansions to keep resolved repo versions
+- Added concept indexes for repo version query
 ##### 2.2.14 - Mon Jun 20 08:43:13 2022 +0000
 - [OpenConceptLab/ocl_issues#1325](https://github.com/OpenConceptLab/ocl_issues/issues/1325) | Mapping target concept name reverse
 - [OpenConceptLab/ocl_issues#1325](https://github.com/OpenConceptLab/ocl_issues/issues/1325) | Mapping target concept name
