@@ -1,3 +1,5 @@
+##### 2.2.10 - Fri Jun 10 05:40:43 2022 +0000
+- [OpenConceptLab/ocl_issues#1311](https://github.com/OpenConceptLab/ocl_issues/issues/1311) | wildcard search boost=0
 ##### 2.2.9 - Fri Jun 10 03:22:12 2022 +0000
 - CollectionReference | not using expression to compute concepts/mappings
 - [OpenConceptLab/ocl_issues#1321](https://github.com/OpenConceptLab/ocl_issues/issues/1321) | ES extras | replacing hyphens with underscores
