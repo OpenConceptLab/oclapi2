@@ -1,3 +1,5 @@
+##### 2.2.16 - Fri Jun 24 05:36:31 2022 +0000
+- [OpenConceptLab/ocl_issues#1320](https://github.com/OpenConceptLab/ocl_issues/issues/1320) | expansion to add unique resources
 ##### 2.2.15 - Fri Jun 24 04:50:56 2022 +0000
 - Errbit | fixing mapping collection membership API
 - Errbit | fixing concept collection membership API
