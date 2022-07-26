@@ -1,3 +1,18 @@
+##### 2.2.23 - Wed Jul 6 06:01:54 2022 +0000
+- removed unused import
+- Bump django from 4.0.5 to 4.0.6 (#258)
+- API/Task to link all references resources
+- Task to migrate references
+- Task to migrate references | ignoring coverage
+- Task to migrate from old to new reference structure | added logs
+- APIs to Link reference with resources and to migrate from old to new structure via job
+- Reference | migrating old reference to new structure via management command
+- Revert "Reference | migrating old reference to new structure"
+- Reference | migrating old reference to new structure
+- Utils | Test for more scenarios
+- Merge pull request #254 from OpenConceptLab/dependabot/pip/django-request-logging-0.7.5
+- [OpenConceptLab/ocl_issues#1145](https://github.com/OpenConceptLab/ocl_issues/issues/1145) | API to get any task info by ID from Flower
+- Bump django-request-logging from 0.7.3 to 0.7.5
 ##### 2.2.20 - Wed Jun 29 05:10:39 2022 +0000
 - Expansions | corrected user signatures on create
 - Skipping csv test | getting hung sometimes
