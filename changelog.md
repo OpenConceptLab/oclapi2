@@ -1,3 +1,6 @@
+##### 2.2.14 - Mon Jun 20 08:43:13 2022 +0000
+- [OpenConceptLab/ocl_issues#1325](https://github.com/OpenConceptLab/ocl_issues/issues/1325) | Mapping target concept name reverse
+- [OpenConceptLab/ocl_issues#1325](https://github.com/OpenConceptLab/ocl_issues/issues/1325) | Mapping target concept name
 ##### 2.2.13 - Fri Jun 17 04:59:06 2022 +0000
 - importers.models | ignoring logs from coverage
 - non-negative validator test
