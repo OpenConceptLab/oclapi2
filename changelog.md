@@ -1,3 +1,5 @@
+##### 2.2.25 - Fri Jul 8 05:36:11 2022 +0000
+- CollectionReference | API to resolve reference
 ##### 2.2.24 - Thu Jul 7 07:02:23 2022 +0000
 - Errbit | fixing exception class import
 - Errbit | ES search exception | data too large
