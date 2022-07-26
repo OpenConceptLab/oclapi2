@@ -1,3 +1,7 @@
+##### 2.2.24 - Thu Jul 7 07:02:23 2022 +0000
+- Errbit | fixing exception class import
+- Errbit | ES search exception | data too large
+- Fixing Mapping creation without from/to source
 ##### 2.2.23 - Wed Jul 6 06:01:54 2022 +0000
 - removed unused import
 - Bump django from 4.0.5 to 4.0.6 (#258)
