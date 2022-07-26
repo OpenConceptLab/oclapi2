@@ -1,3 +1,6 @@
+##### 2.2.32 - Thu Jul 21 03:24:07 2022 +0000
+- Importer | Added Failed in summary
+- Importer | delete action needs to be in sync with others in the same group
 ##### 2.2.31 - Tue Jul 19 02:41:13 2022 +0000
 - Collection last child update query fix
 ##### 2.2.30 - Mon Jul 18 03:17:34 2022 +0000
