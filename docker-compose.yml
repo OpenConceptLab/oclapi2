@@ -149,6 +149,20 @@ services:
     restart: "always"
     healthcheck:
       test: "curl --silent --fail http://localhost:9200/_cluster/health || exit 1"
+  keycloak:
+    image: quay.io/keycloak/keycloak:18.0.2
+    command: ["start-dev", "--health-enabled=true"]
+    ports:
+      - 8080:8080
+    volumes:
+      - keycloak-data:/usr/share/keycloak/data
+    environment:
+      - KEYCLOAK_ADMIN=${KEYCLOAK_ADMIN-root}
+      - KEYCLOAK_ADMIN_PASSWORD=${KEYCLOAK_ADMIN_PASSWORD-Root123}
+    restart: "always"
+    healthcheck:
+      test: "curl --silent --fail http://localhost:8080/health || exit 1"
 volumes:
   postgres-data:
   es-data:
+  keycloak-data:
