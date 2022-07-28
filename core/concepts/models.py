@@ -1002,6 +1002,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                             result['concepts'] = Concept.objects.filter(
                                 id__in=[
                                     *res['concepts'].values_list('id', flat=True),
+                                    *res['hierarchy_concepts'].values_list('id', flat=True),
                                     *result['concepts'].values_list('id', flat=True)
                                 ]
                             )

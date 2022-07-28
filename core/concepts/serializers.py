@@ -321,7 +321,7 @@ class ConceptMinimalSerializer(ConceptAbstractSerializer):
 
     class Meta:
         model = Concept
-        fields = ConceptAbstractSerializer.Meta.fields + ('id', 'type', 'url', 'version_url')
+        fields = ConceptAbstractSerializer.Meta.fields + ('id', 'type', 'url', 'version_url', 'retired')
 
 
 class ConceptMinimalSerializerRecursive(ConceptAbstractSerializer):
