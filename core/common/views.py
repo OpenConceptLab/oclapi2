@@ -930,3 +930,47 @@ class ConceptMultipleLatestVersionsView(BaseAPIView, ListWithHeadersMixin):  # p
         Concept.batch_index(concepts, ConceptDocument)
 
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class ConceptContainerExtraRetrieveUpdateDestroyView(RetrieveUpdateDestroyAPIView):
+    def retrieve(self, request, *args, **kwargs):
+        key = kwargs.get('extra')
+        instance = self.get_object()
+        extras = get(instance, 'extras', {})
+        if key in extras:
+            return Response({key: extras[key]})
+
+        return Response(dict(detail=NOT_FOUND), status=status.HTTP_404_NOT_FOUND)
+
+    def update(self, request, **kwargs):  # pylint: disable=arguments-differ
+        key = kwargs.get('extra')
+        value = request.data.get(key)
+        if not value:
+            return Response([MUST_SPECIFY_EXTRA_PARAM_IN_BODY.format(key)], status=status.HTTP_400_BAD_REQUEST)
+
+        instance = self.get_object()
+        instance.extras = get(instance, 'extras', {})
+        instance.extras[key] = value
+        instance.comment = f'Updated extras: {key}={value}.'
+        head = instance.get_head()
+        head.extras = get(head, 'extras', {})
+        head.extras.update(instance.extras)
+        instance.save()
+        head.save()
+        return Response({key: value})
+
+    def delete(self, request, *args, **kwargs):
+        key = kwargs.get('extra')
+        instance = self.get_object()
+        instance.extras = get(instance, 'extras', {})
+        if key in instance.extras:
+            del instance.extras[key]
+            instance.comment = f'Deleted extra {key}.'
+            head = instance.get_head()
+            head.extras = get(head, 'extras', {})
+            del head.extras[key]
+            instance.save()
+            head.save()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+
+        return Response(dict(detail=NOT_FOUND), status=status.HTTP_404_NOT_FOUND)

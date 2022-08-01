@@ -8,12 +8,12 @@ from django.db import models
 from django.urls import reverse
 from rest_framework.authtoken.models import Token
 
-from core.common.mixins import SourceContainerMixin
 from core.common.models import BaseModel, CommonLogoModel
 from core.common.tasks import send_user_verification_email, send_user_reset_password_email
 from core.common.utils import web_url
 from core.users.constants import AUTH_GROUPS
 from .constants import USER_OBJECT_TYPE
+from core.common.mixins import SourceContainerMixin
 
 
 class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin):
@@ -32,8 +32,8 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
     website = models.TextField(null=True, blank=True)
     verified = models.BooleanField(default=True)
     verification_token = models.TextField(null=True, blank=True)
-    mnemonic_attr = 'username'
     deactivated_at = models.DateTimeField(null=True, blank=True)
+    mnemonic_attr = 'username'
 
     es_fields = {
         'username': {'sortable': True, 'filterable': True, 'exact': True},
