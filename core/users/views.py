@@ -27,6 +27,7 @@ from core.users.documents import UserProfileDocument
 from core.users.search import UserProfileSearch
 from core.users.serializers import UserDetailSerializer, UserCreateSerializer, UserListSerializer, UserSummarySerializer
 from .models import UserProfile
+from ..common.services import AuthService
 
 
 class TokenAuthenticationView(ObtainAuthToken):
@@ -34,9 +35,16 @@ class TokenAuthenticationView(ObtainAuthToken):
 
     @swagger_auto_schema(request_body=AuthTokenSerializer)
     def post(self, request, *args, **kwargs):
-        user = UserProfile.objects.filter(username=request.data.get('username')).first()
-        if not user or not user.check_password(request.data.get('password')):
+        username = request.data.get('username')
+        password = request.data.get('password')
+
+        auth_service = AuthService.get(username=username, password=password)
+        token = auth_service.get_token()
+
+        if token is False:
             raise Http400(dict(non_field_errors=["Unable to log in with provided credentials."]))
+
+        user = auth_service.user
 
         if not user.is_active:
             user.verify()
@@ -49,14 +57,12 @@ class TokenAuthenticationView(ObtainAuthToken):
                 {'detail': VERIFY_EMAIL_MESSAGE, 'email': user.email}, status=status.HTTP_401_UNAUTHORIZED
             )
 
-        result = super().post(request, *args, **kwargs)
-
         try:
             update_last_login(None, user)
         except:  # pylint: disable=bare-except
             pass
 
-        return result
+        return Response(token)
 
 
 class UserBaseView(BaseAPIView):
