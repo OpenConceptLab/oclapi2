@@ -33,3 +33,4 @@ django-request-logging==0.7.5
 django-cid==2.3
 django-dirtyfields==1.8.1
 jsonpath-ng==1.5.3
+mozilla-django-oidc==2.0.0

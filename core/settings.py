@@ -63,6 +63,7 @@ DEFAULT_AUTO_FIELD = 'django.db.models.AutoField'
 INSTALLED_APPS = [
     'django.contrib.admin',
     'django.contrib.auth',
+    'mozilla_django_oidc',
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
@@ -90,12 +91,12 @@ INSTALLED_APPS = [
     'core.client_configs',
     'core.tasks',
 ]
-
 REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': (
         'rest_framework.permissions.IsAuthenticated',
     ),
     'DEFAULT_AUTHENTICATION_CLASSES': (
+        'mozilla_django_oidc.contrib.drf.OIDCAuthentication',
         'rest_framework.authentication.TokenAuthentication',
     ),
     'DEFAULT_RENDERER_CLASSES': (
@@ -108,6 +109,11 @@ REST_FRAMEWORK = {
     'DEFAULT_SCHEMA_CLASS': 'rest_framework.schemas.coreapi.AutoSchema',
     'DEFAULT_CONTENT_NEGOTIATION_CLASS': 'core.common.negotiation.OptionallyCompressContentNegotiation',
 }
+OIDC_DRF_AUTH_BACKEND = 'core.common.backends.OCLOIDCAuthenticationBackend'
+AUTHENTICATION_BACKENDS = (
+    OIDC_DRF_AUTH_BACKEND,
+)
+
 
 SWAGGER_SETTINGS = {
     'PERSIST_AUTH': True,
@@ -168,7 +174,6 @@ WSGI_APPLICATION = 'core.wsgi.application'
 
 # Database
 # https://docs.djangoproject.com/en/3.0/ref/settings/#databases
-
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
@@ -389,4 +394,23 @@ VERSION = __version__
 # Errbit
 ERRBIT_URL = os.environ.get('ERRBIT_URL', 'http://errbit:8080')
 ERRBIT_KEY = os.environ.get('ERRBIT_KEY', 'errbit-key')
+
+# Repo Export Upload/download
 EXPORT_SERVICE = os.environ.get('EXPORT_SERVICE', 'core.common.services.S3')
+
+# keyCloak/OIDC Provider settings
+OIDC_RP_CLIENT_ID = os.environ.get('OIDC_RP_CLIENT_ID', 'ocllocal')
+OIDC_RP_CLIENT_SECRET = os.environ.get('OIDC_RP_CLIENT_SECRET', 'ZhuQY8Ps6osM3wJagmwItSuQmY2bgX3Q')
+OIDC_SERVER_URL = os.environ.get('OIDC_SERVER_URL', 'http://localhost:8080')
+OIDC_SERVER_INTERNAL_URL = os.environ.get('OIDC_SERVER_URL', 'http://host.docker.internal:8080')
+OIDC_REALM = os.environ.get('OIDC_REALM', 'ocl')
+OIDC_OP_AUTHORIZATION_ENDPOINT = f'{OIDC_SERVER_URL}/realms/{OIDC_REALM}/protocol/openid-connect/auth'
+OIDC_OP_TOKEN_ENDPOINT = f'{OIDC_SERVER_INTERNAL_URL}/realms/{OIDC_REALM}/protocol/openid-connect/token/'
+OIDC_OP_USER_ENDPOINT = f'{OIDC_SERVER_INTERNAL_URL}/realms/{OIDC_REALM}/protocol/openid-connect/userinfo/'
+OIDC_RP_SIGN_ALGO = 'RS256'
+OIDC_OP_JWKS_ENDPOINT = f'{OIDC_SERVER_INTERNAL_URL}/realms/{OIDC_REALM}/protocol/openid-connect/certs'
+OIDC_VERIFY_SSL = False
+OIDC_VERIFY_JWT = True
+OIDC_RP_SCOPES = 'openid profile email roles role_list'
+OIDC_STORE_ACCESS_TOKEN = True
+LOGIN_REDIRECT_URL = '/'
