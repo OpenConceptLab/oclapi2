@@ -9,6 +9,7 @@ from botocore.exceptions import NoCredentialsError, ClientError
 from django.conf import settings
 from django.core.files.base import ContentFile
 from django.db import connection
+from pydash import get
 
 from core.settings import REDIS_HOST, REDIS_PORT, REDIS_DB
 
@@ -244,3 +245,40 @@ class PostgresQL:
         with connection.cursor() as cursor:
             cursor.execute(f"SELECT last_value from {seq_name};")
             return cursor.fetchone()[0]
+
+
+class AbstractAuthService:
+    def __init__(self, username, password=None, user=None):
+        self.username = username
+        self.password = password
+        self.user = user
+        if self.username and not self.user:
+            self.set_user()
+
+    def set_user(self):
+        from core.users.models import UserProfile
+        self.user = UserProfile.objects.filter(username=self.username).first()
+
+    def get_token(self):
+        pass
+
+
+class DjangoAuthService(AbstractAuthService):
+    def get_token(self, check_password=True):
+        if check_password:
+            if not self.user.check_password(self.password):
+                return False
+        return self.user.get_token()
+
+
+class OIDCAuthService(AbstractAuthService):
+    def get_token(self):
+        return self.user.get_oidc_token(self.password)
+
+
+class AuthService:
+    @staticmethod
+    def get(**kwargs):
+        if get(settings, 'OIDC_SERVER_URL'):
+            return OIDCAuthService(**kwargs)
+        return DjangoAuthService(**kwargs)
