@@ -246,7 +246,13 @@ class UserPasswordResetView(UserBaseView):
         if not user:
             return Response(status=status.HTTP_404_NOT_FOUND)
 
-        result = user.update_password(password=password)
+        try:
+            validate_password(password)
+        except ValidationError as ex:
+            return Response(dict(errors=ex.messages), status=status.HTTP_400_BAD_REQUEST)
+
+        service = AuthService.get(user=user)
+        result = service.update_password(password)
         if get(result, 'errors'):
             return Response(result, status=status.HTTP_400_BAD_REQUEST)
 

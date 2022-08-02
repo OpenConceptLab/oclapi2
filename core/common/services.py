@@ -268,6 +268,9 @@ class AbstractAuthService:
     def mark_verified(self, **kwargs):
         return self.user.mark_verified(**kwargs)
 
+    def update_password(self, password):
+        return self.user.update_password(password=password)
+
 
 class DjangoAuthService(AbstractAuthService):
     token_type = 'Token'
@@ -334,43 +337,63 @@ class OIDCAuthService(AbstractAuthService):
 
         return response.json()
 
-    def mark_verified(self, **kwargs):
-        admin_headers = self.get_admin_headers()
+    def __get_all_users(self, headers=None):
         response = requests.get(
             settings.OIDC_SERVER_INTERNAL_URL + '/admin/realms/ocl/users',
             verify=False,
-            headers=admin_headers
+            headers=headers or self.get_admin_headers()
         )
+        return response.json()
 
-        users = response.json()
-        user_info = get([user for user in users if user['username'] == self.username], '0')
-        oid_user_id = get(user_info, 'id')
-        if not oid_user_id:
-            raise Http404()
+    def __get_user_info(self, headers=None):
+        users = self.__get_all_users(headers)
+        return next(user for user in users if user['username'] == self.username)
 
-        response = requests.put(
-            settings.OIDC_SERVER_INTERNAL_URL + f'/admin/realms/ocl/users/{oid_user_id}',
-            json=dict(emailVerified=True),
-            verify=False,
-            headers=admin_headers
-        )
+    def __get_user_id(self, headers=None):
+        user_info = self.__get_user_info(headers)
+        return get(user_info, 'id')
+
+    def mark_verified(self, **kwargs):
+        response = self.update_user(dict(emailVerified=True))
         if response.status_code < 300:
             return super().mark_verified(**kwargs)
         return response.json()
 
-    def reset_password(self, **kwargs):
-        # PUT /{realm}/users/{id}/disable-credential-types
-        # Body
-        # credentialTypes : < string > array
+    def update_user(self, data):
+        admin_headers = self.get_admin_headers()
+        oid_user_id = self.__get_user_id(admin_headers)
+        if not oid_user_id:
+            raise Http404()
+        response = requests.put(
+            settings.OIDC_SERVER_INTERNAL_URL + f'/admin/realms/ocl/users/{oid_user_id}',
+            json=data,
+            verify=False,
+            headers=admin_headers
+        )
+        return response
 
-        # PUT /admin/realms/{realm}/users/{id}/reset-password
-        # {
-        #     "type": "password",
-        #     "temporary": false,
-        #     "value": "my-new-password"
-        # }
+    def update_password(self, password):
+        admin_headers = self.get_admin_headers()
+        oid_user_id = self.__get_user_id(admin_headers)
+        if not oid_user_id:
+            raise Http404()
 
-        pass
+        requests.put(
+            settings.OIDC_SERVER_INTERNAL_URL + f'/admin/realms/ocl/users/{oid_user_id}/disable-credential-types',
+            json=['password'],
+            verify=False,
+            headers=admin_headers
+        )
+
+        response = requests.put(
+            settings.OIDC_SERVER_INTERNAL_URL + f'/admin/realms/ocl/users/{oid_user_id}/reset-password',
+            json=dict(type='password', temporary=False, value=password),
+            verify=False,
+            headers=admin_headers
+        )
+        if response.status_code < 300:
+            return super().update_password(password)
+        return response.json()
 
 
 class AuthService:
