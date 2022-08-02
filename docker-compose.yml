@@ -9,6 +9,8 @@ services:
       - POSTGRES_PASSWORD=${DB_PASSWORD-Postgres123}
     healthcheck:
       test: "pg_isready -U postgres"
+    volumes:
+      - postgres-data:/usr/share/postgres/data
   redis:
     image: redis:6.0.6-alpine
     restart: "always"
