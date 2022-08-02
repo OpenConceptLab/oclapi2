@@ -289,6 +289,40 @@ class DjangoAuthService(AbstractAuthService):
 class OIDCAuthService(AbstractAuthService):
     token_type = 'Bearer'
 
+    @staticmethod
+    def credential_representation_from_hash(hash_, temporary=False):
+        algorithm, hashIterations, salt, hashedSaltedValue = hash_.split('$')
+
+        return {
+            'type': 'password',
+            'hashedSaltedValue': hashedSaltedValue,
+            'algorithm': algorithm.replace('_', '-'),
+            'hashIterations': int(hashIterations),
+            'salt': base64.b64encode(salt.encode()).decode('ascii').strip(),
+            'temporary': temporary
+        }
+
+    @classmethod
+    def add_user(cls, user):
+        response = requests.post(
+            settings.OIDC_SERVER_INTERNAL_URL + '/admin/realms/ocl/users',
+            json=dict(
+                enabled=True,
+                emailVerified=user.verified,
+                firstName=user.first_name,
+                lastName=user.last_name,
+                email=user.email,
+                username=user.username,
+                credentials=[cls.credential_representation_from_hash(hash_=user.password)]
+            ),
+            verify=False,
+            headers=OIDCAuthService.get_admin_headers()
+        )
+        if response.status_code == 201:
+            return True
+
+        return response.json()
+
     def get_token(self):
         token = self.user.get_oidc_token(self.password)
         if token is False:
@@ -347,7 +381,7 @@ class OIDCAuthService(AbstractAuthService):
 
     def __get_user_info(self, headers=None):
         users = self.__get_all_users(headers)
-        return next(user for user in users if user['username'] == self.username)
+        return next((user for user in users if user['username'] == self.username), None)
 
     def __get_user_id(self, headers=None):
         user_info = self.__get_user_info(headers)
