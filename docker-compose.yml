@@ -49,6 +49,8 @@ services:
       - OIDC_RP_CLIENT_SECRET
       - OIDC_SERVER_URL=${OIDC_SERVER_URL-http://localhost:8080}
       - OIDC_REALM=${OIDC_REALM-ocl}
+      - KEYCLOAK_ADMIN=${KEYCLOAK_ADMIN-root}
+      - KEYCLOAK_ADMIN_PASSWORD=${KEYCLOAK_ADMIN_PASSWORD-Root123}
     healthcheck:
       test: "curl --silent --fail http://localhost:8000/version/ || exit 1"
   celery:

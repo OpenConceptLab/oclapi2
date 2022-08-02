@@ -414,3 +414,5 @@ OIDC_VERIFY_JWT = True
 OIDC_RP_SCOPES = 'openid profile email roles role_list'
 OIDC_STORE_ACCESS_TOKEN = True
 LOGIN_REDIRECT_URL = '/'
+KEYCLOAK_ADMIN = os.environ.get('KEYCLOAK_ADMIN', 'root')
+KEYCLOAK_ADMIN_PASSWORD = os.environ.get('KEYCLOAK_ADMIN_PASSWORD', 'Root123')

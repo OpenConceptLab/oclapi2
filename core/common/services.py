@@ -9,6 +9,7 @@ from botocore.exceptions import NoCredentialsError, ClientError
 from django.conf import settings
 from django.core.files.base import ContentFile
 from django.db import connection
+from django.http import Http404
 from pydash import get
 
 from core.settings import REDIS_HOST, REDIS_PORT, REDIS_DB
@@ -248,11 +249,13 @@ class PostgresQL:
 
 
 class AbstractAuthService:
-    def __init__(self, username, password=None, user=None):
+    def __init__(self, username=None, password=None, user=None):
         self.username = username
         self.password = password
         self.user = user
-        if self.username and not self.user:
+        if self.user:
+            self.username = self.user.username
+        elif self.username:
             self.set_user()
 
     def set_user(self):
@@ -262,18 +265,112 @@ class AbstractAuthService:
     def get_token(self):
         pass
 
+    def mark_verified(self, **kwargs):
+        return self.user.mark_verified(**kwargs)
+
 
 class DjangoAuthService(AbstractAuthService):
+    token_type = 'Token'
+
     def get_token(self, check_password=True):
         if check_password:
             if not self.user.check_password(self.password):
                 return False
-        return self.user.get_token()
+        return self.token_type + ' ' + self.user.get_token()
+
+    @staticmethod
+    def create_user(_):
+        return True
 
 
 class OIDCAuthService(AbstractAuthService):
+    token_type = 'Bearer'
+
     def get_token(self):
-        return self.user.get_oidc_token(self.password)
+        token = self.user.get_oidc_token(self.password)
+        if token is False:
+            return token
+        return self.token_type + ' ' + get(token, 'access_token')
+
+    @staticmethod
+    def get_admin_token():
+        response = requests.post(
+            settings.OIDC_SERVER_INTERNAL_URL + '/realms/master/protocol/openid-connect/token/',
+            data=dict(
+                grant_type='password',
+                username=settings.KEYCLOAK_ADMIN,
+                password=settings.KEYCLOAK_ADMIN_PASSWORD,
+                client_id='admin-cli'
+            ),
+            verify=False,
+        )
+        return response.json().get('access_token')
+
+    @staticmethod
+    def get_admin_headers():
+        return dict(Authorization=f'Bearer {OIDCAuthService.get_admin_token()}')
+
+    def get_user_headers(self):
+        return dict(Authorization=self.get_token())
+
+    @staticmethod
+    def create_user(data):
+        response = requests.post(
+            settings.OIDC_SERVER_INTERNAL_URL + '/admin/realms/ocl/users',
+            json=dict(
+                enabled=True,
+                emailVerified=False,
+                firstName=data.get('first_name'),
+                lastName=data.get('last_name'),
+                email=data.get('email'),
+                username=data.get('username'),
+                credentials=[dict(type='password', value=data.get('password'), temporary=False)]
+            ),
+            verify=False,
+            headers=OIDCAuthService.get_admin_headers()
+        )
+        if response.status_code == 201:
+            return True
+
+        return response.json()
+
+    def mark_verified(self, **kwargs):
+        admin_headers = self.get_admin_headers()
+        response = requests.get(
+            settings.OIDC_SERVER_INTERNAL_URL + '/admin/realms/ocl/users',
+            verify=False,
+            headers=admin_headers
+        )
+
+        users = response.json()
+        user_info = get([user for user in users if user['username'] == self.username], '0')
+        oid_user_id = get(user_info, 'id')
+        if not oid_user_id:
+            raise Http404()
+
+        response = requests.put(
+            settings.OIDC_SERVER_INTERNAL_URL + f'/admin/realms/ocl/users/{oid_user_id}',
+            json=dict(emailVerified=True),
+            verify=False,
+            headers=admin_headers
+        )
+        if response.status_code < 300:
+            return super().mark_verified(**kwargs)
+        return response.json()
+
+    def reset_password(self, **kwargs):
+        # PUT /{realm}/users/{id}/disable-credential-types
+        # Body
+        # credentialTypes : < string > array
+
+        # PUT /admin/realms/{realm}/users/{id}/reset-password
+        # {
+        #     "type": "password",
+        #     "temporary": false,
+        #     "value": "my-new-password"
+        # }
+
+        pass
 
 
 class AuthService:

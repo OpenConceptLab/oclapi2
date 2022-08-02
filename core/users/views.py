@@ -1,6 +1,8 @@
 import uuid
 
 from django.contrib.auth.models import update_last_login
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError
 from django.http import Http404
 from drf_yasg.utils import swagger_auto_schema
 from pydash import get
@@ -38,12 +40,10 @@ class TokenAuthenticationView(ObtainAuthToken):
         username = request.data.get('username')
         password = request.data.get('password')
 
+        if not username or not password:
+            raise Http400(dict(non_field_errors=['Must include "username" and "password".']))
+
         auth_service = AuthService.get(username=username, password=password)
-        token = auth_service.get_token()
-
-        if token is False:
-            raise Http400(dict(non_field_errors=["Unable to log in with provided credentials."]))
-
         user = auth_service.user
 
         if not user.is_active:
@@ -57,12 +57,17 @@ class TokenAuthenticationView(ObtainAuthToken):
                 {'detail': VERIFY_EMAIL_MESSAGE, 'email': user.email}, status=status.HTTP_401_UNAUTHORIZED
             )
 
+        token = auth_service.get_token()
+
+        if token is False:
+            raise Http400(dict(non_field_errors=["Unable to log in with provided credentials."]))
+
         try:
             update_last_login(None, user)
         except:  # pylint: disable=bare-except
             pass
 
-        return Response(token)
+        return Response(dict(token=token))
 
 
 class UserBaseView(BaseAPIView):
@@ -177,6 +182,20 @@ class UserSignup(UserBaseView, mixins.CreateModelMixin):
         headers = self.get_success_headers(serializer.data)
         return Response({'detail': VERIFY_EMAIL_MESSAGE}, status=status.HTTP_201_CREATED, headers=headers)
 
+    def perform_create(self, serializer):
+        data = self.request.data
+        try:
+            validate_password(data.get('password'))
+        except ValidationError as ex:
+            serializer._errors['password'] = ex.messages
+            return
+
+        response = AuthService.get().create_user(data)
+        if response is True:
+            super().perform_create(serializer)
+        else:
+            serializer._errors = response
+
 
 class UserEmailVerificationView(UserBaseView):
     permission_classes = (AllowAny, )
@@ -186,8 +205,10 @@ class UserEmailVerificationView(UserBaseView):
         if not user:
             return Response(status=status.HTTP_404_NOT_FOUND)
 
-        result = user.mark_verified(token=kwargs.get('verification_token'), force=get(request.user, 'is_staff'))
-        if result:
+        result = AuthService.get(user=user).mark_verified(
+            token=kwargs.get('verification_token'), force=get(request.user, 'is_staff'))
+
+        if result is True:
             return Response(status=status.HTTP_200_OK)
 
         return Response(dict(detail=VERIFICATION_TOKEN_MISMATCH), status=status.HTTP_401_UNAUTHORIZED)
