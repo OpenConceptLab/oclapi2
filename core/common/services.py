@@ -288,6 +288,8 @@ class DjangoAuthService(AbstractAuthService):
 
 class OIDCAuthService(AbstractAuthService):
     token_type = 'Bearer'
+    USERS_URL = settings.OIDC_SERVER_INTERNAL_URL + f'/admin/realms/{settings.OIDC_REALM}/users'
+    OIDP_ADMIN_TOKEN_URL = settings.OIDC_SERVER_INTERNAL_URL + '/realms/master/protocol/openid-connect/token'
 
     @staticmethod
     def credential_representation_from_hash(hash_, temporary=False):
@@ -305,7 +307,7 @@ class OIDCAuthService(AbstractAuthService):
     @classmethod
     def add_user(cls, user):
         response = requests.post(
-            settings.OIDC_SERVER_INTERNAL_URL + '/admin/realms/ocl/users',
+            cls.USERS_URL,
             json=dict(
                 enabled=True,
                 emailVerified=user.verified,
@@ -332,7 +334,7 @@ class OIDCAuthService(AbstractAuthService):
     @staticmethod
     def get_admin_token():
         response = requests.post(
-            settings.OIDC_SERVER_INTERNAL_URL + '/realms/master/protocol/openid-connect/token/',
+            OIDCAuthService.OIDP_ADMIN_TOKEN_URL,
             data=dict(
                 grant_type='password',
                 username=settings.KEYCLOAK_ADMIN,
@@ -353,7 +355,7 @@ class OIDCAuthService(AbstractAuthService):
     @staticmethod
     def create_user(data):
         response = requests.post(
-            settings.OIDC_SERVER_INTERNAL_URL + '/admin/realms/ocl/users',
+            OIDCAuthService.USERS_URL,
             json=dict(
                 enabled=True,
                 emailVerified=False,
@@ -373,7 +375,7 @@ class OIDCAuthService(AbstractAuthService):
 
     def __get_all_users(self, headers=None):
         response = requests.get(
-            settings.OIDC_SERVER_INTERNAL_URL + '/admin/realms/ocl/users',
+            self.USERS_URL,
             verify=False,
             headers=headers or self.get_admin_headers()
         )
@@ -399,7 +401,7 @@ class OIDCAuthService(AbstractAuthService):
         if not oid_user_id:
             raise Http404()
         response = requests.put(
-            settings.OIDC_SERVER_INTERNAL_URL + f'/admin/realms/ocl/users/{oid_user_id}',
+            f"{self.USERS_URL}/{oid_user_id}",
             json=data,
             verify=False,
             headers=admin_headers
@@ -413,14 +415,14 @@ class OIDCAuthService(AbstractAuthService):
             raise Http404()
 
         requests.put(
-            settings.OIDC_SERVER_INTERNAL_URL + f'/admin/realms/ocl/users/{oid_user_id}/disable-credential-types',
+            f"{self.USERS_URL}/{oid_user_id}/disable-credential-types",
             json=['password'],
             verify=False,
             headers=admin_headers
         )
 
         response = requests.put(
-            settings.OIDC_SERVER_INTERNAL_URL + f'/admin/realms/ocl/users/{oid_user_id}/reset-password',
+            f"{self.USERS_URL}/{oid_user_id}/reset-password",
             json=dict(type='password', temporary=False, value=password),
             verify=False,
             headers=admin_headers
