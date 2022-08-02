@@ -187,14 +187,14 @@ class UserSignup(UserBaseView, mixins.CreateModelMixin):
         try:
             validate_password(data.get('password'))
         except ValidationError as ex:
-            serializer._errors['password'] = ex.messages
+            serializer._errors['password'] = ex.messages  # pylint: disable=protected-access
             return
 
         response = AuthService.get().create_user(data)
         if response is True:
             super().perform_create(serializer)
         else:
-            serializer._errors = response
+            serializer._errors = response  # pylint: disable=protected-access
 
 
 class UserEmailVerificationView(UserBaseView):
