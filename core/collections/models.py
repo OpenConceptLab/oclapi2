@@ -424,7 +424,9 @@ class CollectionReference(models.Model):
                     if self.resource_version:
                         expression += self.resource_version + '/'
                 elif self.filter:
-                    expression += '?' + self.filter_to_querystring()
+                    querystring = self.filter_to_querystring()
+                    if querystring:
+                        expression += '?' + querystring
         return expression
 
     @property

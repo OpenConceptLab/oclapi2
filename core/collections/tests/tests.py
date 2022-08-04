@@ -741,7 +741,7 @@ class CollectionReferenceTest(OCLTestCase):
         reference = CollectionReference(
             system='/orgs/MyOrg/sources/MySource/',
             reference_type='concepts',
-            filter=[dict(property='q', value='foo', operator='='), dict(property='name', value='foobar', operator='=')]
+            filter=[dict(property='q', value='foo', op='='), dict(property='name', value='foobar', op='=')]
         )
         self.assertEqual(
             reference.build_expression(), '/orgs/MyOrg/sources/MySource/concepts/?q=foo&name=foobar'
@@ -750,7 +750,7 @@ class CollectionReferenceTest(OCLTestCase):
         reference = CollectionReference(
             valueset=['/orgs/MyOrg/collections/Coll/'],
             reference_type='concepts',
-            filter=[dict(property='q', value='foo', operator='='), dict(property='name', value='foobar', operator='=')]
+            filter=[dict(property='q', value='foo', op='='), dict(property='name', value='foobar', op='=')]
         )
         self.assertEqual(
             reference.build_expression(), '/orgs/MyOrg/collections/Coll/concepts/?q=foo&name=foobar'
@@ -759,7 +759,7 @@ class CollectionReferenceTest(OCLTestCase):
         reference = CollectionReference(
             valueset=['/orgs/MyOrg/collections/Coll/', '/orgs/MyOrg/collections/Coll1/'],
             reference_type='concepts',
-            filter=[dict(property='q', value='foo', operator='='), dict(property='name', value='foobar', operator='=')]
+            filter=[dict(property='q', value='foo', op='='), dict(property='name', value='foobar', op='=')]
         )
         self.assertEqual(
             reference.build_expression(), '/orgs/MyOrg/collections/Coll/concepts/?q=foo&name=foobar'
