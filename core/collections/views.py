@@ -439,6 +439,7 @@ class CollectionReferencesView(
         return Response({'message': OK_MESSAGE}, status=status.HTTP_204_NO_CONTENT)
 
     def update(self, request, *args, **kwargs):  # pylint: disable=too-many-locals,unused-argument # Fixme: Sny
+        is_async = self.is_async_requested()
         collection = self.get_object()
         data = request.data.get('data')
         is_dict = isinstance(data, dict)
@@ -449,7 +450,7 @@ class CollectionReferencesView(
 
         adding_all = mapping_expressions == '*' or concept_expressions == '*'
 
-        if adding_all:
+        if adding_all or is_async:
             result = add_references.delay(self.request.user.id, data, collection.id, cascade, transform)
             return Response(
                 dict(
