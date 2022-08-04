@@ -646,9 +646,12 @@ class CollectionReference(models.Model):
             self.expression = self.build_expression()
 
     def filter_to_querystring(self):
-        if self.filter:
+        if not self.is_valid_filter():
+            return None
+        filters = compact(self.filter)
+        if filters:
             queries = []
-            for filter_def in self.filter:  # pylint: disable=not-an-iterable
+            for filter_def in filters:  # pylint: disable=not-an-iterable
                 value = ','.join(filter_def['value']) if isinstance(filter_def['value'], list) else filter_def['value']
                 queries.append(f'{filter_def["property"]}={value}')
             return '&'.join(queries)
