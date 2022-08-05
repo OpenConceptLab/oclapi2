@@ -5,6 +5,7 @@ from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
 from django.http import Http404
 from drf_yasg.utils import swagger_auto_schema
+from mozilla_django_oidc.views import OIDCAuthenticationCallbackView
 from pydash import get
 from rest_framework import mixins, status
 from rest_framework.authtoken.serializers import AuthTokenSerializer
@@ -30,6 +31,19 @@ from core.users.search import UserProfileSearch
 from core.users.serializers import UserDetailSerializer, UserCreateSerializer, UserListSerializer, UserSummarySerializer
 from .models import UserProfile
 from ..common.services import AuthService
+
+
+class OCLOIDCAuthenticationCallbackView(OIDCAuthenticationCallbackView):
+    pass
+    # def login_success(self):
+    #     print("**QP***", dict(self.request.GET.items()))
+    #     print("**Session***", self.request.session.items())
+        # auth.login(self.request, self.user)
+        # expiration_interval = self.get_settings('OIDC_RENEW_ID_TOKEN_EXPIRY_SECONDS', 60 * 15)
+        # self.request.session['oidc_id_token_expiration'] = time.time() + expiration_interval
+        #
+        # return Response(dict(token=self.request.session['oidc_access_token']))
+        # return super().login_success()
 
 
 class TokenAuthenticationView(ObtainAuthToken):

@@ -142,6 +142,7 @@ MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
+    'core.middlewares.middlewares.TokenAuthMiddleWare',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
@@ -400,7 +401,7 @@ EXPORT_SERVICE = os.environ.get('EXPORT_SERVICE', 'core.common.services.S3')
 
 # keyCloak/OIDC Provider settings
 OIDC_RP_CLIENT_ID = os.environ.get('OIDC_RP_CLIENT_ID', 'ocllocal')
-OIDC_RP_CLIENT_SECRET = os.environ.get('OIDC_RP_CLIENT_SECRET', 'ZhuQY8Ps6osM3wJagmwItSuQmY2bgX3Q')
+OIDC_RP_CLIENT_SECRET = os.environ.get('OIDC_RP_CLIENT_SECRET', 'XnsOiEwp5khw6ZLo9v1bLuXuheOofnz5')
 OIDC_SERVER_URL = os.environ.get('OIDC_SERVER_URL', 'http://localhost:8080')
 OIDC_SERVER_INTERNAL_URL = os.environ.get('OIDC_SERVER_URL', 'http://host.docker.internal:8080')
 OIDC_REALM = os.environ.get('OIDC_REALM', 'ocl')
@@ -411,8 +412,10 @@ OIDC_RP_SIGN_ALGO = 'RS256'
 OIDC_OP_JWKS_ENDPOINT = f'{OIDC_SERVER_INTERNAL_URL}/realms/{OIDC_REALM}/protocol/openid-connect/certs'
 OIDC_VERIFY_SSL = False
 OIDC_VERIFY_JWT = True
-OIDC_RP_SCOPES = 'openid profile email roles role_list'
+OIDC_RP_SCOPES = 'openid profile email'
 OIDC_STORE_ACCESS_TOKEN = True
-LOGIN_REDIRECT_URL = '/'
+OIDC_CREATE_USER = True
+LOGIN_REDIRECT_URL = os.environ.get('LOGIN_REDIRECT_URL', 'http://localhost:4000')
 KEYCLOAK_ADMIN = os.environ.get('KEYCLOAK_ADMIN', 'root')
 KEYCLOAK_ADMIN_PASSWORD = os.environ.get('KEYCLOAK_ADMIN_PASSWORD', 'Root123')
+OIDC_CALLBACK_CLASS = 'core.users.views.OCLOIDCAuthenticationCallbackView'
