@@ -27,6 +27,13 @@ class OCLOIDCAuthenticationBackend(OIDCAuthenticationBackend):
             )
         )
 
+    def update_user(self, user, claims):
+        user.first_name = claims.get('given_name') or user.first_name
+        user.last_name = claims.get('family_name') or user.last_name
+        user.email = claims.get('email') or user.email
+        user.save()
+        return user
+
     def filter_users_by_claims(self, claims):
         from core.users.models import UserProfile
 
