@@ -30,20 +30,27 @@ from core.users.documents import UserProfileDocument
 from core.users.search import UserProfileSearch
 from core.users.serializers import UserDetailSerializer, UserCreateSerializer, UserListSerializer, UserSummarySerializer
 from .models import UserProfile
-from ..common.services import AuthService
+from ..common.services import AuthService, OIDCAuthService
 
 
 class OCLOIDCAuthenticationCallbackView(OIDCAuthenticationCallbackView):
     pass
-    # def login_success(self):
-    #     print("**QP***", dict(self.request.GET.items()))
-    #     print("**Session***", self.request.session.items())
-        # auth.login(self.request, self.user)
-        # expiration_interval = self.get_settings('OIDC_RENEW_ID_TOKEN_EXPIRY_SECONDS', 60 * 15)
-        # self.request.session['oidc_id_token_expiration'] = time.time() + expiration_interval
-        #
-        # return Response(dict(token=self.request.session['oidc_access_token']))
-        # return super().login_success()
+
+
+class OIDCodeExchangeView(APIView):
+    permission_classes = (AllowAny, )
+
+    @staticmethod
+    def post(request):
+        code = request.data.get('code', None)
+        redirect_uri = request.data.get('redirect_uri', None)
+        if not code or not redirect_uri:
+            return Response(
+                dict(error='code and redirect_uri are mandatory to exchange for token'),
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        return Response(
+            OIDCAuthService.exchange_code_for_token(code, redirect_uri))
 
 
 class TokenAuthenticationView(ObtainAuthToken):

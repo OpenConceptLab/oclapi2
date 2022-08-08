@@ -346,6 +346,21 @@ class OIDCAuthService(AbstractAuthService):
         return response.json().get('access_token')
 
     @staticmethod
+    def exchange_code_for_token(code, redirect_uri):
+        response = requests.post(
+            settings.OIDC_OP_TOKEN_ENDPOINT,
+            data=dict(
+                grant_type='authorization_code',
+                client_id=settings.OIDC_RP_CLIENT_ID,
+                client_secret=settings.OIDC_RP_CLIENT_SECRET,
+                code=code,
+                redirect_uri=redirect_uri
+            )
+
+        )
+        return response.json()
+
+    @staticmethod
     def get_admin_headers():
         return dict(Authorization=f'Bearer {OIDCAuthService.get_admin_token()}')
 
