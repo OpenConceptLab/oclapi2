@@ -37,6 +37,15 @@ class OCLOIDCAuthenticationCallbackView(OIDCAuthenticationCallbackView):
     pass
 
 
+class UserOIDLogoutView(APIView):
+    def post(self, _):
+        if self.request.user.is_authenticated:
+            token = self.request.META['HTTP_AUTHORIZATION']
+            if token:
+                AuthService.get().logout(token)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
 class OIDCodeExchangeView(APIView):
     permission_classes = (AllowAny, )
 

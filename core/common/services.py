@@ -285,6 +285,9 @@ class DjangoAuthService(AbstractAuthService):
     def create_user(_):
         return True
 
+    def logout(self, _):
+        pass
+
 
 class OIDCAuthService(AbstractAuthService):
     token_type = 'Bearer'
@@ -344,6 +347,27 @@ class OIDCAuthService(AbstractAuthService):
             verify=False,
         )
         return response.json().get('access_token')
+
+    def logout(self, token):
+        user_info = self.get_user_info(token)
+        user_id = get(user_info, 'sub')
+        if user_id:
+            requests.post(
+                f"{self.USERS_URL}/{user_id}/logout",
+                json=dict(user=user_id, realm=settings.OIDC_REALM),
+                headers=self.get_admin_headers()
+            )
+
+        return user_info
+
+    @staticmethod
+    def get_user_info(token):
+        response = requests.post(
+            settings.OIDC_OP_USER_ENDPOINT,
+            verify=False,
+            headers=dict(Authorization=token)
+        )
+        return response.json()
 
     @staticmethod
     def exchange_code_for_token(code, redirect_uri):
