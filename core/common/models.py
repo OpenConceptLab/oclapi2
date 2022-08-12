@@ -505,6 +505,12 @@ class ConceptContainerModel(VersionedModel):
     def get_concepts_queryset(self):
         return self.concepts_set.filter(id=F('versioned_object_id'))
 
+    def get_mappings_queryset(self):
+        if self.is_head:
+            return self.mappings_set.filter(id=F('versioned_object_id'))
+
+        return self.mappings
+
     def has_parent_edit_access(self, user):
         if user.is_staff:
             return True

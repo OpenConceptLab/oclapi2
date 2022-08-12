@@ -207,7 +207,7 @@ class CodeSystemDetailSerializer(serializers.ModelSerializer):
     def to_representation(self, instance):
         try:
             rep = super().to_representation(instance)
-            IdentifierSerializer.include_ocl_identifier(instance.uri, rep)
+            IdentifierSerializer.include_ocl_identifier(instance.uri, RESOURCE_TYPE, rep)
         except Exception as error:
             raise Exception(f'Failed to represent "{instance.uri}" as {RESOURCE_TYPE}') from error
         # Remove fields with 'None' value
@@ -221,7 +221,7 @@ class CodeSystemDetailSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         concepts = validated_data.pop('concepts', [])
         uri = self.context['request'].path + validated_data['mnemonic']
-        ident = IdentifierSerializer.include_ocl_identifier(uri, validated_data)
+        ident = IdentifierSerializer.include_ocl_identifier(uri, RESOURCE_TYPE, validated_data)
         source = SourceCreateOrUpdateSerializer().prepare_object(validated_data)
 
         if ident['owner_type'] == 'orgs':

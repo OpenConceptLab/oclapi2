@@ -6,6 +6,7 @@ from core.code_systems.constants import RESOURCE_TYPE as CODE_SYSTEM_RESOURCE_TY
 from core.orgs.models import Organization
 from core.users.models import UserProfile
 from core.value_sets.constants import RESOURCE_TYPE as VALUESET_RESOURCE_TYPE
+from core.concept_maps.constants import RESOURCE_TYPE as CONCEPT_MAP_RESOURCE_TYPE
 
 
 class RootSerializer(Serializer):  # pylint: disable=abstract-method
@@ -86,8 +87,9 @@ class IdentifierSerializer(ReadSerializerMixin, Serializer):
         return identifier
 
     @staticmethod
-    def convert_ocl_uri_to_fhir_url(uri):
-        fhir_uri = uri.replace('sources', CODE_SYSTEM_RESOURCE_TYPE).replace('collections', VALUESET_RESOURCE_TYPE)
+    def convert_ocl_uri_to_fhir_url(uri, resource_type):
+        resource_type_uri = f"/{resource_type}/"
+        fhir_uri = uri.replace('/sources/', resource_type_uri).replace('/collections/', resource_type_uri)
         fhir_uri = fhir_uri.strip('/')
         parts = fhir_uri.split('/')
         if len(parts) < 4:
@@ -98,13 +100,20 @@ class IdentifierSerializer(ReadSerializerMixin, Serializer):
         return fhir_uri
 
     @staticmethod
-    def include_ocl_identifier(uri, rep):
+    def convert_fhir_url_to_ocl_uri(uri, resource_type):
+        resource_type_uri = f"/{resource_type}/"
+        fhir_uri = uri.replace('/ConceptMap/', resource_type_uri).replace('/CodeSystem/', resource_type_uri)\
+            .replace('/ValueSet/', resource_type_uri)
+        return fhir_uri
+
+    @staticmethod
+    def include_ocl_identifier(uri, resource_type, rep):
         """ Add OCL identifier if not present """
         if 'identifier' not in rep:
             rep['identifier'] = []
         ident = IdentifierSerializer.find_ocl_identifier(rep['identifier'])
         if not ident:
-            ident = IdentifierSerializer.convert_ocl_uri_to_fhir_url(uri)
+            ident = IdentifierSerializer.convert_ocl_uri_to_fhir_url(uri, resource_type)
             rep['identifier'].append({
                 'system': settings.API_BASE_URL,
                 'value': ident,
@@ -127,10 +136,12 @@ class IdentifierSerializer(ReadSerializerMixin, Serializer):
             if identifier['owner_type'] not in ['users', 'orgs']:
                 raise ValidationError(
                     f"Owner type='{identifier['owner_type']}' is invalid. It must be 'users' or 'orgs'")
-            if identifier['resource_type'] not in [CODE_SYSTEM_RESOURCE_TYPE, VALUESET_RESOURCE_TYPE]:
+            if identifier['resource_type'] not in [CODE_SYSTEM_RESOURCE_TYPE, VALUESET_RESOURCE_TYPE,
+                                                   CONCEPT_MAP_RESOURCE_TYPE]:
                 raise ValidationError(
                     f"Resource type='{identifier['resource_type']}' is invalid. "
-                    f"It must be '{CODE_SYSTEM_RESOURCE_TYPE}' or '{VALUESET_RESOURCE_TYPE}'"
+                    f"It must be '{CODE_SYSTEM_RESOURCE_TYPE}' or '{VALUESET_RESOURCE_TYPE}' or "
+                    f"'{CONCEPT_MAP_RESOURCE_TYPE}'"
                 )
             if identifier['owner_type'] == 'users':
                 owner_exists = UserProfile.objects.filter(username=identifier['owner_id']).exists()

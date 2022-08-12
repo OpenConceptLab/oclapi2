@@ -1,12 +1,13 @@
 
-def translate_fhir_query(query_fields, query_params, queryset):
+def translate_fhir_query(fhir_query_fields, query_params, queryset):
+    query_fields = fhir_query_fields.copy()
     url = query_params.get('url')
     if url:
         queryset = queryset.filter(canonical_url=url)
         query_fields.remove('url')
     language = query_params.get('language')
     if language:
-        queryset = queryset.filter(locale=language)
+        queryset = queryset.filter(default_locale=language)
         query_fields.remove('language')
     status = query_params.get('status')
     if status:

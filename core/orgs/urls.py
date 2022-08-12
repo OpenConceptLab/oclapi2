@@ -57,6 +57,8 @@ urlpatterns = [
             name='code_systems_urls'),
     re_path(r'^(?P<org>' + NAMESPACE_PATTERN + ')/ValueSet/', include('core.value_sets.urls'),
             name='value_sets_urls'),
+    re_path(r'^(?P<org>' + NAMESPACE_PATTERN + ')/ConceptMap/', include('core.concept_maps.urls'),
+            name='concept_maps_urls'),
     re_path(r'^(?P<org>' + NAMESPACE_PATTERN + ')/collections/', include('core.collections.urls')),
     re_path(r'^(?P<org>' + NAMESPACE_PATTERN + ')/pins/', include('core.pins.urls')),
 ]

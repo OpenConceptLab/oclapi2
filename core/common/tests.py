@@ -30,7 +30,9 @@ from core.orgs.models import Organization
 from core.sources.models import Source
 from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
+from .fhir_helpers import translate_fhir_query
 from .services import S3, PostgresQL
+from ..code_systems.serializers import CodeSystemDetailSerializer
 
 
 class CustomTestRunner(ColourRunnerMixin, DiscoverRunner):
@@ -377,6 +379,55 @@ class S3Test(TestCase):
             'http://oclapi2-dev.s3.amazonaws.com/some/path'
         )
 
+class FhirHelpersTest(OCLTestCase):
+    def test_language_to_default_locale(self):
+        query_fields = list(CodeSystemDetailSerializer.Meta.fields)
+        query_params = {'language': 'eng'}
+        query_set = Concept.objects.all()
+
+        query_set = translate_fhir_query(query_fields, query_params, query_set)
+        self.assertTrue('"concepts"."default_locale" = eng' in str(query_set.query))
+
+    def test_status_retired(self):
+        query_fields = list(CodeSystemDetailSerializer.Meta.fields)
+        query_params = {'status': 'retired'}
+        query_set = Concept.objects.all()
+
+        query_set = translate_fhir_query(query_fields, query_params, query_set)
+        self.assertTrue('WHERE "concepts"."retired"' in str(query_set.query))
+
+    def test_status_active(self):
+        query_fields = list(CodeSystemDetailSerializer.Meta.fields)
+        query_params = {'status': 'active'}
+        query_set = Concept.objects.all()
+
+        query_set = translate_fhir_query(query_fields, query_params, query_set)
+        self.assertTrue('WHERE "concepts"."released"' in str(query_set.query))
+
+    def test_status_draft(self):
+        query_fields = list(CodeSystemDetailSerializer.Meta.fields)
+        query_params = {'status': 'draft'}
+        query_set = Concept.objects.all()
+
+        query_set = translate_fhir_query(query_fields, query_params, query_set)
+        self.assertTrue('WHERE NOT "concepts"."released"' in str(query_set.query))
+
+    def test_title_to_full_name(self):
+        query_fields = list(CodeSystemDetailSerializer.Meta.fields)
+        query_params = {'title': 'some title'}
+        query_set = Concept.objects.all()
+
+        query_set = translate_fhir_query(query_fields, query_params, query_set)
+        self.assertTrue('WHERE "concepts"."full_name" = some title' in str(query_set.query))
+
+    def test_other_fields(self):
+        query_fields = list(CodeSystemDetailSerializer.Meta.fields)
+        query_params = {'version': 'v1', 'id': '2'}
+        query_set = Concept.objects.all()
+
+        query_set = translate_fhir_query(query_fields, query_params, query_set)
+        self.assertTrue('"concepts"."version" = v1' in str(query_set.query))
+        self.assertTrue('"concepts"."id" = 2' in str(query_set.query))
 
 class UtilsTest(OCLTestCase):
     def test_set_and_get_current_user(self):
