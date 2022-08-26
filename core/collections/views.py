@@ -1170,8 +1170,7 @@ class CollectionSummaryView(CollectionBaseView, RetrieveAPIView, CreateAPIView):
         if instance.has_edit_access(request.user):
             instance.update_children_counts()
             return Response(status=status.HTTP_202_ACCEPTED)
-        else:
-            raise PermissionDenied()
+        raise PermissionDenied()
 
 
 class CollectionVersionSummaryView(CollectionBaseView, RetrieveAPIView):
@@ -1188,8 +1187,7 @@ class CollectionVersionSummaryView(CollectionBaseView, RetrieveAPIView):
         if instance.has_edit_access(request.user):
             instance.update_children_counts()
             return Response(status=status.HTTP_202_ACCEPTED)
-        else:
-            raise PermissionDenied()
+        raise PermissionDenied()
 
 
 class CollectionLatestVersionSummaryView(CollectionVersionBaseView, RetrieveAPIView, UpdateAPIView):

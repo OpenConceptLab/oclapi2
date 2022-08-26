@@ -13,7 +13,6 @@ from rest_framework import status
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.generics import (
     RetrieveAPIView, ListAPIView, UpdateAPIView, CreateAPIView)
-from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
 
 from core.client_configs.views import ResourceClientConfigsView
@@ -455,8 +454,7 @@ class SourceSummaryView(SourceBaseView, RetrieveAPIView):
         if instance.has_edit_access(request.user):
             instance.update_children_counts()
             return Response(status=status.HTTP_202_ACCEPTED)
-        else:
-            raise PermissionDenied()
+        raise PermissionDenied()
 
 
 class SourceVersionSummaryView(SourceVersionBaseView, RetrieveAPIView):
@@ -473,8 +471,7 @@ class SourceVersionSummaryView(SourceVersionBaseView, RetrieveAPIView):
         if instance.has_edit_access(request.user):
             instance.update_children_counts()
             return Response(status=status.HTTP_202_ACCEPTED)
-        else:
-            raise PermissionDenied()
+        raise PermissionDenied()
 
 
 class SourceLatestVersionSummaryView(SourceVersionBaseView, RetrieveAPIView, UpdateAPIView):
