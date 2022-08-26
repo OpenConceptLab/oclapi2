@@ -10,6 +10,7 @@ from django.shortcuts import get_object_or_404
 from drf_yasg.utils import swagger_auto_schema
 from pydash import get
 from rest_framework import status
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.generics import (
     RetrieveAPIView, DestroyAPIView, UpdateAPIView, ListAPIView,
     CreateAPIView)
@@ -1157,11 +1158,7 @@ class CollectionVersionExportView(ConceptContainerExportMixin, CollectionVersion
 
 class CollectionSummaryView(CollectionBaseView, RetrieveAPIView, CreateAPIView):
     serializer_class = CollectionSummaryDetailSerializer
-
-    def get_permissions(self):
-        if self.request.method == 'PUT':
-            return [IsAdminUser()]
-        return [CanViewConceptDictionary()]
+    permission_classes = (CanViewConceptDictionary,)
 
     def get_object(self, queryset=None):
         instance = get_object_or_404(self.get_queryset())
@@ -1169,21 +1166,17 @@ class CollectionSummaryView(CollectionBaseView, RetrieveAPIView, CreateAPIView):
         return instance
 
     def put(self, request, **kwargs):  # pylint: disable=unused-argument
-        self.perform_update()
-        return Response(status=status.HTTP_202_ACCEPTED)
-
-    def perform_update(self):
         instance = self.get_object()
-        instance.update_children_counts()
+        if instance.has_edit_access(request.user):
+            instance.update_children_counts()
+            return Response(status=status.HTTP_202_ACCEPTED)
+        else:
+            raise PermissionDenied()
 
 
 class CollectionVersionSummaryView(CollectionBaseView, RetrieveAPIView):
     serializer_class = CollectionVersionSummaryDetailSerializer
-
-    def get_permissions(self):
-        if self.request.method == 'PUT':
-            return [IsAdminUser()]
-        return [CanViewConceptDictionary()]
+    permission_classes = (CanViewConceptDictionary,)
 
     def get_object(self, queryset=None):
         instance = get_object_or_404(self.get_queryset())
@@ -1191,12 +1184,12 @@ class CollectionVersionSummaryView(CollectionBaseView, RetrieveAPIView):
         return instance
 
     def put(self, request, **kwargs):  # pylint: disable=unused-argument
-        self.perform_update()
-        return Response(status=status.HTTP_202_ACCEPTED)
-
-    def perform_update(self):
         instance = self.get_object()
-        instance.update_children_counts()
+        if instance.has_edit_access(request.user):
+            instance.update_children_counts()
+            return Response(status=status.HTTP_202_ACCEPTED)
+        else:
+            raise PermissionDenied()
 
 
 class CollectionLatestVersionSummaryView(CollectionVersionBaseView, RetrieveAPIView, UpdateAPIView):
