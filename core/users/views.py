@@ -62,6 +62,29 @@ class OIDCodeExchangeView(APIView):
             OIDCAuthService.exchange_code_for_token(code, redirect_uri))
 
 
+class SSOMigrateView(APIView):
+    permission_classes = (AllowAny, )
+
+    def get_object(self):
+        username = self.kwargs.get('user')
+        user = UserProfile.objects.filter(username=username).first()
+        if not user:
+            raise Http404()
+        return user
+
+    def post(self, request, **kwargs):  # pylint: disable=unused-argument
+        username = request.data.get('username')
+        password = request.data.get('password')
+        if not username or not password:
+            return Response(
+                dict(error='keycloak admin username/password are required'),
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        user = self.get_object()
+        result = OIDCAuthService.add_user(user=user, username=username, password=password)
+        return Response(result)
+
+
 class TokenAuthenticationView(ObtainAuthToken):
     """Implementation of ObtainAuthToken with last_login update"""
 
