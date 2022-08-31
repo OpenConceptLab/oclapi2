@@ -16,6 +16,11 @@ urlpatterns = [
         name='userprofile-detail'
     ),
     path(
+        '<str:user>/sso-migrate/',
+        views.SSOMigrateView.as_view(),
+        name='userprofile-sso-migrate'
+    ),
+    path(
         '<str:user>/verify/<str:verification_token>/',
         views.UserEmailVerificationView.as_view(),
         name='userprofile-email-verify'

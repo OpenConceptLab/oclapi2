@@ -308,7 +308,7 @@ class OIDCAuthService(AbstractAuthService):
         }
 
     @classmethod
-    def add_user(cls, user):
+    def add_user(cls, user, username=None, password=None):
         response = requests.post(
             cls.USERS_URL,
             json=dict(
@@ -321,7 +321,7 @@ class OIDCAuthService(AbstractAuthService):
                 credentials=[cls.credential_representation_from_hash(hash_=user.password)]
             ),
             verify=False,
-            headers=OIDCAuthService.get_admin_headers()
+            headers=OIDCAuthService.get_admin_headers(username=username, password=password)
         )
         if response.status_code == 201:
             return True
@@ -335,13 +335,13 @@ class OIDCAuthService(AbstractAuthService):
         return self.token_type + ' ' + get(token, 'access_token')
 
     @staticmethod
-    def get_admin_token():
+    def get_admin_token(username=None, password=None):
         response = requests.post(
             OIDCAuthService.OIDP_ADMIN_TOKEN_URL,
             data=dict(
                 grant_type='password',
-                username=settings.KEYCLOAK_ADMIN,
-                password=settings.KEYCLOAK_ADMIN_PASSWORD,
+                username=username or settings.KEYCLOAK_ADMIN,
+                password=password or settings.KEYCLOAK_ADMIN_PASSWORD,
                 client_id='admin-cli'
             ),
             verify=False,
@@ -385,8 +385,8 @@ class OIDCAuthService(AbstractAuthService):
         return response.json()
 
     @staticmethod
-    def get_admin_headers():
-        return dict(Authorization=f'Bearer {OIDCAuthService.get_admin_token()}')
+    def get_admin_headers(**kwargs):
+        return dict(Authorization=f'Bearer {OIDCAuthService.get_admin_token(**kwargs)}')
 
     def get_user_headers(self):
         return dict(Authorization=self.get_token())
