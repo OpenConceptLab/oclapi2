@@ -15,6 +15,7 @@ from core.collections.constants import (
     REFERENCE_TYPE_CHOICES, CONCEPT_REFERENCE_TYPE, MAPPING_REFERENCE_TYPE, SOURCE_MAPPINGS, SOURCE_TO_CONCEPTS,
     TRANSFORM_TO_RESOURCE_VERSIONS, COLLECTION_REFERENCE_TYPE)
 from core.collections.parsers import CollectionReferenceParser
+from core.collections.translators import CollectionReferenceTranslator
 from core.collections.utils import is_concept, is_mapping
 from core.common.constants import (
     DEFAULT_REPOSITORY_TYPE, ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT,
@@ -724,6 +725,10 @@ class CollectionReference(models.Model):
                 self.concepts.add(*expansion.concepts.filter(uri=self.expression))
             if not is_concept_expression and not self.mappings.exists():
                 self.mappings.add(*expansion.mappings.filter(uri=self.expression))
+
+    @property
+    def translation(self):
+        return CollectionReferenceTranslator(self).translate()
 
 
 def default_expansion_parameters():

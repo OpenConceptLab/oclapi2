@@ -2290,7 +2290,7 @@ class CollectionReferenceParserTest(OCLTestCase):
         parser.to_reference_structure()
         return parser.to_objects()
 
-    def test_parse_string_expression_generic(self):
+    def test_parse_string_expression_generic(self):  # pylint: disable=too-many-statements
         references = self.get_expanded_references(
             expression=dict(expressions=[
                 "/orgs/MyOrg/sources/MySource/concepts/c-1234/",
@@ -2311,6 +2311,7 @@ class CollectionReferenceParserTest(OCLTestCase):
         self.assertIsNone(reference.valueset)
         self.assertIsNone(reference.filter)
         self.assertIsNone(reference.cascade)
+        self.assertEqual(reference.translation, 'Include latest concept "c-1234" from MyOrg/MySource')
 
         reference = references[1]
         self.assertEqual(reference.expression, "/orgs/MyOrg/sources/MySource/mappings/m-1234/")
@@ -2321,6 +2322,7 @@ class CollectionReferenceParserTest(OCLTestCase):
         self.assertIsNone(reference.valueset)
         self.assertIsNone(reference.filter)
         self.assertIsNone(reference.cascade)
+        self.assertEqual(reference.translation, 'Include latest mapping "m-1234" from MyOrg/MySource')
 
         reference = references[2]
         self.assertEqual(reference.expression, "/users/Me/sources/MySource/concepts/?q=foobar")
@@ -2331,6 +2333,7 @@ class CollectionReferenceParserTest(OCLTestCase):
         self.assertIsNone(reference.valueset)
         self.assertIsNone(reference.cascade)
         self.assertIsNone(reference.code)
+        self.assertEqual(reference.translation, 'Include latest concepts from Me/MySource containing "foobar"')
 
         reference = references[3]
         self.assertEqual(reference.expression, "/users/Me/sources/MySource/v1/concepts/?q=foobar&datatype=rule")
@@ -2343,6 +2346,10 @@ class CollectionReferenceParserTest(OCLTestCase):
         self.assertIsNone(reference.valueset)
         self.assertIsNone(reference.cascade)
         self.assertIsNone(reference.code)
+        self.assertEqual(
+            reference.translation,
+            'Include concepts from version "v1" of Me/MySource containing "foobar" & having datatype equal to "rule"'
+        )
 
         reference = references[4]
         self.assertEqual(reference.expression, "/users/Me/collections/MyColl/v1/mappings/?mapType=Q-AND-A")
@@ -2355,6 +2362,10 @@ class CollectionReferenceParserTest(OCLTestCase):
         self.assertIsNone(reference.system)
         self.assertIsNone(reference.cascade)
         self.assertIsNone(reference.code)
+        self.assertEqual(
+            reference.translation,
+            'Include mappings from version "v1" of Me/MyColl having mapType equal to "Q-AND-A"'
+        )
 
     def test_parse_string_expression_concepts_mappings_explicit(self):  # pylint: disable=too-many-statements
         references = self.get_expanded_references(
@@ -2379,6 +2390,7 @@ class CollectionReferenceParserTest(OCLTestCase):
         self.assertIsNone(reference.valueset)
         self.assertIsNone(reference.filter)
         self.assertIsNone(reference.cascade)
+        self.assertEqual(reference.translation, 'Include latest concept "c-1234" from MyOrg/MySource')
 
         reference = references[1]
         self.assertTrue(isinstance(reference, CollectionReference))
@@ -2390,6 +2402,7 @@ class CollectionReferenceParserTest(OCLTestCase):
         self.assertIsNone(reference.valueset)
         self.assertIsNone(reference.cascade)
         self.assertIsNone(reference.code)
+        self.assertEqual(reference.translation, 'Include latest concepts from Me/MySource containing "foobar"')
 
         reference = references[2]
         self.assertTrue(isinstance(reference, CollectionReference))
@@ -2403,6 +2416,10 @@ class CollectionReferenceParserTest(OCLTestCase):
         self.assertIsNone(reference.valueset)
         self.assertIsNone(reference.cascade)
         self.assertIsNone(reference.code)
+        self.assertEqual(
+            reference.translation,
+            'Include concepts from version "v1" of Me/MySource containing "foobar" & having datatype equal to "rule"'
+        )
 
         reference = references[3]
         self.assertTrue(isinstance(reference, CollectionReference))
@@ -2414,6 +2431,7 @@ class CollectionReferenceParserTest(OCLTestCase):
         self.assertIsNone(reference.valueset)
         self.assertIsNone(reference.filter)
         self.assertIsNone(reference.cascade)
+        self.assertEqual(reference.translation, 'Include latest mapping "m-1234" from MyOrg/MySource')
 
         reference = references[4]
         self.assertTrue(isinstance(reference, CollectionReference))
@@ -2427,6 +2445,10 @@ class CollectionReferenceParserTest(OCLTestCase):
         self.assertIsNone(reference.system)
         self.assertIsNone(reference.cascade)
         self.assertIsNone(reference.code)
+        self.assertEqual(
+            reference.translation,
+            'Include mappings from version "v1" of Me/MyColl having mapType equal to "Q-AND-A"'
+        )
 
     def test_parse_source_all_resources_expression(self):
         references = self.get_expanded_references(
@@ -2444,6 +2466,7 @@ class CollectionReferenceParserTest(OCLTestCase):
         self.assertIsNone(reference.valueset)
         self.assertIsNone(reference.filter)
         self.assertIsNone(reference.cascade)
+        self.assertEqual(reference.translation, 'Include latest concepts from MyOrg/MySource')
 
         reference = references[1]
         self.assertTrue(isinstance(reference, CollectionReference))
@@ -2455,6 +2478,7 @@ class CollectionReferenceParserTest(OCLTestCase):
         self.assertIsNone(reference.valueset)
         self.assertIsNone(reference.filter)
         self.assertIsNone(reference.cascade)
+        self.assertEqual(reference.translation, 'Include latest mappings from MyOrg/MySource')
 
     def test_parse_new_style(self):  # pylint: disable=too-many-statements
         references = self.get_expanded_references(
@@ -2476,6 +2500,10 @@ class CollectionReferenceParserTest(OCLTestCase):
         self.assertIsNone(references[0].version)
         self.assertEqual(
             references[0].build_expression(), "http://hl7.org/fhir/CodeSystem/my-codeystem/concepts/1948/")
+        self.assertEqual(
+            references[0].translation,
+            'Include latest concept "1948" from http://hl7.org/fhir/CodeSystem/my-codeystem'
+        )
 
         references = self.get_expanded_references(
             expression={
@@ -2519,6 +2547,10 @@ class CollectionReferenceParserTest(OCLTestCase):
             references[0].build_expression(),
             "http://hl7.org/fhir/CodeSystem/my-codeystem|0.8/concepts/?datatype=Numeric"
         )
+        self.assertEqual(
+            references[0].translation,
+            'Include concepts from version "0.8" of http://hl7.org/fhir/CodeSystem/my-codeystem intersection with http://hl7.org/fhir/ValueSet/my-valueset1 intersection with http://hl7.org/fhir/ValueSet/my-valueset2 having datatype equal to "Numeric"'  # pylint: disable=line-too-long
+        )
 
         references = self.get_expanded_references(
             expression={
@@ -2550,6 +2582,10 @@ class CollectionReferenceParserTest(OCLTestCase):
         self.assertEqual(
             references[0].build_expression(),
             "http://hl7.org/fhir/CodeSystem/my-codeystem/concepts/?datatype=Numeric"
+        )
+        self.assertEqual(
+            references[0].translation,
+            'Include latest concepts from http://hl7.org/fhir/CodeSystem/my-codeystem having datatype equal to "Numeric"'  # pylint: disable=line-too-long
         )
 
         references = self.get_expanded_references(
@@ -2583,6 +2619,10 @@ class CollectionReferenceParserTest(OCLTestCase):
             references[0].build_expression(),
             "http://hl7.org/fhir/ValueSet/my-valueset1/concepts/?datatype=Numeric"
         )
+        self.assertEqual(
+            references[0].translation,
+            'Include latest concepts from http://hl7.org/fhir/ValueSet/my-valueset1 having datatype equal to "Numeric"'
+        )
 
         references = self.get_expanded_references(
             expression={
@@ -2602,6 +2642,10 @@ class CollectionReferenceParserTest(OCLTestCase):
         self.assertEqual(reference.display, "abcd")
         self.assertEqual(reference.reference_type, "concepts")
         self.assertIsNone(reference.version)
+        self.assertEqual(
+            reference.translation,
+            'Include latest concept "1948" from http://hl7.org/fhir/CodeSystem/my-codeystem'
+        )
 
         reference = references[1]
         self.assertEqual(reference.system, "http://hl7.org/fhir/CodeSystem/my-codeystem")
@@ -2609,18 +2653,30 @@ class CollectionReferenceParserTest(OCLTestCase):
         self.assertEqual(reference.reference_type, "concepts")
         self.assertIsNone(reference.display)
         self.assertIsNone(reference.version)
+        self.assertEqual(
+            reference.translation,
+            'Include latest concept "1234" from http://hl7.org/fhir/CodeSystem/my-codeystem'
+        )
 
         reference = references[2]
         self.assertEqual(reference.system, "http://hl7.org/fhir/CodeSystem/my-codeystem")
         self.assertEqual(reference.code, "93")
         self.assertEqual(reference.reference_type, "mappings")
         self.assertIsNone(reference.version)
+        self.assertEqual(
+            reference.translation,
+            'Include latest mapping "93" from http://hl7.org/fhir/CodeSystem/my-codeystem'
+        )
 
         reference = references[3]
         self.assertEqual(reference.system, "http://hl7.org/fhir/CodeSystem/my-codeystem")
         self.assertEqual(reference.code, "urjdk")
         self.assertEqual(reference.reference_type, "mappings")
         self.assertIsNone(reference.version)
+        self.assertEqual(
+            reference.translation,
+            'Include latest mapping "urjdk" from http://hl7.org/fhir/CodeSystem/my-codeystem'
+        )
 
         references = self.get_expanded_references(expression={
             "valueSet": "http://hl7.org/fhir/ValueSet/my-valueset1",
@@ -2634,6 +2690,10 @@ class CollectionReferenceParserTest(OCLTestCase):
         self.assertEqual(references[0].reference_type, "concepts")
         self.assertEqual(references[0].code, "1948")
         self.assertEqual(references[0].build_expression(), "http://hl7.org/fhir/ValueSet/my-valueset1/concepts/1948/")
+        self.assertEqual(
+            references[0].translation,
+            'Include latest concept "1948" from http://hl7.org/fhir/ValueSet/my-valueset1'
+        )
 
         references = self.get_expanded_references(
             expression={
@@ -2650,19 +2710,27 @@ class CollectionReferenceParserTest(OCLTestCase):
         self.assertEqual(reference.reference_type, "concepts")
         self.assertIsNone(reference.version)
         self.assertIsNone(reference.display)
+        self.assertEqual(
+            references[0].translation,
+            'Include latest concept "1948" from http://hl7.org/fhir/CodeSystem/my-codeystem'
+        )
 
         reference = references[1]
         self.assertEqual(reference.system, "http://hl7.org/fhir/CodeSystem/my-codeystem")
         self.assertEqual(reference.code, "93")
         self.assertEqual(reference.reference_type, "mappings")
         self.assertIsNone(reference.version)
+        self.assertEqual(
+            references[1].translation,
+            'Include latest mapping "93" from http://hl7.org/fhir/CodeSystem/my-codeystem'
+        )
 
         references = self.get_expanded_references(
             expression=[{
               "system": "http://hl7.org/fhir/CodeSystem/my-codeystem",
               "concept": "1948",
             }, {
-              "system": "http://hl7.org/fhir/CodeSystem/my-codeystem",
+              "system": "http://hl7.org/fhir/CodeSystem/my-codeystem2",
               "mapping": "93"
             }]
         )
@@ -2674,12 +2742,20 @@ class CollectionReferenceParserTest(OCLTestCase):
         self.assertEqual(reference.reference_type, "concepts")
         self.assertIsNone(reference.version)
         self.assertIsNone(reference.display)
+        self.assertEqual(
+            reference.translation,
+            'Include latest concept "1948" from http://hl7.org/fhir/CodeSystem/my-codeystem'
+        )
 
         reference = references[1]
-        self.assertEqual(reference.system, "http://hl7.org/fhir/CodeSystem/my-codeystem")
+        self.assertEqual(reference.system, "http://hl7.org/fhir/CodeSystem/my-codeystem2")
         self.assertEqual(reference.code, "93")
         self.assertEqual(reference.reference_type, "mappings")
         self.assertIsNone(reference.version)
+        self.assertEqual(
+            reference.translation,
+            'Include latest mapping "93" from http://hl7.org/fhir/CodeSystem/my-codeystem2'
+        )
 
 
 class ExpansionConceptsIndexViewTest(OCLAPITestCase):
