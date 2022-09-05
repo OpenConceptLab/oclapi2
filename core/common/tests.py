@@ -200,6 +200,8 @@ class OCLAPITestCase(APITestCase, BaseTestCase):
     def setUpClass(cls):
         super().setUpClass()
         call_command("loaddata", "core/fixtures/base_entities.yaml")
+        org = Organization.objects.get(id=1)
+        org.members.add(1)
 
 
 class OCLTestCase(TestCase, BaseTestCase):
