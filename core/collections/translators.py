@@ -58,7 +58,9 @@ class CollectionReferenceTranslator:
                 english += 'latest version of '
             english += f'{entity} "{self.reference.code}" from '
         else:
-            english += f'{entity}s from '
+            english += f'{entity}s '
+            if self.reference.system or self.reference.valueset:
+                english += 'from '
         if self.reference.system:
             if self.reference.version:
                 english += f'version "{self.reference.version}" of '
