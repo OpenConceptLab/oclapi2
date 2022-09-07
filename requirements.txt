@@ -31,5 +31,5 @@ markdown==3.3.7
 mock==4.0.3
 django-request-logging==0.7.5
 django-cid==2.3
-django-dirtyfields==1.8.1
+django-dirtyfields==1.8.2
 jsonpath-ng==1.5.3
