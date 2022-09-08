@@ -249,7 +249,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         'collection_owner_url': {'sortable': False, 'filterable': False, 'facet': True},
         'owner': {'sortable': True, 'filterable': True, 'facet': True, 'exact': True},
         'owner_type': {'sortable': False, 'filterable': True, 'facet': True, 'exact': True},
-        'external_id': {'sortable': False, 'filterable': True, 'facet': False, 'exact': False},
+        'external_id': {'sortable': False, 'filterable': True, 'facet': False, 'exact': True},
         'name_types': {'sortable': False, 'filterable': True, 'facet': True},
         'description_types': {'sortable': False, 'filterable': True, 'facet': True},
     }

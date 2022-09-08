@@ -137,7 +137,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         'concept_owner_type': {'sortable': False, 'filterable': True, 'facet': True},
         'from_concept_owner_type': {'sortable': False, 'filterable': True, 'facet': True},
         'to_concept_owner_type': {'sortable': False, 'filterable': True, 'facet': True},
-        'external_id': {'sortable': False, 'filterable': True, 'facet': False, 'exact': False},
+        'external_id': {'sortable': False, 'filterable': True, 'facet': False, 'exact': True},
     }
 
     @staticmethod

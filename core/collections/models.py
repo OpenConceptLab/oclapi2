@@ -45,7 +45,7 @@ class Collection(ConceptContainerModel):
         'custom_validation_schema': {'sortable': False, 'filterable': True, 'facet': True},
         'canonical_url': {'sortable': True, 'filterable': True, 'exact': True},
         'experimental': {'sortable': False, 'filterable': False, 'facet': False},
-        'external_id': {'sortable': False, 'filterable': True, 'facet': False, 'exact': False},
+        'external_id': {'sortable': False, 'filterable': True, 'facet': False, 'exact': True},
     }
 
     class Meta:
