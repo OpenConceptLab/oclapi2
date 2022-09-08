@@ -22,6 +22,7 @@ class TaskViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data, {"task-id": "123", "state": "PENDING"})
+        flower_get_mock.assert_called_once_with('api/task/info/123')
 
     @patch('core.tasks.views.flower_get')
     def test_get_404(self, flower_get_mock):
