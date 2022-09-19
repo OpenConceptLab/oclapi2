@@ -56,7 +56,6 @@ class OCLAuthenticationBackend(ModelBackend):
         if AuthService.is_valid_django_token(request):
             klass = ModelBackend
         else:
-            from core.common.services import AuthService
             klass = AuthService.get().authentication_backend_class
 
         self._authentication_backend = klass()
@@ -64,7 +63,8 @@ class OCLAuthenticationBackend(ModelBackend):
         return self._authentication_backend
 
     def authenticate(self, request, username=None, password=None, **kwargs):
-        return self.get_auth_backend(request).authenticate(request=request, username=username, password=password, **kwargs)
+        return self.get_auth_backend(request).authenticate(
+            request=request, username=username, password=password, **kwargs)
 
     def get_user(self, user_id):
         return self.get_auth_backend().get_user(user_id=user_id)

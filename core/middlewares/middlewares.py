@@ -2,7 +2,6 @@ import logging
 import time
 
 from request_logging.middleware import LoggingMiddleware
-from rest_framework.authtoken.models import Token
 
 from core.common.constants import VERSION_HEADER, REQUEST_USER_HEADER, RESPONSE_TIME_HEADER, REQUEST_URL_HEADER, \
     REQUEST_METHOD_HEADER

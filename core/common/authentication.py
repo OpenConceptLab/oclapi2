@@ -7,7 +7,6 @@ class OCLAuthentication(BaseAuthentication):
         if AuthService.is_valid_django_token(request):
             klass = TokenAuthentication
         else:
-            from core.common.services import AuthService
             klass = AuthService.get().authentication_class
 
         return klass()
