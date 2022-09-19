@@ -10,9 +10,9 @@ from django.shortcuts import get_object_or_404
 from drf_yasg.utils import swagger_auto_schema
 from pydash import get
 from rest_framework import status
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.generics import (
     RetrieveAPIView, ListAPIView, UpdateAPIView, CreateAPIView)
-from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
 
 from core.client_configs.views import ResourceClientConfigsView
@@ -442,11 +442,7 @@ class SourceHierarchyView(SourceBaseView, RetrieveAPIView):
 
 class SourceSummaryView(SourceBaseView, RetrieveAPIView):
     serializer_class = SourceSummaryDetailSerializer
-
-    def get_permissions(self):
-        if self.request.method == 'PUT':
-            return [IsAdminUser()]
-        return [CanViewConceptDictionary()]
+    permission_classes = (CanViewConceptDictionary,)
 
     def get_object(self, queryset=None):
         instance = get_object_or_404(self.get_queryset())
@@ -454,21 +450,16 @@ class SourceSummaryView(SourceBaseView, RetrieveAPIView):
         return instance
 
     def put(self, request, **kwargs):  # pylint: disable=unused-argument
-        self.perform_update()
-        return Response(status=status.HTTP_202_ACCEPTED)
-
-    def perform_update(self):
         instance = self.get_object()
-        instance.update_children_counts()
+        if instance.has_edit_access(request.user):
+            instance.update_children_counts()
+            return Response(status=status.HTTP_202_ACCEPTED)
+        raise PermissionDenied()
 
 
 class SourceVersionSummaryView(SourceVersionBaseView, RetrieveAPIView):
     serializer_class = SourceVersionSummaryDetailSerializer
-
-    def get_permissions(self):
-        if self.request.method == 'PUT':
-            return [IsAdminUser()]
-        return [CanViewConceptDictionary()]
+    permission_classes = (CanViewConceptDictionary,)
 
     def get_object(self, queryset=None):
         instance = get_object_or_404(self.get_queryset())
@@ -476,12 +467,11 @@ class SourceVersionSummaryView(SourceVersionBaseView, RetrieveAPIView):
         return instance
 
     def put(self, request, **kwargs):  # pylint: disable=unused-argument
-        self.perform_update()
-        return Response(status=status.HTTP_202_ACCEPTED)
-
-    def perform_update(self):
         instance = self.get_object()
-        instance.update_children_counts()
+        if instance.has_edit_access(request.user):
+            instance.update_children_counts()
+            return Response(status=status.HTTP_202_ACCEPTED)
+        raise PermissionDenied()
 
 
 class SourceLatestVersionSummaryView(SourceVersionBaseView, RetrieveAPIView, UpdateAPIView):

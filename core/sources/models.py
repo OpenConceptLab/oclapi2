@@ -29,7 +29,7 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         'canonical_url': {'sortable': True, 'filterable': True, 'exact': True},
         'experimental': {'sortable': False, 'filterable': False, 'facet': False},
         'hierarchy_meaning': {'sortable': False, 'filterable': True, 'facet': True},
-        'external_id': {'sortable': False, 'filterable': True, 'facet': False, 'exact': False},
+        'external_id': {'sortable': False, 'filterable': True, 'facet': False, 'exact': True},
     }
 
     class Meta:

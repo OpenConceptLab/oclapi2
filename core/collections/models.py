@@ -15,9 +15,10 @@ from core.collections.constants import (
     REFERENCE_TYPE_CHOICES, CONCEPT_REFERENCE_TYPE, MAPPING_REFERENCE_TYPE, SOURCE_MAPPINGS, SOURCE_TO_CONCEPTS,
     TRANSFORM_TO_RESOURCE_VERSIONS, COLLECTION_REFERENCE_TYPE)
 from core.collections.parsers import CollectionReferenceParser
+from core.collections.translators import CollectionReferenceTranslator
 from core.collections.utils import is_concept, is_mapping
 from core.common.constants import (
-    DEFAULT_REPOSITORY_TYPE, ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT,
+    ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT,
     ES_REQUEST_TIMEOUT, ES_REQUEST_TIMEOUT_ASYNC, HEAD)
 from core.common.models import ConceptContainerModel, BaseResourceModel
 from core.common.tasks import seed_children_to_expansion, batch_index_resources, index_expansion_concepts, \
@@ -44,7 +45,7 @@ class Collection(ConceptContainerModel):
         'custom_validation_schema': {'sortable': False, 'filterable': True, 'facet': True},
         'canonical_url': {'sortable': True, 'filterable': True, 'exact': True},
         'experimental': {'sortable': False, 'filterable': False, 'facet': False},
-        'external_id': {'sortable': False, 'filterable': True, 'facet': False, 'exact': False},
+        'external_id': {'sortable': False, 'filterable': True, 'facet': False, 'exact': True},
     }
 
     class Meta:
@@ -65,7 +66,6 @@ class Collection(ConceptContainerModel):
 
     collection_type = models.TextField(blank=True)
     preferred_source = models.TextField(blank=True)
-    repository_type = models.TextField(default=DEFAULT_REPOSITORY_TYPE, blank=True)
     custom_resources_linked_source = models.TextField(blank=True)
     immutable = models.BooleanField(null=True, blank=True, default=None)
     locked_date = models.DateTimeField(null=True, blank=True)
@@ -117,7 +117,6 @@ class Collection(ConceptContainerModel):
         super().update_version_data(head)
         self.collection_type = head.collection_type
         self.preferred_source = head.preferred_source
-        self.repository_type = head.repository_type
         self.custom_resources_linked_source = head.custom_resources_linked_source
         self.immutable = head.immutable
         self.locked_date = head.locked_date
@@ -424,7 +423,9 @@ class CollectionReference(models.Model):
                     if self.resource_version:
                         expression += self.resource_version + '/'
                 elif self.filter:
-                    expression += '?' + self.filter_to_querystring()
+                    querystring = self.filter_to_querystring()
+                    if querystring:
+                        expression += '?' + querystring
         return expression
 
     @property
@@ -646,9 +647,12 @@ class CollectionReference(models.Model):
             self.expression = self.build_expression()
 
     def filter_to_querystring(self):
-        if self.filter:
+        if not self.is_valid_filter():
+            return None
+        filters = compact(self.filter)
+        if filters:
             queries = []
-            for filter_def in self.filter:  # pylint: disable=not-an-iterable
+            for filter_def in filters:  # pylint: disable=not-an-iterable
                 value = ','.join(filter_def['value']) if isinstance(filter_def['value'], list) else filter_def['value']
                 queries.append(f'{filter_def["property"]}={value}')
             return '&'.join(queries)
@@ -719,6 +723,10 @@ class CollectionReference(models.Model):
                 self.concepts.add(*expansion.concepts.filter(uri=self.expression))
             if not is_concept_expression and not self.mappings.exists():
                 self.mappings.add(*expansion.mappings.filter(uri=self.expression))
+
+    @property
+    def translation(self):
+        return CollectionReferenceTranslator(self).translate()
 
 
 def default_expansion_parameters():

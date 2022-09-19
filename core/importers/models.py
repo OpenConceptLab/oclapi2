@@ -182,11 +182,13 @@ class OrganizationImporter(BaseResourceImporter):
         self.data['mnemonic'] = self.data.pop('id')
 
     def process(self):
-        org = Organization.objects.create(**self.data)
-        org.members.add(org.created_by)
-        if org:
-            return CREATED
-        return FAILED
+        if not self.exists():
+            org = Organization.objects.create(**self.data)
+            org.members.add(org.created_by)
+            if org:
+                return CREATED
+            return FAILED
+        return None
 
     def delete(self):
         if self.exists():
@@ -451,7 +453,7 @@ class MappingImporter(BaseResourceImporter):
     def exists(self):
         return self.get_queryset().exists()
 
-    def get_queryset(self):
+    def get_queryset(self):  # pylint: disable=too-many-branches
         if self.queryset:
             return self.queryset
 
@@ -484,13 +486,17 @@ class MappingImporter(BaseResourceImporter):
             else:
                 filters['to_concept_code'] = compact(versionless_to_concept_url.split('/'))[-1]
                 if not to_source_url:
-                    filters['to_source__uri'] = to_parent_uri(versionless_to_concept_url)
+                    to_source_uri = to_parent_uri(versionless_to_concept_url)
+                    if Source.objects.filter(uri=drop_version(to_source_uri)).exists():
+                        filters['to_source__uri'] = to_source_uri
 
         if self.get('id'):
             filters['mnemonic'] = self.get('id')
 
         if to_source_url:
-            filters['to_source__uri'] = drop_version(to_source_url)
+            to_source_uri = drop_version(to_source_url)
+            if Source.objects.filter(uri=to_source_uri).exists():
+                filters['to_source__uri'] = to_source_uri
 
         if to_concept_code:
             filters['to_concept_code'] = to_concept_code if is_url_encoded_string(

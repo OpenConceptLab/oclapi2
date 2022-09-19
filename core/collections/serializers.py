@@ -1,4 +1,5 @@
 from datetime import datetime
+
 from django.core.validators import RegexValidator
 from pydash import get
 from rest_framework.fields import CharField, ChoiceField, ListField, IntegerField, DateTimeField, JSONField, \
@@ -90,7 +91,7 @@ class CollectionCreateOrUpdateSerializer(ModelSerializer):
                 'experimental', 'locked_date', 'text', 'revision_date', 'immutable', 'copyright', 'purpose',
                 'jurisdiction', 'contact', 'publisher', 'identifier', 'canonical_url', 'retired', 'released',
                 'organization', 'user', 'organization_id', 'user_id', 'external_id', 'extras', 'preferred_source',
-                'repository_type', 'custom_resources_linked_source', 'website', 'custom_validation_schema',
+                'custom_resources_linked_source', 'website', 'custom_validation_schema',
                 'collection_type', 'description', 'name', 'meta',
         ]:
             setattr(collection, attr, validated_data.get(attr, get(collection, attr)))
@@ -134,7 +135,6 @@ class CollectionCreateSerializer(CollectionCreateOrUpdateSerializer):
     url = CharField(read_only=True)
     canonical_url = CharField(required=False, allow_null=True, allow_blank=True)
     custom_resources_linked_source = CharField(required=False, allow_null=True, allow_blank=True)
-    repository_type = CharField(required=False, allow_null=True, allow_blank=True)
     preferred_source = CharField(required=False, allow_null=True, allow_blank=True)
     versions_url = CharField(read_only=True)
     concepts_url = CharField(read_only=True)
@@ -251,7 +251,7 @@ class CollectionDetailSerializer(CollectionCreateOrUpdateSerializer):
             'url', 'owner', 'owner_type', 'owner_url',
             'created_on', 'updated_on', 'created_by', 'updated_by', 'extras', 'external_id', 'versions_url',
             'version', 'concepts_url', 'mappings_url', 'expansions_url',
-            'custom_resources_linked_source', 'repository_type', 'preferred_source', 'references',
+            'custom_resources_linked_source', 'preferred_source', 'references',
             'canonical_url', 'identifier', 'publisher', 'contact', 'jurisdiction', 'purpose', 'copyright', 'meta',
             'immutable', 'revision_date', 'logo_url', 'summary', 'text', 'client_configs',
             'experimental', 'locked_date', 'autoexpand_head', 'expansion_url'
@@ -380,7 +380,7 @@ class CollectionReferenceDetailSerializer(CollectionReferenceSerializer):
         fields = (
             *CollectionReferenceSerializer.Meta.fields,
             'code', 'resource_version', 'namespace', 'system', 'version', 'valueset', 'cascade', 'filter', 'display',
-            'created_at', 'updated_at', 'concepts', 'mappings'
+            'created_at', 'updated_at', 'concepts', 'mappings', 'translation'
         )
 
 

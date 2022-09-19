@@ -654,6 +654,12 @@ class CollectionReferencesViewTest(OCLAPITestCase):
         self.assertEqual(self.collection.active_concepts, 3)
         self.assertEqual(self.collection.active_mappings, 2)
         self.assertTrue(self.collection.references.filter(expression=latest_version.uri).exists())
+        reference = self.collection.references.last()
+        self.assertTrue(reference.cascade, 'sourcemappings')
+        self.assertTrue(
+            reference.translation,
+            'Include latest version "330827" of concept "concept2" from org2/source2 PLUS its mappings'
+        )
 
         concept4 = ConceptFactory()
         latest_version = concept4.get_latest_version()
@@ -706,7 +712,7 @@ class CollectionReferencesViewTest(OCLAPITestCase):
     def test_put_expression_with_cascade_to_concepts(self):
         source1 = OrganizationSourceFactory()
         source2 = OrganizationSourceFactory()
-        concept1 = ConceptFactory(parent=source1)
+        concept1 = ConceptFactory(parent=source1, mnemonic='concept1')
         concept2 = ConceptFactory(parent=source1)
         concept3 = ConceptFactory(parent=source2)
         concept4 = ConceptFactory(parent=source2)
@@ -748,6 +754,12 @@ class CollectionReferencesViewTest(OCLAPITestCase):
                 concept1.get_latest_version().uri, mapping1.uri,
                 mapping1.to_concept.versioned_object.uri
             ])
+        )
+        reference = self.collection.references.last()
+        self.assertEqual(reference.cascade, 'sourcetoconcepts')
+        self.assertEqual(
+            reference.translation,
+            f'Include version "{concept1.get_latest_version().version}" of concept "concept1" from {concept1.parent.parent.mnemonic}/{concept1.parent.mnemonic} PLUS its mappings and their target concepts'  # pylint: disable=line-too-long
         )
 
         response = self.client.put(

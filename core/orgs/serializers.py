@@ -10,11 +10,12 @@ from .models import Organization
 
 
 class OrganizationListSerializer(serializers.ModelSerializer):
+    type = serializers.CharField(source='resource_type', read_only=True)
     id = serializers.CharField(source='mnemonic')
 
     class Meta:
         model = Organization
-        fields = ('id', 'name', 'url')
+        fields = ('id', 'name', 'url', 'type')
 
 
 class OrganizationCreateSerializer(serializers.ModelSerializer):
