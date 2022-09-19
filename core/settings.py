@@ -96,8 +96,7 @@ REST_FRAMEWORK = {
         'rest_framework.permissions.IsAuthenticated',
     ),
     'DEFAULT_AUTHENTICATION_CLASSES': (
-        'mozilla_django_oidc.contrib.drf.OIDCAuthentication',
-        'rest_framework.authentication.TokenAuthentication',
+        'core.common.authentication.OCLAuthentication',
     ),
     'DEFAULT_RENDERER_CLASSES': (
         'rest_framework.renderers.JSONRenderer',
@@ -111,7 +110,7 @@ REST_FRAMEWORK = {
 }
 OIDC_DRF_AUTH_BACKEND = 'core.common.backends.OCLOIDCAuthenticationBackend'
 AUTHENTICATION_BACKENDS = (
-    OIDC_DRF_AUTH_BACKEND,
+    'core.common.backends.OCLAuthenticationBackend',
 )
 
 
@@ -401,9 +400,9 @@ EXPORT_SERVICE = os.environ.get('EXPORT_SERVICE', 'core.common.services.S3')
 
 # keyCloak/OIDC Provider settings
 OIDC_RP_CLIENT_ID = os.environ.get('OIDC_RP_CLIENT_ID', 'ocllocal')
-OIDC_RP_CLIENT_SECRET = os.environ.get('OIDC_RP_CLIENT_SECRET', 'openid-client-secret')
+OIDC_RP_CLIENT_SECRET = os.environ.get('OIDC_RP_CLIENT_SECRET', 'XnsOiEwp5khw6ZLo9v1bLuXuheOofnz5')
 OIDC_SERVER_URL = os.environ.get('OIDC_SERVER_URL', 'http://localhost:8080')
-OIDC_SERVER_INTERNAL_URL = os.environ.get('OIDC_SERVER_URL', 'http://host.docker.internal:8080')
+OIDC_SERVER_INTERNAL_URL = os.environ.get('OIDC_SERVER_INTERNAL_URL', '') or OIDC_SERVER_URL
 OIDC_REALM = os.environ.get('OIDC_REALM', 'ocl')
 OIDC_OP_AUTHORIZATION_ENDPOINT = f'{OIDC_SERVER_URL}/realms/{OIDC_REALM}/protocol/openid-connect/auth'
 OIDC_OP_TOKEN_ENDPOINT = f'{OIDC_SERVER_INTERNAL_URL}/realms/{OIDC_REALM}/protocol/openid-connect/token'

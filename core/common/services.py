@@ -7,11 +7,16 @@ import requests
 from botocore.client import Config
 from botocore.exceptions import NoCredentialsError, ClientError
 from django.conf import settings
+from django.contrib.auth.backends import ModelBackend
 from django.core.files.base import ContentFile
 from django.db import connection
 from django.http import Http404
+from mozilla_django_oidc.contrib.drf import OIDCAuthentication
 from pydash import get
+from rest_framework.authentication import TokenAuthentication
+from rest_framework.authtoken.models import Token
 
+from core.common.backends import OCLOIDCAuthenticationBackend
 from core.settings import REDIS_HOST, REDIS_PORT, REDIS_DB
 
 
@@ -274,6 +279,8 @@ class AbstractAuthService:
 
 class DjangoAuthService(AbstractAuthService):
     token_type = 'Token'
+    authentication_class = TokenAuthentication
+    authentication_backend_class = ModelBackend
 
     def get_token(self, check_password=True):
         if check_password:
@@ -291,6 +298,8 @@ class DjangoAuthService(AbstractAuthService):
 
 class OIDCAuthService(AbstractAuthService):
     token_type = 'Bearer'
+    authentication_class = OIDCAuthentication
+    authentication_backend_class = OCLOIDCAuthenticationBackend
     USERS_URL = settings.OIDC_SERVER_INTERNAL_URL + f'/admin/realms/{settings.OIDC_REALM}/users'
     OIDP_ADMIN_TOKEN_URL = settings.OIDC_SERVER_INTERNAL_URL + '/realms/master/protocol/openid-connect/token'
 
@@ -477,3 +486,11 @@ class AuthService:
         if get(settings, 'OIDC_SERVER_URL'):
             return OIDCAuthService(**kwargs)
         return DjangoAuthService(**kwargs)
+
+    @staticmethod
+    def is_valid_django_token(request):
+        authorization_header = request.META.get('HTTP_AUTHORIZATION')
+        if authorization_header and authorization_header.startswith('Token '):
+            token_key = authorization_header.replace('Token ', '')
+            return len(token_key) == 40 and Token.objects.filter(key=token_key).exists()
+        return False

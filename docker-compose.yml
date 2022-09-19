@@ -50,6 +50,7 @@ services:
       - OIDC_RP_CLIENT_ID
       - OIDC_RP_CLIENT_SECRET
       - OIDC_SERVER_URL=${OIDC_SERVER_URL-http://localhost:8080}
+      - OIDC_SERVER_INTERNAL_URL=${OIDC_SERVER_INTERNAL_URL-http://host.docker.internal:8080} # only for dev env
       - OIDC_REALM=${OIDC_REALM-ocl}
       - KEYCLOAK_ADMIN=${KEYCLOAK_ADMIN-root}
       - KEYCLOAK_ADMIN_PASSWORD=${KEYCLOAK_ADMIN_PASSWORD-Root123}

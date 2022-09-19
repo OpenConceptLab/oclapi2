@@ -1,4 +1,6 @@
+from django.contrib.auth.backends import ModelBackend
 from mozilla_django_oidc.auth import OIDCAuthenticationBackend
+from pydash import get
 
 
 class OCLOIDCAuthenticationBackend(OIDCAuthenticationBackend):
@@ -43,3 +45,26 @@ class OCLOIDCAuthenticationBackend(OIDCAuthenticationBackend):
             return UserProfile.objects.none()
 
         return UserProfile.objects.filter(username=username)
+
+
+class OCLAuthenticationBackend(ModelBackend):
+    def get_auth_backend(self, request=None):
+        if get(self, '_authentication_backend'):
+            return get(self, '_authentication_backend')
+
+        from core.common.services import AuthService
+        if AuthService.is_valid_django_token(request):
+            klass = ModelBackend
+        else:
+            from core.common.services import AuthService
+            klass = AuthService.get().authentication_backend_class
+
+        self._authentication_backend = klass()
+
+        return self._authentication_backend
+
+    def authenticate(self, request, username=None, password=None, **kwargs):
+        return self.get_auth_backend(request).authenticate(request=request, username=username, password=password, **kwargs)
+
+    def get_user(self, user_id):
+        return self.get_auth_backend().get_user(user_id=user_id)
