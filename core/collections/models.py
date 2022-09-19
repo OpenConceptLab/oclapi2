@@ -18,7 +18,7 @@ from core.collections.parsers import CollectionReferenceParser
 from core.collections.translators import CollectionReferenceTranslator
 from core.collections.utils import is_concept, is_mapping
 from core.common.constants import (
-    DEFAULT_REPOSITORY_TYPE, ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT,
+    ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT,
     ES_REQUEST_TIMEOUT, ES_REQUEST_TIMEOUT_ASYNC, HEAD)
 from core.common.models import ConceptContainerModel, BaseResourceModel
 from core.common.tasks import seed_children_to_expansion, batch_index_resources, index_expansion_concepts, \
@@ -66,7 +66,6 @@ class Collection(ConceptContainerModel):
 
     collection_type = models.TextField(blank=True)
     preferred_source = models.TextField(blank=True)
-    repository_type = models.TextField(default=DEFAULT_REPOSITORY_TYPE, blank=True)
     custom_resources_linked_source = models.TextField(blank=True)
     immutable = models.BooleanField(null=True, blank=True, default=None)
     locked_date = models.DateTimeField(null=True, blank=True)
@@ -118,7 +117,6 @@ class Collection(ConceptContainerModel):
         super().update_version_data(head)
         self.collection_type = head.collection_type
         self.preferred_source = head.preferred_source
-        self.repository_type = head.repository_type
         self.custom_resources_linked_source = head.custom_resources_linked_source
         self.immutable = head.immutable
         self.locked_date = head.locked_date

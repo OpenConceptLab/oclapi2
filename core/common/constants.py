@@ -34,7 +34,6 @@ CUSTOM_VALIDATION_SCHEMA_OPENMRS = 'OpenMRS'
 LOOKUP_CONCEPT_CLASSES = ['Concept Class', 'Datatype', 'NameType', 'DescriptionType', 'MapType', 'Locale']
 REFERENCE_VALUE_SOURCE_MNEMONICS = ['Classes', 'Datatypes', 'NameTypes', 'DescriptionTypes', 'Locales']
 FIVE_MINS = 5 * 60
-DEFAULT_REPOSITORY_TYPE = 'Collection'
 INCLUDE_RETIRED_PARAM = 'includeRetired'
 INCLUDE_MAPPINGS_PARAM = 'includeMappings'
 INCLUDE_EXTRAS_PARAM = 'includeExtras'
