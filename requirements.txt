@@ -1,7 +1,7 @@
 Django==4.1.1
 psycopg2==2.9.3
 gunicorn==20.1.0 #production server
-whitenoise==5.3.0 #serving swagger static files
+whitenoise==6.2.0 #serving swagger static files
 djangorestframework==3.13.1
 pylint==2.15.0
 pydash==5.1.0
@@ -27,7 +27,7 @@ coverage==6.2
 tblib==1.7.0
 django-ordered-model==3.6
 django-health-check>=3.16.2
-markdown==3.3.7
+markdown==3.4.1
 mock==4.0.3
 django-request-logging==0.7.5
 django-cid==2.3
