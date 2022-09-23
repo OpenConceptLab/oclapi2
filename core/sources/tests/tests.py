@@ -217,7 +217,7 @@ class SourceTest(OCLTestCase):
                 mnemonic=source.mnemonic,
                 organization=source.organization
             )
-            with self.assertRaises(IntegrityError):
+            with self.assertRaises(ValidationError):
                 source_version.full_clean()
                 source_version.save()
 
