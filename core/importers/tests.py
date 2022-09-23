@@ -425,11 +425,66 @@ class BulkImportInlineTest(OCLTestCase):
         self.assertEqual(len(importer.created), 49)
         self.assertEqual(len(importer.exists), 3)
         self.assertEqual(len(importer.updated), 12)
+        self.assertEqual(len(importer.deleted), 0)
         self.assertEqual(len(importer.failed), 0)
         self.assertEqual(len(importer.invalid), 0)
         self.assertEqual(len(importer.others), 0)
         self.assertEqual(len(importer.permission_denied), 0)
-        batch_index_resources_mock.apply_async.assert_called()
+        self.assertEqual(batch_index_resources_mock.apply_async.call_count, 2)
+
+        data = {
+            "type": "Concept", "id": "Corn", "concept_class": "Root",
+            "datatype": "None", "source": "DemoSource", "owner": "DemoOrg", "owner_type": "Organization",
+            "names": [{"name": "Food", "locale": "en", "locale_preferred": "True", "name_type": "Fully Specified"}],
+            "descriptions": [], '__action': 'delete'
+        }
+
+        importer = BulkImportInline(json.dumps(data), 'ocladmin', True)
+        importer.run()
+
+        self.assertEqual(importer.processed, 1)
+        self.assertEqual(len(importer.created), 0)
+        self.assertEqual(len(importer.exists), 0)
+        self.assertEqual(len(importer.updated), 0)
+        self.assertEqual(len(importer.deleted), 1)
+        self.assertEqual(len(importer.failed), 0)
+        self.assertEqual(len(importer.invalid), 0)
+        self.assertEqual(len(importer.others), 0)
+        self.assertEqual(len(importer.permission_denied), 0)
+        self.assertEqual(batch_index_resources_mock.apply_async.call_count, 2)  # no new indexing call
+        concept = Concept.objects.filter(mnemonic='Corn').first()
+        self.assertTrue(concept.get_latest_version().retired)
+        self.assertTrue(concept.versioned_object.retired)
+        self.assertFalse(concept.get_latest_version().prev_version.retired)
+
+        data = {
+            "to_concept_url": "/orgs/DemoOrg/sources/DemoSource/concepts/Corn/",
+            "from_concept_url": "/orgs/DemoOrg/sources/DemoSource/concepts/Vegetable/",
+            "type": "Mapping", "source": "DemoSource",
+            "extras": None, "owner": "DemoOrg", "map_type": "Has Child", "owner_type": "Organization",
+            "external_id": None, '__action': 'delete'
+        }
+
+        importer = BulkImportInline(json.dumps(data), 'ocladmin', True)
+        importer.run()
+
+        self.assertEqual(importer.processed, 1)
+        self.assertEqual(len(importer.created), 0)
+        self.assertEqual(len(importer.exists), 0)
+        self.assertEqual(len(importer.updated), 0)
+        self.assertEqual(len(importer.deleted), 1)
+        self.assertEqual(len(importer.failed), 0)
+        self.assertEqual(len(importer.invalid), 0)
+        self.assertEqual(len(importer.others), 0)
+        self.assertEqual(len(importer.permission_denied), 0)
+        self.assertEqual(batch_index_resources_mock.apply_async.call_count, 2)  # no new indexing call
+        mapping = Mapping.objects.filter(
+            to_concept__uri="/orgs/DemoOrg/sources/DemoSource/concepts/Corn/",
+            from_concept__uri="/orgs/DemoOrg/sources/DemoSource/concepts/Vegetable/",
+        ).first()
+        self.assertTrue(mapping.get_latest_version().retired)
+        self.assertTrue(mapping.versioned_object.retired)
+        self.assertFalse(mapping.get_latest_version().prev_version.retired)
 
     @patch('core.importers.models.batch_index_resources')
     def test_csv_import_with_retired_concepts(self, batch_index_resources_mock):
