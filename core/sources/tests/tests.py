@@ -1,6 +1,6 @@
 import factory
 from django.core.exceptions import ValidationError
-from django.db import transaction, IntegrityError
+from django.db import transaction
 from mock import patch, Mock, ANY, PropertyMock
 
 from core.collections.models import Collection
