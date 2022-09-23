@@ -1,6 +1,7 @@
 from pydash import get
 
 from core.collections.constants import SOURCE_TO_CONCEPTS, SOURCE_MAPPINGS
+from core.common.utils import is_url_encoded_string, decode_string
 
 
 class CollectionReferenceTranslator:
@@ -46,17 +47,19 @@ class CollectionReferenceTranslator:
                     english += 'PLUS its mappings '
         return english
 
-    def translate(self):  # pylint: disable=too-many-branches
+    def translate(self):  # pylint: disable=too-many-branches,too-many-statements
         english = f'{self.reference_effect} '
         if not self.__has_any_repo_version() and not self.reference.resource_version:
             english += 'latest '
         entity = self.ref_entity
-        if self.reference.code:
+        code = self.reference.code
+        if code:
+            code = decode_string(decode_string(code)) if is_url_encoded_string(code) else code
             if self.reference.resource_version:
                 english += f'version "{self.reference.resource_version}" of '
             elif self.reference.transform:
                 english += 'latest version of '
-            english += f'{entity} "{self.reference.code}" from '
+            english += f'{entity} "{code}" from '
         else:
             english += f'{entity}s '
             if self.reference.system or self.reference.valueset:
