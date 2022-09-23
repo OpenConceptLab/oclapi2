@@ -1,3 +1,4 @@
+import json
 from datetime import datetime
 
 from django.core.validators import RegexValidator
@@ -95,6 +96,14 @@ class CollectionCreateOrUpdateSerializer(ModelSerializer):
                 'collection_type', 'description', 'name', 'meta',
         ]:
             setattr(collection, attr, validated_data.get(attr, get(collection, attr)))
+
+        for attr in ['jurisdiction', 'identifier', 'contact', 'meta']:
+            value = validated_data.get(attr, get(collection, attr))
+            try:
+                value = json.loads(value) if isinstance(value, str) else value
+            except:  # pylint: disable=bare-except
+                pass
+            setattr(collection, attr, value)
 
         collection.full_name = validated_data.get('full_name', collection.full_name) or collection.name
         collection.autoexpand_head = validated_data.get('autoexpand_head', collection.autoexpand_head)
