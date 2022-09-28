@@ -495,8 +495,8 @@ class BulkImportInlineTest(OCLTestCase):
         importer = BulkImportInline(data, 'ocladmin', True)
         importer.run()
 
-        self.assertEqual(importer.processed, 10)
-        self.assertEqual(len(importer.created), 10)
+        self.assertEqual(importer.processed, 11)
+        self.assertEqual(len(importer.created), 11)
         self.assertEqual(len(importer.failed), 0)
         self.assertEqual(len(importer.exists), 0)
         self.assertEqual(len(importer.updated), 0)
@@ -510,6 +510,14 @@ class BulkImportInlineTest(OCLTestCase):
             Concept.objects.filter(parent__mnemonic='MyDemoSource', is_latest_version=True, retired=True).count(), 1)
         self.assertEqual(
             Concept.objects.filter(parent__mnemonic='MyDemoSource', is_latest_version=True, retired=False).count(), 3)
+        self.assertEqual(
+            Mapping.objects.filter(
+                map_type="Parent-child", parent__mnemonic='MyDemoSource', is_latest_version=True, retired=False
+            ).count(), 1)
+        self.assertEqual(
+            Mapping.objects.filter(
+                map_type="Parent-child-retired", parent__mnemonic='MyDemoSource', is_latest_version=True, retired=True
+            ).count(), 1)
 
     @unittest.skip('[Skipped] Gets hung sometimes')
     @patch('core.importers.models.batch_index_resources')
