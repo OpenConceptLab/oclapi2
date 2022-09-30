@@ -6,6 +6,7 @@ from . import views
 
 urlpatterns = [
     re_path(r'^$', views.UserListView.as_view(), name='userprofile-list'),
+    path('api-token/', views.TokenExchangeView.as_view(), name='user-oid-django-token-exchange'),
     path('oidc/code-exchange/', views.OIDCodeExchangeView.as_view(), name='user-oid-code-exchange'),
     path('oidc/logout/', views.UserOIDLogoutView.as_view(), name='user-logout'),
     path('login/', views.TokenAuthenticationView.as_view(), name='user-login'),

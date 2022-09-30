@@ -85,6 +85,14 @@ class SSOMigrateView(APIView):
         return Response(result)
 
 
+class TokenExchangeView(APIView):
+    permission_classes = (IsAuthenticated, )
+
+    @staticmethod
+    def get(request):
+        return Response(dict(token=request.user.get_token()))
+
+
 class TokenAuthenticationView(ObtainAuthToken):
     """Implementation of ObtainAuthToken with last_login update"""
 
