@@ -1058,6 +1058,20 @@ class BulkImportViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.data, dict(exception='No content to import'))
 
+    def test_post_invalid_csv_400(self):
+        file = open(
+                os.path.join(os.path.dirname(__file__), '..', 'samples/invalid_import_csv.csv'), 'r'
+            )
+
+        response = self.client.post(
+            "/importers/bulk-import-inline/?update_if_exists=true",
+            {'file': file},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data, {'exception': 'No content to import'})
+
     @patch('core.common.tasks.bulk_import_parallel_inline')
     def test_post_inline_parallel_202(self, bulk_import_mock):
         task_id = 'ace5abf4-3b7f-4e4a-b16f-d1c041088c3e-ocladmin~priority'
