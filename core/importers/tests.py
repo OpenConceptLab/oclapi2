@@ -522,7 +522,8 @@ class BulkImportInlineTest(OCLTestCase):
     @patch('core.importers.models.batch_index_resources')
     def test_csv_import_with_retired_concepts_and_mappings(self, batch_index_resources_mock):
         file_content = open(
-            os.path.join(os.path.dirname(__file__), '..', 'samples/ocl_csv_import_example_test_retired.csv'), 'r').read()
+            os.path.join(os.path.dirname(__file__), '..', 'samples/ocl_csv_import_example_test_retired.csv'), 'r'
+        ).read()
         data = OclStandardCsvToJsonConverter(
             input_list=csv_file_data_to_input_list(file_content), allow_special_characters=True).process()
         importer = BulkImportInline(data, 'ocladmin', True)
