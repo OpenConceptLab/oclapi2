@@ -331,7 +331,6 @@ class BulkImportInlineView(APIView):  # pragma: no cover
                     input_list=csv_file_data_to_input_list(file_content),
                     allow_special_characters=True
                 ).process()
-                print("****", data)
             except Exception as ex:  # pylint: disable=broad-except
                 return Response(dict(exception=f'Bad CSV ({str(ex)})'), status=status.HTTP_400_BAD_REQUEST)
         elif file:

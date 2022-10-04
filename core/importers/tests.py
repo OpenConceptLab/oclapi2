@@ -519,6 +519,42 @@ class BulkImportInlineTest(OCLTestCase):
                 map_type="Parent-child-retired", parent__mnemonic='MyDemoSource', is_latest_version=True, retired=True
             ).count(), 1)
 
+    @patch('core.importers.models.batch_index_resources')
+    def test_csv_import_with_retired_concepts_and_mappings(self, batch_index_resources_mock):
+        file_content = open(
+            os.path.join(os.path.dirname(__file__), '..', 'samples/ocl_csv_import_example_test_retired.csv'), 'r').read()
+        data = OclStandardCsvToJsonConverter(
+            input_list=csv_file_data_to_input_list(file_content), allow_special_characters=True).process()
+        importer = BulkImportInline(data, 'ocladmin', True)
+        importer.run()
+
+        self.assertEqual(importer.processed, 12)
+        self.assertEqual(len(importer.created), 12)
+        self.assertEqual(len(importer.failed), 0)
+        self.assertEqual(len(importer.exists), 0)
+        self.assertEqual(len(importer.updated), 0)
+        self.assertEqual(len(importer.invalid), 0)
+        self.assertEqual(len(importer.others), 0)
+        self.assertEqual(len(importer.permission_denied), 0)
+        batch_index_resources_mock.apply_async.assert_called()
+
+        self.assertTrue(
+            Concept.objects.filter(mnemonic='Act', is_latest_version=True, retired=False).exists())
+        self.assertTrue(
+            Concept.objects.filter(mnemonic='Child', is_latest_version=True, retired=False).exists())
+        self.assertTrue(
+            Concept.objects.filter(mnemonic='Child_of_child', is_latest_version=True, retired=False).exists())
+        self.assertTrue(
+            Concept.objects.filter(mnemonic='Ret', is_latest_version=True, retired=True).exists())
+        self.assertTrue(
+            Concept.objects.filter(mnemonic='Ret-with-mappings', is_latest_version=True, retired=True).exists())
+        self.assertTrue(
+            Mapping.objects.filter(map_type='Child-Parent', is_latest_version=True, retired=False).exists())
+        self.assertTrue(
+            Mapping.objects.filter(map_type='SAME-AS', is_latest_version=True, retired=True).exists())
+        self.assertTrue(
+            Mapping.objects.filter(map_type='Parent-child', is_latest_version=True, retired=False).exists())
+
     @unittest.skip('[Skipped] Gets hung sometimes')
     @patch('core.importers.models.batch_index_resources')
     def test_openmrs_schema_csv_import(self, batch_index_resources_mock):
