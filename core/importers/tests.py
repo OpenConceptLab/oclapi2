@@ -425,11 +425,66 @@ class BulkImportInlineTest(OCLTestCase):
         self.assertEqual(len(importer.created), 49)
         self.assertEqual(len(importer.exists), 3)
         self.assertEqual(len(importer.updated), 12)
+        self.assertEqual(len(importer.deleted), 0)
         self.assertEqual(len(importer.failed), 0)
         self.assertEqual(len(importer.invalid), 0)
         self.assertEqual(len(importer.others), 0)
         self.assertEqual(len(importer.permission_denied), 0)
-        batch_index_resources_mock.apply_async.assert_called()
+        self.assertEqual(batch_index_resources_mock.apply_async.call_count, 2)
+
+        data = {
+            "type": "Concept", "id": "Corn", "concept_class": "Root",
+            "datatype": "None", "source": "DemoSource", "owner": "DemoOrg", "owner_type": "Organization",
+            "names": [{"name": "Food", "locale": "en", "locale_preferred": "True", "name_type": "Fully Specified"}],
+            "descriptions": [], '__action': 'delete'
+        }
+
+        importer = BulkImportInline(json.dumps(data), 'ocladmin', True)
+        importer.run()
+
+        self.assertEqual(importer.processed, 1)
+        self.assertEqual(len(importer.created), 0)
+        self.assertEqual(len(importer.exists), 0)
+        self.assertEqual(len(importer.updated), 0)
+        self.assertEqual(len(importer.deleted), 1)
+        self.assertEqual(len(importer.failed), 0)
+        self.assertEqual(len(importer.invalid), 0)
+        self.assertEqual(len(importer.others), 0)
+        self.assertEqual(len(importer.permission_denied), 0)
+        self.assertEqual(batch_index_resources_mock.apply_async.call_count, 2)  # no new indexing call
+        concept = Concept.objects.filter(mnemonic='Corn').first()
+        self.assertTrue(concept.get_latest_version().retired)
+        self.assertTrue(concept.versioned_object.retired)
+        self.assertFalse(concept.get_latest_version().prev_version.retired)
+
+        data = {
+            "to_concept_url": "/orgs/DemoOrg/sources/DemoSource/concepts/Corn/",
+            "from_concept_url": "/orgs/DemoOrg/sources/DemoSource/concepts/Vegetable/",
+            "type": "Mapping", "source": "DemoSource",
+            "extras": None, "owner": "DemoOrg", "map_type": "Has Child", "owner_type": "Organization",
+            "external_id": None, '__action': 'delete'
+        }
+
+        importer = BulkImportInline(json.dumps(data), 'ocladmin', True)
+        importer.run()
+
+        self.assertEqual(importer.processed, 1)
+        self.assertEqual(len(importer.created), 0)
+        self.assertEqual(len(importer.exists), 0)
+        self.assertEqual(len(importer.updated), 0)
+        self.assertEqual(len(importer.deleted), 1)
+        self.assertEqual(len(importer.failed), 0)
+        self.assertEqual(len(importer.invalid), 0)
+        self.assertEqual(len(importer.others), 0)
+        self.assertEqual(len(importer.permission_denied), 0)
+        self.assertEqual(batch_index_resources_mock.apply_async.call_count, 2)  # no new indexing call
+        mapping = Mapping.objects.filter(
+            to_concept__uri="/orgs/DemoOrg/sources/DemoSource/concepts/Corn/",
+            from_concept__uri="/orgs/DemoOrg/sources/DemoSource/concepts/Vegetable/",
+        ).first()
+        self.assertTrue(mapping.get_latest_version().retired)
+        self.assertTrue(mapping.versioned_object.retired)
+        self.assertFalse(mapping.get_latest_version().prev_version.retired)
 
     @patch('core.importers.models.batch_index_resources')
     def test_csv_import_with_retired_concepts(self, batch_index_resources_mock):
@@ -440,8 +495,8 @@ class BulkImportInlineTest(OCLTestCase):
         importer = BulkImportInline(data, 'ocladmin', True)
         importer.run()
 
-        self.assertEqual(importer.processed, 10)
-        self.assertEqual(len(importer.created), 10)
+        self.assertEqual(importer.processed, 11)
+        self.assertEqual(len(importer.created), 11)
         self.assertEqual(len(importer.failed), 0)
         self.assertEqual(len(importer.exists), 0)
         self.assertEqual(len(importer.updated), 0)
@@ -455,6 +510,51 @@ class BulkImportInlineTest(OCLTestCase):
             Concept.objects.filter(parent__mnemonic='MyDemoSource', is_latest_version=True, retired=True).count(), 1)
         self.assertEqual(
             Concept.objects.filter(parent__mnemonic='MyDemoSource', is_latest_version=True, retired=False).count(), 3)
+        self.assertEqual(
+            Mapping.objects.filter(
+                map_type="Parent-child", parent__mnemonic='MyDemoSource', is_latest_version=True, retired=False
+            ).count(), 1)
+        self.assertEqual(
+            Mapping.objects.filter(
+                map_type="Parent-child-retired", parent__mnemonic='MyDemoSource', is_latest_version=True, retired=True
+            ).count(), 1)
+
+    @patch('core.importers.models.batch_index_resources')
+    def test_csv_import_with_retired_concepts_and_mappings(self, batch_index_resources_mock):
+        file_content = open(
+            os.path.join(os.path.dirname(__file__), '..', 'samples/ocl_csv_import_example_test_retired.csv'), 'r'
+        ).read()
+        data = OclStandardCsvToJsonConverter(
+            input_list=csv_file_data_to_input_list(file_content), allow_special_characters=True).process()
+        importer = BulkImportInline(data, 'ocladmin', True)
+        importer.run()
+
+        self.assertEqual(importer.processed, 12)
+        self.assertEqual(len(importer.created), 12)
+        self.assertEqual(len(importer.failed), 0)
+        self.assertEqual(len(importer.exists), 0)
+        self.assertEqual(len(importer.updated), 0)
+        self.assertEqual(len(importer.invalid), 0)
+        self.assertEqual(len(importer.others), 0)
+        self.assertEqual(len(importer.permission_denied), 0)
+        batch_index_resources_mock.apply_async.assert_called()
+
+        self.assertTrue(
+            Concept.objects.filter(mnemonic='Act', is_latest_version=True, retired=False).exists())
+        self.assertTrue(
+            Concept.objects.filter(mnemonic='Child', is_latest_version=True, retired=False).exists())
+        self.assertTrue(
+            Concept.objects.filter(mnemonic='Child_of_child', is_latest_version=True, retired=False).exists())
+        self.assertTrue(
+            Concept.objects.filter(mnemonic='Ret', is_latest_version=True, retired=True).exists())
+        self.assertTrue(
+            Concept.objects.filter(mnemonic='Ret-with-mappings', is_latest_version=True, retired=True).exists())
+        self.assertTrue(
+            Mapping.objects.filter(map_type='Child-Parent', is_latest_version=True, retired=False).exists())
+        self.assertTrue(
+            Mapping.objects.filter(map_type='SAME-AS', is_latest_version=True, retired=True).exists())
+        self.assertTrue(
+            Mapping.objects.filter(map_type='Parent-child', is_latest_version=True, retired=False).exists())
 
     @unittest.skip('[Skipped] Gets hung sometimes')
     @patch('core.importers.models.batch_index_resources')
@@ -994,6 +1094,20 @@ class BulkImportViewTest(OCLAPITestCase):
         )
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.data, dict(exception='No content to import'))
+
+    def test_post_invalid_csv_400(self):
+        file = open(
+                os.path.join(os.path.dirname(__file__), '..', 'samples/invalid_import_csv.csv'), 'r'
+            )
+
+        response = self.client.post(
+            "/importers/bulk-import-inline/?update_if_exists=true",
+            {'file': file},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data, {'exception': 'No content to import'})
 
     @patch('core.common.tasks.bulk_import_parallel_inline')
     def test_post_inline_parallel_202(self, bulk_import_mock):

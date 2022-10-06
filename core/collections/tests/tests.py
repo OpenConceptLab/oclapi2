@@ -2298,9 +2298,10 @@ class CollectionReferenceParserTest(OCLTestCase):
                 "/users/Me/sources/MySource/concepts/?q=foobar",
                 "/users/Me/sources/MySource/v1/concepts/?q=foobar&datatype=rule",
                 "/users/Me/collections/MyColl/v1/mappings/?mapType=Q-AND-A",
+                "/orgs/MyOrg/sources/MySource/concepts/foo%252Fbar/",
             ])
         )
-        self.assertEqual(len(references), 5)
+        self.assertEqual(len(references), 6)
 
         reference = references[0]
         self.assertEqual(reference.expression, "/orgs/MyOrg/sources/MySource/concepts/c-1234/")
@@ -2366,6 +2367,17 @@ class CollectionReferenceParserTest(OCLTestCase):
             reference.translation,
             'Include mappings from version "v1" of Me/MyColl having mapType equal to "Q-AND-A"'
         )
+
+        reference = references[5]
+        self.assertEqual(reference.expression, "/orgs/MyOrg/sources/MySource/concepts/foo%252Fbar/")
+        self.assertEqual(reference.system, "/orgs/MyOrg/sources/MySource/")
+        self.assertEqual(reference.code, "foo%252Fbar")
+        self.assertEqual(reference.reference_type, 'concepts')
+        self.assertIsNone(reference.version)
+        self.assertIsNone(reference.valueset)
+        self.assertIsNone(reference.filter)
+        self.assertIsNone(reference.cascade)
+        self.assertEqual(reference.translation, 'Include latest concept "foo/bar" from MyOrg/MySource')
 
     def test_parse_string_expression_concepts_mappings_explicit(self):  # pylint: disable=too-many-statements
         references = self.get_expanded_references(

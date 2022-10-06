@@ -68,10 +68,13 @@ class BulkImportFileUploadView(APIView):
             return Response(dict(exception=NO_CONTENT_TO_IMPORT), status=status.HTTP_400_BAD_REQUEST)
 
         if is_csv_file(name=file.name):
-            data = OclStandardCsvToJsonConverter(
-                input_list=csv_file_data_to_input_list(file.read().decode('utf-8')),
-                allow_special_characters=True
-            ).process()
+            try:
+                data = OclStandardCsvToJsonConverter(
+                    input_list=csv_file_data_to_input_list(file.read().decode('utf-8')),
+                    allow_special_characters=True
+                ).process()
+            except Exception as ex:  # pylint: disable=broad-except
+                return Response(dict(exception=f'Bad CSV ({str(ex)})'), status=status.HTTP_400_BAD_REQUEST)
         else:
             data = file.read()
 
@@ -101,8 +104,11 @@ class BulkImportFileURLView(APIView):
             return Response(dict(exception=NO_CONTENT_TO_IMPORT), status=status.HTTP_400_BAD_REQUEST)
 
         if is_csv_file(name=file_url):
-            data = OclStandardCsvToJsonConverter(
-                input_list=csv_file_data_to_input_list(file.text), allow_special_characters=True).process()
+            try:
+                data = OclStandardCsvToJsonConverter(
+                    input_list=csv_file_data_to_input_list(file.text), allow_special_characters=True).process()
+            except Exception as ex:  # pylint: disable=broad-except
+                return Response(dict(exception=f'Bad CSV ({str(ex)})'), status=status.HTTP_400_BAD_REQUEST)
         else:
             data = file.text
 
@@ -272,10 +278,13 @@ class BulkImportParallelInlineView(APIView):  # pragma: no cover
             return Response(dict(exception=NO_CONTENT_TO_IMPORT), status=status.HTTP_400_BAD_REQUEST)
 
         if file_name and is_csv_file(name=file_name):
-            data = OclStandardCsvToJsonConverter(
-                input_list=csv_file_data_to_input_list(file_content),
-                allow_special_characters=True
-            ).process()
+            try:
+                data = OclStandardCsvToJsonConverter(
+                    input_list=csv_file_data_to_input_list(file_content),
+                    allow_special_characters=True
+                ).process()
+            except Exception as ex:  # pylint: disable=broad-except
+                return Response(dict(exception=f'Bad CSV ({str(ex)})'), status=status.HTTP_400_BAD_REQUEST)
         elif file:
             data = file_content
         else:
@@ -317,10 +326,13 @@ class BulkImportInlineView(APIView):  # pragma: no cover
             return Response(dict(exception=NO_CONTENT_TO_IMPORT), status=status.HTTP_400_BAD_REQUEST)
 
         if file_name and is_csv_file(name=file_name):
-            data = OclStandardCsvToJsonConverter(
-                input_list=csv_file_data_to_input_list(file_content),
-                allow_special_characters=True
-            ).process()
+            try:
+                data = OclStandardCsvToJsonConverter(
+                    input_list=csv_file_data_to_input_list(file_content),
+                    allow_special_characters=True
+                ).process()
+            except Exception as ex:  # pylint: disable=broad-except
+                return Response(dict(exception=f'Bad CSV ({str(ex)})'), status=status.HTTP_400_BAD_REQUEST)
         elif file:
             data = file_content
         else:

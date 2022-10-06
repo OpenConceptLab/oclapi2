@@ -437,6 +437,23 @@ class ConceptImporter(BaseResourceImporter):
 
         return PERMISSION_DENIED
 
+    def delete(self):
+        is_clean = self.clean()
+        if not is_clean:
+            return is_clean
+        if self.exists():
+            parent = self.data.get('parent')
+            try:
+                if parent.has_edit_access(self.user):
+                    concept = self.get_queryset().first()
+                    concept.retire(self.user)
+                    return DELETED
+                return PERMISSION_DENIED
+            except Exception as ex:
+                return dict(errors=ex.args)
+
+        return NOT_FOUND
+
 
 class MappingImporter(BaseResourceImporter):
     mandatory_fields = {"map_type", "from_concept_url"}
@@ -552,6 +569,23 @@ class MappingImporter(BaseResourceImporter):
             return self.instance.errors or FAILED
 
         return PERMISSION_DENIED
+
+    def delete(self):
+        is_clean = self.clean()
+        if not is_clean:
+            return is_clean
+        if self.exists():
+            parent = self.data.get('parent')
+            try:
+                if parent.has_edit_access(self.user):
+                    mapping = self.get_queryset().first()
+                    mapping.retire(self.user)
+                    return DELETED
+                return PERMISSION_DENIED
+            except Exception as ex:
+                return dict(errors=ex.args)
+
+        return NOT_FOUND
 
 
 class ReferenceImporter(BaseResourceImporter):
@@ -708,7 +742,7 @@ class BulkImportInline(BaseImporter):
                 continue
             if item_type == 'concept':
                 concept_importer = ConceptImporter(item, self.user, self.update_if_exists)
-                _result = concept_importer.run()
+                _result = concept_importer.delete() if action == 'delete' else concept_importer.run()
                 if get(concept_importer.instance, 'id'):
                     parent_url = concept_importer.instance.parent.uri
                     if parent_url not in new_concept_ids:
@@ -718,7 +752,7 @@ class BulkImportInline(BaseImporter):
                 continue
             if item_type == 'mapping':
                 mapping_importer = MappingImporter(item, self.user, self.update_if_exists)
-                _result = mapping_importer.run()
+                _result = mapping_importer.delete() if action == 'delete' else mapping_importer.run()
                 if get(mapping_importer.instance, 'id'):
                     parent_url = mapping_importer.instance.parent.uri
                     if parent_url not in new_mapping_ids:

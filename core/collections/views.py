@@ -261,8 +261,11 @@ class CollectionRetrieveUpdateDestroyView(CollectionBaseView, ConceptDictionaryU
         collection = self.get_object()
 
         if not self.is_inline_requested():
-            task = delete_collection.delay(collection.id)
-            return Response(dict(task=task.id), status=status.HTTP_202_ACCEPTED)
+            try:
+                task = delete_collection.delay(collection.id)
+                return Response(dict(task=task.id), status=status.HTTP_202_ACCEPTED)
+            except AlreadyQueued:
+                return Response(dict(detail='Already Queued'), status=status.HTTP_409_CONFLICT)
 
         result = delete_collection(collection.id)
 
