@@ -1,8 +1,6 @@
 import uuid
 from datetime import datetime
 
-import requests
-from django.conf import settings
 from django.contrib.auth.models import AbstractUser
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
@@ -111,22 +109,6 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
     def get_token(self):
         token = Token.objects.filter(user_id=self.id).first() or self.__create_token()
         return token.key
-
-    def get_oidc_token(self, password):
-        response = requests.post(
-            settings.OIDC_OP_TOKEN_ENDPOINT,
-            data=dict(
-                username=self.username,
-                password=password,
-                grant_type='password',
-                client_id=settings.OIDC_RP_CLIENT_ID,
-                client_secret=settings.OIDC_RP_CLIENT_SECRET
-            ),
-            verify=False,
-        )
-        if response.status_code != 200:
-            return False
-        return response.json()
 
     def set_token(self, token):
         self.__delete_token()

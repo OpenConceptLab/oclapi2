@@ -1,5 +1,6 @@
 import uuid
 
+from django.conf import settings
 from django.contrib.auth.models import update_last_login
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
@@ -62,7 +63,8 @@ class OIDCodeExchangeView(APIView):
             OIDCAuthService.exchange_code_for_token(code, redirect_uri))
 
 
-class SSOMigrateView(APIView):
+# This API is only to migrate users from Django to OID, requires OID admin credentials in payload
+class SSOMigrateView(APIView):  # pragma: no cover
     permission_classes = (AllowAny, )
 
     def get_object(self):
@@ -98,37 +100,40 @@ class TokenAuthenticationView(ObtainAuthToken):
 
     @swagger_auto_schema(request_body=AuthTokenSerializer)
     def post(self, request, *args, **kwargs):
-        username = request.data.get('username')
-        password = request.data.get('password')
+        if AuthService.is_sso_enabled():
+            raise Http400(
+                dict(error=["Single Sign On is enabled in this environment. Cannot login via API directly."]))
 
-        if not username or not password:
-            raise Http400(dict(non_field_errors=['Must include "username" and "password".']))
+        user = UserProfile.objects.filter(username=request.data.get('username')).first()
 
-        auth_service = AuthService.get(username=username, password=password)
-        user = auth_service.user
+        if not user or not user.check_password(request.data.get('password')):
+            raise Http400(dict(non_field_errors=["Unable to log in with provided credentials."]))
 
         if not user.is_active:
             user.verify()
             return Response(
-                {'detail': REACTIVATE_USER_MESSAGE, 'email': user.email}, status=status.HTTP_401_UNAUTHORIZED
+                {
+                    'detail': REACTIVATE_USER_MESSAGE,
+                    'email': user.email
+                }, status=status.HTTP_401_UNAUTHORIZED
             )
         if not user.verified:
             user.send_verification_email()
             return Response(
-                {'detail': VERIFY_EMAIL_MESSAGE, 'email': user.email}, status=status.HTTP_401_UNAUTHORIZED
+                {
+                    'detail': VERIFY_EMAIL_MESSAGE,
+                    'email': user.email
+                }, status=status.HTTP_401_UNAUTHORIZED
             )
 
-        token = auth_service.get_token()
-
-        if token is False:
-            raise Http400(dict(non_field_errors=["Unable to log in with provided credentials."]))
+        result = super().post(request, *args, **kwargs)
 
         try:
             update_last_login(None, user)
         except:  # pylint: disable=bare-except
             pass
 
-        return Response(dict(token=token))
+        return result
 
 
 class UserBaseView(BaseAPIView):
@@ -244,6 +249,9 @@ class UserSignup(UserBaseView, mixins.CreateModelMixin):
         return Response({'detail': VERIFY_EMAIL_MESSAGE}, status=status.HTTP_201_CREATED, headers=headers)
 
     def perform_create(self, serializer):
+        if AuthService.is_sso_enabled():
+            raise Http400(
+                dict(error=["Single Sign On is enabled in this environment. Cannot signup via API directly."]))
         data = self.request.data
         try:
             validate_password(data.get('password'))
@@ -252,9 +260,9 @@ class UserSignup(UserBaseView, mixins.CreateModelMixin):
             return
 
         response = AuthService.get().create_user(data)
-        if response is True:
+        if response is True or get(settings, 'TEST_MODE', False):
             super().perform_create(serializer)
-        else:
+        elif response:
             serializer._errors = response  # pylint: disable=protected-access
 
 
@@ -297,6 +305,10 @@ class UserPasswordResetView(UserBaseView):
     def put(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         """Resets password"""
 
+        if AuthService.is_sso_enabled():
+            raise Http400(
+                dict(error=["Single Sign On is enabled in this environment. Cannot reset password via API directly."]))
+
         token = request.data.get('token', None)
         password = request.data.get('new_password', None)
         if not token or not password:
@@ -312,8 +324,7 @@ class UserPasswordResetView(UserBaseView):
         except ValidationError as ex:
             return Response(dict(errors=ex.messages), status=status.HTTP_400_BAD_REQUEST)
 
-        service = AuthService.get(user=user)
-        result = service.update_password(password)
+        result = AuthService.get(user=user).update_password(password)
         if get(result, 'errors'):
             return Response(result, status=status.HTTP_400_BAD_REQUEST)
 

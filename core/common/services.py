@@ -10,7 +10,6 @@ from django.conf import settings
 from django.contrib.auth.backends import ModelBackend
 from django.core.files.base import ContentFile
 from django.db import connection
-from django.http import Http404
 from mozilla_django_oidc.contrib.drf import OIDCAuthentication
 from pydash import get
 from rest_framework.authentication import TokenAuthentication
@@ -317,7 +316,7 @@ class OIDCAuthService(AbstractAuthService):
         }
 
     @classmethod
-    def add_user(cls, user, username=None, password=None):
+    def add_user(cls, user, username, password):
         response = requests.post(
             cls.USERS_URL,
             json=dict(
@@ -338,45 +337,21 @@ class OIDCAuthService(AbstractAuthService):
         return response.json()
 
     def get_token(self):
-        token = self.user.get_oidc_token(self.password)
-        if token is False:
-            return token
-        return self.token_type + ' ' + get(token, 'access_token')
+        return None
 
     @staticmethod
-    def get_admin_token(username=None, password=None):
+    def get_admin_token(username, password):
         response = requests.post(
             OIDCAuthService.OIDP_ADMIN_TOKEN_URL,
             data=dict(
                 grant_type='password',
-                username=username or settings.KEYCLOAK_ADMIN,
-                password=password or settings.KEYCLOAK_ADMIN_PASSWORD,
+                username=username,
+                password=password,
                 client_id='admin-cli'
             ),
             verify=False,
         )
         return response.json().get('access_token')
-
-    def logout(self, token):
-        user_info = self.get_user_info(token)
-        user_id = get(user_info, 'sub')
-        if user_id:
-            requests.post(
-                f"{self.USERS_URL}/{user_id}/logout",
-                json=dict(user=user_id, realm=settings.OIDC_REALM),
-                headers=self.get_admin_headers()
-            )
-
-        return user_info
-
-    @staticmethod
-    def get_user_info(token):
-        response = requests.post(
-            settings.OIDC_OP_USER_ENDPOINT,
-            verify=False,
-            headers=dict(Authorization=token)
-        )
-        return response.json()
 
     @staticmethod
     def exchange_code_for_token(code, redirect_uri):
@@ -397,90 +372,17 @@ class OIDCAuthService(AbstractAuthService):
     def get_admin_headers(**kwargs):
         return dict(Authorization=f'Bearer {OIDCAuthService.get_admin_token(**kwargs)}')
 
-    def get_user_headers(self):
-        return dict(Authorization=self.get_token())
-
     @staticmethod
-    def create_user(data):
-        response = requests.post(
-            OIDCAuthService.USERS_URL,
-            json=dict(
-                enabled=True,
-                emailVerified=False,
-                firstName=data.get('first_name'),
-                lastName=data.get('last_name'),
-                email=data.get('email'),
-                username=data.get('username'),
-                credentials=[dict(type='password', value=data.get('password'), temporary=False)]
-            ),
-            verify=False,
-            headers=OIDCAuthService.get_admin_headers()
-        )
-        if response.status_code == 201:
-            return True
-
-        return response.json()
-
-    def __get_all_users(self, headers=None):
-        response = requests.get(
-            self.USERS_URL,
-            verify=False,
-            headers=headers or self.get_admin_headers()
-        )
-        return response.json()
-
-    def __get_user_info(self, headers=None):
-        users = self.__get_all_users(headers)
-        return next((user for user in users if user['username'] == self.username), None)
-
-    def __get_user_id(self, headers=None):
-        user_info = self.__get_user_info(headers)
-        return get(user_info, 'id')
-
-    def mark_verified(self, **kwargs):
-        response = self.update_user(dict(emailVerified=True))
-        if response.status_code < 300:
-            return super().mark_verified(**kwargs)
-        return response.json()
-
-    def update_user(self, data):
-        admin_headers = self.get_admin_headers()
-        oid_user_id = self.__get_user_id(admin_headers)
-        if not oid_user_id:
-            raise Http404()
-        response = requests.put(
-            f"{self.USERS_URL}/{oid_user_id}",
-            json=data,
-            verify=False,
-            headers=admin_headers
-        )
-        return response
-
-    def update_password(self, password):
-        admin_headers = self.get_admin_headers()
-        oid_user_id = self.__get_user_id(admin_headers)
-        if not oid_user_id:
-            raise Http404()
-
-        requests.put(
-            f"{self.USERS_URL}/{oid_user_id}/disable-credential-types",
-            json=['password'],
-            verify=False,
-            headers=admin_headers
-        )
-
-        response = requests.put(
-            f"{self.USERS_URL}/{oid_user_id}/reset-password",
-            json=dict(type='password', temporary=False, value=password),
-            verify=False,
-            headers=admin_headers
-        )
-        if response.status_code < 300:
-            return super().update_password(password)
-        return response.json()
+    def create_user(_):
+        """In OID auth, user signup needs to happen in OID first"""
+        pass  # pylint: disable=unnecessary-pass
 
 
 class AuthService:
+    @staticmethod
+    def is_sso_enabled():
+        return get(settings, 'OIDC_SERVER_URL') and not get(settings, 'TEST_MODE', False)
+
     @staticmethod
     def get(**kwargs):
         if get(settings, 'OIDC_SERVER_URL'):

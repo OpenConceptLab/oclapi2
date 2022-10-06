@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.contrib.auth.backends import ModelBackend
 from mozilla_django_oidc.auth import OIDCAuthenticationBackend
 from pydash import get
@@ -53,7 +54,7 @@ class OCLAuthenticationBackend(ModelBackend):
             return get(self, '_authentication_backend')
 
         from core.common.services import AuthService
-        if AuthService.is_valid_django_token(request):
+        if AuthService.is_valid_django_token(request) or get(settings, 'TEST_MODE', False):
             klass = ModelBackend
         else:
             klass = AuthService.get().authentication_backend_class

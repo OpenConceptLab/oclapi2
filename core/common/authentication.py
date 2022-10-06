@@ -1,10 +1,12 @@
+from django.conf import settings
+from pydash import get
 from rest_framework.authentication import BaseAuthentication, TokenAuthentication
 
 
 class OCLAuthentication(BaseAuthentication):
     def get_auth_class(self, request):
         from core.common.services import AuthService
-        if AuthService.is_valid_django_token(request):
+        if AuthService.is_valid_django_token(request) or get(settings, 'TEST_MODE', False):
             klass = TokenAuthentication
         else:
             klass = AuthService.get().authentication_class
