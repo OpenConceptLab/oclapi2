@@ -2,7 +2,7 @@ version: '3'
 
 services:
   db:
-    image: postgres:14.2-alpine
+    image: postgres:14.4-alpine
     restart: "always"
     shm_size: "128mb"
     environment:
