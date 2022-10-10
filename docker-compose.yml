@@ -47,11 +47,6 @@ services:
       - AWS_REGION_NAME
       - ERRBIT_URL
       - ERRBIT_KEY
-      - OIDC_RP_CLIENT_ID
-      - OIDC_RP_CLIENT_SECRET
-      - OIDC_SERVER_URL=${OIDC_SERVER_URL-http://localhost:8080}
-      - OIDC_SERVER_INTERNAL_URL=${OIDC_SERVER_INTERNAL_URL-http://host.docker.internal:8080} # only for dev env
-      - OIDC_REALM=${OIDC_REALM-ocl}
     healthcheck:
       test: "curl --silent --fail http://localhost:8000/version/ || exit 1"
   celery:
@@ -156,21 +151,6 @@ services:
     restart: "always"
     healthcheck:
       test: "curl --silent --fail http://localhost:9200/_cluster/health || exit 1"
-  keycloak:
-    image: quay.io/keycloak/keycloak:18.0.2
-    command: ["start-dev", "--health-enabled=true"]
-    ports:
-      - 8080:8080
-    volumes:
-      - keycloak-data:/usr/share/keycloak/data
-    environment:
-      - KEYCLOAK_ADMIN=${KEYCLOAK_ADMIN-root}
-      - KEYCLOAK_ADMIN_PASSWORD=${KEYCLOAK_ADMIN_PASSWORD-Root123}
-      - KC_HOSTNAME=${KC_HOSTNAME-localhost}
-    restart: "always"
-    healthcheck:
-      test: "curl --silent --fail http://localhost:8080/health || exit 1"
 volumes:
   postgres-data:
   es-data:
-  keycloak-data:
