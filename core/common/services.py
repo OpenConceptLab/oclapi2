@@ -296,6 +296,11 @@ class DjangoAuthService(AbstractAuthService):
 
 
 class OIDCAuthService(AbstractAuthService):
+    """
+    Service that interacts with OIDP for:
+    1. exchanging auth_code with token
+    2. migrating user from django to OIDP
+    """
     token_type = 'Bearer'
     authentication_class = OIDCAuthentication
     authentication_backend_class = OCLOIDCAuthenticationBackend
@@ -379,6 +384,9 @@ class OIDCAuthService(AbstractAuthService):
 
 
 class AuthService:
+    """
+    This returns Django or OIDC Auth service based on configured env vars.
+    """
     @staticmethod
     def is_sso_enabled():
         return get(settings, 'OIDC_SERVER_URL') and not get(settings, 'TEST_MODE', False)

@@ -5,6 +5,10 @@ from pydash import get
 
 
 class OCLOIDCAuthenticationBackend(OIDCAuthenticationBackend):
+    """
+    1. overrides Default OIDCAuthenticationBackend
+    2. creates/updates user from OID to django on successful auth
+    """
     def create_user(self, claims):
         """Return object for a newly created user account."""
         # {
@@ -49,6 +53,12 @@ class OCLOIDCAuthenticationBackend(OIDCAuthenticationBackend):
 
 
 class OCLAuthenticationBackend(ModelBackend):
+    """
+    1. authentication backend defined in settings.AUTHENTICATION_BACKENDS.
+    2. switches between Django/OID Auth Backends based on type of request
+    3. switches to django auth if a valid django token is used in request
+    """
+
     def get_auth_backend(self, request=None):
         if get(self, '_authentication_backend'):
             return get(self, '_authentication_backend')
