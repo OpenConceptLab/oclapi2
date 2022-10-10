@@ -177,6 +177,7 @@ DATABASES = {
         'PASSWORD': os.environ.get('DB_PASSWORD', 'Postgres123'),
         'HOST': os.environ.get('DB_HOST', 'db'),
         'PORT': os.environ.get('DB_PORT', 5432),
+        'DISABLE_SERVER_SIDE_CURSORS': os.environ.get('DISABLE_SERVER_SIDE_CURSORS', True)
     }
 }
 
