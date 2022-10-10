@@ -65,7 +65,7 @@ class CollectionDocument(Document):
                 value = flatten_dict(value)
 
         if value:
-            value = json.loads(json.dumps(value).replace('-', '_'))
+            value = json.loads(json.dumps(value))
         return value or {}
 
     @staticmethod

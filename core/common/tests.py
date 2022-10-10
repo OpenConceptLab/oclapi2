@@ -665,6 +665,10 @@ class UtilsTest(OCLTestCase):
             flatten_dict(dict(foo=True, bar=dict(tao=dict(te='ching')))),
             dict(foo='True', bar__tao__te='ching')
         )
+        self.assertEqual(
+            flatten_dict(dict(foo=True, bar=dict(tao=dict(te='tao-te-ching')))),
+            dict(foo='True', bar__tao__te='tao_te_ching')
+        )
         # self.assertEqual(
         #     flatten_dict(
         #         {

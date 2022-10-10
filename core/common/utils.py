@@ -604,7 +604,8 @@ def flatten_dict(dikt, parent_key='', sep='__'):
         #         else:
         #             items.append(("{}__{}".format(key, i), str(_v)))
         else:
-            items.append((new_key, str(val)))
+            _val = str(val).replace('-', '_')
+            items.append((new_key, _val))
     return dict(items)
 
 
