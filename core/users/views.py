@@ -39,6 +39,7 @@ class OCLOIDCAuthenticationCallbackView(OIDCAuthenticationCallbackView):
 
 
 class OIDCodeExchangeView(APIView):
+    """API to exchange OIDP one-time authorization_code with token"""
     permission_classes = (AllowAny, )
 
     @staticmethod
