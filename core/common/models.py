@@ -734,6 +734,13 @@ class ConceptContainerModel(VersionedModel):
         self._background_process_ids = []
         self.save(update_fields=['_background_process_ids'])
 
+    def get_supported_locales(self):
+        locales = [self.default_locale]
+        if self.supported_locales:
+            # to maintain the order of default locale always first
+            locales += [locale for locale in self.supported_locales if locale != self.default_locale]
+        return locales
+
     @property
     def is_exporting(self):
         is_processing = self.is_processing

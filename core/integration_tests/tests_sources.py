@@ -142,7 +142,11 @@ class SourceListViewTest(OCLAPITestCase):
         self.assertEqual(response.data['owner_url'], source.parent.uri)
         self.assertEqual(response.data['url'], source.uri)
         self.assertEqual(response.data['canonical_url'], source.canonical_url)
+        self.assertEqual(response.data['default_locale'], 'ab')
+        self.assertEqual(response.data['supported_locales'], ['ab', 'af', 'am'])
+        self.assertEqual(source.default_locale, 'ab')
         self.assertEqual(source.canonical_url, 'https://foo.com/foo/bar/')
+        self.assertEqual(source.supported_locales, ['af', 'am'])
         self.assertIsNone(source.active_mappings)
         self.assertIsNone(source.active_concepts)
 
@@ -160,7 +164,7 @@ class SourceListViewTest(OCLAPITestCase):
         self.assertEqual(list(response.data.keys()), ['name'])
 
 
-class SourceCreateUpdateDestroyViewTest(OCLAPITestCase):
+class SourceRetrieveUpdateDestroyViewTest(OCLAPITestCase):
     def setUp(self):
         super().setUp()
         self.organization = Organization.objects.first()
@@ -175,7 +179,8 @@ class SourceCreateUpdateDestroyViewTest(OCLAPITestCase):
         )
         self.assertEqual(response.status_code, 404)
 
-        source = OrganizationSourceFactory(organization=self.organization)
+        source = OrganizationSourceFactory(
+            organization=self.organization, default_locale='en', supported_locales=['fr'])
         response = self.client.get(
             source.uri,
             HTTP_AUTHORIZATION='Token ' + self.token,
@@ -185,17 +190,49 @@ class SourceCreateUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['uuid'], str(source.id))
         self.assertEqual(response.data['short_code'], source.mnemonic)
+        self.assertEqual(response.data['default_locale'], 'en')
+        self.assertEqual(response.data['supported_locales'], ['en', 'fr'])
+
+        source2 = OrganizationSourceFactory(
+            organization=self.organization, default_locale='en', supported_locales=['fr', 'en'])
+        response = self.client.get(
+            source2.uri,
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['uuid'], str(source2.id))
+        self.assertEqual(response.data['short_code'], source2.mnemonic)
+        self.assertEqual(response.data['default_locale'], 'en')
+        self.assertEqual(response.data['supported_locales'], ['en', 'fr'])
+
+        source3 = OrganizationSourceFactory(
+            organization=self.organization, default_locale='en', supported_locales=None)
+        response = self.client.get(
+            source3.uri,
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['uuid'], str(source3.id))
+        self.assertEqual(response.data['short_code'], source3.mnemonic)
+        self.assertEqual(response.data['default_locale'], 'en')
+        self.assertEqual(response.data['supported_locales'], ['en'])
 
     def test_put_200(self):
         source = OrganizationSourceFactory(organization=self.organization)
         self.assertTrue(source.is_head)
         self.assertEqual(source.versions.count(), 1)
+        self.assertEqual(source.default_locale, 'en')
+        self.assertEqual(source.supported_locales, ['fr'])
 
         sources_url = f"/orgs/{self.organization.mnemonic}/sources/{source.mnemonic}/"
 
         response = self.client.put(
             sources_url,
-            {'full_name': 'Full name'},
+            {'full_name': 'Full name', 'supported_locales': ['fr']},
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -223,6 +260,10 @@ class SourceCreateUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(source.versions.count(), 1)
         self.assertEqual(response.data['full_name'], source.full_name)
         self.assertEqual(response.data['full_name'], 'Full name')
+        self.assertEqual(response.data['default_locale'], 'en')
+        self.assertEqual(response.data['supported_locales'], ['en', 'fr'])
+        self.assertEqual(source.default_locale, 'en')
+        self.assertEqual(source.supported_locales, ['fr'])
 
     def test_put_hierarchy_root(self):
         source = OrganizationSourceFactory(organization=self.organization)

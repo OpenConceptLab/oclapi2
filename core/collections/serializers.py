@@ -305,6 +305,11 @@ class CollectionDetailSerializer(CollectionCreateOrUpdateSerializer):
 
         return []
 
+    def to_representation(self, instance):  # used to be to_native
+        ret = super().to_representation(instance)
+        ret.update({"supported_locales": instance.get_supported_locales()})
+        return ret
+
 
 class CollectionVersionDetailSerializer(CollectionCreateOrUpdateSerializer):
     type = CharField(source='resource_version_type')

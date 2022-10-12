@@ -301,6 +301,11 @@ class SourceDetailSerializer(SourceCreateOrUpdateSerializer):
             return ConceptDetailSerializer(obj.hierarchy_root).data
         return None
 
+    def to_representation(self, instance):  # used to be to_native
+        ret = super().to_representation(instance)
+        ret.update({"supported_locales": instance.get_supported_locales()})
+        return ret
+
 
 class SourceVersionDetailSerializer(SourceCreateOrUpdateSerializer):
     type = CharField(source='resource_version_type')
