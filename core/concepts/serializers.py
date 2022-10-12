@@ -220,10 +220,11 @@ class ConceptLookupListSerializer(ModelSerializer):
     uuid = CharField(source='id')
     id = EncodedDecodedCharField(source='mnemonic')
     url = CharField(read_only=True, source='uri')
+    locale = CharField(source='iso_639_1_locale', read_only=True)
 
     class Meta:
         model = Concept
-        fields = ('uuid', 'id', 'display_name', 'url')
+        fields = ('uuid', 'id', 'display_name', 'url', 'locale')
 
     def __init__(self, *args, **kwargs):  # pylint: disable=too-many-branches
         request = get(kwargs, 'context.request')
@@ -233,6 +234,7 @@ class ConceptLookupListSerializer(ModelSerializer):
         try:
             if not self.is_verbose:
                 self.fields.pop('display_name', None)
+                self.fields.pop('locale', None)
         except:  # pylint: disable=bare-except
             pass
 
