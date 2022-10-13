@@ -46,13 +46,15 @@ class OIDCodeExchangeView(APIView):
     def post(request):
         code = request.data.get('code', None)
         redirect_uri = request.data.get('redirect_uri', None)
-        if not code or not redirect_uri:
+        client_id = request.data.get('client_id', None)
+        client_secret = request.data.get('client_secret', None)
+        if not code or not redirect_uri or not client_id or not client_secret:
             return Response(
                 dict(error='code and redirect_uri are mandatory to exchange for token'),
                 status=status.HTTP_400_BAD_REQUEST
             )
         return Response(
-            OIDCAuthService.exchange_code_for_token(code, redirect_uri))
+            OIDCAuthService.exchange_code_for_token(code, redirect_uri, client_id, client_secret))
 
 
 # This API is only to migrate users from Django to OID, requires OID admin credentials in payload

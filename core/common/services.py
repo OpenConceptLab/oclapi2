@@ -359,13 +359,13 @@ class OIDCAuthService(AbstractAuthService):
         return response.json().get('access_token')
 
     @staticmethod
-    def exchange_code_for_token(code, redirect_uri):
+    def exchange_code_for_token(code, redirect_uri, client_id, client_secret):
         response = requests.post(
             settings.OIDC_OP_TOKEN_ENDPOINT,
             data=dict(
                 grant_type='authorization_code',
-                client_id=settings.OIDC_RP_CLIENT_ID,
-                client_secret=settings.OIDC_RP_CLIENT_SECRET,
+                client_id=client_id,
+                client_secret=client_secret,
                 code=code,
                 redirect_uri=redirect_uri
             )
@@ -389,11 +389,11 @@ class AuthService:
     """
     @staticmethod
     def is_sso_enabled():
-        return get(settings, 'OIDC_SERVER_URL') and not get(settings, 'TEST_MODE', False)
+        return settings.OIDC_SERVER_URL and not get(settings, 'TEST_MODE', False)
 
     @staticmethod
     def get(**kwargs):
-        if get(settings, 'OIDC_SERVER_URL'):
+        if AuthService.is_sso_enabled():
             return OIDCAuthService(**kwargs)
         return DjangoAuthService(**kwargs)
 

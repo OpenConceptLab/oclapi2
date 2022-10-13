@@ -399,9 +399,7 @@ ERRBIT_KEY = os.environ.get('ERRBIT_KEY', 'errbit-key')
 EXPORT_SERVICE = os.environ.get('EXPORT_SERVICE', 'core.common.services.S3')
 
 # keyCloak/OIDC Provider settings
-OIDC_RP_CLIENT_ID = os.environ.get('OIDC_RP_CLIENT_ID', 'ocllocal')
-OIDC_RP_CLIENT_SECRET = os.environ.get('OIDC_RP_CLIENT_SECRET', 'XnsOiEwp5khw6ZLo9v1bLuXuheOofnz5')
-OIDC_SERVER_URL = os.environ.get('OIDC_SERVER_URL', 'http://localhost:8080')
+OIDC_SERVER_URL = os.environ.get('OIDC_SERVER_URL', None)
 OIDC_SERVER_INTERNAL_URL = os.environ.get('OIDC_SERVER_INTERNAL_URL', '') or OIDC_SERVER_URL
 OIDC_REALM = os.environ.get('OIDC_REALM', 'ocl')
 OIDC_OP_AUTHORIZATION_ENDPOINT = f'{OIDC_SERVER_URL}/realms/{OIDC_REALM}/protocol/openid-connect/auth'
