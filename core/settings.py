@@ -400,6 +400,8 @@ EXPORT_SERVICE = os.environ.get('EXPORT_SERVICE', 'core.common.services.S3')
 
 # keyCloak/OIDC Provider settings
 OIDC_SERVER_URL = os.environ.get('OIDC_SERVER_URL', None)
+OIDC_RP_CLIENT_ID = ''  # only needed a defined var in mozilla_django_oidc
+OIDC_RP_CLIENT_SECRET = ''  # only needed a defined var in mozilla_django_oidc
 OIDC_SERVER_INTERNAL_URL = os.environ.get('OIDC_SERVER_INTERNAL_URL', '') or OIDC_SERVER_URL
 OIDC_REALM = os.environ.get('OIDC_REALM', 'ocl')
 OIDC_OP_AUTHORIZATION_ENDPOINT = f'{OIDC_SERVER_URL}/realms/{OIDC_REALM}/protocol/openid-connect/auth'
