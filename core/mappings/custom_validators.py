@@ -25,6 +25,7 @@ class OpenMRSMappingValidator:
             parent=self.mapping.parent, is_active=True, retired=False,
             from_source_url=self.mapping.from_source_url, from_concept_code=self.mapping.from_concept_code,
             to_source_url=self.mapping.to_source_url, to_concept_code=self.mapping.to_concept_code,
+            is_latest_version=True
         )
 
         if self.mapping.versioned_object_id:
