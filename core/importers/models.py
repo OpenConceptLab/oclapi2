@@ -512,8 +512,7 @@ class MappingImporter(BaseResourceImporter):
 
         if to_source_url:
             to_source_uri = drop_version(to_source_url)
-            if Source.objects.filter(uri=to_source_uri).exists():
-                filters['to_source__uri'] = to_source_uri
+            filters['to_source_url'] = to_source_uri
 
         if to_concept_code:
             filters['to_concept_code'] = to_concept_code if is_url_encoded_string(
