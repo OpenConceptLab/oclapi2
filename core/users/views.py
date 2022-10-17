@@ -5,6 +5,7 @@ from django.contrib.auth.models import update_last_login
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
 from django.http import Http404
+from django.shortcuts import redirect
 from drf_yasg.utils import swagger_auto_schema
 from mozilla_django_oidc.views import OIDCAuthenticationCallbackView
 from pydash import get
@@ -89,8 +90,36 @@ class TokenExchangeView(APIView):
         return Response(dict(token=request.user.get_token()))
 
 
+class OIDCLogoutView(APIView):
+    permission_classes = (AllowAny,)
+
+    @staticmethod
+    def get(request):
+        if AuthService.is_sso_enabled():
+            return redirect(
+                OIDCAuthService.get_logout_redirect_url(
+                    request.query_params.get('id_token_hint'),
+                    request.query_params.get('post_logout_redirect_uri'),
+                )
+            )
+        return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
+
+
 class TokenAuthenticationView(ObtainAuthToken):
     """Implementation of ObtainAuthToken with last_login update"""
+
+    @staticmethod
+    def get(request):
+        if AuthService.is_sso_enabled():
+            return redirect(
+                OIDCAuthService.get_login_redirect_url(
+                    request.query_params.get('client_id'),
+                    request.query_params.get('redirect_uri'),
+                    request.query_params.get('state'),
+                    request.query_params.get('nonce'),
+                )
+            )
+        return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
 
     @swagger_auto_schema(request_body=AuthTokenSerializer)
     def post(self, request, *args, **kwargs):

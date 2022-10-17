@@ -9,6 +9,7 @@ urlpatterns = [
     path('api-token/', views.TokenExchangeView.as_view(), name='user-oid-django-token-exchange'),
     path('oidc/code-exchange/', views.OIDCodeExchangeView.as_view(), name='user-oid-code-exchange'),
     path('login/', views.TokenAuthenticationView.as_view(), name='user-login'),
+    path('logout/', views.OIDCLogoutView.as_view(), name='user-logout'),
     path('signup/', views.UserSignup.as_view(), name='user-signup'),
     re_path(
         r'^(?P<user>' + NAMESPACE_PATTERN + ')/$',
