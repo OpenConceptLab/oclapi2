@@ -22,7 +22,8 @@ class MappingValidationMixin:
         ).filter(
             parent_id=self.parent_id, map_type=self.map_type,
             from_concept_code=self.from_concept_code, to_concept_code=self.to_concept_code,
-            to_source_url=self.to_source_url, from_source_url=self.from_source_url
+            to_source_url=self.to_source_url, from_source_url=self.from_source_url,
+            is_latest_version=True, retired=False
         ).exists():
             errors.append(TO_SOURCE_UNIQUE_ATTRIBUTES_ERROR_MESSAGE)
 
