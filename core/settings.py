@@ -63,6 +63,7 @@ DEFAULT_AUTO_FIELD = 'django.db.models.AutoField'
 INSTALLED_APPS = [
     'django.contrib.admin',
     'django.contrib.auth',
+    'mozilla_django_oidc',
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
@@ -90,13 +91,12 @@ INSTALLED_APPS = [
     'core.client_configs',
     'core.tasks',
 ]
-
 REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': (
         'rest_framework.permissions.IsAuthenticated',
     ),
     'DEFAULT_AUTHENTICATION_CLASSES': (
-        'rest_framework.authentication.TokenAuthentication',
+        'core.common.authentication.OCLAuthentication',
     ),
     'DEFAULT_RENDERER_CLASSES': (
         'rest_framework.renderers.JSONRenderer',
@@ -108,6 +108,11 @@ REST_FRAMEWORK = {
     'DEFAULT_SCHEMA_CLASS': 'rest_framework.schemas.coreapi.AutoSchema',
     'DEFAULT_CONTENT_NEGOTIATION_CLASS': 'core.common.negotiation.OptionallyCompressContentNegotiation',
 }
+OIDC_DRF_AUTH_BACKEND = 'core.common.backends.OCLOIDCAuthenticationBackend'
+AUTHENTICATION_BACKENDS = (
+    'core.common.backends.OCLAuthenticationBackend',
+)
+
 
 SWAGGER_SETTINGS = {
     'PERSIST_AUTH': True,
@@ -136,6 +141,7 @@ MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
+    'core.middlewares.middlewares.TokenAuthMiddleWare',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
@@ -168,7 +174,6 @@ WSGI_APPLICATION = 'core.wsgi.application'
 
 # Database
 # https://docs.djangoproject.com/en/3.0/ref/settings/#databases
-
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
@@ -389,4 +394,25 @@ VERSION = __version__
 # Errbit
 ERRBIT_URL = os.environ.get('ERRBIT_URL', 'http://errbit:8080')
 ERRBIT_KEY = os.environ.get('ERRBIT_KEY', 'errbit-key')
+
+# Repo Export Upload/download
 EXPORT_SERVICE = os.environ.get('EXPORT_SERVICE', 'core.common.services.S3')
+
+# keyCloak/OIDC Provider settings
+OIDC_SERVER_URL = os.environ.get('OIDC_SERVER_URL', '')
+OIDC_RP_CLIENT_ID = ''  # only needed a defined var in mozilla_django_oidc
+OIDC_RP_CLIENT_SECRET = ''  # only needed a defined var in mozilla_django_oidc
+OIDC_SERVER_INTERNAL_URL = os.environ.get('OIDC_SERVER_INTERNAL_URL', '') or OIDC_SERVER_URL
+OIDC_REALM = os.environ.get('OIDC_REALM', 'ocl')
+OIDC_OP_AUTHORIZATION_ENDPOINT = f'{OIDC_SERVER_URL}/realms/{OIDC_REALM}/protocol/openid-connect/auth'
+OIDC_OP_LOGOUT_ENDPOINT = f'{OIDC_SERVER_URL}/realms/{OIDC_REALM}/protocol/openid-connect/logout'
+OIDC_OP_TOKEN_ENDPOINT = f'{OIDC_SERVER_INTERNAL_URL}/realms/{OIDC_REALM}/protocol/openid-connect/token'
+OIDC_OP_USER_ENDPOINT = f'{OIDC_SERVER_INTERNAL_URL}/realms/{OIDC_REALM}/protocol/openid-connect/userinfo'
+OIDC_RP_SIGN_ALGO = 'RS256'
+OIDC_OP_JWKS_ENDPOINT = f'{OIDC_SERVER_INTERNAL_URL}/realms/{OIDC_REALM}/protocol/openid-connect/certs'
+OIDC_VERIFY_SSL = False
+OIDC_VERIFY_JWT = True
+OIDC_RP_SCOPES = 'openid profile email'
+OIDC_STORE_ACCESS_TOKEN = True
+OIDC_CREATE_USER = True
+OIDC_CALLBACK_CLASS = 'core.users.views.OCLOIDCAuthenticationCallbackView'

@@ -7,6 +7,13 @@ The new and improved OCL terminology service v2
 2. `docker-compose up -d`
 3. Go to http://localhost:8000/swagger/ to benefit.
 
+
+#### Dev Setup with KeyCloak (SSO)
+1. `sysctl -w vm.max_map_count=262144` #required by Elasticsearch
+2. `docker-compose -f docker-compose.yml -f docker-compose.sso.yml up -d`
+3. Go to http://localhost:8000/swagger/ to benefit.
+4. Go to http://localhost:8080 for keyCloak.
+
 #### Run Checks
 (use the `docker exec` command in a service started with `docker-compose up -d`)
 1. Pylint (pep8):

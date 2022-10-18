@@ -7,9 +7,15 @@ import requests
 from botocore.client import Config
 from botocore.exceptions import NoCredentialsError, ClientError
 from django.conf import settings
+from django.contrib.auth.backends import ModelBackend
 from django.core.files.base import ContentFile
 from django.db import connection
+from mozilla_django_oidc.contrib.drf import OIDCAuthentication
+from pydash import get
+from rest_framework.authentication import TokenAuthentication
+from rest_framework.authtoken.models import Token
 
+from core.common.backends import OCLOIDCAuthenticationBackend
 from core.settings import REDIS_HOST, REDIS_PORT, REDIS_DB
 
 
@@ -244,3 +250,172 @@ class PostgresQL:
         with connection.cursor() as cursor:
             cursor.execute(f"SELECT last_value from {seq_name};")
             return cursor.fetchone()[0]
+
+
+class AbstractAuthService:
+    def __init__(self, username=None, password=None, user=None):
+        self.username = username
+        self.password = password
+        self.user = user
+        if self.user:
+            self.username = self.user.username
+        elif self.username:
+            self.set_user()
+
+    def set_user(self):
+        from core.users.models import UserProfile
+        self.user = UserProfile.objects.filter(username=self.username).first()
+
+    def get_token(self):
+        pass
+
+    def mark_verified(self, **kwargs):
+        return self.user.mark_verified(**kwargs)
+
+    def update_password(self, password):
+        return self.user.update_password(password=password)
+
+
+class DjangoAuthService(AbstractAuthService):
+    token_type = 'Token'
+    authentication_class = TokenAuthentication
+    authentication_backend_class = ModelBackend
+
+    def get_token(self, check_password=True):
+        if check_password:
+            if not self.user.check_password(self.password):
+                return False
+        return self.token_type + ' ' + self.user.get_token()
+
+    @staticmethod
+    def create_user(_):
+        return True
+
+    def logout(self, _):
+        pass
+
+
+class OIDCAuthService(AbstractAuthService):
+    """
+    Service that interacts with OIDP for:
+    1. exchanging auth_code with token
+    2. migrating user from django to OIDP
+    """
+    token_type = 'Bearer'
+    authentication_class = OIDCAuthentication
+    authentication_backend_class = OCLOIDCAuthenticationBackend
+    USERS_URL = settings.OIDC_SERVER_INTERNAL_URL + f'/admin/realms/{settings.OIDC_REALM}/users'
+    OIDP_ADMIN_TOKEN_URL = settings.OIDC_SERVER_INTERNAL_URL + '/realms/master/protocol/openid-connect/token'
+
+    @staticmethod
+    def get_login_redirect_url(client_id, redirect_uri, state, nonce):
+        return f"{settings.OIDC_OP_AUTHORIZATION_ENDPOINT}?" \
+               f"response_type=code id_token&" \
+               f"client_id={client_id}&" \
+               f"state={state}&" \
+               f"nonce={nonce}&" \
+               f"redirect_uri={redirect_uri}"
+
+    @staticmethod
+    def get_logout_redirect_url(id_token_hint, redirect_uri):
+        return f"{settings.OIDC_OP_LOGOUT_ENDPOINT}?" \
+               f"id_token_hint={id_token_hint}&" \
+               f"post_logout_redirect_uri={redirect_uri}"
+
+    @staticmethod
+    def credential_representation_from_hash(hash_, temporary=False):
+        algorithm, hashIterations, salt, hashedSaltedValue = hash_.split('$')
+
+        return {
+            'type': 'password',
+            'hashedSaltedValue': hashedSaltedValue,
+            'algorithm': algorithm.replace('_', '-'),
+            'hashIterations': int(hashIterations),
+            'salt': base64.b64encode(salt.encode()).decode('ascii').strip(),
+            'temporary': temporary
+        }
+
+    @classmethod
+    def add_user(cls, user, username, password):
+        response = requests.post(
+            cls.USERS_URL,
+            json=dict(
+                enabled=True,
+                emailVerified=user.verified,
+                firstName=user.first_name,
+                lastName=user.last_name,
+                email=user.email,
+                username=user.username,
+                credentials=[cls.credential_representation_from_hash(hash_=user.password)]
+            ),
+            verify=False,
+            headers=OIDCAuthService.get_admin_headers(username=username, password=password)
+        )
+        if response.status_code == 201:
+            return True
+
+        return response.json()
+
+    def get_token(self):
+        return None
+
+    @staticmethod
+    def get_admin_token(username, password):
+        response = requests.post(
+            OIDCAuthService.OIDP_ADMIN_TOKEN_URL,
+            data=dict(
+                grant_type='password',
+                username=username,
+                password=password,
+                client_id='admin-cli'
+            ),
+            verify=False,
+        )
+        return response.json().get('access_token')
+
+    @staticmethod
+    def exchange_code_for_token(code, redirect_uri, client_id, client_secret):
+        response = requests.post(
+            settings.OIDC_OP_TOKEN_ENDPOINT,
+            data=dict(
+                grant_type='authorization_code',
+                client_id=client_id,
+                client_secret=client_secret,
+                code=code,
+                redirect_uri=redirect_uri
+            )
+
+        )
+        return response.json()
+
+    @staticmethod
+    def get_admin_headers(**kwargs):
+        return dict(Authorization=f'Bearer {OIDCAuthService.get_admin_token(**kwargs)}')
+
+    @staticmethod
+    def create_user(_):
+        """In OID auth, user signup needs to happen in OID first"""
+        pass  # pylint: disable=unnecessary-pass
+
+
+class AuthService:
+    """
+    This returns Django or OIDC Auth service based on configured env vars.
+    """
+    @staticmethod
+    def is_sso_enabled():
+        return settings.OIDC_SERVER_URL and not get(settings, 'TEST_MODE', False)
+
+    @staticmethod
+    def get(**kwargs):
+        if AuthService.is_sso_enabled():
+            return OIDCAuthService(**kwargs)
+        return DjangoAuthService(**kwargs)
+
+    @staticmethod
+    def is_valid_django_token(request):
+        authorization_header = request.META.get('HTTP_AUTHORIZATION')
+        if authorization_header and authorization_header.startswith('Token '):
+            token_key = authorization_header.replace('Token ', '')
+            return len(token_key) == 40 and Token.objects.filter(key=token_key).exists()
+        return False

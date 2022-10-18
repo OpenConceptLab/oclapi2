@@ -18,7 +18,7 @@ from rest_framework.response import Response
 from core.client_configs.views import ResourceClientConfigsView
 from core.common.constants import HEAD, RELEASED_PARAM, PROCESSING_PARAM, ACCESS_TYPE_NONE
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryCreateMixin, ConceptDictionaryUpdateMixin, \
-    ConceptContainerExportMixin, ConceptContainerProcessingMixin, ConceptContainerExtraRetrieveUpdateDestroyView
+    ConceptContainerExportMixin, ConceptContainerProcessingMixin
 from core.common.permissions import CanViewConceptDictionary, CanEditConceptDictionary, HasAccessToVersionedObject, \
     CanViewConceptDictionaryVersion
 from core.common.serializers import TaskSerializer
@@ -26,7 +26,7 @@ from core.common.swagger_parameters import q_param, limit_param, sort_desc_param
     page_param, verbose_param, include_retired_param, updated_since_param, include_facets_header, compress_header
 from core.common.tasks import export_source, index_source_concepts, index_source_mappings, delete_source
 from core.common.utils import parse_boolean_query_param, compact_dict_by_values
-from core.common.views import BaseAPIView, BaseLogoView
+from core.common.views import BaseAPIView, BaseLogoView, ConceptContainerExtraRetrieveUpdateDestroyView
 from core.sources.constants import DELETE_FAILURE, DELETE_SUCCESS, VERSION_ALREADY_EXISTS
 from core.sources.documents import SourceDocument
 from core.sources.models import Source

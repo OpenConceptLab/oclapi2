@@ -1,8 +1,13 @@
 import uuid
 
+from django.conf import settings
 from django.contrib.auth.models import update_last_login
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError
 from django.http import Http404
+from django.shortcuts import redirect
 from drf_yasg.utils import swagger_auto_schema
+from mozilla_django_oidc.views import OIDCAuthenticationCallbackView
 from pydash import get
 from rest_framework import mixins, status
 from rest_framework.authtoken.serializers import AuthTokenSerializer
@@ -27,26 +32,121 @@ from core.users.documents import UserProfileDocument
 from core.users.search import UserProfileSearch
 from core.users.serializers import UserDetailSerializer, UserCreateSerializer, UserListSerializer, UserSummarySerializer
 from .models import UserProfile
+from ..common.services import AuthService, OIDCAuthService
+
+
+class OCLOIDCAuthenticationCallbackView(OIDCAuthenticationCallbackView):
+    pass
+
+
+class OIDCodeExchangeView(APIView):
+    """API to exchange OIDP one-time authorization_code with token"""
+    permission_classes = (AllowAny, )
+
+    @staticmethod
+    def post(request):
+        code = request.data.get('code', None)
+        redirect_uri = request.data.get('redirect_uri', None)
+        client_id = request.data.get('client_id', None)
+        client_secret = request.data.get('client_secret', None)
+        if not code or not redirect_uri or not client_id or not client_secret:
+            return Response(
+                dict(error='code and redirect_uri are mandatory to exchange for token'),
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        return Response(
+            OIDCAuthService.exchange_code_for_token(code, redirect_uri, client_id, client_secret))
+
+
+# This API is only to migrate users from Django to OID, requires OID admin credentials in payload
+class SSOMigrateView(APIView):  # pragma: no cover
+    permission_classes = (AllowAny, )
+
+    def get_object(self):
+        username = self.kwargs.get('user')
+        user = UserProfile.objects.filter(username=username).first()
+        if not user:
+            raise Http404()
+        return user
+
+    def post(self, request, **kwargs):  # pylint: disable=unused-argument
+        username = request.data.get('username')
+        password = request.data.get('password')
+        if not username or not password:
+            return Response(
+                dict(error='keycloak admin username/password are required'),
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        user = self.get_object()
+        result = OIDCAuthService.add_user(user=user, username=username, password=password)
+        return Response(result)
+
+
+class TokenExchangeView(APIView):
+    permission_classes = (IsAuthenticated, )
+
+    @staticmethod
+    def get(request):
+        return Response(dict(token=request.user.get_token()))
+
+
+class OIDCLogoutView(APIView):
+    permission_classes = (AllowAny,)
+
+    @staticmethod
+    def get(request):
+        if AuthService.is_sso_enabled():
+            return redirect(
+                OIDCAuthService.get_logout_redirect_url(
+                    request.query_params.get('id_token_hint'),
+                    request.query_params.get('post_logout_redirect_uri'),
+                )
+            )
+        return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
 
 
 class TokenAuthenticationView(ObtainAuthToken):
     """Implementation of ObtainAuthToken with last_login update"""
 
+    @staticmethod
+    def get(request):
+        if AuthService.is_sso_enabled():
+            return redirect(
+                OIDCAuthService.get_login_redirect_url(
+                    request.query_params.get('client_id'),
+                    request.query_params.get('redirect_uri'),
+                    request.query_params.get('state'),
+                    request.query_params.get('nonce'),
+                )
+            )
+        return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
+
     @swagger_auto_schema(request_body=AuthTokenSerializer)
     def post(self, request, *args, **kwargs):
+        if AuthService.is_sso_enabled():
+            raise Http400(
+                dict(error=["Single Sign On is enabled in this environment. Cannot login via API directly."]))
+
         user = UserProfile.objects.filter(username=request.data.get('username')).first()
+
         if not user or not user.check_password(request.data.get('password')):
             raise Http400(dict(non_field_errors=["Unable to log in with provided credentials."]))
 
         if not user.is_active:
             user.verify()
             return Response(
-                {'detail': REACTIVATE_USER_MESSAGE, 'email': user.email}, status=status.HTTP_401_UNAUTHORIZED
+                {
+                    'detail': REACTIVATE_USER_MESSAGE,
+                    'email': user.email
+                }, status=status.HTTP_401_UNAUTHORIZED
             )
         if not user.verified:
             user.send_verification_email()
             return Response(
-                {'detail': VERIFY_EMAIL_MESSAGE, 'email': user.email}, status=status.HTTP_401_UNAUTHORIZED
+                {
+                    'detail': VERIFY_EMAIL_MESSAGE,
+                    'email': user.email
+                }, status=status.HTTP_401_UNAUTHORIZED
             )
 
         result = super().post(request, *args, **kwargs)
@@ -171,6 +271,23 @@ class UserSignup(UserBaseView, mixins.CreateModelMixin):
         headers = self.get_success_headers(serializer.data)
         return Response({'detail': VERIFY_EMAIL_MESSAGE}, status=status.HTTP_201_CREATED, headers=headers)
 
+    def perform_create(self, serializer):
+        if AuthService.is_sso_enabled():
+            raise Http400(
+                dict(error=["Single Sign On is enabled in this environment. Cannot signup via API directly."]))
+        data = self.request.data
+        try:
+            validate_password(data.get('password'))
+        except ValidationError as ex:
+            serializer._errors['password'] = ex.messages  # pylint: disable=protected-access
+            return
+
+        response = AuthService.get().create_user(data)
+        if response is True or get(settings, 'TEST_MODE', False):
+            super().perform_create(serializer)
+        elif response:
+            serializer._errors = response  # pylint: disable=protected-access
+
 
 class UserEmailVerificationView(UserBaseView):
     permission_classes = (AllowAny, )
@@ -180,8 +297,10 @@ class UserEmailVerificationView(UserBaseView):
         if not user:
             return Response(status=status.HTTP_404_NOT_FOUND)
 
-        result = user.mark_verified(token=kwargs.get('verification_token'), force=get(request.user, 'is_staff'))
-        if result:
+        result = AuthService.get(user=user).mark_verified(
+            token=kwargs.get('verification_token'), force=get(request.user, 'is_staff'))
+
+        if result is True:
             return Response(status=status.HTTP_200_OK)
 
         return Response(dict(detail=VERIFICATION_TOKEN_MISMATCH), status=status.HTTP_401_UNAUTHORIZED)
@@ -209,6 +328,10 @@ class UserPasswordResetView(UserBaseView):
     def put(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         """Resets password"""
 
+        if AuthService.is_sso_enabled():
+            raise Http400(
+                dict(error=["Single Sign On is enabled in this environment. Cannot reset password via API directly."]))
+
         token = request.data.get('token', None)
         password = request.data.get('new_password', None)
         if not token or not password:
@@ -219,7 +342,12 @@ class UserPasswordResetView(UserBaseView):
         if not user:
             return Response(status=status.HTTP_404_NOT_FOUND)
 
-        result = user.update_password(password=password)
+        try:
+            validate_password(password)
+        except ValidationError as ex:
+            return Response(dict(errors=ex.messages), status=status.HTTP_400_BAD_REQUEST)
+
+        result = AuthService.get(user=user).update_password(password)
         if get(result, 'errors'):
             return Response(result, status=status.HTTP_400_BAD_REQUEST)
 

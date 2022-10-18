@@ -43,6 +43,7 @@ SchemaView = get_schema_view(
 
 urlpatterns = [
     path('', RootView.as_view(), name='root'),
+    path('oidc/', include('mozilla_django_oidc.urls')),
     path('version/', APIVersionView.as_view(), name='api-version'),
     path('changelog/', ChangeLogView.as_view(), name='changelog'),
     path('feedback/', FeedbackView.as_view(), name='feedback'),

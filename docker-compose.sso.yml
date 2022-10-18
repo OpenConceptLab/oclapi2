@@ -1,0 +1,103 @@
+version: '3'
+
+services:
+  db:
+    ports:
+      - 5432:5432
+    restart: "no"
+    volumes:
+      - postgres-data:/usr/share/postgres/data
+  redis:
+    ports:
+      - 6379:6379
+    restart: "no"
+  api:
+    build: .
+    ports:
+      - 8000:8000
+    volumes:
+      - .:/code:z
+    restart: "no"
+    depends_on:
+      - db
+      - redis
+      - es
+      - celery
+      - flower
+    environment:
+      - ENVIRONMENT=development
+      - DEBUG=${DEBUG-TRUE}
+      - OIDC_SERVER_URL=${OIDC_SERVER_URL-http://localhost:8080}
+      - OIDC_SERVER_INTERNAL_URL=${OIDC_SERVER_INTERNAL_URL-http://host.docker.internal:8080} # only for dev env
+      - OIDC_REALM=${OIDC_REALM-ocl}
+  keycloak:
+    image: quay.io/keycloak/keycloak:18.0.2
+    command: ["start-dev", "--health-enabled=true"]
+    ports:
+      - 8080:8080
+    volumes:
+      - keycloak-data:/usr/share/keycloak/data
+    environment:
+      - KEYCLOAK_ADMIN=${KEYCLOAK_ADMIN-root}
+      - KEYCLOAK_ADMIN_PASSWORD=${KEYCLOAK_ADMIN_PASSWORD-Root123}
+      - KC_HOSTNAME=${KC_HOSTNAME-localhost}
+    restart: "always"
+    healthcheck:
+      test: "curl --silent --fail http://localhost:8080/health || exit 1"
+  celery:
+    build: .
+    volumes:
+      - .:/code:z
+    restart: "no"
+    depends_on:
+      - redis
+      - celery_indexing
+      - celery_concurrent
+      - celery_bulk_import_0_1
+      - celery_bulk_import_2_3
+      - celery_bulk_import_root
+  celery_indexing:
+    build: .
+    volumes:
+      - .:/code:z
+    restart: "no"
+  celery_concurrent:
+    build: .
+    volumes:
+      - .:/code:z
+    restart: "no"
+  celery_bulk_import_0_1:
+    build: .
+    volumes:
+      - .:/code:z
+    restart: "no"
+  celery_bulk_import_2_3:
+    build: .
+    volumes:
+      - .:/code:z
+    restart: "no"
+  celery_bulk_import_root:
+    build: .
+    volumes:
+      - .:/code:z
+    restart: "no"
+  flower:
+    build: .
+    volumes:
+      - .:/code:z
+    ports:
+      - 5555:5555
+    restart: "no"
+    depends_on:
+      - celery
+      - redis
+  es:
+    ports:
+      - 9200:9200
+    restart: "no"
+    volumes:
+      - es-data:/usr/share/elasticsearch/data
+volumes:
+  postgres-data:
+  es-data:
+  keycloak-data:

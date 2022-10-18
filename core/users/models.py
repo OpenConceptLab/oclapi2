@@ -32,8 +32,8 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
     website = models.TextField(null=True, blank=True)
     verified = models.BooleanField(default=True)
     verification_token = models.TextField(null=True, blank=True)
-    mnemonic_attr = 'username'
     deactivated_at = models.DateTimeField(null=True, blank=True)
+    mnemonic_attr = 'username'
 
     es_fields = {
         'username': {'sortable': True, 'filterable': True, 'exact': True},

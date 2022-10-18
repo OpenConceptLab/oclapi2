@@ -2,8 +2,10 @@ import logging
 import time
 
 from request_logging.middleware import LoggingMiddleware
+
 from core.common.constants import VERSION_HEADER, REQUEST_USER_HEADER, RESPONSE_TIME_HEADER, REQUEST_URL_HEADER, \
     REQUEST_METHOD_HEADER
+from core.common.services import AuthService
 from core.common.utils import set_current_user, set_request_url
 
 request_logger = logging.getLogger('request_logger')
@@ -56,5 +58,22 @@ class CurrentUserMiddleware(BaseMiddleware):
     def __call__(self, request):
         set_current_user(lambda self: getattr(request, 'user', None))
         set_request_url(lambda self: request.build_absolute_uri())
+        response = self.get_response(request)
+        return response
+
+
+class TokenAuthMiddleWare(BaseMiddleware):
+    def __call__(self, request):
+        if not AuthService.is_valid_django_token(request):
+            authorization_header = request.META.get('HTTP_AUTHORIZATION')
+            token = request.session.get("oidc_access_token")
+            token_type = AuthService.get().token_type  # Bearer or Token
+            if authorization_header:
+                if token_type not in authorization_header:
+                    request.META['HTTP_AUTHORIZATION'] = authorization_header.replace(
+                        'Token', token_type).replace('Bearer', token_type)
+            elif token:
+                request.META['HTTP_AUTHORIZATION'] = f'{token_type} {token}'
+
         response = self.get_response(request)
         return response
