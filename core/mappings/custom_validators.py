@@ -11,6 +11,8 @@ class OpenMRSMappingValidator:
         self.mapping = mapping
 
     def validate(self):
+        if self.mapping.retired:
+            return
         self.should_have_valid_external_id()
         self.pair_must_be_unique()
         self.lookup_attributes_should_be_valid()
