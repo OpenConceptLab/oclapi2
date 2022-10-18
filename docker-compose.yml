@@ -61,6 +61,16 @@ services:
       - DEBUG=${DEBUG-FALSE}
       - ERRBIT_URL
       - ERRBIT_KEY
+  celery_beat:
+    image: openconceptlab/oclapi2:${ENVIRONMENT-production}
+    command: ["bash", "-c", "./start_celery_beat.sh"]
+    restart: "always"
+    environment:
+      - REDIS_HOST=${REDIS_HOST-redis}
+      - REDIS_PORT=${REDIS_PORT-6379}
+      - DEBUG=${DEBUG-FALSE}
+      - ERRBIT_URL
+      - ERRBIT_KEY
   celery_indexing:
     image: openconceptlab/oclapi2:${ENVIRONMENT-production}
     command: ["bash", "-c", "CELERY_WORKER_NAME=indexing ./start_celery_worker.sh -P prefork -Q indexing -c 2"]
