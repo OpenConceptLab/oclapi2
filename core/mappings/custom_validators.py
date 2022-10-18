@@ -1,8 +1,7 @@
 from django.core.exceptions import ValidationError
-from django.db.models import F
 from pydash import get
 
-from .constants import OPENMRS_SINGLE_MAPPING_BETWEEN_TWO_CONCEPTS, OPENMRS_INVALID_MAPTYPE,\
+from .constants import OPENMRS_SINGLE_MAPPING_BETWEEN_TWO_CONCEPTS, OPENMRS_INVALID_MAPTYPE, \
     OPENMRS_EXTERNAL_ID_LENGTH, OPENMRS_MAPPING_EXTERNAL_ID_ERROR
 
 
@@ -38,9 +37,11 @@ class OpenMRSMappingValidator:
 
     def lookup_attributes_should_be_valid(self):
         from core.concepts.models import Concept
+        from core.sources.models import Source
+        parent = Source.objects.filter(uri='/orgs/OCL/sources/MapTypes/').first()
         if not Concept.objects.filter(
-                parent__mnemonic='MapTypes', parent__organization__mnemonic='OCL',
-                id=F('versioned_object_id'), retired=False, is_active=True,
-                concept_class='MapType', names__name=self.mapping.map_type or 'None',
+                parent_id=parent.id,
+                is_latest_version=True, retired=False, is_active=True,
+                names__name=self.mapping.map_type or 'None',
         ).exists():
             raise ValidationError({'map_type': [OPENMRS_INVALID_MAPTYPE]})
