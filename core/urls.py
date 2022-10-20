@@ -76,6 +76,7 @@ urlpatterns = [
     path('indexes/', include('core.indexes.urls'), name='indexes_urls'),
     path('client-configs/', include('core.client_configs.urls'), name='client_config_urls'),
     path('tasks/', include('core.tasks.urls'), name='task_urls'),
+    path('locales/', concept_views.ConceptDefaultLocalesView.as_view(), name='ocl-locales'),
 
     # just for ocldev
     re_path(

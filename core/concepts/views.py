@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.db.models import F, Q
 from django.http import Http404
 from drf_yasg.utils import swagger_auto_schema
@@ -96,6 +97,24 @@ class ConceptLookupValuesView(ListAPIView, BaseAPIView):  # pragma: no cover
         self.set_parent_resource()
         if self.parent_resource:
             queryset = self.parent_resource.concepts_set.filter(id=F('versioned_object_id'))
+            if self.is_verbose():
+                queryset = queryset.prefetch_related('names')
+            return queryset
+
+        raise Http404()
+
+
+# this is a cached view (expiry 24 hours)
+# driver from settings.DEFAULT_LOCALES_REPO_URI
+class ConceptDefaultLocalesView(ListAPIView, BaseAPIView):  # pragma: no cover
+    serializer_class = ConceptLookupListSerializer
+    permission_classes = (AllowAny, )
+
+    def get_queryset(self):
+        from core.sources.models import Source
+        source = Source.objects.filter(uri=settings.DEFAULT_LOCALES_REPO_URI).first()
+        if source:
+            queryset = source.concepts_set.filter(id=F('versioned_object_id'))
             if self.is_verbose():
                 queryset = queryset.prefetch_related('names')
             return queryset

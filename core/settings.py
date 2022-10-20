@@ -398,6 +398,11 @@ ERRBIT_KEY = os.environ.get('ERRBIT_KEY', 'errbit-key')
 # Repo Export Upload/download
 EXPORT_SERVICE = os.environ.get('EXPORT_SERVICE', 'core.common.services.S3')
 
+# Locales Repository URI
+# can either be /orgs/OCL/sources/Locales/ (old-style, ISO-639-2)
+# or /orgs/ISO/sources/iso639-1/ (ISO-639-1, OCL's new default)
+DEFAULT_LOCALES_REPO_URI = os.environ.get('DEFAULT_LOCALES_REPO_URI', '/orgs/ISO/sources/iso639-1/')
+
 # keyCloak/OIDC Provider settings
 OIDC_SERVER_URL = os.environ.get('OIDC_SERVER_URL', '')
 OIDC_RP_CLIENT_ID = ''  # only needed a defined var in mozilla_django_oidc
