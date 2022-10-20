@@ -327,7 +327,6 @@ class ConceptMinimalSerializer(ConceptAbstractSerializer):
 
 
 class ConceptMinimalSerializerRecursive(ConceptAbstractSerializer):
-    name = EncodedDecodedCharField(source='mnemonic', read_only=True)
     id = EncodedDecodedCharField(source='mnemonic', read_only=True)
     type = CharField(source='resource_type', read_only=True)
     url = CharField(source='uri', read_only=True)
@@ -336,7 +335,7 @@ class ConceptMinimalSerializerRecursive(ConceptAbstractSerializer):
     class Meta:
         model = Concept
         fields = ConceptAbstractSerializer.Meta.fields + (
-            'id', 'name', 'type', 'url', 'version_url', 'terminal', 'entries', 'display_name', 'retired')
+            'id', 'type', 'url', 'version_url', 'terminal', 'entries', 'display_name', 'retired')
 
     def __init__(self, *args, **kwargs):
         if 'mappings' in self.fields:
