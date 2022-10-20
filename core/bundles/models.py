@@ -28,7 +28,7 @@ class Bundle:
         self.mappings_count = 0
         self.cascade_method = SOURCE_TO_CONCEPTS
         self.mappings_criteria = Q()
-        self.return_map_types = '*'
+        self.return_map_types_criteria = Q()
         self.entries = []
 
     def set_cascade_parameters(self):
@@ -36,11 +36,11 @@ class Bundle:
         self.set_cascade_method()
         self.set_cascade_hierarchy()
         self.set_cascade_mappings()
-        self.set_cascade_mappings_criteria()
         self.set_cascade_levels()
         self.set_include_mappings()
         self.set_include_retired()
-        self.set_return_map_types()
+        self.set_cascade_mappings_criteria()
+        self.set_return_map_types_criteria()
 
     @property
     def is_hierarchy_view(self):
@@ -59,9 +59,6 @@ class Bundle:
             level = self.params.get(CASCADE_LEVELS_PARAM, '*')
             if level != '*' and level:
                 self.cascade_levels = int(level)
-
-    def set_return_map_types(self):
-        self.return_map_types = self.params.get(RETURN_MAP_TYPES, '*') or '*'
 
     def set_cascade_mappings(self):
         if CASCADE_MAPPINGS_PARAM in self.params:
@@ -86,6 +83,15 @@ class Bundle:
             self.mappings_criteria &= Q(map_type__in=compact(map_types.split(',')))
         if exclude_map_types:
             self.mappings_criteria &= ~Q(map_type__in=compact(exclude_map_types.split(',')))
+
+    def set_return_map_types_criteria(self):
+        return_map_types = self.params.dict().get(RETURN_MAP_TYPES, None)
+        if return_map_types == '*':
+            self.return_map_types_criteria = Q()
+        elif not return_map_types:
+            self.return_map_types_criteria = self.mappings_criteria
+        else:
+            self.return_map_types_criteria = Q(map_type__in=compact(return_map_types.split(',')))
 
     @property
     def resource_type(self):
@@ -133,7 +139,7 @@ class Bundle:
             include_mappings=self.include_mappings,
             include_retired=self.include_retired,
             reverse=self.reverse,
-            return_map_types=self.return_map_types
+            return_map_types_criteria=self.return_map_types_criteria
         )
         self.concepts = get(result, 'concepts')
         self.mappings = get(result, 'mappings')
@@ -153,7 +159,7 @@ class Bundle:
             include_mappings=self.include_mappings,
             include_retired=self.include_retired,
             reverse=self.reverse,
-            return_map_types=self.return_map_types
+            return_map_types_criteria=self.return_map_types_criteria
         )
 
         from core.concepts.serializers import ConceptMinimalSerializerRecursive
