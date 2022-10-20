@@ -14,9 +14,16 @@ class Command(BaseCommand):
     help = 'import lookup values'
 
     def handle(self, *args, **options):
-        user = UserProfile.objects.filter(username='ocladmin').get()
-        org = Organization.objects.get(mnemonic='OCL')
-        sources = self.create_sources(org, user)
+        ocladmin = UserProfile.objects.filter(username='ocladmin').get()
+        org_OCL = Organization.objects.get(mnemonic='OCL')
+        org_ISO = Organization.objects.filter(mnemonic='ISO').first()
+        if not org_ISO:
+            org_ISO = Organization(name='International Organization for Standardization (ISO)', mnemonic='ISO')
+            org_ISO.save()
+            org_ISO.members.add(ocladmin)
+
+        sources = self.get_or_create(org_OCL, ocladmin)
+        iso_source = self.get_or_create_iso_source(org_ISO, ocladmin)
 
         current_path = os.path.dirname(__file__)
         importer_confs = [
@@ -48,10 +55,14 @@ class Command(BaseCommand):
 
         for conf in importer_confs:
             source = conf['source']
-            self.create_concepts(source, conf['file'], user)
+            self.create_concepts(source, conf['file'], ocladmin)
+
+        self.create_concepts(
+            iso_source, os.path.join(current_path, "../../../lookup_fixtures/iso_639_1_locales.json"), ocladmin
+        )
 
     @staticmethod
-    def create_sources(org, user):
+    def get_or_create(org, user):
         sources = dict()
 
         kwargs = {
@@ -73,6 +84,32 @@ class Command(BaseCommand):
         return sources
 
     @staticmethod
+    def get_or_create_iso_source(org, user):
+        ISO_SOURCE_ID = 'iso639-1'
+
+        kwargs = {
+            'parent_resource': org
+        }
+
+        source = Source.objects.filter(organization=org, mnemonic='iso639-1').first()
+        if not source:
+            source = Source(
+                name='Iso6391',
+                mnemonic=ISO_SOURCE_ID,
+                full_name='ISO 639-1: Codes for the representation of names of languages -- Part 1: Alpha-2 code',
+                canonical_url='http://terminology.hl7.org/CodeSystem/iso639-1',
+                organization=org,
+                default_locale='en',
+                version=HEAD,
+                created_by=user,
+                updated_by=user,
+                active_mappings=0,
+            )
+            Source.persist_new(source, user, **kwargs)
+
+        return source
+
+    @staticmethod
     def create_concepts(source, file, user):
         file = open(file, 'r')
         lines = file.readlines()
@@ -87,4 +124,7 @@ class Command(BaseCommand):
                 Concept.persist_new(data, user)
                 if not created:
                     created = True
+        if created:
+            source.active_concepts = source.concepts_set.filter(is_latest_version=True).count()
+            source.save()
         return created
