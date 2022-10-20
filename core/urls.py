@@ -14,6 +14,7 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 from django.urls import path, include, re_path
+from django.views.decorators.cache import cache_page
 from drf_yasg import openapi
 from drf_yasg.views import get_schema_view
 from rest_framework import permissions
@@ -76,7 +77,13 @@ urlpatterns = [
     path('indexes/', include('core.indexes.urls'), name='indexes_urls'),
     path('client-configs/', include('core.client_configs.urls'), name='client_config_urls'),
     path('tasks/', include('core.tasks.urls'), name='task_urls'),
-    path('locales/', concept_views.ConceptDefaultLocalesView.as_view(), name='ocl-locales'),
+    path(
+        'locales/',
+        cache_page(
+            timeout=60 * 60 * 6, key_prefix='cache_locales'
+        )(concept_views.ConceptDefaultLocalesView.as_view()),
+        name='ocl-locales'
+    ),
 
     # just for ocldev
     re_path(
