@@ -97,6 +97,9 @@ class Command(BaseCommand):
                 name='Iso6391',
                 mnemonic=ISO_SOURCE_ID,
                 full_name='ISO 639-1: Codes for the representation of names of languages -- Part 1: Alpha-2 code',
+                description='Codes for the Representation of Names of Languages Part 1: Alpha-2 Code.'
+                            ' Used as part of the IETF 3066 specification for languages '
+                            'throughout the HL7 specification.',
                 canonical_url='http://terminology.hl7.org/CodeSystem/iso639-1',
                 organization=org,
                 default_locale='en',
