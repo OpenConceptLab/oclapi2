@@ -191,8 +191,8 @@ class RedisService:  # pragma: no cover
     def __init__(self):
         self.conn = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB)
 
-    def set(self, key, val):
-        return self.conn.set(key, val)
+    def set(self, key, val, **kwargs):
+        return self.conn.set(key, val, **kwargs)
 
     def set_json(self, key, val):
         return self.conn.set(key, json.dumps(val))
