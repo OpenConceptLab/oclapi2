@@ -75,6 +75,7 @@ INSTALLED_APPS = [
     'corsheaders',
     'ordered_model',
     'cid.apps.CidAppConfig',
+    'django_celery_beat',
     'health_check',  # required
     'health_check.db',  # stock Django health checkers
     # 'health_check.contrib.celery_ping',  # requires celery
