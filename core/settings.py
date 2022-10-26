@@ -13,6 +13,8 @@ https://docs.djangoproject.com/en/3.0/ref/settings/
 import os
 
 # Build paths inside the project like this: os.path.join(BASE_DIR, ...)
+from datetime import timedelta
+
 from corsheaders.defaults import default_headers
 from kombu import Queue, Exchange
 
@@ -348,6 +350,13 @@ CELERY_ONCE = {
         'url': CELERY_RESULT_BACKEND,
     }
 }
+CELERYBEAT_SCHEDULE = {
+    'healthcheck-every-minute': {
+        'task': 'core.common.tasks.beat_healthcheck',
+        'schedule': timedelta(seconds=60),
+    },
+}
+CELERYBEAT_HEALTHCHECK_KEY = 'celery_beat_healthcheck'
 ELASTICSEARCH_DSL_PARALLEL = True
 ELASTICSEARCH_DSL_AUTO_REFRESH = True
 ELASTICSEARCH_DSL_AUTOSYNC = True

@@ -1,3 +1,4 @@
+from datetime import datetime
 from json import JSONDecodeError
 
 from billiard.exceptions import WorkerLostError
@@ -711,3 +712,10 @@ def reference_old_to_new_structure():  # pragma: no cover
         reference.valueset = ref_struct['valueset']
         reference.filter = ref_struct['filter']
         reference.save()
+
+
+@app.task(ignore_result=True)
+def beat_healthcheck():  # pragma: no cover
+    from core.common.services import RedisService
+    redis_service = RedisService()
+    redis_service.set(settings.CELERYBEAT_HEALTHCHECK_KEY, str(datetime.now()), ex=120)
