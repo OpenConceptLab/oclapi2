@@ -19,7 +19,7 @@ from core.collections.translators import CollectionReferenceTranslator
 from core.collections.utils import is_concept, is_mapping
 from core.common.constants import (
     ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT,
-    ES_REQUEST_TIMEOUT, ES_REQUEST_TIMEOUT_ASYNC, HEAD)
+    ES_REQUEST_TIMEOUT, ES_REQUEST_TIMEOUT_ASYNC, HEAD, ALL)
 from core.common.models import ConceptContainerModel, BaseResourceModel
 from core.common.tasks import seed_children_to_expansion, batch_index_resources, index_expansion_concepts, \
     index_expansion_mappings
@@ -225,7 +225,7 @@ class Collection(ConceptContainerModel):
         return self.expansions.count()
 
     def delete_references(self, expressions):
-        if expressions == '*':  # Deprecated: Old way
+        if expressions == ALL:  # Deprecated: Old way
             references_to_be_deleted = self.references
             if self.expansion_uri:
                 self.expansion.delete_expressions(expressions)
@@ -529,7 +529,7 @@ class CollectionReference(models.Model):
             'repo_version': get(self.cascade, 'source_version') or self.version or HEAD,
             'source_mappings': method.lower() == SOURCE_MAPPINGS,
             'source_to_concepts': method.lower() == SOURCE_TO_CONCEPTS,
-            'cascade_levels': 1 if self.cascade == method else get(self.cascade, 'cascade_levels', '*'),
+            'cascade_levels': 1 if self.cascade == method else get(self.cascade, 'cascade_levels', ALL),
         }
         if is_dict:
             for attr in ['cascade_mappings', 'cascade_hierarchy', 'include_mappings', 'reverse', 'max_results']:
@@ -870,7 +870,7 @@ class Expansion(BaseResourceModel):
     def delete_expressions(self, expressions):  # Deprecated: Old way, must use delete_references instead
         concepts_filters = None
         mappings_filters = None
-        if expressions == '*':
+        if expressions == ALL:
             if self.concepts.exists():
                 concepts_filters = dict(id__in=list(self.concepts.values_list('id', flat=True)))
                 self.concepts.clear()

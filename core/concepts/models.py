@@ -6,7 +6,7 @@ from django.db import models, IntegrityError, transaction, connection
 from django.db.models import F, Q
 from pydash import get, compact
 
-from core.common.constants import ISO_639_1, LATEST, HEAD
+from core.common.constants import ISO_639_1, LATEST, HEAD, ALL
 from core.common.mixins import SourceChildMixin
 from core.common.models import VersionedModel
 from core.common.tasks import process_hierarchy_for_new_concept, process_hierarchy_for_concept_version, \
@@ -961,7 +961,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
     def cascade(  # pylint: disable=too-many-arguments,too-many-locals
             self, repo_version=None, source_mappings=True, source_to_concepts=True,
-            mappings_criteria=None, cascade_mappings=True, cascade_hierarchy=True, cascade_levels='*',
+            mappings_criteria=None, cascade_mappings=True, cascade_hierarchy=True, cascade_levels=ALL,
             include_mappings=True, include_retired=False, reverse=False, return_map_types_criteria=None,
             max_results=1000
     ):
@@ -986,7 +986,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         cascaded = []
 
         def iterate(level):
-            if level == '*' or level > 0:
+            if level == ALL or level > 0:
                 if not cascaded or (result['concepts'].count() + result['mappings'].count()) < max_results:
                     not_cascaded = result['concepts'].exclude(
                         versioned_object_id__in=cascaded) if cascaded else result['concepts']
@@ -1015,14 +1015,14 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                                 ]
                             )
 
-                        iterate(level if level == '*' else level - 1)
+                        iterate(level if level == ALL else level - 1)
 
         iterate(cascade_levels)
         return result
 
     def cascade_as_hierarchy(  # pylint: disable=too-many-arguments,too-many-locals
             self, repo_version=None, source_mappings=True, source_to_concepts=True, mappings_criteria=None,
-            cascade_mappings=True, cascade_hierarchy=True, cascade_levels='*',
+            cascade_mappings=True, cascade_hierarchy=True, cascade_levels=ALL,
             include_mappings=True, include_retired=False, reverse=False, return_map_types_criteria=None, _=None
     ):
         if cascade_levels == 0:
@@ -1050,7 +1050,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         cascaded = {}
 
         def iterate(level):
-            if level == '*' or level > 0:
+            if level == ALL or level > 0:
                 new_level = self.current_level + 1
                 levels[new_level] = levels.get(new_level, [])
                 for concept in levels[self.current_level]:
@@ -1073,7 +1073,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                     concept_has_entries = has_entries(cascaded_entries)
                     cascaded[concept.id] = concept_has_entries
                     concept.terminal = not concept_has_entries
-                    if level == 1 and cascade_levels != '*':  # last level, when cascadeLevels are finite
+                    if level == 1 and cascade_levels != ALL:  # last level, when cascadeLevels are finite
                         for _concept in cascaded_entries['concepts']:
                             if _concept.id in cascaded:
                                 _concept.terminal = not cascaded[_concept.id]
@@ -1082,7 +1082,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                 if not levels[new_level]:
                     return
                 self.current_level += 1
-                iterate(level if level == '*' else level - 1)
+                iterate(level if level == ALL else level - 1)
 
         iterate(cascade_levels)
 

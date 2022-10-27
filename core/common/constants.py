@@ -102,3 +102,4 @@ CASCADE_LEVELS_PARAM = 'cascadeLevels'
 RETURN_MAP_TYPES = 'returnMapTypes'
 CASCADE_DIRECTION_PARAM = 'reverse'
 FACET_SIZE = 20
+ALL = '*'
