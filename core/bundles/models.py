@@ -86,12 +86,13 @@ class Bundle:
 
     def set_return_map_types_criteria(self):
         return_map_types = self.params.dict().get(RETURN_MAP_TYPES, None)
-        if return_map_types == '*':
-            self.return_map_types_criteria = Q()
-        elif not return_map_types:
-            self.return_map_types_criteria = self.mappings_criteria
+        if return_map_types in ['False', 'false', False, '0', 0]:  # no mappings to be returned
+            self.return_map_types_criteria = False
+        elif return_map_types:
+            self.return_map_types_criteria = Q() if return_map_types == '*' else Q(
+                map_type__in=compact(return_map_types.split(',')))
         else:
-            self.return_map_types_criteria = Q(map_type__in=compact(return_map_types.split(',')))
+            self.return_map_types_criteria = self.mappings_criteria
 
     @property
     def resource_type(self):

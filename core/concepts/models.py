@@ -1113,7 +1113,9 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         concepts = Concept.objects.filter(id=self.id) if include_self else Concept.objects.none()
         result = dict(concepts=concepts, mappings=mappings, hierarchy_concepts=Concept.objects.none())
         mappings_criteria = mappings_criteria or Q()  # cascade mappings criteria
-        return_map_types_criteria = return_map_types_criteria or Q()
+        return_map_types_criteria = return_map_types_criteria if return_map_types_criteria is False else (
+                return_map_types_criteria or Q()
+        )
         if cascade_mappings and (source_mappings or source_to_concepts):
             mappings = repo_version.mappings.filter(
                 from_concept_id__in={self.id, self.versioned_object_id}
@@ -1122,7 +1124,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                 mappings = mappings.filter(id=F('versioned_object_id'))
             if not include_retired:
                 mappings = mappings.filter(retired=False)
-            if include_mappings:
+            if include_mappings and return_map_types_criteria is not False:
                 result['mappings'] = mappings.filter(return_map_types_criteria)
         if source_to_concepts:
             if cascade_hierarchy:
@@ -1155,7 +1157,9 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         concepts = Concept.objects.filter(id=self.id) if include_self else Concept.objects.none()
         result = dict(concepts=concepts, mappings=mappings, hierarchy_concepts=Concept.objects.none())
         mappings_criteria = mappings_criteria or Q()  # cascade mappings criteria
-        return_map_types_criteria = return_map_types_criteria or Q()
+        return_map_types_criteria = return_map_types_criteria if return_map_types_criteria is False else (
+                return_map_types_criteria or Q()
+        )
         if cascade_mappings and (source_mappings or source_to_concepts):
             mappings = repo_version.mappings.filter(
                 to_concept_id__in={self.id, self.versioned_object_id}
@@ -1164,7 +1168,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                 mappings = mappings.filter(id=F('versioned_object_id'))
             if not include_retired:
                 mappings = mappings.filter(retired=False)
-            if include_mappings:
+            if include_mappings and return_map_types_criteria is not False:
                 result['mappings'] = mappings.filter(return_map_types_criteria)
         if source_to_concepts:
             if cascade_hierarchy:
@@ -1195,7 +1199,9 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         concepts = Concept.objects.filter(id=self.id) if include_self else Concept.objects.none()
         result = dict(concepts=concepts, mappings=mappings, hierarchy_concepts=Concept.objects.none())
         mappings_criteria = mappings_criteria or Q()  # cascade mappings criteria
-        return_map_types_criteria = return_map_types_criteria or Q()
+        return_map_types_criteria = return_map_types_criteria if return_map_types_criteria is False else (
+                return_map_types_criteria or Q()
+        )
         expansion = repo_version.expansion
         if not expansion:
             return result
@@ -1205,7 +1211,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             ).order_by('map_type')
             if not include_retired:
                 mappings = mappings.filter(retired=False)
-            if include_mappings:
+            if include_mappings and return_map_types_criteria is not False:
                 result['mappings'] = mappings.filter(return_map_types_criteria)
         if source_to_concepts:
             if cascade_hierarchy:
@@ -1234,7 +1240,9 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         concepts = Concept.objects.filter(id=self.id) if include_self else Concept.objects.none()
         result = dict(concepts=concepts, mappings=mappings, hierarchy_concepts=Concept.objects.none())
         mappings_criteria = mappings_criteria or Q()  # cascade mappings criteria
-        return_map_types_criteria = return_map_types_criteria or Q()
+        return_map_types_criteria = return_map_types_criteria if return_map_types_criteria is False else (
+                return_map_types_criteria or Q()
+        )
         expansion = repo_version.expansion
 
         if not expansion:
@@ -1246,7 +1254,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             ).order_by('map_type')
             if not include_retired:
                 mappings = mappings.filter(retired=False)
-            if include_mappings:
+            if include_mappings and return_map_types_criteria is not False:
                 result['mappings'] = mappings.filter(return_map_types_criteria)
         if source_to_concepts:
             if cascade_hierarchy:
