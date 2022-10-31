@@ -326,6 +326,7 @@ class SourceVersionDetailSerializer(SourceCreateOrUpdateSerializer):
     url = CharField(source='versioned_object_url')
     previous_version_url = CharField(source='prev_version_uri')
     summary = SerializerMethodField()
+    hierarchy_root_url = CharField(source='hierarchy_root.url', required=False, allow_blank=True, allow_null=True)
 
     class Meta:
         model = Source
@@ -339,7 +340,7 @@ class SourceVersionDetailSerializer(SourceCreateOrUpdateSerializer):
             'canonical_url', 'identifier', 'publisher', 'contact', 'jurisdiction', 'purpose', 'copyright',
             'content_type', 'revision_date', 'summary', 'text', 'meta',
             'experimental', 'case_sensitive', 'collection_reference', 'hierarchy_meaning', 'compositional',
-            'version_needed'
+            'version_needed', 'hierarchy_root_url'
         )
 
     def __init__(self, *args, **kwargs):
