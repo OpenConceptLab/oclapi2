@@ -162,8 +162,8 @@ class MappingReverseMinimalSerializer(ModelSerializer):
         model = Mapping
         fields = (
             'id', 'type', 'map_type', 'url', 'version_url', 'from_concept_code', 'from_concept_url',
-            'cascade_target_concept_code', 'cascade_target_concept_url', 'cascade_target_source_owner', 'cascade_target_source_name',
-            'cascade_target_concept_name', 'retired'
+            'cascade_target_concept_code', 'cascade_target_concept_url', 'cascade_target_source_owner',
+            'cascade_target_source_name', 'cascade_target_concept_name', 'retired'
         )
 
     @staticmethod

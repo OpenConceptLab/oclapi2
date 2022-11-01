@@ -9,7 +9,7 @@ from core.common.constants import CASCADE_LEVELS_PARAM, CASCADE_MAPPINGS_PARAM, 
 
 
 class Bundle:
-    def __init__(self, root, repo_version, params=None, verbose=False, requested_url=None):
+    def __init__(self, root, repo_version, params=None, verbose=False, requested_url=None):  # pylint: disable=too-many-arguments
         self.repo_version = repo_version
         self.params = params
         self.verbose = verbose
