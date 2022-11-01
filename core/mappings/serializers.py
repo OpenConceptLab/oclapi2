@@ -119,7 +119,6 @@ class MappingVersionListSerializer(MappingListSerializer):
 
 
 class MappingMinimalSerializer(ModelSerializer):
-    uuid = CharField(source='id', read_only=True)
     id = CharField(source='mnemonic', read_only=True)
     type = CharField(source='resource_type', read_only=True)
     url = CharField(source='uri', read_only=True)
@@ -133,7 +132,7 @@ class MappingMinimalSerializer(ModelSerializer):
     class Meta:
         model = Mapping
         fields = (
-            'uuid', 'id', 'type', 'map_type', 'url', 'version_url', 'to_concept_code', 'to_concept_url',
+            'id', 'type', 'map_type', 'url', 'version_url', 'to_concept_code', 'to_concept_url',
             'cascade_target_concept_code', 'cascade_target_concept_url', 'cascade_target_source_owner',
             'cascade_target_source_name', 'cascade_target_concept_name', 'retired'
         )
@@ -149,7 +148,6 @@ class MappingMinimalSerializer(ModelSerializer):
 
 
 class MappingReverseMinimalSerializer(ModelSerializer):
-    uuid = CharField(source='id', read_only=True)
     id = CharField(source='mnemonic', read_only=True)
     type = CharField(source='resource_type', read_only=True)
     url = CharField(source='uri', read_only=True)
@@ -163,7 +161,7 @@ class MappingReverseMinimalSerializer(ModelSerializer):
     class Meta:
         model = Mapping
         fields = (
-            'uuid', 'id', 'type', 'map_type', 'url', 'version_url', 'from_concept_code', 'from_concept_url',
+            'id', 'type', 'map_type', 'url', 'version_url', 'from_concept_code', 'from_concept_url',
             'cascade_target_concept_code', 'cascade_target_concept_url', 'cascade_target_source_owner', 'cascade_target_source_name',
             'cascade_target_concept_name', 'retired'
         )
