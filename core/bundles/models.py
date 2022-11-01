@@ -3,7 +3,7 @@ from pydash import compact, get
 
 from core.bundles.constants import BUNDLE_TYPE_SEARCHSET, RESOURCE_TYPE
 from core.collections.constants import SOURCE_MAPPINGS, SOURCE_TO_CONCEPTS
-from core.common.constants import INCLUDE_MAPPINGS_PARAM, CASCADE_LEVELS_PARAM, CASCADE_MAPPINGS_PARAM, \
+from core.common.constants import CASCADE_LEVELS_PARAM, CASCADE_MAPPINGS_PARAM, \
     CASCADE_HIERARCHY_PARAM, CASCADE_METHOD_PARAM, MAP_TYPES_PARAM, EXCLUDE_MAP_TYPES_PARAM, CASCADE_DIRECTION_PARAM, \
     INCLUDE_RETIRED_PARAM, RETURN_MAP_TYPES, ALL
 
@@ -19,7 +19,6 @@ class Bundle:
         self.cascade_hierarchy = True
         self.cascade_mappings = True
         self.cascade_levels = ALL
-        self.include_mappings = True
         self.include_retired = False
         self.concepts = None
         self.mappings = None
@@ -37,7 +36,6 @@ class Bundle:
         self.set_cascade_hierarchy()
         self.set_cascade_mappings()
         self.set_cascade_levels()
-        self.set_include_mappings()
         self.set_include_retired()
         self.set_cascade_mappings_criteria()
         self.set_return_map_types_criteria()
@@ -45,10 +43,6 @@ class Bundle:
     @property
     def is_hierarchy_view(self):
         return self.params.get('view', '').lower() == 'hierarchy'
-
-    def set_include_mappings(self):
-        if INCLUDE_MAPPINGS_PARAM in self.params:
-            self.include_mappings = self.params[INCLUDE_MAPPINGS_PARAM] in ['true', True]
 
     def set_include_retired(self):
         if INCLUDE_RETIRED_PARAM in self.params:
@@ -137,7 +131,6 @@ class Bundle:
             cascade_mappings=self.cascade_mappings,
             cascade_hierarchy=self.cascade_hierarchy,
             cascade_levels=self.cascade_levels,
-            include_mappings=self.include_mappings,
             include_retired=self.include_retired,
             reverse=self.reverse,
             return_map_types_criteria=self.return_map_types_criteria
@@ -157,7 +150,6 @@ class Bundle:
             cascade_mappings=self.cascade_mappings,
             cascade_hierarchy=self.cascade_hierarchy,
             cascade_levels=self.cascade_levels,
-            include_mappings=self.include_mappings,
             include_retired=self.include_retired,
             reverse=self.reverse,
             return_map_types_criteria=self.return_map_types_criteria

@@ -1097,7 +1097,7 @@ class ConceptCascadeViewTest(OCLAPITestCase):
         )
 
         response = self.client.get(
-            concept1.uri + '$cascade/?method=sourceToConcepts&cascadeLevels=1&includeMappings=false')
+            concept1.uri + '$cascade/?method=sourceToConcepts&cascadeLevels=1&returnMapTypes=false')
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data['entry']), 2)
@@ -1244,7 +1244,7 @@ class ConceptCascadeViewTest(OCLAPITestCase):
         )
 
         # hierarchy response
-        response = self.client.get(concept1.uri + '$cascade/?view=hierarchy&includeMappings=false')
+        response = self.client.get(concept1.uri + '$cascade/?view=hierarchy&returnMapTypes=false')
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['resourceType'], 'Bundle')
@@ -1303,7 +1303,7 @@ class ConceptCascadeViewTest(OCLAPITestCase):
         )
 
         # reverse hierarchy response
-        response = self.client.get(concept2.uri + '$cascade/?view=hierarchy&reverse=true&includeMappings=false')
+        response = self.client.get(concept2.uri + '$cascade/?view=hierarchy&reverse=true&returnMapTypes=false')
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['resourceType'], 'Bundle')

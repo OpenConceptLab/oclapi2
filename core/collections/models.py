@@ -532,17 +532,27 @@ class CollectionReference(models.Model):
             'cascade_levels': 1 if self.cascade == method else get(self.cascade, 'cascade_levels', ALL),
         }
         if is_dict:
-            for attr in ['cascade_mappings', 'cascade_hierarchy', 'include_mappings', 'reverse', 'max_results']:
+            for attr in ['cascade_mappings', 'cascade_hierarchy', 'reverse', 'max_results']:
                 if attr in self.cascade:
                     cascade_params[attr] = get(self.cascade, attr)
             map_types = get(self.cascade, 'map_types', None)
             exclude_map_types = get(self.cascade, 'exclude_map_types', None)
+            return_map_types = get(self.cascade, 'return_map_types', None)
             mappings_criteria = Q()
             if map_types:
                 mappings_criteria &= Q(map_type__in=compact(map_types.split(',')))
             if exclude_map_types:
                 mappings_criteria &= ~Q(map_type__in=compact(exclude_map_types.split(',')))
             cascade_params['mappings_criteria'] = mappings_criteria
+            include_mappings = get(self.cascade, 'include_mappings')
+            if include_mappings is False or return_map_types in ['False', 'false', False, '0', 0]:
+                return_map_types_criteria = False
+            elif return_map_types:
+                return_map_types_criteria = Q() if return_map_types == ALL else Q(
+                    map_type__in=compact(return_map_types.split(',')))
+            else:
+                return_map_types_criteria = mappings_criteria
+            cascade_params['return_map_types_criteria'] = return_map_types_criteria
         return cascade_params
 
     def __is_exact_search_filter(self):

@@ -124,22 +124,22 @@ class MappingMinimalSerializer(ModelSerializer):
     type = CharField(source='resource_type', read_only=True)
     url = CharField(source='uri', read_only=True)
     to_concept_code = EncodedDecodedCharField()
-    target_concept_code = EncodedDecodedCharField(source='to_concept_code')
-    target_concept_name = SerializerMethodField()
-    target_concept_url = CharField(source='to_concept_url')
-    target_source_name = CharField(source='to_source_name', allow_blank=True, allow_null=True)
-    target_source_owner = CharField(source='to_source_owner', allow_blank=True, allow_null=True)
+    cascade_target_concept_code = EncodedDecodedCharField(source='to_concept_code')
+    cascade_target_concept_name = SerializerMethodField()
+    cascade_target_concept_url = CharField(source='to_concept_url')
+    cascade_target_source_name = CharField(source='to_source_name', allow_blank=True, allow_null=True)
+    cascade_target_source_owner = CharField(source='to_source_owner', allow_blank=True, allow_null=True)
 
     class Meta:
         model = Mapping
         fields = (
             'uuid', 'id', 'type', 'map_type', 'url', 'version_url', 'to_concept_code', 'to_concept_url',
-            'target_concept_code', 'target_concept_url', 'target_source_owner', 'target_source_name',
-            'target_concept_name', 'retired'
+            'cascade_target_concept_code', 'cascade_target_concept_url', 'cascade_target_source_owner',
+            'cascade_target_source_name', 'cascade_target_concept_name', 'retired'
         )
 
     @staticmethod
-    def get_target_concept_name(obj):
+    def get_cascade_target_concept_name(obj):
         name = obj.to_concept_name
         if not name and obj.parent_id != get(obj, 'to_concept.parent_id'):
             # only returns for source different than self
@@ -154,22 +154,22 @@ class MappingReverseMinimalSerializer(ModelSerializer):
     type = CharField(source='resource_type', read_only=True)
     url = CharField(source='uri', read_only=True)
     from_concept_code = EncodedDecodedCharField()
-    target_concept_code = EncodedDecodedCharField(source='from_concept_code')
-    target_concept_name = SerializerMethodField()
-    target_concept_url = CharField(source='from_concept_url')
-    target_source_name = CharField(source='from_source_name', allow_blank=True, allow_null=True)
-    target_source_owner = CharField(source='from_source_owner', allow_blank=True, allow_null=True)
+    cascade_target_concept_code = EncodedDecodedCharField(source='from_concept_code')
+    cascade_target_concept_name = SerializerMethodField()
+    cascade_target_concept_url = CharField(source='from_concept_url')
+    cascade_target_source_name = CharField(source='from_source_name', allow_blank=True, allow_null=True)
+    cascade_target_source_owner = CharField(source='from_source_owner', allow_blank=True, allow_null=True)
 
     class Meta:
         model = Mapping
         fields = (
             'uuid', 'id', 'type', 'map_type', 'url', 'version_url', 'from_concept_code', 'from_concept_url',
-            'target_concept_code', 'target_concept_url', 'target_source_owner', 'target_source_name',
-            'target_concept_name', 'retired'
+            'cascade_target_concept_code', 'cascade_target_concept_url', 'cascade_target_source_owner', 'cascade_target_source_name',
+            'cascade_target_concept_name', 'retired'
         )
 
     @staticmethod
-    def get_target_concept_name(obj):
+    def get_cascade_target_concept_name(obj):
         name = obj.from_concept_name
         if not name and obj.parent_id != get(obj, 'from_concept.parent_id'):
             # only returns for source different than self
