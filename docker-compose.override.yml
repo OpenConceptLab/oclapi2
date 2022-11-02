@@ -37,6 +37,15 @@ services:
       - celery_bulk_import_0_1
       - celery_bulk_import_2_3
       - celery_bulk_import_root
+  celery_beat:
+    build: .
+    volumes:
+      - .:/code:z
+    depends_on:
+      - redis
+      - db
+      - celery
+      - api
   celery_indexing:
     build: .
     volumes:
