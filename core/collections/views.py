@@ -1135,6 +1135,14 @@ class CollectionExtrasView(CollectionExtrasBaseView, ListAPIView):
         return Response(get(self.get_object(), 'extras', {}))
 
 
+class CollectionVersionExtrasView(CollectionBaseView, ListAPIView):
+    serializer_class = CollectionDetailSerializer
+
+    def list(self, request, *args, **kwargs):
+        instance = get_object_or_404(self.get_queryset(), version=self.kwargs['version'])
+        return Response(get(instance, 'extras', {}))
+
+
 class CollectionExtraRetrieveUpdateDestroyView(CollectionExtrasBaseView,
                                                ConceptContainerExtraRetrieveUpdateDestroyView):
     serializer_class = CollectionDetailSerializer

@@ -222,15 +222,8 @@ urlpatterns = [
     ),
     re_path(
         r"^(?P<collection>{pattern})/(?P<version>{pattern})/extras/$".format(pattern=NAMESPACE_PATTERN),
-        views.CollectionExtrasView.as_view(),
+        views.CollectionVersionExtrasView.as_view(),
         name='collectionversion-extras'
-    ),
-    re_path(
-        r"^(?P<collection>{pattern})/(?P<version>{pattern})/extras/(?P<extra>{pattern})/$".format(
-            pattern=NAMESPACE_PATTERN
-        ),
-        views.CollectionExtraRetrieveUpdateDestroyView.as_view(),
-        name='collectionversion-extra'
     ),
     path(
         "<str:collection>/<str:version>/concepts/<str:concept>/$cascade/",

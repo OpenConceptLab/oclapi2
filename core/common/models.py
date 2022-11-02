@@ -696,6 +696,7 @@ class ConceptContainerModel(VersionedModel):
         self.text = head.text
         self.experimental = head.experimental
         self.custom_validation_schema = head.custom_validation_schema
+        self.extras = head.extras
 
     def add_processing(self, process_id):
         if self.id and process_id:

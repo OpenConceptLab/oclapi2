@@ -499,6 +499,24 @@ class SourceExtrasViewTest(OCLAPITestCase):
         self.assertEqual(response.data, self.extras)
 
 
+class SourceVersionExtrasViewTest(OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.organization = Organization.objects.first()
+        self.user = UserProfile.objects.filter(is_superuser=True).first()
+        self.token = self.user.get_token()
+        self.extras = dict(foo='bar', tao='ching')
+        self.source = OrganizationSourceFactory(organization=self.organization, extras=self.extras)
+        self.source_v1 = OrganizationSourceFactory(
+            organization=self.organization, extras=self.extras, mnemonic=self.source.mnemonic, version='v1')
+
+    def test_get_200(self):
+        response = self.client.get(self.source_v1.uri + 'extras/', format='json')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, self.extras)
+
+
 class SourceVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
     def setUp(self):
         super().setUp()

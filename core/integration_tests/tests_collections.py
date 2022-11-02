@@ -1021,6 +1021,33 @@ class CollectionExtrasViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 404)
 
 
+class CollectionVersionExtrasViewTest(OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.user = UserProfileFactory()
+        self.token = self.user.get_token()
+        self.extras = dict(foo='bar', tao='ching')
+        self.collection = UserCollectionFactory(mnemonic='coll', user=self.user, extras=self.extras)
+        self.collection_v1 = UserCollectionFactory(mnemonic='coll', user=self.user, extras=self.extras, version='v1')
+
+    def test_get_200(self):
+        response = self.client.get(
+            self.collection_v1.uri + 'extras/',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, self.extras)
+
+    def test_get_404(self):
+        response = self.client.get(
+            '/users/foobar/collections/foobar/v1/extras/',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+        self.assertEqual(response.status_code, 404)
+
+
 class CollectionExtraRetrieveUpdateDestroyViewTest(OCLAPITestCase):
     def setUp(self):
         super().setUp()

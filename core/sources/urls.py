@@ -82,15 +82,8 @@ urlpatterns = [
     ),
     re_path(
         r"^(?P<source>{pattern})/(?P<version>{pattern})/extras/$".format(pattern=NAMESPACE_PATTERN),
-        views.SourceExtrasView.as_view(),
+        views.SourceVersionExtrasView.as_view(),
         name='sourceversion-extras'
-    ),
-    re_path(
-        r"^(?P<source>{pattern})/(?P<version>{pattern})/extras/(?P<extra>{pattern})/$".format(
-            pattern=NAMESPACE_PATTERN
-        ),
-        views.SourceExtraRetrieveUpdateDestroyView.as_view(),
-        name='sourceversion-extra'
     ),
     re_path(
         r"^(?P<source>{pattern})/(?P<version>{pattern})/concepts/".format(
