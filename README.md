@@ -83,5 +83,5 @@ In order to deploy please trigger the deployment [here](https://ci.openmrs.org/d
 Please use an existing deployment release.
 
 
-## Contributing to Flower
+## Contributing to OCLAPI2
 We welcome contributions. Please see [CONTRIBUTING.md](CONTRIBUTING.md) to get started!
