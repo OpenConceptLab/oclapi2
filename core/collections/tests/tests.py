@@ -1367,6 +1367,25 @@ class ExpansionParametersTest(OCLTestCase):
         self.assertEqual(expansion.concepts.count(), 1)
         self.assertEqual(expansion.concepts.first().id, concept2.id)
 
+        ref2 = CollectionReference(
+            system='https://s2.com', code=concept2.mnemonic)
+        expansion.parameters['system-version'] = 'https://s1.com|v1,https://s2.com|latest'
+        expansion.add_references(ref2)
+
+        self.assertEqual(expansion.concepts.count(), 1)
+        self.assertEqual(expansion.concepts.first().id, concept2.id)
+
+        ref2 = CollectionReference(
+            system='https://s1.com', code=concept1.mnemonic)
+        expansion.parameters['system-version'] = 'https://s1.com|v1,https://s1.com|latest'
+        expansion.add_references(ref2)
+
+        self.assertEqual(expansion.concepts.count(), 2)
+        self.assertEqual(
+            list(expansion.concepts.order_by('id').values_list('mnemonic', flat=True)),
+            sorted([concept2.mnemonic, concept1_latest.mnemonic])
+        )
+
     def test_apply_date_filter(self):  # pylint: disable=too-many-locals,too-many-statements
         source1 = OrganizationSourceFactory(
             mnemonic='s1', version='HEAD', canonical_url='https://s1.com')

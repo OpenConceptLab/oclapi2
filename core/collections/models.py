@@ -912,25 +912,34 @@ class Expansion(BaseResourceModel):
         index_concepts = False
         index_mappings = False
         should_reevaluate = attempt_reevaluate and not self.is_auto_generated
-        include_system_version = None
-        if should_reevaluate and self.parameters.get(ExpansionParameters.INCLUDE_SYSTEM):
-            system_version = self.parameters.get(ExpansionParameters.INCLUDE_SYSTEM)
-            include_system_version = ConceptContainerModel.resolve_reference_expression(system_version)
-            if not include_system_version.id:
-                include_system_version = None
+        include_system_versions = []
+        system_versions = self.parameters.get(ExpansionParameters.INCLUDE_SYSTEM)
+        if should_reevaluate and system_versions:
+            for system_version in compact(system_versions.split(',')):
+                version = ConceptContainerModel.resolve_reference_expression(system_version.strip())
+                if version.id:
+                    include_system_versions.append(version)
 
         def get_ref_results(ref):
             # attempt_reevaluate is False for delete reference(s)
             nonlocal resolved_valueset_versions
             nonlocal resolved_system_versions
-            _system_version = include_system_version if ref.can_compute_against_system_version(
-                include_system_version) else None
             resolved_valueset_versions += ref.resolve_valueset_versions
-            resolved_system_versions += [_system_version] if _system_version else [ref.resolve_system_version]
+            for _system_version in include_system_versions:
+                if ref.can_compute_against_system_version(_system_version):
+                    resolved_system_versions.append(_system_version)
+
+            resolved_system_versions.append(ref.resolve_system_version)
+
+            _concepts = Concept.objects.none()
+            _mappings = Mapping.objects.none()
 
             if should_reevaluate:
-                _concepts, _mappings = ref.get_concepts(_system_version)
-                _mappings |= ref.get_mappings(_system_version)
+                for _system_version in resolved_system_versions:
+                    __concepts, __mappings = ref.get_concepts(_system_version)
+                    _concepts |= __concepts
+                    _mappings |= __mappings
+                    _mappings |= ref.get_mappings(_system_version)
             else:
                 _concepts = ref.concepts.all()
                 _mappings = ref.mappings.all()
