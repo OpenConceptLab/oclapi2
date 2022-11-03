@@ -81,3 +81,7 @@ In order to increase major/minor version you need to set the new version in [cor
 
 In order to deploy please trigger the deployment [here](https://ci.openmrs.org/deploy/viewDeploymentProjectEnvironments.action?id=205619201).
 Please use an existing deployment release.
+
+
+## Contributing to Flower
+We welcome contributions. Please see [CONTRIBUTING.md](CONTRIBUTING.md) to get started!
