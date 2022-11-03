@@ -12,7 +12,7 @@ from core.common.models import VersionedModel
 from core.common.tasks import process_hierarchy_for_new_concept, process_hierarchy_for_concept_version, \
     process_hierarchy_for_new_parent_concept_version
 from core.common.utils import generate_temp_version, drop_version, \
-    encode_string, decode_string, named_tuple_fetchall, startswith_temp_version
+    encode_string, decode_string, named_tuple_fetchall, startswith_temp_version, is_versioned_uri
 from core.concepts.constants import CONCEPT_TYPE, LOCALES_FULLY_SPECIFIED, LOCALES_SHORT, LOCALES_SEARCH_INDEX_TERM, \
     CONCEPT_WAS_RETIRED, CONCEPT_IS_ALREADY_RETIRED, CONCEPT_IS_ALREADY_NOT_RETIRED, CONCEPT_WAS_UNRETIRED, \
     PERSIST_CLONE_ERROR, PERSIST_CLONE_SPECIFY_USER_ERROR, ALREADY_EXISTS, CONCEPT_REGEX, MAX_LOCALES_LIMIT, \
@@ -892,13 +892,13 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
     @property
     def parent_concept_urls(self):
-        return self.__get_hierarchy_concept_urls('parent_concepts')
+        return self.get_hierarchy_concept_urls('parent_concepts')
 
     @property
     def child_concept_urls(self):
-        return self.__get_hierarchy_concept_urls('child_concepts')
+        return self.get_hierarchy_concept_urls('child_concepts')
 
-    def __get_hierarchy_concept_urls(self, relation):
+    def get_hierarchy_concept_urls(self, relation, versioned=False):
         queryset = get(self, relation).all()
         if self.is_latest_version:
             queryset |= get(self.versioned_object, relation).all()
@@ -906,7 +906,15 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             latest_version = self.get_latest_version()
             if latest_version:
                 queryset |= get(latest_version, relation).all()
-        return self.__format_hierarchy_uris(queryset.values_list('uri', flat=True))
+        uris = queryset.values_list('uri', flat=True)
+        if versioned:
+            return self.__format_hierarchy_versioned_uris(uris)
+        return self.__format_hierarchy_uris(uris)
+
+    def get_hierarchy_queryset(self, relation, repo_version, filters=None):
+        filters = filters or {}
+        queryset = Concept.objects.filter(uri__in=self.get_hierarchy_concept_urls(relation, not repo_version.is_head))
+        return queryset.filter(**filters)
 
     def child_concept_queryset(self):
         urls = self.child_concept_urls
@@ -942,6 +950,10 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     @staticmethod
     def __format_hierarchy_uris(uris):
         return list({drop_version(uri) for uri in uris})
+
+    @staticmethod
+    def __format_hierarchy_versioned_uris(uris):
+        return list({uri for uri in uris if is_versioned_uri(uri)})
 
     def get_hierarchy_path(self):
         result = []
@@ -1128,7 +1140,8 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                 result['mappings'] = mappings.filter(return_map_types_criteria)
         if source_to_concepts:
             if cascade_hierarchy:
-                hierarchy_queryset = self.child_concept_queryset().filter(sources=repo_version)
+                hierarchy_queryset = self.get_hierarchy_queryset(
+                    'child_concepts', repo_version, dict(sources=repo_version))
                 if not include_retired:
                     hierarchy_queryset = hierarchy_queryset.filter(retired=False)
                 result['hierarchy_concepts'] = result['hierarchy_concepts'].union(hierarchy_queryset)
@@ -1172,7 +1185,8 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                 result['mappings'] = mappings.filter(return_map_types_criteria)
         if source_to_concepts:
             if cascade_hierarchy:
-                hierarchy_queryset = self.parent_concept_queryset().filter(sources=repo_version)
+                hierarchy_queryset = self.get_hierarchy_queryset(
+                    'parent_concepts', repo_version, dict(sources=repo_version))
                 if not include_retired:
                     hierarchy_queryset = hierarchy_queryset.filter(retired=False)
                 result['hierarchy_concepts'] = result['hierarchy_concepts'].union(hierarchy_queryset)
@@ -1215,8 +1229,8 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                 result['mappings'] = mappings.filter(return_map_types_criteria)
         if source_to_concepts:
             if cascade_hierarchy:
-                hierarchy_queryset = self.child_concept_queryset().filter(
-                    expansion_set__collection_version=repo_version)
+                hierarchy_queryset = self.get_hierarchy_queryset(
+                    'child_concepts', repo_version, dict(expansion_set__collection_version=repo_version))
                 if not include_retired:
                     hierarchy_queryset = hierarchy_queryset.filter(retired=False)
                 result['hierarchy_concepts'] = result['hierarchy_concepts'].union(hierarchy_queryset)
@@ -1258,8 +1272,8 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                 result['mappings'] = mappings.filter(return_map_types_criteria)
         if source_to_concepts:
             if cascade_hierarchy:
-                hierarchy_queryset = self.parent_concept_queryset().filter(
-                    expansion_set__collection_version=repo_version)
+                hierarchy_queryset = self.get_hierarchy_queryset(
+                    'parent_concepts', repo_version, dict(expansion_set__collection_version=repo_version))
                 if not include_retired:
                     hierarchy_queryset = hierarchy_queryset.filter(retired=False)
                 result['hierarchy_concepts'] = result['hierarchy_concepts'].union(hierarchy_queryset)
