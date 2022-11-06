@@ -650,7 +650,9 @@ class ConceptContainerExportMixin:
         if version.is_exporting:
             return Response(status=status.HTTP_208_ALREADY_REPORTED)
 
-        if not version.has_export():
+        force_export = request.query_params.get('force', False) in ['true', 'True', True]
+
+        if force_export or not version.has_export():
             status_code = self.handle_export_version()
             return Response(status=status_code)
 
