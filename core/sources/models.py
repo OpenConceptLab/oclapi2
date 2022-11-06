@@ -2,8 +2,8 @@ import uuid
 
 from django.core.exceptions import ValidationError
 from django.db import models
-from django.db.models import UniqueConstraint, F
-from pydash import compact
+from django.db.models import UniqueConstraint, F, Max
+from pydash import compact, get
 from dirtyfields import DirtyFieldsMixin
 
 from core.common.models import ConceptContainerModel
@@ -344,3 +344,13 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
             PostgresQL.drop_seq(self.concepts_external_id_seq_name)
             PostgresQL.drop_seq(self.mappings_mnemonic_seq_name)
             PostgresQL.drop_seq(self.mappings_external_id_seq_name)
+
+    @property
+    def last_concept_update(self):
+        queryset = self.concepts_set.filter(id=F('versioned_object_id')) if self.is_head else self.concepts
+        return get(queryset.aggregate(max_updated_at=Max('updated_at')), 'max_updated_at', None)
+
+    @property
+    def last_mapping_update(self):
+        queryset = self.mappings_set.filter(id=F('versioned_object_id')) if self.is_head else self.mappings
+        return get(queryset.aggregate(max_updated_at=Max('updated_at')), 'max_updated_at', None)

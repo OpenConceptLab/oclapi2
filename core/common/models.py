@@ -5,7 +5,7 @@ from django.contrib.postgres.fields import ArrayField
 from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator
 from django.db import models, IntegrityError
-from django.db.models import Value, Q, Max
+from django.db.models import Value, Q
 from django.db.models.expressions import CombinedExpression, F
 from django.utils import timezone
 from django.utils.functional import cached_property
@@ -394,14 +394,6 @@ class ConceptContainerModel(VersionedModel):
             update_source_active_concepts_count.apply_async((self.id,), queue='concurrent')
         elif self.__class__.__name__ == 'Collection':
             update_collection_active_concepts_count.apply_async((self.id,), queue='concurrent')
-
-    @property
-    def last_concept_update(self):
-        return get(self.concepts.aggregate(max_updated_at=Max('updated_at')), 'max_updated_at', None)
-
-    @property
-    def last_mapping_update(self):
-        return get(self.mappings.aggregate(max_updated_at=Max('updated_at')), 'max_updated_at', None)
 
     @property
     def last_child_update(self):
