@@ -1056,7 +1056,7 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
         uncounted_concepts = Concept.objects.filter(_counted__isnull=True)
         sources = Source.objects.filter(id__in=uncounted_concepts.values_list('parent_id', flat=True))
         for source in sources:
-            source.update_concepts_count(sync=True)
+            source.update_concepts_count(sync=False)
             uncounted_concepts.filter(parent_id=source.id).update(_counted=True)
 
     @staticmethod
@@ -1065,5 +1065,5 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
         sources = Source.objects.filter(
             id__in=uncounted_mappings.values_list('parent_id', flat=True))
         for source in sources:
-            source.update_mappings_count(sync=True)
+            source.update_mappings_count(sync=False)
             uncounted_mappings.filter(parent_id=source.id).update(_counted=True)
