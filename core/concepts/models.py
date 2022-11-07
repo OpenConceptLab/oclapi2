@@ -467,14 +467,19 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             )
 
         if concept:
-            mnemonics = [concept, encode_string(concept, safe=' '), encode_string(concept, safe='+'),
-                         encode_string(concept, safe='+%'), encode_string(concept, safe='% +'),
-                         decode_string(concept), decode_string(concept, False)]
-            queryset = queryset.filter(mnemonic__in=mnemonics)
+            queryset = queryset.filter(mnemonic__in=cls.get_mnemonic_variations_for_filter(concept))
         if concept_version:
             queryset = queryset.filter(version=concept_version)
 
         return cls.apply_attribute_based_filters(queryset, params)
+
+    @staticmethod
+    def get_mnemonic_variations_for_filter(mnemonic):
+        return [
+            mnemonic, encode_string(mnemonic, safe=' '), encode_string(mnemonic, safe='+'),
+            encode_string(mnemonic, safe='+%'), encode_string(mnemonic, safe='% +'),
+            decode_string(mnemonic), decode_string(mnemonic, False)
+        ]
 
     def clone(self):
         concept_version = Concept(
