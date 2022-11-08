@@ -924,9 +924,9 @@ class TaskTest(OCLTestCase):
 
         self.assertEqual(res, 1)
         call_args = email_message_mock.call_args[1]
-        self.assertEqual(
-            call_args['subject'],
-            f'[DEVELOPMENT] Monthly usage report: {get_start_of_month(prev_month)} to {get_end_of_month(prev_month)}'
+        self.assertTrue(
+            f"Monthly usage report: {get_start_of_month(prev_month)} to {get_end_of_month(prev_month)}"
+            in call_args['subject']
         )
         self.assertEqual(call_args['to'], ['reports@openconceptlab.org'])
         self.assertTrue('</html>' in call_args['body'])
