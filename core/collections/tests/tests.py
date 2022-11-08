@@ -1318,7 +1318,7 @@ class ExpansionParametersTest(OCLTestCase):
         expansion.add_references(ref1)
 
         self.assertEqual(expansion.concepts.count(), 1)
-        self.assertEqual(expansion.concepts.first().id, initial_version.id)   # v1 source version concept c1
+        self.assertEqual(expansion.concepts.first().mnemonic, initial_version.mnemonic)   # v1 source version concept c1
 
         expansion.concepts.clear()
 
