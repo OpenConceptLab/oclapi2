@@ -1,3 +1,6 @@
+import json
+from urllib.parse import quote
+
 from dateutil.relativedelta import relativedelta
 from django.db.models import Count, F
 from django.db.models.functions import TruncMonth
@@ -22,6 +25,35 @@ class MonthlyUsageReport:
         self.result = {}
         self.make_resources()
 
+    @staticmethod
+    def to_chart_url(label, graph_data, chart_type='bar'):
+        labels = []
+        data = []
+        color = "rgba(51, 115, 170, 1)"
+        color_light = "rgba(51, 115, 170, .2)"
+        for ele in graph_data:
+            key = list(ele.keys())[0]
+            labels.append(key)
+            data.append(ele[key])
+
+        config = dict(
+            type=chart_type,
+            data=dict(
+                labels=labels,
+                datasets=[dict(
+                    label=label,
+                    data=data,
+                    backgroundColor=[color_light],
+                    borderColor=[color],
+                    borderWidth=1
+                )]
+            ),
+            options=dict(
+                scales=dict(y=dict(beginAtZero=True))
+            )
+        )
+        return f'https://quickchart.io/chart?c={quote(json.dumps(config))}'
+
     def make_resources(self):
         self.resources.append(UserReport(start=self.start, end=self.end, verbose=self.verbose))
         self.resources.append(OrganizationReport(start=self.start, end=self.end, verbose=self.verbose))
@@ -39,6 +71,28 @@ class MonthlyUsageReport:
         self.result['end'] = self.resources[0].end
         for resource in self.resources:
             self.result[resource.resource] = resource.get_monthly_report()
+
+    def get_result_for_email(self):
+        urls = {}
+        for resource in self.resources:
+            entity = resource.resource
+            stats = [
+                dict(
+                    data=self.result[entity]['created_monthly'],
+                    label=f"{entity.title()} Created Monthly",
+                    key=f"{entity}_url")
+            ]
+
+            if entity == 'users':
+                stats.append(
+                    dict(
+                        data=self.result[entity]['last_login_monthly'],
+                        label=f"{entity.title()} Joined Monthly",
+                        key=f"{entity}_last_login_monthly_url"),
+                )
+            for stat in stats:
+                urls[stat['key']] = self.to_chart_url(stat['label'], stat['data'])
+        return {**self.result, **urls}
 
 
 class ResourceReport:
@@ -119,6 +173,7 @@ class ResourceReport:
 
 class UserReport(ResourceReport):
     queryset = UserProfile.objects
+    raw_queryset = UserProfile.objects
     resource = 'users'
     pk = 'username'
 
@@ -132,6 +187,15 @@ class UserReport(ResourceReport):
 
     def set_last_login_monthly_distribution(self):
         self.last_login_monthly_distribution = self.get_distribution('last_login')
+
+    def set_date_range(self):
+        pass
+
+    def set_created_at_date_range(self):
+        self.queryset = self.raw_queryset.filter(created_at__gte=self.start, created_at__lte=self.end)
+
+    def set_last_login_date_range(self):
+        self.queryset = self.raw_queryset.filter(last_login__gte=self.start, last_login__lte=self.end)
 
     def get_monthly_report(self):
         self.result = super().get_monthly_report()

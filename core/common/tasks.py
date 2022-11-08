@@ -15,7 +15,8 @@ from pydash import get
 
 from core.celery import app
 from core.common.constants import CONFIRM_EMAIL_ADDRESS_MAIL_SUBJECT, PASSWORD_RESET_MAIL_SUBJECT
-from core.common.utils import write_export_file, web_url, get_resource_class_from_resource_name, get_export_service
+from core.common.utils import write_export_file, web_url, get_resource_class_from_resource_name, get_export_service, \
+    get_start_of_month, get_end_of_month
 
 logger = get_task_logger(__name__)
 
@@ -719,3 +720,19 @@ def beat_healthcheck():  # pragma: no cover
     from core.common.services import RedisService
     redis_service = RedisService()
     redis_service.set(settings.CELERYBEAT_HEALTHCHECK_KEY, str(datetime.now()), ex=120)
+
+
+@app.task(ignore_result=True)
+def monthly_usage_report():  # pragma: no cover
+    from core.reports.models import MonthlyUsageReport
+    report = MonthlyUsageReport(verbose=True, start=get_start_of_month(), end=get_end_of_month())
+    report.prepare()
+    html_body = render_to_string('monthly_usage_report_for_mail.html', report.get_result_for_email())
+    mail = EmailMessage(
+        subject=f"[{settings.ENV.upper()}] Monthly usage report: {report.start} to {report.end}",
+        body=html_body,
+        to=[settings.REPORTS_EMAIL]
+    )
+    mail.content_subtype = "html"
+    res = mail.send()
+    return res

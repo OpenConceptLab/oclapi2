@@ -17,14 +17,14 @@ from rest_framework.test import APITestCase
 
 from core.collections.models import CollectionReference
 from core.common.constants import HEAD
-from core.common.tasks import delete_s3_objects, bulk_import_parallel_inline
+from core.common.tasks import delete_s3_objects, bulk_import_parallel_inline, monthly_usage_report
 from core.common.utils import (
     compact_dict_by_values, to_snake_case, flower_get, task_exists, parse_bulk_import_task_id,
     to_camel_case,
     drop_version, is_versioned_uri, separate_version, to_parent_uri, jsonify_safe, es_get,
     get_resource_class_from_resource_name, flatten_dict, is_csv_file, is_url_encoded_string, to_parent_uri_from_kwargs,
     set_current_user, get_current_user, set_request_url, get_request_url, nested_dict_values, chunks, api_get,
-    split_list_by_condition)
+    split_list_by_condition, get_start_of_month, get_end_of_month)
 from core.concepts.models import Concept
 from core.orgs.models import Organization
 from core.sources.models import Source
@@ -911,6 +911,28 @@ class TaskTest(OCLTestCase):
 
         self.assertEqual(result, 'Import Result')
         import_run_mock.assert_called_once()
+
+    @patch('core.common.tasks.EmailMessage')
+    def test_monthly_usage_report(self, email_message_mock):
+        email_message_instance_mock = Mock(send=Mock(return_value=1))
+        email_message_mock.return_value = email_message_instance_mock
+        res = monthly_usage_report()
+
+        email_message_mock.assert_called_once()
+        email_message_instance_mock.send.assert_called_once()
+
+        self.assertEqual(res, 1)
+        call_args = email_message_mock.call_args[1]
+        self.assertEqual(
+            call_args['subject'],
+            f'[DEVELOPMENT] Monthly usage report: {get_start_of_month()} to {get_end_of_month()}'
+        )
+        self.assertEqual(call_args['to'], ['reports@openconceptlab.org'])
+        self.assertTrue('</html>' in call_args['body'])
+        self.assertTrue('concepts' in call_args['body'])
+        self.assertTrue('sources' in call_args['body'])
+        self.assertTrue('collections' in call_args['body'])
+        self.assertEqual(email_message_instance_mock.content_subtype, 'html')
 
 
 class PostgresQLTest(OCLTestCase):
