@@ -446,10 +446,11 @@ class CollectionReferencesView(
         is_async = self.is_async_requested()
         collection = self.get_object()
         data = request.data.get('data')
+        cascade_params = request.data.get('cascade', None)
         is_dict = isinstance(data, dict)
         concept_expressions = data.get('concepts', []) if is_dict else []
         mapping_expressions = data.get('mappings', []) if is_dict else []
-        cascade = self.request.query_params.get('cascade', '').lower()
+        cascade = cascade_params or self.request.query_params.get('cascade', '').lower()
         transform = self.request.query_params.get('transformReferences', '').lower()
 
         adding_all = ALL in (mapping_expressions, concept_expressions)
