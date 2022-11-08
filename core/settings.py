@@ -15,6 +15,7 @@ import os
 # Build paths inside the project like this: os.path.join(BASE_DIR, ...)
 from datetime import timedelta
 
+from celery.schedules import crontab
 from corsheaders.defaults import default_headers
 from kombu import Queue, Exchange
 
@@ -354,6 +355,10 @@ CELERYBEAT_SCHEDULE = {
     'healthcheck-every-minute': {
         'task': 'core.common.tasks.beat_healthcheck',
         'schedule': timedelta(seconds=60),
+    },
+    'first-of-every-month': {
+        'task': 'core.common.tasks.monthly_usage_report',
+        'schedule': crontab(0, 0, day_of_month='1'),
     },
 }
 CELERYBEAT_HEALTHCHECK_KEY = 'celery_beat_healthcheck'

@@ -865,3 +865,7 @@ def get_start_of_month(date=timezone.now().date()):
 def get_end_of_month(date=timezone.now().date()):
     next_month = date.replace(day=28) + timedelta(days=4)
     return next_month - timedelta(days=next_month.day)
+
+
+def get_prev_month(date=timezone.now().date()):
+    return date.replace(day=1) - timedelta(days=1)
