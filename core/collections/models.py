@@ -478,8 +478,9 @@ class CollectionReference(models.Model):
             queryset = self.transform_to_latest_version(queryset, Concept)
             if self.code:
                 concept = queryset.first()
-                self.resource_version = concept.version
-                self.expression = concept.uri
+                if concept:
+                    self.resource_version = concept.version
+                    self.expression = concept.uri
             if mapping_queryset.exists():
                 mapping_queryset = self.transform_to_latest_version(mapping_queryset, Mapping)
         return queryset, mapping_queryset
