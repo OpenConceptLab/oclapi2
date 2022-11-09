@@ -394,7 +394,7 @@ class CollectionReferenceDetailSerializer(CollectionReferenceSerializer):
         fields = (
             *CollectionReferenceSerializer.Meta.fields,
             'code', 'resource_version', 'namespace', 'system', 'version', 'valueset', 'cascade', 'filter', 'display',
-            'created_at', 'updated_at', 'concepts', 'mappings', 'translation'
+            'created_at', 'updated_at', 'concepts', 'mappings', 'translation', 'transform'
         )
 
 
