@@ -10,7 +10,7 @@ from core.collections.serializers import CollectionVersionExportSerializer, Coll
 from core.collections.tests.factories import OrganizationCollectionFactory, UserCollectionFactory, ExpansionFactory
 from core.common.tasks import export_collection
 from core.common.tests import OCLAPITestCase
-from core.common.utils import get_latest_dir_in_path
+from core.common.utils import get_latest_dir_in_path, drop_version
 from core.concepts.serializers import ConceptVersionExportSerializer
 from core.concepts.tests.factories import ConceptFactory
 from core.mappings.serializers import MappingDetailSerializer
@@ -883,6 +883,8 @@ class CollectionReferencesViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(self.collection.references.count(), 4)
+        self.assertEqual(self.collection.expansion.concepts.count(), 3)
+        self.assertEqual(self.collection.expansion.mappings.count(), 1)
         self.assertTrue(
             self.collection.references.filter(
                 expression=concept2_latest_version.uri,
@@ -891,6 +893,68 @@ class CollectionReferencesViewTest(OCLAPITestCase):
                 reference_type='concepts',
                 cascade__isnull=True,
                 transform__isnull=True,
+                include=True,
+            ).exists()
+        )
+        self.assertTrue(
+            self.collection.references.filter(
+                expression=concept3_latest_version.uri,
+                code=concept3_latest_version.mnemonic,
+                resource_version=concept3_latest_version.version,
+                reference_type='concepts',
+                cascade__isnull=True,
+                transform__isnull=True,
+                include=True,
+            ).exists()
+        )
+        self.assertTrue(
+            self.collection.references.filter(
+                expression=mapping_latest_version.uri,
+                code=mapping_latest_version.mnemonic,
+                resource_version=mapping_latest_version.version,
+                reference_type='mappings',
+                cascade__isnull=True,
+                transform__isnull=True,
+                include=True,
+            ).exists()
+        )
+
+        # excluding one of them should keep rest same -- bug
+        response = self.client.put(
+            self.collection.uri + 'references/',
+            {
+                "data": {
+                    "concepts": [drop_version(concept3.uri)],
+                    "exclude": True
+                }
+            },
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.collection.references.count(), 5)
+        self.assertEqual(self.collection.expansion.concepts.count(), 2)
+        self.assertEqual(self.collection.expansion.mappings.count(), 1)
+        self.assertTrue(
+            self.collection.references.filter(
+                expression=concept2_latest_version.uri,
+                code=concept2_latest_version.mnemonic,
+                resource_version=concept2_latest_version.version,
+                reference_type='concepts',
+                cascade__isnull=True,
+                transform__isnull=True,
+                include=True,
+            ).exists()
+        )
+        self.assertTrue(
+            self.collection.references.filter(
+                expression=mapping_latest_version.uri,
+                code=mapping_latest_version.mnemonic,
+                resource_version=mapping_latest_version.version,
+                reference_type='mappings',
+                cascade__isnull=True,
+                transform__isnull=True,
+                include=True,
             ).exists()
         )
         self.assertTrue(
@@ -905,12 +969,21 @@ class CollectionReferencesViewTest(OCLAPITestCase):
         )
         self.assertTrue(
             self.collection.references.filter(
-                expression=mapping_latest_version.uri,
-                code=mapping_latest_version.mnemonic,
-                resource_version=mapping_latest_version.version,
-                reference_type='mappings',
+                expression=concept3_latest_version.uri,
+                code=concept3_latest_version.mnemonic,
+                resource_version=concept3_latest_version.version,
+                reference_type='concepts',
                 cascade__isnull=True,
                 transform__isnull=True,
+                include=True,
+            ).exists()
+        )
+        self.assertTrue(
+            self.collection.references.filter(
+                expression=drop_version(concept3_latest_version.uri),
+                code=concept3_latest_version.mnemonic,
+                reference_type='concepts',
+                include=False,
             ).exists()
         )
 

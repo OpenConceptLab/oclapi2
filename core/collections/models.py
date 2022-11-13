@@ -1027,7 +1027,7 @@ class Expansion(BaseResourceModel):
             if ref.resource_version:
                 rel.remove(*resources)
             else:
-                rel.set(rel.exclude(versioned_object_id__in=rel.values_list('versioned_object_id', flat=True)))
+                rel.set(rel.exclude(versioned_object_id__in=resources.values_list('versioned_object_id', flat=True)))
         return should_index
 
     def index_resources(self, concepts, mappings):
