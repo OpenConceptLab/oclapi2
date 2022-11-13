@@ -830,6 +830,90 @@ class CollectionReferencesViewTest(OCLAPITestCase):
         self.assertTrue(self.collection.references.filter(expression=concept2_latest_version.uri).exists())
         self.assertTrue(self.collection.references.filter(expression=concept3.uri).exists())
 
+    def test_put_expression_cascade_and_transform_to_generate_multiple_references(self):
+        source = OrganizationSourceFactory()
+        concept2 = ConceptFactory(parent=source)
+        concept2_latest_version = concept2.get_latest_version()
+        concept3 = ConceptFactory(parent=source)
+        concept3_latest_version = concept3.get_latest_version()
+        mapping = MappingFactory(from_concept=concept2, to_concept=concept3, parent=source)
+        mapping_latest_version = mapping.get_latest_version()
+
+        self.assertNotEqual(concept2.uri, concept2_latest_version.uri)
+        self.assertNotEqual(concept3.uri, concept3_latest_version.uri)
+        self.assertNotEqual(mapping.uri, mapping_latest_version.uri)
+        response = self.client.put(
+            self.collection.uri + 'references/?transformReferences=resourceVersions',
+            dict(
+                data=dict(expressions=[concept2.uri]),
+                cascade=dict(cascade_levels="*", return_map_types='*', method='sourcetoconcepts')
+            ),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 3)
+        self.assertEqual(
+            [data for data in response.data if data['expression'] == concept2_latest_version.uri],
+            [
+                dict(
+                    added=True, expression=concept2_latest_version.uri,
+                    message=ANY
+                )
+            ]
+        )
+        self.assertEqual(
+            [data for data in response.data if data['expression'] == concept3_latest_version.uri],
+            [
+                dict(
+                    added=True, expression=concept3_latest_version.uri,
+                    message=ANY
+                )
+            ]
+        )
+        self.assertEqual(
+            [data for data in response.data if data['expression'] == mapping_latest_version.uri],
+            [
+                dict(
+                    added=True, expression=mapping_latest_version.uri,
+                    message=ANY
+                )
+            ]
+        )
+
+        self.assertEqual(self.collection.references.count(), 4)
+        self.assertTrue(
+            self.collection.references.filter(
+                expression=concept2_latest_version.uri,
+                code=concept2_latest_version.mnemonic,
+                resource_version=concept2_latest_version.version,
+                reference_type='concepts',
+                cascade__isnull=True,
+                transform__isnull=True,
+            ).exists()
+        )
+        self.assertTrue(
+            self.collection.references.filter(
+                expression=concept3_latest_version.uri,
+                code=concept3_latest_version.mnemonic,
+                resource_version=concept3_latest_version.version,
+                reference_type='concepts',
+                cascade__isnull=True,
+                transform__isnull=True,
+            ).exists()
+        )
+        self.assertTrue(
+            self.collection.references.filter(
+                expression=mapping_latest_version.uri,
+                code=mapping_latest_version.mnemonic,
+                resource_version=mapping_latest_version.version,
+                reference_type='mappings',
+                cascade__isnull=True,
+                transform__isnull=True,
+            ).exists()
+        )
+
     def test_put_bad_expressions(self):
         expression = {
            "data": {
