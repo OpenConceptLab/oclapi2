@@ -189,36 +189,7 @@ class Collection(ConceptContainerModel):
             reference.expression = reference.build_expression()
             reference.collection = self
             reference.created_by = user
-            all_references_from_reference = []
-            if reference.include and reference.cascade and reference.transform:
-                concepts, mappings = reference.get_concepts()
-                for concept in concepts:
-                    new_ref = CollectionReference(
-                        expression=concept.uri,
-                        reference_type='concepts',
-                        code=encode_string(concept.mnemonic),
-                        collection=self,
-                        created_by=user,
-                        resource_version=concept.version,
-                        system=reference.system,
-                        version=reference.version
-                    )
-                    all_references_from_reference.append(new_ref)
-                for mapping in mappings:
-                    new_ref = CollectionReference(
-                        expression=mapping.uri,
-                        reference_type='mappings',
-                        code=mapping.mnemonic,
-                        collection=self,
-                        created_by=user,
-                        resource_version=mapping.version,
-                        system=reference.system,
-                        version=reference.version
-                    )
-                    all_references_from_reference.append(new_ref)
-            else:
-                all_references_from_reference.append(reference)
-            for _reference in all_references_from_reference:
+            for _reference in reference.generate_references():
                 try:
                     self.validate(_reference)
                     _reference.save()
@@ -536,6 +507,39 @@ class CollectionReference(models.Model):
                 self.resource_version = mapping.version
                 self.expression = mapping.uri
         return queryset
+
+    def generate_references(self):
+        references = []
+        if self.should_generate_multiple_references():
+            concepts, mappings = self.get_concepts()
+            for concept in concepts:
+                references.append(CollectionReference(
+                    expression=concept.uri,
+                    reference_type='concepts',
+                    code=encode_string(concept.mnemonic),
+                    collection_id=self.collection_id,
+                    created_by=self.created_by,
+                    resource_version=concept.version,
+                    system=self.system,
+                    version=self.version
+                ))
+            for mapping in mappings:
+                references.append(CollectionReference(
+                    expression=mapping.uri,
+                    reference_type='mappings',
+                    code=mapping.mnemonic,
+                    collection_id=self.collection_id,
+                    created_by=self.created_by,
+                    resource_version=mapping.version,
+                    system=self.system,
+                    version=self.version
+                ))
+        else:
+            references.append(self)
+        return references
+
+    def should_generate_multiple_references(self):
+        return self.include and self.cascade and self.transform
 
     @staticmethod
     def transform_to_latest_version(queryset, klass):
@@ -935,7 +939,8 @@ class Expansion(BaseResourceModel):
         resolved_system_versions = []
 
         if not is_adding_all_references:
-            existing_exclude_refs = self.collection_version.references.exclude(include=True)
+            existing_exclude_refs = self.collection_version.references.exclude(
+                include=True).exclude(id__in=[ref.id for ref in exclude_refs])
             if isinstance(exclude_refs, QuerySet):
                 exclude_refs |= existing_exclude_refs
             else:
