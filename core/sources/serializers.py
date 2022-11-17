@@ -25,18 +25,43 @@ class SourceMinimalSerializer(ModelSerializer):
 
 
 class SourceListSerializer(ModelSerializer):
+    type = CharField(source='resource_type')
     short_code = CharField(source='mnemonic')
     owner = CharField(source='parent_resource')
     owner_type = CharField(source='parent_resource_type')
     owner_url = CharField(source='parent_url')
     id = CharField(source='mnemonic')
+    summary = SerializerMethodField()
 
     class Meta:
         model = Source
         fields = (
             'short_code', 'name', 'url', 'owner', 'owner_type', 'owner_url', 'version', 'created_at', 'id',
-            'source_type', 'updated_at', 'canonical_url'
+            'source_type', 'updated_at', 'canonical_url', 'summary', 'type',
         )
+
+    def __init__(self, *args, **kwargs):
+        params = get(kwargs, 'context.request.query_params')
+
+        self.query_params = {}
+        if params:
+            self.query_params = params if isinstance(params, dict) else params.dict()
+        self.include_summary = self.query_params.get(INCLUDE_SUMMARY) in ['true', True]
+        try:
+            if not self.include_summary:
+                self.fields.pop('summary', None)
+        except:  # pylint: disable=bare-except
+            pass
+
+        super().__init__(*args, **kwargs)
+
+    def get_summary(self, obj):
+        summary = None
+
+        if self.include_summary:
+            summary = SourceSummarySerializer(obj).data
+
+        return summary
 
 
 class SourceVersionListSerializer(ModelSerializer):
