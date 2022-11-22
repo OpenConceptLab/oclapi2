@@ -115,7 +115,7 @@ class CodeSystemTest(OCLTestCase):
         self.assertEqual(response.data['version'], 'v2')
 
     def test_validate_code_for_code_system(self):
-        response = self.client.get(f'/fhir/CodeSystem/$validate-code'
+        response = self.client.get(f'/fhir/CodeSystem/$validate-code/'
                                    f'?url={self.org_source.canonical_url}&code={self.concept_1.mnemonic}')
 
         self.assertEqual(response.status_code, 200)
@@ -123,7 +123,7 @@ class CodeSystemTest(OCLTestCase):
             {'resourceType': 'Parameters', 'parameter': [{'name': 'result', 'valueBoolean': True}]}))
 
     def test_validate_code_for_code_system_negative(self):
-        response = self.client.get(f'/fhir/CodeSystem/$validate-code'
+        response = self.client.get(f'/fhir/CodeSystem/$validate-code/'
                                    f'?url={self.org_source.canonical_url}&code=non_existing_code')
 
         self.assertEqual(response.status_code, 200)
@@ -134,7 +134,7 @@ class CodeSystemTest(OCLTestCase):
             ]}))
 
     def test_validate_code_with_display_for_code_system(self):
-        response = self.client.get(f'/fhir/CodeSystem/$validate-code'
+        response = self.client.get(f'/fhir/CodeSystem/$validate-code/'
                                    f'?url={self.org_source.canonical_url}'
                                    f'&code={self.concept_1.mnemonic}'
                                    f'&display={self.concept_1.display_name}')
@@ -144,7 +144,7 @@ class CodeSystemTest(OCLTestCase):
             {'resourceType': 'Parameters', 'parameter': [{'name': 'result', 'valueBoolean': True}]}))
 
     def test_validate_code_with_display_for_code_system_negative(self):
-        response = self.client.get(f'/fhir/CodeSystem/$validate-code'
+        response = self.client.get(f'/fhir/CodeSystem/$validate-code/'
                                    f'?url={self.org_source.canonical_url}'
                                    f'&code={self.concept_1.mnemonic}'
                                    f'&display=wrong_display')
@@ -157,7 +157,7 @@ class CodeSystemTest(OCLTestCase):
                 ]}))
 
     def test_lookup_for_code_system(self):
-        response = self.client.get(f'/fhir/CodeSystem/$lookup'
+        response = self.client.get(f'/fhir/CodeSystem/$lookup/'
                                    f'?system={self.org_source.canonical_url}'
                                    f'&code={self.concept_1.mnemonic}')
 
