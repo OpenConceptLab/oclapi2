@@ -9,7 +9,7 @@ from dirtyfields import DirtyFieldsMixin
 from core.common.models import ConceptContainerModel
 from core.common.services import PostgresQL
 from core.common.validators import validate_non_negative
-from core.concepts.models import LocalizedText
+from core.concepts.models import ConceptName
 from core.sources.constants import SOURCE_TYPE, SOURCE_VERSION_TYPE, HIERARCHY_ROOT_MUST_BELONG_TO_SAME_SOURCE, \
     HIERARCHY_MEANINGS, AUTO_ID_CHOICES, AUTO_ID_SEQUENTIAL, AUTO_ID_UUID
 
@@ -152,7 +152,7 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         self.version_needed = head.version_needed
 
     def get_concept_name_locales(self):
-        return LocalizedText.objects.filter(name_locales__in=self.get_active_concepts())
+        return ConceptName.objects.filter(concept__in=self.get_active_concepts())
 
     def is_validation_necessary(self):
         origin_source = self.get_latest_version()

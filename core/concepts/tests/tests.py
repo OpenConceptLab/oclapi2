@@ -1,5 +1,3 @@
-from uuid import UUID
-
 import factory
 from pydash import omit
 
@@ -13,12 +11,12 @@ from core.concepts.constants import (
     OPENMRS_PREFERRED_NAME_UNIQUE_PER_SOURCE_LOCALE, OPENMRS_SHORT_NAME_CANNOT_BE_PREFERRED,
     SHORT, INDEX_TERM, OPENMRS_NAMES_EXCEPT_SHORT_MUST_BE_UNIQUE, OPENMRS_ONE_FULLY_SPECIFIED_NAME_PER_LOCALE,
     OPENMRS_NO_MORE_THAN_ONE_SHORT_NAME_PER_LOCALE, CONCEPT_IS_ALREADY_RETIRED, CONCEPT_IS_ALREADY_NOT_RETIRED,
-    OPENMRS_CONCEPT_CLASS, OPENMRS_DATATYPE, OPENMRS_DESCRIPTION_TYPE, OPENMRS_NAME_LOCALE, OPENMRS_DESCRIPTION_LOCALE)
+    OPENMRS_CONCEPT_CLASS, OPENMRS_DATATYPE, OPENMRS_DESCRIPTION_TYPE, OPENMRS_NAME_LOCALE)
 from core.concepts.documents import ConceptDocument
-from core.concepts.models import Concept, LocalizedText
+from core.concepts.models import Concept
 from core.concepts.serializers import ConceptListSerializer, ConceptVersionListSerializer, ConceptDetailSerializer, \
     ConceptVersionDetailSerializer, ConceptMinimalSerializer
-from core.concepts.tests.factories import LocalizedTextFactory, ConceptFactory
+from core.concepts.tests.factories import ConceptNameFactory, ConceptFactory, ConceptDescriptionFactory
 from core.concepts.validators import ValidatorSpecifier
 from core.mappings.tests.factories import MappingFactory
 from core.sources.tests.factories import OrganizationSourceFactory
@@ -26,38 +24,12 @@ from core.sources.tests.factories import OrganizationSourceFactory
 
 class LocalizedTextTest(OCLTestCase):
     def test_clone(self):
-        saved_locale = LocalizedTextFactory()
+        saved_locale = ConceptNameFactory.build()
         cloned_locale = saved_locale.clone()
         self.assertEqual(
             omit(saved_locale.__dict__, ['_state', 'id', 'created_at']),
             omit(cloned_locale.__dict__, ['_state', 'id', 'created_at'])
         )
-        self.assertNotEqual(saved_locale.id, cloned_locale.id)
-
-    def test_dormants_raw_query(self):
-        self.assertEqual(LocalizedText.dormants(), 0)
-
-        locale = LocalizedTextFactory()
-        self.assertEqual(LocalizedText.dormants(), 1)
-
-        ConceptFactory(names=[locale])
-
-        self.assertEqual(LocalizedText.dormants(), 0)
-
-        LocalizedTextFactory()
-        self.assertEqual(LocalizedText.dormants(raw=False), 1)
-
-    def test_dormants(self):
-        self.assertEqual(LocalizedText.dormants(raw=False), 0)
-
-        locale = LocalizedTextFactory()
-        self.assertEqual(LocalizedText.dormants(raw=False), 1)
-
-        ConceptFactory(names=[locale])
-        self.assertEqual(LocalizedText.dormants(raw=False), 0)
-
-        LocalizedTextFactory()
-        self.assertEqual(LocalizedText.dormants(raw=False), 1)
 
 
 class ConceptTest(OCLTestCase):
@@ -73,27 +45,27 @@ class ConceptTest(OCLTestCase):
 
     def test_display_name(self):
         source = OrganizationSourceFactory(default_locale='fr', supported_locales=['fr', 'ti'])
-        ch_locale = LocalizedTextFactory(locale_preferred=True, locale='ch')
-        en_locale = LocalizedTextFactory(locale_preferred=True, locale='en')
-        concept = ConceptFactory(names=[ch_locale, en_locale], parent=source)
+        concept = ConceptFactory(
+            parent=source, names=1, names__locale_preferred=True, names__locale='ch', names__name='ch')
+        en_locale = ConceptNameFactory(locale_preferred=True, locale='en', concept=concept, name='en')
 
         self.assertEqual(concept.display_name, en_locale.name)  # locale preferred order by created at desc
 
         source.supported_locales = ['fr', 'ti', 'ch']
         source.save()
-        self.assertEqual(concept.display_name, ch_locale.name)  # locale preferred parent's supported locale
+        self.assertEqual(concept.display_name, 'ch')  # locale preferred parent's supported locale
 
         # taking scenarios for ciel 1366 concept
         concept = ConceptFactory(
             parent=source,
             names=[
-                LocalizedTextFactory(locale_preferred=True, locale='en', name='MALARIA SMEAR, QUALITATIVE'),
-                LocalizedTextFactory(type='SHORT', locale_preferred=False, locale='en', name='malaria sm, qual'),
-                LocalizedTextFactory(locale_preferred=False, locale='en', name='Jungle fever smear'),
-                LocalizedTextFactory(locale_preferred=True, locale='fr', name='FROTTIS POUR DÉTECTER PALUDISME'),
-                LocalizedTextFactory(locale_preferred=False, locale='ht', name='tès MALARYA , kalitatif'),
-                LocalizedTextFactory(locale_preferred=False, locale='es', name='frotis de malaria (cualitativo)'),
-                LocalizedTextFactory(locale_preferred=False, locale='es', name='Frotis de paludismo'),
+                ConceptNameFactory.build(locale_preferred=True, locale='en', name='MALARIA SMEAR, QUALITATIVE'),
+                ConceptNameFactory.build(type='SHORT', locale_preferred=False, locale='en', name='malaria sm, qual'),
+                ConceptNameFactory.build(locale_preferred=False, locale='en', name='Jungle fever smear'),
+                ConceptNameFactory.build(locale_preferred=True, locale='fr', name='FROTTIS POUR DÉTECTER PALUDISME'),
+                ConceptNameFactory.build(locale_preferred=False, locale='ht', name='tès MALARYA , kalitatif'),
+                ConceptNameFactory.build(locale_preferred=False, locale='es', name='frotis de malaria (cualitativo)'),
+                ConceptNameFactory.build(locale_preferred=False, locale='es', name='Frotis de paludismo'),
             ]
         )
 
@@ -128,14 +100,14 @@ class ConceptTest(OCLTestCase):
         self.assertEqual(concept.display_name, 'MALARIA SMEAR, QUALITATIVE')
 
     def test_display_locale(self):
-        preferred_locale = LocalizedTextFactory(locale_preferred=True)
+        preferred_locale = ConceptNameFactory.build(locale_preferred=True)
         concept = ConceptFactory(names=(preferred_locale,))
 
         self.assertEqual(concept.display_locale, preferred_locale.locale)
 
     def test_default_name_locales(self):
-        es_locale = LocalizedTextFactory(locale='es')
-        en_locale = LocalizedTextFactory(locale='en')
+        es_locale = ConceptNameFactory.build(locale='es')
+        en_locale = ConceptNameFactory.build(locale='en')
         concept = ConceptFactory(names=(es_locale, en_locale))
 
         default_name_locales = concept.default_name_locales
@@ -144,8 +116,8 @@ class ConceptTest(OCLTestCase):
         self.assertEqual(default_name_locales.first(), en_locale)
 
     def test_default_description_locales(self):
-        es_locale = LocalizedTextFactory(locale='es')
-        en_locale = LocalizedTextFactory(locale='en')
+        es_locale = ConceptDescriptionFactory.build(locale='es')
+        en_locale = ConceptDescriptionFactory.build(locale='en')
         concept = ConceptFactory(descriptions=(es_locale, en_locale))
 
         default_description_locales = concept.default_description_locales
@@ -154,15 +126,15 @@ class ConceptTest(OCLTestCase):
         self.assertEqual(default_description_locales.first(), en_locale)
 
     def test_names_for_default_locale(self):
-        es_locale = LocalizedTextFactory(locale='es', name='Not English')
-        en_locale = LocalizedTextFactory(locale='en', name='English')
+        es_locale = ConceptNameFactory.build(locale='es', name='Not English')
+        en_locale = ConceptNameFactory.build(locale='en', name='English')
         concept = ConceptFactory(names=(es_locale, en_locale))
 
         self.assertEqual(concept.names_for_default_locale, [en_locale.name])
 
     def test_descriptions_for_default_locale(self):
-        es_locale = LocalizedTextFactory(locale='es', name='Not English')
-        en_locale = LocalizedTextFactory(locale='en', name='English')
+        es_locale = ConceptDescriptionFactory.build(locale='es', name='Not English')
+        en_locale = ConceptDescriptionFactory.build(locale='en', name='English')
         concept = ConceptFactory(descriptions=(es_locale, en_locale))
 
         self.assertEqual(concept.descriptions_for_default_locale, [en_locale.name])
@@ -170,8 +142,8 @@ class ConceptTest(OCLTestCase):
     def test_all_names(self):
         concept = ConceptFactory(
             names=[
-                LocalizedTextFactory(name="name1", locale='en', locale_preferred=True),
-                LocalizedTextFactory(name='name2', locale='en', type='Short')
+                ConceptNameFactory.build(name="name1", locale='en', locale_preferred=True),
+                ConceptNameFactory.build(name='name2', locale='en', type='Short')
             ]
         )
 
@@ -181,7 +153,7 @@ class ConceptTest(OCLTestCase):
         source = OrganizationSourceFactory(version=HEAD)
         concept = Concept.persist_new({
             **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'c1', 'parent': source,
-            'names': [LocalizedTextFactory.build(locale='en', name='English', locale_preferred=True)]
+            'names': [ConceptNameFactory.build(locale='en', name='English', locale_preferred=True)]
         })
 
         self.assertEqual(concept.errors, {})
@@ -199,7 +171,7 @@ class ConceptTest(OCLTestCase):
             version=HEAD, autoid_concept_mnemonic='sequential', autoid_concept_external_id='sequential')
         concept = Concept.persist_new({
             **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'parent': source, 'mnemonic': None,
-            'names': [LocalizedTextFactory.build(locale='en', name='English', locale_preferred=True)]
+            'names': [ConceptNameFactory.build(locale='en', name='English', locale_preferred=True)]
         })
 
         self.assertEqual(concept.errors, {})
@@ -209,7 +181,7 @@ class ConceptTest(OCLTestCase):
 
         concept = Concept.persist_new({
             **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'parent': source, 'mnemonic': None,
-            'names': [LocalizedTextFactory.build(locale='en', name='English', locale_preferred=True)]
+            'names': [ConceptNameFactory.build(locale='en', name='English', locale_preferred=True)]
         })
 
         self.assertEqual(concept.errors, {})
@@ -224,7 +196,7 @@ class ConceptTest(OCLTestCase):
             **factory.build(dict, FACTORY_CLASS=ConceptFactory),
             'parent': source,
             'mnemonic': None,
-            'names': [LocalizedTextFactory.build(locale='en', name='English', locale_preferred=True)]
+            'names': [ConceptNameFactory.build(locale='en', name='English', locale_preferred=True)]
         })
 
         self.assertEqual(concept.errors, {})
@@ -237,7 +209,7 @@ class ConceptTest(OCLTestCase):
             'mnemonic': '1',
             'external_id': '1',
             'parent': source,
-            'names': [LocalizedTextFactory.build(locale='en', name='English', locale_preferred=True)]
+            'names': [ConceptNameFactory.build(locale='en', name='English', locale_preferred=True)]
         })
 
         self.assertEqual(concept.errors, {})
@@ -249,7 +221,7 @@ class ConceptTest(OCLTestCase):
             **factory.build(dict, FACTORY_CLASS=ConceptFactory),
             'mnemonic': None,
             'parent': source,
-            'names': [LocalizedTextFactory.build(locale='en', name='English', locale_preferred=True)]
+            'names': [ConceptNameFactory.build(locale='en', name='English', locale_preferred=True)]
         })
 
         self.assertEqual(concept.errors, {})
@@ -264,7 +236,7 @@ class ConceptTest(OCLTestCase):
             **factory.build(dict, FACTORY_CLASS=ConceptFactory),
             'mnemonic': None,
             'parent': source,
-            'names': [LocalizedTextFactory.build(locale='en', name='English', locale_preferred=True)]
+            'names': [ConceptNameFactory.build(locale='en', name='English', locale_preferred=True)]
         })
 
         self.assertEqual(concept.errors, {})
@@ -276,7 +248,7 @@ class ConceptTest(OCLTestCase):
             **factory.build(dict, FACTORY_CLASS=ConceptFactory),
             'mnemonic': None,
             'parent': source,
-            'names': [LocalizedTextFactory.build(locale='en', name='English', locale_preferred=True)]
+            'names': [ConceptNameFactory.build(locale='en', name='English', locale_preferred=True)]
         })
 
         self.assertEqual(concept.errors, {})
@@ -289,34 +261,34 @@ class ConceptTest(OCLTestCase):
             version=HEAD, autoid_concept_mnemonic='uuid', autoid_concept_external_id='uuid')
         concept1 = Concept.persist_new({
             **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'parent': source, 'mnemonic': None,
-            'names': [LocalizedTextFactory.build(locale='en', name='English', locale_preferred=True)]
+            'names': [ConceptNameFactory.build(locale='en', name='English', locale_preferred=True)]
         })
 
         self.assertEqual(concept1.errors, {})
         self.assertIsNotNone(concept1.id)
-        self.assertIsInstance(concept1.mnemonic, UUID)
-        self.assertIsInstance(concept1.external_id, UUID)
+        self.assertTrue(len(concept1.mnemonic), 36)
+        self.assertTrue(len(concept1.external_id), 36)
 
         concept2 = Concept.persist_new({
             **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'parent': source, 'mnemonic': None,
-            'names': [LocalizedTextFactory.build(locale='en', name='English', locale_preferred=True)]
+            'names': [ConceptNameFactory.build(locale='en', name='English', locale_preferred=True)]
         })
 
         self.assertEqual(concept2.errors, {})
         self.assertIsNotNone(concept2.id)
-        self.assertIsInstance(concept2.mnemonic, UUID)
-        self.assertIsInstance(concept2.external_id, UUID)
+        self.assertTrue(len(concept2.mnemonic), 36)
+        self.assertTrue(len(concept2.external_id), 36)
 
         self.assertNotEqual(concept1.mnemonic, concept2.mnemonic)
         self.assertNotEqual(concept1.external_id, concept2.external_id)
 
     def test_hierarchy_one_parent_child(self):
         parent_concept = ConceptFactory(
-            names=[LocalizedTextFactory(locale='en', name='English', locale_preferred=True)])
+            names=[ConceptNameFactory.build(locale='en', name='English', locale_preferred=True)])
         source = parent_concept.parent
         child_concept = Concept.persist_new({
             **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'c1', 'parent': source,
-            'names': [LocalizedTextFactory.build(locale='en', name='English', locale_preferred=True)],
+            'names': [ConceptNameFactory.build(locale='en', name='English', locale_preferred=True)],
             'parent_concept_urls': [parent_concept.uri]
         })
 
@@ -332,7 +304,7 @@ class ConceptTest(OCLTestCase):
 
         another_child_concept = Concept.persist_new({
             **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'c2', 'parent': source,
-            'names': [LocalizedTextFactory.build(locale='en', name='English', locale_preferred=True)],
+            'names': [ConceptNameFactory.build(locale='en', name='English', locale_preferred=True)],
             'parent_concept_urls': [parent_concept.uri]
         })
 
@@ -358,14 +330,14 @@ class ConceptTest(OCLTestCase):
     def test_hierarchy(self):  # pylint: disable=too-many-statements
         # Av1
         parent_concept = ConceptFactory(
-            names=[LocalizedTextFactory(locale='en', name='English', locale_preferred=True)])
+            names=[ConceptNameFactory.build(locale='en', name='English', locale_preferred=True)])
         self.assertEqual(parent_concept.versions.count(), 1)
         source = parent_concept.parent
 
         # Av1 -> None and Av2 -> Bv1
         child_concept = Concept.persist_new({
             **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'c1', 'parent': source,
-            'names': [LocalizedTextFactory.build(locale='en', name='English', locale_preferred=True)],
+            'names': [ConceptNameFactory.build(locale='en', name='English', locale_preferred=True)],
             'parent_concept_urls': [parent_concept.uri]
         })
 
@@ -383,7 +355,7 @@ class ConceptTest(OCLTestCase):
         # Av1 -> None and Av2 -> Bv1,Bv2 and Bv2 -> Cv1
         child_child_concept = Concept.persist_new({
             **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'c2', 'parent': source,
-            'names': [LocalizedTextFactory.build(locale='en', name='English', locale_preferred=True)],
+            'names': [ConceptNameFactory.build(locale='en', name='English', locale_preferred=True)],
             'parent_concept_urls': [child_concept.uri]
         })
 
@@ -567,7 +539,7 @@ class ConceptTest(OCLTestCase):
     def test_hierarchy_without_multiple_parent_versions(self):  # pylint: disable=too-many-statements
         # Av1
         parent_concept = ConceptFactory(
-            names=[LocalizedTextFactory(locale='en', name='English', locale_preferred=True)])
+            names=[ConceptNameFactory.build(locale='en', name='English', locale_preferred=True)])
         self.assertEqual(parent_concept.versions.count(), 1)
         self.assertEqual(list(parent_concept.get_latest_version().child_concept_urls), [])
         source = parent_concept.parent
@@ -575,7 +547,7 @@ class ConceptTest(OCLTestCase):
         # Av1 to Av1 -> Bv1
         child_concept = Concept.persist_new(data={
             **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'c1', 'parent': source,
-            'names': [LocalizedTextFactory.build(locale='en', name='English', locale_preferred=True)],
+            'names': [ConceptNameFactory.build(locale='en', name='English', locale_preferred=True)],
             'parent_concept_urls': [parent_concept.uri]
         }, create_parent_version=False)
 
@@ -592,7 +564,7 @@ class ConceptTest(OCLTestCase):
         # Av1 to Av1 -> Bv1 to Av1 -> Bv1 -> Cv1
         child_child_concept = Concept.persist_new(data={
             **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'c2', 'parent': source,
-            'names': [LocalizedTextFactory.build(locale='en', name='English', locale_preferred=True)],
+            'names': [ConceptNameFactory.build(locale='en', name='English', locale_preferred=True)],
             'parent_concept_urls': [child_concept.uri]
         }, create_parent_version=False)
 
@@ -743,10 +715,11 @@ class ConceptTest(OCLTestCase):
         )
 
     def test_clone(self):
-        es_locale = LocalizedTextFactory(locale='es', name='Not English')
-        en_locale = LocalizedTextFactory(locale='en', name='English')
+        en_locale = ConceptNameFactory.build(locale='en', name='English')
+        es_locale_description = ConceptDescriptionFactory.build(locale='es', name='Not English')
+        en_locale_description = ConceptDescriptionFactory.build(locale='en', name='English')
 
-        concept = ConceptFactory(descriptions=(es_locale, en_locale), names=(en_locale,), released=True)
+        concept = ConceptFactory(descriptions=(es_locale_description, en_locale_description), names=(en_locale,), released=True)
         cloned_concept = concept.clone()
 
         self.assertTrue(cloned_concept.version.startswith('--TEMP--'))
@@ -770,8 +743,9 @@ class ConceptTest(OCLTestCase):
         self.assertFalse(concept_version.released)
 
     def test_persist_clone(self):
-        es_locale = LocalizedTextFactory(locale='es', name='Not English')
-        en_locale = LocalizedTextFactory(locale='en', name='English')
+        es_description = ConceptDescriptionFactory.build(locale='es', name='Not English')
+        en_description = ConceptDescriptionFactory.build(locale='en', name='English')
+        en_name = ConceptNameFactory.build(locale='en', name='English')
 
         source_head = OrganizationSourceFactory(version=HEAD)
         source_version0 = OrganizationSourceFactory(
@@ -781,8 +755,8 @@ class ConceptTest(OCLTestCase):
         self.assertEqual(source_head.versions.count(), 2)
 
         concept = ConceptFactory(
-            descriptions=(es_locale, en_locale),
-            names=(en_locale,),
+            descriptions=(es_description, en_description),
+            names=(en_name,),
             parent=source_head
         )
         source_version0.concepts.add(concept)
@@ -815,7 +789,7 @@ class ConceptTest(OCLTestCase):
         source = OrganizationSourceFactory(version=HEAD)
         concept = Concept.persist_new({
             **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'c1', 'parent': source,
-            'names': [LocalizedTextFactory.build(locale='en', name='English', locale_preferred=True)]
+            'names': [ConceptNameFactory.build(locale='en', name='English', locale_preferred=True)]
         })
         Concept.persist_clone(concept.clone(), concept.created_by)
         concept_v1 = Concept.objects.order_by('-created_at').first()
@@ -847,7 +821,7 @@ class ConceptTest(OCLTestCase):
         source = OrganizationSourceFactory(version=HEAD)
         concept = Concept.persist_new({
             **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'c1', 'parent': source, 'retired': True,
-            'names': [LocalizedTextFactory.build(locale='en', name='English', locale_preferred=True)]
+            'names': [ConceptNameFactory.build(locale='en', name='English', locale_preferred=True)]
         })
         Concept.persist_clone(concept.clone(), concept.created_by)
         concept_v1 = Concept.objects.order_by('-created_at').first()
@@ -1028,7 +1002,7 @@ class ConceptTest(OCLTestCase):
 
         child_concept = Concept.persist_new({
             **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'c1', 'parent': parent_concept.parent,
-            'names': [LocalizedTextFactory.build(locale='en', name='English', locale_preferred=True)],
+            'names': [ConceptNameFactory.build(locale='en', name='English', locale_preferred=True)],
             'parent_concept_urls': [parent_concept.uri]
         })
 
@@ -1037,7 +1011,7 @@ class ConceptTest(OCLTestCase):
 
         child_child_concept = Concept.persist_new({
             **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'c2', 'parent': parent_concept.parent,
-            'names': [LocalizedTextFactory.build(locale='en', name='English', locale_preferred=True)],
+            'names': [ConceptNameFactory.build(locale='en', name='English', locale_preferred=True)],
             'parent_concept_urls': [child_concept.uri]
         })
 
@@ -1052,7 +1026,7 @@ class ConceptTest(OCLTestCase):
 
         child_concept = Concept.persist_new({
             **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'c1', 'parent': parent_concept.parent,
-            'names': [LocalizedTextFactory.build(locale='en', name='English', locale_preferred=True)],
+            'names': [ConceptNameFactory.build(locale='en', name='English', locale_preferred=True)],
             'parent_concept_urls': [parent_concept.uri]
         })
         self.assertEqual(
@@ -1063,7 +1037,7 @@ class ConceptTest(OCLTestCase):
 
         child_child_concept = Concept.persist_new({
             **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'c2', 'parent': parent_concept.parent,
-            'names': [LocalizedTextFactory.build(locale='en', name='English', locale_preferred=True)],
+            'names': [ConceptNameFactory.build(locale='en', name='English', locale_preferred=True)],
             'parent_concept_urls': [child_concept.uri]
         })
         self.assertEqual(
@@ -1082,7 +1056,7 @@ class ConceptTest(OCLTestCase):
 
         child_concept = Concept.persist_new({
             **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'c1', 'parent': parent_concept.parent,
-            'names': [LocalizedTextFactory.build(locale='en', name='English', locale_preferred=True)],
+            'names': [ConceptNameFactory.build(locale='en', name='English', locale_preferred=True)],
             'parent_concept_urls': [parent_concept.uri]
         })
         self.assertEqual(
@@ -1093,7 +1067,7 @@ class ConceptTest(OCLTestCase):
 
         child_child_concept = Concept.persist_new({
             **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'c2', 'parent': parent_concept.parent,
-            'names': [LocalizedTextFactory.build(locale='en', name='English', locale_preferred=True)],
+            'names': [ConceptNameFactory.build(locale='en', name='English', locale_preferred=True)],
             'parent_concept_urls': [child_concept.uri]
         })
         self.assertEqual(
@@ -1127,7 +1101,7 @@ class ConceptTest(OCLTestCase):
         source = OrganizationSourceFactory()
         concept = Concept.persist_new({
             **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'c1', 'parent': source,
-            'names': [LocalizedTextFactory.build(locale='en', name='English', locale_preferred=True)],
+            'names': [ConceptNameFactory.build(locale='en', name='English', locale_preferred=True)],
         })
         self.assertEqual(concept.versions.count(), 1)
 
@@ -1180,14 +1154,13 @@ class ConceptTest(OCLTestCase):
         source = OrganizationSourceFactory()
         concept = Concept.persist_new({
             **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'c1', 'parent': source,
-            'names': [LocalizedTextFactory.build(locale='en', name='English', locale_preferred=True)],
+            'names': [ConceptNameFactory.build(locale='en', name='English', locale_preferred=True)],
         })
         source_version1 = OrganizationSourceFactory(
             version='v1', mnemonic=source.mnemonic, organization=source.organization)
         source_version1.seed_concepts(index=False)
         OrganizationSourceFactory(
             version='v2', mnemonic=source.mnemonic, organization=source.organization)
-
         cloned_concept = Concept.version_for_concept(concept, 'v1', source)
         Concept.persist_clone(cloned_concept, concept.created_by)
         self.assertEqual(concept.versions.count(), 2)
@@ -1308,7 +1281,7 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
             dict(
                 mnemonic='concept1', version=HEAD, name='concept1', parent=source,
                 concept_class='XYZQWERT', datatype='None',
-                names=[LocalizedTextFactory.build(name='Grip', locale='es', locale_preferred=True)]
+                names=[ConceptNameFactory.build(name='Grip', locale='es', locale_preferred=True)]
             )
         )
 
@@ -1323,7 +1296,7 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
             dict(
                 mnemonic='concept1', version=HEAD, name='concept1', parent=source,
                 concept_class='Diagnosis', datatype='XYZWERRTR',
-                names=[LocalizedTextFactory.build(name='Grip', locale='es', locale_preferred=True)]
+                names=[ConceptNameFactory.build(name='Grip', locale='es', locale_preferred=True)]
             )
         )
         self.assertEqual(
@@ -1337,8 +1310,8 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
             dict(
                 mnemonic='concept1', version=HEAD, name='concept1', parent=source,
                 concept_class='Diagnosis', datatype='None',
-                names=[LocalizedTextFactory.build(locale_preferred=True)],
-                descriptions=[LocalizedTextFactory.build(type='XYZWERRTR')]
+                names=[ConceptNameFactory.build(locale_preferred=True)],
+                descriptions=[ConceptDescriptionFactory.build(type='XYZWERRTR')]
             )
         )
 
@@ -1353,8 +1326,8 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
             dict(
                 mnemonic='concept1', version=HEAD, name='concept1', parent=source,
                 concept_class='Diagnosis', datatype='None',
-                names=[LocalizedTextFactory.build(locale_preferred=True, locale='FOOBAR')],
-                descriptions=[LocalizedTextFactory.build(locale_preferred=True)]
+                names=[ConceptNameFactory.build(locale_preferred=True, locale='FOOBAR')],
+                descriptions=[ConceptDescriptionFactory.build(locale_preferred=True, type='Definition')]
             )
         )
 
@@ -1369,19 +1342,19 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
             dict(
                 mnemonic='concept1', version=HEAD, name='concept1', parent=source,
                 concept_class='Diagnosis', datatype='None',
-                names=[LocalizedTextFactory.build(locale_preferred=True)],
-                descriptions=[LocalizedTextFactory.build(locale_preferred=True, locale='FOOBAR')]
+                names=[ConceptNameFactory.build(locale_preferred=True)],
+                descriptions=[ConceptDescriptionFactory.build(locale_preferred=True, locale='FOOBAR')]
             )
         )
         self.assertEqual(
             concept.errors,
-            dict(descriptions=[OPENMRS_DESCRIPTION_LOCALE])
+            dict(descriptions=[OPENMRS_DESCRIPTION_TYPE])
         )
 
     def test_concept_should_have_exactly_one_preferred_name_per_locale(self):
-        name_en1 = LocalizedTextFactory.build(name='PreferredName1', locale_preferred=True)
-        name_en2 = LocalizedTextFactory.build(name='PreferredName2', locale_preferred=True)
-        name_tr = LocalizedTextFactory.build(name='PreferredName3', locale="tr", locale_preferred=True)
+        name_en1 = ConceptNameFactory.build(name='PreferredName1', locale_preferred=True)
+        name_en2 = ConceptNameFactory.build(name='PreferredName2', locale_preferred=True)
+        name_tr = ConceptNameFactory.build(name='PreferredName3', locale="tr", locale_preferred=True)
         source = OrganizationSourceFactory(custom_validation_schema=CUSTOM_VALIDATION_SCHEMA_OPENMRS)
 
         concept = Concept.persist_new(
@@ -1397,7 +1370,7 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
         )
 
     def test_concepts_should_have_unique_fully_specified_name_per_locale(self):
-        name_fully_specified1 = LocalizedTextFactory.build(name='FullySpecifiedName1')
+        name_fully_specified1 = ConceptNameFactory.build(name='FullySpecifiedName1')
 
         source = OrganizationSourceFactory(custom_validation_schema=CUSTOM_VALIDATION_SCHEMA_OPENMRS, version=HEAD)
         concept1_data = {
@@ -1425,8 +1398,8 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
             dict(
                 mnemonic='concept', version=HEAD, name='concept', parent=source,
                 concept_class='Diagnosis', datatype='None', names=[
-                    LocalizedTextFactory.build(name='Fully Specified Name 1', locale='tr', type='Short'),
-                    LocalizedTextFactory.build(name='Fully Specified Name 2', locale='en', type='Short')
+                    ConceptNameFactory.build(name='Fully Specified Name 1', locale='tr', type='Short'),
+                    ConceptNameFactory.build(name='Fully Specified Name 2', locale='en', type='Short')
                 ]
             )
         )
@@ -1441,7 +1414,7 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
             dict(
                 mnemonic='concept1', version=HEAD, name='concept1', parent=source,
                 concept_class='Diagnosis', datatype='None', names=[
-                    LocalizedTextFactory.build(
+                    ConceptNameFactory.build(
                         name='Concept Non Unique Preferred Name', locale='en',
                         locale_preferred=True, type='Fully Specified'
                     ),
@@ -1452,10 +1425,10 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
             dict(
                 mnemonic='concept2', version=HEAD, name='concept2', parent=source,
                 concept_class='Diagnosis', datatype='None', names=[
-                    LocalizedTextFactory.build(
+                    ConceptNameFactory.build(
                         name='Concept Non Unique Preferred Name', locale='en', locale_preferred=True, type='None'
                     ),
-                    LocalizedTextFactory.build(
+                    ConceptNameFactory.build(
                         name='any name', locale='en', locale_preferred=False, type='Fully Specified'
                     ),
                 ]
@@ -1476,11 +1449,11 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
             dict(
                 mnemonic='concept1', version=HEAD, name='concept1', parent=source,
                 concept_class='Diagnosis', datatype='None', names=[
-                    LocalizedTextFactory.build(
+                    ConceptNameFactory.build(
                         name='Concept Non Unique Preferred Name', locale='es',
                         locale_preferred=True, type='FULLY_SPECIFIED'
                     ),
-                    LocalizedTextFactory.build(
+                    ConceptNameFactory.build(
                         name='Concept Non Unique Preferred Name', locale='es',
                         locale_preferred=True, type='FULLY_SPECIFIED'
                     ),
@@ -1501,8 +1474,8 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
             dict(
                 mnemonic='concept', version=HEAD, name='concept', parent=source,
                 concept_class='Diagnosis', datatype='None', names=[
-                    LocalizedTextFactory.build(name="ShortName", locale_preferred=True, type="Short", locale='fr'),
-                    LocalizedTextFactory.build(name='Fully Specified Name'),
+                    ConceptNameFactory.build(name="ShortName", locale_preferred=True, type="Short", locale='fr'),
+                    ConceptNameFactory.build(name='Fully Specified Name'),
                 ]
             )
         )
@@ -1517,8 +1490,8 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
             dict(
                 mnemonic='concept', version=HEAD, name='concept', parent=source,
                 concept_class='Diagnosis', datatype='None', names=[
-                    LocalizedTextFactory.build(name="IndexTermName", locale_preferred=True, type=INDEX_TERM),
-                    LocalizedTextFactory.build(name='Fully Specified Name'),
+                    ConceptNameFactory.build(name="IndexTermName", locale_preferred=True, type=INDEX_TERM),
+                    ConceptNameFactory.build(name='Fully Specified Name'),
                 ]
             )
         )
@@ -1534,8 +1507,8 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
             dict(
                 mnemonic='concept', version=HEAD, name='concept', parent=source,
                 concept_class='Diagnosis', datatype='None', names=[
-                    LocalizedTextFactory.build(name="aName", type=SHORT),
-                    LocalizedTextFactory.build(name='aName'),
+                    ConceptNameFactory.build(name="aName", type=SHORT),
+                    ConceptNameFactory.build(name='aName'),
                 ]
             )
         )
@@ -1550,8 +1523,8 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
             dict(
                 mnemonic='concept', version=HEAD, name='concept', parent=source,
                 concept_class='Diagnosis', datatype='None', names=[
-                    LocalizedTextFactory.build(name="aName"),
-                    LocalizedTextFactory.build(name='aName'),
+                    ConceptNameFactory.build(name="aName"),
+                    ConceptNameFactory.build(name='aName'),
                 ]
             )
         )
@@ -1567,9 +1540,9 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
             dict(
                 mnemonic='concept', version=HEAD, name='concept', parent=source,
                 concept_class='Diagnosis', datatype='None', names=[
-                    LocalizedTextFactory.build(name="fully specified name1", locale='en'),
-                    LocalizedTextFactory.build(name='fully specified name2', locale='en'),
-                    LocalizedTextFactory.build(name='fully specified name3', locale='fr'),
+                    ConceptNameFactory.build(name="fully specified name1", locale='en'),
+                    ConceptNameFactory.build(name='fully specified name2', locale='en'),
+                    ConceptNameFactory.build(name='fully specified name3', locale='fr'),
                 ]
             )
         )
@@ -1586,9 +1559,9 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
             dict(
                 mnemonic='concept', version=HEAD, name='concept', parent=source,
                 concept_class='Diagnosis', datatype='None', names=[
-                    LocalizedTextFactory.build(name="fully specified name1", locale='en', type='Short'),
-                    LocalizedTextFactory.build(name='fully specified name2', locale='en', type='Short'),
-                    LocalizedTextFactory.build(name='fully specified name3', locale='fr'),
+                    ConceptNameFactory.build(name="fully specified name1", locale='en', type='Short'),
+                    ConceptNameFactory.build(name='fully specified name2', locale='en', type='Short'),
+                    ConceptNameFactory.build(name='fully specified name3', locale='fr'),
                 ]
             )
         )
@@ -1605,8 +1578,8 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
             dict(
                 mnemonic='concept', version=HEAD, name='concept', parent=source,
                 concept_class='Diagnosis', datatype='None', names=[
-                    LocalizedTextFactory.build(name="mg", locale='en', locale_preferred=True),
-                    LocalizedTextFactory.build(name='mg', locale='en', type='Short'),
+                    ConceptNameFactory.build(name="mg", locale='en', locale_preferred=True),
+                    ConceptNameFactory.build(name='mg', locale='en', type='Short'),
                 ]
             )
         )
@@ -1618,7 +1591,7 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
         concept = Concept.persist_new(dict(
                 mnemonic='concept', version=HEAD, name='concept', parent=source, external_id='1'*37,
                 concept_class='Diagnosis', datatype='None', names=[
-                    LocalizedTextFactory.build(name="mg", locale='en', locale_preferred=True),
+                    ConceptNameFactory.build(name="mg", locale='en', locale_preferred=True),
                 ]
             ))
         self.assertEqual(concept.errors, {'external_id': ['Concept External ID cannot be more than 36 characters.']})
@@ -1627,7 +1600,7 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
         concept = Concept.persist_new(dict(
                 mnemonic='concept', version=HEAD, name='concept', parent=source, external_id='1'*36,
                 concept_class='Diagnosis', datatype='None', names=[
-                    LocalizedTextFactory.build(name="mg", locale='en', locale_preferred=True),
+                    ConceptNameFactory.build(name="mg", locale='en', locale_preferred=True),
                 ]
             ))
         self.assertEqual(concept.errors, {})
@@ -1636,7 +1609,7 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
         concept1 = Concept.persist_new(dict(
                 mnemonic='concept1', version=HEAD, name='concept1', parent=source, external_id='1'*10,
                 concept_class='Diagnosis', datatype='None', names=[
-                    LocalizedTextFactory.build(name="mg1", locale='en', locale_preferred=True),
+                    ConceptNameFactory.build(name="mg1", locale='en', locale_preferred=True),
                 ]
             ))
         self.assertEqual(concept.errors, {})
@@ -1647,7 +1620,7 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
         concept = Concept.persist_new(dict(
                 mnemonic='concept', version=HEAD, name='concept', parent=source, external_id='1'*36,
                 concept_class='Diagnosis', datatype='None', names=[
-                    LocalizedTextFactory.build(name="mg", locale='en', locale_preferred=True, external_id='2'*37),
+                    ConceptNameFactory.build(name="mg", locale='en', locale_preferred=True, external_id='2' * 37),
                 ]
             ))
         self.assertEqual(
@@ -1661,14 +1634,23 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
 
     def test_description_external_id_length(self):
         source = OrganizationSourceFactory(custom_validation_schema=CUSTOM_VALIDATION_SCHEMA_OPENMRS)
-        concept = Concept.persist_new(dict(
-                mnemonic='concept', version=HEAD, name='concept', parent=source, external_id='1'*36,
-                concept_class='Diagnosis', datatype='None', names=[
-                    LocalizedTextFactory.build(name="mg", locale='en', locale_preferred=True, external_id='2'*36),
-                ], descriptions=[
-                    LocalizedTextFactory.build(name="mg", locale='en', external_id='2'*37),
+        concept = Concept.persist_new(
+            dict(
+                mnemonic='concept',
+                version=HEAD,
+                name='concept',
+                parent=source,
+                external_id='1' * 36,
+                concept_class='Diagnosis',
+                datatype='None',
+                names=[
+                    ConceptNameFactory.build(name="mg", locale='en', locale_preferred=True, external_id='2' * 36),
+                ],
+                descriptions=[
+                    ConceptDescriptionFactory.build(name="mg", locale='en', external_id='2' * 37),
                 ]
-            ))
+            )
+        )
         self.assertEqual(
             concept.errors,
             {

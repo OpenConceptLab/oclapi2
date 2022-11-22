@@ -1,7 +1,7 @@
 from rest_framework.test import APIClient
 
 from core.common.tests import OCLTestCase
-from core.concepts.tests.factories import ConceptFactory, LocalizedTextFactory
+from core.concepts.tests.factories import ConceptFactory, ConceptNameFactory
 from core.mappings.tests.factories import MappingFactory
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.models import Source
@@ -20,7 +20,7 @@ class ConceptMapTest(OCLTestCase):
             version='v1', mnemonic=self.org_source.mnemonic, organization=self.org_source.parent)
         Source.persist_new_version(self.org_source_v1, self.org_source.created_by)
         self.concept_1 = ConceptFactory(parent=self.org_source, mnemonic='concept_1',
-                                        names=[LocalizedTextFactory(name="concept_1_name")])
+                                        names=[ConceptNameFactory(name="concept_1_name")])
         self.concept_2 = ConceptFactory(parent=self.org_source, mnemonic='concept_2')
 
 
@@ -34,7 +34,7 @@ class ConceptMapTest(OCLTestCase):
         self.org_source_B = OrganizationSourceFactory(organization=self.org, canonical_url='/some/url/B',
                                                        full_name='source name B')
         self.concept_B_1 = ConceptFactory(parent=self.org_source_B, mnemonic='concept_B_1',
-                                          names=[LocalizedTextFactory(name="concept_B_1_name")])
+                                          names=[ConceptNameFactory(name="concept_B_1_name")])
         self.concept_B_2 = ConceptFactory(parent=self.org_source_B, mnemonic='concept_B_2')
         self.org_source_B_v1 = OrganizationSourceFactory.build(
             version='v1', mnemonic=self.org_source_B.mnemonic, organization=self.org_source_B.parent)

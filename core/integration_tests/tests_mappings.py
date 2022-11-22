@@ -2,7 +2,7 @@ from rest_framework.exceptions import ErrorDetail
 
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
 from core.common.tests import OCLAPITestCase
-from core.concepts.tests.factories import ConceptFactory, LocalizedTextFactory
+from core.concepts.tests.factories import ConceptFactory, ConceptNameFactory
 from core.mappings.constants import SAME_AS
 from core.mappings.models import Mapping
 from core.mappings.tests.factories import MappingFactory
@@ -264,7 +264,7 @@ class MappingListViewTest(OCLAPITestCase):
         self.assertIsNone(mapping.to_concept_id)
         self.assertIsNone(mapping.to_source_id)
 
-        concept2 = ConceptFactory(parent=source, sources=[source_v1], names=[LocalizedTextFactory()])
+        concept2 = ConceptFactory(parent=source, sources=[source_v1], names=[ConceptNameFactory()])
         self.assertIsNotNone(concept2.display_name)
 
         response = self.client.post(
@@ -350,7 +350,7 @@ class MappingListViewTest(OCLAPITestCase):
         self.assertEqual(mapping.to_source, source)
         self.assertIsNone(mapping.to_concept)
 
-        concept = ConceptFactory(parent=source, mnemonic='A73', names=[LocalizedTextFactory(name='Malaria Updated')])
+        concept = ConceptFactory(parent=source, mnemonic='A73', names=[ConceptNameFactory(name='Malaria Updated')])
         concept.update_mappings()
         mapping.refresh_from_db()
         self.assertEqual(mapping.to_concept_code, 'A73')
@@ -418,7 +418,7 @@ class MappingListViewTest(OCLAPITestCase):
         self.assertEqual(mapping.to_source, to_source)
         self.assertEqual(mapping.to_source_version, 'v11')
 
-        concept = ConceptFactory(parent=to_source, mnemonic='A73', names=[LocalizedTextFactory(name='foobar')])
+        concept = ConceptFactory(parent=to_source, mnemonic='A73', names=[ConceptNameFactory(name='foobar')])
         concept.update_mappings()
 
         mapping.refresh_from_db()
@@ -437,7 +437,7 @@ class MappingListViewTest(OCLAPITestCase):
         self.assertEqual(mapping.from_source_version, "2.46")
         self.assertEqual(mapping.from_source, from_source)
 
-        concept = ConceptFactory(parent=from_source, mnemonic='32700-7', names=[LocalizedTextFactory(name='foobar')])
+        concept = ConceptFactory(parent=from_source, mnemonic='32700-7', names=[ConceptNameFactory(name='foobar')])
         concept.update_mappings()
 
         mapping.refresh_from_db()

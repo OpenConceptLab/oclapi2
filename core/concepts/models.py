@@ -20,10 +20,9 @@ from core.concepts.constants import CONCEPT_TYPE, LOCALES_FULLY_SPECIFIED, LOCAL
 from core.concepts.mixins import ConceptValidationMixin
 
 
-class LocalizedText(models.Model):
+class AbstractLocalizedText(models.Model):
     class Meta:
-        db_table = 'localized_texts'
-
+        abstract = True
         indexes = [
             HashIndex(fields=['name']),
             models.Index(fields=['type']),
@@ -40,28 +39,6 @@ class LocalizedText(models.Model):
     locale_preferred = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
-    @classmethod
-    def get_dormant_queryset(cls):
-        return cls.objects.filter(name_locales__isnull=True, description_locales__isnull=True)
-
-    @classmethod
-    def dormants(cls, raw=True):
-        if raw:
-            with connection.cursor() as cursor:
-                cursor.execute(
-                    """
-                    SELECT COUNT("localized_texts"."id") FROM "localized_texts"
-                    WHERE NOT EXISTS (SELECT 1 FROM "concepts_names" WHERE
-                    "concepts_names"."localizedtext_id" = "localized_texts"."id")
-                    AND NOT EXISTS (SELECT 1 FROM "concepts_descriptions"
-                    WHERE "concepts_descriptions"."localizedtext_id" = "localized_texts"."id")
-                    """
-                )
-                count, = cursor.fetchone()
-                return count
-
-        return cls.get_dormant_queryset().count()
-
     def to_dict(self):
         return dict(
             external_id=self.external_id, name=self.name, type=self.type, locale=self.locale,
@@ -69,7 +46,7 @@ class LocalizedText(models.Model):
         )
 
     def clone(self):
-        return LocalizedText(
+        return self.__class__(
             external_id=self.external_id,
             name=self.name,
             type=self.type,
@@ -77,49 +54,17 @@ class LocalizedText(models.Model):
             locale_preferred=self.locale_preferred
         )
 
-    @classmethod
-    def build(cls, params, used_as='name'):
-        instance = None
-        if used_as == 'name':
-            instance = cls.build_name(params)
-        if used_as == 'description':
-            instance = cls.build_description(params)
-
-        return instance
+    @staticmethod
+    def _build(_):
+        pass
 
     @classmethod
-    def build_name(cls, params):
-        _type = params.pop('type', None)
-        name_type = params.pop('name_type', None)
-        if not name_type or name_type == 'ConceptName':
-            name_type = _type
-
-        return cls(
-            **{**params, 'type': name_type}
-        )
-
-    @classmethod
-    def build_description(cls, params):
-        _type = params.pop('type', None)
-        description_type = params.pop('description_type', None)
-        if not description_type or description_type == 'ConceptDescription':
-            description_type = _type
-
-        description_name = params.pop('description', None) or params.pop('name', None)
-        return cls(
-            **{
-                **params,
-                'type': description_type,
-                'name': description_name,
-            }
-        )
-
-    @classmethod
-    def build_locales(cls, locale_params, used_as='name'):
-        if not locale_params:
+    def build(cls, params):
+        if not params:
             return []
-
-        return [cls.build(locale, used_as) for locale in locale_params]
+        if isinstance(params, list):
+            return [cls._build(param) for param in params]
+        return cls._build(params)
 
     @property
     def is_fully_specified(self):
@@ -139,6 +84,75 @@ class LocalizedText(models.Model):
     @property
     def is_search_index_term(self):
         return self.type in LOCALES_SEARCH_INDEX_TERM
+
+
+class ConceptDescription(AbstractLocalizedText):
+    concept = models.ForeignKey('concepts.Concept', on_delete=models.CASCADE, related_name='descriptions')
+
+    class Meta:
+        db_table = 'concept_descriptions'
+        indexes = AbstractLocalizedText.Meta.indexes
+
+    @staticmethod
+    def _build(params):
+        _type = params.get('type', None)
+        description_type = params.get('description_type', None)
+        if not description_type or description_type == 'ConceptDescription':
+            description_type = _type
+
+        description_name = params.get('description', None) or params.get('name', None)
+        return ConceptDescription(
+            **{
+                **{k: v for k, v in params.items() if k not in ['description', 'name', 'type', 'description_type']},
+                'type': description_type,
+                'name': description_name,
+            }
+        )
+
+
+class ConceptName(AbstractLocalizedText):
+    concept = models.ForeignKey(
+        'concepts.Concept', on_delete=models.CASCADE, null=True, blank=True, related_name='names')
+
+    class Meta:
+        db_table = 'concept_names'
+        indexes = AbstractLocalizedText.Meta.indexes
+
+    @staticmethod
+    def _build(params):
+        _type = params.get('type', None)
+        name_type = params.get('name_type', None)
+        if not name_type or name_type == 'ConceptName':
+            name_type = _type
+
+        return ConceptName(
+            **{
+                **{k: v for k, v in params.items() if k not in ['type', 'name_type']},
+                'type': name_type
+            }
+        )
+
+    @classmethod
+    def get_dormant_queryset(cls):
+        return cls.objects.filter(name_locales__isnull=True, description_locales__isnull=True)
+
+    @classmethod
+    def dormants(cls, raw=True):
+        if raw:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT COUNT("concept_names"."id") FROM "concept_names"
+                    WHERE NOT EXISTS (SELECT 1 FROM "concepts_names" WHERE
+                    "concepts_names"."localizedtext_id" = "concept_names"."id")
+                    AND NOT EXISTS (SELECT 1 FROM "concepts_descriptions"
+                    WHERE "concepts_descriptions"."localizedtext_id" = "concept_names"."id")
+                    """
+                )
+                count, = cursor.fetchone()
+                return count
+
+        return cls.get_dormant_queryset().count()
 
 
 class HierarchicalConcepts(models.Model):
@@ -202,8 +216,8 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     external_id = models.TextField(null=True, blank=True)
     concept_class = models.TextField()
     datatype = models.TextField()
-    names = models.ManyToManyField(LocalizedText, related_name='name_locales')
-    descriptions = models.ManyToManyField(LocalizedText, related_name='description_locales')
+    names_old = models.ManyToManyField(ConceptName, related_name='name_locales')
+    descriptions_old = models.ManyToManyField(ConceptName, related_name='description_locales')
     comment = models.TextField(null=True, blank=True)
     parent = models.ForeignKey('sources.Source', related_name='concepts_set', on_delete=models.CASCADE)
     sources = models.ManyToManyField('sources.Source', related_name='concepts')
@@ -540,8 +554,8 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         instance.comment = data.get('update_comment') or data.get('comment')
         instance.retired = data.get('retired', instance.retired)
 
-        new_names = LocalizedText.build_locales(data.get('names', []))
-        new_descriptions = LocalizedText.build_locales(data.get('descriptions', []), 'description')
+        new_names = ConceptName.build(data.get('names', []))
+        new_descriptions = ConceptDescription.build(data.get('descriptions', []))
         has_parent_concept_uris_attr = 'parent_concept_urls' in data
         parent_concept_uris = data.pop('parent_concept_urls', None)
 
@@ -602,22 +616,13 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                         child = Concept.objects.filter(uri=uri).first().get_latest_version()
                         child.parent_concepts.add(new_latest_version)
 
-    def set_locales(self):
+    def set_locales(self, locales, locale_klass):
         if not self.id:
             return  # pragma: no cover
-
-        names = get(self, 'cloned_names', [])
-        descriptions = get(self, 'cloned_descriptions', [])
-
-        for name in names:
-            name.save()
-        for desc in descriptions:
-            desc.save()
-
-        self.names.set(names)
-        self.descriptions.set(descriptions)
-        self.cloned_names = []
-        self.cloned_descriptions = []
+        for locale in locales:
+            new_locale = locale.clone() if isinstance(locale, locale_klass) else locale_klass.build(locale)
+            new_locale.concept_id = self.id
+            new_locale.save()
 
     def remove_locales(self):
         self.names.all().delete()
@@ -638,17 +643,8 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
     @classmethod
     def persist_new(cls, data, user=None, create_initial_version=True, create_parent_version=True):  # pylint: disable=too-many-statements
-        names = [
-            name if isinstance(name, LocalizedText) else LocalizedText.build(
-                name
-            ) for name in data.pop('names', []) or []
-        ]
-        descriptions = [
-            desc if isinstance(desc, LocalizedText) else LocalizedText.build(
-                desc, 'description'
-            ) for desc in data.pop('descriptions', []) or []
-        ]
-
+        names = data.pop('names', []) or []
+        descriptions = data.pop('descriptions', []) or []
         parent_concept_uris = data.pop('parent_concept_urls', None)
         concept = Concept(**data)
         temp_version = generate_temp_version()
@@ -663,29 +659,30 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
         try:
             concept.validate_locales_limit(names, descriptions)
-            concept.cloned_names = names
-            concept.cloned_descriptions = descriptions
-            concept.full_clean()
             concept.save()
+            concept.versioned_object_id = concept.id
+            concept.version = str(concept.id)
+            concept.set_locales(names, ConceptName)
+            concept.set_locales(descriptions, ConceptDescription)
+
             parent_resource = concept.parent
             if startswith_temp_version(concept.mnemonic):
                 concept.mnemonic = parent_resource.concept_mnemonic_next or str(concept.id)
                 concept.name = concept.mnemonic
             if not concept.external_id:
                 concept.external_id = parent_resource.concept_external_id_next
-            concept.versioned_object_id = concept.id
-            concept.version = str(concept.id)
             concept.is_latest_version = not create_initial_version
             concept.public_access = parent_resource.public_access
             concept.save()
-            concept.set_locales()
+            concept.full_clean()
 
             initial_version = None
             if create_initial_version:
                 initial_version = cls.create_initial_version(concept)
-                initial_version.names.set(concept.names.all())
-                initial_version.descriptions.set(concept.descriptions.all())
-                initial_version.sources.set([parent_resource])
+                if initial_version.id:
+                    initial_version.set_locales(names, ConceptName)
+                    initial_version.set_locales(descriptions, ConceptDescription)
+                    initial_version.sources.set([parent_resource])
 
             concept.sources.set([parent_resource])
             concept.update_mappings()
@@ -701,8 +698,12 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             if create_initial_version and concept._counted is True:
                 parent_resource.update_concepts_count()
         except ValidationError as ex:
+            if concept.id:
+                concept.delete()
             concept.errors.update(ex.message_dict)
         except IntegrityError as ex:
+            if concept.id:
+                concept.delete()
             concept.errors.update(dict(__all__=ex.args))
 
         return concept
@@ -710,8 +711,9 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     def update_versioned_object(self):
         concept = self.versioned_object
         concept.extras = self.extras
-        concept.names.set(self.names.all())
-        concept.descriptions.set(self.descriptions.all())
+        concept.remove_locales()
+        concept.set_locales(self.names.all(), ConceptName)
+        concept.set_locales(self.descriptions.all(), ConceptDescription)
         concept.parent_concepts.set(self.parent_concepts.all())
         concept.concept_class = self.concept_class
         concept.datatype = self.datatype
@@ -746,7 +748,10 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                 if obj.id:
                     obj.version = str(obj.id)
                     obj.save()
-                    obj.set_locales()
+                    obj.set_locales(obj.cloned_names, ConceptName)
+                    obj.set_locales(obj.cloned_descriptions, ConceptDescription)
+                    obj.cloned_names = []
+                    obj.cloned_descriptions = []
                     obj.clean()  # clean here to validate locales that can only be saved after obj is saved
                     obj.update_versioned_object()
                     if prev_latest_version:
@@ -969,12 +974,6 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
         result.reverse()
         return result
-
-    def delete(self, using=None, keep_parents=False):
-        if self.is_versioned_object:
-            LocalizedText.objects.filter(name_locales=self).delete()
-            LocalizedText.objects.filter(description_locales=self).delete()
-        return super().delete(using=using, keep_parents=keep_parents)
 
     def cascade(  # pylint: disable=too-many-arguments,too-many-locals
             self, repo_version=None, source_mappings=True, source_to_concepts=True,
