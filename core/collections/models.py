@@ -456,6 +456,7 @@ class CollectionReference(models.Model):
             self._fetched = True
 
     def get_concepts(self, system_version=None):
+        system_version = system_version or self.resolve_system_version
         queryset = self.get_resource_queryset_from_system_and_valueset('concepts', system_version)
         mapping_queryset = Mapping.objects.none()
         if queryset is None:
@@ -466,7 +467,7 @@ class CollectionReference(models.Model):
             if self.resource_version:
                 queryset = queryset.filter(version=self.resource_version)
         if self.cascade:
-            cascade_params = self.get_concept_cascade_params()
+            cascade_params = self.get_concept_cascade_params(system_version)
             for concept in queryset:
                 result = concept.cascade(**cascade_params)
                 queryset = Concept.objects.filter(
@@ -558,11 +559,11 @@ class CollectionReference(models.Model):
     def should_apply_filter(self):
         return not self.code and self.filter
 
-    def get_concept_cascade_params(self):
+    def get_concept_cascade_params(self, system_version=None):
         is_dict = isinstance(self.cascade, dict)
         method = get(self.cascade, 'method') if is_dict and 'method' in self.cascade else self.cascade or ''
         cascade_params = {
-            'repo_version': get(self.cascade, 'source_version') or self.version or HEAD,
+            'repo_version': get(self.cascade, 'source_version') or system_version or self.version or HEAD,
             'source_mappings': method.lower() == SOURCE_MAPPINGS,
             'source_to_concepts': method.lower() == SOURCE_TO_CONCEPTS,
             'cascade_levels': 1 if self.cascade == method else get(self.cascade, 'cascade_levels', ALL),
