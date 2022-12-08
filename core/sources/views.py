@@ -513,7 +513,7 @@ class SourceMappedSourcesListView(SourceListView):
     is_searchable = False
 
     def get_object(self, queryset=None):
-        instance = super().get_queryset().filter(is_active=True).order_by('-created_at').first()
+        instance = super().get_queryset().order_by('-created_at').first()
         if not instance:
             raise Http404()
         self.check_object_permissions(self.request, instance)
