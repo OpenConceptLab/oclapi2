@@ -537,6 +537,19 @@ class UserDetailViewTest(OCLAPITestCase):
         self.assertEqual(response.data['name'], self.user.name)
         self.assertEqual(response.data['url'], self.user.uri)
 
+        random_user = UserProfileFactory()
+
+        response = self.client.get(
+            f'/users/{self.user.username}/',
+            HTTP_AUTHORIZATION='Token ' + random_user.get_token(),
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['username'], self.user.username)
+        self.assertEqual(response.data['name'], self.user.name)
+        self.assertEqual(response.data['url'], self.user.uri)
+
     def test_get_200_with_subscribed_orgs(self):
         response = self.client.get(
             f'/users/{self.user.username}/?includeSubscribedOrgs=false',

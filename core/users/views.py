@@ -387,7 +387,7 @@ class UserDetailView(UserBaseView, RetrieveAPIView, DestroyAPIView, mixins.Updat
         if self.request.query_params.get('includeVerificationToken') and self.request.method == 'GET':
             return instance
 
-        if not is_self and not is_admin:
+        if not is_self and not is_admin and self.request.method != 'GET':
             raise PermissionDenied()
 
         return instance
