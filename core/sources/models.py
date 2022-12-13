@@ -1,10 +1,10 @@
 import uuid
 
+from dirtyfields import DirtyFieldsMixin
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import UniqueConstraint, F, Max
 from pydash import compact, get
-from dirtyfields import DirtyFieldsMixin
 
 from core.common.models import ConceptContainerModel
 from core.common.services import PostgresQL
@@ -354,3 +354,9 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
     def last_mapping_update(self):
         queryset = self.mappings_set.filter(id=F('versioned_object_id')) if self.is_head else self.mappings
         return get(queryset.aggregate(max_updated_at=Max('updated_at')), 'max_updated_at', None)
+
+    def get_mapped_sources(self):
+        """Returns only direct mapped sources"""
+        mappings = self.mappings.exclude(to_source_id=self.id)
+        mappings = mappings.order_by('to_source_id').distinct('to_source_id')
+        return Source.objects.filter(id__in=mappings.values_list('to_source_id', flat=True))

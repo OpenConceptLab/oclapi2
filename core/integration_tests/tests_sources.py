@@ -1173,3 +1173,55 @@ class SourceVersionProcessingViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 200)
         self.source.refresh_from_db()
         self.assertFalse(self.source.is_processing)
+
+
+class SourceMappedSourcesListViewTest(OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.source = OrganizationSourceFactory()
+        self.token = self.source.created_by.get_token()
+
+    def test_get_404(self):
+        response = self.client.get(
+            '/orgs/my/sources/empty/mapped-sources/',
+            HTTP_AUTHORIZATION=f'Token {self.token}'
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+    @patch('core.sources.views.Source.get_mapped_sources')
+    def test_get_200(self, get_mapped_sources_mock):
+        get_mapped_sources_mock.return_value = Source.objects.none()
+
+        response = self.client.get(
+            self.source.url + 'mapped-sources/',
+            HTTP_AUTHORIZATION=f'Token {self.token}'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 0)
+        get_mapped_sources_mock.assert_called_once()
+
+    @patch('core.sources.views.Source.get_mapped_sources')
+    def test_get_200_with_data(self, get_mapped_sources_mock):
+        source2 = OrganizationSourceFactory(mnemonic='source2')
+        get_mapped_sources_mock.return_value = Source.objects.filter(id=source2.id)
+
+        response = self.client.get(
+            self.source.url + 'mapped-sources/',
+            HTTP_AUTHORIZATION=f'Token {self.token}'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['url'], source2.url)
+        get_mapped_sources_mock.assert_called_once()
+
+    def test_post_405(self):
+        response = self.client.post(
+            self.source.url + 'mapped-sources/',
+            dict(default_locale='en'),
+            HTTP_AUTHORIZATION=f'Token {self.token}'
+        )
+
+        self.assertEqual(response.status_code, 405)

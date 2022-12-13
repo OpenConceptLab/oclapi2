@@ -769,6 +769,57 @@ class SourceTest(OCLTestCase):
         ]:
             Source(**{field: 1}, mnemonic='foo', version='HEAD', name='foo').full_clean()
 
+    def test_get_mapped_sources(self):
+        source = OrganizationSourceFactory(mnemonic='subject')
+        source1 = OrganizationSourceFactory(mnemonic='source1')
+        source2 = OrganizationSourceFactory(mnemonic='source2')
+        source3 = OrganizationSourceFactory(mnemonic='source3')
+        concept1 = ConceptFactory(parent=source)
+        concept2 = ConceptFactory(parent=source1)
+        concept3 = ConceptFactory(parent=source1)
+        concept4 = ConceptFactory(parent=source2)
+        concept5 = ConceptFactory(parent=source3)
+        # self
+        MappingFactory(
+            parent=source, from_concept=concept1, to_concept=concept1,
+            from_source=concept1.parent, to_source=concept1.parent
+        )
+
+        mapped_sources = source.get_mapped_sources()
+
+        self.assertEqual(mapped_sources.count(), 0)
+
+        # direct
+        MappingFactory(
+            parent=source, from_concept=concept1, to_concept=concept2,
+            from_source=concept1.parent, to_source=concept2.parent
+        )
+        # reverse
+        MappingFactory(
+            parent=source, from_concept=concept4, to_concept=concept1,
+            from_source=concept4.parent, to_source=concept1.parent
+        )
+        # other source's mapping
+        MappingFactory(
+            parent=source1, from_concept=concept1, to_concept=concept3,
+            from_source=concept1.parent, to_source=concept3.parent
+        )
+        # other source's mapping
+        MappingFactory(
+            parent=source3, from_concept=concept5, to_concept=concept1,
+            from_source=concept5.parent, to_source=concept1.parent
+        )
+        # Mapping with unknown source
+        MappingFactory(
+            parent=source, from_concept=concept1, to_concept=None, to_concept_name='concept-unknown',
+            from_source=concept1.parent, to_source=None
+        )
+
+        mapped_sources = source.get_mapped_sources()
+
+        self.assertEqual(mapped_sources.count(), 1)
+        self.assertEqual(mapped_sources.first().url, source1.url)
+
 
 class TasksTest(OCLTestCase):
     @patch('core.sources.models.Source.index_children')

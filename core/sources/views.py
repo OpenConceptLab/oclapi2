@@ -17,6 +17,7 @@ from rest_framework.response import Response
 
 from core.client_configs.views import ResourceClientConfigsView
 from core.common.constants import HEAD, RELEASED_PARAM, PROCESSING_PARAM, ACCESS_TYPE_NONE
+from core.common.exceptions import Http405
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryCreateMixin, ConceptDictionaryUpdateMixin, \
     ConceptContainerExportMixin, ConceptContainerProcessingMixin
 from core.common.permissions import CanViewConceptDictionary, CanEditConceptDictionary, HasAccessToVersionedObject, \
@@ -506,3 +507,21 @@ class SourceClientConfigsView(SourceBaseView, ResourceClientConfigsView):
     model = Source
     queryset = Source.objects.filter(is_active=True, version=HEAD)
     permission_classes = (CanViewConceptDictionary, )
+
+
+class SourceMappedSourcesListView(SourceListView):
+    is_searchable = False
+
+    def get_object(self, queryset=None):
+        instance = super().get_queryset().order_by('-created_at').first()
+        if not instance:
+            raise Http404()
+        self.check_object_permissions(self.request, instance)
+        return instance
+
+    def get_queryset(self):
+        instance = self.get_object()
+        return instance.get_mapped_sources()
+
+    def post(self, request, **kwargs):
+        raise Http405()
