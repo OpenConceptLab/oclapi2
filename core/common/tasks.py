@@ -10,13 +10,14 @@ from django.core.exceptions import ValidationError
 from django.core.mail import EmailMessage
 from django.core.management import call_command
 from django.template.loader import render_to_string
+from django.utils import timezone
 from django_elasticsearch_dsl.registries import registry
 from pydash import get
 
 from core.celery import app
 from core.common.constants import CONFIRM_EMAIL_ADDRESS_MAIL_SUBJECT, PASSWORD_RESET_MAIL_SUBJECT
 from core.common.utils import write_export_file, web_url, get_resource_class_from_resource_name, get_export_service, \
-    get_start_of_month, get_end_of_month, get_prev_month
+    get_end_of_month
 
 logger = get_task_logger(__name__)
 
@@ -727,8 +728,9 @@ def monthly_usage_report():  # pragma: no cover
     # runs on first of every month
     # reports usage of prev month
     from core.reports.models import MonthlyUsageReport
-    prev_month = get_prev_month()
-    report = MonthlyUsageReport(verbose=True, start=get_start_of_month(prev_month), end=get_end_of_month(prev_month))
+    now = timezone.now()
+    prev_month = now.replace(month=now.month - 1, day=1).date()
+    report = MonthlyUsageReport(verbose=True, start=prev_month, end=get_end_of_month(prev_month))
     report.prepare()
     html_body = render_to_string('monthly_usage_report_for_mail.html', report.get_result_for_email())
     mail = EmailMessage(
