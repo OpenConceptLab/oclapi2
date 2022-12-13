@@ -642,7 +642,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         return self.parent.concepts_set.filter(mnemonic__exact=self.mnemonic).exists()
 
     @classmethod
-    def persist_new(cls, data, user=None, create_initial_version=True, create_parent_version=True):  # pylint: disable=too-many-statements
+    def persist_new(cls, data, user=None, create_initial_version=True, create_parent_version=True):  # pylint: disable=too-many-statements,too-many-branches
         names = data.pop('names', []) or []
         descriptions = data.pop('descriptions', []) or []
         parent_concept_uris = data.pop('parent_concept_urls', None)

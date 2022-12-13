@@ -719,7 +719,8 @@ class ConceptTest(OCLTestCase):
         es_locale_description = ConceptDescriptionFactory.build(locale='es', name='Not English')
         en_locale_description = ConceptDescriptionFactory.build(locale='en', name='English')
 
-        concept = ConceptFactory(descriptions=(es_locale_description, en_locale_description), names=(en_locale,), released=True)
+        concept = ConceptFactory(
+            descriptions=(es_locale_description, en_locale_description), names=(en_locale,), released=True)
         cloned_concept = concept.clone()
 
         self.assertTrue(cloned_concept.version.startswith('--TEMP--'))
