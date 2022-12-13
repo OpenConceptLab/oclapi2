@@ -358,7 +358,7 @@ CELERYBEAT_SCHEDULE = {
     },
     'first-of-every-month': {
         'task': 'core.common.tasks.monthly_usage_report',
-        'schedule': crontab(0, 0, day_of_month='1'),
+        'schedule': crontab(1, 0, day_of_month='1'),
     },
 }
 CELERYBEAT_HEALTHCHECK_KEY = 'celery_beat_healthcheck'
