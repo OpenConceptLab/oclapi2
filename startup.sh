@@ -9,19 +9,19 @@ set -e
 if [[ "$SKIP_MIGRATE_DB" != "true" ]]; then
   echo "Running DB migrations"
   python manage.py migrate
+  echo "Importing base entities"
+  python manage.py loaddata core/fixtures/*
+
+  echo "Setting up superuser"
+  python manage.py setup_superuser
+
+  echo "Importing lookup values"
+  python manage.py import_lookup_values
+
+  echo "Populating text from extras.about"
+  python manage.py populate_text_from_extras_about
 fi
 
-echo "Importing base entities"
-python manage.py loaddata core/fixtures/*
-
-echo "Setting up superuser"
-python manage.py setup_superuser
-
-echo "Importing lookup values"
-python manage.py import_lookup_values
-
-echo "Populating text from extras.about"
-python manage.py populate_text_from_extras_about
 
 if [[ "$ENVIRONMENT" = "development" ]]; then
   echo "Starting up the development server"
