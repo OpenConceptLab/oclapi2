@@ -2,13 +2,12 @@ import factory
 from factory import Sequence, SubFactory
 
 from core.common.constants import HEAD
-from core.concepts.models import Concept, LocalizedText
+from core.concepts.models import Concept, ConceptName, ConceptDescription
 from core.sources.tests.factories import OrganizationSourceFactory
 
 
 def sync_latest_version(self):
     latest_version = self.get_latest_version()
-    has_names = self.names.exists()
     if not latest_version:
         latest_version = self.clone()
         latest_version.save()
@@ -17,19 +16,11 @@ def sync_latest_version(self):
         latest_version.version = latest_version.id
         latest_version.save()
         latest_version.sources.add(latest_version.parent)
-    if latest_version and has_names and not latest_version.names.exists():
-        latest_version.cloned_names = [name.clone() for name in self.names.all()]
-        latest_version.set_locales()
-
-
-class LocalizedTextFactory(factory.django.DjangoModelFactory):
-    class Meta:
-        model = LocalizedText
-
-    name = Sequence("name{}".format)  # pylint: disable=consider-using-f-string
-    type = "FULLY_SPECIFIED"
-    locale = "en"
-    locale_preferred = False
+    if latest_version:
+        if self.names.exists() and not latest_version.names.exists():
+            latest_version.set_locales(self.names.all(), ConceptName)
+        if self.descriptions.exists() and not latest_version.descriptions.exists():
+            latest_version.set_locales(self.descriptions.all(), ConceptDescription)
 
 
 class ConceptFactory(factory.django.DjangoModelFactory):
@@ -63,38 +54,49 @@ class ConceptFactory(factory.django.DjangoModelFactory):
                 self.sources.add(source)
 
     @factory.post_generation
-    def names(self, create, extracted):
+    def names(self, create, extracted, **kwargs):
         if not create:
             return
 
         if extracted:
-            for name in extracted:
-                self.names.add(name)
+            if isinstance(extracted, int):
+                ConceptNameFactory.create_batch(size=extracted, concept=self, **kwargs)
+            elif isinstance(extracted, (list, tuple, set)):
+                for locale in extracted:
+                    locale.concept = self
+                    locale.save()
+
             sync_latest_version(self)
 
     @factory.post_generation
-    def descriptions(self, create, extracted):
+    def descriptions(self, create, extracted, **kwargs):
         if not create:
             return
 
         if extracted:
-            for desc in extracted:
-                self.descriptions.add(desc)
+            if isinstance(extracted, int):
+                ConceptDescriptionFactory.create_batch(size=extracted, concept=self, **kwargs)
+            elif isinstance(extracted, (list, tuple, set)):
+                for locale in extracted:
+                    locale.concept = self
+                    locale.save()
 
-    @factory.post_generation
-    def cloned_names(self, create, extracted):
-        if not create:
-            return
 
-        if extracted:
-            for name in extracted:
-                self.cloned_names.add(name)
+class ConceptNameFactory(factory.django.DjangoModelFactory):
+    class Meta:
+        model = ConceptName
 
-    @factory.post_generation
-    def cloned_descriptions(self, create, extracted):
-        if not create:
-            return
+    name = Sequence("name{}".format)  # pylint: disable=consider-using-f-string
+    type = "FULLY_SPECIFIED"
+    locale = "en"
+    locale_preferred = False
 
-        if extracted:
-            for desc in extracted:
-                self.cloned_descriptions.add(desc)
+
+class ConceptDescriptionFactory(factory.django.DjangoModelFactory):
+    class Meta:
+        model = ConceptDescription
+
+    name = Sequence("name{}".format)  # pylint: disable=consider-using-f-string
+    type = "Description"
+    locale = "en"
+    locale_preferred = False

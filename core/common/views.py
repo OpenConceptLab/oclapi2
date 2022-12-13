@@ -387,26 +387,23 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
     def get_extras_searchable_fields_from_query_params(self):
         query_params = self.request.query_params.dict()
-        is_source_child = self.is_source_child_document_model()
         result = {}
         for key, value in query_params.items():
             if key.startswith('extras.') and not key.startswith('extras.exists') and not key.startswith('extras.exact'):
                 parts = key.split('extras.')
-                value = value.replace('/', '\\/')
-                result['extras.' + parts[1].replace('.', '__')] = value if is_source_child else value.replace('-', '_')
+                value = value.replace('/', '\\/').replace('-', '_')
+                result['extras.' + parts[1].replace('.', '__')] = f"*{value}*"
 
         return result
 
     def get_extras_exact_fields_from_query_params(self):
         query_params = self.request.query_params.dict()
-        is_source_child = self.is_source_child_document_model()
         result = {}
         for key, value in query_params.items():
             if key.startswith('extras.exact'):
                 new_key = key.replace('.exact', '')
                 parts = new_key.split('extras.')
-                value = value.replace('/', '\\/')
-                result['extras.' + parts[1].replace('.', '__')] = value if is_source_child else value.replace('-', '_')
+                result['extras.' + parts[1].replace('.', '__')] = value.replace('/', '\\/').replace('-', '_')
 
         return result
 
@@ -870,8 +867,8 @@ class ConceptDormantLocalesView(APIView):  # pragma: no cover
 
     @staticmethod
     def get(_, **kwargs):  # pylint: disable=unused-argument
-        from core.concepts.models import LocalizedText
-        count = LocalizedText.dormants()
+        from core.concepts.models import ConceptName
+        count = ConceptName.dormants()
         return Response(count, status=status.HTTP_200_OK)
 
     @staticmethod

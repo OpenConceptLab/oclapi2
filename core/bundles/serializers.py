@@ -78,10 +78,11 @@ class BundleSerializer(serializers.Serializer):  # pylint: disable=abstract-meth
     meta = BundleMetaSerializer(read_only=True, source='timestamp')
     total = IntegerField(read_only=True)
     entry = JSONField(read_only=True, source='entries')
+    requested_url = CharField(read_only=True)
 
     class Meta:
         fields = (
-            'resourceType', 'type', 'meta', 'total', 'concepts', 'mappings', 'entry'
+            'resourceType', 'type', 'meta', 'total', 'concepts', 'mappings', 'entry', 'requested_url'
         )
 
     def __init__(self, *args, **kwargs):

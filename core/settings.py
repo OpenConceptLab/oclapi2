@@ -13,6 +13,9 @@ https://docs.djangoproject.com/en/3.0/ref/settings/
 import os
 
 # Build paths inside the project like this: os.path.join(BASE_DIR, ...)
+from datetime import timedelta
+
+from celery.schedules import crontab
 from corsheaders.defaults import default_headers
 from kombu import Queue, Exchange
 
@@ -75,6 +78,7 @@ INSTALLED_APPS = [
     'corsheaders',
     'ordered_model',
     'cid.apps.CidAppConfig',
+    'django_celery_beat',
     'health_check',  # required
     'health_check.db',  # stock Django health checkers
     # 'health_check.contrib.celery_ping',  # requires celery
@@ -347,6 +351,17 @@ CELERY_ONCE = {
         'url': CELERY_RESULT_BACKEND,
     }
 }
+CELERYBEAT_SCHEDULE = {
+    'healthcheck-every-minute': {
+        'task': 'core.common.tasks.beat_healthcheck',
+        'schedule': timedelta(seconds=60),
+    },
+    'first-of-every-month': {
+        'task': 'core.common.tasks.monthly_usage_report',
+        'schedule': crontab(0, 0, day_of_month='1'),
+    },
+}
+CELERYBEAT_HEALTHCHECK_KEY = 'celery_beat_healthcheck'
 ELASTICSEARCH_DSL_PARALLEL = True
 ELASTICSEARCH_DSL_AUTO_REFRESH = True
 ELASTICSEARCH_DSL_AUTOSYNC = True
@@ -374,6 +389,7 @@ ACCOUNT_EMAIL_SUBJECT_PREFIX = os.environ.get('ACCOUNT_EMAIL_SUBJECT_PREFIX', '[
 ADMINS = (
     ('Jonathan Payne', 'paynejd@gmail.com'),
 )
+REPORTS_EMAIL = os.environ.get('REPORTS_EMAIL', 'reports@openconceptlab.org')
 
 if ENV and ENV != 'development':
     # Serving swagger static files (inserted after SecurityMiddleware)
@@ -398,8 +414,13 @@ ERRBIT_KEY = os.environ.get('ERRBIT_KEY', 'errbit-key')
 # Repo Export Upload/download
 EXPORT_SERVICE = os.environ.get('EXPORT_SERVICE', 'core.common.services.S3')
 
+# Locales Repository URI
+# can either be /orgs/OCL/sources/Locales/ (old-style, ISO-639-2)
+# or /orgs/ISO/sources/iso639-1/ (ISO-639-1, OCL's new default)
+DEFAULT_LOCALES_REPO_URI = os.environ.get('DEFAULT_LOCALES_REPO_URI', '/orgs/ISO/sources/iso639-1/')
+
 # keyCloak/OIDC Provider settings
-OIDC_SERVER_URL = os.environ.get('OIDC_SERVER_URL', None)
+OIDC_SERVER_URL = os.environ.get('OIDC_SERVER_URL', '')
 OIDC_RP_CLIENT_ID = ''  # only needed a defined var in mozilla_django_oidc
 OIDC_RP_CLIENT_SECRET = ''  # only needed a defined var in mozilla_django_oidc
 OIDC_SERVER_INTERNAL_URL = os.environ.get('OIDC_SERVER_INTERNAL_URL', '') or OIDC_SERVER_URL

@@ -389,7 +389,7 @@ class SourceVersionRetrieveUpdateDestroyView(SourceVersionBaseView, RetrieveAPIV
 
 class SourceExtrasBaseView(SourceBaseView):
     def get_object(self, queryset=None):
-        return self.get_queryset().filter(version=HEAD).first()
+        return get_object_or_404(self.get_queryset(), version=HEAD)
 
 
 class SourceExtrasView(SourceExtrasBaseView, ListAPIView):
@@ -397,6 +397,14 @@ class SourceExtrasView(SourceExtrasBaseView, ListAPIView):
 
     def list(self, request, *args, **kwargs):
         return Response(get(self.get_object(), 'extras', {}))
+
+
+class SourceVersionExtrasView(SourceBaseView, ListAPIView):
+    serializer_class = SourceDetailSerializer
+
+    def list(self, request, *args, **kwargs):
+        instance = get_object_or_404(self.get_queryset(), version=self.kwargs['version'])
+        return Response(get(instance, 'extras', {}))
 
 
 class SourceExtraRetrieveUpdateDestroyView(SourceExtrasBaseView, ConceptContainerExtraRetrieveUpdateDestroyView):

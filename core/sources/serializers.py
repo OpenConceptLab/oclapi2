@@ -25,18 +25,43 @@ class SourceMinimalSerializer(ModelSerializer):
 
 
 class SourceListSerializer(ModelSerializer):
+    type = CharField(source='resource_type')
     short_code = CharField(source='mnemonic')
     owner = CharField(source='parent_resource')
     owner_type = CharField(source='parent_resource_type')
     owner_url = CharField(source='parent_url')
     id = CharField(source='mnemonic')
+    summary = SerializerMethodField()
 
     class Meta:
         model = Source
         fields = (
             'short_code', 'name', 'url', 'owner', 'owner_type', 'owner_url', 'version', 'created_at', 'id',
-            'source_type', 'updated_at', 'canonical_url'
+            'source_type', 'updated_at', 'canonical_url', 'summary', 'type',
         )
+
+    def __init__(self, *args, **kwargs):
+        params = get(kwargs, 'context.request.query_params')
+
+        self.query_params = {}
+        if params:
+            self.query_params = params if isinstance(params, dict) else params.dict()
+        self.include_summary = self.query_params.get(INCLUDE_SUMMARY) in ['true', True]
+        try:
+            if not self.include_summary:
+                self.fields.pop('summary', None)
+        except:  # pylint: disable=bare-except
+            pass
+
+        super().__init__(*args, **kwargs)
+
+    def get_summary(self, obj):
+        summary = None
+
+        if self.include_summary:
+            summary = SourceSummarySerializer(obj).data
+
+        return summary
 
 
 class SourceVersionListSerializer(ModelSerializer):
@@ -301,6 +326,11 @@ class SourceDetailSerializer(SourceCreateOrUpdateSerializer):
             return ConceptDetailSerializer(obj.hierarchy_root).data
         return None
 
+    def to_representation(self, instance):  # used to be to_native
+        ret = super().to_representation(instance)
+        ret.update({"supported_locales": instance.get_supported_locales()})
+        return ret
+
 
 class SourceVersionDetailSerializer(SourceCreateOrUpdateSerializer):
     type = CharField(source='resource_version_type')
@@ -321,6 +351,7 @@ class SourceVersionDetailSerializer(SourceCreateOrUpdateSerializer):
     url = CharField(source='versioned_object_url')
     previous_version_url = CharField(source='prev_version_uri')
     summary = SerializerMethodField()
+    hierarchy_root_url = CharField(source='hierarchy_root.url', required=False, allow_blank=True, allow_null=True)
 
     class Meta:
         model = Source
@@ -334,7 +365,7 @@ class SourceVersionDetailSerializer(SourceCreateOrUpdateSerializer):
             'canonical_url', 'identifier', 'publisher', 'contact', 'jurisdiction', 'purpose', 'copyright',
             'content_type', 'revision_date', 'summary', 'text', 'meta',
             'experimental', 'case_sensitive', 'collection_reference', 'hierarchy_meaning', 'compositional',
-            'version_needed'
+            'version_needed', 'hierarchy_root_url'
         )
 
     def __init__(self, *args, **kwargs):

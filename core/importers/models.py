@@ -486,8 +486,7 @@ class MappingImporter(BaseResourceImporter):
             'map_type': self.get('map_type'),
         }
         if from_concept_code:
-            filters['from_concept_code'] = from_concept_code if is_url_encoded_string(
-                from_concept_code) else encode_string(from_concept_code, safe='')
+            filters['from_concept_code'] = Concept.get_mnemonic_variations_for_filter(from_concept_code)
 
         versionless_from_concept_url = drop_version(from_concept_url)
         from_concept = Concept.objects.filter(id=F('versioned_object_id'), uri=versionless_from_concept_url).first()
@@ -512,12 +511,10 @@ class MappingImporter(BaseResourceImporter):
 
         if to_source_url:
             to_source_uri = drop_version(to_source_url)
-            if Source.objects.filter(uri=to_source_uri).exists():
-                filters['to_source__uri'] = to_source_uri
+            filters['to_source_url'] = to_source_uri
 
         if to_concept_code:
-            filters['to_concept_code'] = to_concept_code if is_url_encoded_string(
-                to_concept_code) else encode_string(to_concept_code, safe='')
+            filters['to_concept_code__in'] = Concept.get_mnemonic_variations_for_filter(to_concept_code)
 
         self.queryset = Mapping.objects.filter(**filters)
 
@@ -701,8 +698,8 @@ class BulkImportInline(BaseImporter):
             print("****STARTED SUBPROCESS****")
             print(f"TASK ID: {self.self_task_id}")
             print("***************")
-        new_concept_ids = {}
-        new_mapping_ids = {}
+        new_concept_ids = set()
+        new_mapping_ids = set()
         for original_item in self.input_list:
             self.processed += 1
             logger.info('Processing %s of %s', str(self.processed), str(self.total))
@@ -744,20 +741,14 @@ class BulkImportInline(BaseImporter):
                 concept_importer = ConceptImporter(item, self.user, self.update_if_exists)
                 _result = concept_importer.delete() if action == 'delete' else concept_importer.run()
                 if get(concept_importer.instance, 'id'):
-                    parent_url = concept_importer.instance.parent.uri
-                    if parent_url not in new_concept_ids:
-                        new_concept_ids[parent_url] = []
-                    new_concept_ids[parent_url].append(concept_importer.instance.mnemonic)
+                    new_concept_ids.add(concept_importer.instance.versioned_object_id)
                 self.handle_item_import_result(_result, original_item)
                 continue
             if item_type == 'mapping':
                 mapping_importer = MappingImporter(item, self.user, self.update_if_exists)
                 _result = mapping_importer.delete() if action == 'delete' else mapping_importer.run()
                 if get(mapping_importer.instance, 'id'):
-                    parent_url = mapping_importer.instance.parent.uri
-                    if parent_url not in new_mapping_ids:
-                        new_mapping_ids[parent_url] = []
-                    new_mapping_ids[parent_url].append(mapping_importer.instance.mnemonic)
+                    new_mapping_ids.add(mapping_importer.instance.versioned_object_id)
                 self.handle_item_import_result(_result, original_item)
                 continue
             if item_type == 'reference':
@@ -767,15 +758,13 @@ class BulkImportInline(BaseImporter):
                 continue
 
         if new_concept_ids:
-            for parent_url, ids in new_concept_ids.items():
-                for chunk in chunks(ids, 1000):
-                    batch_index_resources.apply_async(
-                        ('concept', dict(mnemonic__in=chunk, parent__uri=parent_url), True), queue='indexing')
+            for chunk in chunks(list(new_concept_ids), 1000):
+                batch_index_resources.apply_async(
+                    ('concept', dict(versioned_object_id__in=chunk), True), queue='indexing')
         if new_mapping_ids:
-            for parent_url, ids in new_mapping_ids.items():
-                for chunk in chunks(ids, 1000):
-                    batch_index_resources.apply_async(
-                        ('mapping', dict(mnemonic__in=chunk, parent__uri=parent_url), True), queue='indexing')
+            for chunk in chunks(list(new_mapping_ids), 1000):
+                batch_index_resources.apply_async(
+                    ('mapping', dict(versioned_object_id__in=chunk), True), queue='indexing')
 
         self.elapsed_seconds = time.time() - self.start_time
 
@@ -1065,7 +1054,7 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
         uncounted_concepts = Concept.objects.filter(_counted__isnull=True)
         sources = Source.objects.filter(id__in=uncounted_concepts.values_list('parent_id', flat=True))
         for source in sources:
-            source.update_concepts_count(sync=True)
+            source.update_concepts_count(sync=False)
             uncounted_concepts.filter(parent_id=source.id).update(_counted=True)
 
     @staticmethod
@@ -1074,5 +1063,5 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
         sources = Source.objects.filter(
             id__in=uncounted_mappings.values_list('parent_id', flat=True))
         for source in sources:
-            source.update_mappings_count(sync=True)
+            source.update_mappings_count(sync=False)
             uncounted_mappings.filter(parent_id=source.id).update(_counted=True)

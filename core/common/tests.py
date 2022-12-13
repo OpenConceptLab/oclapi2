@@ -3,6 +3,8 @@ import os
 import uuid
 from unittest.mock import patch, Mock, mock_open
 
+import factory
+
 import boto3
 from botocore.exceptions import ClientError
 from colour_runner.django_runner import ColourRunnerMixin
@@ -17,20 +19,22 @@ from rest_framework.test import APITestCase
 
 from core.collections.models import CollectionReference
 from core.common.constants import HEAD
-from core.common.tasks import delete_s3_objects, bulk_import_parallel_inline
+from core.common.tasks import delete_s3_objects, bulk_import_parallel_inline, monthly_usage_report
 from core.common.utils import (
     compact_dict_by_values, to_snake_case, flower_get, task_exists, parse_bulk_import_task_id,
     to_camel_case,
     drop_version, is_versioned_uri, separate_version, to_parent_uri, jsonify_safe, es_get,
     get_resource_class_from_resource_name, flatten_dict, is_csv_file, is_url_encoded_string, to_parent_uri_from_kwargs,
     set_current_user, get_current_user, set_request_url, get_request_url, nested_dict_values, chunks, api_get,
-    split_list_by_condition)
+    split_list_by_condition, get_start_of_month, get_end_of_month, get_prev_month)
 from core.concepts.models import Concept
 from core.orgs.models import Organization
 from core.sources.models import Source
 from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
+from .fhir_helpers import translate_fhir_query
 from .services import S3, PostgresQL
+from ..code_systems.serializers import CodeSystemDetailSerializer
 
 
 class CustomTestRunner(ColourRunnerMixin, DiscoverRunner):
@@ -47,7 +51,7 @@ class BaseTestCase(SetupTestEnvironment):
     @staticmethod
     def create_lookup_concept_classes(user=None, org=None):
         from core.sources.tests.factories import OrganizationSourceFactory
-        from core.concepts.tests.factories import LocalizedTextFactory, ConceptFactory
+        from core.concepts.tests.factories import ConceptNameFactory, ConceptFactory
 
         org = org or Organization.objects.get(mnemonic='OCL')
         user = user or UserProfile.objects.get(username='ocladmin')
@@ -69,129 +73,129 @@ class BaseTestCase(SetupTestEnvironment):
 
         ConceptFactory(
             version=HEAD, updated_by=user, parent=classes_source, concept_class="Concept Class",
-            names=[LocalizedTextFactory(name="Diagnosis")]
+            names=[ConceptNameFactory.build(name="Diagnosis")]
         )
         ConceptFactory(
             version=HEAD, updated_by=user, parent=classes_source, concept_class="Concept Class",
-            names=[LocalizedTextFactory(name="Drug")]
+            names=[ConceptNameFactory.build(name="Drug")]
         )
         ConceptFactory(
             version=HEAD, updated_by=user, parent=classes_source, concept_class="Concept Class",
-            names=[LocalizedTextFactory(name="Test")]
+            names=[ConceptNameFactory.build(name="Test")]
         )
         ConceptFactory(
             version=HEAD, updated_by=user, parent=classes_source, concept_class="Concept Class",
-            names=[LocalizedTextFactory(name="Procedure")]
+            names=[ConceptNameFactory.build(name="Procedure")]
         )
         ConceptFactory(
             version=HEAD, updated_by=user, parent=datatypes_source, concept_class="Datatype",
-            names=[LocalizedTextFactory(name="None"), LocalizedTextFactory(name="N/A")]
+            names=[ConceptNameFactory.build(name="None"), ConceptNameFactory.build(name="N/A")]
         )
         ConceptFactory(
             version=HEAD, updated_by=user, parent=datatypes_source, concept_class="Datatype",
-            names=[LocalizedTextFactory(name="Numeric")]
+            names=[ConceptNameFactory.build(name="Numeric")]
         )
         ConceptFactory(
             version=HEAD, updated_by=user, parent=datatypes_source, concept_class="Datatype",
-            names=[LocalizedTextFactory(name="Coded")]
+            names=[ConceptNameFactory.build(name="Coded")]
         )
         ConceptFactory(
             version=HEAD, updated_by=user, parent=datatypes_source, concept_class="Datatype",
-            names=[LocalizedTextFactory(name="Text")]
+            names=[ConceptNameFactory.build(name="Text")]
         )
         ConceptFactory(
             version=HEAD, updated_by=user, parent=nametypes_source, concept_class="NameType",
-            names=[LocalizedTextFactory(name="FULLY_SPECIFIED"), LocalizedTextFactory(name="Fully Specified")]
+            names=[ConceptNameFactory.build(name="FULLY_SPECIFIED"), ConceptNameFactory.build(name="Fully Specified")]
         )
         ConceptFactory(
             version=HEAD, updated_by=user, parent=nametypes_source, concept_class="NameType",
-            names=[LocalizedTextFactory(name="Short"), LocalizedTextFactory(name="SHORT")]
+            names=[ConceptNameFactory.build(name="Short"), ConceptNameFactory.build(name="SHORT")]
         )
         ConceptFactory(
             version=HEAD, updated_by=user, parent=nametypes_source, concept_class="NameType",
-            names=[LocalizedTextFactory(name="INDEX_TERM"), LocalizedTextFactory(name="Index Term")]
+            names=[ConceptNameFactory.build(name="INDEX_TERM"), ConceptNameFactory.build(name="Index Term")]
         )
         ConceptFactory(
             version=HEAD, updated_by=user, parent=nametypes_source, concept_class="NameType",
-            names=[LocalizedTextFactory(name="None")]
+            names=[ConceptNameFactory.build(name="None")]
         )
         ConceptFactory(
             version=HEAD, updated_by=user, parent=descriptiontypes_source, concept_class="DescriptionType",
-            names=[LocalizedTextFactory(name="None")]
+            names=[ConceptNameFactory.build(name="None")]
         )
         ConceptFactory(
             version=HEAD, updated_by=user, parent=descriptiontypes_source, concept_class="DescriptionType",
-            names=[LocalizedTextFactory(name="FULLY_SPECIFIED")]
+            names=[ConceptNameFactory.build(name="FULLY_SPECIFIED")]
         )
         ConceptFactory(
             version=HEAD, updated_by=user, parent=descriptiontypes_source, concept_class="DescriptionType",
-            names=[LocalizedTextFactory(name="Definition")]
+            names=[ConceptNameFactory.build(name="Definition")]
         )
         ConceptFactory(
             version=HEAD, updated_by=user, parent=maptypes_source, concept_class="MapType",
-            names=[LocalizedTextFactory(name="SAME-AS"), LocalizedTextFactory(name="Same As")]
+            names=[ConceptNameFactory.build(name="SAME-AS"), ConceptNameFactory.build(name="Same As")]
         )
         ConceptFactory(
             version=HEAD, updated_by=user, parent=maptypes_source, concept_class="MapType",
-            names=[LocalizedTextFactory(name="Is Subset of")]
+            names=[ConceptNameFactory.build(name="Is Subset of")]
         )
         ConceptFactory(
             version=HEAD, updated_by=user, parent=maptypes_source, concept_class="MapType",
-            names=[LocalizedTextFactory(name="Different")]
+            names=[ConceptNameFactory.build(name="Different")]
         )
         ConceptFactory(
             version=HEAD, updated_by=user, parent=maptypes_source, concept_class="MapType",
             names=[
-                LocalizedTextFactory(name="BROADER-THAN"), LocalizedTextFactory(name="Broader Than"),
-                LocalizedTextFactory(name="BROADER_THAN")
+                ConceptNameFactory.build(name="BROADER-THAN"), ConceptNameFactory.build(name="Broader Than"),
+                ConceptNameFactory.build(name="BROADER_THAN")
             ]
         )
         ConceptFactory(
             version=HEAD, updated_by=user, parent=maptypes_source, concept_class="MapType",
             names=[
-                LocalizedTextFactory(name="NARROWER-THAN"), LocalizedTextFactory(name="Narrower Than"),
-                LocalizedTextFactory(name="NARROWER_THAN")
+                ConceptNameFactory.build(name="NARROWER-THAN"), ConceptNameFactory.build(name="Narrower Than"),
+                ConceptNameFactory.build(name="NARROWER_THAN")
             ]
         )
         ConceptFactory(
             version=HEAD, updated_by=user, parent=maptypes_source, concept_class="MapType",
-            names=[LocalizedTextFactory(name="Q-AND-A")]
+            names=[ConceptNameFactory.build(name="Q-AND-A")]
         )
         ConceptFactory(
             version=HEAD, updated_by=user, parent=maptypes_source, concept_class="MapType",
-            names=[LocalizedTextFactory(name="More specific than")]
+            names=[ConceptNameFactory.build(name="More specific than")]
         )
         ConceptFactory(
             version=HEAD, updated_by=user, parent=maptypes_source, concept_class="MapType",
-            names=[LocalizedTextFactory(name="Less specific than")]
+            names=[ConceptNameFactory.build(name="Less specific than")]
         )
         ConceptFactory(
             version=HEAD, updated_by=user, parent=maptypes_source, concept_class="MapType",
-            names=[LocalizedTextFactory(name="Something Else")]
+            names=[ConceptNameFactory.build(name="Something Else")]
         )
         ConceptFactory(
             version=HEAD, updated_by=user, parent=locales_source, concept_class="Locale",
-            names=[LocalizedTextFactory(name="en")]
+            names=[ConceptNameFactory.build(name="en")]
         )
         ConceptFactory(
             version=HEAD, updated_by=user, parent=locales_source, concept_class="Locale",
-            names=[LocalizedTextFactory(name="es")]
+            names=[ConceptNameFactory.build(name="es")]
         )
         ConceptFactory(
             version=HEAD, updated_by=user, parent=locales_source, concept_class="Locale",
-            names=[LocalizedTextFactory(name="fr")]
+            names=[ConceptNameFactory.build(name="fr")]
         )
         ConceptFactory(
             version=HEAD, updated_by=user, parent=locales_source, concept_class="Locale",
-            names=[LocalizedTextFactory(name="tr")]
+            names=[ConceptNameFactory.build(name="tr")]
         )
         ConceptFactory(
             version=HEAD, updated_by=user, parent=locales_source, concept_class="Locale",
-            names=[LocalizedTextFactory(name="Abkhazian")]
+            names=[ConceptNameFactory.build(name="Abkhazian")]
         )
         ConceptFactory(
             version=HEAD, updated_by=user, parent=locales_source, concept_class="Locale",
-            names=[LocalizedTextFactory(name="English")]
+            names=[ConceptNameFactory.build(name="English")]
         )
 
 
@@ -210,6 +214,13 @@ class OCLTestCase(TestCase, BaseTestCase):
         super().setUpClass()
         call_command("loaddata", "core/fixtures/base_entities.yaml")
         call_command("loaddata", "core/fixtures/auth_groups.yaml")
+
+    @staticmethod
+    def factory_to_params(factory_klass, **kwargs):
+        return {
+            **factory.build(dict, FACTORY_CLASS=factory_klass),
+            **kwargs
+        }
 
 
 class S3Test(TestCase):
@@ -377,6 +388,55 @@ class S3Test(TestCase):
             'http://oclapi2-dev.s3.amazonaws.com/some/path'
         )
 
+class FhirHelpersTest(OCLTestCase):
+    def test_language_to_default_locale(self):
+        query_fields = list(CodeSystemDetailSerializer.Meta.fields)
+        query_params = {'language': 'eng'}
+        query_set = Concept.objects.all()
+
+        query_set = translate_fhir_query(query_fields, query_params, query_set)
+        self.assertTrue('"concepts"."default_locale" = eng' in str(query_set.query))
+
+    def test_status_retired(self):
+        query_fields = list(CodeSystemDetailSerializer.Meta.fields)
+        query_params = {'status': 'retired'}
+        query_set = Concept.objects.all()
+
+        query_set = translate_fhir_query(query_fields, query_params, query_set)
+        self.assertTrue('WHERE "concepts"."retired"' in str(query_set.query))
+
+    def test_status_active(self):
+        query_fields = list(CodeSystemDetailSerializer.Meta.fields)
+        query_params = {'status': 'active'}
+        query_set = Concept.objects.all()
+
+        query_set = translate_fhir_query(query_fields, query_params, query_set)
+        self.assertTrue('WHERE "concepts"."released"' in str(query_set.query))
+
+    def test_status_draft(self):
+        query_fields = list(CodeSystemDetailSerializer.Meta.fields)
+        query_params = {'status': 'draft'}
+        query_set = Concept.objects.all()
+
+        query_set = translate_fhir_query(query_fields, query_params, query_set)
+        self.assertTrue('WHERE NOT "concepts"."released"' in str(query_set.query))
+
+    def test_title_to_full_name(self):
+        query_fields = list(CodeSystemDetailSerializer.Meta.fields)
+        query_params = {'title': 'some title'}
+        query_set = Concept.objects.all()
+
+        query_set = translate_fhir_query(query_fields, query_params, query_set)
+        self.assertTrue('WHERE "concepts"."full_name" = some title' in str(query_set.query))
+
+    def test_other_fields(self):
+        query_fields = list(CodeSystemDetailSerializer.Meta.fields)
+        query_params = {'version': 'v1', 'id': '2'}
+        query_set = Concept.objects.all()
+
+        query_set = translate_fhir_query(query_fields, query_params, query_set)
+        self.assertTrue('"concepts"."version" = v1' in str(query_set.query))
+        self.assertTrue('"concepts"."id" = 2' in str(query_set.query))
 
 class UtilsTest(OCLTestCase):
     def test_set_and_get_current_user(self):
@@ -665,6 +725,10 @@ class UtilsTest(OCLTestCase):
             flatten_dict(dict(foo=True, bar=dict(tao=dict(te='ching')))),
             dict(foo='True', bar__tao__te='ching')
         )
+        self.assertEqual(
+            flatten_dict(dict(foo=True, bar=dict(tao=dict(te='tao-te-ching')))),
+            dict(foo='True', bar__tao__te='tao_te_ching')
+        )
         # self.assertEqual(
         #     flatten_dict(
         #         {
@@ -856,6 +920,29 @@ class TaskTest(OCLTestCase):
 
         self.assertEqual(result, 'Import Result')
         import_run_mock.assert_called_once()
+
+    @patch('core.common.tasks.EmailMessage')
+    def test_monthly_usage_report(self, email_message_mock):
+        prev_month = get_prev_month()
+        email_message_instance_mock = Mock(send=Mock(return_value=1))
+        email_message_mock.return_value = email_message_instance_mock
+        res = monthly_usage_report()
+
+        email_message_mock.assert_called_once()
+        email_message_instance_mock.send.assert_called_once()
+
+        self.assertEqual(res, 1)
+        call_args = email_message_mock.call_args[1]
+        self.assertTrue(
+            f"Monthly usage report: {get_start_of_month(prev_month)} to {get_end_of_month(prev_month)}"
+            in call_args['subject']
+        )
+        self.assertEqual(call_args['to'], ['reports@openconceptlab.org'])
+        self.assertTrue('</html>' in call_args['body'])
+        self.assertTrue('concepts' in call_args['body'])
+        self.assertTrue('sources' in call_args['body'])
+        self.assertTrue('collections' in call_args['body'])
+        self.assertEqual(email_message_instance_mock.content_subtype, 'html')
 
 
 class PostgresQLTest(OCLTestCase):

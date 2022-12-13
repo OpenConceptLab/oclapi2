@@ -37,7 +37,7 @@ from core.collections.serializers import (
 from core.collections.utils import is_version_specified
 from core.common.constants import (
     HEAD, RELEASED_PARAM, PROCESSING_PARAM, OK_MESSAGE,
-    ACCESS_TYPE_NONE, INCLUDE_RETIRED_PARAM, INCLUDE_INVERSE_MAPPINGS_PARAM)
+    ACCESS_TYPE_NONE, INCLUDE_RETIRED_PARAM, INCLUDE_INVERSE_MAPPINGS_PARAM, ALL)
 from core.common.exceptions import Http409, Http405
 from core.common.mixins import (
     ConceptDictionaryCreateMixin, ListWithHeadersMixin, ConceptDictionaryUpdateMixin,
@@ -429,7 +429,7 @@ class CollectionReferencesView(
         if not expressions and not reference_ids:
             return Response(status=status.HTTP_400_BAD_REQUEST)
 
-        if self.should_cascade_mappings() and expressions != '*' and expressions:
+        if self.should_cascade_mappings() and expressions != ALL and expressions:
             expressions += instance.get_cascaded_mapping_uris_from_concept_expressions(expressions)
 
         if expressions:
@@ -446,13 +446,14 @@ class CollectionReferencesView(
         is_async = self.is_async_requested()
         collection = self.get_object()
         data = request.data.get('data')
+        cascade_params = request.data.get('cascade', None)
         is_dict = isinstance(data, dict)
         concept_expressions = data.get('concepts', []) if is_dict else []
         mapping_expressions = data.get('mappings', []) if is_dict else []
-        cascade = self.request.query_params.get('cascade', '').lower()
+        cascade = cascade_params or self.request.query_params.get('cascade', '').lower()
         transform = self.request.query_params.get('transformReferences', '').lower()
 
-        adding_all = mapping_expressions == '*' or concept_expressions == '*'
+        adding_all = ALL in (mapping_expressions, concept_expressions)
 
         if adding_all or is_async:
             result = add_references.delay(self.request.user.id, data, collection.id, cascade, transform)
@@ -468,7 +469,10 @@ class CollectionReferencesView(
         added_original_expressions = set()
         for reference in added_references:
             added_expressions.add(reference.expression)
-            added_expression = reference.original_expression or reference.expression
+            if reference.cascade and reference.transform:
+                added_expression = reference.expression or reference.original_expression
+            else:
+                added_expression = reference.original_expression or reference.expression
             added_original_expressions.add(added_expression)
         if errors:
             for expression in errors:
@@ -1133,6 +1137,14 @@ class CollectionExtrasView(CollectionExtrasBaseView, ListAPIView):
 
     def list(self, request, *args, **kwargs):
         return Response(get(self.get_object(), 'extras', {}))
+
+
+class CollectionVersionExtrasView(CollectionBaseView, ListAPIView):
+    serializer_class = CollectionDetailSerializer
+
+    def list(self, request, *args, **kwargs):
+        instance = get_object_or_404(self.get_queryset(), version=self.kwargs['version'])
+        return Response(get(instance, 'extras', {}))
 
 
 class CollectionExtraRetrieveUpdateDestroyView(CollectionExtrasBaseView,

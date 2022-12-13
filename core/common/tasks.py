@@ -1,3 +1,4 @@
+from datetime import datetime
 from json import JSONDecodeError
 
 from billiard.exceptions import WorkerLostError
@@ -14,7 +15,8 @@ from pydash import get
 
 from core.celery import app
 from core.common.constants import CONFIRM_EMAIL_ADDRESS_MAIL_SUBJECT, PASSWORD_RESET_MAIL_SUBJECT
-from core.common.utils import write_export_file, web_url, get_resource_class_from_resource_name, get_export_service
+from core.common.utils import write_export_file, web_url, get_resource_class_from_resource_name, get_export_service, \
+    get_start_of_month, get_end_of_month, get_prev_month
 
 logger = get_task_logger(__name__)
 
@@ -479,8 +481,8 @@ def delete_duplicate_locales(start_from=None):  # pragma: no cover
 
 @app.task
 def delete_dormant_locales():  # pragma: no cover
-    from core.concepts.models import LocalizedText
-    queryset = LocalizedText.get_dormant_queryset()
+    from core.concepts.models import ConceptName
+    queryset = ConceptName.get_dormant_queryset()
     total = queryset.count()
     logger.info('%s Dormant locales found. Deleting in batches...' % total)  # pylint: disable=logging-not-lazy,consider-using-f-string
 
@@ -488,7 +490,7 @@ def delete_dormant_locales():  # pragma: no cover
     for start in range(0, total, batch_size):
         end = min(start + batch_size, total)
         logger.info('Iterating locales %d - %d to delete...' % (start + 1, end))  # pylint: disable=logging-not-lazy,consider-using-f-string
-        LocalizedText.objects.filter(id__in=queryset.order_by('id')[start:end].values('id')).delete()
+        ConceptName.objects.filter(id__in=queryset.order_by('id')[start:end].values('id')).delete()
 
     return 1
 
@@ -711,3 +713,29 @@ def reference_old_to_new_structure():  # pragma: no cover
         reference.valueset = ref_struct['valueset']
         reference.filter = ref_struct['filter']
         reference.save()
+
+
+@app.task(ignore_result=True)
+def beat_healthcheck():  # pragma: no cover
+    from core.common.services import RedisService
+    redis_service = RedisService()
+    redis_service.set(settings.CELERYBEAT_HEALTHCHECK_KEY, str(datetime.now()), ex=120)
+
+
+@app.task(ignore_result=True)
+def monthly_usage_report():  # pragma: no cover
+    # runs on first of every month
+    # reports usage of prev month
+    from core.reports.models import MonthlyUsageReport
+    prev_month = get_prev_month()
+    report = MonthlyUsageReport(verbose=True, start=get_start_of_month(prev_month), end=get_end_of_month(prev_month))
+    report.prepare()
+    html_body = render_to_string('monthly_usage_report_for_mail.html', report.get_result_for_email())
+    mail = EmailMessage(
+        subject=f"[{settings.ENV.upper()}] Monthly usage report: {report.start} to {report.end}",
+        body=html_body,
+        to=[settings.REPORTS_EMAIL]
+    )
+    mail.content_subtype = "html"
+    res = mail.send()
+    return res

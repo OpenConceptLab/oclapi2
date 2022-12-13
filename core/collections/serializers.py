@@ -28,18 +28,44 @@ class CollectionMinimalSerializer(ModelSerializer):
 
 
 class CollectionListSerializer(ModelSerializer):
+    type = CharField(source='resource_type')
     short_code = CharField(source='mnemonic')
     owner = CharField(source='parent_resource')
     owner_type = CharField(source='parent_resource_type')
     owner_url = CharField(source='parent_url')
     id = CharField(source='mnemonic')
+    summary = SerializerMethodField()
 
     class Meta:
         model = Collection
         fields = (
             'short_code', 'name', 'url', 'owner', 'owner_type', 'owner_url', 'version', 'created_at', 'id',
-            'collection_type', 'updated_at', 'canonical_url', 'autoexpand_head'
+            'collection_type', 'updated_at', 'canonical_url', 'autoexpand_head',
+            'summary', 'type',
         )
+
+    def __init__(self, *args, **kwargs):
+        params = get(kwargs, 'context.request.query_params')
+
+        self.query_params = {}
+        if params:
+            self.query_params = params if isinstance(params, dict) else params.dict()
+        self.include_summary = self.query_params.get(INCLUDE_SUMMARY) in ['true', True]
+        try:
+            if not self.include_summary:
+                self.fields.pop('summary', None)
+        except:  # pylint: disable=bare-except
+            pass
+
+        super().__init__(*args, **kwargs)
+
+    def get_summary(self, obj):
+        summary = None
+
+        if self.include_summary:
+            summary = CollectionSummarySerializer(obj).data
+
+        return summary
 
 
 class CollectionVersionListSerializer(ModelSerializer):
@@ -305,6 +331,11 @@ class CollectionDetailSerializer(CollectionCreateOrUpdateSerializer):
 
         return []
 
+    def to_representation(self, instance):  # used to be to_native
+        ret = super().to_representation(instance)
+        ret.update({"supported_locales": instance.get_supported_locales()})
+        return ret
+
 
 class CollectionVersionDetailSerializer(CollectionCreateOrUpdateSerializer):
     type = CharField(source='resource_version_type')
@@ -389,7 +420,7 @@ class CollectionReferenceDetailSerializer(CollectionReferenceSerializer):
         fields = (
             *CollectionReferenceSerializer.Meta.fields,
             'code', 'resource_version', 'namespace', 'system', 'version', 'valueset', 'cascade', 'filter', 'display',
-            'created_at', 'updated_at', 'concepts', 'mappings', 'translation'
+            'created_at', 'updated_at', 'concepts', 'mappings', 'translation', 'transform'
         )
 
 

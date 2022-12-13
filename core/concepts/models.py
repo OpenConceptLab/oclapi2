@@ -6,13 +6,13 @@ from django.db import models, IntegrityError, transaction, connection
 from django.db.models import F, Q
 from pydash import get, compact
 
-from core.common.constants import ISO_639_1, LATEST, HEAD
+from core.common.constants import ISO_639_1, LATEST, HEAD, ALL
 from core.common.mixins import SourceChildMixin
 from core.common.models import VersionedModel
 from core.common.tasks import process_hierarchy_for_new_concept, process_hierarchy_for_concept_version, \
     process_hierarchy_for_new_parent_concept_version
 from core.common.utils import generate_temp_version, drop_version, \
-    encode_string, decode_string, named_tuple_fetchall, startswith_temp_version
+    encode_string, decode_string, named_tuple_fetchall, startswith_temp_version, is_versioned_uri
 from core.concepts.constants import CONCEPT_TYPE, LOCALES_FULLY_SPECIFIED, LOCALES_SHORT, LOCALES_SEARCH_INDEX_TERM, \
     CONCEPT_WAS_RETIRED, CONCEPT_IS_ALREADY_RETIRED, CONCEPT_IS_ALREADY_NOT_RETIRED, CONCEPT_WAS_UNRETIRED, \
     PERSIST_CLONE_ERROR, PERSIST_CLONE_SPECIFY_USER_ERROR, ALREADY_EXISTS, CONCEPT_REGEX, MAX_LOCALES_LIMIT, \
@@ -20,10 +20,9 @@ from core.concepts.constants import CONCEPT_TYPE, LOCALES_FULLY_SPECIFIED, LOCAL
 from core.concepts.mixins import ConceptValidationMixin
 
 
-class LocalizedText(models.Model):
+class AbstractLocalizedText(models.Model):
     class Meta:
-        db_table = 'localized_texts'
-
+        abstract = True
         indexes = [
             HashIndex(fields=['name']),
             models.Index(fields=['type']),
@@ -40,28 +39,6 @@ class LocalizedText(models.Model):
     locale_preferred = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
-    @classmethod
-    def get_dormant_queryset(cls):
-        return cls.objects.filter(name_locales__isnull=True, description_locales__isnull=True)
-
-    @classmethod
-    def dormants(cls, raw=True):
-        if raw:
-            with connection.cursor() as cursor:
-                cursor.execute(
-                    """
-                    SELECT COUNT("localized_texts"."id") FROM "localized_texts"
-                    WHERE NOT EXISTS (SELECT 1 FROM "concepts_names" WHERE
-                    "concepts_names"."localizedtext_id" = "localized_texts"."id")
-                    AND NOT EXISTS (SELECT 1 FROM "concepts_descriptions"
-                    WHERE "concepts_descriptions"."localizedtext_id" = "localized_texts"."id")
-                    """
-                )
-                count, = cursor.fetchone()
-                return count
-
-        return cls.get_dormant_queryset().count()
-
     def to_dict(self):
         return dict(
             external_id=self.external_id, name=self.name, type=self.type, locale=self.locale,
@@ -69,7 +46,7 @@ class LocalizedText(models.Model):
         )
 
     def clone(self):
-        return LocalizedText(
+        return self.__class__(
             external_id=self.external_id,
             name=self.name,
             type=self.type,
@@ -77,49 +54,17 @@ class LocalizedText(models.Model):
             locale_preferred=self.locale_preferred
         )
 
-    @classmethod
-    def build(cls, params, used_as='name'):
-        instance = None
-        if used_as == 'name':
-            instance = cls.build_name(params)
-        if used_as == 'description':
-            instance = cls.build_description(params)
-
-        return instance
+    @staticmethod
+    def _build(_):
+        pass
 
     @classmethod
-    def build_name(cls, params):
-        _type = params.pop('type', None)
-        name_type = params.pop('name_type', None)
-        if not name_type or name_type == 'ConceptName':
-            name_type = _type
-
-        return cls(
-            **{**params, 'type': name_type}
-        )
-
-    @classmethod
-    def build_description(cls, params):
-        _type = params.pop('type', None)
-        description_type = params.pop('description_type', None)
-        if not description_type or description_type == 'ConceptDescription':
-            description_type = _type
-
-        description_name = params.pop('description', None) or params.pop('name', None)
-        return cls(
-            **{
-                **params,
-                'type': description_type,
-                'name': description_name,
-            }
-        )
-
-    @classmethod
-    def build_locales(cls, locale_params, used_as='name'):
-        if not locale_params:
+    def build(cls, params):
+        if not params:
             return []
-
-        return [cls.build(locale, used_as) for locale in locale_params]
+        if isinstance(params, list):
+            return [cls._build(param) for param in params]
+        return cls._build(params)
 
     @property
     def is_fully_specified(self):
@@ -139,6 +84,75 @@ class LocalizedText(models.Model):
     @property
     def is_search_index_term(self):
         return self.type in LOCALES_SEARCH_INDEX_TERM
+
+
+class ConceptDescription(AbstractLocalizedText):
+    concept = models.ForeignKey('concepts.Concept', on_delete=models.CASCADE, related_name='descriptions')
+
+    class Meta:
+        db_table = 'concept_descriptions'
+        indexes = AbstractLocalizedText.Meta.indexes
+
+    @staticmethod
+    def _build(params):
+        _type = params.get('type', None)
+        description_type = params.get('description_type', None)
+        if not description_type or description_type == 'ConceptDescription':
+            description_type = _type
+
+        description_name = params.get('description', None) or params.get('name', None)
+        return ConceptDescription(
+            **{
+                **{k: v for k, v in params.items() if k not in ['description', 'name', 'type', 'description_type']},
+                'type': description_type,
+                'name': description_name,
+            }
+        )
+
+
+class ConceptName(AbstractLocalizedText):
+    concept = models.ForeignKey(
+        'concepts.Concept', on_delete=models.CASCADE, null=True, blank=True, related_name='names')
+
+    class Meta:
+        db_table = 'concept_names'
+        indexes = AbstractLocalizedText.Meta.indexes
+
+    @staticmethod
+    def _build(params):
+        _type = params.get('type', None)
+        name_type = params.get('name_type', None)
+        if not name_type or name_type == 'ConceptName':
+            name_type = _type
+
+        return ConceptName(
+            **{
+                **{k: v for k, v in params.items() if k not in ['type', 'name_type']},
+                'type': name_type
+            }
+        )
+
+    @classmethod
+    def get_dormant_queryset(cls):
+        return cls.objects.filter(name_locales__isnull=True, description_locales__isnull=True)
+
+    @classmethod
+    def dormants(cls, raw=True):
+        if raw:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT COUNT("concept_names"."id") FROM "concept_names"
+                    WHERE NOT EXISTS (SELECT 1 FROM "concepts_names" WHERE
+                    "concepts_names"."localizedtext_id" = "concept_names"."id")
+                    AND NOT EXISTS (SELECT 1 FROM "concepts_descriptions"
+                    WHERE "concepts_descriptions"."localizedtext_id" = "concept_names"."id")
+                    """
+                )
+                count, = cursor.fetchone()
+                return count
+
+        return cls.get_dormant_queryset().count()
 
 
 class HierarchicalConcepts(models.Model):
@@ -202,8 +216,8 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     external_id = models.TextField(null=True, blank=True)
     concept_class = models.TextField()
     datatype = models.TextField()
-    names = models.ManyToManyField(LocalizedText, related_name='name_locales')
-    descriptions = models.ManyToManyField(LocalizedText, related_name='description_locales')
+    names_old = models.ManyToManyField(ConceptName, related_name='name_locales')
+    descriptions_old = models.ManyToManyField(ConceptName, related_name='description_locales')
     comment = models.TextField(null=True, blank=True)
     parent = models.ForeignKey('sources.Source', related_name='concepts_set', on_delete=models.CASCADE)
     sources = models.ManyToManyField('sources.Source', related_name='concepts')
@@ -467,14 +481,19 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             )
 
         if concept:
-            mnemonics = [concept, encode_string(concept, safe=' '), encode_string(concept, safe='+'),
-                         encode_string(concept, safe='+%'), encode_string(concept, safe='% +'),
-                         decode_string(concept), decode_string(concept, False)]
-            queryset = queryset.filter(mnemonic__in=mnemonics)
+            queryset = queryset.filter(mnemonic__in=cls.get_mnemonic_variations_for_filter(concept))
         if concept_version:
             queryset = queryset.filter(version=concept_version)
 
         return cls.apply_attribute_based_filters(queryset, params)
+
+    @staticmethod
+    def get_mnemonic_variations_for_filter(mnemonic):
+        return [
+            mnemonic, encode_string(mnemonic, safe=' '), encode_string(mnemonic, safe='+'),
+            encode_string(mnemonic, safe='+%'), encode_string(mnemonic, safe='% +'),
+            decode_string(mnemonic), decode_string(mnemonic, False)
+        ]
 
     def clone(self):
         concept_version = Concept(
@@ -535,8 +554,8 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         instance.comment = data.get('update_comment') or data.get('comment')
         instance.retired = data.get('retired', instance.retired)
 
-        new_names = LocalizedText.build_locales(data.get('names', []))
-        new_descriptions = LocalizedText.build_locales(data.get('descriptions', []), 'description')
+        new_names = ConceptName.build(data.get('names', []))
+        new_descriptions = ConceptDescription.build(data.get('descriptions', []))
         has_parent_concept_uris_attr = 'parent_concept_urls' in data
         parent_concept_uris = data.pop('parent_concept_urls', None)
 
@@ -597,22 +616,13 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                         child = Concept.objects.filter(uri=uri).first().get_latest_version()
                         child.parent_concepts.add(new_latest_version)
 
-    def set_locales(self):
+    def set_locales(self, locales, locale_klass):
         if not self.id:
             return  # pragma: no cover
-
-        names = get(self, 'cloned_names', [])
-        descriptions = get(self, 'cloned_descriptions', [])
-
-        for name in names:
-            name.save()
-        for desc in descriptions:
-            desc.save()
-
-        self.names.set(names)
-        self.descriptions.set(descriptions)
-        self.cloned_names = []
-        self.cloned_descriptions = []
+        for locale in locales:
+            new_locale = locale.clone() if isinstance(locale, locale_klass) else locale_klass.build(locale)
+            new_locale.concept_id = self.id
+            new_locale.save()
 
     def remove_locales(self):
         self.names.all().delete()
@@ -633,17 +643,8 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
     @classmethod
     def persist_new(cls, data, user=None, create_initial_version=True, create_parent_version=True):  # pylint: disable=too-many-statements
-        names = [
-            name if isinstance(name, LocalizedText) else LocalizedText.build(
-                name
-            ) for name in data.pop('names', []) or []
-        ]
-        descriptions = [
-            desc if isinstance(desc, LocalizedText) else LocalizedText.build(
-                desc, 'description'
-            ) for desc in data.pop('descriptions', []) or []
-        ]
-
+        names = data.pop('names', []) or []
+        descriptions = data.pop('descriptions', []) or []
         parent_concept_uris = data.pop('parent_concept_urls', None)
         concept = Concept(**data)
         temp_version = generate_temp_version()
@@ -658,29 +659,30 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
         try:
             concept.validate_locales_limit(names, descriptions)
-            concept.cloned_names = names
-            concept.cloned_descriptions = descriptions
-            concept.full_clean()
             concept.save()
+            concept.versioned_object_id = concept.id
+            concept.version = str(concept.id)
+            concept.set_locales(names, ConceptName)
+            concept.set_locales(descriptions, ConceptDescription)
+
             parent_resource = concept.parent
             if startswith_temp_version(concept.mnemonic):
                 concept.mnemonic = parent_resource.concept_mnemonic_next or str(concept.id)
                 concept.name = concept.mnemonic
             if not concept.external_id:
                 concept.external_id = parent_resource.concept_external_id_next
-            concept.versioned_object_id = concept.id
-            concept.version = str(concept.id)
             concept.is_latest_version = not create_initial_version
             concept.public_access = parent_resource.public_access
             concept.save()
-            concept.set_locales()
+            concept.full_clean()
 
             initial_version = None
             if create_initial_version:
                 initial_version = cls.create_initial_version(concept)
-                initial_version.names.set(concept.names.all())
-                initial_version.descriptions.set(concept.descriptions.all())
-                initial_version.sources.set([parent_resource])
+                if initial_version.id:
+                    initial_version.set_locales(names, ConceptName)
+                    initial_version.set_locales(descriptions, ConceptDescription)
+                    initial_version.sources.set([parent_resource])
 
             concept.sources.set([parent_resource])
             concept.update_mappings()
@@ -696,8 +698,12 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             if create_initial_version and concept._counted is True:
                 parent_resource.update_concepts_count()
         except ValidationError as ex:
+            if concept.id:
+                concept.delete()
             concept.errors.update(ex.message_dict)
         except IntegrityError as ex:
+            if concept.id:
+                concept.delete()
             concept.errors.update(dict(__all__=ex.args))
 
         return concept
@@ -705,8 +711,9 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     def update_versioned_object(self):
         concept = self.versioned_object
         concept.extras = self.extras
-        concept.names.set(self.names.all())
-        concept.descriptions.set(self.descriptions.all())
+        concept.remove_locales()
+        concept.set_locales(self.names.all(), ConceptName)
+        concept.set_locales(self.descriptions.all(), ConceptDescription)
         concept.parent_concepts.set(self.parent_concepts.all())
         concept.concept_class = self.concept_class
         concept.datatype = self.datatype
@@ -741,7 +748,10 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                 if obj.id:
                     obj.version = str(obj.id)
                     obj.save()
-                    obj.set_locales()
+                    obj.set_locales(obj.cloned_names, ConceptName)
+                    obj.set_locales(obj.cloned_descriptions, ConceptDescription)
+                    obj.cloned_names = []
+                    obj.cloned_descriptions = []
                     obj.clean()  # clean here to validate locales that can only be saved after obj is saved
                     obj.update_versioned_object()
                     if prev_latest_version:
@@ -892,13 +902,13 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
     @property
     def parent_concept_urls(self):
-        return self.__get_hierarchy_concept_urls('parent_concepts')
+        return self.get_hierarchy_concept_urls('parent_concepts')
 
     @property
     def child_concept_urls(self):
-        return self.__get_hierarchy_concept_urls('child_concepts')
+        return self.get_hierarchy_concept_urls('child_concepts')
 
-    def __get_hierarchy_concept_urls(self, relation):
+    def get_hierarchy_concept_urls(self, relation, versioned=False):
         queryset = get(self, relation).all()
         if self.is_latest_version:
             queryset |= get(self.versioned_object, relation).all()
@@ -906,7 +916,15 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             latest_version = self.get_latest_version()
             if latest_version:
                 queryset |= get(latest_version, relation).all()
-        return self.__format_hierarchy_uris(queryset.values_list('uri', flat=True))
+        uris = queryset.values_list('uri', flat=True)
+        if versioned:
+            return self.__format_hierarchy_versioned_uris(uris)
+        return self.__format_hierarchy_uris(uris)
+
+    def get_hierarchy_queryset(self, relation, repo_version, filters=None):
+        filters = filters or {}
+        queryset = Concept.objects.filter(uri__in=self.get_hierarchy_concept_urls(relation, not repo_version.is_head))
+        return queryset.filter(**filters)
 
     def child_concept_queryset(self):
         urls = self.child_concept_urls
@@ -943,6 +961,10 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     def __format_hierarchy_uris(uris):
         return list({drop_version(uri) for uri in uris})
 
+    @staticmethod
+    def __format_hierarchy_versioned_uris(uris):
+        return list({uri for uri in uris if is_versioned_uri(uri)})
+
     def get_hierarchy_path(self):
         result = []
         parent_concept = self.parent_concepts.first()
@@ -953,16 +975,11 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         result.reverse()
         return result
 
-    def delete(self, using=None, keep_parents=False):
-        if self.is_versioned_object:
-            LocalizedText.objects.filter(name_locales=self).delete()
-            LocalizedText.objects.filter(description_locales=self).delete()
-        return super().delete(using=using, keep_parents=keep_parents)
-
     def cascade(  # pylint: disable=too-many-arguments,too-many-locals
             self, repo_version=None, source_mappings=True, source_to_concepts=True,
-            mappings_criteria=None, cascade_mappings=True, cascade_hierarchy=True, cascade_levels='*',
-            include_mappings=True, include_retired=False, reverse=False, max_results=1000
+            mappings_criteria=None, cascade_mappings=True, cascade_hierarchy=True, cascade_levels=ALL,
+            include_retired=False, reverse=False, return_map_types_criteria=None,
+            max_results=1000
     ):
         from core.mappings.models import Mapping
         result = dict(concepts=Concept.objects.filter(id=self.id), mappings=Mapping.objects.none())
@@ -985,7 +1002,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         cascaded = []
 
         def iterate(level):
-            if level == '*' or level > 0:
+            if level == ALL or level > 0:
                 if not cascaded or (result['concepts'].count() + result['mappings'].count()) < max_results:
                     not_cascaded = result['concepts'].exclude(
                         versioned_object_id__in=cascaded) if cascaded else result['concepts']
@@ -995,8 +1012,9 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                                 repo_version=repo_version,
                                 source_mappings=source_mappings, source_to_concepts=source_to_concepts,
                                 mappings_criteria=mappings_criteria, cascade_mappings=cascade_mappings,
-                                cascade_hierarchy=cascade_hierarchy, include_mappings=include_mappings,
-                                include_retired=include_retired, reverse=reverse, is_collection=is_collection
+                                cascade_hierarchy=cascade_hierarchy,
+                                include_retired=include_retired, reverse=reverse, is_collection=is_collection,
+                                return_map_types_criteria=return_map_types_criteria
                             )
                             cascaded.append(concept.versioned_object_id)
                             result['concepts'] = Concept.objects.filter(
@@ -1013,15 +1031,15 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                                 ]
                             )
 
-                        iterate(level if level == '*' else level - 1)
+                        iterate(level if level == ALL else level - 1)
 
         iterate(cascade_levels)
         return result
 
     def cascade_as_hierarchy(  # pylint: disable=too-many-arguments,too-many-locals
             self, repo_version=None, source_mappings=True, source_to_concepts=True, mappings_criteria=None,
-            cascade_mappings=True, cascade_hierarchy=True, cascade_levels='*',
-            include_mappings=True, include_retired=False, reverse=False, _=None
+            cascade_mappings=True, cascade_hierarchy=True, cascade_levels=ALL,
+            include_retired=False, reverse=False, return_map_types_criteria=None, _=None
     ):
         if cascade_levels == 0:
             return self
@@ -1048,7 +1066,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         cascaded = {}
 
         def iterate(level):
-            if level == '*' or level > 0:
+            if level == ALL or level > 0:
                 new_level = self.current_level + 1
                 levels[new_level] = levels.get(new_level, [])
                 for concept in levels[self.current_level]:
@@ -1059,9 +1077,10 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                         repo_version=repo_version,
                         source_mappings=source_mappings, source_to_concepts=source_to_concepts,
                         mappings_criteria=mappings_criteria, cascade_mappings=cascade_mappings,
-                        cascade_hierarchy=cascade_hierarchy, include_mappings=include_mappings,
+                        cascade_hierarchy=cascade_hierarchy,
                         include_retired=include_retired, include_self=False,
-                        reverse=reverse, is_collection=is_collection
+                        reverse=reverse, is_collection=is_collection,
+                        return_map_types_criteria=return_map_types_criteria
                     )
                     cascaded_entries['concepts'] = list(
                         set(list(cascaded_entries['hierarchy_concepts']) + list(cascaded_entries['concepts'])))
@@ -1070,7 +1089,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                     concept_has_entries = has_entries(cascaded_entries)
                     cascaded[concept.id] = concept_has_entries
                     concept.terminal = not concept_has_entries
-                    if level == 1 and cascade_levels != '*':  # last level, when cascadeLevels are finite
+                    if level == 1 and cascade_levels != ALL:  # last level, when cascadeLevels are finite
                         for _concept in cascaded_entries['concepts']:
                             if _concept.id in cascaded:
                                 _concept.terminal = not cascaded[_concept.id]
@@ -1079,7 +1098,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                 if not levels[new_level]:
                     return
                 self.current_level += 1
-                iterate(level if level == '*' else level - 1)
+                iterate(level if level == ALL else level - 1)
 
         iterate(cascade_levels)
 
@@ -1102,33 +1121,40 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
     def cascaded_resources_forward_for_source_version(  # pylint: disable=too-many-arguments,too-many-locals
             self, repo_version, source_mappings=True, source_to_concepts=True, mappings_criteria=None,
-            cascade_mappings=True, cascade_hierarchy=True, include_mappings=True, include_retired=False,
-            include_self=True
+            cascade_mappings=True, cascade_hierarchy=True, include_retired=False,
+            include_self=True, return_map_types_criteria=None
     ):
         from core.mappings.models import Mapping
         mappings = Mapping.objects.none()
         concepts = Concept.objects.filter(id=self.id) if include_self else Concept.objects.none()
         result = dict(concepts=concepts, mappings=mappings, hierarchy_concepts=Concept.objects.none())
-        mappings_criteria = mappings_criteria or Q()
+        mappings_criteria = mappings_criteria or Q()  # cascade mappings criteria
+        return_map_types_criteria = return_map_types_criteria if return_map_types_criteria is False else (
+                return_map_types_criteria or Q()
+        )
         if cascade_mappings and (source_mappings or source_to_concepts):
             mappings = repo_version.mappings.filter(
                 from_concept_id__in={self.id, self.versioned_object_id}
-            ).filter(mappings_criteria).order_by('map_type')
+            ).order_by('map_type')
             if repo_version.is_head:
                 mappings = mappings.filter(id=F('versioned_object_id'))
             if not include_retired:
                 mappings = mappings.filter(retired=False)
-            if include_mappings:
-                result['mappings'] = mappings
+            if return_map_types_criteria is not False:
+                result['mappings'] = mappings.filter(return_map_types_criteria)
         if source_to_concepts:
             if cascade_hierarchy:
-                hierarchy_queryset = self.child_concept_queryset().filter(sources=repo_version)
+                hierarchy_queryset = self.get_hierarchy_queryset(
+                    'child_concepts', repo_version, dict(sources=repo_version))
                 if not include_retired:
                     hierarchy_queryset = hierarchy_queryset.filter(retired=False)
                 result['hierarchy_concepts'] = result['hierarchy_concepts'].union(hierarchy_queryset)
-            if mappings.exists():
+            to_cascade_mappings = mappings.filter(mappings_criteria)
+            if to_cascade_mappings.exists():
                 queryset = Concept.objects.filter(
-                    id__in=mappings.values_list('to_concept_id', flat=True), parent_id=self.parent_id)
+                    id__in=to_cascade_mappings.values_list('to_concept_id', flat=True),
+                    parent_id=self.parent_id
+                )
                 queryset = repo_version.concepts.filter(
                     versioned_object_id__in=queryset.values_list('versioned_object_id', flat=True))
                 if repo_version.is_head:
@@ -1140,33 +1166,38 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
     def cascaded_resources_reverse_for_source_version(  # pylint: disable=too-many-arguments,too-many-locals
             self, repo_version, source_mappings=True, source_to_concepts=True, mappings_criteria=None,
-            cascade_mappings=True, cascade_hierarchy=True, include_mappings=True, include_retired=False,
-            include_self=True
+            cascade_mappings=True, cascade_hierarchy=True, include_retired=False,
+            include_self=True, return_map_types_criteria=None
     ):
         from core.mappings.models import Mapping
         mappings = Mapping.objects.none()
         concepts = Concept.objects.filter(id=self.id) if include_self else Concept.objects.none()
         result = dict(concepts=concepts, mappings=mappings, hierarchy_concepts=Concept.objects.none())
-        mappings_criteria = mappings_criteria or Q()
+        mappings_criteria = mappings_criteria or Q()  # cascade mappings criteria
+        return_map_types_criteria = return_map_types_criteria if return_map_types_criteria is False else (
+                return_map_types_criteria or Q()
+        )
         if cascade_mappings and (source_mappings or source_to_concepts):
             mappings = repo_version.mappings.filter(
                 to_concept_id__in={self.id, self.versioned_object_id}
-            ).filter(mappings_criteria).order_by('map_type')
+            ).order_by('map_type')
             if repo_version.is_head:
                 mappings = mappings.filter(id=F('versioned_object_id'))
             if not include_retired:
                 mappings = mappings.filter(retired=False)
-            if include_mappings:
-                result['mappings'] = mappings
+            if return_map_types_criteria is not False:
+                result['mappings'] = mappings.filter(return_map_types_criteria)
         if source_to_concepts:
             if cascade_hierarchy:
-                hierarchy_queryset = self.parent_concept_queryset().filter(sources=repo_version)
+                hierarchy_queryset = self.get_hierarchy_queryset(
+                    'parent_concepts', repo_version, dict(sources=repo_version))
                 if not include_retired:
                     hierarchy_queryset = hierarchy_queryset.filter(retired=False)
                 result['hierarchy_concepts'] = result['hierarchy_concepts'].union(hierarchy_queryset)
-            if mappings.exists():
+            to_cascade_mappings = mappings.filter(mappings_criteria)
+            if to_cascade_mappings.exists():
                 queryset = Concept.objects.filter(
-                    id__in=mappings.values_list('from_concept_id', flat=True), parent_id=self.parent_id)
+                    id__in=to_cascade_mappings.values_list('from_concept_id', flat=True), parent_id=self.parent_id)
                 queryset = repo_version.concepts.filter(versioned_object_id__in=queryset)
                 if repo_version.is_head:
                     queryset = queryset.filter(id=F('versioned_object_id'))
@@ -1178,34 +1209,38 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
     def cascaded_resources_forward_for_collection_version(  # pylint: disable=too-many-arguments,too-many-locals
             self, repo_version, source_mappings=True, source_to_concepts=True, mappings_criteria=None,
-            cascade_mappings=True, cascade_hierarchy=True, include_mappings=True, include_retired=False,
-            include_self=True
+            cascade_mappings=True, cascade_hierarchy=True, include_retired=False,
+            include_self=True, return_map_types_criteria=None
     ):
         from core.mappings.models import Mapping
         mappings = Mapping.objects.none()
         concepts = Concept.objects.filter(id=self.id) if include_self else Concept.objects.none()
         result = dict(concepts=concepts, mappings=mappings, hierarchy_concepts=Concept.objects.none())
-        mappings_criteria = mappings_criteria or Q()
+        mappings_criteria = mappings_criteria or Q()  # cascade mappings criteria
+        return_map_types_criteria = return_map_types_criteria if return_map_types_criteria is False else (
+                return_map_types_criteria or Q()
+        )
         expansion = repo_version.expansion
         if not expansion:
             return result
         if cascade_mappings and (source_mappings or source_to_concepts):
             mappings = expansion.mappings.filter(
                 from_concept_id__in={self.id, self.versioned_object_id}
-            ).filter(mappings_criteria).order_by('map_type')
+            ).order_by('map_type')
             if not include_retired:
                 mappings = mappings.filter(retired=False)
-            if include_mappings:
-                result['mappings'] = mappings
+            if return_map_types_criteria is not False:
+                result['mappings'] = mappings.filter(return_map_types_criteria)
         if source_to_concepts:
             if cascade_hierarchy:
-                hierarchy_queryset = self.child_concept_queryset().filter(
-                    expansion_set__collection_version=repo_version)
+                hierarchy_queryset = self.get_hierarchy_queryset(
+                    'child_concepts', repo_version, dict(expansion_set__collection_version=repo_version))
                 if not include_retired:
                     hierarchy_queryset = hierarchy_queryset.filter(retired=False)
                 result['hierarchy_concepts'] = result['hierarchy_concepts'].union(hierarchy_queryset)
-            if mappings.exists():
-                queryset = Concept.objects.filter(id__in=mappings.values_list('to_concept_id', flat=True))
+            to_cascade_mappings = mappings.filter(mappings_criteria)
+            if to_cascade_mappings.exists():
+                queryset = Concept.objects.filter(id__in=to_cascade_mappings.values_list('to_concept_id', flat=True))
                 queryset = expansion.concepts.filter(
                     versioned_object_id__in=queryset.values_list('versioned_object_id', flat=True))
                 if not include_retired:
@@ -1215,14 +1250,17 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
     def cascaded_resources_reverse_for_collection_version(  # pylint: disable=too-many-arguments,too-many-locals
             self, repo_version, source_mappings=True, source_to_concepts=True, mappings_criteria=None,
-            cascade_mappings=True, cascade_hierarchy=True, include_mappings=True, include_retired=False,
-            include_self=True
+            cascade_mappings=True, cascade_hierarchy=True, include_retired=False,
+            include_self=True, return_map_types_criteria=None
     ):
         from core.mappings.models import Mapping
         mappings = Mapping.objects.none()
         concepts = Concept.objects.filter(id=self.id) if include_self else Concept.objects.none()
         result = dict(concepts=concepts, mappings=mappings, hierarchy_concepts=Concept.objects.none())
-        mappings_criteria = mappings_criteria or Q()
+        mappings_criteria = mappings_criteria or Q()  # cascade mappings criteria
+        return_map_types_criteria = return_map_types_criteria if return_map_types_criteria is False else (
+                return_map_types_criteria or Q()
+        )
         expansion = repo_version.expansion
 
         if not expansion:
@@ -1231,20 +1269,21 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         if cascade_mappings and (source_mappings or source_to_concepts):
             mappings = expansion.mappings.filter(
                 to_concept_id__in={self.id, self.versioned_object_id}
-            ).filter(mappings_criteria).order_by('map_type')
+            ).order_by('map_type')
             if not include_retired:
                 mappings = mappings.filter(retired=False)
-            if include_mappings:
-                result['mappings'] = mappings
+            if return_map_types_criteria is not False:
+                result['mappings'] = mappings.filter(return_map_types_criteria)
         if source_to_concepts:
             if cascade_hierarchy:
-                hierarchy_queryset = self.parent_concept_queryset().filter(
-                    expansion_set__collection_version=repo_version)
+                hierarchy_queryset = self.get_hierarchy_queryset(
+                    'parent_concepts', repo_version, dict(expansion_set__collection_version=repo_version))
                 if not include_retired:
                     hierarchy_queryset = hierarchy_queryset.filter(retired=False)
                 result['hierarchy_concepts'] = result['hierarchy_concepts'].union(hierarchy_queryset)
-            if mappings.exists():
-                queryset = Concept.objects.filter(id__in=mappings.values_list('from_concept_id', flat=True))
+            to_cascade_mappings = mappings.filter(mappings_criteria)
+            if to_cascade_mappings.exists():
+                queryset = Concept.objects.filter(id__in=to_cascade_mappings.values_list('from_concept_id', flat=True))
                 queryset = expansion.concepts.filter(versioned_object_id__in=queryset)
                 if not include_retired:
                     queryset = queryset.filter(retired=False)

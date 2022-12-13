@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.db.models import F, Q
 from django.http import Http404
 from drf_yasg.utils import swagger_auto_schema
@@ -21,14 +22,14 @@ from core.common.swagger_parameters import (
     include_facets_header, updated_since_param, include_inverse_mappings_param, include_retired_param,
     compress_header, include_source_versions_param, include_collection_versions_param, cascade_method_param,
     cascade_map_types_params, cascade_exclude_map_types_params, cascade_hierarchy_param, cascade_mappings_param,
-    include_mappings_param, cascade_levels_param, cascade_direction_param, cascade_view_hierarchy)
+    cascade_levels_param, cascade_direction_param, cascade_view_hierarchy, return_map_types_params)
 from core.common.tasks import delete_concept, make_hierarchy
 from core.common.utils import to_parent_uri_from_kwargs, generate_temp_version
 from core.common.views import SourceChildCommonBaseView, SourceChildExtrasView, \
     SourceChildExtraRetrieveUpdateDestroyView, BaseAPIView
 from core.concepts.constants import PARENT_VERSION_NOT_LATEST_CANNOT_UPDATE_CONCEPT
 from core.concepts.documents import ConceptDocument
-from core.concepts.models import Concept, LocalizedText
+from core.concepts.models import Concept, ConceptName
 from core.concepts.permissions import CanViewParentDictionary, CanEditParentDictionary
 from core.concepts.search import ConceptSearch
 from core.concepts.serializers import (
@@ -96,6 +97,24 @@ class ConceptLookupValuesView(ListAPIView, BaseAPIView):  # pragma: no cover
         self.set_parent_resource()
         if self.parent_resource:
             queryset = self.parent_resource.concepts_set.filter(id=F('versioned_object_id'))
+            if self.is_verbose():
+                queryset = queryset.prefetch_related('names')
+            return queryset
+
+        raise Http404()
+
+
+# this is a cached view (expiry 24 hours)
+# driver from settings.DEFAULT_LOCALES_REPO_URI
+class ConceptDefaultLocalesView(ListAPIView, BaseAPIView):  # pragma: no cover
+    serializer_class = ConceptLookupListSerializer
+    permission_classes = (AllowAny, )
+
+    def get_queryset(self):
+        from core.sources.models import Source
+        source = Source.objects.filter(uri=settings.DEFAULT_LOCALES_REPO_URI).first()
+        if source:
+            queryset = source.concepts_set.filter(id=F('versioned_object_id'))
             if self.is_verbose():
                 queryset = queryset.prefetch_related('names')
             return queryset
@@ -344,8 +363,8 @@ class ConceptCascadeView(ConceptBaseView):
 
     @swagger_auto_schema(
         manual_parameters=[
-            cascade_method_param, cascade_map_types_params, cascade_exclude_map_types_params,
-            cascade_hierarchy_param, cascade_mappings_param, include_mappings_param, cascade_levels_param,
+            cascade_method_param, cascade_map_types_params, cascade_exclude_map_types_params, return_map_types_params,
+            cascade_hierarchy_param, cascade_mappings_param, cascade_levels_param,
             cascade_direction_param, cascade_view_hierarchy, include_retired_param
         ]
     )
@@ -354,7 +373,7 @@ class ConceptCascadeView(ConceptBaseView):
         self.set_parent_resource(False)
         bundle = Bundle(
             root=instance, params=self.request.query_params, verbose=self.is_verbose(),
-            repo_version=self.parent_resource
+            repo_version=self.parent_resource, requested_url=self.request.get_full_path()
         )
         bundle.cascade()
         return Response(BundleSerializer(bundle, context=dict(request=request)).data)
@@ -495,7 +514,7 @@ class ConceptVersionRetrieveView(ConceptBaseView, RetrieveAPIView, DestroyAPIVie
 
 
 class ConceptLabelListCreateView(ConceptBaseView, ListWithHeadersMixin, ListCreateAPIView):
-    model = LocalizedText
+    model = ConceptName
     parent_list_attribute = None
     default_qs_sort_attr = '-created_at'
 
@@ -542,7 +561,7 @@ class ConceptLabelListCreateView(ConceptBaseView, ListWithHeadersMixin, ListCrea
 
 
 class ConceptLabelRetrieveUpdateDestroyView(ConceptBaseView, RetrieveUpdateDestroyAPIView):
-    model = LocalizedText
+    model = ConceptName
     parent_list_attribute = None
     permission_classes = (IsAuthenticatedOrReadOnly,)
     default_qs_sort_attr = '-created_at'
@@ -573,13 +592,12 @@ class ConceptLabelRetrieveUpdateDestroyView(ConceptBaseView, RetrieveUpdateDestr
         serializer = self.get_serializer(instance, data=request.data, partial=partial)
 
         if serializer.is_valid():
+            subject_label_attr = f"cloned_{self.parent_list_attribute}"
             resource_instance = self.get_resource_object()
+            locales = get(resource_instance, self.parent_list_attribute).exclude(id=self.kwargs['uuid'])
             new_version = resource_instance.clone()
             saved_instance = serializer.save()
-            subject_label_attr = f"cloned_{self.parent_list_attribute}"
-            labels = getattr(new_version, subject_label_attr, [])
-            labels.append(saved_instance)
-            setattr(new_version, subject_label_attr, labels)
+            setattr(new_version, subject_label_attr, [*[locale.clone() for locale in locales.all()], saved_instance])
             new_version.comment = f'Updated {saved_instance.name} in {self.parent_list_attribute}.'
             errors = Concept.persist_clone(new_version, request.user)
             if errors:

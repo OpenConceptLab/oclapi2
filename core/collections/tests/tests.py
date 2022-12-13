@@ -17,7 +17,7 @@ from core.common.tasks import update_collection_active_mappings_count
 from core.common.tests import OCLTestCase, OCLAPITestCase
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept
-from core.concepts.tests.factories import ConceptFactory, LocalizedTextFactory
+from core.concepts.tests.factories import ConceptFactory, ConceptNameFactory
 from core.mappings.documents import MappingDocument
 from core.mappings.tests.factories import MappingFactory
 from core.orgs.tests.factories import OrganizationFactory
@@ -184,8 +184,8 @@ class CollectionTest(OCLTestCase):
         expansion = ExpansionFactory(collection_version=collection)
         collection.expansion_uri = expansion.uri
         collection.save()
-        ch_locale = LocalizedTextFactory(locale_preferred=True, locale='ch')
-        en_locale = LocalizedTextFactory(locale_preferred=True, locale='en')
+        ch_locale = ConceptNameFactory.build(locale_preferred=True, locale='ch')
+        en_locale = ConceptNameFactory.build(locale_preferred=True, locale='en')
         concept = ConceptFactory(names=[ch_locale, en_locale])
         reference = CollectionReference(expression=concept.uri, collection=collection)
         reference.save()
@@ -205,8 +205,8 @@ class CollectionTest(OCLTestCase):
         )
 
     def test_validate_openmrs_schema_duplicate_locale_type(self):
-        ch_locale = LocalizedTextFactory(locale_preferred=True, locale='ch')
-        en_locale = LocalizedTextFactory(locale_preferred=True, locale='en')
+        ch_locale = ConceptNameFactory.build(locale_preferred=True, locale='ch')
+        en_locale = ConceptNameFactory.build(locale_preferred=True, locale='en')
         concept1 = ConceptFactory(names=[ch_locale, en_locale])
         collection = OrganizationCollectionFactory(custom_validation_schema=CUSTOM_VALIDATION_SCHEMA_OPENMRS)
         expansion = ExpansionFactory(collection_version=collection)
@@ -217,6 +217,8 @@ class CollectionTest(OCLTestCase):
             expression=concept1.uri, collection=collection, system=concept1.parent.uri, version='HEAD')
         concept1_reference.save()
 
+        ch_locale = ConceptNameFactory.build(name=ch_locale.name, locale_preferred=True, locale='ch')
+        en_locale = ConceptNameFactory.build(name=en_locale.name, locale_preferred=True, locale='en')
         concept2 = ConceptFactory(names=[ch_locale, en_locale])
         concept2_reference = CollectionReference(
             expression=concept2.uri, collection=collection, system=concept2.parent.uri, version='HEAD')
@@ -230,7 +232,7 @@ class CollectionTest(OCLTestCase):
         )
 
     def test_validate_openmrs_schema_matching_name_locale(self):
-        ch_locale = LocalizedTextFactory(locale_preferred=False, locale='ch')
+        ch_locale = ConceptNameFactory.build(locale_preferred=False, locale='ch')
         concept1 = ConceptFactory(names=[ch_locale])
         collection = OrganizationCollectionFactory(custom_validation_schema=CUSTOM_VALIDATION_SCHEMA_OPENMRS)
         expansion = ExpansionFactory(collection_version=collection)
@@ -241,8 +243,8 @@ class CollectionTest(OCLTestCase):
             expression=concept1.uri, collection=collection, system=concept1.parent.uri, version='HEAD')
         concept1_reference.save()
 
-        en_locale1 = LocalizedTextFactory(locale='en', locale_preferred=False, name='name')
-        en_locale2 = LocalizedTextFactory(locale='en', locale_preferred=True, name='name')
+        en_locale1 = ConceptNameFactory.build(locale='en', locale_preferred=False, name='name')
+        en_locale2 = ConceptNameFactory.build(locale='en', locale_preferred=True, name='name')
         concept2 = ConceptFactory(names=[en_locale1, en_locale2])
         concept2_reference = CollectionReference(
             expression=concept2.uri, collection=collection, system=concept2.parent.uri, version='HEAD')
@@ -1318,7 +1320,7 @@ class ExpansionParametersTest(OCLTestCase):
         expansion.add_references(ref1)
 
         self.assertEqual(expansion.concepts.count(), 1)
-        self.assertEqual(expansion.concepts.first().id, initial_version.id)   # v1 source version concept c1
+        self.assertEqual(expansion.concepts.first().mnemonic, initial_version.mnemonic)   # v1 source version concept c1
 
         expansion.concepts.clear()
 
@@ -1366,6 +1368,25 @@ class ExpansionParametersTest(OCLTestCase):
 
         self.assertEqual(expansion.concepts.count(), 1)
         self.assertEqual(expansion.concepts.first().id, concept2.id)
+
+        ref2 = CollectionReference(
+            system='https://s2.com', code=concept2.mnemonic)
+        expansion.parameters['system-version'] = 'https://s1.com|v1,https://s2.com|latest'
+        expansion.add_references(ref2)
+
+        self.assertEqual(expansion.concepts.count(), 1)
+        self.assertEqual(expansion.concepts.first().id, concept2.id)
+
+        ref2 = CollectionReference(
+            system='https://s1.com', code=concept1.mnemonic)
+        expansion.parameters['system-version'] = 'https://s1.com|v1,https://s1.com|latest'
+        expansion.add_references(ref2)
+
+        self.assertEqual(expansion.concepts.count(), 2)
+        self.assertEqual(
+            list(expansion.concepts.order_by('id').values_list('mnemonic', flat=True)),
+            sorted([concept2.mnemonic, concept1_latest.mnemonic])
+        )
 
     def test_apply_date_filter(self):  # pylint: disable=too-many-locals,too-many-statements
         source1 = OrganizationSourceFactory(

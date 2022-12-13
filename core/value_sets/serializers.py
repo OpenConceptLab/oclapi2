@@ -81,7 +81,7 @@ class ComposeValueSetField(serializers.Field):
 
         # TODO: is this use or uri as concept_system correct?
         concept_system = source.canonical_url if source.canonical_url else \
-            IdentifierSerializer.convert_ocl_uri_to_fhir_url(source.uri)
+            IdentifierSerializer.convert_ocl_uri_to_fhir_url(source.uri, 'ValueSet')
         concept_system_version = reference.version or source.version
 
         for include in includes:
@@ -121,7 +121,7 @@ class ValueSetDetailSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         uri = self.context['request'].path + validated_data['mnemonic']
-        ident = IdentifierSerializer.include_ocl_identifier(uri, validated_data)
+        ident = IdentifierSerializer.include_ocl_identifier(uri, RESOURCE_TYPE, validated_data)
         collection = CollectionCreateOrUpdateSerializer().prepare_object(validated_data)
         collection_version = collection.version if collection.version != HEAD else '0.1'
         collection.version = HEAD
@@ -201,7 +201,7 @@ class ValueSetDetailSerializer(serializers.ModelSerializer):
     def to_representation(self, instance):
         try:
             rep = super().to_representation(instance)
-            IdentifierSerializer.include_ocl_identifier(instance.uri, rep)
+            IdentifierSerializer.include_ocl_identifier(instance.uri, RESOURCE_TYPE, rep)
         except Exception as error:
             raise Exception(f'Failed to represent "{instance.uri}" as {RESOURCE_TYPE}') from error
         return rep

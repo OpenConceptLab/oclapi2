@@ -5,7 +5,7 @@ from django.contrib.postgres.fields import ArrayField
 from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator
 from django.db import models, IntegrityError
-from django.db.models import Value, Q, Max
+from django.db.models import Value, Q
 from django.db.models.expressions import CombinedExpression, F
 from django.utils import timezone
 from django.utils.functional import cached_property
@@ -396,14 +396,6 @@ class ConceptContainerModel(VersionedModel):
             update_collection_active_concepts_count.apply_async((self.id,), queue='concurrent')
 
     @property
-    def last_concept_update(self):
-        return get(self.concepts.aggregate(max_updated_at=Max('updated_at')), 'max_updated_at', None)
-
-    @property
-    def last_mapping_update(self):
-        return get(self.mappings.aggregate(max_updated_at=Max('updated_at')), 'max_updated_at', None)
-
-    @property
     def last_child_update(self):
         last_concept_update = self.last_concept_update
         last_mapping_update = self.last_mapping_update
@@ -504,6 +496,12 @@ class ConceptContainerModel(VersionedModel):
 
     def get_concepts_queryset(self):
         return self.concepts_set.filter(id=F('versioned_object_id'))
+
+    def get_mappings_queryset(self):
+        if self.is_head:
+            return self.mappings_set.filter(id=F('versioned_object_id'))
+
+        return self.mappings
 
     def has_parent_edit_access(self, user):
         if user.is_staff:
@@ -696,6 +694,7 @@ class ConceptContainerModel(VersionedModel):
         self.text = head.text
         self.experimental = head.experimental
         self.custom_validation_schema = head.custom_validation_schema
+        self.extras = head.extras
 
     def add_processing(self, process_id):
         if self.id and process_id:
@@ -733,6 +732,13 @@ class ConceptContainerModel(VersionedModel):
     def clear_processing(self):
         self._background_process_ids = []
         self.save(update_fields=['_background_process_ids'])
+
+    def get_supported_locales(self):
+        locales = [self.default_locale]
+        if self.supported_locales:
+            # to maintain the order of default locale always first
+            locales += [locale for locale in self.supported_locales if locale != self.default_locale]
+        return locales
 
     @property
     def is_exporting(self):

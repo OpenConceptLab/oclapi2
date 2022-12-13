@@ -4,7 +4,7 @@ from rest_framework.test import APIClient
 
 from core.common.tests import OCLTestCase
 from core.concepts.models import Concept
-from core.concepts.tests.factories import ConceptFactory, LocalizedTextFactory
+from core.concepts.tests.factories import ConceptFactory
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory, UserSourceFactory
@@ -21,7 +21,7 @@ class CodeSystemTest(OCLTestCase):
         self.org_source_v1 = OrganizationSourceFactory.build(
             version='v1', mnemonic=self.org_source.mnemonic, organization=self.org_source.parent)
         Source.persist_new_version(self.org_source_v1, self.org_source.created_by)
-        self.concept_1 = ConceptFactory(parent=self.org_source, names=[LocalizedTextFactory(name="concept_1_name")])
+        self.concept_1 = ConceptFactory(parent=self.org_source, names=1, name__name="concept_1_name")
         self.concept_2 = ConceptFactory(parent=self.org_source)
         self.org_source_v2 = OrganizationSourceFactory.build(
             version='v2', mnemonic=self.org_source.mnemonic, organization=self.org_source.parent)
@@ -115,7 +115,7 @@ class CodeSystemTest(OCLTestCase):
         self.assertEqual(response.data['version'], 'v2')
 
     def test_validate_code_for_code_system(self):
-        response = self.client.get(f'/fhir/CodeSystem/$validate-code'
+        response = self.client.get(f'/fhir/CodeSystem/$validate-code/'
                                    f'?url={self.org_source.canonical_url}&code={self.concept_1.mnemonic}')
 
         self.assertEqual(response.status_code, 200)
@@ -123,7 +123,7 @@ class CodeSystemTest(OCLTestCase):
             {'resourceType': 'Parameters', 'parameter': [{'name': 'result', 'valueBoolean': True}]}))
 
     def test_validate_code_for_code_system_negative(self):
-        response = self.client.get(f'/fhir/CodeSystem/$validate-code'
+        response = self.client.get(f'/fhir/CodeSystem/$validate-code/'
                                    f'?url={self.org_source.canonical_url}&code=non_existing_code')
 
         self.assertEqual(response.status_code, 200)
@@ -134,7 +134,7 @@ class CodeSystemTest(OCLTestCase):
             ]}))
 
     def test_validate_code_with_display_for_code_system(self):
-        response = self.client.get(f'/fhir/CodeSystem/$validate-code'
+        response = self.client.get(f'/fhir/CodeSystem/$validate-code/'
                                    f'?url={self.org_source.canonical_url}'
                                    f'&code={self.concept_1.mnemonic}'
                                    f'&display={self.concept_1.display_name}')
@@ -144,7 +144,7 @@ class CodeSystemTest(OCLTestCase):
             {'resourceType': 'Parameters', 'parameter': [{'name': 'result', 'valueBoolean': True}]}))
 
     def test_validate_code_with_display_for_code_system_negative(self):
-        response = self.client.get(f'/fhir/CodeSystem/$validate-code'
+        response = self.client.get(f'/fhir/CodeSystem/$validate-code/'
                                    f'?url={self.org_source.canonical_url}'
                                    f'&code={self.concept_1.mnemonic}'
                                    f'&display=wrong_display')
@@ -157,7 +157,7 @@ class CodeSystemTest(OCLTestCase):
                 ]}))
 
     def test_lookup_for_code_system(self):
-        response = self.client.get(f'/fhir/CodeSystem/$lookup'
+        response = self.client.get(f'/fhir/CodeSystem/$lookup/'
                                    f'?system={self.org_source.canonical_url}'
                                    f'&code={self.concept_1.mnemonic}')
 

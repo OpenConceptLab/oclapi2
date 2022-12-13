@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title> OCL | Usage Report</title>
+    <style>
+        body{
+            background-color: #f3f3f3;
+            color: #444;
+            font-family: sans-serif;
+            padding: 2rem 1rem;
+        }
+
+        *{
+            padding: 0;
+            margin: 0;
+            box-sizing: border-box;
+        }
+
+        .main-heading{
+            text-align: center;
+            font-size: 2.5rem;
+        }
+
+        h2{
+            text-align: center;
+            padding: 1rem;
+            opacity: .8;
+        }
+
+        .swap-graph{
+            border-bottom: 1px solid #0002;
+            margin-bottom: 1.5rem;
+            padding-bottom: .5rem;
+            font-size: 1.1rem;
+            text-align: right;
+        }
+
+        .swap-graph input{
+			transform: scale(1.25) translateX(-2px);
+		}
+
+        .flex{
+            display: flex;
+        }
+        
+        .flex *{
+            flex:1;
+        }
+
+        section{
+            background-color: #eee;
+            margin: .5rem;
+            padding: 2rem;
+            text-align: center;
+            padding: 2rem 3.5rem;
+            background-color: #fff;
+            border-radius: 10px;
+        }
+
+        .chart{
+            width: 100%;
+        }
+
+        .chart-label{
+            display: inline-block;
+            margin-top: .75rem;
+            font-size: 1.4rem;
+        }
+
+        section h3{
+            font-size: 1.8rem;
+            margin-top: 1.35rem;
+        }
+
+        @media (max-width:1250px) {
+            .flex{
+                flex-direction: column;
+            }
+
+            section{
+                min-height: max-content;
+            }
+
+            section h4 {
+				font-size: 1.3rem;
+				margin-top: 1.35rem;
+			}
+        }
+
+        @media (max-width:700px) {
+            .chart-label{
+                font-size: 1.2rem;
+            }
+
+            section h4{
+                font-size: 1.4rem;
+            }
+        }
+
+        @media (max-width:600px) {
+            .chart-label{
+                font-size: 1rem;
+            }
+
+            section h4{
+                font-size: 1.2rem;
+            }
+
+            body{
+                padding: 2rem 1rem;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <h1 class="main-heading" >Usage Report</h1>
+    <h2><span>{{start}}</span> to <span>{{end}}</span></h2>
+    <div class="swap-graph">
+		<input type="checkbox" name="Swap Graph" id="swap">
+        <label for="swap">Line Graphs</label>
+    </div>
+    <main>
+        <div class="flex">
+            <section>
+                <img src={{concepts_url}} id="concepts_created_monthly" class="chart" />
+                <label class="chart-label">Concepts created monthly</label>
+                <h4>{{concepts.total | safe}} Total Concepts • {% widthratio concepts.active concepts.total 100 %}% Active</h4>
+            </section>
+            <section>
+                <img src={{mappings_url}} id="mappings_created_monthly" class="chart" />
+                <label class="chart-label">Mappings created monthly</label>
+                <h4>{{mappings.total | safe}} Total Mappings • {% widthratio mappings.active mappings.total 100 %}% Active</h4>
+            </section>
+        </div>
+        <div class="flex">
+            <section>
+                <img src={{sources_url}} id="sources_created_monthly" class="chart" />
+                <label class="chart-label">Sources created monthly</label>
+                <h4>{{sources.total | safe}} Total Sources • {% widthratio sources.active sources.total 100 %}% Active</h4>
+            </section>
+            <section>
+                <img src={{source_versions_url}} id="source_versions_created_monthly" class="chart" />
+                <label class="chart-label">Source Versions created monthly</label>
+                <h4>{{source_versions.total | safe}} Total Source Versions • {% widthratio source_versions.active source_versions.total 100 %}% Active</h4>
+            </section>
+        </div>
+        <div class="flex">
+            <section>
+                <img src={{collections_url}} id="collections_created_monthly" class="chart" />
+                <label class="chart-label">Collections created monthly</label>
+                <h4>{{collections.total | safe}} Total Collections <br/> {% widthratio collections.active collections.total 100 %}% Active</h4>
+            </section>
+            <section>
+                <img src={{collection_versions_url}} id="collection_versions_created_monthly" class="chart" />
+                <label class="chart-label">Collection Versions created monthly</label>
+                <h4>{{collection_versions.total | safe}} Total Collection Versions <br/> {% widthratio collection_versions.active collection_versions.total 100 %}% Active</h4>
+            </section>
+            <section>
+                <img src={{collection_references_url}} id="collection_references_created_monthly" class="chart" />
+                <label class="chart-label">Collection References created monthly</label>
+                <h4>{{collection_references.total | safe}} Total Collection References</h4>
+            </section>
+        </div>
+        <div class="flex">
+            <section>
+                <img src={{organizations_url}} id="organizations_created_monthly" class="chart" />
+                <label class="chart-label">Organizations created monthly</label>
+                <h4>{{organizations.total | safe}} Total Organizations <br/> {% widthratio organizations.active organizations.total 100 %}% Active</h4>
+            </section>
+            <section>
+                <img src={{users_url}} id="users_created_monthly" class="chart" />
+                <label class="chart-label">Users joined monthly</label>
+                <h4>{{users.total | safe}} Total Users</h4>
+            </section>
+            <section>
+                <img src={{users_last_login_monthly_url}} id="users_last_login_monthly" class="chart" />
+                <label class="chart-label">Users login Monthly</label>
+                <h4>{% widthratio users.active users.total 100 %}% Active Users</h4>
+            </section>
+        </div>
+    </main>
+</body>
+</html>

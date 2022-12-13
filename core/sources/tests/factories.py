@@ -16,7 +16,7 @@ class OrganizationSourceFactory(factory.django.DjangoModelFactory):
     source_type = "Dictionary"
     public_access = ACCESS_TYPE_EDIT
     default_locale = "en"
-    supported_locales = ["en"]
+    supported_locales = ["fr"]
     website = 'www.source.com'
     description = 'This is a test source'
     organization = SubFactory(OrganizationFactory)

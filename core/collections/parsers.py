@@ -3,8 +3,9 @@ from urllib import parse
 from django.urls import resolve
 from pydash import get, compact, flatten
 
-from core.collections.constants import CONCEPT_REFERENCE_TYPE, MAPPING_REFERENCE_TYPE, ALL_SYMBOL, SOURCE_TO_CONCEPTS, \
+from core.collections.constants import CONCEPT_REFERENCE_TYPE, MAPPING_REFERENCE_TYPE, SOURCE_TO_CONCEPTS, \
     SOURCE_MAPPINGS
+from core.common.constants import ALL
 from core.collections.utils import is_concept, is_mapping
 from core.common.utils import to_parent_uri, drop_version
 
@@ -234,10 +235,10 @@ class CollectionReferenceSourceAllExpressionParser(CollectionReferenceAbstractPa
 
     def parse(self):
         self.set_expression_string()
-        if self.expression.get('concepts') == ALL_SYMBOL:
+        if self.expression.get('concepts') == ALL:
             self.parsers.append(CollectionReferenceExpressionStringParser(
                 self.expression_str + 'concepts/', self.transform, self.cascade, self.user))
-        if self.expression.get('mappings') == ALL_SYMBOL:
+        if self.expression.get('mappings') == ALL:
             self.parsers.append(CollectionReferenceExpressionStringParser(
                 self.expression_str + 'mappings/', self.transform, self.cascade, self.user))
         for parser in self.parsers:

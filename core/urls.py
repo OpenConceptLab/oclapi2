@@ -14,6 +14,7 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 from django.urls import path, include, re_path
+from django.views.decorators.cache import cache_page
 from drf_yasg import openapi
 from drf_yasg.views import get_schema_view
 from rest_framework import permissions
@@ -69,6 +70,7 @@ urlpatterns = [
     #TODO: require FHIR subdomain
     path('fhir/CodeSystem/', include('core.code_systems.urls'), name='code_systems_urls'),
     path('fhir/ValueSet/', include('core.value_sets.urls'), name='value_sets_urls'),
+    path('fhir/ConceptMap/', include('core.concept_maps.urls'), name='concept_maps_urls'),
     path('collections/', include('core.collections.urls'), name='collections_urls'),
     path('concepts/', concept_views.ConceptListView.as_view(), name='all_concepts_urls'),
     path('mappings/', mapping_views.MappingListView.as_view(), name='all_mappings_urls'),
@@ -76,6 +78,13 @@ urlpatterns = [
     path('indexes/', include('core.indexes.urls'), name='indexes_urls'),
     path('client-configs/', include('core.client_configs.urls'), name='client_config_urls'),
     path('tasks/', include('core.tasks.urls'), name='task_urls'),
+    path(
+        'locales/',
+        cache_page(
+            timeout=60 * 60 * 6, key_prefix='cache_locales'
+        )(concept_views.ConceptDefaultLocalesView.as_view()),
+        name='ocl-locales'
+    ),
 
     # just for ocldev
     re_path(

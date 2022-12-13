@@ -10,6 +10,7 @@ import uuid
 import zipfile
 from collections import OrderedDict
 from collections.abc import MutableMapping  # pylint: disable=no-name-in-module,deprecated-class
+from datetime import timedelta
 from threading import local
 from urllib import parse
 
@@ -18,6 +19,7 @@ from celery_once.helpers import queue_once_key
 from dateutil import parser
 from django.conf import settings
 from django.urls import NoReverseMatch, reverse, get_resolver
+from django.utils import timezone
 from djqscsv import csv_file_for
 from elasticsearch_dsl import Q as es_Q
 from pydash import flatten, compact, get
@@ -604,7 +606,8 @@ def flatten_dict(dikt, parent_key='', sep='__'):
         #         else:
         #             items.append(("{}__{}".format(key, i), str(_v)))
         else:
-            items.append((new_key, str(val)))
+            _val = str(val).replace('-', '_')
+            items.append((new_key, _val))
     return dict(items)
 
 
@@ -853,3 +856,16 @@ def get_export_service():
     klass = parts[-1]
     mod = __import__('.'.join(parts[0:-1]), fromlist=[klass])
     return getattr(mod, klass)
+
+
+def get_start_of_month(date=timezone.now().date()):
+    return date.replace(day=1)
+
+
+def get_end_of_month(date=timezone.now().date()):
+    next_month = date.replace(day=28) + timedelta(days=4)
+    return next_month - timedelta(days=next_month.day)
+
+
+def get_prev_month(date=timezone.now().date()):
+    return date.replace(day=1) - timedelta(days=1)

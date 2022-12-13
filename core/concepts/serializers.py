@@ -9,7 +9,7 @@ from core.common.constants import INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_MAPPIN
     INCLUDE_CHILD_CONCEPT_URLS, HEAD, INCLUDE_SUMMARY, INCLUDE_VERBOSE_REFERENCES, VERBOSE_PARAM
 from core.common.fields import EncodedDecodedCharField
 from core.common.utils import to_parent_uri_from_kwargs
-from core.concepts.models import Concept, LocalizedText
+from core.concepts.models import Concept, ConceptName
 
 
 class LocalizedNameSerializer(ModelSerializer):
@@ -18,7 +18,7 @@ class LocalizedNameSerializer(ModelSerializer):
     type = CharField(source='name_type', required=False, allow_null=True, allow_blank=True)
 
     class Meta:
-        model = LocalizedText
+        model = ConceptName
         fields = (
             'uuid', 'name', 'external_id', 'type', 'locale', 'locale_preferred', 'name_type',
         )
@@ -36,7 +36,7 @@ class LocalizedDescriptionSerializer(ModelSerializer):
     type = CharField(source='description_type', required=False, allow_null=True, allow_blank=True)
 
     class Meta:
-        model = LocalizedText
+        model = ConceptName
         fields = (
             'uuid', 'description', 'external_id', 'type', 'locale', 'locale_preferred', 'description_type'
         )
@@ -54,13 +54,13 @@ class ConceptLabelSerializer(ModelSerializer):
     locale_preferred = BooleanField(required=False, default=False)
 
     class Meta:
-        model = LocalizedText
+        model = ConceptName
         fields = (
             'uuid', 'external_id', 'type', 'locale', 'locale_preferred'
         )
 
     def create(self, validated_data, instance=None):  # pylint: disable=arguments-differ
-        concept_desc = instance if instance else LocalizedText()
+        concept_desc = instance if instance else ConceptName()
         concept_desc.name = validated_data.get('name', concept_desc.name)
         concept_desc.locale = validated_data.get('locale', concept_desc.locale)
         concept_desc.locale_preferred = validated_data.get('locale_preferred', concept_desc.locale_preferred)
@@ -75,7 +75,7 @@ class ConceptNameSerializer(ConceptLabelSerializer):
     name_type = CharField(required=False, source='type')
 
     class Meta:
-        model = LocalizedText
+        model = ConceptName
         fields = (*ConceptLabelSerializer.Meta.fields, 'name', 'name_type')
 
     def to_representation(self, instance):
@@ -89,7 +89,7 @@ class ConceptDescriptionSerializer(ConceptLabelSerializer):
     description_type = CharField(required=False, source='type')
 
     class Meta:
-        model = LocalizedText
+        model = ConceptName
         fields = (
             *ConceptLabelSerializer.Meta.fields, 'description', 'description_type'
         )
@@ -220,10 +220,11 @@ class ConceptLookupListSerializer(ModelSerializer):
     uuid = CharField(source='id')
     id = EncodedDecodedCharField(source='mnemonic')
     url = CharField(read_only=True, source='uri')
+    locale = CharField(source='iso_639_1_locale', read_only=True)
 
     class Meta:
         model = Concept
-        fields = ('uuid', 'id', 'display_name', 'url')
+        fields = ('uuid', 'id', 'display_name', 'url', 'locale')
 
     def __init__(self, *args, **kwargs):  # pylint: disable=too-many-branches
         request = get(kwargs, 'context.request')
@@ -233,6 +234,7 @@ class ConceptLookupListSerializer(ModelSerializer):
         try:
             if not self.is_verbose:
                 self.fields.pop('display_name', None)
+                self.fields.pop('locale', None)
         except:  # pylint: disable=bare-except
             pass
 
@@ -325,7 +327,6 @@ class ConceptMinimalSerializer(ConceptAbstractSerializer):
 
 
 class ConceptMinimalSerializerRecursive(ConceptAbstractSerializer):
-    name = EncodedDecodedCharField(source='mnemonic', read_only=True)
     id = EncodedDecodedCharField(source='mnemonic', read_only=True)
     type = CharField(source='resource_type', read_only=True)
     url = CharField(source='uri', read_only=True)
@@ -334,7 +335,7 @@ class ConceptMinimalSerializerRecursive(ConceptAbstractSerializer):
     class Meta:
         model = Concept
         fields = ConceptAbstractSerializer.Meta.fields + (
-            'id', 'name', 'type', 'url', 'version_url', 'terminal', 'entries', 'display_name', 'retired')
+            'id', 'type', 'url', 'version_url', 'terminal', 'entries', 'display_name', 'retired')
 
     def __init__(self, *args, **kwargs):
         if 'mappings' in self.fields:

@@ -58,24 +58,6 @@ class ValueSetValidateCodeView(ConceptRetrieveUpdateDestroyView):
         for key, value in self.request.query_params.items():
             self.parameters[key] = value
 
-        if self.request.data:
-            serializer = ParametersSerializer(data=self.request.data)
-            serializer.is_valid(raise_exception=True)
-            body_parameters = serializer.validated_data
-            for parameter in body_parameters.get('parameter', []):
-                name = parameter.get('name')
-                value = None
-                match name:
-                    case 'url' | 'system':
-                        value = parameter.get('valueUrl') | parameter.get('valueUri')
-                    case 'code' | 'displayLanguage':
-                        value = parameter.get('valueCode')
-                    case 'display' | 'systemVersion':
-                        value = parameter.get('valueString')
-
-                if value:
-                    self.parameters[name] = value
-
     def is_container_version_specified(self):
         return True
 
