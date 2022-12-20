@@ -395,15 +395,21 @@ if ENV and ENV != 'development':
     # Serving swagger static files (inserted after SecurityMiddleware)
     MIDDLEWARE.insert(1, 'whitenoise.middleware.WhiteNoiseMiddleware')
 
-if not ENV or ENV in ['production']:
-    EMAIL_SUBJECT_PREFIX = '[Openconceptlab.org] '
-else:
-    EMAIL_SUBJECT_PREFIX = f'[Openconceptlab.org] [{ENV.upper()}]'
+EMAIL_SUBJECT_PREFIX = os.environ.get('EMAIL_SUBJECT_PREFIX', None)
+if not EMAIL_SUBJECT_PREFIX:
+    if not ENV or ENV in ['production']:
+        EMAIL_SUBJECT_PREFIX = '[Openconceptlab.org] '
+    else:
+        EMAIL_SUBJECT_PREFIX = f'[Openconceptlab.org] [{ENV.upper()}]'
 
-if not ENV or ENV in ['development', 'ci']:
-    EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
-else:
-    EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_BACKEND = os.environ.get('EMAIL_BACKEND', None)
+if not EMAIL_BACKEND:
+    if not ENV or ENV in ['development', 'ci']:
+        EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+    else:
+        EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+
+WEB_URL = os.environ.get('WEB_URL', None)
 
 VERSION = __version__
 
