@@ -49,7 +49,7 @@ class ResponseHeadersMiddleware(BaseMiddleware):
         response[VERSION_HEADER] = settings.VERSION
         response[REQUEST_USER_HEADER] = str(getattr(request, 'user', None))
         response[RESPONSE_TIME_HEADER] = time.time() - start_time
-        response[REQUEST_URL_HEADER] = request.path
+        response[REQUEST_URL_HEADER] = request.get_full_path() or request.path
         response[REQUEST_METHOD_HEADER] = request.method
         return response
 
