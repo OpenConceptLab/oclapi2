@@ -459,7 +459,7 @@ class MappingImporter(BaseResourceImporter):
     mandatory_fields = {"map_type", "from_concept_url"}
     allowed_fields = [
         "id", "map_type", "from_concept_url", "to_source_url", "to_concept_url", "to_concept_code",
-        "to_concept_name", "extras", "external_id", "retired", 'update_comment', 'comment'
+        "to_concept_name", "extras", "external_id", "retired", 'update_comment', 'comment', 'sort_weight'
     ]
 
     def __init__(self, data, user, update_if_exists):

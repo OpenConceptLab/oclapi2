@@ -1030,7 +1030,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                                     *res['mappings'].values_list('id', flat=True),
                                     *result['mappings'].values_list('id', flat=True)
                                 ]
-                            )
+                            ).order_by('map_type', 'sort_weight')
 
                         iterate(level if level == ALL else level - 1)
 
@@ -1142,7 +1142,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             if not include_retired:
                 mappings = mappings.filter(retired=False)
             if return_map_types_criteria is not False:
-                result['mappings'] = mappings.filter(return_map_types_criteria)
+                result['mappings'] = mappings.filter(return_map_types_criteria).order_by('map_type', 'sort_weight')
         if source_to_concepts:
             if cascade_hierarchy:
                 hierarchy_queryset = self.get_hierarchy_queryset(
@@ -1187,7 +1187,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             if not include_retired:
                 mappings = mappings.filter(retired=False)
             if return_map_types_criteria is not False:
-                result['mappings'] = mappings.filter(return_map_types_criteria)
+                result['mappings'] = mappings.filter(return_map_types_criteria).order_by('map_type', 'sort_weight')
         if source_to_concepts:
             if cascade_hierarchy:
                 hierarchy_queryset = self.get_hierarchy_queryset(
@@ -1231,7 +1231,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             if not include_retired:
                 mappings = mappings.filter(retired=False)
             if return_map_types_criteria is not False:
-                result['mappings'] = mappings.filter(return_map_types_criteria)
+                result['mappings'] = mappings.filter(return_map_types_criteria).order_by('map_type', 'sort_weight')
         if source_to_concepts:
             if cascade_hierarchy:
                 hierarchy_queryset = self.get_hierarchy_queryset(
@@ -1274,7 +1274,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             if not include_retired:
                 mappings = mappings.filter(retired=False)
             if return_map_types_criteria is not False:
-                result['mappings'] = mappings.filter(return_map_types_criteria)
+                result['mappings'] = mappings.filter(return_map_types_criteria).order_by('map_type', 'sort_weight')
         if source_to_concepts:
             if cascade_hierarchy:
                 hierarchy_queryset = self.get_hierarchy_queryset(

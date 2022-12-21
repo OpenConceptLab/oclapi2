@@ -460,6 +460,7 @@ class ConceptVersionsView(ConceptBaseView, ConceptDictionaryMixin, ListWithHeade
 class ConceptMappingsView(ConceptBaseView, ListWithHeadersMixin):
     serializer_class = MappingListSerializer
     permission_classes = (CanViewParentDictionary,)
+    default_qs_sort_attr = ['map_type', 'sort_weight']
 
     def get_queryset(self):
         concept = super().get_queryset().first()
@@ -481,7 +482,6 @@ class ConceptMappingsView(ConceptBaseView, ListWithHeadersMixin):
 
         if not include_retired:
             mappings_queryset = mappings_queryset.exclude(retired=True)
-
         return mappings_queryset
 
     def get(self, request, *args, **kwargs):
