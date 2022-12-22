@@ -83,7 +83,8 @@ class UserProfileTest(OCLTestCase):
 
     @patch('core.orgs.models.Organization.collection_set')
     def test_public_collections(self, collection_set_mock):
-        collection_set_mock.filter = Mock(return_value=Mock(exclude=Mock(return_value=Mock(count=Mock(return_value=10)))))
+        collection_set_mock.filter = Mock(
+            return_value=Mock(exclude=Mock(return_value=Mock(count=Mock(return_value=10)))))
 
         self.assertEqual(Organization().public_collections, 10)
         collection_set_mock.filter.assert_called_once_with(version=HEAD)
