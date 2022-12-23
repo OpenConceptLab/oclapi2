@@ -268,7 +268,8 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
             from_source_id=self.from_source_id,
             from_source_url=self.from_source_url,
             from_source_version=self.from_source_version,
-            _index=self._index
+            _index=self._index,
+            sort_weight=self.sort_weight
         )
         if user:
             mapping.created_by = mapping.updated_by = user

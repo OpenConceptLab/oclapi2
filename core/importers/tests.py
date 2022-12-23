@@ -556,6 +556,62 @@ class BulkImportInlineTest(OCLTestCase):
         self.assertTrue(
             Mapping.objects.filter(map_type='Parent-child', is_latest_version=True, retired=False).exists())
 
+    @patch('core.importers.models.batch_index_resources')
+    def test_csv_import_mappings_with_sort_weight(self, batch_index_resources_mock):
+        file_content = open(
+            os.path.join(os.path.dirname(__file__), '..', 'samples/mappings_with_sort_weight.csv'), 'r'
+        ).read()
+        data = OclStandardCsvToJsonConverter(
+            input_list=csv_file_data_to_input_list(file_content), allow_special_characters=True).process()
+        importer = BulkImportInline(data, 'ocladmin', True)
+
+        self.assertEqual(len(data), 12)
+
+        importer.run()
+
+        self.assertEqual(importer.processed, 12)
+        self.assertEqual(len(importer.created), 12)
+        self.assertEqual(len(importer.failed), 0)
+        self.assertEqual(len(importer.exists), 0)
+        self.assertEqual(len(importer.updated), 0)
+        self.assertEqual(len(importer.invalid), 0)
+        self.assertEqual(len(importer.others), 0)
+        self.assertEqual(len(importer.permission_denied), 0)
+        batch_index_resources_mock.apply_async.assert_called()
+
+        self.assertTrue(
+            Concept.objects.filter(mnemonic='Act', is_latest_version=True, retired=False).exists())
+        self.assertTrue(
+            Concept.objects.filter(mnemonic='Child', is_latest_version=True, retired=False).exists())
+        self.assertTrue(
+            Concept.objects.filter(mnemonic='Child_of_child', is_latest_version=True, retired=False).exists())
+        self.assertTrue(
+            Concept.objects.filter(mnemonic='Ret', is_latest_version=True, retired=True).exists())
+        self.assertTrue(
+            Mapping.objects.filter(map_type='Child-Parent', is_latest_version=True, retired=False).exists())
+        self.assertEqual(
+            Mapping.objects.filter(map_type='Child-Parent', is_latest_version=True, retired=False).first().sort_weight,
+            None
+        )
+        self.assertEqual(
+            Mapping.objects.filter(
+                to_concept__uri='/orgs/DemoOrg/sources/MyDemoSource/concepts/Child/', is_latest_version=True
+            ).first().sort_weight,
+            2.2
+        )
+        self.assertEqual(
+            Mapping.objects.filter(
+                to_concept__uri='/orgs/DemoOrg/sources/MyDemoSource/concepts/Child_of_child/', is_latest_version=True
+            ).first().sort_weight,
+            3.0
+        )
+        self.assertEqual(
+            Mapping.objects.filter(
+                to_concept_code='non-existant', is_latest_version=True
+            ).first().sort_weight,
+            1.0
+        )
+
     @unittest.skip('[Skipped] Gets hung sometimes')
     @patch('core.importers.models.batch_index_resources')
     def test_openmrs_schema_csv_import(self, batch_index_resources_mock):
