@@ -30,18 +30,6 @@
             opacity: .8;
         }
 
-        .swap-graph{
-            border-bottom: 1px solid #0002;
-            margin-bottom: 1.5rem;
-            padding-bottom: .5rem;
-            font-size: 1.1rem;
-            text-align: right;
-        }
-
-        .swap-graph input{
-			transform: scale(1.25) translateX(-2px);
-		}
-
         .flex{
             display: flex;
         }
@@ -117,13 +105,42 @@
 </head>
 
 <body>
-    <h1 class="main-heading" >Usage Report</h1>
-    <h2><span>{{start}}</span> to <span>{{end}}</span></h2>
-    <div class="swap-graph">
-		<input type="checkbox" name="Swap Graph" id="swap">
-        <label for="swap">Line Graphs</label>
-    </div>
-    <main>
+    <h1 class="main-heading" >{{env|title}} Usage Report</h1>
+    <h2><span>{{current_month_start}}</span> to <span>{{current_month_end}}</span></h2>
+    <main style="margin-top: 15px;">
+        <div class="flex" style="width:70%;margin:0 auto;margin-bottom:40px;">
+            <table>
+                <thead>
+                    <tr>
+                        <th style="text-align:left;">
+                            Resource
+                        </th>
+                        <th style="text-align:center;">
+                            Created
+                        </th>
+                        <th style="text-align:center;">
+                            Active
+                        </th>
+                        <th style="text-align:center;">
+                            Inactive
+                        </th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for resource, stats in current_month.items %}
+                    <tr>
+                        <td>{{resource|title}}</td>
+                        <td style="text-align:center;">{{stats.created_monthly}}</td>
+                        <td style="text-align:center;">{{stats.active}}</td>
+                        <td style="text-align:center;">{{stats.inactive}}</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <h3 style="text-align:center;">Trends</h3>
+        <h3 style="text-align:center;"><span>{{start}}</span> to <span>{{end}}</span></h3>
         <div class="flex">
             <section>
                 <img src={{concepts_url}} id="concepts_created_monthly" class="chart" />

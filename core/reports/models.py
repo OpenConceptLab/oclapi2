@@ -2,6 +2,7 @@ import json
 from urllib.parse import quote
 
 from dateutil.relativedelta import relativedelta
+from django.conf import settings
 from django.db.models import Count, F
 from django.db.models.functions import TruncMonth
 from django.utils import timezone
@@ -9,6 +10,7 @@ from pydash import get
 
 from core.collections.models import Collection, CollectionReference
 from core.common.constants import HEAD
+from core.common.utils import get_end_of_month
 from core.concepts.models import Concept
 from core.mappings.models import Mapping
 from core.orgs.models import Organization
@@ -21,9 +23,17 @@ class MonthlyUsageReport:
         self.verbose = verbose
         self.start = start
         self.end = end
+        now = timezone.now()
+        self.current_month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        self.current_month_end = get_end_of_month(self.current_month_start).replace(
+            hour=23, minute=59, second=59, microsecond=0)
         self.resources = []
+        self.current_month_resources = []
         self.result = {}
+        self.current_month_result = {}
+        self.make_current_month_resources()
         self.make_resources()
+        self.make_current_month_resources()
 
     @staticmethod
     def to_chart_url(label, graph_data, chart_type='bar'):
@@ -55,22 +65,40 @@ class MonthlyUsageReport:
         return f'https://quickchart.io/chart?c={quote(json.dumps(config))}'
 
     def make_resources(self):
-        self.resources.append(UserReport(start=self.start, end=self.end, verbose=self.verbose))
-        self.resources.append(OrganizationReport(start=self.start, end=self.end, verbose=self.verbose))
-        self.resources.append(SourceReport(start=self.start, end=self.end, verbose=self.verbose))
-        self.resources.append(CollectionReport(start=self.start, end=self.end, verbose=self.verbose))
+        start = self.start
+        end = self.end
+        self.resources.append(UserReport(start=start, end=end, verbose=self.verbose))
+        self.resources.append(OrganizationReport(start=start, end=end, verbose=self.verbose))
+        self.resources.append(SourceReport(start=start, end=end, verbose=self.verbose))
+        self.resources.append(CollectionReport(start=start, end=end, verbose=self.verbose))
         if self.verbose:
-            self.resources.append(SourceVersionReport(start=self.start, end=self.end, verbose=self.verbose))
-            self.resources.append(CollectionVersionReport(start=self.start, end=self.end, verbose=self.verbose))
-            self.resources.append(CollectionReferenceReport(start=self.start, end=self.end, verbose=self.verbose))
-            self.resources.append(ConceptReport(start=self.start, end=self.end, verbose=self.verbose))
-            self.resources.append(MappingReport(start=self.start, end=self.end, verbose=self.verbose))
+            self.resources.append(SourceVersionReport(start=start, end=end, verbose=self.verbose))
+            self.resources.append(CollectionVersionReport(start=start, end=end, verbose=self.verbose))
+            self.resources.append(CollectionReferenceReport(start=start, end=end, verbose=self.verbose))
+            self.resources.append(ConceptReport(start=start, end=end, verbose=self.verbose))
+            self.resources.append(MappingReport(start=start, end=end, verbose=self.verbose))
+
+    def make_current_month_resources(self):
+        start = self.current_month_start
+        end = self.current_month_end
+        self.current_month_resources.append(UserReport(start=start, end=end, verbose=self.verbose))
+        self.current_month_resources.append(OrganizationReport(start=start, end=end, verbose=self.verbose))
+        self.current_month_resources.append(SourceReport(start=start, end=end, verbose=self.verbose))
+        self.current_month_resources.append(CollectionReport(start=start, end=end, verbose=self.verbose))
+        if self.verbose:
+            self.current_month_resources.append(SourceVersionReport(start=start, end=end, verbose=self.verbose))
+            self.current_month_resources.append(CollectionVersionReport(start=start, end=end, verbose=self.verbose))
+            self.current_month_resources.append(CollectionReferenceReport(start=start, end=end, verbose=self.verbose))
+            self.current_month_resources.append(ConceptReport(start=start, end=end, verbose=self.verbose))
+            self.current_month_resources.append(MappingReport(start=start, end=end, verbose=self.verbose))
 
     def prepare(self):
-        self.result['start'] = self.resources[0].start
-        self.result['end'] = self.resources[0].end
+        self.result['start'] = self.start
+        self.result['end'] = self.end
         for resource in self.resources:
             self.result[resource.resource] = resource.get_monthly_report()
+        for resource in self.current_month_resources:
+            self.current_month_result[resource.resource] = resource.get_monthly_report()
 
     def get_result_for_email(self):
         urls = {}
@@ -92,7 +120,27 @@ class MonthlyUsageReport:
                 )
             for stat in stats:
                 urls[stat['key']] = self.to_chart_url(stat['label'], stat['data'])
-        return {**self.result, **urls}
+        return {
+            **self.result,
+            **urls,
+            'current_month': self.format_current_month_result(),
+            'current_month_start': self.current_month_start,
+            'current_month_end': self.current_month_end,
+            'env': settings.ENV
+        }
+
+    def format_current_month_result(self):
+        _result = {}
+
+        def __format(stat):
+            return list(stat[0].values())[0] or 0 if stat else 0
+
+        for resource, stats in self.current_month_result.items():
+            _result[resource] = {
+                **stats,
+                'created_monthly': __format(stats['created_monthly']),
+            }
+        return _result
 
 
 class ResourceReport:

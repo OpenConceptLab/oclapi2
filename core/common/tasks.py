@@ -726,11 +726,11 @@ def beat_healthcheck():  # pragma: no cover
 @app.task(ignore_result=True)
 def monthly_usage_report():  # pragma: no cover
     # runs on first of every month
-    # reports usage of prev month
+    # reports usage of prev month and trend over last 3 months
     from core.reports.models import MonthlyUsageReport
     now = timezone.now()
-    prev_month = now.replace(month=now.month - 1, day=1).date()
-    report = MonthlyUsageReport(verbose=True, start=prev_month, end=get_end_of_month(prev_month))
+    three_months_from_now = now.replace(month=now.month-3, day=1)
+    report = MonthlyUsageReport(verbose=True, start=three_months_from_now, end=now.replace(day=1))
     report.prepare()
     html_body = render_to_string('monthly_usage_report_for_mail.html', report.get_result_for_email())
     mail = EmailMessage(
