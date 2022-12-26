@@ -16,8 +16,7 @@ from pydash import get
 
 from core.celery import app
 from core.common.constants import CONFIRM_EMAIL_ADDRESS_MAIL_SUBJECT, PASSWORD_RESET_MAIL_SUBJECT
-from core.common.utils import write_export_file, web_url, get_resource_class_from_resource_name, get_export_service, \
-    get_end_of_month
+from core.common.utils import write_export_file, web_url, get_resource_class_from_resource_name, get_export_service
 
 logger = get_task_logger(__name__)
 
