@@ -1,3 +1,19 @@
+##### 2.2.57 - Wed Dec 28 03:22:31 2022 +0000
+- [OpenConceptLab/ocl_issues#1447](https://github.com/OpenConceptLab/ocl_issues/issues/1447) | fixing mapping importer for duplicate mappings
+- [OpenConceptLab/ocl_issues#1449](https://github.com/OpenConceptLab/ocl_issues/issues/1449) | fixing pylint
+- [OpenConceptLab/ocl_issues#1449](https://github.com/OpenConceptLab/ocl_issues/issues/1449) | changing subject
+- [OpenConceptLab/ocl_issues#1449](https://github.com/OpenConceptLab/ocl_issues/issues/1449) | fixing tests
+- [OpenConceptLab/ocl_issues#1449](https://github.com/OpenConceptLab/ocl_issues/issues/1449) | fixing pylint
+- [OpenConceptLab/ocl_issues#1449](https://github.com/OpenConceptLab/ocl_issues/issues/1449) | monthly usage report to show current month results and trend over last 3 months
+- [OpenConceptLab/ocl_issues#1446](https://github.com/OpenConceptLab/ocl_issues/issues/1446) | mapping sort_weight field to be populated in versions | tests for importer
+- [OpenConceptLab/ocl_issues#1448](https://github.com/OpenConceptLab/ocl_issues/issues/1448) | fixing pylint
+- [OpenConceptLab/ocl_issues#1448](https://github.com/OpenConceptLab/ocl_issues/issues/1448) | all owned orgs/sources/collections properties on user | handling user hard delete exception
+##### 2.2.56 - Thu Dec 22 05:33:32 2022 +0000
+- Exception handling for import deadlock
+- [OpenConceptLab/ocl_issues#1446](https://github.com/OpenConceptLab/ocl_issues/issues/1446) | mapping sort_weight field and ordering
+##### 2.2.55 - Wed Dec 21 07:49:47 2022 +0000
+- request full url in header
+- Extracting env vars for email and web url
 ##### 2.2.54 - Wed Dec 14 04:06:51 2022 +0000
 - [OpenConceptLab/ocl_issues#1430](https://github.com/OpenConceptLab/ocl_issues/issues/1430) | skipping other tasks if migrations are skipped
 - Correcting job schedule
