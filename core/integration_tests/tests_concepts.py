@@ -1252,9 +1252,8 @@ class ConceptCascadeViewTest(OCLAPITestCase):
         entry = response.data['entry']
         self.assertEqual(
             list(entry.keys()),
-            ['uuid', 'id', 'type', 'url', 'version_url', 'terminal', 'entries', 'display_name', 'retired']
+            ['id', 'type', 'url', 'version_url', 'terminal', 'entries', 'display_name', 'retired']
         )
-        self.assertEqual(entry['uuid'], str(concept1.id))
         self.assertEqual(entry['id'], concept1.mnemonic)
         self.assertEqual(entry['type'], 'Concept')
         self.assertEqual(len(entry['entries']), 1)
@@ -1311,9 +1310,8 @@ class ConceptCascadeViewTest(OCLAPITestCase):
         entry = response.data['entry']
         self.assertEqual(
             list(entry.keys()),
-            ['uuid', 'id', 'type', 'url', 'version_url', 'terminal', 'entries', 'display_name', 'retired']
+            ['id', 'type', 'url', 'version_url', 'terminal', 'entries', 'display_name', 'retired']
         )
-        self.assertEqual(entry['uuid'], str(concept2.id))
         self.assertEqual(entry['id'], concept2.mnemonic)
         self.assertEqual(entry['type'], 'Concept')
         self.assertEqual(len(entry['entries']), 1)
@@ -1354,9 +1352,8 @@ class ConceptCascadeViewTest(OCLAPITestCase):
         entry = response.data['entry']
         self.assertEqual(
             list(entry.keys()),
-            ['uuid', 'id', 'type', 'url', 'version_url', 'terminal', 'entries', 'display_name', 'retired']
+            ['id', 'type', 'url', 'version_url', 'terminal', 'entries', 'display_name', 'retired']
         )
-        self.assertEqual(entry['uuid'], str(concept1.id))
         self.assertEqual(entry['id'], concept1.mnemonic)
         self.assertEqual(entry['type'], 'Concept')
         self.assertEqual(len(entry['entries']), 0)
@@ -1370,9 +1367,8 @@ class ConceptCascadeViewTest(OCLAPITestCase):
         entry = response.data['entry']
         self.assertEqual(
             list(entry.keys()),
-            ['uuid', 'id', 'type', 'url', 'version_url', 'terminal', 'entries', 'display_name', 'retired']
+            ['id', 'type', 'url', 'version_url', 'terminal', 'entries', 'display_name', 'retired']
         )
-        self.assertEqual(entry['uuid'], str(concept2.id))
         self.assertEqual(entry['id'], concept2.mnemonic)
         self.assertEqual(entry['type'], 'Concept')
         self.assertEqual(len(entry['entries']), 0)
