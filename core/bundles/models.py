@@ -30,6 +30,7 @@ class Bundle:
         self.return_map_types_criteria = Q()
         self.entries = []
         self.requested_url = requested_url
+        self.repo_url = get(self.repo_version, 'uri')
 
     def set_cascade_parameters(self):
         self.set_cascade_direction()
