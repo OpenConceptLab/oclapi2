@@ -1293,12 +1293,15 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         return result
 
     @staticmethod
-    def get_serializer_class(verbose=False, version=False, brief=False):
+    def get_serializer_class(verbose=False, version=False, brief=False, cascade=False):
         if brief:
-            from core.concepts.serializers import ConceptMinimalSerializer
-            return ConceptMinimalSerializer
+            from core.concepts.serializers import ConceptMinimalSerializer, ConceptCascadeMinimalSerializer
+            return ConceptCascadeMinimalSerializer if cascade else ConceptMinimalSerializer
         if version:
             from core.concepts.serializers import ConceptVersionDetailSerializer, ConceptVersionListSerializer
+            if cascade:
+                from core.concepts.serializers import ConceptVersionCascadeSerializer
+                return ConceptVersionCascadeSerializer
             return ConceptVersionDetailSerializer if verbose else ConceptVersionListSerializer
 
         from core.concepts.serializers import ConceptDetailSerializer, ConceptListSerializer

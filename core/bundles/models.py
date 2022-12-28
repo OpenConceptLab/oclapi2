@@ -172,5 +172,5 @@ class Bundle:
 
     def get_concept_serializer(self):
         from core.concepts.models import Concept
-        serializer = Concept.get_serializer_class(verbose=self.verbose, version=True, brief=self.brief)
+        serializer = Concept.get_serializer_class(verbose=self.verbose, version=True, brief=self.brief, cascade=True)
         return serializer

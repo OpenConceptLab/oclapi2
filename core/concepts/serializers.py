@@ -290,6 +290,12 @@ class ConceptVersionListSerializer(ConceptListSerializer):
         super().__init__(*args, **kwargs)
 
 
+class ConceptVersionCascadeSerializer(ConceptVersionListSerializer):
+    class Meta:
+        model = Concept
+        fields = tuple(field for field in ConceptVersionListSerializer.Meta.fields if field not in ('uuid', ))
+
+
 class ConceptSummarySerializer(ModelSerializer):
     uuid = CharField(source='id', read_only=True)
     id = EncodedDecodedCharField(source='mnemonic', read_only=True)
@@ -326,6 +332,12 @@ class ConceptMinimalSerializer(ConceptAbstractSerializer):
         fields = ConceptAbstractSerializer.Meta.fields + ('id', 'type', 'url', 'version_url', 'retired')
 
 
+class ConceptCascadeMinimalSerializer(ConceptMinimalSerializer):
+    class Meta:
+        model = Concept
+        fields = tuple(field for field in ConceptMinimalSerializer.Meta.fields if field not in ('uuid', ))
+
+
 class ConceptMinimalSerializerRecursive(ConceptAbstractSerializer):
     id = EncodedDecodedCharField(source='mnemonic', read_only=True)
     type = CharField(source='resource_type', read_only=True)
@@ -340,6 +352,8 @@ class ConceptMinimalSerializerRecursive(ConceptAbstractSerializer):
     def __init__(self, *args, **kwargs):
         if 'mappings' in self.fields:
             self.fields.pop('mappings', None)
+        if 'uuid' in self.fields:
+            self.fields.pop('uuid', None)
         super().__init__(*args, **kwargs)
 
     def get_entries(self, obj):
