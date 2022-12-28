@@ -552,7 +552,10 @@ class MappingImporter(BaseResourceImporter):
             return FAILED
         if parent.has_edit_access(self.user):
             if self.version:
-                self.instance = self.get_queryset().first().clone()
+                queryset = self.get_queryset()
+                if queryset.count() > 1:
+                    queryset = queryset.filter(retired=False)
+                self.instance = queryset.first().clone()
                 self.instance._counted = None  # pylint: disable=protected-access
                 self.instance._index = False  # pylint: disable=protected-access
                 errors = Mapping.create_new_version_for(self.instance, self.data, self.user)
