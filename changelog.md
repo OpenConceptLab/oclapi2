@@ -1,3 +1,9 @@
+##### 2.2.58 - Mon Jan 2 10:19:30 2023 +0000
+- [OpenConceptLab/ocl_issues#1449](https://github.com/OpenConceptLab/ocl_issues/issues/1449) | Errbit | fixing monthly usage report duration
+- [OpenConceptLab/ocl_issues#1452](https://github.com/OpenConceptLab/ocl_issues/issues/1452) | added repo_url in cascade response
+- [OpenConceptLab/ocl_issues#1450](https://github.com/OpenConceptLab/ocl_issues/issues/1450) | fixing tests
+- updated changelog
+- [OpenConceptLab/ocl_issues#1450](https://github.com/OpenConceptLab/ocl_issues/issues/1450) | removed uuid from cascade response
 ##### 2.2.57 - Wed Dec 28 03:22:31 2022 +0000
 - [OpenConceptLab/ocl_issues#1447](https://github.com/OpenConceptLab/ocl_issues/issues/1447) | fixing mapping importer for duplicate mappings
 - [OpenConceptLab/ocl_issues#1449](https://github.com/OpenConceptLab/ocl_issues/issues/1449) | fixing pylint
