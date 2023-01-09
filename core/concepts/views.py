@@ -22,7 +22,7 @@ from core.common.swagger_parameters import (
     include_facets_header, updated_since_param, include_inverse_mappings_param, include_retired_param,
     compress_header, include_source_versions_param, include_collection_versions_param, cascade_method_param,
     cascade_map_types_params, cascade_exclude_map_types_params, cascade_hierarchy_param, cascade_mappings_param,
-    cascade_levels_param, cascade_direction_param, cascade_view_hierarchy, return_map_types_params)
+    cascade_levels_param, cascade_direction_param, cascade_view_hierarchy, return_map_types_params, omit_if_exists_in)
 from core.common.tasks import delete_concept, make_hierarchy
 from core.common.utils import to_parent_uri_from_kwargs, generate_temp_version
 from core.common.views import SourceChildCommonBaseView, SourceChildExtrasView, \
@@ -365,7 +365,8 @@ class ConceptCascadeView(ConceptBaseView):
         manual_parameters=[
             cascade_method_param, cascade_map_types_params, cascade_exclude_map_types_params, return_map_types_params,
             cascade_hierarchy_param, cascade_mappings_param, cascade_levels_param,
-            cascade_direction_param, cascade_view_hierarchy, include_retired_param
+            cascade_direction_param, cascade_view_hierarchy, include_retired_param,
+            omit_if_exists_in
         ]
     )
     def get(self, request, **kwargs):  # pylint: disable=unused-argument

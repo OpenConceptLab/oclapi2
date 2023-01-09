@@ -1373,6 +1373,46 @@ class ConceptCascadeViewTest(OCLAPITestCase):
         self.assertEqual(entry['type'], 'Concept')
         self.assertEqual(len(entry['entries']), 0)
 
+        # $cascade all forward with omitIfExistsIn
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection)
+        collection.expansion_uri = expansion.uri
+        collection.save()
+        expansion.concepts.add(concept2)
+        expansion.concepts.add(concept3)
+        expansion.mappings.add(mapping2)
+        expansion.mappings.add(mapping6)
+
+        response = self.client.get(
+            concept1.uri + '$cascade/?omitIfExistsIn=' + collection.uri
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data['entry']), 3)
+        self.assertEqual(
+            sorted([data['url'] for data in response.data['entry']]),
+            sorted([
+                concept1.uri,
+                mapping1.uri,
+                mapping4.uri,
+            ])
+        )
+
+        response = self.client.get(
+            concept1.uri + '$cascade/?view=hierarchy&omitIfExistsIn=' + collection.uri
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['entry']['url'], concept1.uri)
+        self.assertEqual(len(response.data['entry']['entries']), 2)
+        self.assertEqual(
+            sorted([data['url'] for data in response.data['entry']['entries']]),
+            sorted([
+                mapping1.uri,
+                mapping4.uri,
+            ])
+        )
+
     def test_get_200_for_collection_version(self):  # pylint: disable=too-many-locals,too-many-statements
         source1 = OrganizationSourceFactory()
         source2 = OrganizationSourceFactory()

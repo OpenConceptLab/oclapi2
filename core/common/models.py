@@ -362,6 +362,11 @@ class ConceptContainerModel(VersionedModel):
         indexes = [] + VersionedModel.Meta.indexes
 
     @property
+    def is_collection(self):
+        from core.collections.models import Collection
+        return self.resource_type == Collection.OBJECT_TYPE
+
+    @property
     def should_set_active_concepts(self):
         return self.active_concepts is None
 
