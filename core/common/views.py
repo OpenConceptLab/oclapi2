@@ -594,7 +594,11 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             criterion |= get_query(word)
 
         if self.is_concept_document() and ' ' in search_string:
-            criterion |= Q("wildcard", _name=dict(value=search_string.replace(' ', '*') + '*', boost=2))
+            criterion |= Q("wildcard", _name=dict(value=search_string, boost=11))
+            criterion |= Q("wildcard", synonyms=dict(value=search_string, boost=10))
+            criterion |= Q("wildcard", synonyms=dict(value=search_string.replace(' ', '*'), boost=9))
+            criterion |= Q("wildcard", synonyms=dict(value=search_string.replace(' ', '*') + '*', boost=8))
+            criterion |= Q("wildcard", synonyms=dict(value='*' + search_string.replace(' ', '*') + '*', boost=7))
 
         return criterion
 
