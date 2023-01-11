@@ -21,15 +21,15 @@ from rest_framework import permissions
 
 import core.concepts.views as concept_views
 import core.mappings.views as mapping_views
+import core.reports.views as report_views
 from core import VERSION
 from core.collections.views import ReferenceExpressionResolveView
 from core.common.constants import NAMESPACE_PATTERN
 from core.common.utils import get_api_base_url
 from core.common.views import RootView, FeedbackView, APIVersionView, ChangeLogView, ConceptDuplicateLocalesView, \
-    ConceptDormantLocalesView, ConceptMultipleLatestVersionsView
+    ConceptDormantLocalesView
 from core.concepts.views import ConceptsHierarchyAmendAdminView
 from core.importers.views import BulkImportView
-import core.reports.views as report_views
 
 SchemaView = get_schema_view(
     openapi.Info(
@@ -57,9 +57,6 @@ urlpatterns = [
     path('admin/concepts/locales/duplicate/', ConceptDuplicateLocalesView.as_view(), name='concept-duplicate-locales'),
     path('admin/concepts/locales/dormant/', ConceptDormantLocalesView.as_view(), name='concept-dormant-locales'),
     path('admin/concepts/amend-hierarchy/', ConceptsHierarchyAmendAdminView.as_view(), name='concepts-amend-hierarchy'),
-    path(
-        'admin/concepts/duplicate-latest-versions/',
-        ConceptMultipleLatestVersionsView.as_view(), name='concepts-duplicate-latest-versions'),
     path('admin/mappings/debug/', mapping_views.MappingDebugRetrieveDestroyView.as_view(), name='mapping-debug'),
     path('admin/concepts/debug/<int:id>/', concept_views.ConceptDebugView.as_view(), name='concept-debug'),
     path('$resolveReference/', ReferenceExpressionResolveView.as_view(), name='reference-$resolve'),

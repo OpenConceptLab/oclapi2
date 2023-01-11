@@ -12,7 +12,7 @@ from core.common.models import VersionedModel, ConceptContainerModel
 from core.common.tasks import process_hierarchy_for_new_concept, process_hierarchy_for_concept_version, \
     process_hierarchy_for_new_parent_concept_version
 from core.common.utils import generate_temp_version, drop_version, \
-    encode_string, decode_string, named_tuple_fetchall, startswith_temp_version, is_versioned_uri
+    encode_string, decode_string, startswith_temp_version, is_versioned_uri
 from core.concepts.constants import CONCEPT_TYPE, LOCALES_FULLY_SPECIFIED, LOCALES_SHORT, LOCALES_SEARCH_INDEX_TERM, \
     CONCEPT_WAS_RETIRED, CONCEPT_IS_ALREADY_RETIRED, CONCEPT_IS_ALREADY_NOT_RETIRED, CONCEPT_WAS_UNRETIRED, \
     PERSIST_CLONE_ERROR, PERSIST_CLONE_SPECIFY_USER_ERROR, ALREADY_EXISTS, CONCEPT_REGEX, MAX_LOCALES_LIMIT, \
@@ -267,32 +267,6 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         'name_types': {'sortable': False, 'filterable': True, 'facet': True},
         'description_types': {'sortable': False, 'filterable': True, 'facet': True},
     }
-
-    def dedupe_latest_versions(self):
-        if self.is_versioned_object and self.is_latest_version:
-            self.is_latest_version = False
-            self.save(update_fields=['is_latest_version'])
-        latest_versions = self.versions.filter(is_latest_version=True)
-        count = latest_versions.count()
-        if count > 1:
-            for version in latest_versions.order_by('-id')[1:]:
-                version.is_latest_version = False
-                version.save(update_fields=['is_latest_version'])
-        elif count < 1:
-            version = self.versions.order_by('-id').first()
-            version.is_latest_version = True
-            version.save(update_fields=['is_latest_version'])
-
-    @classmethod
-    def duplicate_latest_versions(cls, limit=25, offset=0):
-        with connection.cursor() as cursor:
-            cursor.execute(
-                f"""
-                select mnemonic, count(*) from concepts where is_latest_version=true
-                group by parent_id, mnemonic having count(*) > 1 order by mnemonic limit {limit} offset {offset}
-                """
-            )
-            return named_tuple_fetchall(cursor)
 
     @staticmethod
     def get_search_document():
