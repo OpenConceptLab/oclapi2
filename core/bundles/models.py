@@ -5,7 +5,7 @@ from core.bundles.constants import BUNDLE_TYPE_SEARCHSET, RESOURCE_TYPE
 from core.collections.constants import SOURCE_MAPPINGS, SOURCE_TO_CONCEPTS
 from core.common.constants import CASCADE_LEVELS_PARAM, CASCADE_MAPPINGS_PARAM, \
     CASCADE_HIERARCHY_PARAM, CASCADE_METHOD_PARAM, MAP_TYPES_PARAM, EXCLUDE_MAP_TYPES_PARAM, CASCADE_DIRECTION_PARAM, \
-    INCLUDE_RETIRED_PARAM, RETURN_MAP_TYPES, ALL
+    INCLUDE_RETIRED_PARAM, RETURN_MAP_TYPES, ALL, OMIT_IF_EXISTS_IN
 
 
 class Bundle:
@@ -20,6 +20,7 @@ class Bundle:
         self.cascade_mappings = True
         self.cascade_levels = ALL
         self.include_retired = False
+        self.omit_if_exists_in = None
         self.concepts = None
         self.mappings = None
         self._total = None
@@ -30,6 +31,7 @@ class Bundle:
         self.return_map_types_criteria = Q()
         self.entries = []
         self.requested_url = requested_url
+        self.repo_url = get(self.repo_version, 'uri')
 
     def set_cascade_parameters(self):
         self.set_cascade_direction()
@@ -40,6 +42,7 @@ class Bundle:
         self.set_include_retired()
         self.set_cascade_mappings_criteria()
         self.set_return_map_types_criteria()
+        self.set_omit_if_exists_in()
 
     @property
     def is_hierarchy_view(self):
@@ -89,6 +92,9 @@ class Bundle:
         else:
             self.return_map_types_criteria = self.mappings_criteria
 
+    def set_omit_if_exists_in(self):
+        self.omit_if_exists_in = self.params.get(OMIT_IF_EXISTS_IN, None) or None
+
     @property
     def resource_type(self):
         return RESOURCE_TYPE
@@ -134,7 +140,8 @@ class Bundle:
             cascade_levels=self.cascade_levels,
             include_retired=self.include_retired,
             reverse=self.reverse,
-            return_map_types_criteria=self.return_map_types_criteria
+            return_map_types_criteria=self.return_map_types_criteria,
+            omit_if_exists_in=self.omit_if_exists_in
         )
         self.concepts = get(result, 'concepts')
         self.mappings = get(result, 'mappings')
@@ -153,7 +160,8 @@ class Bundle:
             cascade_levels=self.cascade_levels,
             include_retired=self.include_retired,
             reverse=self.reverse,
-            return_map_types_criteria=self.return_map_types_criteria
+            return_map_types_criteria=self.return_map_types_criteria,
+            omit_if_exists_in=self.omit_if_exists_in
         )
 
         from core.concepts.serializers import ConceptMinimalSerializerRecursive
@@ -172,5 +180,5 @@ class Bundle:
 
     def get_concept_serializer(self):
         from core.concepts.models import Concept
-        serializer = Concept.get_serializer_class(verbose=self.verbose, version=True, brief=self.brief)
+        serializer = Concept.get_serializer_class(verbose=self.verbose, version=True, brief=self.brief, cascade=True)
         return serializer

@@ -546,6 +546,9 @@ def jsonify_safe(value):
 
 
 def web_url():
+    url = settings.WEB_URL
+    if url:
+        return url
     env = settings.ENV
     if not env or env in ['development', 'ci']:
         return 'http://localhost:4000'

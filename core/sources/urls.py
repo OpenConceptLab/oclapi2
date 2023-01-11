@@ -17,6 +17,11 @@ urlpatterns = [
         name='source-client-configs'
     ),
     re_path(
+        fr"^(?P<source>{NAMESPACE_PATTERN})/mapped-sources/$",
+        views.SourceMappedSourcesListView.as_view(),
+        name='source-mapped-sources'
+    ),
+    re_path(
         fr"^(?P<source>{NAMESPACE_PATTERN})/summary/$",
         views.SourceSummaryView.as_view(),
         name='source-summary'

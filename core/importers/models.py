@@ -459,7 +459,7 @@ class MappingImporter(BaseResourceImporter):
     mandatory_fields = {"map_type", "from_concept_url"}
     allowed_fields = [
         "id", "map_type", "from_concept_url", "to_source_url", "to_concept_url", "to_concept_code",
-        "to_concept_name", "extras", "external_id", "retired", 'update_comment', 'comment'
+        "to_concept_name", "extras", "external_id", "retired", 'update_comment', 'comment', 'sort_weight'
     ]
 
     def __init__(self, data, user, update_if_exists):
@@ -552,7 +552,10 @@ class MappingImporter(BaseResourceImporter):
             return FAILED
         if parent.has_edit_access(self.user):
             if self.version:
-                self.instance = self.get_queryset().first().clone()
+                queryset = self.get_queryset()
+                if queryset.count() > 1:
+                    queryset = queryset.filter(retired=False)
+                self.instance = queryset.first().clone()
                 self.instance._counted = None  # pylint: disable=protected-access
                 self.instance._index = False  # pylint: disable=protected-access
                 errors = Mapping.create_new_version_for(self.instance, self.data, self.user)
@@ -1055,7 +1058,10 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
         sources = Source.objects.filter(id__in=uncounted_concepts.values_list('parent_id', flat=True))
         for source in sources:
             source.update_concepts_count(sync=False)
-            uncounted_concepts.filter(parent_id=source.id).update(_counted=True)
+            try:
+                uncounted_concepts.filter(parent_id=source.id).update(_counted=True)
+            except:  # pylint: disable=bare-except
+                pass
 
     @staticmethod
     def update_mappings_counts():
@@ -1064,4 +1070,7 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
             id__in=uncounted_mappings.values_list('parent_id', flat=True))
         for source in sources:
             source.update_mappings_count(sync=False)
-            uncounted_mappings.filter(parent_id=source.id).update(_counted=True)
+            try:
+                uncounted_mappings.filter(parent_id=source.id).update(_counted=True)
+            except:  # pylint: disable=bare-except
+                pass

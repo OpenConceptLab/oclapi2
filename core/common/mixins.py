@@ -380,12 +380,28 @@ class ConceptDictionaryUpdateMixin(ConceptDictionaryMixin):
 
 class SourceContainerMixin:
     @property
+    def sources(self):
+        return self.source_set.filter(version=HEAD)
+
+    @property
+    def collections(self):
+        return self.collection_set.filter(version=HEAD)
+
+    @property
+    def all_sources_count(self):
+        return self.sources.count()
+
+    @property
+    def all_collections_count(self):
+        return self.collections.count()
+
+    @property
     def public_sources(self):
-        return self.source_set.exclude(public_access=ACCESS_TYPE_NONE).filter(version=HEAD).count()
+        return self.sources.exclude(public_access=ACCESS_TYPE_NONE).count()
 
     @property
     def public_collections(self):
-        return self.collection_set.exclude(public_access=ACCESS_TYPE_NONE).filter(version=HEAD).count()
+        return self.collections.exclude(public_access=ACCESS_TYPE_NONE).count()
 
     @property
     def sources_url(self):

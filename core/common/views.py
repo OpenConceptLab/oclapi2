@@ -145,7 +145,14 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         if queryset is None:
             queryset = self.get_queryset()
 
-        return super().filter_queryset(queryset).order_by(self.default_qs_sort_attr)
+        _queryset = super().filter_queryset(queryset)
+
+        if self.default_qs_sort_attr:
+            if isinstance(self.default_qs_sort_attr, str):
+                _queryset = _queryset.order_by(self.default_qs_sort_attr)
+            elif isinstance(self.default_qs_sort_attr, list):
+                _queryset = _queryset.order_by(*self.default_qs_sort_attr)
+        return _queryset
 
     def get_sort_and_desc(self):
         query_params = self.request.query_params.dict()
@@ -585,6 +592,9 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         criterion = get_query(words[0])
         for word in words[1:]:
             criterion |= get_query(word)
+
+        if self.is_concept_document() and ' ' in search_string:
+            criterion |= Q("wildcard", _name=dict(value=search_string.replace(' ', '*') + '*', boost=2))
 
         return criterion
 

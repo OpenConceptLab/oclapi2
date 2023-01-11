@@ -64,7 +64,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
 
     parent = models.ForeignKey('sources.Source', related_name='mappings_set', on_delete=models.CASCADE)
     map_type = models.TextField(db_index=True)
-
+    sort_weight = models.FloatField(db_index=True, null=True, blank=True)
     sources = models.ManyToManyField('sources.Source', related_name='mappings')
     external_id = models.TextField(null=True, blank=True)
     comment = models.TextField(null=True, blank=True)
@@ -268,7 +268,8 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
             from_source_id=self.from_source_id,
             from_source_url=self.from_source_url,
             from_source_version=self.from_source_version,
-            _index=self._index
+            _index=self._index,
+            sort_weight=self.sort_weight
         )
         if user:
             mapping.created_by = mapping.updated_by = user
@@ -374,6 +375,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         instance.retired = data.get('retired', instance.retired)
         instance.mnemonic = data.get('mnemonic', instance.mnemonic)
         instance.map_type = data.get('map_type', instance.map_type)
+        instance.sort_weight = data.get('sort_weight', instance.sort_weight)
 
         return cls.persist_clone(instance, user)
 
@@ -425,6 +427,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         mapping.map_type = self.map_type
         mapping.retired = self.retired
         mapping.external_id = self.external_id or mapping.external_id
+        mapping.sort_weight = self.sort_weight
 
         mapping.from_concept_id = self.from_concept_id
         mapping.to_concept_id = self.to_concept_id

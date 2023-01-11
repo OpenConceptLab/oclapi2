@@ -8,7 +8,7 @@ from pydash import get, compact
 
 from core.common.constants import ISO_639_1, LATEST, HEAD, ALL
 from core.common.mixins import SourceChildMixin
-from core.common.models import VersionedModel
+from core.common.models import VersionedModel, ConceptContainerModel
 from core.common.tasks import process_hierarchy_for_new_concept, process_hierarchy_for_concept_version, \
     process_hierarchy_for_new_parent_concept_version
 from core.common.utils import generate_temp_version, drop_version, \
@@ -975,10 +975,32 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         result.reverse()
         return result
 
+    @staticmethod
+    def __get_omit_from_version(omit_if_exists_in):
+        if omit_if_exists_in:
+            omit_from_version = ConceptContainerModel.resolve_expression_to_version(omit_if_exists_in)
+            if omit_from_version.id:
+                return omit_from_version
+
+        return None
+
+    def __get_omit_from_version_criteria(self, omit_if_exists_in):
+        repo_version = self.__get_omit_from_version(omit_if_exists_in)
+        criteria = models.Q()
+        if repo_version:
+            if repo_version.is_collection:
+                expansion = get(repo_version, 'expansion')
+                if expansion:
+                    criteria = models.Q(expansion_set=expansion)
+            else:
+                criteria = models.Q(sources=repo_version)
+
+        return criteria
+
     def cascade(  # pylint: disable=too-many-arguments,too-many-locals
             self, repo_version=None, source_mappings=True, source_to_concepts=True,
             mappings_criteria=None, cascade_mappings=True, cascade_hierarchy=True, cascade_levels=ALL,
-            include_retired=False, reverse=False, return_map_types_criteria=None,
+            include_retired=False, reverse=False, return_map_types_criteria=None, omit_if_exists_in=None,
             max_results=1000
     ):
         from core.mappings.models import Mapping
@@ -998,6 +1020,8 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         else:
             from core.collections.models import Collection
             is_collection = repo_version.__class__ == Collection
+
+        omit_from_version_criteria = self.__get_omit_from_version_criteria(omit_if_exists_in)
 
         cascaded = []
 
@@ -1023,13 +1047,13 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                                     *res['hierarchy_concepts'].values_list('id', flat=True),
                                     *result['concepts'].values_list('id', flat=True)
                                 ]
-                            )
+                            ).exclude(omit_from_version_criteria)
                             result['mappings'] = Mapping.objects.filter(
                                 id__in=[
                                     *res['mappings'].values_list('id', flat=True),
                                     *result['mappings'].values_list('id', flat=True)
                                 ]
-                            )
+                            ).exclude(omit_from_version_criteria).order_by('map_type', 'sort_weight')
 
                         iterate(level if level == ALL else level - 1)
 
@@ -1039,7 +1063,8 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     def cascade_as_hierarchy(  # pylint: disable=too-many-arguments,too-many-locals
             self, repo_version=None, source_mappings=True, source_to_concepts=True, mappings_criteria=None,
             cascade_mappings=True, cascade_hierarchy=True, cascade_levels=ALL,
-            include_retired=False, reverse=False, return_map_types_criteria=None, _=None
+            include_retired=False, reverse=False, return_map_types_criteria=None, omit_if_exists_in=None,
+            _=None
     ):
         if cascade_levels == 0:
             return self
@@ -1056,6 +1081,8 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         else:
             from core.collections.models import Collection
             is_collection = repo_version.__class__ == Collection
+
+        omit_from_version_criteria = self.__get_omit_from_version_criteria(omit_if_exists_in)
 
         self.current_level = 0
         levels = {self.current_level: [self]}
@@ -1086,6 +1113,11 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                         set(list(cascaded_entries['hierarchy_concepts']) + list(cascaded_entries['concepts'])))
 
                     concept.cascaded_entries = cascaded_entries
+                    concept.cascaded_entries['concepts'] = Concept.objects.filter(
+                        id__in=[_concept.id for _concept in concept.cascaded_entries['concepts']]
+                    ).exclude(omit_from_version_criteria)
+                    concept.cascaded_entries['mappings'] = concept.cascaded_entries['mappings'].exclude(
+                        omit_from_version_criteria)
                     concept_has_entries = has_entries(cascaded_entries)
                     cascaded[concept.id] = concept_has_entries
                     concept.terminal = not concept_has_entries
@@ -1141,7 +1173,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             if not include_retired:
                 mappings = mappings.filter(retired=False)
             if return_map_types_criteria is not False:
-                result['mappings'] = mappings.filter(return_map_types_criteria)
+                result['mappings'] = mappings.filter(return_map_types_criteria).order_by('map_type', 'sort_weight')
         if source_to_concepts:
             if cascade_hierarchy:
                 hierarchy_queryset = self.get_hierarchy_queryset(
@@ -1186,7 +1218,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             if not include_retired:
                 mappings = mappings.filter(retired=False)
             if return_map_types_criteria is not False:
-                result['mappings'] = mappings.filter(return_map_types_criteria)
+                result['mappings'] = mappings.filter(return_map_types_criteria).order_by('map_type', 'sort_weight')
         if source_to_concepts:
             if cascade_hierarchy:
                 hierarchy_queryset = self.get_hierarchy_queryset(
@@ -1230,7 +1262,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             if not include_retired:
                 mappings = mappings.filter(retired=False)
             if return_map_types_criteria is not False:
-                result['mappings'] = mappings.filter(return_map_types_criteria)
+                result['mappings'] = mappings.filter(return_map_types_criteria).order_by('map_type', 'sort_weight')
         if source_to_concepts:
             if cascade_hierarchy:
                 hierarchy_queryset = self.get_hierarchy_queryset(
@@ -1273,7 +1305,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             if not include_retired:
                 mappings = mappings.filter(retired=False)
             if return_map_types_criteria is not False:
-                result['mappings'] = mappings.filter(return_map_types_criteria)
+                result['mappings'] = mappings.filter(return_map_types_criteria).order_by('map_type', 'sort_weight')
         if source_to_concepts:
             if cascade_hierarchy:
                 hierarchy_queryset = self.get_hierarchy_queryset(
@@ -1292,12 +1324,15 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         return result
 
     @staticmethod
-    def get_serializer_class(verbose=False, version=False, brief=False):
+    def get_serializer_class(verbose=False, version=False, brief=False, cascade=False):
         if brief:
-            from core.concepts.serializers import ConceptMinimalSerializer
-            return ConceptMinimalSerializer
+            from core.concepts.serializers import ConceptMinimalSerializer, ConceptCascadeMinimalSerializer
+            return ConceptCascadeMinimalSerializer if cascade else ConceptMinimalSerializer
         if version:
             from core.concepts.serializers import ConceptVersionDetailSerializer, ConceptVersionListSerializer
+            if cascade:
+                from core.concepts.serializers import ConceptVersionCascadeSerializer
+                return ConceptVersionCascadeSerializer
             return ConceptVersionDetailSerializer if verbose else ConceptVersionListSerializer
 
         from core.concepts.serializers import ConceptDetailSerializer, ConceptListSerializer

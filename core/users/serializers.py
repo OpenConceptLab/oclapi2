@@ -127,6 +127,9 @@ class UserDetailSerializer(serializers.ModelSerializer):
     location = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     preferred_locale = serializers.CharField(required=False)
     orgs = serializers.IntegerField(read_only=True, source='orgs_count')
+    owned_orgs = serializers.IntegerField(read_only=True, source='owned_orgs_count')
+    sources = serializers.IntegerField(read_only=True, source='all_sources_count')
+    collections = serializers.IntegerField(read_only=True, source='all_collections_count')
     created_on = serializers.DateTimeField(source='created_at', read_only=True)
     updated_on = serializers.DateTimeField(source='updated_at', read_only=True)
     created_by = serializers.CharField(read_only=True)
@@ -143,7 +146,8 @@ class UserDetailSerializer(serializers.ModelSerializer):
             'public_collections', 'public_sources', 'created_on', 'updated_on', 'created_by', 'updated_by',
             'url', 'organizations_url', 'extras', 'sources_url', 'collections_url', 'website', 'last_login',
             'logo_url', 'subscribed_orgs', 'is_superuser', 'is_staff', 'first_name', 'last_name', 'verified',
-            'verification_token', 'date_joined', 'auth_groups', 'status', 'deactivated_at'
+            'verification_token', 'date_joined', 'auth_groups', 'status', 'deactivated_at',
+            'sources', 'collections', 'owned_orgs'
         )
 
     def __init__(self, *args, **kwargs):

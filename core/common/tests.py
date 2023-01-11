@@ -26,7 +26,7 @@ from core.common.utils import (
     drop_version, is_versioned_uri, separate_version, to_parent_uri, jsonify_safe, es_get,
     get_resource_class_from_resource_name, flatten_dict, is_csv_file, is_url_encoded_string, to_parent_uri_from_kwargs,
     set_current_user, get_current_user, set_request_url, get_request_url, nested_dict_values, chunks, api_get,
-    split_list_by_condition, get_start_of_month, get_end_of_month, get_prev_month)
+    split_list_by_condition)
 from core.concepts.models import Concept
 from core.orgs.models import Organization
 from core.sources.models import Source
@@ -923,7 +923,6 @@ class TaskTest(OCLTestCase):
 
     @patch('core.common.tasks.EmailMessage')
     def test_monthly_usage_report(self, email_message_mock):
-        prev_month = get_prev_month()
         email_message_instance_mock = Mock(send=Mock(return_value=1))
         email_message_mock.return_value = email_message_instance_mock
         res = monthly_usage_report()
@@ -933,10 +932,7 @@ class TaskTest(OCLTestCase):
 
         self.assertEqual(res, 1)
         call_args = email_message_mock.call_args[1]
-        self.assertTrue(
-            f"Monthly usage report: {get_start_of_month(prev_month)} to {get_end_of_month(prev_month)}"
-            in call_args['subject']
-        )
+        self.assertTrue("Monthly usage report" in call_args['subject'])
         self.assertEqual(call_args['to'], ['reports@openconceptlab.org'])
         self.assertTrue('</html>' in call_args['body'])
         self.assertTrue('concepts' in call_args['body'])

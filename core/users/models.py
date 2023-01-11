@@ -128,6 +128,10 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
     def orgs_count(self):
         return self.organizations.count()
 
+    @property
+    def owned_orgs_count(self):
+        return self.organizations.filter(created_by=self).count()
+
     def send_verification_email(self):
         return send_user_verification_email.delay(self.id)
 

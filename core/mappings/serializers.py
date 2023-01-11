@@ -1,5 +1,6 @@
 from pydash import get
-from rest_framework.fields import CharField, JSONField, IntegerField, DateTimeField, ListField, SerializerMethodField
+from rest_framework.fields import CharField, JSONField, IntegerField, DateTimeField, ListField, SerializerMethodField, \
+    FloatField
 from rest_framework.serializers import ModelSerializer
 
 from core.common.constants import MAPPING_LOOKUP_CONCEPTS, MAPPING_LOOKUP_SOURCES, MAPPING_LOOKUP_FROM_CONCEPT, \
@@ -30,6 +31,7 @@ class MappingListSerializer(ModelSerializer):
     to_concept_code = EncodedDecodedCharField(required=False)
     from_concept_code = EncodedDecodedCharField(required=False)
     references = SerializerMethodField()
+    sort_weight = FloatField(required=False)
 
     class Meta:
         model = Mapping
@@ -42,7 +44,8 @@ class MappingListSerializer(ModelSerializer):
             'url', 'version', 'id', 'versioned_object_id', 'versioned_object_url',
             'is_latest_version', 'update_comment', 'version_url', 'uuid', 'version_created_on',
             'from_source_version', 'to_source_version', 'from_concept', 'to_concept', 'from_source', 'to_source',
-            'from_concept_name_resolved', 'to_concept_name_resolved', 'extras', 'type', 'references'
+            'from_concept_name_resolved', 'to_concept_name_resolved', 'extras', 'type', 'references',
+            'sort_weight'
         )
 
     def __init__(self, *args, **kwargs):
@@ -134,7 +137,7 @@ class MappingMinimalSerializer(ModelSerializer):
         fields = (
             'id', 'type', 'map_type', 'url', 'version_url', 'to_concept_code', 'to_concept_url',
             'cascade_target_concept_code', 'cascade_target_concept_url', 'cascade_target_source_owner',
-            'cascade_target_source_name', 'cascade_target_concept_name', 'retired'
+            'cascade_target_source_name', 'cascade_target_concept_name', 'retired', 'sort_weight'
         )
 
     @staticmethod
@@ -163,7 +166,7 @@ class MappingReverseMinimalSerializer(ModelSerializer):
         fields = (
             'id', 'type', 'map_type', 'url', 'version_url', 'from_concept_code', 'from_concept_url',
             'cascade_target_concept_code', 'cascade_target_concept_url', 'cascade_target_source_owner',
-            'cascade_target_source_name', 'cascade_target_concept_name', 'retired'
+            'cascade_target_source_name', 'cascade_target_concept_name', 'retired', 'sort_weight'
         )
 
     @staticmethod

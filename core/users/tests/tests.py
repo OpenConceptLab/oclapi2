@@ -74,12 +74,22 @@ class UserProfileTest(OCLTestCase):
 
     @patch('core.users.models.UserProfile.source_set')
     def test_public_sources(self, source_set_mock):
-        source_set_mock.exclude = Mock(return_value=Mock(filter=Mock(return_value=Mock(count=Mock(return_value=10)))))
+        source_set_mock.filter = Mock(return_value=Mock(exclude=Mock(return_value=Mock(count=Mock(return_value=10)))))
 
         self.assertEqual(UserProfile().public_sources, 10)
-        source_set_mock.exclude.assert_called_once_with(public_access=ACCESS_TYPE_NONE)
-        source_set_mock.exclude().filter.assert_called_once_with(version=HEAD)
-        source_set_mock.exclude().filter().count.assert_called_once()
+        source_set_mock.filter.assert_called_once_with(version=HEAD)
+        source_set_mock.filter().exclude.assert_called_once_with(public_access=ACCESS_TYPE_NONE)
+        source_set_mock.filter().exclude().count.assert_called_once()
+
+    @patch('core.orgs.models.Organization.collection_set')
+    def test_public_collections(self, collection_set_mock):
+        collection_set_mock.filter = Mock(
+            return_value=Mock(exclude=Mock(return_value=Mock(count=Mock(return_value=10)))))
+
+        self.assertEqual(Organization().public_collections, 10)
+        collection_set_mock.filter.assert_called_once_with(version=HEAD)
+        collection_set_mock.filter().exclude.assert_called_once_with(public_access=ACCESS_TYPE_NONE)
+        collection_set_mock.filter().exclude().count.assert_called_once()
 
     def test_delete(self):
         user = UserProfileFactory()

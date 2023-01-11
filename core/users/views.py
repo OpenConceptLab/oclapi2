@@ -32,6 +32,7 @@ from core.users.documents import UserProfileDocument
 from core.users.search import UserProfileSearch
 from core.users.serializers import UserDetailSerializer, UserCreateSerializer, UserListSerializer, UserSummarySerializer
 from .models import UserProfile
+from ..common import ERRBIT_LOGGER
 from ..common.services import AuthService, OIDCAuthService
 
 
@@ -387,7 +388,7 @@ class UserDetailView(UserBaseView, RetrieveAPIView, DestroyAPIView, mixins.Updat
         if self.request.query_params.get('includeVerificationToken') and self.request.method == 'GET':
             return instance
 
-        if not is_self and not is_admin:
+        if not is_self and not is_admin and self.request.method != 'GET':
             raise PermissionDenied()
 
         return instance
@@ -403,7 +404,11 @@ class UserDetailView(UserBaseView, RetrieveAPIView, DestroyAPIView, mixins.Updat
         if self.user_is_self:
             return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
         if self.is_hard_delete_requested():
-            obj.delete()
+            try:
+                obj.delete()
+            except Exception as ex:
+                ERRBIT_LOGGER.raise_errbit(f'Cannot delete user because: {str(ex)}')
+                return Response(status=status.HTTP_400_BAD_REQUEST)
         else:
             obj.deactivate()
         return Response(status=status.HTTP_204_NO_CONTENT)
