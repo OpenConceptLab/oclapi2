@@ -356,9 +356,6 @@ class OIDCAuthService(AbstractAuthService):
 
         return response.json()
 
-    def get_token(self):
-        return None
-
     @staticmethod
     def get_admin_token(username, password):
         response = requests.post(
@@ -384,7 +381,6 @@ class OIDCAuthService(AbstractAuthService):
                 code=code,
                 redirect_uri=redirect_uri
             )
-
         )
         return response.json()
 

@@ -1,7 +1,7 @@
 import base64
 import os
 import uuid
-from unittest.mock import patch, Mock, mock_open
+from unittest.mock import patch, Mock, mock_open, ANY
 
 import factory
 
@@ -33,7 +33,7 @@ from core.sources.models import Source
 from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
 from .fhir_helpers import translate_fhir_query
-from .services import S3, PostgresQL
+from .services import S3, PostgresQL, DjangoAuthService, OIDCAuthService
 from ..code_systems.serializers import CodeSystemDetailSerializer
 
 
@@ -1007,3 +1007,100 @@ class PostgresQLTest(OCLTestCase):
 
         db_connection_mock.cursor.assert_called_once()
         cursor_context_mock.execute.assert_called_once_with("SELECT last_value from foobar_seq;")
+
+
+class DjangoAuthServiceTest(OCLTestCase):
+    def test_get_token(self):
+        user = UserProfileFactory(username='foobar')
+
+        token = DjangoAuthService(user=user, password='foobar').get_token(True)
+        self.assertEqual(token, False)
+
+        user.set_password('foobar')
+        user.save()
+
+        token = DjangoAuthService(username='foobar', password='foobar').get_token(True)
+        self.assertTrue('Token ' in token)
+        self.assertTrue(len(token), 64)
+
+
+class OIDCAuthServiceTest(OCLTestCase):
+    def test_get_login_redirect_url(self):
+        self.assertEqual(
+            OIDCAuthService.get_login_redirect_url('client-id', 'http://localhost:4000', 'state', 'nonce'),
+            '/realms/ocl/protocol/openid-connect/auth?response_type=code id_token&client_id=client-id&'
+            'state=state&nonce=nonce&redirect_uri=http://localhost:4000'
+        )
+
+    def test_get_logout_redirect_url(self):
+        self.assertEqual(
+            OIDCAuthService.get_logout_redirect_url('id-token-hint', 'http://localhost:4000'),
+            '/realms/ocl/protocol/openid-connect/logout?id_token_hint=id-token-hint&'
+            'post_logout_redirect_uri=http://localhost:4000'
+        )
+
+    @patch('requests.post')
+    def test_exchange_code_for_token(self, post_mock):
+        post_mock.return_value = Mock(json=Mock(return_value=dict(token='token', foo='bar')))
+
+        result = OIDCAuthService.exchange_code_for_token(
+            'code', 'http://localhost:4000', 'client-id', 'client-secret'
+        )
+
+        self.assertEqual(result, dict(token='token', foo='bar'))
+        post_mock.assert_called_once_with(
+            '/realms/ocl/protocol/openid-connect/token',
+            data=dict(
+                grant_type='authorization_code',
+                client_id='client-id',
+                client_secret='client-secret',
+                code='code',
+                redirect_uri='http://localhost:4000'
+            )
+        )
+
+    @patch('requests.post')
+    def test_get_admin_token(self, post_mock):
+        post_mock.return_value = Mock(json=Mock(return_value=dict(access_token='token', foo='bar')))
+
+        result = OIDCAuthService.get_admin_token('username', 'password')
+
+        self.assertEqual(result, 'token')
+        post_mock.assert_called_once_with(
+            '/realms/master/protocol/openid-connect/token',
+            data=dict(
+                grant_type='password',
+                username='username',
+                password='password',
+                client_id='admin-cli'
+            ),
+            verify=False
+        )
+
+    @patch('core.common.services.OIDCAuthService.get_admin_token')
+    @patch('requests.post')
+    def test_add_user(self, post_mock, get_admin_token_mock):
+        post_mock.return_value = Mock(status_code=201, json=Mock(return_value=dict(foo='bar')))
+        get_admin_token_mock.return_value = 'token'
+        user = UserProfileFactory(username='username')
+        user.set_password('password')
+        user.save()
+
+        result = OIDCAuthService.add_user(user, 'username', 'password')
+
+        self.assertEqual(result, True)
+        get_admin_token_mock.assert_called_once_with(username='username', password='password')
+        post_mock.assert_called_once_with(
+            '/admin/realms/ocl/users',
+            json=dict(
+                enabled=True,
+                emailVerified=user.verified,
+                firstName=user.first_name,
+                lastName=user.last_name,
+                email=user.email,
+                username=user.username,
+                credentials=ANY
+            ),
+            verify=False,
+            headers=dict(Authorization='Bearer token')
+        )
