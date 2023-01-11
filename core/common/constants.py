@@ -100,6 +100,7 @@ EXCLUDE_MAP_TYPES_PARAM = 'excludeMapTypes'
 MAP_TYPES_PARAM = 'mapTypes'
 CASCADE_LEVELS_PARAM = 'cascadeLevels'
 RETURN_MAP_TYPES = 'returnMapTypes'
+EQUIVALENCY_MAP_TYPES = 'equivalencyMapType'
 CASCADE_DIRECTION_PARAM = 'reverse'
 OMIT_IF_EXISTS_IN = 'omitIfExistsIn'
 FACET_SIZE = 20

@@ -5,7 +5,8 @@ from core.common.constants import RELEASED_PARAM, VERBOSE_PARAM, INCLUDE_RETIRED
     INCLUDE_INVERSE_MAPPINGS_PARAM, UPDATED_SINCE_PARAM, INCLUDE_SOURCE_VERSIONS, INCLUDE_COLLECTION_VERSIONS, \
     LAST_LOGIN_BEFORE_PARAM, LAST_LOGIN_SINCE_PARAM, DATE_JOINED_SINCE_PARAM, DATE_JOINED_BEFORE_PARAM, \
     CASCADE_HIERARCHY_PARAM, CASCADE_METHOD_PARAM, MAP_TYPES_PARAM, EXCLUDE_MAP_TYPES_PARAM, CASCADE_MAPPINGS_PARAM, \
-    INCLUDE_MAPPINGS_PARAM, CASCADE_LEVELS_PARAM, CASCADE_DIRECTION_PARAM, ALL, RETURN_MAP_TYPES, OMIT_IF_EXISTS_IN
+    INCLUDE_MAPPINGS_PARAM, CASCADE_LEVELS_PARAM, CASCADE_DIRECTION_PARAM, ALL, RETURN_MAP_TYPES, OMIT_IF_EXISTS_IN, \
+    EQUIVALENCY_MAP_TYPES
 # HEADERS
 from core.orgs.constants import NO_MEMBERS
 
@@ -44,7 +45,7 @@ end_date_param = openapi.Parameter(
 include_retired_param = openapi.Parameter(
     INCLUDE_RETIRED_PARAM, openapi.IN_QUERY, type=openapi.TYPE_BOOLEAN, default=False,
 )
-omit_if_exists_in = openapi.Parameter(
+omit_if_exists_in_param = openapi.Parameter(
     OMIT_IF_EXISTS_IN, openapi.IN_QUERY, type=openapi.TYPE_STRING,
     description='e.g. /orgs/MyOrg/collections/MyCollection/v1/'
 )
@@ -126,17 +127,22 @@ cascade_method_param = openapi.Parameter(
     CASCADE_METHOD_PARAM, openapi.IN_QUERY, type=openapi.TYPE_STRING,
     enum=[SOURCE_TO_CONCEPTS, SOURCE_MAPPINGS], default=SOURCE_TO_CONCEPTS
 )
-cascade_map_types_params = openapi.Parameter(
+cascade_map_types_param = openapi.Parameter(
     MAP_TYPES_PARAM, openapi.IN_QUERY, type=openapi.TYPE_ARRAY,
     items=openapi.Items(type=openapi.TYPE_STRING),
     uniqueItems=True
 )
-cascade_exclude_map_types_params = openapi.Parameter(
+cascade_exclude_map_types_param = openapi.Parameter(
     EXCLUDE_MAP_TYPES_PARAM, openapi.IN_QUERY, type=openapi.TYPE_ARRAY,
     items=openapi.Items(type=openapi.TYPE_STRING),
     uniqueItems=True
 )
-return_map_types_params = openapi.Parameter(
+equivalency_map_types_param = openapi.Parameter(
+    EQUIVALENCY_MAP_TYPES, openapi.IN_QUERY, type=openapi.TYPE_ARRAY,
+    items=openapi.Items(type=openapi.TYPE_STRING),
+    uniqueItems=True
+)
+return_map_types_param = openapi.Parameter(
     RETURN_MAP_TYPES, openapi.IN_QUERY, type=openapi.TYPE_ARRAY,
     items=openapi.Items(type=openapi.TYPE_STRING),
     uniqueItems=True

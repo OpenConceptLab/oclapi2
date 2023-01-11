@@ -5,7 +5,7 @@ from core.bundles.constants import BUNDLE_TYPE_SEARCHSET, RESOURCE_TYPE
 from core.collections.constants import SOURCE_MAPPINGS, SOURCE_TO_CONCEPTS
 from core.common.constants import CASCADE_LEVELS_PARAM, CASCADE_MAPPINGS_PARAM, \
     CASCADE_HIERARCHY_PARAM, CASCADE_METHOD_PARAM, MAP_TYPES_PARAM, EXCLUDE_MAP_TYPES_PARAM, CASCADE_DIRECTION_PARAM, \
-    INCLUDE_RETIRED_PARAM, RETURN_MAP_TYPES, ALL, OMIT_IF_EXISTS_IN
+    INCLUDE_RETIRED_PARAM, RETURN_MAP_TYPES, ALL, OMIT_IF_EXISTS_IN, EQUIVALENCY_MAP_TYPES
 
 
 class Bundle:
@@ -29,6 +29,7 @@ class Bundle:
         self.cascade_method = SOURCE_TO_CONCEPTS
         self.mappings_criteria = Q()
         self.return_map_types_criteria = Q()
+        self.equivalency_map_types_criteria = Q()
         self.entries = []
         self.requested_url = requested_url
         self.repo_url = get(self.repo_version, 'uri')
@@ -42,6 +43,7 @@ class Bundle:
         self.set_include_retired()
         self.set_cascade_mappings_criteria()
         self.set_return_map_types_criteria()
+        self.set_equivalency_map_types_criteria()
         self.set_omit_if_exists_in()
 
     @property
@@ -92,6 +94,11 @@ class Bundle:
         else:
             self.return_map_types_criteria = self.mappings_criteria
 
+    def set_equivalency_map_types_criteria(self):
+        equivalency_map_types = self.params.dict().get(EQUIVALENCY_MAP_TYPES, None)
+        if equivalency_map_types:
+            self.equivalency_map_types_criteria = Q(map_type__in=compact(equivalency_map_types.split(',')))
+
     def set_omit_if_exists_in(self):
         self.omit_if_exists_in = self.params.get(OMIT_IF_EXISTS_IN, None) or None
 
@@ -141,7 +148,8 @@ class Bundle:
             include_retired=self.include_retired,
             reverse=self.reverse,
             return_map_types_criteria=self.return_map_types_criteria,
-            omit_if_exists_in=self.omit_if_exists_in
+            omit_if_exists_in=self.omit_if_exists_in,
+            equivalency_map_types_criteria=self.equivalency_map_types_criteria
         )
         self.concepts = get(result, 'concepts')
         self.mappings = get(result, 'mappings')
@@ -161,7 +169,8 @@ class Bundle:
             include_retired=self.include_retired,
             reverse=self.reverse,
             return_map_types_criteria=self.return_map_types_criteria,
-            omit_if_exists_in=self.omit_if_exists_in
+            omit_if_exists_in=self.omit_if_exists_in,
+            equivalency_map_types_criteria=self.equivalency_map_types_criteria
         )
 
         from core.concepts.serializers import ConceptMinimalSerializerRecursive
