@@ -889,20 +889,33 @@ class BulkImportViewTest(OCLAPITestCase):
     def test_get_without_task_id(self, flower_get_mock):
         task_id1 = f"{str(uuid.uuid4())}-ocladmin~priority"
         task_id2 = f"{str(uuid.uuid4())}-foobar~normal"
+        task_id3 = f"{str(uuid.uuid4())}-foobar~pending"
         flower_tasks = {
             task_id1: dict(name='core.common.tasks.bulk_import', state='success'),
             task_id2: dict(name='core.common.tasks.bulk_import', state='failed'),
+            task_id3: dict(name='core.common.tasks.bulk_import', state='PENDING'),
         }
         flower_get_mock.return_value = Mock(json=Mock(return_value=flower_tasks))
 
         response = self.client.get(
-            '/importers/bulk-import/?username=ocladmin',
+            '/importers/bulk-import/?username=ocladmin&verbose=true',
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data, [dict(queue='priority', state='success', task=task_id1, username='ocladmin')])
+        self.assertEqual(
+            response.data,
+            [
+                dict(
+                    queue='priority',
+                    state='success',
+                    task=task_id1,
+                    username='ocladmin',
+                    details=dict(name='core.common.tasks.bulk_import', state='success')
+                )
+            ]
+        )
 
         response = self.client.get(
             '/importers/bulk-import/?username=foobar',
@@ -911,7 +924,12 @@ class BulkImportViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data, [dict(queue='normal', state='failed', task=task_id2, username='foobar')])
+        self.assertEqual(
+            response.data,
+            [
+                dict(queue='normal', state='failed', task=task_id2, username='foobar'),
+                dict(queue='pending', state='PENDING', task=task_id3, username='foobar'),
+            ])
 
         response = self.client.get(
             '/importers/bulk-import/priority/?username=ocladmin',
@@ -1137,6 +1155,17 @@ class BulkImportViewTest(OCLAPITestCase):
         response = self.client.post(
             "/importers/bulk-import/upload/?update_if_exists=true",
             {'file': ''},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data, dict(exception='No content to import'))
+
+        file = open(
+                os.path.join(os.path.dirname(__file__), '..', 'samples/invalid_import_csv.csv'), 'r'
+            )
+        response = self.client.post(
+            "/importers/bulk-import/upload/?update_if_exists=true",
+            {'file': file},
             HTTP_AUTHORIZATION='Token ' + self.token,
         )
         self.assertEqual(response.status_code, 400)
