@@ -30,7 +30,7 @@ from core.common.views import SourceChildCommonBaseView, SourceChildExtrasView, 
     SourceChildExtraRetrieveUpdateDestroyView, BaseAPIView
 from core.concepts.constants import PARENT_VERSION_NOT_LATEST_CANNOT_UPDATE_CONCEPT
 from core.concepts.documents import ConceptDocument
-from core.concepts.models import Concept, LocalizedText
+from core.concepts.models import Concept, ConceptName
 from core.concepts.permissions import CanViewParentDictionary, CanEditParentDictionary
 from core.concepts.search import ConceptSearch
 from core.concepts.serializers import (
@@ -516,7 +516,7 @@ class ConceptVersionRetrieveView(ConceptBaseView, RetrieveAPIView, DestroyAPIVie
 
 
 class ConceptLabelListCreateView(ConceptBaseView, ListWithHeadersMixin, ListCreateAPIView):
-    model = LocalizedText
+    model = ConceptName
     parent_list_attribute = None
     default_qs_sort_attr = '-created_at'
 
@@ -563,7 +563,7 @@ class ConceptLabelListCreateView(ConceptBaseView, ListWithHeadersMixin, ListCrea
 
 
 class ConceptLabelRetrieveUpdateDestroyView(ConceptBaseView, RetrieveUpdateDestroyAPIView):
-    model = LocalizedText
+    model = ConceptName
     parent_list_attribute = None
     permission_classes = (IsAuthenticatedOrReadOnly,)
     default_qs_sort_attr = '-created_at'
@@ -594,13 +594,12 @@ class ConceptLabelRetrieveUpdateDestroyView(ConceptBaseView, RetrieveUpdateDestr
         serializer = self.get_serializer(instance, data=request.data, partial=partial)
 
         if serializer.is_valid():
+            subject_label_attr = f"cloned_{self.parent_list_attribute}"
             resource_instance = self.get_resource_object()
+            locales = get(resource_instance, self.parent_list_attribute).exclude(id=self.kwargs['uuid'])
             new_version = resource_instance.clone()
             saved_instance = serializer.save()
-            subject_label_attr = f"cloned_{self.parent_list_attribute}"
-            labels = getattr(new_version, subject_label_attr, [])
-            labels.append(saved_instance)
-            setattr(new_version, subject_label_attr, labels)
+            setattr(new_version, subject_label_attr, [*[locale.clone() for locale in locales.all()], saved_instance])
             new_version.comment = f'Updated {saved_instance.name} in {self.parent_list_attribute}.'
             errors = Concept.persist_clone(new_version, request.user)
             if errors:

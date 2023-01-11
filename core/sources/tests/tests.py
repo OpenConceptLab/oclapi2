@@ -15,7 +15,7 @@ from core.common.tasks import update_validation_schema
 from core.common.tests import OCLTestCase
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept
-from core.concepts.tests.factories import ConceptFactory, LocalizedTextFactory
+from core.concepts.tests.factories import ConceptFactory, ConceptNameFactory
 from core.mappings.documents import MappingDocument
 from core.mappings.tests.factories import MappingFactory
 from core.orgs.tests.factories import OrganizationFactory
@@ -535,14 +535,14 @@ class SourceTest(OCLTestCase):
         child_concept = Concept.persist_new({
             **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'root-kid',
             'parent': source,
-            'names': [LocalizedTextFactory.build(locale='en', name='English', locale_preferred=True)],
+            'names': [ConceptNameFactory.build(locale='en', name='English', locale_preferred=True)],
             'parent_concept_urls': [root_concept.uri]
         })
         parentless_concept = ConceptFactory(parent=source, mnemonic='parentless')
         parentless_concept_child = Concept.persist_new({
             **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'parentless-kid',
             'parent': source,
-            'names': [LocalizedTextFactory.build(locale='en', name='English', locale_preferred=True)],
+            'names': [ConceptNameFactory.build(locale='en', name='English', locale_preferred=True)],
             'parent_concept_urls': [parentless_concept.uri]
         })
 
@@ -567,7 +567,7 @@ class SourceTest(OCLTestCase):
         parentless_concept_child = Concept.persist_new({
             **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'parentless-kid',
             'parent': source,
-            'names': [LocalizedTextFactory.build(locale='en', name='English', locale_preferred=True)],
+            'names': [ConceptNameFactory.build(locale='en', name='English', locale_preferred=True)],
             'parent_concept_urls': [parentless_concept.uri]
         })
 

@@ -68,9 +68,7 @@ class ConceptDocument(Document):
 
     @staticmethod
     def prepare_locale(instance):
-        return list(
-            instance.names.filter(locale__isnull=False).distinct('locale').values_list('locale', flat=True)
-        )
+        return list(set(instance.names.filter(locale__isnull=False).values_list('locale', flat=True)))
 
     @staticmethod
     def prepare_synonyms(instance):
@@ -114,11 +112,11 @@ class ConceptDocument(Document):
     @staticmethod
     def prepare_name_types(instance):
         return list(
-            instance.names.filter(type__isnull=False).distinct('type').values_list('type', flat=True)
+            set(instance.names.filter(type__isnull=False).values_list('type', flat=True))
         )
 
     @staticmethod
     def prepare_description_types(instance):
         return list(
-            instance.descriptions.filter(type__isnull=False).distinct('type').values_list('type', flat=True)
+            set(instance.descriptions.filter(type__isnull=False).values_list('type', flat=True))
         )

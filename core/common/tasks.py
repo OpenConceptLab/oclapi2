@@ -482,8 +482,8 @@ def delete_duplicate_locales(start_from=None):  # pragma: no cover
 
 @app.task
 def delete_dormant_locales():  # pragma: no cover
-    from core.concepts.models import LocalizedText
-    queryset = LocalizedText.get_dormant_queryset()
+    from core.concepts.models import ConceptName
+    queryset = ConceptName.get_dormant_queryset()
     total = queryset.count()
     logger.info('%s Dormant locales found. Deleting in batches...' % total)  # pylint: disable=logging-not-lazy,consider-using-f-string
 
@@ -491,7 +491,7 @@ def delete_dormant_locales():  # pragma: no cover
     for start in range(0, total, batch_size):
         end = min(start + batch_size, total)
         logger.info('Iterating locales %d - %d to delete...' % (start + 1, end))  # pylint: disable=logging-not-lazy,consider-using-f-string
-        LocalizedText.objects.filter(id__in=queryset.order_by('id')[start:end].values('id')).delete()
+        ConceptName.objects.filter(id__in=queryset.order_by('id')[start:end].values('id')).delete()
 
     return 1
 

@@ -8,7 +8,7 @@ from core import settings
 from core.code_systems.constants import RESOURCE_TYPE
 from core.common.constants import HEAD
 from core.common.serializers import ReadSerializerMixin, StatusField, IdentifierSerializer
-from core.concepts.models import Concept, LocalizedText
+from core.concepts.models import Concept, ConceptName
 from core.concepts.serializers import ConceptDetailSerializer
 from core.orgs.models import Organization
 from core.sources.models import Source
@@ -34,7 +34,7 @@ class CodeSystemConceptDesignationSerializer(serializers.ModelSerializer):
     use = CodeSystemConceptDesignationUseSerializer(source='*', required=False)
 
     class Meta:
-        model = LocalizedText
+        model = ConceptName
         fields = ('language', 'value', 'use')
 
 

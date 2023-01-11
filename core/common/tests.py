@@ -3,6 +3,8 @@ import os
 import uuid
 from unittest.mock import patch, Mock, mock_open
 
+import factory
+
 import boto3
 from botocore.exceptions import ClientError
 from colour_runner.django_runner import ColourRunnerMixin
@@ -49,7 +51,7 @@ class BaseTestCase(SetupTestEnvironment):
     @staticmethod
     def create_lookup_concept_classes(user=None, org=None):
         from core.sources.tests.factories import OrganizationSourceFactory
-        from core.concepts.tests.factories import LocalizedTextFactory, ConceptFactory
+        from core.concepts.tests.factories import ConceptNameFactory, ConceptFactory
 
         org = org or Organization.objects.get(mnemonic='OCL')
         user = user or UserProfile.objects.get(username='ocladmin')
@@ -71,129 +73,129 @@ class BaseTestCase(SetupTestEnvironment):
 
         ConceptFactory(
             version=HEAD, updated_by=user, parent=classes_source, concept_class="Concept Class",
-            names=[LocalizedTextFactory(name="Diagnosis")]
+            names=[ConceptNameFactory.build(name="Diagnosis")]
         )
         ConceptFactory(
             version=HEAD, updated_by=user, parent=classes_source, concept_class="Concept Class",
-            names=[LocalizedTextFactory(name="Drug")]
+            names=[ConceptNameFactory.build(name="Drug")]
         )
         ConceptFactory(
             version=HEAD, updated_by=user, parent=classes_source, concept_class="Concept Class",
-            names=[LocalizedTextFactory(name="Test")]
+            names=[ConceptNameFactory.build(name="Test")]
         )
         ConceptFactory(
             version=HEAD, updated_by=user, parent=classes_source, concept_class="Concept Class",
-            names=[LocalizedTextFactory(name="Procedure")]
+            names=[ConceptNameFactory.build(name="Procedure")]
         )
         ConceptFactory(
             version=HEAD, updated_by=user, parent=datatypes_source, concept_class="Datatype",
-            names=[LocalizedTextFactory(name="None"), LocalizedTextFactory(name="N/A")]
+            names=[ConceptNameFactory.build(name="None"), ConceptNameFactory.build(name="N/A")]
         )
         ConceptFactory(
             version=HEAD, updated_by=user, parent=datatypes_source, concept_class="Datatype",
-            names=[LocalizedTextFactory(name="Numeric")]
+            names=[ConceptNameFactory.build(name="Numeric")]
         )
         ConceptFactory(
             version=HEAD, updated_by=user, parent=datatypes_source, concept_class="Datatype",
-            names=[LocalizedTextFactory(name="Coded")]
+            names=[ConceptNameFactory.build(name="Coded")]
         )
         ConceptFactory(
             version=HEAD, updated_by=user, parent=datatypes_source, concept_class="Datatype",
-            names=[LocalizedTextFactory(name="Text")]
+            names=[ConceptNameFactory.build(name="Text")]
         )
         ConceptFactory(
             version=HEAD, updated_by=user, parent=nametypes_source, concept_class="NameType",
-            names=[LocalizedTextFactory(name="FULLY_SPECIFIED"), LocalizedTextFactory(name="Fully Specified")]
+            names=[ConceptNameFactory.build(name="FULLY_SPECIFIED"), ConceptNameFactory.build(name="Fully Specified")]
         )
         ConceptFactory(
             version=HEAD, updated_by=user, parent=nametypes_source, concept_class="NameType",
-            names=[LocalizedTextFactory(name="Short"), LocalizedTextFactory(name="SHORT")]
+            names=[ConceptNameFactory.build(name="Short"), ConceptNameFactory.build(name="SHORT")]
         )
         ConceptFactory(
             version=HEAD, updated_by=user, parent=nametypes_source, concept_class="NameType",
-            names=[LocalizedTextFactory(name="INDEX_TERM"), LocalizedTextFactory(name="Index Term")]
+            names=[ConceptNameFactory.build(name="INDEX_TERM"), ConceptNameFactory.build(name="Index Term")]
         )
         ConceptFactory(
             version=HEAD, updated_by=user, parent=nametypes_source, concept_class="NameType",
-            names=[LocalizedTextFactory(name="None")]
+            names=[ConceptNameFactory.build(name="None")]
         )
         ConceptFactory(
             version=HEAD, updated_by=user, parent=descriptiontypes_source, concept_class="DescriptionType",
-            names=[LocalizedTextFactory(name="None")]
+            names=[ConceptNameFactory.build(name="None")]
         )
         ConceptFactory(
             version=HEAD, updated_by=user, parent=descriptiontypes_source, concept_class="DescriptionType",
-            names=[LocalizedTextFactory(name="FULLY_SPECIFIED")]
+            names=[ConceptNameFactory.build(name="FULLY_SPECIFIED")]
         )
         ConceptFactory(
             version=HEAD, updated_by=user, parent=descriptiontypes_source, concept_class="DescriptionType",
-            names=[LocalizedTextFactory(name="Definition")]
+            names=[ConceptNameFactory.build(name="Definition")]
         )
         ConceptFactory(
             version=HEAD, updated_by=user, parent=maptypes_source, concept_class="MapType",
-            names=[LocalizedTextFactory(name="SAME-AS"), LocalizedTextFactory(name="Same As")]
+            names=[ConceptNameFactory.build(name="SAME-AS"), ConceptNameFactory.build(name="Same As")]
         )
         ConceptFactory(
             version=HEAD, updated_by=user, parent=maptypes_source, concept_class="MapType",
-            names=[LocalizedTextFactory(name="Is Subset of")]
+            names=[ConceptNameFactory.build(name="Is Subset of")]
         )
         ConceptFactory(
             version=HEAD, updated_by=user, parent=maptypes_source, concept_class="MapType",
-            names=[LocalizedTextFactory(name="Different")]
+            names=[ConceptNameFactory.build(name="Different")]
         )
         ConceptFactory(
             version=HEAD, updated_by=user, parent=maptypes_source, concept_class="MapType",
             names=[
-                LocalizedTextFactory(name="BROADER-THAN"), LocalizedTextFactory(name="Broader Than"),
-                LocalizedTextFactory(name="BROADER_THAN")
+                ConceptNameFactory.build(name="BROADER-THAN"), ConceptNameFactory.build(name="Broader Than"),
+                ConceptNameFactory.build(name="BROADER_THAN")
             ]
         )
         ConceptFactory(
             version=HEAD, updated_by=user, parent=maptypes_source, concept_class="MapType",
             names=[
-                LocalizedTextFactory(name="NARROWER-THAN"), LocalizedTextFactory(name="Narrower Than"),
-                LocalizedTextFactory(name="NARROWER_THAN")
+                ConceptNameFactory.build(name="NARROWER-THAN"), ConceptNameFactory.build(name="Narrower Than"),
+                ConceptNameFactory.build(name="NARROWER_THAN")
             ]
         )
         ConceptFactory(
             version=HEAD, updated_by=user, parent=maptypes_source, concept_class="MapType",
-            names=[LocalizedTextFactory(name="Q-AND-A")]
+            names=[ConceptNameFactory.build(name="Q-AND-A")]
         )
         ConceptFactory(
             version=HEAD, updated_by=user, parent=maptypes_source, concept_class="MapType",
-            names=[LocalizedTextFactory(name="More specific than")]
+            names=[ConceptNameFactory.build(name="More specific than")]
         )
         ConceptFactory(
             version=HEAD, updated_by=user, parent=maptypes_source, concept_class="MapType",
-            names=[LocalizedTextFactory(name="Less specific than")]
+            names=[ConceptNameFactory.build(name="Less specific than")]
         )
         ConceptFactory(
             version=HEAD, updated_by=user, parent=maptypes_source, concept_class="MapType",
-            names=[LocalizedTextFactory(name="Something Else")]
+            names=[ConceptNameFactory.build(name="Something Else")]
         )
         ConceptFactory(
             version=HEAD, updated_by=user, parent=locales_source, concept_class="Locale",
-            names=[LocalizedTextFactory(name="en")]
+            names=[ConceptNameFactory.build(name="en")]
         )
         ConceptFactory(
             version=HEAD, updated_by=user, parent=locales_source, concept_class="Locale",
-            names=[LocalizedTextFactory(name="es")]
+            names=[ConceptNameFactory.build(name="es")]
         )
         ConceptFactory(
             version=HEAD, updated_by=user, parent=locales_source, concept_class="Locale",
-            names=[LocalizedTextFactory(name="fr")]
+            names=[ConceptNameFactory.build(name="fr")]
         )
         ConceptFactory(
             version=HEAD, updated_by=user, parent=locales_source, concept_class="Locale",
-            names=[LocalizedTextFactory(name="tr")]
+            names=[ConceptNameFactory.build(name="tr")]
         )
         ConceptFactory(
             version=HEAD, updated_by=user, parent=locales_source, concept_class="Locale",
-            names=[LocalizedTextFactory(name="Abkhazian")]
+            names=[ConceptNameFactory.build(name="Abkhazian")]
         )
         ConceptFactory(
             version=HEAD, updated_by=user, parent=locales_source, concept_class="Locale",
-            names=[LocalizedTextFactory(name="English")]
+            names=[ConceptNameFactory.build(name="English")]
         )
 
 
@@ -212,6 +214,13 @@ class OCLTestCase(TestCase, BaseTestCase):
         super().setUpClass()
         call_command("loaddata", "core/fixtures/base_entities.yaml")
         call_command("loaddata", "core/fixtures/auth_groups.yaml")
+
+    @staticmethod
+    def factory_to_params(factory_klass, **kwargs):
+        return {
+            **factory.build(dict, FACTORY_CLASS=factory_klass),
+            **kwargs
+        }
 
 
 class S3Test(TestCase):
