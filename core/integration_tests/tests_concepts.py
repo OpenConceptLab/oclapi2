@@ -1378,7 +1378,7 @@ class ConceptCascadeViewTest(OCLAPITestCase):
         expansion = ExpansionFactory(collection_version=collection)
         collection.expansion_uri = expansion.uri
         collection.save()
-        expansion.concepts.add(concept2)
+        expansion.concepts.add(concept2.get_latest_version())
         expansion.concepts.add(concept3)
         expansion.mappings.add(mapping2)
         expansion.mappings.add(mapping6)

@@ -986,17 +986,18 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         return None
 
     def __get_omit_from_version_criteria(self, omit_if_exists_in):
+        from core.mappings.models import Mapping
         repo_version = self.__get_omit_from_version(omit_if_exists_in)
-        criteria = models.Q()
+        concepts_qs = Concept.objects.none()
+        mappings_qs = Mapping.objects.none()
         if repo_version:
             if repo_version.is_collection:
-                expansion = get(repo_version, 'expansion')
-                if expansion:
-                    criteria = models.Q(expansion_set=expansion)
-            else:
-                criteria = models.Q(sources=repo_version)
+                repo_version = get(repo_version, 'expansion')
+            if repo_version:
+                concepts_qs = repo_version.concepts.values_list('versioned_object_id', flat=True)
+                mappings_qs = repo_version.mappings.values_list('versioned_object_id', flat=True)
 
-        return criteria
+        return Q(versioned_object_id__in=concepts_qs), Q(versioned_object_id__in=mappings_qs)
 
     def cascade(  # pylint: disable=too-many-arguments,too-many-locals
             self, repo_version=None, source_mappings=True, source_to_concepts=True,
@@ -1022,7 +1023,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             from core.collections.models import Collection
             is_collection = repo_version.__class__ == Collection
 
-        omit_from_version_criteria = self.__get_omit_from_version_criteria(omit_if_exists_in)
+        omit_concepts_criteria, omit_mappings_criteria = self.__get_omit_from_version_criteria(omit_if_exists_in)
 
         cascaded = []
 
@@ -1042,19 +1043,16 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                                 return_map_types_criteria=return_map_types_criteria
                             )
                             cascaded.append(concept.versioned_object_id)
+
+                            concepts_qs = res['concepts'].union(res['hierarchy_concepts']).union(result['concepts'])
                             result['concepts'] = Concept.objects.filter(
-                                id__in=[
-                                    *res['concepts'].values_list('id', flat=True),
-                                    *res['hierarchy_concepts'].values_list('id', flat=True),
-                                    *result['concepts'].values_list('id', flat=True)
-                                ]
-                            ).exclude(omit_from_version_criteria)
+                                id__in=concepts_qs.values_list('id', flat=True)
+                            ).exclude(omit_concepts_criteria)
+
+                            mappings_qs = res['mappings'].union(result['mappings'])
                             result['mappings'] = Mapping.objects.filter(
-                                id__in=[
-                                    *res['mappings'].values_list('id', flat=True),
-                                    *result['mappings'].values_list('id', flat=True)
-                                ]
-                            ).exclude(omit_from_version_criteria).order_by('map_type', 'sort_weight')
+                                id__in=mappings_qs.values_list('id', flat=True)
+                            ).exclude(omit_mappings_criteria).order_by('map_type', 'sort_weight')
 
                         iterate(level if level == ALL else level - 1)
 
@@ -1083,7 +1081,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             from core.collections.models import Collection
             is_collection = repo_version.__class__ == Collection
 
-        omit_from_version_criteria = self.__get_omit_from_version_criteria(omit_if_exists_in)
+        omit_concepts_criteria, omit_mappings_criteria = self.__get_omit_from_version_criteria(omit_if_exists_in)
 
         self.current_level = 0
         levels = {self.current_level: [self]}
@@ -1116,9 +1114,9 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                     concept.cascaded_entries = cascaded_entries
                     concept.cascaded_entries['concepts'] = Concept.objects.filter(
                         id__in=[_concept.id for _concept in concept.cascaded_entries['concepts']]
-                    ).exclude(omit_from_version_criteria)
+                    ).exclude(omit_concepts_criteria)
                     concept.cascaded_entries['mappings'] = concept.cascaded_entries['mappings'].exclude(
-                        omit_from_version_criteria)
+                        omit_mappings_criteria)
                     concept_has_entries = has_entries(cascaded_entries)
                     cascaded[concept.id] = concept_has_entries
                     concept.terminal = not concept_has_entries
