@@ -885,8 +885,10 @@ class BulkImportViewTest(OCLAPITestCase):
         self.superuser = UserProfile.objects.get(username='ocladmin')
         self.token = self.superuser.get_token()
 
+    @patch('core.importers.views.AsyncResult')
     @patch('core.importers.views.flower_get')
-    def test_get_without_task_id(self, flower_get_mock):
+    def test_get_without_task_id(self, flower_get_mock, async_result_mock):
+        async_result_mock.return_value = Mock(state='DONE')
         task_id1 = f"{str(uuid.uuid4())}-ocladmin~priority"
         task_id2 = f"{str(uuid.uuid4())}-foobar~normal"
         task_id3 = f"{str(uuid.uuid4())}-foobar~pending"
@@ -928,7 +930,7 @@ class BulkImportViewTest(OCLAPITestCase):
             response.data,
             [
                 dict(queue='normal', state='failed', task=task_id2, username='foobar'),
-                dict(queue='pending', state='PENDING', task=task_id3, username='foobar'),
+                dict(queue='pending', state='DONE', task=task_id3, username='foobar'),
             ])
 
         response = self.client.get(
