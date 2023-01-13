@@ -1,9 +1,17 @@
 import logging
 
+from django.core.exceptions import ValidationError
+
 from core.bundles.serializers import FHIRBundleSerializer
 from core.common.constants import HEAD
 from core.common.fhir_helpers import translate_fhir_query
-from core.concept_maps.serializers import ConceptMapDetailSerializer
+from core.common.permissions import CanViewConceptDictionary
+from core.common.serializers import IdentifierSerializer
+from core.concept_maps.constants import RESOURCE_TYPE
+from core.concept_maps.serializers import ConceptMapDetailSerializer, ConceptMapParametersSerializer
+from core.concepts.permissions import CanAccessParentDictionary
+from core.mappings.constants import SAME_AS
+from core.mappings.views import MappingListView
 from core.sources.views import SourceListView, SourceRetrieveUpdateDestroyView
 
 logger = logging.getLogger('oclapi')
@@ -51,3 +59,107 @@ class ConceptMapRetrieveUpdateView(SourceRetrieveUpdateDestroyView):
 
     def get_detail_serializer(self, obj):
         return ConceptMapDetailSerializer(obj)
+
+
+class ConceptMapTranslateView(MappingListView):
+    serializer_class = ConceptMapParametersSerializer
+
+    def get_permissions(self):
+        return [CanAccessParentDictionary(), CanViewConceptDictionary()]
+
+    def get_serializer_class(self):
+        return ConceptMapParametersSerializer
+
+    def verify_scope(self):
+        """
+        Override to not verify scope and allow POSTing for everyone
+        :return: None
+        """
+
+    def apply_filters(self, queryset):
+        if self.request.method in ['POST', 'PUT']:
+            parameters = self.get_serializer(data=self.request.data, instance=None)
+        else:
+            parameters = self.get_serializer_class().parse_query_params(self.request.query_params)
+
+        if not parameters.is_valid():
+            raise ValidationError(message=parameters.errors)
+
+        params = parameters.validated_data
+
+        for param in params['parameter']:
+            match param['name']:
+                case 'url':
+                    queryset = queryset.filter(canonical_url=param['valueUri'])
+                case 'code':
+                    queryset = queryset.filter(from_concept_code=param['valueCode'])
+                case 'system':
+                    queryset = queryset.filter(from_source_url=IdentifierSerializer.convert_fhir_url_to_ocl_uri(
+                        param['valueUri'], 'sources'))
+                case 'source':
+                    queryset = queryset.filter(parent__canonical_url=param['valueUri'])
+                case 'target':
+                    queryset = queryset.filter(to_source_url=IdentifierSerializer.convert_fhir_url_to_ocl_uri(
+                        param['valueUri'], 'sources'
+                    ))
+        return queryset
+
+    def get_serializer(self, *args, **kwargs):
+        instance = args[0]
+        many = kwargs.get('many', False)
+        if many:
+            if isinstance(instance, list) and len(instance) != 0:
+                matches = []
+                for mapping in instance:
+                    equivalence = mapping.map_type
+                    if mapping.map_type == SAME_AS:
+                        equivalence = "equivalent"
+
+                    if mapping.to_source and mapping.to_source.canonical_url:
+                        to_url = mapping.to_source.canonical_url
+                    else:
+                        to_url = IdentifierSerializer.convert_ocl_uri_to_fhir_url(mapping.to_source_url, RESOURCE_TYPE)
+
+                    matches.append({
+                        'name': 'match',
+                        'part': [
+                            {
+                                'name': 'equivalence',
+                                'valueCode': equivalence
+                            },
+                            {
+                                'name': 'concept',
+                                'valueCoding': {
+                                    'system': to_url,
+                                    'code': mapping.to_concept_code,
+                                    'userSelected': False
+                                }
+                            }
+                        ]
+                    })
+                return ConceptMapParametersSerializer({'parameter': [
+                        {
+                            'name': 'result',
+                            'valueBoolean': True
+                        },
+                        *matches
+                   ]})
+
+            return ConceptMapParametersSerializer({'parameter': [
+                {
+                    'name': 'result',
+                    'valueBoolean': False
+                }
+            ]})
+        return super().get_serializer(instance, many, *args, **kwargs)
+
+    # Change POST behavior to get
+    def post(self, request, *args, **kwargs):
+        """
+        Change POST behavior to simply list
+        :param request:
+        :param args:
+        :param kwargs:
+        :return: parameters
+        """
+        return self.get(request, *args, **kwargs)

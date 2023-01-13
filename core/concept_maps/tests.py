@@ -1,3 +1,5 @@
+from collections import OrderedDict
+
 from rest_framework.test import APIClient
 
 from core.common.tests import OCLTestCase
@@ -10,6 +12,8 @@ from core.users.tests.factories import UserProfileFactory
 
 
 class ConceptMapTest(OCLTestCase):
+    maxDiff = None
+
     def setUp(self):
         super().setUp()
         self.org = OrganizationFactory()
@@ -288,38 +292,7 @@ class ConceptMapTest(OCLTestCase):
         self.assertEqual(len(source.get_mappings_queryset().all()), 3)
 
     def test_put_concept_map_with_all_new_concepts(self):
-        response = self.client.put(
-            f'/users/{self.user.mnemonic}/ConceptMap/{self.user_source.mnemonic}/',
-            HTTP_AUTHORIZATION='Token ' + self.user_token,
-            data={
-                'url': 'http://localhost/url',
-                'title': 'test',
-                'language': 'en',
-                'identifier': [{
-                                   'value': f'/users/{self.user.mnemonic}/ConceptMap/{self.user_source.mnemonic}/',
-                                   'type': {
-                                       'coding': [{
-                                                      'code': 'ACSN',
-                                                      'system': 'http://hl7.org/fhir/v2/0203'
-                                                  }]
-                                   }
-                               }],
-                'version': '1.0',
-                'name': 'test',
-                'id': self.user_source.mnemonic,
-                'status': 'draft',
-                'group': [{'source': self.org_source_B_v1.canonical_url,
-                           'target': self.org_source.canonical_url,
-                           'element': [
-                               {'code': 'concept_B_1',
-                                'target': [{'code': 'concept_1', 'relationship': 'equivalent'}]}]
-                           }]
-
-            },
-            format='json'
-        )
-
-        self.assertEqual(response.status_code, 200)
+        response = self.putConceptMap()
         self.assertEqual(response.data['id'], self.user_source.mnemonic)
         self.assertEqual(response.data['version'], '1.0')
         self.assertEqual(response.data['status'], 'draft')
@@ -352,3 +325,119 @@ class ConceptMapTest(OCLTestCase):
         self.assertEqual(mapping.to_source_url,  self.org_source.canonical_url)
         self.assertEqual(mapping.from_concept_code, 'concept_B_1')
         self.assertEqual(mapping.to_concept_code, 'concept_1')
+
+    def test_translate_positive(self):
+        self.putConceptMap()
+
+        response = self.client.get(
+            f'/users/{self.user.mnemonic}/ConceptMap/$translate?'
+            f'system={self.org_source_B_v1.canonical_url}&code=concept_B_1',
+            HTTP_AUTHORIZATION='Token ' + self.user_token)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertDictEqual(response.data, {
+            'resourceType': 'Parameters',
+            'parameter': [OrderedDict(
+                [('name', 'result'), ('valueBoolean', True)]
+            ), OrderedDict(
+                [('name', 'match'), ('part', [
+                    OrderedDict([('name', 'equivalence'), ('valueCode', 'equivalent')]),
+                    OrderedDict([('name', 'concept'), ('valueCoding',
+                                                       OrderedDict(
+                                                           [('system', '/some/url'), ('code', 'concept_1')]))])])])]})
+
+    def test_public_translate_negative(self):
+        self.putConceptMap()
+
+        response = self.client.get(
+            f'/users/{self.user.mnemonic}/ConceptMap/$translate?'
+            f'system={self.org_source_B_v1.canonical_url}&code=concept_B_1')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertDictEqual(response.data, {
+            'resourceType': 'Parameters',
+            'parameter': [OrderedDict(
+                [('name', 'result'), ('valueBoolean', False)])]})
+
+    def putConceptMap(self):
+        response = self.client.put(
+            f'/users/{self.user.mnemonic}/ConceptMap/{self.user_source.mnemonic}/',
+            HTTP_AUTHORIZATION='Token ' + self.user_token,
+            data={
+                'url': 'http://localhost/url',
+                'title': 'test',
+                'language': 'en',
+                'identifier': [{
+                    'value': f'/users/{self.user.mnemonic}/ConceptMap/{self.user_source.mnemonic}/',
+                    'type': {
+                        'coding': [{
+                            'code': 'ACSN',
+                            'system': 'http://hl7.org/fhir/v2/0203'
+                        }]
+                    }
+                }],
+                'version': '1.0',
+                'name': 'test',
+                'id': self.user_source.mnemonic,
+                'status': 'draft',
+                'group': [{'source': self.org_source_B_v1.canonical_url,
+                           'target': self.org_source.canonical_url,
+                           'element': [
+                               {'code': 'concept_B_1',
+                                'target': [{'code': 'concept_1', 'relationship': 'equivalent'}]}]
+                           }]
+
+            },
+            format='json'
+        )
+        self.assertEqual(response.status_code, 200)
+        return response
+
+    def test_translate_negative(self):
+        self.putConceptMap()
+
+        response = self.client.get(
+            f'/users/{self.user.mnemonic}/ConceptMap/$translate?'
+            f'system={self.org_source_B_v1.canonical_url}&code=concept_1',
+            HTTP_AUTHORIZATION='Token ' + self.user_token)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertDictEqual(response.data, {
+            'resourceType': 'Parameters',
+            'parameter': [OrderedDict(
+                [('name', 'result'), ('valueBoolean', False)]
+            )]})
+
+    def test_translate_with_target(self):
+        self.putConceptMap()
+
+        response = self.client.get(
+            f'/users/{self.user.mnemonic}/ConceptMap/$translate?'
+            f'system={self.org_source_B_v1.canonical_url}&code=concept_B_1&target={self.org_source.canonical_url}',
+            HTTP_AUTHORIZATION='Token ' + self.user_token)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertDictEqual(response.data, {
+            'resourceType': 'Parameters',
+            'parameter': [OrderedDict(
+                [('name', 'result'), ('valueBoolean', True)]
+            ), OrderedDict(
+                [('name', 'match'), ('part', [
+                    OrderedDict([('name', 'equivalence'), ('valueCode', 'equivalent')]),
+                    OrderedDict([('name', 'concept'), ('valueCoding',
+                                                       OrderedDict(
+                                                           [('system', '/some/url'), ('code', 'concept_1')]))])])])]})
+
+    def test_translate_with_target_negative(self):
+        self.putConceptMap()
+
+        response = self.client.get(
+            f'/users/{self.user.mnemonic}/ConceptMap/$translate?'
+            f'system={self.org_source_B_v1.canonical_url}&code=concept_B_1&target={self.org_source_B_v1.canonical_url}',
+            HTTP_AUTHORIZATION='Token ' + self.user_token)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertDictEqual(response.data, {
+            'resourceType': 'Parameters',
+            'parameter': [OrderedDict(
+                [('name', 'result'), ('valueBoolean', False)])]})

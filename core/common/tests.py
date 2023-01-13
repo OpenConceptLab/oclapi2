@@ -1,6 +1,7 @@
 import base64
 import os
 import uuid
+from collections import OrderedDict
 from unittest.mock import patch, Mock, mock_open, ANY
 
 import factory
@@ -15,6 +16,7 @@ from django.test import TestCase
 from django.test.runner import DiscoverRunner
 from moto import mock_s3
 from requests.auth import HTTPBasicAuth
+from rest_framework.exceptions import ValidationError
 from rest_framework.test import APITestCase
 
 from core.collections.models import CollectionReference
@@ -33,6 +35,7 @@ from core.sources.models import Source
 from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
 from .fhir_helpers import translate_fhir_query
+from .serializers import IdentifierSerializer
 from .services import S3, PostgresQL, DjangoAuthService, OIDCAuthService
 from ..code_systems.serializers import CodeSystemDetailSerializer
 
@@ -437,6 +440,85 @@ class FhirHelpersTest(OCLTestCase):
         query_set = translate_fhir_query(query_fields, query_params, query_set)
         self.assertTrue('"concepts"."version" = v1' in str(query_set.query))
         self.assertTrue('"concepts"."id" = 2' in str(query_set.query))
+
+
+class IdentifierSerializerTest(OCLTestCase):
+    def test_deserialize(self):
+        data = {'system': '/org/OCL/test',
+                'value': '1',
+                'type': {
+                    'text': 'Accession ID',
+                    'coding': [{
+                        'system': 'http://hl7.org/fhir/v2/0203',
+                        'code': 'ACSN',
+                        'display': 'ACSN'
+                    }]
+                }}
+        serializer = IdentifierSerializer(data=data)
+        valid = serializer.is_valid()
+        self.assertTrue(valid, serializer.errors)
+        self.assertDictEqual(serializer.validated_data, OrderedDict([
+            ('system', '/org/OCL/test'),
+            ('value', '1'),
+            ('type', OrderedDict([
+                ('text', 'Accession ID'),
+                ('coding', [OrderedDict([
+                    ('system', 'http://hl7.org/fhir/v2/0203'),
+                    ('code', 'ACSN'),
+                    ('display', 'ACSN')])])]))]))
+
+    def test_include_ocl_identifier(self):
+        rep = {}
+        IdentifierSerializer.include_ocl_identifier('/orgs/OCL/test/1', 'org', rep)
+
+        self.assertDictEqual(rep, {'identifier': [
+            {'system': 'http://localhost:8000',
+             'type': {
+                 'coding': [{
+                     'code': 'ACSN',
+                     'display': 'Accession ID',
+                     'system': 'http://hl7.org/fhir/v2/0203'}],
+                 'text': 'Accession ID'},
+             'value': '/orgs/OCL/test/1/'}]})
+
+    def test_validate_identifier(self):
+        try:
+            IdentifierSerializer.validate_identifier([
+                {'system': 'http://localhost:8000',
+                 'type': {
+                     'coding': [{
+                         'code': 'ACSN',
+                         'display': 'Accession ID',
+                         'system': 'http://hl7.org/fhir/v2/0203'}],
+                     'text': 'Accession ID'},
+                 'value': '/orgs/OCL/CodeSystem/1/'}])
+        except ValidationError as e:
+            self.fail(e)
+
+    def test_validate_identifier_with_wrong_owner(self):
+        with self.assertRaisesRegex(ValidationError, "Owner type='org' is invalid. It must be 'users' or 'orgs'"):
+            IdentifierSerializer.validate_identifier([
+                {'system': 'http://localhost:8000',
+                 'type': {
+                     'coding': [{
+                         'code': 'ACSN',
+                         'display': 'Accession ID',
+                         'system': 'http://hl7.org/fhir/v2/0203'}],
+                     'text': 'Accession ID'},
+                 'value': '/org/OCL/CodeSystem/1/'}])
+
+    def test_validate_identifier_with_wrong_type(self):
+        with self.assertRaisesRegex(ValidationError, "Resource type='Code' is invalid. "
+                                                     "It must be 'CodeSystem' or 'ValueSet' or 'ConceptMap'"):
+            IdentifierSerializer.validate_identifier([
+                {'system': 'http://localhost:8000',
+                 'type': {
+                     'coding': [{
+                         'code': 'ACSN',
+                         'display': 'Accession ID',
+                         'system': 'http://hl7.org/fhir/v2/0203'}],
+                     'text': 'Accession ID'},
+                 'value': '/orgs/OCL/Code/1/'}])
 
 class UtilsTest(OCLTestCase):
     def test_set_and_get_current_user(self):

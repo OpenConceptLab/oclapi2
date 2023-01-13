@@ -11,6 +11,7 @@ from core.mappings.constants import SAME_AS
 from core.mappings.models import Mapping
 from core.mappings.serializers import MappingDetailSerializer
 from core.orgs.models import Organization
+from core.parameters.serializers import ParametersSerializer
 from core.sources.models import Source
 from core.sources.serializers import SourceCreateOrUpdateSerializer
 from core.users.models import UserProfile
@@ -23,7 +24,7 @@ class ConceptMapGroupField(serializers.Field):
             for element in group.get('element', []):
                 for target in element.get('target', []):
                     map_type = target.get('relationship')
-                    if map_type == 'equivalence':
+                    if map_type == 'equivalent':
                         map_type = SAME_AS
                     mapping = {
                         'from_source_url': IdentifierSerializer.convert_fhir_url_to_ocl_uri(group.get('source'),
@@ -203,3 +204,27 @@ class ConceptMapDetailSerializer(serializers.ModelSerializer):
         self._errors.update(errors)
 
         return source
+
+
+class ConceptMapParametersSerializer(ParametersSerializer):
+
+    def update(self, instance, validated_data):
+        pass
+
+    def create(self, validated_data):
+        pass
+
+    allowed_input_parameters = {
+            'url': 'valueUri',
+            'conceptMapVersion': 'valueString',
+            'code': 'valueCode',
+            'system': 'valueUri',
+            'version': 'valueString',
+            'source': 'valueUri',
+            'coding': 'valueCoding',
+            'codeableConcept': 'valueCodeableConcept',
+            'target': 'valueUri',
+            'targetsystem': 'valueUri',
+            # TODO: dependency?
+            'reverse': 'valueBoolean'
+        }

@@ -57,6 +57,9 @@ class MappingListView(MappingBaseView, ListWithHeadersMixin, CreateModelMixin):
 
         return MappingListSerializer
 
+    def apply_filters(self, queryset):
+        return queryset
+
     def get_queryset(self):
         is_latest_version = 'collection' not in self.kwargs and 'version' not in self.kwargs or \
                             get(self.kwargs, 'version') == HEAD
@@ -69,6 +72,8 @@ class MappingListView(MappingBaseView, ListWithHeadersMixin, CreateModelMixin):
 
         if is_latest_version:
             queryset = queryset.filter(id=F('versioned_object_id'))
+
+        queryset = self.apply_filters(queryset)
 
         if not parent:
             user = self.request.user

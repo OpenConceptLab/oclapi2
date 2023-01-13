@@ -216,6 +216,12 @@ class ValueSetDetailSerializer(serializers.ModelSerializer):
 
 
 class ValueSetExpansionParametersSerializer(ParametersSerializer):
+    def update(self, instance, validated_data):
+        pass
+
+    def create(self, validated_data):
+        pass
+
     def to_internal_value(self, data):
         parameters = {}
 

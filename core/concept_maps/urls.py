@@ -5,6 +5,7 @@ from . import views
 
 urlpatterns = [
     re_path(r'^$', views.ConceptMapListView.as_view(), name='concept-map-list'),
+    re_path(r'^\$translate$', views.ConceptMapTranslateView.as_view(), name='concept-map-list-translate'),
     re_path(
         fr"^(?P<source>{NAMESPACE_PATTERN})/$",
         views.ConceptMapRetrieveUpdateView.as_view(),
