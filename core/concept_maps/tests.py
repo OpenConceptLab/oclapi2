@@ -291,6 +291,62 @@ class ConceptMapTest(OCLTestCase):
         self.assertEqual(source.name, 'test')
         self.assertEqual(len(source.get_mappings_queryset().all()), 3)
 
+    def test_post_concept_map_with_mappings_without_canonicals(self):
+        response = self.client.post(
+            f'/users/{self.user.mnemonic}/ConceptMap/',
+            HTTP_AUTHORIZATION='Token ' + self.user_token,
+            data={
+                'url': 'http://localhost/url',
+                'title': 'test',
+                'language': 'en',
+                'identifier': [{
+                    'value': f'/users/{self.user.mnemonic}/ConceptMap/test',
+                    'type': {
+                        'coding': [{
+                            'code': 'ACSN',
+                            'system': 'http://hl7.org/fhir/v2/0203'
+                        }]
+                    }
+                }],
+                'version': '1.0',
+                'name': 'test',
+                'id': 'test',
+                'status': 'retired',
+                'group': [{'source': self.org_source_B_v1.url,
+                           'target': self.org_source.url,
+                           'element': [
+                               {'code': 'concept_B_1',
+                                'target': [{'code': 'concept_1', 'relationship': 'equivalent'}]},
+                               {'code': 'concept_B_2',
+                                'target': [{'code': 'concept_2', 'relationship': 'equivalent'}]},
+                               {'code': 'concept_B_2',
+                                'target': [{'code': 'concept_1', 'relationship': 'equivalent'}]}]}]
+            },
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data['id'], 'test')
+        self.assertEqual(response.data['version'], '1.0')
+
+        # check if HEAD persisted
+        sources = Source.objects.filter(mnemonic='test', version='HEAD', user=self.user)
+        self.assertEqual(len(sources), 1)
+        source = sources.first()
+        self.assertEqual(source.canonical_url, 'http://localhost/url')
+        self.assertEqual(source.retired, True)
+        self.assertEqual(source.name, 'test')
+        self.assertEqual(len(source.get_mappings_queryset().all()), 3)
+        # check if version persisted
+        sources = Source.objects.filter(mnemonic='test', version='1.0', user=self.user)
+        self.assertEqual(len(sources), 1)
+        source = sources.first()
+        self.assertEqual(source.canonical_url, 'http://localhost/url')
+        self.assertEqual(source.retired, True)
+        self.assertEqual(source.name, 'test')
+        self.assertEqual(len(source.get_mappings_queryset().all()), 3)
+
+
     def test_put_concept_map_with_all_new_concepts(self):
         response = self.putConceptMap()
         self.assertEqual(response.data['id'], self.user_source.mnemonic)

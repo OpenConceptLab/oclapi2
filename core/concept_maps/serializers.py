@@ -124,11 +124,6 @@ class ConceptMapDetailSerializer(serializers.ModelSerializer):
         # Remove fields with 'None' value
         return OrderedDict([(key, rep[key]) for key in rep if rep[key] is not None])
 
-    def get_ocl_identifier(self):
-        ident = IdentifierSerializer.find_ocl_identifier(self.validated_data['identifier'])
-        ident = IdentifierSerializer.parse_identifier(ident)
-        return ident
-
     def create(self, validated_data):
         mappings = validated_data.pop('mappings', [])
         uri = self.context['request'].path + validated_data['mnemonic']

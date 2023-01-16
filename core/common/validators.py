@@ -1,5 +1,5 @@
 import re
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator, validate_ipv6_address
@@ -30,22 +30,23 @@ class URIValidator(RegexValidator):
         if self.unsafe_chars.intersection(value):
             raise ValidationError(self.message, code=self.code, params={"value": value})
 
+        # Then check full URL
+        try:
+            splitted_url = urlsplit(value)
+        except ValueError as er:
+            raise ValidationError(self.message, code=self.code, params={"value": value}) from er
         try:
             super().__call__(value)
         except ValidationError as e:
             # Trivial case failed. Try for possible IDN domain
             if value:
+                scheme, netloc, path, query, fragment = splitted_url  # pylint: disable=unused-variable
                 try:
-                    scheme, netloc, path, query, fragment = urlsplit(value)  # pylint: disable=unused-variable
-                except ValueError as ex:  # for example, "Invalid IPv6 URL"
-                    raise ValidationError(
-                        self.message, code=self.code, params={"value": value}
-                    ) from ex
-                try:
-                    new_netloc = punycode(netloc)  # IDN -> ACE
-                except UnicodeError as ex:  # invalid domain part
-                    raise e from ex
-                super().__call__(value.replace(netloc, new_netloc))
+                    netloc = punycode(netloc)  # IDN -> ACE
+                except UnicodeError as ue:  # invalid domain part
+                    raise e from ue
+                url = urlunsplit((scheme, netloc, path, query, fragment))
+                super().__call__(url)
             else:
                 raise
         else:

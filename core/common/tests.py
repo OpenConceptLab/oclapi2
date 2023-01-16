@@ -4,6 +4,7 @@ import uuid
 from collections import OrderedDict
 from unittest.mock import patch, Mock, mock_open, ANY
 
+import django
 import factory
 
 import boto3
@@ -37,6 +38,7 @@ from core.users.tests.factories import UserProfileFactory
 from .fhir_helpers import translate_fhir_query
 from .serializers import IdentifierSerializer
 from .services import S3, PostgresQL, DjangoAuthService, OIDCAuthService
+from .validators import URIValidator
 from ..code_systems.serializers import CodeSystemDetailSerializer
 
 
@@ -1186,3 +1188,34 @@ class OIDCAuthServiceTest(OCLTestCase):
             verify=False,
             headers=dict(Authorization='Bearer token')
         )
+
+
+class URIValidatorTest(OCLTestCase):
+    validator = URIValidator()
+
+    def test_invalid_value(self):
+        with self.assertRaises(django.core.exceptions.ValidationError):
+            self.validator([])
+
+    def test_valid_http_uri(self):
+        self.validator('https://openconceptlab.org/orgs/OCL/sources')
+
+    def test_valid_custom_scheme_uri(self):
+        self.validator('mailto:admin@openconceptlab.org')
+
+    def test_invalid_uri_with_unsafe_char(self):
+        with self.assertRaises(django.core.exceptions.ValidationError):
+            self.validator("mailto::\nadmin")
+
+    def test_invalid_uri_domain_too_long(self):
+        with self.assertRaises(django.core.exceptions.ValidationError):
+            hostname = "abc"*100
+            self.validator("https://" + hostname)
+
+    def test_invalid_uri_domain_wrong_char(self):
+        with self.assertRaises(django.core.exceptions.ValidationError):
+            self.validator("https://open[test/?test")
+
+    def test_invalid_uri_ipv6(self):
+        with self.assertRaises(django.core.exceptions.ValidationError):
+            self.validator("https://[56FE::2159:5BBC::6594]")
