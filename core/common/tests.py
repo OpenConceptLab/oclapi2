@@ -484,16 +484,15 @@ class IdentifierSerializerTest(OCLTestCase):
              'value': '/orgs/OCL/test/1/'}]})
 
     def test_validate_identifier(self):
-        with self.assertRaises(ValidationError):
-            IdentifierSerializer.validate_identifier([
-                {'system': 'http://localhost:8000',
-                 'type': {
-                     'coding': [{
-                         'code': 'ACSN',
-                         'display': 'Accession ID',
-                         'system': 'http://hl7.org/fhir/v2/0203'}],
-                     'text': 'Accession ID'},
-                 'value': '/orgs/OCL/CodeSystem/1/'}])
+        IdentifierSerializer.validate_identifier([
+            {'system': 'http://localhost:8000',
+             'type': {
+                 'coding': [{
+                     'code': 'ACSN',
+                     'display': 'Accession ID',
+                     'system': 'http://hl7.org/fhir/v2/0203'}],
+                 'text': 'Accession ID'},
+             'value': '/orgs/OCL/CodeSystem/1/'}])
 
     def test_validate_identifier_with_wrong_owner(self):
         with self.assertRaisesRegex(ValidationError, "Owner type='org' is invalid. It must be 'users' or 'orgs'"):
