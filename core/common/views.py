@@ -15,7 +15,7 @@ from elasticsearch_dsl import Q
 from pydash import get
 from rest_framework import response, generics, status
 from rest_framework.generics import ListAPIView, RetrieveUpdateDestroyAPIView
-from rest_framework.permissions import AllowAny, IsAdminUser
+from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -864,32 +864,6 @@ class FeedbackView(APIView):  # pragma: no cover
         mail.send()
 
         return Response(status=status.HTTP_200_OK)
-
-
-class ConceptDuplicateLocalesView(APIView):  # pragma: no cover
-    permission_classes = (IsAdminUser,)
-
-    @staticmethod
-    def get(request):
-        from core.common.tasks import delete_duplicate_locales
-        delete_duplicate_locales.delay(int(request.query_params.get('start', 0)))
-        return Response(status=status.HTTP_200_OK)
-
-
-class ConceptDormantLocalesView(APIView):  # pragma: no cover
-    permission_classes = (IsAdminUser, )
-
-    @staticmethod
-    def get(_, **kwargs):  # pylint: disable=unused-argument
-        from core.concepts.models import ConceptName
-        count = ConceptName.dormants()
-        return Response(count, status=status.HTTP_200_OK)
-
-    @staticmethod
-    def delete(_, **kwargs):  # pylint: disable=unused-argument
-        from core.common.tasks import delete_dormant_locales
-        delete_dormant_locales.delay()
-        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class ConceptContainerExtraRetrieveUpdateDestroyView(RetrieveUpdateDestroyAPIView):

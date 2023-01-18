@@ -448,55 +448,6 @@ def process_hierarchy_for_new_parent_concept_version(prev_version_id, latest_ver
 
 
 @app.task
-def delete_duplicate_locales(start_from=None):  # pragma: no cover
-    from core.concepts.models import Concept
-    from django.db.models import Count
-    from django.db.models import Q
-    start_from = start_from or 0
-    queryset = Concept.objects.annotate(
-        names_count=Count('names'), desc_count=Count('descriptions')).filter(Q(names_count__gt=1) | Q(desc_count__gt=1))
-    total = queryset.count()
-    batch_size = 1000
-
-    logger.info(f'{total:d} concepts with more than one locales. Getting them in batches of {batch_size:d}...')  # pylint: disable=logging-not-lazy,logging-fstring-interpolation
-
-    for start in range(start_from, total, batch_size):
-        end = min(start + batch_size, total)
-        logger.info('Iterating concepts %d - %d...' % (start + 1, end))  # pylint: disable=logging-not-lazy,consider-using-f-string
-        concepts = queryset.order_by('id')[start:end]
-        for concept in concepts:
-            logger.info('Cleaning up %s', concept.mnemonic)
-            for name in concept.names.all().reverse():
-                if concept.names.filter(
-                        type=name.type, name=name.name, locale=name.locale, locale_preferred=name.locale_preferred,
-                        external_id=name.external_id
-                ).count() > 1:
-                    name.delete()
-            for desc in concept.descriptions.all().reverse():
-                if concept.descriptions.filter(
-                        type=desc.type, name=desc.name, locale=desc.locale, locale_preferred=desc.locale_preferred,
-                        external_id=desc.external_id
-                ).count() > 1:
-                    desc.delete()
-
-
-@app.task
-def delete_dormant_locales():  # pragma: no cover
-    from core.concepts.models import ConceptName
-    queryset = ConceptName.get_dormant_queryset()
-    total = queryset.count()
-    logger.info('%s Dormant locales found. Deleting in batches...' % total)  # pylint: disable=logging-not-lazy,consider-using-f-string
-
-    batch_size = 1000
-    for start in range(0, total, batch_size):
-        end = min(start + batch_size, total)
-        logger.info('Iterating locales %d - %d to delete...' % (start + 1, end))  # pylint: disable=logging-not-lazy,consider-using-f-string
-        ConceptName.objects.filter(id__in=queryset.order_by('id')[start:end].values('id')).delete()
-
-    return 1
-
-
-@app.task
 def delete_concept(concept_id):  # pragma: no cover
     from core.concepts.models import Concept
 
