@@ -52,22 +52,24 @@ class ConceptLabelSerializer(ModelSerializer):
     external_id = CharField(required=False)
     locale = CharField(required=True)
     locale_preferred = BooleanField(required=False, default=False)
+    concept_id = IntegerField(write_only=True, required=False)
 
     class Meta:
         model = ConceptName
         fields = (
-            'uuid', 'external_id', 'type', 'locale', 'locale_preferred'
+            'uuid', 'external_id', 'type', 'locale', 'locale_preferred', 'concept_id'
         )
 
     def create(self, validated_data, instance=None):  # pylint: disable=arguments-differ
-        concept_desc = instance if instance else ConceptName()
-        concept_desc.name = validated_data.get('name', concept_desc.name)
-        concept_desc.locale = validated_data.get('locale', concept_desc.locale)
-        concept_desc.locale_preferred = validated_data.get('locale_preferred', concept_desc.locale_preferred)
-        concept_desc.type = validated_data.get('type', concept_desc.type)
-        concept_desc.external_id = validated_data.get('external_id', concept_desc.external_id)
-        concept_desc.save()
-        return concept_desc
+        locale = instance if instance else ConceptName()
+        locale.name = validated_data.get('name', locale.name)
+        locale.locale = validated_data.get('locale', locale.locale)
+        locale.locale_preferred = validated_data.get('locale_preferred', locale.locale_preferred)
+        locale.type = validated_data.get('type', locale.type)
+        locale.external_id = validated_data.get('external_id', locale.external_id)
+        locale.concept_id = validated_data.get('concept_id', locale.concept_id)
+        locale.save()
+        return locale
 
 
 class ConceptNameSerializer(ConceptLabelSerializer):

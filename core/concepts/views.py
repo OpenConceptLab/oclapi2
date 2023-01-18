@@ -541,20 +541,22 @@ class ConceptLabelListCreateView(ConceptBaseView, ListWithHeadersMixin, ListCrea
         return getattr(instance, self.parent_list_attribute).all()
 
     def create(self, request, **_):  # pylint: disable=arguments-differ
-        serializer = self.get_serializer(data=request.data)
-        if serializer.is_valid():
-            instance = self.get_object()
-            new_version = instance.clone()
-            subject_label_attr = f"cloned_{self.parent_list_attribute}"
-            # get the current labels from the object
-            labels = getattr(new_version, subject_label_attr, [])
-            # If labels are None then we would want to initialize the labels in new_version
-            saved_instance = serializer.save()
-            labels.append(saved_instance)
-            setattr(new_version, subject_label_attr, labels)
-            new_version.comment = f'Added to {self.parent_list_attribute}: {saved_instance.name}.'
-            # save updated ConceptVersion into database
+        name = request.data.get('name', None) or request.data.get('description', None)
+        serializer = self.get_serializer(data=request.data.copy())
+        if name and serializer.is_valid():
+            new_version = self.get_object().clone()
+            new_version.comment = f'Added to {self.parent_list_attribute}: {name}.'
             errors = Concept.persist_clone(new_version, request.user)
+            if new_version.id:
+                serializer = self.get_serializer(data={**request.data, 'concept_id': new_version.id})
+                if serializer.is_valid():
+                    serializer.save()
+                    locale = serializer.instance
+                    if locale.id:
+                        versioned_object_locale = locale.clone()
+                        versioned_object_locale.concept_id = new_version.versioned_object_id
+                        versioned_object_locale.save()
+
             if errors:
                 return Response(errors, status=status.HTTP_400_BAD_REQUEST)
             headers = self.get_success_headers(serializer.data)
