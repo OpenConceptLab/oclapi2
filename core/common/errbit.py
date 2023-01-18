@@ -7,6 +7,7 @@ import traceback
 from xml.sax.saxutils import escape
 
 from django.conf import settings
+from pydash import get
 
 from core.common.utils import get_request_url
 
@@ -147,7 +148,7 @@ class ErrbitClient:
         from .utils import get_current_user
         _trace_str = ''
         cause = None
-        if value and value.__cause__:
+        if value and get(value, '__cause__'):
             cause = value.__cause__
             _trace_str += self._trace(cause.__traceback__)
             _trace_str += '<line method="The above exception was the direct cause of the following exception:"/>'
