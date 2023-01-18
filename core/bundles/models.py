@@ -5,7 +5,7 @@ from core.bundles.constants import BUNDLE_TYPE_SEARCHSET, RESOURCE_TYPE
 from core.collections.constants import SOURCE_MAPPINGS, SOURCE_TO_CONCEPTS
 from core.common.constants import CASCADE_LEVELS_PARAM, CASCADE_MAPPINGS_PARAM, \
     CASCADE_HIERARCHY_PARAM, CASCADE_METHOD_PARAM, MAP_TYPES_PARAM, EXCLUDE_MAP_TYPES_PARAM, CASCADE_DIRECTION_PARAM, \
-    INCLUDE_RETIRED_PARAM, RETURN_MAP_TYPES, ALL, OMIT_IF_EXISTS_IN, EQUIVALENCY_MAP_TYPES
+    INCLUDE_RETIRED_PARAM, RETURN_MAP_TYPES, ALL, OMIT_IF_EXISTS_IN, EQUIVALENCY_MAP_TYPES, HEAD
 
 
 class Bundle:
@@ -32,7 +32,8 @@ class Bundle:
         self.equivalency_map_types_criteria = Q()
         self.entries = []
         self.requested_url = requested_url
-        self.repo_url = get(self.repo_version, 'uri')
+        self.repo_version_url = None
+        self.set_repo_version_url()
 
     def set_cascade_parameters(self):
         self.set_cascade_direction()
@@ -45,6 +46,12 @@ class Bundle:
         self.set_return_map_types_criteria()
         self.set_equivalency_map_types_criteria()
         self.set_omit_if_exists_in()
+
+    def set_repo_version_url(self):
+        if self.repo_version:
+            self.repo_version_url = self.repo_version.uri
+            if self.repo_version.is_head:
+                self.repo_version_url += HEAD + '/'
 
     @property
     def is_hierarchy_view(self):
