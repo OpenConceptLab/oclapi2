@@ -4,10 +4,9 @@ import uuid
 from collections import OrderedDict
 from unittest.mock import patch, Mock, mock_open, ANY
 
+import boto3
 import django
 import factory
-
-import boto3
 from botocore.exceptions import ClientError
 from colour_runner.django_runner import ColourRunnerMixin
 from django.conf import settings
@@ -35,6 +34,7 @@ from core.orgs.models import Organization
 from core.sources.models import Source
 from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
+from .backends import OCLOIDCAuthenticationBackend
 from .fhir_helpers import translate_fhir_query
 from .serializers import IdentifierSerializer
 from .services import S3, PostgresQL, DjangoAuthService, OIDCAuthService
@@ -1216,3 +1216,44 @@ class URIValidatorTest(OCLTestCase):
     def test_invalid_uri_ipv6(self):
         with self.assertRaises(django.core.exceptions.ValidationError):
             self.validator("https://[56FE::2159:5BBC::6594]")
+
+
+class OCLOIDCAuthenticationBackendTest(OCLTestCase):
+    def setUp(self):
+        super().setUp()
+        self.backend = OCLOIDCAuthenticationBackend()
+        self.claim = dict(
+            preferred_username='batman', email='batman@gotham.com',
+            given_name='Bruce', family_name='Wayne',
+            email_verified=True, foo='bar'
+        )
+
+    @patch('core.users.models.UserProfile.objects')
+    def test_create_user(self, user_manager_mock):
+        self.backend.create_user(self.claim)
+        user_manager_mock.create_user.assert_called_once_with(
+            'batman',
+            email='batman@gotham.com',
+            first_name='Bruce',
+            last_name='Wayne',
+            verified=True
+        )
+
+    def test_update_user(self):
+        user = Mock()
+
+        self.backend.update_user(user, self.claim)
+
+        self.assertEqual(user.first_name, 'Bruce')
+        self.assertEqual(user.last_name, 'Wayne')
+        self.assertEqual(user.email, 'batman@gotham.com')
+
+        user.save.assert_called_once()
+
+    def test_filter_users_by_claims(self):
+        batman = UserProfileFactory(username='batman')
+        UserProfileFactory(username='superman@not-gotham.com')
+
+        users = self.backend.filter_users_by_claims(self.claim)
+        self.assertEqual(users.count(), 1)
+        self.assertEqual(users.first(), batman)

@@ -27,11 +27,9 @@ class OCLOIDCAuthenticationBackend(OIDCAuthenticationBackend):
         return UserProfile.objects.create_user(
             claims.get('preferred_username'),
             email=claims.get('email'),
-            **dict(
-                first_name=claims.get('given_name'),
-                last_name=claims.get('family_name'),
-                verified=claims.get('email_verified')
-            )
+            first_name=claims.get('given_name'),
+            last_name=claims.get('family_name'),
+            verified=claims.get('email_verified')
         )
 
     def update_user(self, user, claims):
