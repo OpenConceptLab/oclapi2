@@ -112,7 +112,7 @@ class ConceptDescription(AbstractLocalizedText):
 
 class ConceptName(AbstractLocalizedText):
     concept = models.ForeignKey(
-        'concepts.Concept', on_delete=models.CASCADE, null=True, blank=True, related_name='names')
+        'concepts.Concept', on_delete=models.CASCADE, related_name='names')
 
     class Meta:
         db_table = 'concept_names'
@@ -216,8 +216,6 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     external_id = models.TextField(null=True, blank=True)
     concept_class = models.TextField()
     datatype = models.TextField()
-    names_old = models.ManyToManyField(ConceptName, related_name='name_locales')
-    descriptions_old = models.ManyToManyField(ConceptName, related_name='description_locales')
     comment = models.TextField(null=True, blank=True)
     parent = models.ForeignKey('sources.Source', related_name='concepts_set', on_delete=models.CASCADE)
     sources = models.ManyToManyField('sources.Source', related_name='concepts')
