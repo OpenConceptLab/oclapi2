@@ -1,5 +1,5 @@
 from django.conf import settings
-from django.db.models import F, Q
+from django.db.models import F
 from django.http import Http404
 from drf_yasg.utils import swagger_auto_schema
 from pydash import get
@@ -159,6 +159,9 @@ class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
         if 'source' in self.kwargs and self.request.query_params.get('onlyParentLess', False) in ['true', True]:
             queryset = queryset.filter(parent_concepts__isnull=True)
 
+        if not self.is_brief():
+            queryset = queryset.prefetch_related('names', 'descriptions')
+
         if not parent:
             user = self.request.user
             is_anonymous = get(user, 'is_anonymous')
@@ -166,11 +169,7 @@ class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
             if is_anonymous:
                 queryset = queryset.exclude(public_access=ACCESS_TYPE_NONE)
             elif not is_staff:
-                public_queryset = queryset.exclude(public_access=ACCESS_TYPE_NONE)
-                private_queryset = queryset.filter(public_access=ACCESS_TYPE_NONE)
-                private_queryset = private_queryset.filter(
-                    Q(parent__user_id=user.id) | Q(parent__organization__members__id=user.id))
-                queryset = public_queryset.union(private_queryset)
+                queryset = queryset.filter(Concept.user_criteria(user))
 
         return queryset
 

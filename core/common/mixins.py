@@ -414,6 +414,12 @@ class SourceContainerMixin:
 
 class SourceChildMixin:
     @staticmethod
+    def user_criteria(user):
+        public_criteria = Q(public_access=ACCESS_TYPE_NONE)
+        owner_criteria = Q(Q(parent__user_id=user.id) | Q(parent__organization__members__id=user.id))
+        return Q(public_criteria) | Q(~public_criteria & owner_criteria)
+
+    @staticmethod
     def apply_attribute_based_filters(queryset, params):
         is_latest = params.get('is_latest', None) in [True, 'true']
         include_retired = params.get(INCLUDE_RETIRED_PARAM, None) in [True, 'true']
@@ -438,9 +444,8 @@ class SourceChildMixin:
 
     @property
     def versions(self):
-        if self.is_versioned_object:
-            self.versions_set.exclude(id=F('versioned_object_id'))
-        return self.versioned_object.versions_set.exclude(id=F('versioned_object_id'))
+        return self.__class__.objects.filter(
+            versioned_object_id=self.versioned_object_id).exclude(id=F('versioned_object_id'))
 
     @property
     def is_versioned_object(self):
