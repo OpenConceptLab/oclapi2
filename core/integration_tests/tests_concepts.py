@@ -358,7 +358,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 404)
 
     def test_delete_204(self):
-        names = [ConceptNameFactory()]
+        names = [ConceptNameFactory.build()]
         concept = ConceptFactory(parent=self.source, names=names)
         concepts_url = f"/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}/concepts/{concept.mnemonic}/"
 
@@ -380,7 +380,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         self.assertTrue(latest_version.comment, 'Deleting it')
 
     def test_db_hard_delete_204(self):
-        names = [ConceptNameFactory()]
+        names = [ConceptNameFactory.build()]
         concept = ConceptFactory(parent=self.source, names=names)
         concepts_url = f"/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}/concepts/{concept.mnemonic}/"
 
@@ -396,7 +396,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         self.assertFalse(Concept.objects.filter(mnemonic=concept.mnemonic).exists())
 
     def test_hard_delete_204(self):
-        names = [ConceptNameFactory()]
+        names = [ConceptNameFactory.build()]
         concept = ConceptFactory(parent=self.source, names=names)
         concepts_url = f"/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}/concepts/{concept.mnemonic}/"
 
@@ -413,7 +413,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
 
     @patch('core.concepts.views.delete_concept')
     def test_async_hard_delete_204(self, delete_conceot_task_mock):
-        names = [ConceptNameFactory()]
+        names = [ConceptNameFactory.build()]
         concept = ConceptFactory(parent=self.source, names=names)
         concepts_url = f"/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}/concepts/{concept.mnemonic}/"
 
@@ -440,7 +440,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 404)
 
     def test_delete_400(self):
-        names = [ConceptNameFactory()]
+        names = [ConceptNameFactory.build()]
         concept = ConceptFactory(parent=self.source, names=names, retired=True)
         concepts_url = f"/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}/concepts/{concept.mnemonic}/"
 
@@ -455,7 +455,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.data, {'__all__': 'Concept is already retired'})
 
     def test_extras_get_200(self):
-        names = [ConceptNameFactory()]
+        names = [ConceptNameFactory.build()]
         concept = ConceptFactory(parent=self.source, names=names, extras=dict(foo='bar'))
         extras_url = f"/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}" \
             f"/concepts/{concept.mnemonic}/extras/"
@@ -470,7 +470,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.data, dict(foo='bar'))
 
     def test_extra_get_200(self):
-        names = [ConceptNameFactory()]
+        names = [ConceptNameFactory.build()]
         concept = ConceptFactory(parent=self.source, names=names, extras=dict(foo='bar', tao='ching'))
 
         def extra_url(extra):
@@ -505,7 +505,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.data, dict(detail='Not found.'))
 
     def test_extra_put_200(self):
-        names = [ConceptNameFactory()]
+        names = [ConceptNameFactory.build()]
         concept = ConceptFactory(parent=self.source, names=names, extras=dict(foo='bar', tao='ching'))
 
         def extra_url(extra):
@@ -530,7 +530,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(latest_version.comment, 'Updated extras: tao=te-ching.')
 
     def test_extra_put_400(self):
-        names = [ConceptNameFactory()]
+        names = [ConceptNameFactory.build()]
         concept = ConceptFactory(parent=self.source, names=names, extras=dict(foo='bar', tao='ching'))
 
         def extra_url(extra):
@@ -550,7 +550,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(concept.extras, dict(foo='bar', tao='ching'))
 
     def test_extra_delete_204(self):
-        names = [ConceptNameFactory()]
+        names = [ConceptNameFactory.build()]
         concept = ConceptFactory(parent=self.source, names=names, extras=dict(foo='bar', tao='ching'))
         self.assertEqual(concept.versions.count(), 1)
 
@@ -575,7 +575,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(latest_version.comment, 'Deleted extra tao.')
 
     def test_extra_delete_404(self):
-        names = [ConceptNameFactory()]
+        names = [ConceptNameFactory.build()]
         concept = ConceptFactory(parent=self.source, names=names, extras=dict(foo='bar', tao='ching'))
 
         def extra_url(extra):
@@ -591,7 +591,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 404)
 
     def test_names_get_200(self):
-        name = ConceptNameFactory()
+        name = ConceptNameFactory.build()
         concept = ConceptFactory(parent=self.source, names=[name])
 
         response = self.client.get(
@@ -615,7 +615,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         )
 
     def test_names_post_201(self):
-        name = ConceptNameFactory()
+        name = ConceptNameFactory.build()
         concept = ConceptFactory(parent=self.source, names=[name])
 
         response = self.client.post(
@@ -646,7 +646,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(concept.names.count(), 2)
 
     def test_names_post_400(self):
-        name = ConceptNameFactory()
+        name = ConceptNameFactory.build()
         concept = ConceptFactory(parent=self.source, names=[name])
 
         response = self.client.post(
@@ -663,8 +663,8 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(list(response.data.keys()), ['locale'])
 
     def test_name_delete_204(self):
-        name1 = ConceptNameFactory()
-        name2 = ConceptNameFactory()
+        name1 = ConceptNameFactory.build()
+        name2 = ConceptNameFactory.build()
         concept = ConceptFactory(parent=self.source, names=[name1, name2])
         response = self.client.delete(
             f"/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}"
@@ -854,7 +854,7 @@ class ConceptExtraRetrieveUpdateDestroyViewTest(OCLAPITestCase):
     def setUp(self):
         super().setUp()
         self.extras = dict(foo='bar', tao='ching')
-        self.concept = ConceptFactory(extras=self.extras, names=[ConceptNameFactory()])
+        self.concept = ConceptFactory(extras=self.extras, names=[ConceptNameFactory.build()])
         self.user = UserProfileFactory(organizations=[self.concept.parent.organization])
         self.token = self.user.get_token()
 
@@ -929,7 +929,7 @@ class ConceptExtraRetrieveUpdateDestroyViewTest(OCLAPITestCase):
 class ConceptVersionsViewTest(OCLAPITestCase):
     def setUp(self):
         super().setUp()
-        self.concept = ConceptFactory(names=[ConceptNameFactory()])
+        self.concept = ConceptFactory(names=[ConceptNameFactory.build()])
         self.user = UserProfileFactory(organizations=[self.concept.parent.organization])
         self.token = self.user.get_token()
 
@@ -987,7 +987,7 @@ class ConceptVersionsViewTest(OCLAPITestCase):
 class ConceptMappingsViewTest(OCLAPITestCase):
     def setUp(self):
         super().setUp()
-        self.concept = ConceptFactory(names=[ConceptNameFactory()])
+        self.concept = ConceptFactory(names=[ConceptNameFactory.build()])
 
     def test_get_200_for_concept(self):
         mappings_url = self.concept.uri + 'mappings/'
@@ -1772,7 +1772,7 @@ class ConceptNameRetrieveUpdateDestroyViewTest(OCLAPITestCase):
 
 class ConceptReactivateViewTest(OCLAPITestCase):
     def test_put(self):
-        name = ConceptNameFactory()
+        name = ConceptNameFactory.build()
         concept = ConceptFactory(retired=True, names=[name])
         self.assertTrue(concept.retired)
         self.assertTrue(concept.get_latest_version().retired)
@@ -1887,7 +1887,7 @@ class ConceptSummaryViewTest(OCLAPITestCase):
         parent_concept = ConceptFactory(
             names=[ConceptNameFactory.build(), ConceptNameFactory.build()])
         child_concept = ConceptFactory(
-            names=[ConceptNameFactory(), ConceptNameFactory()],
+            names=[ConceptNameFactory.build(), ConceptNameFactory.build()],
             descriptions=[ConceptDescriptionFactory.build()]
         )
         child_concept.parent_concepts.add(parent_concept)
