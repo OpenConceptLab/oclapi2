@@ -130,7 +130,7 @@ class ErrbitClient:
         self.send_request(headers, message)
 
     def generate_xml(self, exc, trace):
-        return self.xml_raw(exc, str(exc.args), trace)
+        return self.xml_raw(exc, exc.args, trace)
 
     @staticmethod
     def _trace(trace):
@@ -145,9 +145,18 @@ class ErrbitClient:
 
     def xml_raw(self, etype, value, trace, limit=None, file=None):
         from .utils import get_current_user
-        _trace_str = self._trace(trace)
+        _trace_str = ''
+        cause = None
+        if value and value.__cause__:
+            cause = value.__cause__
+            _trace_str += self._trace(cause.__traceback__)
+            _trace_str += '<line method="The above exception was the direct cause of the following exception:"/>'
+        _trace_str += self._trace(trace)
+        message_value = str(value)
+        if cause:
+            message_value += ' from ' + str(cause)
         return ERRBIT_XML.format(
-            api_key=self.api_key, version=settings.VERSION, class_name=etype.__class__.__name__, value=str(value),
+            api_key=self.api_key, version=settings.VERSION, class_name=etype.__class__.__name__, value=message_value,
             trace=_trace_str, component=self.component_name, environment=self.environment, user=str(get_current_user()),
             url=escape(str(get_request_url()))
         )
@@ -166,7 +175,7 @@ original_print_exception = traceback.print_exception
 
 def print_exception_with_errbit_logging(etype, value, tb, limit=None, file=None):
     if not (etype == KeyError and str(value) == "'cid'"):
-        message = ERRBIT_LOGGER.xml_raw(etype, str(value), tb)
+        message = ERRBIT_LOGGER.xml_raw(etype, value, tb)
         ERRBIT_LOGGER.send_message(message.encode('utf-8'))
         original_print_exception(etype, value, tb, limit=None, file=None)
 
