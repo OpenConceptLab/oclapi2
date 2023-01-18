@@ -1,4 +1,4 @@
-from django.db.models import F, Q
+from django.db.models import F
 from django.http import QueryDict, Http404
 from drf_yasg.utils import swagger_auto_schema
 from pydash import get
