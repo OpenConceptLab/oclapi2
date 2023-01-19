@@ -142,12 +142,7 @@ class MappingMinimalSerializer(ModelSerializer):
 
     @staticmethod
     def get_cascade_target_concept_name(obj):
-        name = obj.to_concept_name
-        if not name and obj.parent_id != get(obj, 'to_concept.parent_id'):
-            # only returns for source different than self
-            name = get(obj, 'to_concept.display_name')
-
-        return name
+        return obj.to_concept_name or get(obj, 'to_concept.display_name')
 
 
 class MappingReverseMinimalSerializer(ModelSerializer):
@@ -171,12 +166,7 @@ class MappingReverseMinimalSerializer(ModelSerializer):
 
     @staticmethod
     def get_cascade_target_concept_name(obj):
-        name = obj.from_concept_name
-        if not name and obj.parent_id != get(obj, 'from_concept.parent_id'):
-            # only returns for source different than self
-            name = get(obj, 'from_concept.display_name')
-
-        return name
+        return obj.from_concept_name or get(obj, 'from_concept.display_name')
 
 
 class MappingDetailSerializer(MappingListSerializer):
