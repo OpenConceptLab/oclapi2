@@ -295,7 +295,7 @@ class VersionedModel(BaseResourceModel):
         return self.version == HEAD
 
     def get_head(self):
-        return self.active_versions.filter(version=HEAD).first()
+        return self if self.is_head else self.active_versions.filter(version=HEAD).first()
 
     head = property(get_head)
 
@@ -498,6 +498,9 @@ class ConceptContainerModel(VersionedModel):
 
     def get_active_concepts(self):
         return self.get_concepts_queryset().filter(is_active=True, retired=False)
+
+    def get_active_mappings(self):
+        return self.get_mappings_queryset().filter(is_active=True, retired=False)
 
     def get_concepts_queryset(self):
         return self.concepts_set.filter(id=F('versioned_object_id'))

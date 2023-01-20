@@ -886,7 +886,7 @@ class ConceptContainerExtraRetrieveUpdateDestroyView(RetrieveUpdateDestroyAPIVie
         instance.extras = get(instance, 'extras', {})
         instance.extras[key] = value
         instance.comment = f'Updated extras: {key}={value}.'
-        head = instance.get_head()
+        head = instance.head
         head.extras = get(head, 'extras', {})
         head.extras.update(instance.extras)
         instance.save()
@@ -900,11 +900,12 @@ class ConceptContainerExtraRetrieveUpdateDestroyView(RetrieveUpdateDestroyAPIVie
         if key in instance.extras:
             del instance.extras[key]
             instance.comment = f'Deleted extra {key}.'
-            head = instance.get_head()
-            head.extras = get(head, 'extras', {})
-            del head.extras[key]
             instance.save()
-            head.save()
+            if not instance.is_head:
+                head = instance.head
+                head.extras = get(head, 'extras', {})
+                del head.extras[key]
+                head.save()
             return Response(status=status.HTTP_204_NO_CONTENT)
 
         return Response(dict(detail=NOT_FOUND), status=status.HTTP_404_NOT_FOUND)

@@ -278,7 +278,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
     def get_version_url_kwarg():
         return 'mapping_version'
 
-    def clone(self, user=None):
+    def clone(self, user=None, from_concept=None, to_concept=None):
         mapping = Mapping(
             version=generate_temp_version(),
             mnemonic=self.mnemonic,
@@ -291,13 +291,13 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
             public_access=self.public_access,
             external_id=self.external_id,
             versioned_object_id=self.versioned_object_id,
-            to_concept_id=self.to_concept_id,
+            to_concept_id=get(to_concept, 'id') or self.to_concept_id,
             to_concept_code=self.to_concept_code,
             to_concept_name=self.to_concept_name,
             to_source_id=self.to_source_id,
             to_source_url=self.to_source_url,
             to_source_version=self.to_source_version,
-            from_concept_id=self.from_concept_id,
+            from_concept_id=get(from_concept, 'id') or self.from_concept_id,
             from_concept_code=self.from_concept_code,
             from_concept_name=self.from_concept_name,
             from_source_id=self.from_source_id,
@@ -306,6 +306,10 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
             _index=self._index,
             sort_weight=self.sort_weight
         )
+        if to_concept:
+            mapping.to_concept = to_concept
+        if from_concept:
+            mapping.from_concept = from_concept
         if user:
             mapping.created_by = mapping.updated_by = user
 
@@ -413,6 +417,19 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         instance.sort_weight = data.get('sort_weight', instance.sort_weight)
 
         return cls.persist_clone(instance, user)
+
+    def save_cloned(self):
+        parent = self.parent
+        self.is_latest_version = False
+        self.public_access = parent.public_access
+        self.save()
+        if self.id:
+            self.versioned_object_id = self.id
+            self.version = str(self.id)
+            self.save()
+            initial_version = Mapping.create_initial_version(self)
+            initial_version.sources.set([parent])
+            self.sources.set([parent])
 
     @classmethod
     def persist_new(cls, data, user):

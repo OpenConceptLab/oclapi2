@@ -9,7 +9,8 @@ from pydash import compact, get
 from core.common.models import ConceptContainerModel
 from core.common.services import PostgresQL
 from core.common.validators import validate_non_negative
-from core.concepts.models import ConceptName
+from core.concepts.models import ConceptName, Concept
+from core.mappings.constants import SAME_AS
 from core.sources.constants import SOURCE_TYPE, SOURCE_VERSION_TYPE, HIERARCHY_ROOT_MUST_BELONG_TO_SAME_SOURCE, \
     HIERARCHY_MEANINGS, AUTO_ID_CHOICES, AUTO_ID_SEQUENTIAL, AUTO_ID_UUID
 
@@ -360,3 +361,87 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         mappings = self.mappings.exclude(to_source_id=self.id)
         mappings = mappings.order_by('to_source_id').distinct('to_source_id')
         return Source.objects.filter(id__in=mappings.values_list('to_source_id', flat=True))
+
+    def clone_resources(self, user, concepts, mappings, **kwargs):
+        from core.mappings.models import Mapping
+        cloned_concepts, cloned_mappings = [], []
+        map_types = kwargs.get('map_types', '')
+        for concept in concepts:
+            if not self.concepts_set.filter(mnemonic=concept.mnemonic).exists():
+                cloned_concept = concept.versioned_object.clone()
+                cloned_concepts.append(cloned_concept)
+                cloned_mappings.append(
+                    Mapping(
+                        map_type=SAME_AS, from_concept=cloned_concept, to_concept=concept, parent=self,
+                        to_concept_code=concept.mnemonic, from_concept_code=cloned_concept.mnemonic
+                    )
+                )
+                for mapping in mappings.filter(from_concept__versioned_object_id=concept.versioned_object_id):
+                    original_to_concept = concepts.filter(id=mapping.to_concept_id).first()
+                    existing_to_concept = self.find_concept_by_mnemonic(
+                        original_to_concept.mnemonic) if original_to_concept else None
+                    cloned_mappings.append(mapping.clone(user, cloned_concept, existing_to_concept))
+                    if mapping.map_type in map_types and mapping.to_concept_id and not existing_to_concept:
+                        cloned_concepts.append(original_to_concept.clone())
+        self.clone_concepts(cloned_concepts, user)
+        self.clone_mappings(cloned_mappings, user)
+
+    def clone_with_cascade(self, concept_to_clone, user, **kwargs):
+        if kwargs:
+            kwargs.pop('view', None)
+            kwargs['repo_version'] = kwargs.get('repo_version') or concept_to_clone.parent
+            result = concept_to_clone.cascade(**kwargs, omit_if_exists_in=self.uri)
+            concepts = result['concepts']
+            mappings = result['mappings']
+        else:
+            from core.mappings.models import Mapping
+            concepts = Concept.objects.filter(id=concept_to_clone.id)
+            mappings = Mapping.objects.none()
+        self.clone_resources(user, concepts, mappings, **kwargs)
+
+    def clone_mappings(self, cloned_mappings, user):
+        update_count = False
+        for mapping in cloned_mappings:
+            to_concept = get(mapping, 'to_concept')
+            from_concept = get(mapping, 'from_concept')
+            if not from_concept.id:
+                from_concept = self.find_concept_by_mnemonic(from_concept.mnemonic)
+            if not to_concept.id:
+                to_concept = self.find_concept_by_mnemonic(to_concept.mnemonic)
+            mapping.parent = self
+            mapping.parent_id = self.id
+            mapping.uri = None
+            mapping.from_concept_id = from_concept.id
+            mapping.to_concept_id = to_concept.id
+            mapping.to_source_id = get(to_concept, 'parent_id')
+            mapping.from_source_id = get(from_concept, 'parent_id')
+            mapping.created_by = user
+            mapping.updated_by = user
+            mapping.save_cloned()
+            if mapping.id:
+                update_count = True
+        if update_count:
+            self.update_mappings_count()
+
+    def clone_concepts(self, cloned_concepts, user):
+        update_count = False
+        for concept in cloned_concepts:
+            concept.parent = self
+            concept.parent_id = self.id
+            concept.uri = None
+            concept._parent_concepts = None  # pylint: disable=protected-access
+            concept.created_by = user
+            concept.updated_by = user
+            concept.save_cloned()
+            if concept.id:
+                update_count = True
+        if update_count:
+            self.update_concepts_count()
+
+    def find_concept_by_mnemonic(self, mnemonic):
+        queryset = self.concepts_set.filter(mnemonic=mnemonic).order_by('-created_at')
+        return (
+                queryset.filter(
+                    id=F('versioned_object_id')
+                ) or queryset.filter(is_latest_version=True) or queryset.filter(retired=False) or queryset
+        ).first()

@@ -625,6 +625,26 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     def is_existing_in_parent(self):
         return self.parent.concepts_set.filter(mnemonic__exact=self.mnemonic).exists()
 
+    def save_cloned(self):
+        names = self.cloned_names
+        descriptions = self.cloned_descriptions
+        parent = self.parent
+        self.is_latest_version = False
+        self.public_access = parent.public_access
+        self.name = self.mnemonic
+        self.save()
+        if self.id:
+            self.versioned_object_id = self.id
+            self.version = str(self.id)
+            self.save()
+            self.set_locales(names, ConceptName)
+            self.set_locales(descriptions, ConceptDescription)
+            initial_version = Concept.create_initial_version(self)
+            initial_version.set_locales(names, ConceptName)
+            initial_version.set_locales(descriptions, ConceptDescription)
+            initial_version.sources.set([parent])
+            self.sources.set([parent])
+
     @classmethod
     def persist_new(cls, data, user=None, create_initial_version=True, create_parent_version=True):  # pylint: disable=too-many-statements,too-many-branches
         names = data.pop('names', []) or []
@@ -988,11 +1008,40 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
         return concepts_criteria, mappings_criteria
 
+    @staticmethod
+    def _get_cascade_mappings_criteria(map_types, exclude_map_types):
+        criteria = Q()
+        if map_types:
+            criteria &= Q(map_type__in=compact(map_types.split(',')))
+        if exclude_map_types:
+            criteria &= ~Q(map_type__in=compact(exclude_map_types.split(',')))
+        return criteria
+
+    @staticmethod
+    def _get_return_map_types_criteria(return_map_types, default_criteria):
+        if return_map_types in ['False', 'false', False, '0', 0]:  # no mappings to be returned
+            criteria = False
+        elif return_map_types:
+            criteria = Q() if return_map_types == ALL else Q(
+                map_type__in=compact(return_map_types.split(',')))
+        else:
+            criteria = default_criteria
+
+        return criteria
+
+    @staticmethod
+    def _get_equivalency_map_types_criteria(equivalency_map_types):
+        criteria = Q()
+        if equivalency_map_types:
+            criteria = Q(map_type__in=compact(equivalency_map_types.split(',')))
+        return criteria
+
     def cascade(  # pylint: disable=too-many-arguments,too-many-locals
             self, repo_version=None, source_mappings=True, source_to_concepts=True,
-            mappings_criteria=None, cascade_mappings=True, cascade_hierarchy=True, cascade_levels=ALL,
-            include_retired=False, reverse=False, return_map_types_criteria=None, omit_if_exists_in=None,
-            equivalency_map_types_criteria=None, max_results=1000
+            map_types=None, exclude_map_types=None, return_map_types=ALL, equivalency_map_types=None,
+            cascade_mappings=True, cascade_hierarchy=True, cascade_levels=ALL,
+            include_retired=False, reverse=False, omit_if_exists_in=None,
+            max_results=1000
     ):
         from core.mappings.models import Mapping
         result = dict(concepts=Concept.objects.filter(id=self.id), mappings=Mapping.objects.none())
@@ -1002,6 +1051,16 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
         if not repo_version:
             return result
+
+        mappings_criteria = self._get_cascade_mappings_criteria(map_types, exclude_map_types)
+        return_map_types_criteria = self._get_return_map_types_criteria(return_map_types, mappings_criteria)
+        equivalency_map_types_criteria = self._get_equivalency_map_types_criteria(equivalency_map_types)
+        omit_concepts_criteria, omit_mappings_criteria = self.__get_omit_from_version_criteria(
+            omit_if_exists_in, equivalency_map_types_criteria)
+
+        if omit_concepts_criteria and Concept.objects.filter(omit_concepts_criteria).filter(versioned_object_id=self.versioned_object_id).exists():
+            return result
+
         if isinstance(repo_version, str):  # assumes its cascaded under source version, usage via collection-reference
             source_versions = self.sources.filter(version=repo_version)
             if source_versions.count() != 1:
@@ -1011,9 +1070,6 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         else:
             from core.collections.models import Collection
             is_collection = repo_version.__class__ == Collection
-
-        omit_concepts_criteria, omit_mappings_criteria = self.__get_omit_from_version_criteria(
-            omit_if_exists_in, equivalency_map_types_criteria)
 
         cascaded = []
 
@@ -1050,15 +1106,25 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         return result
 
     def cascade_as_hierarchy(  # pylint: disable=too-many-arguments,too-many-locals
-            self, repo_version=None, source_mappings=True, source_to_concepts=True, mappings_criteria=None,
+            self, repo_version=None, source_mappings=True, source_to_concepts=True,
+            map_types=None, exclude_map_types=None, return_map_types=ALL, equivalency_map_types=None,
             cascade_mappings=True, cascade_hierarchy=True, cascade_levels=ALL,
-            include_retired=False, reverse=False, return_map_types_criteria=None, omit_if_exists_in=None,
-            equivalency_map_types_criteria=None, _=None
+            include_retired=False, reverse=False, omit_if_exists_in=None,
+            _=None
     ):
         if cascade_levels == 0:
             return self
 
         if not repo_version:
+            return self
+
+        mappings_criteria = self._get_cascade_mappings_criteria(map_types, exclude_map_types)
+        return_map_types_criteria = self._get_return_map_types_criteria(return_map_types, mappings_criteria)
+        equivalency_map_types_criteria = self._get_equivalency_map_types_criteria(equivalency_map_types)
+        omit_concepts_criteria, omit_mappings_criteria = self.__get_omit_from_version_criteria(
+            omit_if_exists_in, equivalency_map_types_criteria)
+
+        if omit_concepts_criteria and Concept.objects.filter(omit_concepts_criteria).filter(versioned_object_id=self.versioned_object_id).exists():
             return self
 
         if isinstance(repo_version, str):  # assumes its cascaded under source version, may never happen
@@ -1071,8 +1137,6 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             from core.collections.models import Collection
             is_collection = repo_version.__class__ == Collection
 
-        omit_concepts_criteria, omit_mappings_criteria = self.__get_omit_from_version_criteria(
-            omit_if_exists_in, equivalency_map_types_criteria)
 
         self.current_level = 0
         levels = {self.current_level: [self]}

@@ -1,5 +1,4 @@
-from django.db.models import Q
-from pydash import compact, get
+from pydash import get
 
 from core.bundles.constants import BUNDLE_TYPE_SEARCHSET, RESOURCE_TYPE
 from core.collections.constants import SOURCE_MAPPINGS, SOURCE_TO_CONCEPTS
@@ -27,9 +26,10 @@ class Bundle:
         self.concepts_count = 0
         self.mappings_count = 0
         self.cascade_method = SOURCE_TO_CONCEPTS
-        self.mappings_criteria = Q()
-        self.return_map_types_criteria = Q()
-        self.equivalency_map_types_criteria = Q()
+        self.map_types = None
+        self.exclude_map_types = None
+        self.return_map_types = None
+        self.equivalency_map_types = None
         self.entries = []
         self.requested_url = requested_url
         self.repo_version_url = None
@@ -42,9 +42,7 @@ class Bundle:
         self.set_cascade_mappings()
         self.set_cascade_levels()
         self.set_include_retired()
-        self.set_cascade_mappings_criteria()
-        self.set_return_map_types_criteria()
-        self.set_equivalency_map_types_criteria()
+        self.set_map_types()
         self.set_omit_if_exists_in()
 
     def set_repo_version_url(self):
@@ -60,6 +58,12 @@ class Bundle:
     def set_include_retired(self):
         if INCLUDE_RETIRED_PARAM in self.params:
             self.include_retired = self.params[INCLUDE_RETIRED_PARAM] in ['true', True]
+
+    def set_map_types(self):
+        self.map_types = self.params.get(MAP_TYPES_PARAM) or None
+        self.exclude_map_types = self.params.get(EXCLUDE_MAP_TYPES_PARAM) or None
+        self.return_map_types = self.params.get(RETURN_MAP_TYPES) or ALL
+        self.equivalency_map_types = self.params.get(EQUIVALENCY_MAP_TYPES) or None
 
     def set_cascade_levels(self):
         if CASCADE_LEVELS_PARAM in self.params:
@@ -82,29 +86,6 @@ class Bundle:
     def set_cascade_direction(self):
         if CASCADE_DIRECTION_PARAM in self.params:
             self.reverse = self.params[CASCADE_DIRECTION_PARAM] in ['true', True]
-
-    def set_cascade_mappings_criteria(self):
-        map_types = self.params.dict().get(MAP_TYPES_PARAM, None)
-        exclude_map_types = self.params.dict().get(EXCLUDE_MAP_TYPES_PARAM, None)
-        if map_types:
-            self.mappings_criteria &= Q(map_type__in=compact(map_types.split(',')))
-        if exclude_map_types:
-            self.mappings_criteria &= ~Q(map_type__in=compact(exclude_map_types.split(',')))
-
-    def set_return_map_types_criteria(self):
-        return_map_types = self.params.dict().get(RETURN_MAP_TYPES, None)
-        if return_map_types in ['False', 'false', False, '0', 0]:  # no mappings to be returned
-            self.return_map_types_criteria = False
-        elif return_map_types:
-            self.return_map_types_criteria = Q() if return_map_types == ALL else Q(
-                map_type__in=compact(return_map_types.split(',')))
-        else:
-            self.return_map_types_criteria = self.mappings_criteria
-
-    def set_equivalency_map_types_criteria(self):
-        equivalency_map_types = self.params.dict().get(EQUIVALENCY_MAP_TYPES, None)
-        if equivalency_map_types:
-            self.equivalency_map_types_criteria = Q(map_type__in=compact(equivalency_map_types.split(',')))
 
     def set_omit_if_exists_in(self):
         self.omit_if_exists_in = self.params.get(OMIT_IF_EXISTS_IN, None) or None
@@ -148,15 +129,16 @@ class Bundle:
             repo_version=self.repo_version,
             source_mappings=self.cascade_method == SOURCE_MAPPINGS,
             source_to_concepts=self.cascade_method == SOURCE_TO_CONCEPTS,
-            mappings_criteria=self.mappings_criteria,
+            map_types=self.map_types,
+            exclude_map_types=self.exclude_map_types,
             cascade_mappings=self.cascade_mappings,
             cascade_hierarchy=self.cascade_hierarchy,
             cascade_levels=self.cascade_levels,
             include_retired=self.include_retired,
             reverse=self.reverse,
-            return_map_types_criteria=self.return_map_types_criteria,
+            return_map_types=self.return_map_types,
             omit_if_exists_in=self.omit_if_exists_in,
-            equivalency_map_types_criteria=self.equivalency_map_types_criteria
+            equivalency_map_types=self.equivalency_map_types
         )
         self.concepts = get(result, 'concepts')
         self.mappings = get(result, 'mappings')
@@ -169,15 +151,16 @@ class Bundle:
             repo_version=self.repo_version,
             source_mappings=self.cascade_method == SOURCE_MAPPINGS,
             source_to_concepts=self.cascade_method == SOURCE_TO_CONCEPTS,
-            mappings_criteria=self.mappings_criteria,
+            map_types=self.map_types,
+            exclude_map_types=self.exclude_map_types,
             cascade_mappings=self.cascade_mappings,
             cascade_hierarchy=self.cascade_hierarchy,
             cascade_levels=self.cascade_levels,
             include_retired=self.include_retired,
             reverse=self.reverse,
-            return_map_types_criteria=self.return_map_types_criteria,
+            return_map_types=self.return_map_types,
             omit_if_exists_in=self.omit_if_exists_in,
-            equivalency_map_types_criteria=self.equivalency_map_types_criteria
+            equivalency_map_types=self.equivalency_map_types
         )
 
         from core.concepts.serializers import ConceptMinimalSerializerRecursive

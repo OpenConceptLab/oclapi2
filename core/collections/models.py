@@ -4,7 +4,7 @@ from django.conf import settings
 from django.contrib.postgres.fields import ArrayField
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
-from django.db.models import UniqueConstraint, F, QuerySet, Q, Max
+from django.db.models import UniqueConstraint, F, QuerySet, Max
 from django.utils import timezone
 from django.utils.functional import cached_property
 from pydash import get, compact
@@ -575,21 +575,9 @@ class CollectionReference(models.Model):
             map_types = get(self.cascade, 'map_types', None)
             exclude_map_types = get(self.cascade, 'exclude_map_types', None)
             return_map_types = get(self.cascade, 'return_map_types', None)
-            mappings_criteria = Q()
-            if map_types:
-                mappings_criteria &= Q(map_type__in=compact(map_types.split(',')))
-            if exclude_map_types:
-                mappings_criteria &= ~Q(map_type__in=compact(exclude_map_types.split(',')))
-            cascade_params['mappings_criteria'] = mappings_criteria
-            include_mappings = get(self.cascade, 'include_mappings')
-            if include_mappings is False or return_map_types in ['False', 'false', False, '0', 0]:
-                return_map_types_criteria = False
-            elif return_map_types:
-                return_map_types_criteria = Q() if return_map_types == ALL else Q(
-                    map_type__in=compact(return_map_types.split(',')))
-            else:
-                return_map_types_criteria = mappings_criteria
-            cascade_params['return_map_types_criteria'] = return_map_types_criteria
+            cascade_params['map_types'] = map_types
+            cascade_params['exclude_map_types'] = exclude_map_types
+            cascade_params['return_map_types'] = return_map_types
         return cascade_params
 
     def __is_exact_search_filter(self):

@@ -820,6 +820,94 @@ class SourceTest(OCLTestCase):
         self.assertEqual(mapped_sources.count(), 1)
         self.assertEqual(mapped_sources.first().url, source1.url)
 
+    def test_clone_with_cascade(self):
+        """
+            test_clone_with_cascade
+            source1:
+                - concept1
+                - concept2
+                - concept3
+                - concept4
+                - mapping -> concept1 -> Q-AND-A -> concept3
+                - mapping -> concept2 -> Q-AND-A -> concept1
+                - mapping -> concept2 -> NARROWER-THAN -> concept3
+                - mapping -> concept2 -> BROADER-THAN -> concept4
+            source2:
+                - concept1
+                - concept3
+
+            --CLONE source1.concept2 in source2--
+
+            source2:
+                - concept1
+                - concept3
+                - (new) concept2 (clone of source1.concept2)
+                - (new) mapping -> source2.concept2 -> SAME-AS -> source1.concept2
+                - (new) mapping -> source2.concept2 -> Q-AND-A -> source2.concept1
+                - (new) mapping -> source2.concept2 -> NARROWER-THAN -> source2.concept3
+                - (new) mapping -> source2.concept2 -> BROADER-THAN -> source1.concept4
+        """
+        source1 = OrganizationSourceFactory(mnemonic='source1')
+        source1_concept1 = ConceptFactory(mnemonic='concept1', parent=source1)  # to_concept
+        source1_concept2 = ConceptFactory(mnemonic='concept2', parent=source1)  # from_concept
+        source1_concept3 = ConceptFactory(mnemonic='concept3', parent=source1)
+        source1_concept4 = ConceptFactory(mnemonic='concept4', parent=source1)
+        MappingFactory(
+            from_concept=source1_concept1, to_concept=source1_concept3, parent=source1, map_type='Q-AND-A')
+        MappingFactory(
+            from_concept=source1_concept2, to_concept=source1_concept1, parent=source1, map_type='Q-AND-A')
+        MappingFactory(
+            from_concept=source1_concept2, to_concept=source1_concept3, parent=source1, map_type='NARROWER-THAN')
+        MappingFactory(
+            from_concept=source1_concept2, to_concept=source1_concept4, parent=source1, map_type='BROADER-THAN')
+
+        source2 = OrganizationSourceFactory(mnemonic='source2')
+        source2_concept1 = ConceptFactory(mnemonic='concept1', parent=source2)  # same as source1_concept1 -> to_concept
+        source2_concept3 = ConceptFactory(mnemonic='concept3', parent=source2)  # same as source1_concept3
+
+        self.assertEqual(source2.get_active_concepts().count(), 2)
+        self.assertEqual(source2.get_active_mappings().count(), 0)
+
+        source2.clone_with_cascade(
+            concept_to_clone=source1_concept2,
+            user=source1_concept2.created_by,
+            map_types='Q-AND-A,CONCEPT-SET',
+        )
+        self.assertEqual(source2.get_active_concepts().count(), 3)
+        self.assertEqual(source2.get_active_mappings().count(), 4)
+        self.assertEqual(
+            list(source2.get_concepts_queryset().order_by('created_at').values_list('mnemonic', flat=True)),
+            ['concept1', 'concept3', 'concept2']
+        )
+        mappings = source2.get_mappings_queryset()
+        self.assertEqual(mappings.count(), 4)
+
+        same_as_mapping = mappings.filter(map_type='SAME-AS').first()
+        self.assertEqual(same_as_mapping.to_concept.uri, source1_concept2.uri)
+        new_from_concept = same_as_mapping.from_concept
+        self.assertEqual(new_from_concept.mnemonic, source1_concept2.mnemonic)
+        self.assertEqual(new_from_concept.uri, source2.uri + f'concepts/{source1_concept2.mnemonic}/')
+
+        q_and_a_mapping = mappings.filter(map_type='Q-AND-A').first()
+        self.assertEqual(q_and_a_mapping.from_concept.uri, new_from_concept.uri)
+        self.assertEqual(q_and_a_mapping.to_concept.uri, source2_concept1.uri)
+
+        narrower_than_mapping = mappings.filter(map_type='NARROWER-THAN').first()
+        self.assertEqual(narrower_than_mapping.from_concept.uri, new_from_concept.uri)
+        self.assertEqual(narrower_than_mapping.to_concept.uri, source2_concept3.uri)
+
+        broader_than_mapping = mappings.filter(map_type='BROADER-THAN').first()
+        self.assertEqual(broader_than_mapping.from_concept.uri, new_from_concept.uri)
+        self.assertEqual(broader_than_mapping.to_concept.uri, source1_concept4.uri)
+
+        source2.clone_with_cascade(
+            concept_to_clone=source1_concept2,
+            user=source1_concept2.created_by,
+            map_types='Q-AND-A,CONCEPT-SET',
+        )
+        self.assertEqual(source2.get_active_concepts().count(), 3)
+        self.assertEqual(source2.get_active_mappings().count(), 4)
+
 
 class TasksTest(OCLTestCase):
     @patch('core.sources.models.Source.index_children')
