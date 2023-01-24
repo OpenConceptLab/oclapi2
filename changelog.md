@@ -1,3 +1,42 @@
+##### 2.2.64 - Tue Jan 24 09:59:26 2023 +0000
+- Fixing concept map views serializer for swagger
+##### 2.2.63 - Tue Jan 24 09:37:53 2023 +0000
+- [OpenConceptLab/ocl_issues#1463](https://github.com/OpenConceptLab/ocl_issues/issues/1463) | fixing cascade mapping serializer for target concept name
+##### 2.2.62 - Wed Jan 18 11:06:49 2023 +0000
+- Errbit client | checking for cause exists or not
+##### 2.2.61 - Wed Jan 18 10:50:20 2023 +0000
+- Errbit client | adding exception as cause in message and backtrace
+- fixing pylint
+- Refactoring concept/mappings listing
+- Tests for OCL SSO auth backend
+##### 2.2.60 - Wed Jan 18 07:28:02 2023 +0000
+- [OpenConceptLab/ocl_issues#1452](https://github.com/OpenConceptLab/ocl_issues/issues/1452) | Bundle | changing repo_url to repo_version_url
+- [OpenConceptLab/ocl_issues#1399](https://github.com/OpenConceptLab/ocl_issues/issues/1399) | fixing locale create
+- [OpenConceptLab/ocl_issues#1399](https://github.com/OpenConceptLab/ocl_issues/issues/1399) | removed redundant admin APIs for locales cleanup
+- [OpenConceptLab/ocl_issues#1399](https://github.com/OpenConceptLab/ocl_issues/issues/1399) | ConceptName | concept_id is mandatory | fixing tests
+- [OpenConceptLab/ocl_issues#1399](https://github.com/OpenConceptLab/ocl_issues/issues/1399) | migrations | removed dormant locales and old M2M relations
+##### 2.2.59 - Wed Jan 18 03:38:17 2023 +0000
+- [OpenConceptLab/ocl_issues#1235](https://github.com/OpenConceptLab/ocl_issues/issues/1235) ConceptMap Operations: fixing test
+- [OpenConceptLab/ocl_issues#1235](https://github.com/OpenConceptLab/ocl_issues/issues/1235) ConceptMap Operations: use assertRaises
+- updated docker-compose version
+- bumped coverage to 93
+- [OpenConceptLab/ocl_issues#1235](https://github.com/OpenConceptLab/ocl_issues/issues/1235) ConceptMap Operations: follow up
+- [OpenConceptLab/ocl_issues#1235](https://github.com/OpenConceptLab/ocl_issues/issues/1235) ConceptMap Operations: translate
+- [OpenConceptLab/ocl_issues#1430](https://github.com/OpenConceptLab/ocl_issues/issues/1430) | separating pre_startup script | includes migrate and other tasks
+- Concept Search | fixing wild card search
+- coverage to 92
+- coverage to 92
+- AuthService | missing tests
+- Importers | fixing mocks
+- Importers | missing assertions
+- Concept Search | search with multiple words and anything between them in synonyms
+- [OpenConceptLab/ocl_issues#1399](https://github.com/OpenConceptLab/ocl_issues/issues/1399) | removed unused API
+- [OpenConceptLab/ocl_issues#1399](https://github.com/OpenConceptLab/ocl_issues/issues/1399) | fixing pylints
+- [OpenConceptLab/ocl_issues#1399](https://github.com/OpenConceptLab/ocl_issues/issues/1399) | names/descriptions migrations to split names and descriptions
+- [OpenConceptLab/ocl_issues#1457](https://github.com/OpenConceptLab/ocl_issues/issues/1457) | cascade param equivalencyMapType
+- [OpenConceptLab/ocl_issues#1451](https://github.com/OpenConceptLab/ocl_issues/issues/1451) | omitIfExistsIn to exclude all resource versions
+- Concept Search | search with multiple words and anything between them
+- [OpenConceptLab/ocl_issues#1451](https://github.com/OpenConceptLab/ocl_issues/issues/1451) | Concept cascade | Omit if exists in repo version
 ##### 2.2.58 - Mon Jan 2 10:19:30 2023 +0000
 - [OpenConceptLab/ocl_issues#1449](https://github.com/OpenConceptLab/ocl_issues/issues/1449) | Errbit | fixing monthly usage report duration
 - [OpenConceptLab/ocl_issues#1452](https://github.com/OpenConceptLab/ocl_issues/issues/1452) | added repo_url in cascade response
