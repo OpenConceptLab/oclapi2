@@ -1,6 +1,7 @@
 import logging
 
 from django.core.exceptions import ValidationError
+from pydash import get
 
 from core.bundles.serializers import FHIRBundleSerializer
 from core.common.constants import HEAD
@@ -105,7 +106,7 @@ class ConceptMapTranslateView(MappingListView):
         return queryset
 
     def get_serializer(self, *args, **kwargs):
-        instance = args[0]
+        instance = get(args, '0')
         many = kwargs.get('many', False)
         if many:
             if isinstance(instance, list) and len(instance) != 0:
