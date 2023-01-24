@@ -1,3 +1,4 @@
+import logging
 from collections import OrderedDict
 
 from rest_framework import serializers
@@ -15,6 +16,8 @@ from core.parameters.serializers import ParametersSerializer
 from core.sources.models import Source
 from core.sources.serializers import SourceCreateOrUpdateSerializer
 from core.users.models import UserProfile
+
+logger = logging.getLogger('oclapi')
 
 
 class ConceptMapGroupField(serializers.Field):
@@ -120,7 +123,15 @@ class ConceptMapDetailSerializer(serializers.ModelSerializer):
             rep = super().to_representation(instance)
             IdentifierSerializer.include_ocl_identifier(instance.uri, RESOURCE_TYPE, rep)
         except Exception as error:
-            raise Exception(f'Failed to represent "{instance.uri}" as {RESOURCE_TYPE}') from error
+            msg = f'Failed to represent "{instance.uri}" as {RESOURCE_TYPE}'
+            logger.error(msg, error)
+            return {
+                'resourceType': 'OperationOutcome',
+                'issue': [{
+                    'severity': 'error',
+                    'details': msg
+                }]
+            }
         # Remove fields with 'None' value
         return OrderedDict([(key, rep[key]) for key in rep if rep[key] is not None])
 

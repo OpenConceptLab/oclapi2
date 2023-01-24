@@ -1,4 +1,4 @@
-from core.collections.models import CollectionReference
+from core.collections.models import CollectionReference, Collection
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
 from core.common.tests import OCLAPITestCase
 from core.concepts.documents import ConceptDocument
@@ -7,6 +7,7 @@ from core.orgs.tests.factories import OrganizationFactory
 from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory, UserSourceFactory
 from core.users.tests.factories import UserProfileFactory
+from core.value_sets.serializers import ValueSetDetailSerializer
 
 
 class ValueSetTest(OCLAPITestCase):
@@ -448,3 +449,10 @@ class ValueSetTest(OCLAPITestCase):
         self.assertIsNotNone(expansion['timestamp'])
         self.assertEqual(len(expansion['contains']), 1)
         self.assertEqual(expansion['contains'][0]['code'], self.concept_1.mnemonic)
+
+    def test_unable_to_represent_as_fhir(self):
+        instance = Collection(id='1', uri='/invalid/uri')
+        serialized = ValueSetDetailSerializer(instance=instance).data
+        self.assertDictEqual(serialized, {
+            'resourceType': 'OperationOutcome',
+            'issue': [{'severity': 'error', 'details': 'Failed to represent "/invalid/uri" as ValueSet'}]})

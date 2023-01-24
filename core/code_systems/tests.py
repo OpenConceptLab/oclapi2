@@ -2,6 +2,7 @@ import json
 
 from rest_framework.test import APIClient
 
+from core.code_systems.serializers import CodeSystemDetailSerializer
 from core.common.tests import OCLTestCase
 from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory
@@ -527,3 +528,10 @@ class CodeSystemTest(OCLTestCase):
         self.assertEqual(concepts[1].display_name, 'Test2')
         self.assertEqual(concepts[1].is_head, False)
         self.assertEqual(len(concepts[1].names.all()), 1)
+
+    def test_unable_to_represent_as_fhir(self):
+        instance = Source(id='1', uri='/invalid/uri')
+        serialized = CodeSystemDetailSerializer(instance=instance).data
+        self.assertDictEqual(serialized, {
+            'resourceType': 'OperationOutcome',
+            'issue': [{'severity': 'error', 'details': 'Failed to represent "/invalid/uri" as CodeSystem'}]})

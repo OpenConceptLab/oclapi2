@@ -3,6 +3,7 @@ from collections import OrderedDict
 from rest_framework.test import APIClient
 
 from core.common.tests import OCLTestCase
+from core.concept_maps.serializers import ConceptMapDetailSerializer
 from core.concepts.tests.factories import ConceptFactory, ConceptNameFactory
 from core.mappings.tests.factories import MappingFactory
 from core.orgs.tests.factories import OrganizationFactory
@@ -497,3 +498,10 @@ class ConceptMapTest(OCLTestCase):
             'resourceType': 'Parameters',
             'parameter': [OrderedDict(
                 [('name', 'result'), ('valueBoolean', False)])]})
+
+    def test_unable_to_represent_as_fhir(self):
+        instance = Source(id='1', uri='/invalid/uri')
+        serialized = ConceptMapDetailSerializer(instance=instance).data
+        self.assertDictEqual(serialized, {
+            'resourceType': 'OperationOutcome',
+            'issue': [{'severity': 'error', 'details': 'Failed to represent "/invalid/uri" as ConceptMap'}]})

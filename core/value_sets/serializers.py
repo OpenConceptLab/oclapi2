@@ -1,3 +1,5 @@
+import logging
+
 from rest_framework import serializers
 from rest_framework.fields import CharField, DateField, SerializerMethodField, ChoiceField, DateTimeField, JSONField
 
@@ -11,6 +13,8 @@ from core.orgs.models import Organization
 from core.parameters.serializers import ParametersSerializer
 from core.users.models import UserProfile
 from core.value_sets.constants import RESOURCE_TYPE
+
+logger = logging.getLogger('oclapi')
 
 
 class FilterValueSetSerializer(ReadSerializerMixin, serializers.Serializer):
@@ -203,7 +207,15 @@ class ValueSetDetailSerializer(serializers.ModelSerializer):
             rep = super().to_representation(instance)
             IdentifierSerializer.include_ocl_identifier(instance.uri, RESOURCE_TYPE, rep)
         except Exception as error:
-            raise Exception(f'Failed to represent "{instance.uri}" as {RESOURCE_TYPE}') from error
+            msg = f'Failed to represent "{instance.uri}" as {RESOURCE_TYPE}'
+            logger.error(msg, error)
+            return {
+                'resourceType': 'OperationOutcome',
+                'issue': [{
+                    'severity': 'error',
+                    'details': msg
+                }]
+            }
         return rep
 
     @staticmethod
