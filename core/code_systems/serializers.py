@@ -211,9 +211,9 @@ class CodeSystemDetailSerializer(serializers.ModelSerializer):
         try:
             rep = super().to_representation(instance)
             IdentifierSerializer.include_ocl_identifier(instance.uri, RESOURCE_TYPE, rep)
-        except Exception as error:
+        except (Exception, ):
             msg = f'Failed to represent "{instance.uri}" as {RESOURCE_TYPE}'
-            logger.error(msg, error)
+            logger.exception(msg)
             return {
                 'resourceType': 'OperationOutcome',
                 'issue': [{
