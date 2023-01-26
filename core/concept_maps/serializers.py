@@ -45,7 +45,11 @@ class ConceptMapGroupField(serializers.Field):
     def to_representation(self, value):
         # limit to 1000 mappings by default
         # TODO: support graphQL to go around the limit
-        mappings = value.get_mappings_queryset().order_by('id')[:1000]
+        if self.context.get('has_many', False):
+            limit = 25
+        else:
+            limit = 1000
+        mappings = value.get_mappings_queryset().order_by('id')[:limit]
         groups = {}
         for mapping in mappings:
             key = mapping.from_source_url + mapping.to_source_url
@@ -109,6 +113,14 @@ class ConceptMapDetailSerializer(serializers.ModelSerializer):
         fields = ('resourceType', 'url', 'title', 'status', 'id', 'language', 'meta',
                   'version', 'identifier', 'contact', 'jurisdiction', 'name', 'description', 'publisher', 'purpose',
                   'copyright', 'date', 'experimental', 'group')
+
+    def __new__(cls, *args, **kwargs):
+        if kwargs.get('many', False):
+            context = kwargs.get('context', {})
+            context.update({'has_many': True})
+            kwargs.update({'context': context})
+
+        return super().__new__(cls, *args, **kwargs)
 
     @staticmethod
     def get_resource_type(_):

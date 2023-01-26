@@ -138,7 +138,11 @@ class CodeSystemConceptField(serializers.Field):
     def to_representation(self, value):
         # limit to 1000 concepts by default
         # TODO: support graphQL to go around the limit
-        return CodeSystemConceptSerializer(value.concepts.order_by('id')[:1000], many=True).data
+        if self.context.get('has_many', False):
+            limit = 25
+        else:
+            limit = 1000
+        return CodeSystemConceptSerializer(value.concepts.order_by('id')[:limit], many=True).data
 
 
 class CodeSystemDetailSerializer(serializers.ModelSerializer):
@@ -172,6 +176,14 @@ class CodeSystemDetailSerializer(serializers.ModelSerializer):
                   'version', 'identifier', 'contact', 'jurisdiction', 'name', 'description', 'publisher', 'purpose',
                   'copyright', 'revisionDate', 'experimental', 'caseSensitive', 'compositional', 'versionNeeded',
                   'collectionReference', 'hierarchyMeaning', 'concept', 'text')
+
+    def __new__(cls, *args, **kwargs):
+        if kwargs.get('many', False):
+            context = kwargs.get('context', {})
+            context.update({'has_many': True})
+            kwargs.update({'context': context})
+
+        return super().__new__(cls, *args, **kwargs)
 
     @staticmethod
     def get_resource_type(_):
