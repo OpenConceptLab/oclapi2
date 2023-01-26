@@ -107,10 +107,10 @@ class Bundle:
         return self._total
 
     def set_concepts_count(self):
-        self.concepts_count = self.concepts.count()
+        self.concepts_count = len(self.concepts) if isinstance(self.concepts, list) else self.concepts.count()
 
     def set_mappings_count(self):
-        self.mappings_count = self.mappings.count()
+        self.mappings_count = len(self.mappings) if isinstance(self.mappings, list) else self.mappings.count()
 
     def set_total(self):
         self.set_concepts_count()
@@ -181,3 +181,26 @@ class Bundle:
         from core.concepts.models import Concept
         serializer = Concept.get_serializer_class(verbose=self.verbose, version=True, brief=self.brief, cascade=True)
         return serializer
+
+    @classmethod
+    def clone(  # pylint: disable=too-many-arguments
+            cls, concept_to_clone, clone_from_source, clone_to_source, user, requested_url,
+            is_verbose=False, **parameters
+    ):
+        _parameters = {}
+        if parameters:
+            _parameters = parameters.copy()
+            _parameters['repo_version'] = clone_from_source
+        added_concepts, added_mappings = clone_to_source.clone_with_cascade(concept_to_clone, user, **_parameters)
+        bundle = cls(
+            root=clone_to_source.find_concept_by_mnemonic(concept_to_clone.mnemonic),
+            params=_parameters,
+            verbose=is_verbose,
+            repo_version=clone_from_source,
+            requested_url=requested_url
+        )
+        bundle.concepts = added_concepts
+        bundle.mappings = added_mappings
+        bundle.set_total()
+        bundle.set_entries()
+        return bundle
