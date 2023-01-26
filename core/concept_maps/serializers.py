@@ -45,10 +45,7 @@ class ConceptMapGroupField(serializers.Field):
     def to_representation(self, value):
         # limit to 1000 mappings by default
         # TODO: support graphQL to go around the limit
-        if self.context.get('has_many', False):
-            limit = 25
-        else:
-            limit = 1000
+        limit = self.get_limit()
         mappings = value.get_mappings_queryset().order_by('id')[:limit]
         groups = {}
         for mapping in mappings:
@@ -94,6 +91,13 @@ class ConceptMapGroupField(serializers.Field):
                 'relationship': relationship
             })
         return [*groups.values()]
+
+    def get_limit(self):
+        if self.context.get('has_many', False):
+            limit = 25
+        else:
+            limit = 1000
+        return limit
 
 
 class ConceptMapDetailSerializer(serializers.ModelSerializer):
