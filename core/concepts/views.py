@@ -15,7 +15,7 @@ from core.bundles.models import Bundle
 from core.bundles.serializers import BundleSerializer
 from core.common.constants import (
     HEAD, INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_RETIRED_PARAM, ACCESS_TYPE_NONE)
-from core.common.exceptions import Http400
+from core.common.exceptions import Http400, Http403
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryMixin
 from core.common.swagger_parameters import (
     q_param, limit_param, sort_desc_param, page_param, exact_match_param, sort_asc_param, verbose_param,
@@ -378,6 +378,38 @@ class ConceptCascadeView(ConceptBaseView):
         )
         bundle.cascade()
         return Response(BundleSerializer(bundle, context=dict(request=request)).data)
+
+
+class ConceptCloneView(ConceptCascadeView):
+    serializer_class = BundleSerializer
+
+    def post(self, request, **kwargs):  # pylint: disable=unused-argument
+        """
+        body:
+            {
+                “source_uri”: “/orgs/MyOrg/sources/MySource/”, (cloneTo)
+                “parameters”: { ….same as cascade… }
+            }
+        """
+        clone_to_source = self.get_clone_to_source()
+        self.set_parent_resource(False)
+        bundle = Bundle.clone(
+            self.get_object(), self.parent_resource, clone_to_source, request.user,
+            self.request.get_full_path(), self.is_verbose(), **(request.data.get('parameters') or {})
+        )
+        return Response(BundleSerializer(bundle, context=dict(request=request)).data)
+
+    def get_clone_to_source(self):
+        source_uri = self.request.data.get('source_uri')
+        if not source_uri:
+            raise Http400()
+        from core.sources.models import Source
+        source = Source.objects.filter(uri=source_uri).first()
+        if not source:
+            raise Http404()
+        if not source.has_edit_access(self.request.user):
+            raise Http403()
+        return source
 
 
 class ConceptChildrenView(ConceptBaseView, ListWithHeadersMixin):

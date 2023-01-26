@@ -4,6 +4,7 @@ from unittest.mock import patch
 from django.conf import settings
 from mock import ANY
 
+from core.bundles.models import Bundle
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
 from core.common.constants import CUSTOM_VALIDATION_SCHEMA_OPENMRS
 from core.common.tests import OCLAPITestCase
@@ -1913,3 +1914,70 @@ class ConceptSummaryViewTest(OCLAPITestCase):
         self.assertEqual(response.data['versions'], 1)
         self.assertEqual(response.data['children'], 0)
         self.assertEqual(response.data['parents'], 1)
+
+
+class ConceptCloneViewTest(OCLAPITestCase):
+    def setUp(self):
+        self.user = UserProfileFactory()
+        self.token = self.user.get_token()
+        self.concept = ConceptFactory()
+        self.clone_to_source = OrganizationSourceFactory()
+
+    def test_post_bad_requests(self):
+        response = self.client.post(
+            self.concept.uri + '$clone/',
+            {'foo': 'bar'},
+            HTTP_AUTHORIZATION=f"Token {self.token}",
+            format='json'
+        )
+        self.assertEqual(response.status_code, 400)
+
+        response = self.client.post(
+            self.concept.uri + '$clone/',
+            {'source_uri': 'foobar'},
+            HTTP_AUTHORIZATION=f"Token {self.token}",
+            format='json'
+        )
+        self.assertEqual(response.status_code, 404)
+
+        self.clone_to_source.public_access = 'None'
+        self.clone_to_source.save()
+
+        response = self.client.post(
+            self.concept.uri + '$clone/',
+            {'source_uri': self.clone_to_source.uri},
+            HTTP_AUTHORIZATION=f"Token {self.token}",
+            format='json'
+        )
+        self.assertEqual(response.status_code, 403)
+
+    @patch('core.concepts.views.Bundle.clone')
+    def test_post_success(self, bundle_clone_mock):
+        parameters = {'mapTypes': 'Q-AND-A,CONCEPT-SET'}
+        bundle_clone_mock.return_value = Bundle(
+            root=self.concept, repo_version=self.concept.parent, params=parameters, verbose=False
+        )
+
+        response = self.client.post(
+            self.concept.uri + '$clone/',
+            {'source_uri': self.clone_to_source.uri, 'parameters': parameters},
+            HTTP_AUTHORIZATION=f"Token {self.token}",
+            format='json'
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data,
+            {
+                'resourceType': 'Bundle',
+                'type': 'searchset',
+                'meta': ANY,
+                'total': None,
+                'entry': [],
+                'requested_url': None,
+                'repo_version_url': self.concept.parent.uri + 'HEAD/'
+            }
+        )
+        bundle_clone_mock.assert_called_once_with(
+            self.concept, self.concept.parent, self.clone_to_source, self.user, ANY, False,
+            **parameters
+        )

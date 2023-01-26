@@ -23,6 +23,11 @@ urlpatterns = [
         views.ConceptCascadeView.as_view(),
         name='concept-$cascade'
     ),
+    path(
+        "<str:concept>/$clone/",
+        views.ConceptCloneView.as_view(),
+        name='concept-$clone'
+    ),
     # duplicate due to swagger not accepting $cascade
     path(
         "<str:concept>/cascade/",
@@ -99,6 +104,11 @@ urlpatterns = [
         '<str:concept>/<str:concept_version>/',
         views.ConceptVersionRetrieveView.as_view(),
         name='concept-version-detail'
+    ),
+    path(
+        "<str:concept>/<str:concept_version>/$clone/",
+        views.ConceptCloneView.as_view(),
+        name='concept-version-$clone'
     ),
     path(
         "<str:concept>/<str:concept_version>/$cascade/",
