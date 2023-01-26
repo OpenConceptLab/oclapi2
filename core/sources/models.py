@@ -383,8 +383,9 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
                     cloned_mappings.append(mapping.clone(user, cloned_concept, existing_to_concept))
                     if mapping.map_type in map_types and mapping.to_concept_id and not existing_to_concept:
                         cloned_concepts.append(original_to_concept.clone())
-        self.clone_concepts(cloned_concepts, user)
-        self.clone_mappings(cloned_mappings, user)
+        added_concepts = self.clone_concepts(cloned_concepts, user)
+        added_mappings = self.clone_mappings(cloned_mappings, user)
+        return added_concepts, added_mappings
 
     def clone_with_cascade(self, concept_to_clone, user, **kwargs):
         if kwargs:
@@ -397,10 +398,11 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
             from core.mappings.models import Mapping
             concepts = Concept.objects.filter(id=concept_to_clone.id)
             mappings = Mapping.objects.none()
-        self.clone_resources(user, concepts, mappings, **kwargs)
+        return self.clone_resources(user, concepts, mappings, **kwargs)
 
     def clone_mappings(self, cloned_mappings, user):
         update_count = False
+        added = []
         for mapping in cloned_mappings:
             to_concept = get(mapping, 'to_concept')
             from_concept = get(mapping, 'from_concept')
@@ -408,38 +410,42 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
                 from_concept = self.find_concept_by_mnemonic(from_concept.mnemonic)
             if not to_concept.id:
                 to_concept = self.find_concept_by_mnemonic(to_concept.mnemonic)
-            mapping.parent = self
-            mapping.parent_id = self.id
-            mapping.uri = None
             mapping.from_concept_id = from_concept.id
             mapping.to_concept_id = to_concept.id
             mapping.to_source_id = get(to_concept, 'parent_id')
             mapping.from_source_id = get(from_concept, 'parent_id')
-            mapping.created_by = user
-            mapping.updated_by = user
-            mapping.save_cloned()
+            self._clone_resource(mapping, user)
+            added.append(mapping)
             if mapping.id:
                 update_count = True
         if update_count:
             self.update_mappings_count()
+        return added
 
     def clone_concepts(self, cloned_concepts, user):
         update_count = False
+        added = []
         for concept in cloned_concepts:
-            concept.parent = self
-            concept.parent_id = self.id
-            concept.uri = None
             concept._parent_concepts = None  # pylint: disable=protected-access
-            concept.created_by = user
-            concept.updated_by = user
-            concept.save_cloned()
+            self._clone_resource(concept, user)
+            added.append(concept)
             if concept.id:
                 update_count = True
         if update_count:
             self.update_concepts_count()
+        return added
+
+    def _clone_resource(self, resource, user):
+        resource.parent = self
+        resource.parent_id = self.id
+        resource.uri = None
+        resource.created_by = user
+        resource.updated_by = user
+        resource.save_cloned()
 
     def find_concept_by_mnemonic(self, mnemonic):
-        queryset = self.concepts_set.filter(mnemonic=mnemonic).order_by('-created_at')
+        queryset = self.concepts_set if self.is_head else self.concepts
+        queryset = queryset.filter(mnemonic=mnemonic).order_by('-created_at')
         return (
                 queryset.filter(
                     id=F('versioned_object_id')

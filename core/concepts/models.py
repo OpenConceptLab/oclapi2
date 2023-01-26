@@ -1137,7 +1137,6 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             from core.collections.models import Collection
             is_collection = repo_version.__class__ == Collection
 
-
         self.current_level = 0
         levels = {self.current_level: [self]}
 

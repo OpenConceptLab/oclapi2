@@ -2,6 +2,7 @@ import factory
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from mock import patch, Mock, ANY, PropertyMock
+from pydash import get
 
 from core.collections.models import Collection
 from core.collections.tests.factories import OrganizationCollectionFactory
@@ -823,7 +824,7 @@ class SourceTest(OCLTestCase):
     def test_clone_with_cascade(self):
         """
             test_clone_with_cascade
-            source1:
+            source1: cloneFrom
                 - concept1
                 - concept2
                 - concept3
@@ -832,7 +833,7 @@ class SourceTest(OCLTestCase):
                 - mapping -> concept2 -> Q-AND-A -> concept1
                 - mapping -> concept2 -> NARROWER-THAN -> concept3
                 - mapping -> concept2 -> BROADER-THAN -> concept4
-            source2:
+            source2: cloneTo
                 - concept1
                 - concept3
 
@@ -907,6 +908,19 @@ class SourceTest(OCLTestCase):
         )
         self.assertEqual(source2.get_active_concepts().count(), 3)
         self.assertEqual(source2.get_active_mappings().count(), 4)
+
+        result = source1_concept2.cascade(
+            repo_version=source1, omit_if_exists_in=source2.uri, equivalency_map_types='SAME-AS'
+        )
+        self.assertEqual(result['concepts'].count(), 1)
+        self.assertEqual(result['concepts'].first(), source1_concept2)
+        self.assertEqual(result['mappings'].count(), 0)
+
+        result = source1_concept2.cascade_as_hierarchy(
+            repo_version=source1, omit_if_exists_in=source2.uri, equivalency_map_types='SAME-AS'
+        )
+        self.assertEqual(result, source1_concept2)
+        self.assertEqual(get(result, 'cascaded_entries'), None)
 
 
 class TasksTest(OCLTestCase):
