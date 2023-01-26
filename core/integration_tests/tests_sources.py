@@ -6,6 +6,7 @@ from django.db import transaction
 from mock import patch, Mock, ANY, PropertyMock
 from rest_framework.exceptions import ErrorDetail
 
+from core.bundles.models import Bundle
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
 from core.common.tasks import export_source
 from core.common.tests import OCLAPITestCase
@@ -1225,3 +1226,61 @@ class SourceMappedSourcesListViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 405)
+
+
+class SourceConceptsCloneViewTest(OCLAPITestCase):
+    def setUp(self):
+        self.user = UserProfileFactory()
+        self.token = self.user.get_token()
+        self.concept = ConceptFactory()
+        self.clone_to_source = OrganizationSourceFactory()
+
+    def test_post_bad_request(self):
+        response = self.client.post(
+            self.clone_to_source.uri + 'concepts/$clone/',
+            {'foo': 'bar'},
+            HTTP_AUTHORIZATION=f"Token {self.token}",
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+    @patch('core.bundles.models.Bundle.clone')
+    def test_post_success(self, bundle_clone_mock):
+        parameters = {'mapTypes': 'Q-AND-A,CONCEPT-SET'}
+        bundle_clone_mock.return_value = Bundle(
+            root=self.concept, repo_version=self.concept.parent, params=parameters, verbose=False
+        )
+
+        response = self.client.post(
+            self.clone_to_source.uri + 'concepts/$clone/',
+            {'expressions': [self.concept.uri, '/orgs/MyOrg/sources/MySource/concepts/123/'], 'parameters': parameters},
+            HTTP_AUTHORIZATION=f"Token {self.token}",
+            format='json'
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data,
+            {
+                self.concept.uri: {
+                    'status': 200,
+                    'bundle': {
+                        'resourceType': 'Bundle',
+                        'type': 'searchset',
+                        'meta': ANY,
+                        'total': None,
+                        'entry': [],
+                        'requested_url': None,
+                        'repo_version_url': self.concept.parent.uri + 'HEAD/'
+                    }
+                },
+                '/orgs/MyOrg/sources/MySource/concepts/123/': {
+                    'status': 404,
+                    'errors': ['Concept to clone with expression /orgs/MyOrg/sources/MySource/concepts/123/ not found.']
+                }
+            }
+        )
+        bundle_clone_mock.assert_called_once_with(
+            self.concept, self.concept.parent, self.clone_to_source, self.user, ANY, False,
+            **parameters
+        )

@@ -57,6 +57,7 @@ urlpatterns = [
         views.SourceVersionExportView.as_view(),
         name='sourceversion-latest-export-detail'
     ),
+    re_path(fr"^(?P<source>{NAMESPACE_PATTERN})/concepts/\$clone/", views.SourceConceptsCloneView.as_view()),
     re_path(fr"^(?P<source>{NAMESPACE_PATTERN})/concepts/indexes/", views.SourceConceptsIndexView.as_view()),
     re_path(fr"^(?P<source>{NAMESPACE_PATTERN})/mappings/indexes/", views.SourceMappingsIndexView.as_view()),
     re_path(fr"^(?P<source>{NAMESPACE_PATTERN})/concepts/", include('core.concepts.urls')),

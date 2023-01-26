@@ -15,9 +15,10 @@ from rest_framework.generics import (
     RetrieveAPIView, ListAPIView, UpdateAPIView, CreateAPIView)
 from rest_framework.response import Response
 
+from core.bundles.serializers import BundleSerializer
 from core.client_configs.views import ResourceClientConfigsView
 from core.common.constants import HEAD, RELEASED_PARAM, PROCESSING_PARAM, ACCESS_TYPE_NONE
-from core.common.exceptions import Http405
+from core.common.exceptions import Http405, Http400
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryCreateMixin, ConceptDictionaryUpdateMixin, \
     ConceptContainerExportMixin, ConceptContainerProcessingMixin
 from core.common.permissions import CanViewConceptDictionary, CanEditConceptDictionary, HasAccessToVersionedObject, \
@@ -26,7 +27,7 @@ from core.common.serializers import TaskSerializer
 from core.common.swagger_parameters import q_param, limit_param, sort_desc_param, sort_asc_param, exact_match_param, \
     page_param, verbose_param, include_retired_param, updated_since_param, include_facets_header, compress_header
 from core.common.tasks import export_source, index_source_concepts, index_source_mappings, delete_source
-from core.common.utils import parse_boolean_query_param, compact_dict_by_values
+from core.common.utils import parse_boolean_query_param, compact_dict_by_values, to_parent_uri
 from core.common.views import BaseAPIView, BaseLogoView, ConceptContainerExtraRetrieveUpdateDestroyView
 from core.sources.constants import DELETE_FAILURE, DELETE_SUCCESS, VERSION_ALREADY_EXISTS
 from core.sources.documents import SourceDocument
@@ -339,6 +340,49 @@ class SourceMappingsIndexView(SourceBaseView):
             dict(state=result.state, username=self.request.user.username, task=result.task_id, queue='default'),
             status=status.HTTP_202_ACCEPTED
         )
+
+
+class SourceConceptsCloneView(SourceBaseView):
+    serializer_class = BundleSerializer
+
+    def post(self, request, **kwargs):  # pylint: disable=unused-argument
+        """
+        body:
+            {
+                “expressions”: [“/orgs/CIEL/sources/CIEL/concepts/123/”], (cloneFrom)
+                “parameters”: { ….same as cascade… }
+            }
+        """
+        expressions = request.data.get('expressions')
+        parameters = request.data.get('parameters') or {}
+        if not expressions:
+            raise Http400()
+        instance = self.get_object()
+        results = {}
+        parent_resources = {}
+        is_verbose = self.is_verbose()
+        for expression in expressions:
+            from core.concepts.models import Concept
+            result = {}
+            concept_to_clone = Concept.objects.filter(uri=expression).first()
+            if concept_to_clone:
+                parent_uri = to_parent_uri(expression)
+                if parent_uri not in parent_resources:
+                    parent_resources[parent_uri] = Source.objects.filter(uri=parent_uri).first()
+                parent_resource = parent_resources[parent_uri]
+                from core.bundles.models import Bundle
+                bundle = Bundle.clone(
+                    concept_to_clone, parent_resource, instance, request.user,
+                    self.request.get_full_path(), is_verbose, **parameters
+                )
+                result['status'] = status.HTTP_200_OK
+                result['bundle'] = BundleSerializer(bundle, context=dict(request=request)).data
+            else:
+                result['status'] = status.HTTP_404_NOT_FOUND
+                result['errors'] = [f'Concept to clone with expression {expression} not found.']
+            results[expression] = result
+
+        return Response(results, status.HTTP_200_OK)
 
 
 class SourceVersionRetrieveUpdateDestroyView(SourceVersionBaseView, RetrieveAPIView, UpdateAPIView):
