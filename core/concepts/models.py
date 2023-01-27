@@ -1058,7 +1058,8 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         omit_concepts_criteria, omit_mappings_criteria = self.__get_omit_from_version_criteria(
             omit_if_exists_in, equivalency_map_types_criteria)
 
-        if omit_concepts_criteria and Concept.objects.filter(omit_concepts_criteria).filter(versioned_object_id=self.versioned_object_id).exists():
+        if omit_concepts_criteria and Concept.objects.filter(omit_concepts_criteria).filter(
+                versioned_object_id=self.versioned_object_id).exists():
             return result
 
         if isinstance(repo_version, str):  # assumes its cascaded under source version, usage via collection-reference
@@ -1124,7 +1125,8 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         omit_concepts_criteria, omit_mappings_criteria = self.__get_omit_from_version_criteria(
             omit_if_exists_in, equivalency_map_types_criteria)
 
-        if omit_concepts_criteria and Concept.objects.filter(omit_concepts_criteria).filter(versioned_object_id=self.versioned_object_id).exists():
+        if omit_concepts_criteria and Concept.objects.filter(omit_concepts_criteria).filter(
+                versioned_object_id=self.versioned_object_id).exists():
             return self
 
         if isinstance(repo_version, str):  # assumes its cascaded under source version, may never happen

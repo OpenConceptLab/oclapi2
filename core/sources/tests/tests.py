@@ -821,7 +821,7 @@ class SourceTest(OCLTestCase):
         self.assertEqual(mapped_sources.count(), 1)
         self.assertEqual(mapped_sources.first().url, source1.url)
 
-    def test_clone_with_cascade(self):
+    def test_clone_with_cascade(self):  # pylint: disable=too-many-locals
         """
             test_clone_with_cascade
             source1: cloneFrom

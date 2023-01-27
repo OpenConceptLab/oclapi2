@@ -362,7 +362,7 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         mappings = mappings.order_by('to_source_id').distinct('to_source_id')
         return Source.objects.filter(id__in=mappings.values_list('to_source_id', flat=True))
 
-    def clone_resources(self, user, concepts, mappings, **kwargs):
+    def clone_resources(self, user, concepts, mappings, **kwargs):  # pylint: disable=too-many-locals
         from core.mappings.models import Mapping
         cloned_concepts, cloned_mappings = [], []
         map_types = kwargs.get('map_types', '')

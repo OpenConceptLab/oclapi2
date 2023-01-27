@@ -345,7 +345,7 @@ class SourceMappingsIndexView(SourceBaseView):
 class SourceConceptsCloneView(SourceBaseView):
     serializer_class = BundleSerializer
 
-    def post(self, request, **kwargs):  # pylint: disable=unused-argument
+    def post(self, request, **kwargs):  # pylint: disable=unused-argument, too-many-locals
         """
         body:
             {
