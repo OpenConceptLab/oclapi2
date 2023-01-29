@@ -220,16 +220,18 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         )
 
     def set_active_concepts(self):
-        queryset = self.concepts.filter(retired=False, is_active=True)
         if self.is_head:
-            queryset = queryset.filter(id=F('versioned_object_id'))
-        self.active_concepts = queryset.count()
+            queryset = self.concepts_set.filter(id=F('versioned_object_id'))
+        else:
+            queryset = self.concepts
+        self.active_concepts = queryset.filter(retired=False, is_active=True).count()
 
     def set_active_mappings(self):
-        queryset = self.mappings.filter(retired=False, is_active=True)
         if self.is_head:
-            queryset = queryset.filter(id=F('versioned_object_id'))
-        self.active_mappings = queryset.count()
+            queryset = self.mappings_set.filter(id=F('versioned_object_id'))
+        else:
+            queryset = self.mappings
+        self.active_mappings = queryset.filter(retired=False, is_active=True).count()
 
     def seed_concepts(self, index=True):
         head = self.head
