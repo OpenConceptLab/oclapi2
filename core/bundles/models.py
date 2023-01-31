@@ -187,18 +187,37 @@ class Bundle:
             cls, concept_to_clone, clone_from_source, clone_to_source, user, requested_url,
             is_verbose=False, **parameters
     ):
-        _parameters = {}
-        if parameters:
-            _parameters = parameters.copy()
-            _parameters['repo_version'] = clone_from_source
-        added_concepts, added_mappings = clone_to_source.clone_with_cascade(concept_to_clone, user, **_parameters)
+        # if parameters:
+        #     _parameters = parameters.copy()
+
         bundle = cls(
-            root=clone_to_source.find_concept_by_mnemonic(concept_to_clone.mnemonic),
-            params=_parameters,
+            root=None,
+            params=parameters,
             verbose=is_verbose,
             repo_version=clone_from_source,
             requested_url=requested_url
         )
+        bundle.set_cascade_parameters()
+        _parameters = {}
+        if parameters:
+            _parameters = dict(
+                repo_version=clone_from_source,
+                map_types=bundle.map_types,
+                exclude_map_types=bundle.exclude_map_types,
+                cascade_mappings=bundle.cascade_mappings,
+                cascade_hierarchy=bundle.cascade_hierarchy,
+                cascade_levels=bundle.cascade_levels,
+                include_retired=bundle.include_retired,
+                reverse=bundle.reverse,
+                return_map_types=bundle.return_map_types,
+                equivalency_map_types=bundle.equivalency_map_types
+            )
+            if bundle.cascade_method:
+                _parameters['source_mappings'] = bundle.cascade_method == SOURCE_MAPPINGS
+                _parameters['source_to_concepts'] = bundle.cascade_method == SOURCE_TO_CONCEPTS
+
+        added_concepts, added_mappings = clone_to_source.clone_with_cascade(concept_to_clone, user, **_parameters)
+        bundle.root = clone_to_source.find_concept_by_mnemonic(concept_to_clone.mnemonic)
         bundle.concepts = added_concepts
         bundle.mappings = added_mappings
         bundle.set_total()
