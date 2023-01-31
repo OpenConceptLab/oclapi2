@@ -367,7 +367,7 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
     def clone_resources(self, user, concepts, mappings, **kwargs):  # pylint: disable=too-many-locals
         from core.mappings.models import Mapping
         cloned_concepts, cloned_mappings = [], []
-        map_types = kwargs.get('map_types', '')
+        map_types = kwargs.get('map_types', '') or ''
         for concept in concepts:
             if not self.concepts_set.filter(mnemonic=concept.mnemonic).exists():
                 cloned_concept = concept.versioned_object.clone()
