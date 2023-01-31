@@ -202,7 +202,7 @@ class Bundle:
         if parameters:
             _parameters = dict(
                 repo_version=clone_from_source,
-                map_types=bundle.map_types or [],
+                map_types=bundle.map_types or '',
                 exclude_map_types=bundle.exclude_map_types,
                 cascade_mappings=bundle.cascade_mappings,
                 cascade_hierarchy=bundle.cascade_hierarchy,
