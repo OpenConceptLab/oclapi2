@@ -19,14 +19,14 @@ from core.users.models import UserProfile
 
 
 class MonthlyUsageReport:
-    def __init__(self, verbose=False, start=None, end=None):
+    def __init__(self, verbose=False, start=None, end=None, current_month_start=None, current_month_end=None):
         self.verbose = verbose
         self.start = start
         self.end = end
-        now = timezone.now()
-        self.current_month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        self.current_month_end = get_end_of_month(self.current_month_start).replace(
-            hour=23, minute=59, second=59, microsecond=0)
+        self.current_month_start = current_month_start or timezone.now().replace(day=1, hour=0, minute=0, second=0,
+                                                                                 microsecond=0)
+        self.current_month_end = current_month_end or get_end_of_month(
+            self.current_month_start).replace(hour=23, minute=59, second=59, microsecond=0)
         self.resources = []
         self.current_month_resources = []
         self.result = {}

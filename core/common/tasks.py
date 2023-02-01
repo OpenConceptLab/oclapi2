@@ -681,7 +681,9 @@ def monthly_usage_report():  # pragma: no cover
     from core.reports.models import MonthlyUsageReport
     now = timezone.now().replace(day=1)
     three_months_from_now = now - relativedelta(months=3)
-    report = MonthlyUsageReport(verbose=True, start=three_months_from_now, end=now)
+    last_month = now - relativedelta(months=1)
+    report = MonthlyUsageReport(
+        verbose=True, start=three_months_from_now, end=now, current_month_end=now, current_month_start=last_month)
     report.prepare()
     html_body = render_to_string('monthly_usage_report_for_mail.html', report.get_result_for_email())
     mail = EmailMessage(
