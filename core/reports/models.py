@@ -19,7 +19,7 @@ from core.users.models import UserProfile
 
 
 class MonthlyUsageReport:
-    def __init__(self, verbose=False, start=None, end=None, current_month_start=None, current_month_end=None):
+    def __init__(self, verbose=False, start=None, end=None, current_month_start=None, current_month_end=None):  # pylint: disable=too-many-arguments
         self.verbose = verbose
         self.start = start
         self.end = end
