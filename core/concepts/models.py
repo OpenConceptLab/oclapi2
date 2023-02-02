@@ -634,11 +634,14 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         names = self.cloned_names
         descriptions = self.cloned_descriptions
         parent = self.parent
+        self.name = self.mnemonic = self.version = generate_temp_version()
         self.is_latest_version = False
         self.public_access = parent.public_access
-        self.name = self.mnemonic
         self.save()
         if self.id:
+            self.name = self.mnemonic = parent.concept_mnemonic_next or str(self.id)
+            if not self.external_id:
+                self.external_id = parent.concept_external_id_next
             self.versioned_object_id = self.id
             self.version = str(self.id)
             self.save()
@@ -676,8 +679,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
             parent_resource = concept.parent
             if startswith_temp_version(concept.mnemonic):
-                concept.mnemonic = parent_resource.concept_mnemonic_next or str(concept.id)
-                concept.name = concept.mnemonic
+                concept.name = concept.mnemonic = parent_resource.concept_mnemonic_next or str(concept.id)
             if not concept.external_id:
                 concept.external_id = parent_resource.concept_external_id_next
             concept.is_latest_version = not create_initial_version
@@ -1118,10 +1120,10 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             include_retired=False, reverse=False, omit_if_exists_in=None,
             _=None
     ):
-        if cascade_levels == 0:
-            return self
+        from core.mappings.models import Mapping
+        self.cascaded_entries = dict(concepts=Concept.objects.none(), mappings=Mapping.objects.none())
 
-        if not repo_version:
+        if cascade_levels == 0 or not repo_version:
             return self
 
         mappings_criteria = self._get_cascade_mappings_criteria(map_types, exclude_map_types)

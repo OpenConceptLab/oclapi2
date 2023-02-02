@@ -13,7 +13,7 @@ from core.common.utils import separate_version, to_parent_uri, generate_temp_ver
     encode_string, is_url_encoded_string
 from core.mappings.constants import MAPPING_TYPE, MAPPING_IS_ALREADY_RETIRED, MAPPING_WAS_RETIRED, \
     MAPPING_IS_ALREADY_NOT_RETIRED, MAPPING_WAS_UNRETIRED, PERSIST_CLONE_ERROR, PERSIST_CLONE_SPECIFY_USER_ERROR, \
-    ALREADY_EXISTS
+    ALREADY_EXISTS, SAME_AS
 from core.mappings.mixins import MappingValidationMixin
 
 
@@ -321,6 +321,13 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         return mapping
 
     @classmethod
+    def build_same_as(cls, from_concept, to_concept, **kwargs):
+        return cls(
+            map_type=SAME_AS, from_concept=from_concept, to_concept=to_concept,
+            to_concept_code=to_concept.mnemonic, from_concept_code=from_concept.mnemonic, **kwargs
+        )
+
+    @classmethod
     def create_initial_version(cls, mapping, **kwargs):
         initial_version = mapping.clone()
         initial_version.comment = mapping.comment
@@ -427,10 +434,14 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         parent = self.parent
         self.is_latest_version = False
         self.public_access = parent.public_access
+        self.mnemonic = self.version = generate_temp_version()
         self.save()
         if self.id:
+            self.mnemonic = parent.mapping_mnemonic_next or str(self.id)
             self.versioned_object_id = self.id
             self.version = str(self.id)
+            if not self.external_id:
+                self.external_id = parent.mapping_external_id_next
             self.save()
             initial_version = Mapping.create_initial_version(self)
             initial_version.sources.set([parent])

@@ -2,7 +2,6 @@ import factory
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from mock import patch, Mock, ANY, PropertyMock
-from pydash import get
 
 from core.collections.models import Collection
 from core.collections.tests.factories import OrganizationCollectionFactory
@@ -821,7 +820,7 @@ class SourceTest(OCLTestCase):
         self.assertEqual(mapped_sources.count(), 1)
         self.assertEqual(mapped_sources.first().url, source1.url)
 
-    def test_clone_with_cascade(self):  # pylint: disable=too-many-locals
+    def test_clone_with_cascade(self):  # pylint: disable=too-many-locals,too-many-statements
         """
             test_clone_with_cascade
             source1: cloneFrom
@@ -836,12 +835,17 @@ class SourceTest(OCLTestCase):
             source2: cloneTo
                 - concept1
                 - concept3
+                - mapping -> source2.concept1 -> SAME-AS -> source1.concept1
+                - mapping -> source2.concept3 -> SAME-AS -> source1.concept3
 
             --CLONE source1.concept2 in source2--
 
             source2:
-                - concept1
-                - concept3
+                - (old) concept1
+                - (old) concept3
+                - (old) mapping -> source2.concept1 -> SAME-AS -> source1.concept1
+                - (old) mapping -> source2.concept3 -> SAME-AS -> source1.concept3
+
                 - (new) concept2 (clone of source1.concept2)
                 - (new) mapping -> source2.concept2 -> SAME-AS -> source1.concept2
                 - (new) mapping -> source2.concept2 -> Q-AND-A -> source2.concept1
@@ -849,10 +853,14 @@ class SourceTest(OCLTestCase):
                 - (new) mapping -> source2.concept2 -> BROADER-THAN -> source1.concept4
         """
         source1 = OrganizationSourceFactory(mnemonic='source1')
-        source1_concept1 = ConceptFactory(mnemonic='concept1', parent=source1)  # to_concept
-        source1_concept2 = ConceptFactory(mnemonic='concept2', parent=source1)  # from_concept
-        source1_concept3 = ConceptFactory(mnemonic='concept3', parent=source1)
-        source1_concept4 = ConceptFactory(mnemonic='concept4', parent=source1)
+        source1_concept1 = ConceptFactory(
+            mnemonic='concept1', parent=source1, names=[ConceptNameFactory.build(name='concept1')])  # to_concept
+        source1_concept2 = ConceptFactory(
+            mnemonic='concept2', parent=source1, names=[ConceptNameFactory.build(name='concept2')])  # from_concept
+        source1_concept3 = ConceptFactory(
+            mnemonic='concept3', parent=source1, names=[ConceptNameFactory.build(name='concept3')])
+        source1_concept4 = ConceptFactory(
+            mnemonic='concept4', parent=source1, names=[ConceptNameFactory.build(name='concept4')])
         MappingFactory(
             from_concept=source1_concept1, to_concept=source1_concept3, parent=source1, map_type='Q-AND-A')
         MappingFactory(
@@ -863,31 +871,49 @@ class SourceTest(OCLTestCase):
             from_concept=source1_concept2, to_concept=source1_concept4, parent=source1, map_type='BROADER-THAN')
 
         source2 = OrganizationSourceFactory(mnemonic='source2')
-        source2_concept1 = ConceptFactory(mnemonic='concept1', parent=source2)  # same as source1_concept1 -> to_concept
-        source2_concept3 = ConceptFactory(mnemonic='concept3', parent=source2)  # same as source1_concept3
+        # same as source1_concept1 -> to_concept
+        source2_concept1 = ConceptFactory(
+            mnemonic='concept1', parent=source2, names=[ConceptNameFactory.build(name='concept1')])
+        # same as source1_concept3
+        source2_concept3 = ConceptFactory(
+            mnemonic='concept3', parent=source2, names=[ConceptNameFactory.build(name='concept3')])
+        MappingFactory(
+            from_concept=source2_concept1, to_concept=source1_concept1, parent=source2, map_type='SAME-AS')
+        MappingFactory(
+            from_concept=source2_concept3, to_concept=source1_concept3, parent=source2, map_type='SAME-AS')
 
         self.assertEqual(source2.get_active_concepts().count(), 2)
-        self.assertEqual(source2.get_active_mappings().count(), 0)
+        self.assertEqual(source2.get_active_mappings().count(), 2)
 
-        source2.clone_with_cascade(
+        added_concepts, added_mappings = source2.clone_with_cascade(
             concept_to_clone=source1_concept2,
             user=source1_concept2.created_by,
             map_types='Q-AND-A,CONCEPT-SET',
+            equivalency_map_types='SAME-AS'
         )
+
+        self.assertEqual(len(added_concepts), 1)
+        self.assertEqual(len(added_mappings), 4)
         self.assertEqual(source2.get_active_concepts().count(), 3)
-        self.assertEqual(source2.get_active_mappings().count(), 4)
+        self.assertEqual(source2.get_active_mappings().count(), 6)
+        source2_concepts = source2.get_concepts_queryset().order_by('created_at')
         self.assertEqual(
-            list(source2.get_concepts_queryset().order_by('created_at').values_list('mnemonic', flat=True)),
+            list(source2_concepts.values_list('mnemonic', flat=True)),
+            ['concept1', 'concept3', ANY]
+        )
+        self.assertNotEqual(source2_concepts.last().mnemonic, 'concept2')
+        self.assertEqual(
+            [concept.display_name for concept in source2_concepts],
             ['concept1', 'concept3', 'concept2']
         )
         mappings = source2.get_mappings_queryset()
-        self.assertEqual(mappings.count(), 4)
+        self.assertEqual(mappings.count(), 6)
 
-        same_as_mapping = mappings.filter(map_type='SAME-AS').first()
+        same_as_mapping = mappings.filter(map_type='SAME-AS', to_concept_code='concept2').first()
         self.assertEqual(same_as_mapping.to_concept.uri, source1_concept2.uri)
         new_from_concept = same_as_mapping.from_concept
-        self.assertEqual(new_from_concept.mnemonic, source1_concept2.mnemonic)
-        self.assertEqual(new_from_concept.uri, source2.uri + f'concepts/{source1_concept2.mnemonic}/')
+        self.assertNotEqual(new_from_concept.mnemonic, source1_concept2.mnemonic)
+        self.assertTrue(new_from_concept.display_name == source1_concept2.display_name == 'concept2')
 
         q_and_a_mapping = mappings.filter(map_type='Q-AND-A').first()
         self.assertEqual(q_and_a_mapping.from_concept.uri, new_from_concept.uri)
@@ -901,13 +927,17 @@ class SourceTest(OCLTestCase):
         self.assertEqual(broader_than_mapping.from_concept.uri, new_from_concept.uri)
         self.assertEqual(broader_than_mapping.to_concept.uri, source1_concept4.uri)
 
-        source2.clone_with_cascade(
+        added_concepts, added_mappings = source2.clone_with_cascade(
             concept_to_clone=source1_concept2,
             user=source1_concept2.created_by,
             map_types='Q-AND-A,CONCEPT-SET',
+            equivalency_map_types='SAME-AS'
         )
+
+        self.assertEqual(len(added_concepts), 0)
+        self.assertEqual(len(added_mappings), 0)
         self.assertEqual(source2.get_active_concepts().count(), 3)
-        self.assertEqual(source2.get_active_mappings().count(), 4)
+        self.assertEqual(source2.get_active_mappings().count(), 6)
 
         result = source1_concept2.cascade(
             repo_version=source1, omit_if_exists_in=source2.uri, equivalency_map_types='SAME-AS'
@@ -920,7 +950,8 @@ class SourceTest(OCLTestCase):
             repo_version=source1, omit_if_exists_in=source2.uri, equivalency_map_types='SAME-AS'
         )
         self.assertEqual(result, source1_concept2)
-        self.assertEqual(get(result, 'cascaded_entries'), None)
+        self.assertEqual(result.cascaded_entries['concepts'].count(), 0)
+        self.assertEqual(result.cascaded_entries['mappings'].count(), 0)
 
 
 class TasksTest(OCLTestCase):
