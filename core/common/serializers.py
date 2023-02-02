@@ -89,22 +89,26 @@ class IdentifierSerializer(ReadSerializerMixin, Serializer):
     @staticmethod
     def convert_ocl_uri_to_fhir_url(uri, resource_type):
         resource_type_uri = f"/{resource_type}/"
-        fhir_uri = uri.replace('/sources/', resource_type_uri).replace('/collections/', resource_type_uri)
-        fhir_uri = fhir_uri.strip('/')
-        parts = fhir_uri.split('/')
-        if len(parts) < 4:
-            raise ValidationError(
-                'Identifier must be in a format: /{owner_type}/{owner_id}/{resourceType}/{resource_id}/, given: '
-                + fhir_uri)
-        fhir_uri = '/' + '/'.join(parts[:4]) + '/'
-        return fhir_uri
+        if uri.startswith('/orgs/') or uri.startswith('/users/'):
+            # Recognize OCL API relative URI
+            uri = uri.replace('/sources/', resource_type_uri).replace('/collections/', resource_type_uri)
+            uri = uri.strip('/')
+            parts = uri.split('/')
+            if len(parts) < 4:
+                raise ValidationError(
+                    'Identifier must be in a format: /{owner_type}/{owner_id}/{resourceType}/{resource_id}/, given: '
+                    + uri)
+            uri = '/' + '/'.join(parts[:4]) + '/'
+        return uri
 
     @staticmethod
     def convert_fhir_url_to_ocl_uri(uri, resource_type):
         resource_type_uri = f"/{resource_type}/"
-        fhir_uri = uri.replace('/ConceptMap/', resource_type_uri).replace('/CodeSystem/', resource_type_uri)\
-            .replace('/ValueSet/', resource_type_uri)
-        return fhir_uri
+        if uri.startswith('/orgs/') or uri.startswith('/users/'):
+            # Recognize OCL FHIR relative URI
+            uri = uri.replace('/ConceptMap/', resource_type_uri).replace('/CodeSystem/', resource_type_uri) \
+                .replace('/ValueSet/', resource_type_uri)
+        return uri
 
     @staticmethod
     def include_ocl_identifier(uri, resource_type, rep):

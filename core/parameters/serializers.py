@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from rest_framework.fields import CharField, SerializerMethodField, BooleanField
+from rest_framework.fields import CharField, SerializerMethodField, BooleanField, IntegerField
 
 from core.common.constants import HEAD
 from core.common.serializers import ReadSerializerMixin
@@ -27,6 +27,7 @@ class ParameterSerializer(ReadSerializerMixin, serializers.Serializer):
     valueBoolean = BooleanField(required=False)
     valueUri = CharField(required=False)
     valueCode = CharField(required=False)
+    valueInteger = IntegerField(required=False)
 
 
 class ParametersSerializer(serializers.Serializer, ReadSerializerMixin):

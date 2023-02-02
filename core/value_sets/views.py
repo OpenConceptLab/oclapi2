@@ -1,9 +1,12 @@
 import logging
 
+from django.core.exceptions import ValidationError
 from django.db.models import F
+from rest_framework import status
+from rest_framework.response import Response
 
 from core.bundles.serializers import FHIRBundleSerializer
-from core.collections.models import Collection
+from core.collections.models import Collection, default_expansion_parameters
 from core.collections.views import CollectionListView, CollectionRetrieveUpdateDestroyView, \
     CollectionVersionExpansionsView
 from core.common.constants import HEAD
@@ -145,7 +148,34 @@ class ValueSetExpandView(CollectionVersionExpansionsView):
     sync = True
 
     def get_serializer_class(self):
-        return ValueSetExpansionParametersSerializer
+        if self.request.method == 'POST':
+            return ValueSetExpansionParametersSerializer
+
+        return ValueSetExpansionSerializer
 
     def get_response_serializer_class(self):
         return ValueSetExpansionSerializer
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        if self.request.method == 'GET':
+            parameters = ValueSetExpansionParametersSerializer.parse_query_params(self.request.query_params)
+            if not parameters.is_valid():
+                raise ValidationError(message=parameters.errors)
+
+            params = parameters.validated_data
+            params = params.get('parameters', {})
+            if not params:
+                qs = qs.filter(parameters=default_expansion_parameters()).order_by('-id')
+            else:
+                qs = qs.filter(parameters=params).order_by('-id')
+
+        return qs
+
+    def get(self, request, *args, **kwargs):
+        instance = self.get_queryset().first()
+        if instance:
+            serializer = self.get_serializer(instance)
+            return Response(serializer.data)
+
+        return Response(status=status.HTTP_404_NOT_FOUND)
