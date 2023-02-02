@@ -408,12 +408,12 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         for mapping in cloned_mappings:
             to_concept = get(mapping, 'to_concept')
             from_concept = get(mapping, 'from_concept')
-            if not from_concept.id:
+            if not get(from_concept, 'id'):
                 from_concept = self.find_concept_by_mnemonic(from_concept.mnemonic)
-            if not to_concept.id:
+            if not get(to_concept, 'id') and get(to_concept, 'mnemonic'):
                 to_concept = self.find_concept_by_mnemonic(to_concept.mnemonic)
-            mapping.from_concept_id = from_concept.id
-            mapping.to_concept_id = to_concept.id
+            mapping.from_concept_id = get(from_concept, 'id')
+            mapping.to_concept_id = get(to_concept, 'id')
             mapping.to_source_id = get(to_concept, 'parent_id')
             mapping.from_source_id = get(from_concept, 'parent_id')
             self._clone_resource(mapping, user)
