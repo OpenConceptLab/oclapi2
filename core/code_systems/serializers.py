@@ -12,11 +12,30 @@ from core.common.serializers import ReadSerializerMixin, StatusField, Identifier
 from core.concepts.models import Concept, ConceptName
 from core.concepts.serializers import ConceptDetailSerializer
 from core.orgs.models import Organization
+from core.parameters.serializers import ParametersSerializer
 from core.sources.models import Source
 from core.sources.serializers import SourceCreateOrUpdateSerializer
 from core.users.models import UserProfile
 
 logger = logging.getLogger('oclapi')
+
+
+class ValidateCodeParametersSerializer(ParametersSerializer):
+    allowed_input_parameters = {
+        'url': 'valueUri',
+        'code': 'valueCode',
+        'display': 'valueString',
+        'version': 'valueString',
+        'systemVersion': 'valueString',
+        'system': 'valueUri'
+    }
+
+    def get(self, field):
+        params = self.validated_data
+        for param in params['parameter']:
+            if param['name'] == field:
+                return param[self.allowed_input_parameters[field]]
+        return None
 
 
 class CodeSystemConceptDesignationUseSerializer(serializers.Field):

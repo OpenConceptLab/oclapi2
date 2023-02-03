@@ -1,11 +1,14 @@
 import logging
 
 from django.db.models import F
+from rest_framework.exceptions import ValidationError, NotAuthenticated
 
 from core.bundles.serializers import FHIRBundleSerializer
-from core.code_systems.serializers import CodeSystemDetailSerializer
+from core.code_systems.serializers import CodeSystemDetailSerializer, \
+    ValidateCodeParametersSerializer
 from core.common.constants import HEAD
 from core.common.fhir_helpers import translate_fhir_query
+from core.concepts.permissions import CanViewParentDictionaryAsGuest
 from core.concepts.views import ConceptRetrieveUpdateDestroyView
 from core.parameters.serializers import ParametersSerializer
 from core.sources.models import Source
@@ -67,20 +70,40 @@ class CodeSystemListLookupView(ConceptRetrieveUpdateDestroyView):
         return ParametersSerializer()
 
 
-class CodeSystemListValidateCodeView(ConceptRetrieveUpdateDestroyView):
-    serializer_class = ParametersSerializer
+class CodeSystemValidateCodeView(ConceptRetrieveUpdateDestroyView):
+    serializer_class = ValidateCodeParametersSerializer
+
+    def verify_scope(self):
+        pass
+
+    def post(self, request, *args, **kwargs):
+        return self.retrieve(request, *args, **kwargs)
+
+    def update(self, request, *args, **kwargs):
+        return self.retrieve(request, *args, **kwargs)
+
+    def delete(self, request, *args, **kwargs):
+        # Not supported
+        pass
 
     def is_container_version_specified(self):
         return True
 
+    def get_permissions(self):
+        return [CanViewParentDictionaryAsGuest(), ]
+
     def get_queryset(self):
         queryset = super().get_queryset()
-        code = self.request.query_params.get('code')
-        system = self.request.query_params.get('url')
-        display = self.request.query_params.get('display')
-        version = self.request.query_params.get('version')
-        if code and system:
-            source = Source.objects.filter(canonical_url=system)
+
+        parameters = self.get_parameters()
+
+        url = parameters.get('url')
+        code = parameters.get('code')
+        version = parameters.get('version')
+        display = parameters.get('display')
+
+        if code and url:
+            source = Source.objects.filter(canonical_url=url)
             if version:
                 source = source.filter(version=version)
             else:
@@ -95,33 +118,42 @@ class CodeSystemListValidateCodeView(ConceptRetrieveUpdateDestroyView):
 
         return queryset
 
+    def get_parameters(self):
+        if self.request.method in ['POST', 'PUT']:
+            parameters = self.get_serializer(data=self.request.data, instance=None)
+        else:
+            parameters = self.get_serializer_class().parse_query_params(self.request.query_params)
+        if not parameters.is_valid():
+            raise ValidationError(parameters.errors)
+        return parameters
+
     def get_object(self, queryset=None):
         queryset = self.get_queryset()
         if not self.is_container_version_specified():
             queryset = queryset.filter(id=F('versioned_object_id'))
         instance = queryset.first()
         if instance:
-            self.check_object_permissions(self.request, instance)
-
-        return instance
-
-    def get_serializer(self, instance=None):  # pylint: disable=arguments-differ
-        if instance:
-            return ParametersSerializer(
-                {
+            try:
+                self.check_object_permissions(self.request, instance)
+            except NotAuthenticated:
+                return {
                     'parameter': [
-                        {'name': 'result', 'valueBoolean': True}
+                        {'name': 'result', 'valueBoolean': False}
                     ]
                 }
-            )
-        return ParametersSerializer(
-            {
+
+        if instance:
+            return {
                 'parameter': [
-                    {'name': 'result', 'valueBoolean': False},
-                    {'name': 'message', 'valueString': 'The code is incorrect.'}
+                    {'name': 'result', 'valueBoolean': True}
                 ]
             }
-        )
+
+        return {
+            'parameter': [
+                {'name': 'result', 'valueBoolean': False}
+            ]
+        }
 
 
 class CodeSystemRetrieveUpdateView(SourceRetrieveUpdateDestroyView):

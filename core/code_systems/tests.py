@@ -123,6 +123,23 @@ class CodeSystemTest(OCLTestCase):
         self.assertJSONEqual(json.dumps(response.data), json.dumps(
             {'resourceType': 'Parameters', 'parameter': [{'name': 'result', 'valueBoolean': True}]}))
 
+    def test_validate_code_for_code_system_via_post(self):
+        response = self.client.post(
+            f'/fhir/CodeSystem/$validate-code/',
+            data={
+                'resourceType': 'Parameters',
+                'parameter': [
+                    {'name': 'url', 'valueUri': self.org_source.canonical_url},
+                    {'name': 'code', 'valueCode': self.concept_1.mnemonic}
+                ]
+            },
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertJSONEqual(json.dumps(response.data), json.dumps(
+            {'resourceType': 'Parameters', 'parameter': [{'name': 'result', 'valueBoolean': True}]}))
+
     def test_validate_code_for_code_system_negative(self):
         response = self.client.get(f'/fhir/CodeSystem/$validate-code/'
                                    f'?url={self.org_source.canonical_url}&code=non_existing_code')
@@ -130,8 +147,7 @@ class CodeSystemTest(OCLTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertJSONEqual(json.dumps(response.data), json.dumps(
             {'resourceType': 'Parameters', 'parameter': [
-                {'name': 'result', 'valueBoolean': False},
-                {'name': 'message', 'valueString': 'The code is incorrect.'}
+                {'name': 'result', 'valueBoolean': False}
             ]}))
 
     def test_validate_code_with_display_for_code_system(self):
@@ -153,8 +169,7 @@ class CodeSystemTest(OCLTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertJSONEqual(json.dumps(response.data), json.dumps(
             {'resourceType': 'Parameters', 'parameter': [
-                {'name': 'result', 'valueBoolean': False},
-                {'name': 'message', 'valueString': 'The code is incorrect.'}
+                {'name': 'result', 'valueBoolean': False}
                 ]}))
 
     def test_lookup_for_code_system(self):

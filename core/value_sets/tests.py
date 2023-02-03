@@ -373,6 +373,37 @@ class ValueSetTest(OCLAPITestCase):
         self.assertEqual(resource['parameter'][0]['name'], 'result')
         self.assertEqual(resource['parameter'][0]['valueBoolean'], True)
 
+    def test_validate_code_globally_via_post(self):
+        self.collection.add_references([
+            CollectionReference(
+                expression=self.concept_1.uri, collection=self.collection, code=self.concept_1.mnemonic,
+                system=self.concept_1.parent.uri, version='v2'
+            ),
+            CollectionReference(
+                expression=self.concept_2.uri, collection=self.collection, code=self.concept_2.mnemonic,
+                system=self.concept_2.parent.uri, version='v2'
+            ),
+        ])
+        self.collection_v1.seed_references()
+
+        response = self.client.post(
+            f'/fhir/ValueSet/$validate-code/',
+            data={
+                'resourceType': 'Parameters',
+                'parameter': [
+                    {'name': 'url', 'valueUri': 'http://c1.com'},
+                    {'name': 'system', 'valueUri': 'http://some/url'},
+                    {'name': 'systemVersion', 'valueString': self.org_source_v2.version},
+                    {'name': 'code', 'valueCode': self.concept_1.mnemonic}
+                ]
+            },
+            format='json'
+        )
+
+        resource = response.data
+        self.assertEqual(resource['parameter'][0]['name'], 'result')
+        self.assertEqual(resource['parameter'][0]['valueBoolean'], True)
+
     def test_validate_code_globally_negative(self):
         self.collection.add_references([
             CollectionReference(

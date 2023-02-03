@@ -30,7 +30,7 @@ class ParameterSerializer(ReadSerializerMixin, serializers.Serializer):
     valueInteger = IntegerField(required=False)
 
 
-class ParametersSerializer(serializers.Serializer, ReadSerializerMixin):
+class ParametersSerializer(ReadSerializerMixin, serializers.Serializer):
     resourceType = SerializerMethodField(method_name='get_resource_type')
     parameter = ParameterSerializer(many=True)
     allowed_input_parameters = {}
