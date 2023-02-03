@@ -125,6 +125,7 @@ class MappingMinimalSerializer(ModelSerializer):
     id = CharField(source='mnemonic', read_only=True)
     type = CharField(source='resource_type', read_only=True)
     url = CharField(source='uri', read_only=True)
+    from_concept_code = EncodedDecodedCharField()
     to_concept_code = EncodedDecodedCharField()
     cascade_target_concept_code = EncodedDecodedCharField(source='to_concept_code')
     cascade_target_concept_name = SerializerMethodField()
@@ -137,7 +138,8 @@ class MappingMinimalSerializer(ModelSerializer):
         fields = (
             'id', 'type', 'map_type', 'url', 'version_url', 'to_concept_code', 'to_concept_url',
             'cascade_target_concept_code', 'cascade_target_concept_url', 'cascade_target_source_owner',
-            'cascade_target_source_name', 'cascade_target_concept_name', 'retired', 'sort_weight'
+            'cascade_target_source_name', 'cascade_target_concept_name', 'retired', 'sort_weight',
+            'from_concept_code'
         )
 
     @staticmethod

@@ -367,11 +367,9 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         from core.mappings.models import Mapping
         added_concepts, added_mappings = [], []
         equivalency_map_types = (kwargs.get('equivalency_map_types') or '').split(',')
-        update_count = False
+        _concepts_to_add_mappings_for = []
         for concept in concepts:
-            equivalent_concept = self.get_equivalent_concept(concept, equivalency_map_types)
-            if not equivalent_concept:
-                update_count = True
+            if not self.get_equivalent_concept(concept, equivalency_map_types):
                 cloned_concept = concept.versioned_object.clone()
                 added_concepts += self.clone_concepts([cloned_concept], user, False)
                 added_mappings += self.clone_mappings(
@@ -379,12 +377,15 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
                     user,
                     False
                 )
-                for mapping in mappings.filter(from_concept__versioned_object_id=concept.versioned_object_id):
-                    existing_to_concept = self.get_equivalent_concept(mapping.to_concept, equivalency_map_types)
-                    added_mappings += self.clone_mappings(
-                        [mapping.clone(user, cloned_concept, existing_to_concept)], user, False)
+                _concepts_to_add_mappings_for.append([concept, cloned_concept])
+        for concept_pair in _concepts_to_add_mappings_for:
+            concept, cloned_concept = concept_pair
+            for mapping in mappings.filter(from_concept__versioned_object_id=concept.versioned_object_id):
+                existing_to_concept = self.get_equivalent_concept(mapping.to_concept, equivalency_map_types)
+                added_mappings += self.clone_mappings(
+                    [mapping.clone(user, cloned_concept, existing_to_concept)], user, False)
 
-        if update_count:
+        if added_concepts or added_mappings:
             self.update_children_counts()
 
         return added_concepts, added_mappings
