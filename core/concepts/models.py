@@ -640,8 +640,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         self.save()
         if self.id:
             self.name = self.mnemonic = parent.concept_mnemonic_next or str(self.id)
-            if not self.external_id:
-                self.external_id = parent.concept_external_id_next
+            self.external_id = parent.concept_external_id_next
             self.versioned_object_id = self.id
             self.version = str(self.id)
             self.save()

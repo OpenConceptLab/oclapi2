@@ -440,8 +440,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
             self.mnemonic = parent.mapping_mnemonic_next or str(self.id)
             self.versioned_object_id = self.id
             self.version = str(self.id)
-            if not self.external_id:
-                self.external_id = parent.mapping_external_id_next
+            self.external_id = parent.mapping_external_id_next
             self.save()
             initial_version = Mapping.create_initial_version(self)
             initial_version.sources.set([parent])
