@@ -431,20 +431,27 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         return cls.persist_clone(instance, user)
 
     def save_cloned(self):
-        parent = self.parent
-        self.is_latest_version = False
-        self.public_access = parent.public_access
-        self.mnemonic = self.version = generate_temp_version()
-        self.save()
-        if self.id:
-            self.mnemonic = parent.mapping_mnemonic_next or str(self.id)
-            self.versioned_object_id = self.id
-            self.version = str(self.id)
-            self.external_id = parent.mapping_external_id_next
+        try:
+            parent = self.parent
+            self.is_latest_version = False
+            self.public_access = parent.public_access
+            self.mnemonic = self.version = generate_temp_version()
+            self.errors = {}
+            self.full_clean()
             self.save()
-            initial_version = Mapping.create_initial_version(self)
-            initial_version.sources.set([parent])
-            self.sources.set([parent])
+            if self.id:
+                self.mnemonic = parent.mapping_mnemonic_next or str(self.id)
+                self.versioned_object_id = self.id
+                self.version = str(self.id)
+                self.external_id = parent.mapping_external_id_next
+                self.save()
+                initial_version = Mapping.create_initial_version(self)
+                initial_version.sources.set([parent])
+                self.sources.set([parent])
+        except ValidationError as ex:
+            self.errors.update(ex.message_dict)
+        except IntegrityError as ex:
+            self.errors.update(dict(__all__=ex.args))
 
     @classmethod
     def persist_new(cls, data, user):

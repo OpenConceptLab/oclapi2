@@ -631,26 +631,37 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         return self.parent.concepts_set.filter(mnemonic__exact=self.mnemonic).exists()
 
     def save_cloned(self):
-        names = self.cloned_names
-        descriptions = self.cloned_descriptions
-        parent = self.parent
-        self.name = self.mnemonic = self.version = generate_temp_version()
-        self.is_latest_version = False
-        self.public_access = parent.public_access
-        self.save()
-        if self.id:
-            self.name = self.mnemonic = parent.concept_mnemonic_next or str(self.id)
-            self.external_id = parent.concept_external_id_next
-            self.versioned_object_id = self.id
-            self.version = str(self.id)
+        try:
+            names = self.cloned_names
+            descriptions = self.cloned_descriptions
+            parent = self.parent
+            self.name = self.mnemonic = self.version = generate_temp_version()
+            self.is_latest_version = False
+            self.public_access = parent.public_access
+            self.errors = {}
             self.save()
-            self.set_locales(names, ConceptName)
-            self.set_locales(descriptions, ConceptDescription)
-            initial_version = Concept.create_initial_version(self)
-            initial_version.set_locales(names, ConceptName)
-            initial_version.set_locales(descriptions, ConceptDescription)
-            initial_version.sources.set([parent])
-            self.sources.set([parent])
+            if self.id:
+                self.name = self.mnemonic = parent.concept_mnemonic_next or str(self.id)
+                self.external_id = parent.concept_external_id_next
+                self.versioned_object_id = self.id
+                self.version = str(self.id)
+                self.save()
+                self.full_clean()
+                self.set_locales(names, ConceptName)
+                self.set_locales(descriptions, ConceptDescription)
+                initial_version = Concept.create_initial_version(self)
+                initial_version.set_locales(names, ConceptName)
+                initial_version.set_locales(descriptions, ConceptDescription)
+                initial_version.sources.set([parent])
+                self.sources.set([parent])
+        except ValidationError as ex:
+            if self.id:
+                self.delete()
+            self.errors.update(ex.message_dict)
+        except IntegrityError as ex:
+            if self.id:
+                self.delete()
+            self.errors.update(dict(__all__=ex.args))
 
     @classmethod
     def persist_new(cls, data, user=None, create_initial_version=True, create_parent_version=True):  # pylint: disable=too-many-statements,too-many-branches
