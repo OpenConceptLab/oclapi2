@@ -125,7 +125,7 @@ class CodeSystemTest(OCLTestCase):
 
     def test_validate_code_for_code_system_via_post(self):
         response = self.client.post(
-            f'/fhir/CodeSystem/$validate-code/',
+            '/fhir/CodeSystem/$validate-code/',
             data={
                 'resourceType': 'Parameters',
                 'parameter': [

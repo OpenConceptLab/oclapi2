@@ -387,7 +387,7 @@ class ValueSetTest(OCLAPITestCase):
         self.collection_v1.seed_references()
 
         response = self.client.post(
-            f'/fhir/ValueSet/$validate-code/',
+            '/fhir/ValueSet/$validate-code/',
             data={
                 'resourceType': 'Parameters',
                 'parameter': [
