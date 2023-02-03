@@ -1110,12 +1110,12 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
                             concepts_qs = res['concepts'].union(res['hierarchy_concepts']).union(result['concepts'])
                             result['concepts'] = Concept.objects.filter(
-                                id__in=concepts_qs.values_list('id', flat=True)
+                                id__in=list(concepts_qs.values_list('id', flat=True))
                             ).exclude(omit_concepts_criteria)
 
                             mappings_qs = res['mappings'].union(result['mappings'])
                             result['mappings'] = Mapping.objects.filter(
-                                id__in=mappings_qs.values_list('id', flat=True)
+                                id__in=list(mappings_qs.values_list('id', flat=True))
                             ).exclude(omit_mappings_criteria).order_by('map_type', 'sort_weight')
 
                         iterate(level if level == ALL else level - 1)
