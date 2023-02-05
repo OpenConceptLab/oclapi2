@@ -13,7 +13,7 @@ from core.common.utils import separate_version, to_parent_uri, generate_temp_ver
     encode_string, is_url_encoded_string
 from core.mappings.constants import MAPPING_TYPE, MAPPING_IS_ALREADY_RETIRED, MAPPING_WAS_RETIRED, \
     MAPPING_IS_ALREADY_NOT_RETIRED, MAPPING_WAS_UNRETIRED, PERSIST_CLONE_ERROR, PERSIST_CLONE_SPECIFY_USER_ERROR, \
-    ALREADY_EXISTS, SAME_AS
+    ALREADY_EXISTS
 from core.mappings.mixins import MappingValidationMixin
 
 
@@ -321,9 +321,9 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         return mapping
 
     @classmethod
-    def build_same_as(cls, from_concept, to_concept, **kwargs):
+    def build(cls, map_type, from_concept, to_concept, **kwargs):
         return cls(
-            map_type=SAME_AS, from_concept=from_concept, to_concept=to_concept,
+            map_type=map_type, from_concept=from_concept, to_concept=to_concept,
             to_concept_code=to_concept.mnemonic, from_concept_code=from_concept.mnemonic, **kwargs
         )
 

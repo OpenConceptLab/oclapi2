@@ -372,11 +372,15 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
             if not self.get_equivalent_concept(concept, equivalency_map_types):
                 cloned_concept = concept.versioned_object.clone()
                 added_concepts += self.clone_concepts([cloned_concept], user, False)
-                added_mappings += self.clone_mappings(
-                    [Mapping.build_same_as(from_concept=cloned_concept, to_concept=concept, parent=self)],
-                    user,
-                    False
-                )
+                if equivalency_map_types:
+                    added_mappings += self.clone_mappings(
+                        [Mapping.build(
+                            map_type=equivalency_map_types[0], from_concept=cloned_concept, to_concept=concept,
+                            parent=self
+                        )],
+                        user,
+                        False
+                    )
                 _concepts_to_add_mappings_for.append([concept, cloned_concept])
         for concept_pair in _concepts_to_add_mappings_for:
             concept, cloned_concept = concept_pair
