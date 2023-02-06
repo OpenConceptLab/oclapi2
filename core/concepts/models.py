@@ -1058,16 +1058,17 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             map_types=None, exclude_map_types=None, return_map_types=ALL, equivalency_map_types=None,
             cascade_mappings=True, cascade_hierarchy=True, cascade_levels=ALL,
             include_retired=False, reverse=False, omit_if_exists_in=None,
-            max_results=1000
+            include_self=True, max_results=1000,
     ):
         from core.mappings.models import Mapping
+        empty_result = dict(concepts=Concept.objects.none(), mappings=Mapping.objects.none())
         result = dict(concepts=Concept.objects.filter(id=self.id), mappings=Mapping.objects.none())
 
         if cascade_levels == 0:
-            return result
+            return result if include_self else empty_result
 
         if not repo_version:
-            return result
+            return result if include_self else empty_result
 
         mappings_criteria = self._get_cascade_mappings_criteria(map_types, exclude_map_types)
         return_map_types_criteria = self._get_return_map_types_criteria(return_map_types, mappings_criteria)
@@ -1077,12 +1078,12 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
         if omit_concepts_criteria and Concept.objects.filter(omit_concepts_criteria).filter(
                 versioned_object_id=self.versioned_object_id).exists():
-            return result
+            return result if include_self else empty_result
 
         if isinstance(repo_version, str):  # assumes its cascaded under source version, usage via collection-reference
             source_versions = self.sources.filter(version=repo_version)
             if source_versions.count() != 1:
-                return result
+                return result if include_self else empty_result
             repo_version = source_versions.first()
             is_collection = False
         else:
@@ -1123,12 +1124,12 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         iterate(cascade_levels)
         return result
 
-    def cascade_as_hierarchy(  # pylint: disable=too-many-arguments,too-many-locals
+    def cascade_as_hierarchy(  # pylint: disable=too-many-arguments,too-many-locals,unused-argument
             self, repo_version=None, source_mappings=True, source_to_concepts=True,
             map_types=None, exclude_map_types=None, return_map_types=ALL, equivalency_map_types=None,
             cascade_mappings=True, cascade_hierarchy=True, cascade_levels=ALL,
             include_retired=False, reverse=False, omit_if_exists_in=None,
-            _=None
+            include_self=True, _=None
     ):
         from core.mappings.models import Mapping
         self.cascaded_entries = dict(concepts=Concept.objects.none(), mappings=Mapping.objects.none())

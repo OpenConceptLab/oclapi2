@@ -103,5 +103,6 @@ RETURN_MAP_TYPES = 'returnMapTypes'
 EQUIVALENCY_MAP_TYPES = 'equivalencyMapType'
 CASCADE_DIRECTION_PARAM = 'reverse'
 OMIT_IF_EXISTS_IN = 'omitIfExistsIn'
+INCLUDE_SELF = 'includeSelf'
 FACET_SIZE = 20
 ALL = '*'

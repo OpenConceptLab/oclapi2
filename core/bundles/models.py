@@ -4,15 +4,17 @@ from core.bundles.constants import BUNDLE_TYPE_SEARCHSET, RESOURCE_TYPE
 from core.collections.constants import SOURCE_MAPPINGS, SOURCE_TO_CONCEPTS
 from core.common.constants import CASCADE_LEVELS_PARAM, CASCADE_MAPPINGS_PARAM, \
     CASCADE_HIERARCHY_PARAM, CASCADE_METHOD_PARAM, MAP_TYPES_PARAM, EXCLUDE_MAP_TYPES_PARAM, CASCADE_DIRECTION_PARAM, \
-    INCLUDE_RETIRED_PARAM, RETURN_MAP_TYPES, ALL, OMIT_IF_EXISTS_IN, EQUIVALENCY_MAP_TYPES, HEAD
+    INCLUDE_RETIRED_PARAM, RETURN_MAP_TYPES, ALL, OMIT_IF_EXISTS_IN, EQUIVALENCY_MAP_TYPES, HEAD, INCLUDE_SELF
 
 
 class Bundle:
     def __init__(self, root, repo_version, params=None, verbose=False, requested_url=None):  # pylint: disable=too-many-arguments
+        params = params or {}
         self.repo_version = repo_version
         self.params = params
         self.verbose = verbose
-        self.brief = not self.verbose
+        self.listing = params.get('listing', '') in ['true', 'True']
+        self.brief = params.get('brief', '') in ['true', 'True'] or (not self.verbose and not self.listing)
         self.root = root
         self.reverse = False
         self.cascade_hierarchy = True
@@ -20,6 +22,7 @@ class Bundle:
         self.cascade_levels = ALL
         self.include_retired = False
         self.omit_if_exists_in = None
+        self.include_self = True
         self.concepts = None
         self.mappings = None
         self._total = None
@@ -44,6 +47,7 @@ class Bundle:
         self.set_include_retired()
         self.set_map_types()
         self.set_omit_if_exists_in()
+        self.set_include_self()
 
     def set_repo_version_url(self):
         if self.repo_version:
@@ -89,6 +93,10 @@ class Bundle:
 
     def set_omit_if_exists_in(self):
         self.omit_if_exists_in = self.params.get(OMIT_IF_EXISTS_IN, None) or None
+
+    def set_include_self(self):
+        if INCLUDE_SELF in self.params:
+            self.include_self = self.params[INCLUDE_SELF] in ['true', True]
 
     @property
     def resource_type(self):
@@ -138,7 +146,8 @@ class Bundle:
             reverse=self.reverse,
             return_map_types=self.return_map_types,
             omit_if_exists_in=self.omit_if_exists_in,
-            equivalency_map_types=self.equivalency_map_types
+            equivalency_map_types=self.equivalency_map_types,
+            include_self=self.include_self
         )
         self.concepts = get(result, 'concepts')
         self.mappings = get(result, 'mappings')
