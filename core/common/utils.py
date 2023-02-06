@@ -162,7 +162,8 @@ def from_string_to_date(date_string):
         try:
             return parser.parse(date_string)
         except ValueError:
-            return None
+            pass
+        return None
 
 
 def parse_boolean_query_param(request, param, default=None):
