@@ -92,18 +92,17 @@ class FhirMiddleware(BaseMiddleware):
         if settings.FHIR_SUBDOMAIN:
             uri = request.build_absolute_uri().split('/')
             domain = uri[2] if len(uri) > 2 else ''
-            if self.is_fhir_uri(uri):
-                if not domain.startswith(settings.FHIR_SUBDOMAIN):
+            is_fhir_domain = domain.startswith(settings.FHIR_SUBDOMAIN + '.')
+            resource_type = uri[5] if len(uri) > 5 else None
+            global_space = uri[3] if len(uri) > 3 else None
+            is_fhir_resource = (global_space == 'fhir' or resource_type == 'CodeSystem' or
+                                resource_type == 'ValueSet' or resource_type == 'ConceptMap')
+
+            if is_fhir_domain:
+                if global_space != 'version' and not is_fhir_resource:
                     return HttpResponseNotFound()
-            elif domain.startswith(settings.FHIR_SUBDOMAIN):
+            elif is_fhir_resource:
                 return HttpResponseNotFound()
 
         response = self.get_response(request)
         return response
-
-    @staticmethod
-    def is_fhir_uri(uri):
-        resource_type = uri[5] if len(uri) > 5 else None
-        global_space = uri[3] if len(uri) > 3 else None
-        return global_space == 'fhir' or resource_type == 'CodeSystem' or resource_type == 'ValueSet' or \
-            resource_type == 'ConceptMap'
