@@ -155,13 +155,14 @@ def parse_updated_since_param(params):
     return from_string_to_date(params.get(UPDATED_SINCE_PARAM))
 
 
-def from_string_to_date(updated_since):  # pragma: no cover
-    if updated_since:
+def from_string_to_date(date_string):
+    if not isinstance(date_string, str):
+        return date_string
+    if date_string:
         try:
-            return parser.parse(updated_since)
+            return parser.parse(date_string)
         except ValueError:
-            pass
-    return None
+            return None
 
 
 def parse_boolean_query_param(request, param, default=None):

@@ -8,8 +8,10 @@ from rest_framework.generics import RetrieveAPIView
 from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
 from rest_framework.renderers import TemplateHTMLRenderer, JSONRenderer
+from rest_framework.views import APIView
 
 from core.common.swagger_parameters import verbose_param, start_date_param, end_date_param
+from core.common.tasks import monthly_usage_report
 from core.common.utils import get_end_of_month
 from core.common.views import BaseAPIView
 from core.reports.models import MonthlyUsageReport, UserReport
@@ -51,6 +53,18 @@ class MonthlyUsageView(BaseAPIView, RetrieveAPIView):  # pragma: no cover
     @swagger_auto_schema(manual_parameters=[verbose_param, start_date_param, end_date_param])
     def get(self, request, *args, **kwargs):
         return super().get(request, *args, **kwargs)
+
+
+class MonthlyUsageReportJobView(APIView):  # pragma: no cover
+    permission_classes = (IsAdminUser, )
+
+    @staticmethod
+    def post(_):
+        task = monthly_usage_report.delay()
+        return Response(
+            dict(task=task.id, state=task.state, queue=task.queue or 'default'),
+            status=status.HTTP_202_ACCEPTED
+        )
 
 
 class AuthoredView(BaseAPIView):  # pragma: no cover

@@ -10,7 +10,7 @@ from pydash import get
 
 from core.collections.models import Collection, CollectionReference
 from core.common.constants import HEAD
-from core.common.utils import get_end_of_month
+from core.common.utils import get_end_of_month, from_string_to_date
 from core.concepts.models import Concept
 from core.mappings.models import Mapping
 from core.orgs.models import Organization
@@ -21,12 +21,15 @@ from core.users.models import UserProfile
 class MonthlyUsageReport:
     def __init__(self, verbose=False, start=None, end=None, current_month_start=None, current_month_end=None):  # pylint: disable=too-many-arguments
         self.verbose = verbose
-        self.start = start
-        self.end = end
-        self.current_month_start = current_month_start or timezone.now().replace(day=1, hour=0, minute=0, second=0,
-                                                                                 microsecond=0)
-        self.current_month_end = current_month_end or get_end_of_month(
-            self.current_month_start).replace(hour=23, minute=59, second=59, microsecond=0)
+        self.start = from_string_to_date(start)
+        self.end = from_string_to_date(end)
+        self.current_month_start = from_string_to_date(
+            current_month_start or timezone.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        )
+        self.current_month_end = from_string_to_date(
+            current_month_end or get_end_of_month(
+                self.current_month_start).replace(hour=23, minute=59, second=59, microsecond=0)
+        )
         self.resources = []
         self.current_month_resources = []
         self.result = {}
@@ -191,7 +194,7 @@ class ResourceReport:
         return self.queryset.annotate(
             month=TruncMonth(date_attr)
         ).filter(
-            month__gte=self.start, month__lte=self.end
+            month__gte=self.start.strftime('%Y-%m-%d'), month__lte=self.end.strftime('%Y-%m-%d')
         ).values('month').annotate(total=Count(count_by)).values('month', 'total').order_by('-month')
 
     def get_monthly_report(self):

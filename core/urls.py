@@ -53,6 +53,8 @@ urlpatterns = [
     path('healthcheck/', include('core.common.healthcheck.urls')),
     path('admin/reports/authored/', report_views.AuthoredView.as_view(), name='authored-report'),
     path('admin/reports/monthly-usage/', report_views.MonthlyUsageView.as_view(), name='monthly-usage-report'),
+    path(
+        'admin/reports/monthly-usage/job/', report_views.MonthlyUsageReportJobView.as_view(), name='monthly-usage-job'),
     path('admin/concepts/amend-hierarchy/', ConceptsHierarchyAmendAdminView.as_view(), name='concepts-amend-hierarchy'),
     path('admin/mappings/debug/', mapping_views.MappingDebugRetrieveDestroyView.as_view(), name='mapping-debug'),
     path('admin/concepts/debug/<int:id>/', concept_views.ConceptDebugView.as_view(), name='concept-debug'),
