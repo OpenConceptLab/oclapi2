@@ -155,7 +155,7 @@ def parse_updated_since_param(params):
     return from_string_to_date(params.get(UPDATED_SINCE_PARAM))
 
 
-def from_string_to_date(date_string):
+def from_string_to_date(date_string):  # pylint: disable=inconsistent-return-statements
     if not isinstance(date_string, str):
         return date_string
     if date_string:
