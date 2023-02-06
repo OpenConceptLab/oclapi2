@@ -154,6 +154,7 @@ MIDDLEWARE = [
     'core.middlewares.middlewares.FixMalformedLimitParamMiddleware',
     'core.middlewares.middlewares.ResponseHeadersMiddleware',
     'core.middlewares.middlewares.CurrentUserMiddleware',
+    'core.middlewares.middlewares.FhirMiddleware'
 ]
 
 ROOT_URLCONF = 'core.urls'
@@ -374,6 +375,7 @@ FLOWER_USER = os.environ.get('FLOWER_USER', 'root')
 FLOWER_PASSWORD = os.environ.get('FLOWER_PASSWORD', 'Root123')
 FLOWER_HOST = os.environ.get('FLOWER_HOST', 'flower')
 FLOWER_PORT = os.environ.get('FLOWER_PORT', 5555)
+FHIR_SUBDOMAIN = os.environ.get('FHIR_SUBDOMAIN', None)
 DATA_UPLOAD_MAX_MEMORY_SIZE = 200*1024*1024
 FILE_UPLOAD_MAX_MEMORY_SIZE = 200*1024*1024
 

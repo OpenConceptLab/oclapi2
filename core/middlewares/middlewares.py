@@ -1,6 +1,7 @@
 import logging
 import time
 
+from django.http import HttpResponseNotFound
 from request_logging.middleware import LoggingMiddleware
 
 from core.common.constants import VERSION_HEADER, REQUEST_USER_HEADER, RESPONSE_TIME_HEADER, REQUEST_URL_HEADER, \
@@ -28,6 +29,7 @@ class FixMalformedLimitParamMiddleware(BaseMiddleware):
     """
     Why this was necessary: https://github.com/OpenConceptLab/ocl_issues/issues/151
     """
+
     def __call__(self, request):
         to_remove = '?limit=100'
         if request.get_full_path()[-10:] == to_remove and request.method == 'GET':
@@ -77,3 +79,31 @@ class TokenAuthMiddleWare(BaseMiddleware):
 
         response = self.get_response(request)
         return response
+
+
+class FhirMiddleware(BaseMiddleware):
+    """
+    It is used to expose FHIR endpoints under FHIR subdomain only. If FHIR is not deployed under a dedicated subdomain
+    then FHIR_SUBDOMAIN environment variable should be empty.
+    """
+
+    def __call__(self, request):
+        from django.conf import settings
+        if settings.FHIR_SUBDOMAIN:
+            uri = request.build_absolute_uri().split('/')
+            domain = uri[2] if len(uri) > 2 else ''
+            if self.is_fhir_uri(uri):
+                if not domain.startswith(settings.FHIR_SUBDOMAIN):
+                    return HttpResponseNotFound()
+            elif domain.startswith(settings.FHIR_SUBDOMAIN):
+                return HttpResponseNotFound()
+
+        response = self.get_response(request)
+        return response
+
+    @staticmethod
+    def is_fhir_uri(uri):
+        resource_type = uri[5] if len(uri) > 5 else None
+        global_space = uri[3] if len(uri) > 3 else None
+        return global_space == 'fhir' or resource_type == 'CodeSystem' or resource_type == 'ValueSet' or \
+            resource_type == 'ConceptMap'
