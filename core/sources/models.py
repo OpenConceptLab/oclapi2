@@ -3,7 +3,7 @@ import uuid
 from dirtyfields import DirtyFieldsMixin
 from django.core.exceptions import ValidationError
 from django.db import models
-from django.db.models import UniqueConstraint, F, Max
+from django.db.models import UniqueConstraint, F, Max, Count
 from pydash import compact, get
 
 from core.common.models import ConceptContainerModel
@@ -470,3 +470,84 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
                     id=F('versioned_object_id')
                 ) or queryset.filter(is_latest_version=True) or queryset.filter(retired=False) or queryset
         ).first()
+
+    def _get_map_type_distribution(self, filters, concept_field):
+        _result = dict(total=0, retired=0, active=0, concepts=0)
+        result = dict(**_result, map_types=[])
+
+        queryset = self.get_mappings_queryset().filter(**filters)
+        queryset = queryset.values(
+            'map_type').annotate(
+            total=Count('id')).annotate(
+            retired=Count('id', filter=models.Q(retired=True))).annotate(
+            concepts=Count(concept_field, distinct=True))
+        for info in queryset.values('map_type', 'total', 'retired', 'concepts').order_by('-total'):
+            active = info['total'] - info['retired']
+            result['total'] += info['total']
+            result['retired'] += info['retired']
+            result['active'] += active
+            result['concepts'] += info['concepts']
+            result['map_types'].append({
+                'map_type': info['map_type'],
+                'concepts': info['concepts'],
+                'total': info['total'],
+                'retired': info['retired'],
+                'active': active
+            })
+        return result
+
+    def get_from_source_map_type_distribution(self, from_source):
+        return self._get_map_type_distribution(dict(from_source_id=from_source.id), 'to_concept__versioned_object_id')
+
+    def get_to_source_map_type_distribution(self, to_source):
+        return self._get_map_type_distribution(dict(to_source_id=to_source.id), 'from_concept__versioned_object_id')
+
+    @property
+    def from_sources(self):
+        return Source.objects.filter(id__in=self.referenced_from_sources().values_list('id', flat=True))
+
+    @property
+    def to_sources(self):
+        return Source.objects.filter(id__in=self.referenced_to_sources().values_list('id', flat=True))
+
+    def get_sources_with_distribution(self, sources, distribution_method):
+        from core.sources.serializers import SourceVersionMinimalSerializer
+        result = [
+            {
+                **SourceVersionMinimalSerializer(source).data,
+                'distribution': get(self, distribution_method)(source)
+            } for source in sources
+        ]
+        return sorted(result, key=lambda _source: get(_source, 'distribution.total'), reverse=True)
+
+    def referenced_from_sources(self):
+        return Source.objects.exclude(
+            organization_id=self.organization_id, user_id=self.user_id,
+            mnemonic=self.mnemonic
+        ).filter(id__in=self.get_mappings_queryset().values_list('from_source_id', flat=True))
+
+    def referenced_to_sources(self):
+        return Source.objects.exclude(
+            organization_id=self.organization_id, user_id=self.user_id,
+            mnemonic=self.mnemonic
+        ).filter(id__in=self.get_mappings_queryset().values_list('to_source_id', flat=True))
+
+    @property
+    def map_types_count(self):
+        return self.get_mappings_queryset().aggregate(count=Count('map_type', distinct=True))['count']
+
+    @property
+    def concept_class_count(self):
+        return self.get_concepts_queryset().aggregate(count=Count('concept_class', distinct=True))['count']
+
+    @property
+    def datatype_count(self):
+        return self.get_concepts_queryset().aggregate(count=Count('datatype', distinct=True))['count']
+
+    @property
+    def retired_concepts_count(self):
+        return self.get_concepts_queryset().filter(retired=True).count()
+
+    @property
+    def retired_mappings_count(self):
+        return self.get_mappings_queryset().filter(retired=True).count()

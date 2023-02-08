@@ -277,6 +277,10 @@ class VersionedModel(BaseResourceModel):
         return self.versions.count()
 
     @property
+    def released_versions_count(self):
+        return self.versions.filter(released=True).count()
+
+    @property
     def sibling_versions(self):
         return self.versions.exclude(id=self.id)
 

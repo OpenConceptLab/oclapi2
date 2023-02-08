@@ -24,6 +24,17 @@ class SourceMinimalSerializer(ModelSerializer):
         fields = ('id', 'url')
 
 
+class SourceVersionMinimalSerializer(ModelSerializer):
+    id = CharField(source='version')
+    version_url = CharField(source='uri')
+    type = CharField(source='resource_version_type')
+    short_code = CharField(source='mnemonic')
+
+    class Meta:
+        model = Source
+        fields = ('id', 'version_url', 'type', 'short_code')
+
+
 class SourceListSerializer(ModelSerializer):
     type = CharField(source='resource_type')
     short_code = CharField(source='mnemonic')
@@ -227,8 +238,35 @@ class SourceSummaryDetailSerializer(SourceSummarySerializer):
     class Meta:
         model = Source
         fields = (
-            *SourceSummarySerializer.Meta.fields, 'id', 'uuid',
+            'id', 'uuid', *SourceSummarySerializer.Meta.fields
         )
+
+
+class SourceSummaryVerboseSerializer(SourceSummaryDetailSerializer):
+    released_versions = IntegerField(source='released_versions_count')
+    from_sources = SerializerMethodField()
+    to_sources = SerializerMethodField()
+    map_types = IntegerField(source='map_types_count')
+    concept_class = IntegerField(source='concept_class_count')
+    datatype = IntegerField(source='datatype_count')
+    retired_concepts = IntegerField(source='retired_concepts_count')
+    retired_mappings = IntegerField(source='retired_mappings_count')
+
+    class Meta:
+        model = Source
+        fields = (
+            'id', 'uuid', *SourceSummaryDetailSerializer.Meta.fields, 'released_versions',
+            'map_types', 'concept_class', 'datatype',
+            'retired_mappings', 'retired_concepts', 'from_sources', 'to_sources'
+        )
+
+    @staticmethod
+    def get_from_sources(obj):
+        return obj.get_sources_with_distribution(obj.from_sources, 'get_from_source_map_type_distribution')
+
+    @staticmethod
+    def get_to_sources(obj):
+        return obj.get_sources_with_distribution(obj.to_sources, 'get_to_source_map_type_distribution')
 
 
 class SourceVersionSummarySerializer(ModelSerializer):
@@ -246,6 +284,33 @@ class SourceVersionSummaryDetailSerializer(SourceVersionSummarySerializer):
         fields = (
             *SourceVersionSummarySerializer.Meta.fields, 'id', 'uuid',
         )
+
+
+class SourceVersionSummaryVerboseSerializer(SourceVersionSummaryDetailSerializer):
+    released_versions = IntegerField(source='released_versions_count')
+    from_sources = SerializerMethodField()
+    to_sources = SerializerMethodField()
+    map_types = IntegerField(source='map_types_count')
+    concept_class = IntegerField(source='concept_class_count')
+    datatype = IntegerField(source='datatype_count')
+    retired_concepts = IntegerField(source='retired_concepts_count')
+    retired_mappings = IntegerField(source='retired_mappings_count')
+
+    class Meta:
+        model = Source
+        fields = (
+            'id', 'uuid', *SourceVersionSummaryDetailSerializer.Meta.fields, 'released_versions',
+            'map_types', 'concept_class', 'datatype',
+            'retired_mappings', 'retired_concepts', 'from_sources', 'to_sources'
+        )
+
+    @staticmethod
+    def get_from_sources(obj):
+        return obj.get_sources_with_distribution(obj.from_sources, 'get_from_source_map_type_distribution')
+
+    @staticmethod
+    def get_to_sources(obj):
+        return obj.get_sources_with_distribution(obj.to_sources, 'get_to_source_map_type_distribution')
 
 
 class SourceDetailSerializer(SourceCreateOrUpdateSerializer):

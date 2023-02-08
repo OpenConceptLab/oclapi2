@@ -1043,6 +1043,95 @@ class SourceSummaryViewTest(OCLAPITestCase):
         self.assertEqual(response.data['active_concepts'], 2)
         self.assertEqual(response.data['active_mappings'], 1)
 
+    def test_get_200_verbose(self):
+        self.source.active_concepts = 2
+        self.source.active_mappings = 1
+        self.source.save()
+
+        response = self.client.get(self.source.url + 'summary/?verbose=true')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['uuid'], str(self.source.id))
+        self.assertEqual(response.data['id'], self.source.mnemonic)
+        self.assertEqual(response.data['active_concepts'], 2)
+        self.assertEqual(response.data['active_mappings'], 1)
+        self.assertEqual(response.data['map_types'], 1)
+        self.assertEqual(response.data['concept_class'], 1)
+        self.assertEqual(response.data['datatype'], 1)
+        self.assertEqual(response.data['from_sources'], [])
+        self.assertEqual(response.data['to_sources'], [])
+
+        concept3 = ConceptFactory(parent=self.source, datatype='FOO', concept_class='FOOBAR')
+        concept4 = ConceptFactory(parent=self.source, datatype='FOOBAR', concept_class='FOOBAR')
+        random_source1 = OrganizationSourceFactory()
+        random_source2 = OrganizationSourceFactory()
+        MappingFactory(
+            map_type='FOOBAR', parent=self.source, from_concept=concept3, from_source=self.source,
+            to_source=random_source1
+        )
+        MappingFactory(
+            map_type='FOOBAR', parent=self.source, to_concept=concept4, to_source=self.source,
+            from_source=random_source2
+        )
+        self.source.active_concepts = 4
+        self.source.active_mappings = 3
+        self.source.save()
+
+        response = self.client.get(self.source.url + 'summary/?verbose=true')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['uuid'], str(self.source.id))
+        self.assertEqual(response.data['id'], self.source.mnemonic)
+        self.assertEqual(response.data['active_concepts'], 4)
+        self.assertEqual(response.data['active_mappings'], 3)
+        self.assertEqual(response.data['map_types'], 2)
+        self.assertEqual(response.data['concept_class'], 2)
+        self.assertEqual(response.data['datatype'], 3)
+        self.assertEqual(
+            response.data['from_sources'],
+            [{
+                'id': 'HEAD',
+                'version_url': random_source2.url,
+                'type': 'Source Version',
+                'short_code': random_source2.mnemonic,
+                'distribution': {
+                    'total': 1,
+                    'retired': 0,
+                    'active': 1,
+                    'concepts': 1,
+                    'map_types': [{
+                                      'map_type': 'FOOBAR',
+                                      'concepts': 1,
+                                      'total': 1,
+                                      'retired': 0,
+                                      'active': 1
+                                  }]
+                }
+            }]
+        )
+        self.assertEqual(
+            response.data['to_sources'],
+            [{
+                'id': 'HEAD',
+                'version_url': random_source1.url,
+                'type': 'Source Version',
+                'short_code': random_source1.mnemonic,
+                'distribution': {
+                    'total': 1,
+                    'retired': 0,
+                    'active': 1,
+                    'concepts': 1,
+                    'map_types': [{
+                        'map_type': 'FOOBAR',
+                        'concepts': 1,
+                        'total': 1,
+                        'retired': 0,
+                        'active': 1
+                    }]
+                }
+            }]
+        )
+
     def test_put_200(self):
         self.source.refresh_from_db()
         self.assertEqual(self.source.active_mappings, None)
