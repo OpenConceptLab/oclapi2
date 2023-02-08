@@ -1,11 +1,11 @@
-from django.core.exceptions import PermissionDenied
 from django.shortcuts import get_object_or_404
 from rest_framework import status
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 
 
 class SummaryMixin:
-    def get_object(self, queryset=None):
+    def get_object(self, _=None):
         instance = get_object_or_404(self.get_queryset())
         self.check_object_permissions(self.request, instance)
         return instance
