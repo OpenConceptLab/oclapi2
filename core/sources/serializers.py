@@ -242,22 +242,19 @@ class SourceSummaryDetailSerializer(SourceSummarySerializer):
         )
 
 
-class SourceSummaryVerboseSerializer(SourceSummaryDetailSerializer):
-    released_versions = IntegerField(source='released_versions_count')
+class SourceSummaryVerboseSerializer(ModelSerializer):
     from_sources = SerializerMethodField()
     to_sources = SerializerMethodField()
-    map_types = IntegerField(source='map_types_count')
-    concept_class = IntegerField(source='concept_class_count')
-    datatype = IntegerField(source='datatype_count')
-    retired_concepts = IntegerField(source='retired_concepts_count')
-    retired_mappings = IntegerField(source='retired_mappings_count')
+    concepts = JSONField(source='concepts_distribution')
+    mappings = JSONField(source='mappings_distribution')
+    versions = JSONField(source='versions_distribution')
+    uuid = CharField(source='id')
+    id = CharField(source='mnemonic')
 
     class Meta:
         model = Source
         fields = (
-            *SourceSummaryDetailSerializer.Meta.fields, 'released_versions',
-            'map_types', 'concept_class', 'datatype',
-            'retired_mappings', 'retired_concepts', 'from_sources', 'to_sources'
+            'id', 'uuid', 'concepts', 'mappings', 'versions', 'from_sources', 'to_sources'
         )
 
     @staticmethod
@@ -286,22 +283,18 @@ class SourceVersionSummaryDetailSerializer(SourceVersionSummarySerializer):
         )
 
 
-class SourceVersionSummaryVerboseSerializer(SourceVersionSummaryDetailSerializer):
-    released_versions = IntegerField(source='released_versions_count')
+class SourceVersionSummaryVerboseSerializer(ModelSerializer):
     from_sources = SerializerMethodField()
     to_sources = SerializerMethodField()
-    map_types = IntegerField(source='map_types_count')
-    concept_class = IntegerField(source='concept_class_count')
-    datatype = IntegerField(source='datatype_count')
-    retired_concepts = IntegerField(source='retired_concepts_count')
-    retired_mappings = IntegerField(source='retired_mappings_count')
+    concepts = JSONField(source='concepts_distribution')
+    mappings = JSONField(source='mappings_distribution')
+    uuid = CharField(source='id')
+    id = CharField(source='version')
 
     class Meta:
         model = Source
         fields = (
-            *SourceVersionSummaryDetailSerializer.Meta.fields, 'released_versions',
-            'map_types', 'concept_class', 'datatype',
-            'retired_mappings', 'retired_concepts', 'from_sources', 'to_sources'
+            'id', 'uuid', 'concepts', 'mappings', 'from_sources', 'to_sources'
         )
 
     @staticmethod

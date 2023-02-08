@@ -551,3 +551,27 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
     @property
     def retired_mappings_count(self):
         return self.get_mappings_queryset().filter(retired=True).count()
+
+    @property
+    def concepts_distribution(self):
+        return dict(
+            active=self.active_concepts,
+            retired=self.retired_concepts_count,
+            concept_class=self.concept_class_count,
+            datatype=self.datatype_count
+        )
+
+    @property
+    def mappings_distribution(self):
+        return dict(
+            active=self.active_mappings,
+            retired=self.retired_mappings_count,
+            map_types=self.map_types_count
+        )
+
+    @property
+    def versions_distribution(self):
+        return dict(
+            total=self.num_versions,
+            released=self.released_versions_count,
+        )

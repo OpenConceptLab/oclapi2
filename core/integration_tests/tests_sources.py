@@ -1053,11 +1053,8 @@ class SourceSummaryViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['uuid'], str(self.source.id))
         self.assertEqual(response.data['id'], self.source.mnemonic)
-        self.assertEqual(response.data['active_concepts'], 2)
-        self.assertEqual(response.data['active_mappings'], 1)
-        self.assertEqual(response.data['map_types'], 1)
-        self.assertEqual(response.data['concept_class'], 1)
-        self.assertEqual(response.data['datatype'], 1)
+        self.assertEqual(response.data['concepts'], {'active': 2, 'retired': 0, 'concept_class': 1, 'datatype': 1})
+        self.assertEqual(response.data['mappings'], {'active': 1, 'retired': 0, 'map_types': 1})
         self.assertEqual(response.data['from_sources'], [])
         self.assertEqual(response.data['to_sources'], [])
 
@@ -1082,11 +1079,8 @@ class SourceSummaryViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['uuid'], str(self.source.id))
         self.assertEqual(response.data['id'], self.source.mnemonic)
-        self.assertEqual(response.data['active_concepts'], 4)
-        self.assertEqual(response.data['active_mappings'], 3)
-        self.assertEqual(response.data['map_types'], 2)
-        self.assertEqual(response.data['concept_class'], 2)
-        self.assertEqual(response.data['datatype'], 3)
+        self.assertEqual(response.data['concepts'], {'active': 4, 'retired': 0, 'concept_class': 2, 'datatype': 3})
+        self.assertEqual(response.data['mappings'], {'active': 3, 'retired': 0, 'map_types': 2})
         self.assertEqual(
             response.data['from_sources'],
             [{
