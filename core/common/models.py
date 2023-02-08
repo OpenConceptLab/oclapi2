@@ -507,7 +507,10 @@ class ConceptContainerModel(VersionedModel):
         return self.get_mappings_queryset().filter(is_active=True, retired=False)
 
     def get_concepts_queryset(self):
-        return self.concepts_set.filter(id=F('versioned_object_id'))
+        if self.is_head:
+            return self.concepts_set.filter(id=F('versioned_object_id'))
+
+        return self.concepts
 
     def get_mappings_queryset(self):
         if self.is_head:
