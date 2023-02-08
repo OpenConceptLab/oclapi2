@@ -413,5 +413,5 @@ class AuthService:
         authorization_header = request.META.get('HTTP_AUTHORIZATION')
         if authorization_header and authorization_header.startswith('Token '):
             token_key = authorization_header.replace('Token ', '')
-            return len(token_key) == 40 and Token.objects.filter(key=token_key).exists()
+            return Token.objects.filter(key=token_key).exists()
         return False
