@@ -507,11 +507,12 @@ class SourceSummaryView(SourceBaseView, RetrieveAPIView, SummaryMixin):
 
 
 class SourceVersionSummaryView(SourceVersionBaseView, RetrieveAPIView, SummaryMixin):
+    serializer_class = SourceVersionSummaryDetailSerializer
     permission_classes = (CanViewConceptDictionary,)
 
     def get_serializer_class(self):
         if self.is_verbose():
-            return SourceSummaryVerboseSerializer
+            return SourceVersionSummaryDetailSerializer
         return SourceSummaryDetailSerializer
 
 

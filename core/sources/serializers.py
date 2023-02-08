@@ -255,7 +255,7 @@ class SourceSummaryVerboseSerializer(SourceSummaryDetailSerializer):
     class Meta:
         model = Source
         fields = (
-            'id', 'uuid', *SourceSummaryDetailSerializer.Meta.fields, 'released_versions',
+            *SourceSummaryDetailSerializer.Meta.fields, 'released_versions',
             'map_types', 'concept_class', 'datatype',
             'retired_mappings', 'retired_concepts', 'from_sources', 'to_sources'
         )
@@ -299,7 +299,7 @@ class SourceVersionSummaryVerboseSerializer(SourceVersionSummaryDetailSerializer
     class Meta:
         model = Source
         fields = (
-            'id', 'uuid', *SourceVersionSummaryDetailSerializer.Meta.fields, 'released_versions',
+            *SourceVersionSummaryDetailSerializer.Meta.fields, 'released_versions',
             'map_types', 'concept_class', 'datatype',
             'retired_mappings', 'retired_concepts', 'from_sources', 'to_sources'
         )
