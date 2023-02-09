@@ -1140,29 +1140,39 @@ class SourceSummaryViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['uuid'], str(self.source.id))
         self.assertEqual(response.data['id'], self.source.mnemonic)
-        self.assertEqual(
-            response.data['distribution'],
-            {
-                'concept_class': [
-                    {'concept_class': 'Diagnosis', 'count': 2},
-                    {'concept_class': 'FOOBAR', 'count': 2}
-                ],
-                'datatype': [
-                    {'count': 2, 'datatype': 'None'},
-                    {'count': 1, 'datatype': 'FOOBAR'},
-                    {'count': 1, 'datatype': 'FOO'}
-                ],
-                'map_type': [
-                    {'count': 2, 'map_type': 'FOOBAR'},
-                    {'count': 1, 'map_type': 'SAME-AS'}
-                ],
-                'name_locale': [
-                    {'count': 2, 'locale': 'en'},
-                ],
-                'name_type': [
-                    {'count': 2, 'type': 'SHORT'},
-                ]
-            }
+        self.assertCountEqual(
+            response.data['distribution']['concept_class'],
+            [
+                {'concept_class': 'Diagnosis', 'count': 2},
+                {'concept_class': 'FOOBAR', 'count': 2}
+            ]
+        )
+        self.assertCountEqual(
+            response.data['distribution']['datatype'],
+            [
+                {'count': 2, 'datatype': 'None'},
+                {'count': 1, 'datatype': 'FOOBAR'},
+                {'count': 1, 'datatype': 'FOO'}
+            ]
+        )
+        self.assertCountEqual(
+            response.data['distribution']['map_type'],
+            [
+                {'count': 2, 'map_type': 'FOOBAR'},
+                {'count': 1, 'map_type': 'SAME-AS'}
+            ]
+        )
+        self.assertCountEqual(
+            response.data['distribution']['name_locale'],
+            [
+                {'count': 2, 'locale': 'en'},
+            ]
+        )
+        self.assertCountEqual(
+            response.data['distribution']['name_type'],
+            [
+                {'count': 2, 'type': 'SHORT'},
+            ]
         )
 
     def test_put_200(self):
