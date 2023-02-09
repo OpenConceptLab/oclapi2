@@ -12,7 +12,7 @@ from core.common.tasks import export_source
 from core.common.tests import OCLAPITestCase
 from core.common.utils import get_latest_dir_in_path
 from core.concepts.serializers import ConceptVersionExportSerializer
-from core.concepts.tests.factories import ConceptFactory
+from core.concepts.tests.factories import ConceptFactory, ConceptNameFactory
 from core.mappings.serializers import MappingDetailSerializer
 from core.mappings.tests.factories import MappingFactory
 from core.orgs.models import Organization
@@ -1024,6 +1024,7 @@ class SourceVersionSummaryViewTest(OCLAPITestCase):
 
 class SourceSummaryViewTest(OCLAPITestCase):
     def setUp(self):
+        self.maxDiff = None
         super().setUp()
         self.source = OrganizationSourceFactory()
         self.concept1 = ConceptFactory(parent=self.source)
@@ -1058,8 +1059,14 @@ class SourceSummaryViewTest(OCLAPITestCase):
         self.assertEqual(response.data['from_sources'], [])
         self.assertEqual(response.data['to_sources'], [])
 
-        concept3 = ConceptFactory(parent=self.source, datatype='FOO', concept_class='FOOBAR')
-        concept4 = ConceptFactory(parent=self.source, datatype='FOOBAR', concept_class='FOOBAR')
+        concept3 = ConceptFactory(
+            parent=self.source, datatype='FOO', concept_class='FOOBAR',
+            names=[ConceptNameFactory.build(locale='en', type='SHORT')]
+        )
+        concept4 = ConceptFactory(
+            parent=self.source, datatype='FOOBAR', concept_class='FOOBAR',
+            names=[ConceptNameFactory.build(locale='en', type='SHORT')]
+        )
         random_source1 = OrganizationSourceFactory()
         random_source2 = OrganizationSourceFactory()
         MappingFactory(
@@ -1124,6 +1131,38 @@ class SourceSummaryViewTest(OCLAPITestCase):
                     }]
                 }
             }]
+        )
+
+        response = self.client.get(
+            self.source.url + 'summary/?verbose=true&distribution=map_type,concept_class,datatype,name_type,name_locale'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['uuid'], str(self.source.id))
+        self.assertEqual(response.data['id'], self.source.mnemonic)
+        self.assertEqual(
+            response.data['distribution'],
+            {
+                'concept_class': [
+                    {'concept_class': 'Diagnosis', 'count': 2},
+                    {'concept_class': 'FOOBAR', 'count': 2}
+                ],
+                'datatype': [
+                    {'count': 2, 'datatype': 'None'},
+                    {'count': 1, 'datatype': 'FOOBAR'},
+                    {'count': 1, 'datatype': 'FOO'}
+                ],
+                'map_type': [
+                    {'count': 2, 'map_type': 'FOOBAR'},
+                    {'count': 1, 'map_type': 'SAME-AS'}
+                ],
+                'name_locale': [
+                    {'count': 2, 'locale': 'en'},
+                ],
+                'name_type': [
+                    {'count': 2, 'type': 'SHORT'},
+                ]
+            }
         )
 
     def test_put_200(self):

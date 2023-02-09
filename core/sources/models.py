@@ -575,3 +575,32 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
             total=self.num_versions,
             released=self.released_versions_count,
         )
+
+    def get_name_locales_queryset(self):
+        return ConceptName.objects.filter(concept__in=self.get_concepts_queryset())
+
+    @property
+    def concept_names_distribution(self):
+        locales = self.get_name_locales_queryset()
+        locales_total = locales.distinct('locale').count()
+        names_total = locales.distinct('type').count()
+        return dict(locales=locales_total, names=names_total)
+
+    def get_name_locale_distribution(self):
+        return self._get_distribution(self.get_name_locales_queryset(), 'locale')
+
+    def get_name_type_distribution(self):
+        return self._get_distribution(self.get_name_locales_queryset(), 'type')
+
+    def get_concept_class_distribution(self):
+        return self._get_distribution(self.get_concepts_queryset(), 'concept_class')
+
+    def get_datatype_distribution(self):
+        return self._get_distribution(self.get_concepts_queryset(), 'datatype')
+
+    def get_map_type_distribution(self):
+        return self._get_distribution(self.get_mappings_queryset(), 'map_type')
+
+    @staticmethod
+    def _get_distribution(queryset, field):
+        return list(queryset.values(field).annotate(count=Count('id')).values(field, 'count').order_by('-count'))

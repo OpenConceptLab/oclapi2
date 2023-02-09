@@ -247,6 +247,7 @@ class SourceSummaryVerboseSerializer(ModelSerializer):
     to_sources = SerializerMethodField()
     concepts = JSONField(source='concepts_distribution')
     mappings = JSONField(source='mappings_distribution')
+    locales = JSONField(source='concept_names_distribution')
     versions = JSONField(source='versions_distribution')
     uuid = CharField(source='id')
     id = CharField(source='mnemonic')
@@ -254,7 +255,7 @@ class SourceSummaryVerboseSerializer(ModelSerializer):
     class Meta:
         model = Source
         fields = (
-            'id', 'uuid', 'concepts', 'mappings', 'versions', 'from_sources', 'to_sources'
+            'id', 'uuid', 'concepts', 'mappings', 'locales', 'versions', 'from_sources', 'to_sources'
         )
 
     @staticmethod
@@ -264,6 +265,27 @@ class SourceSummaryVerboseSerializer(ModelSerializer):
     @staticmethod
     def get_to_sources(obj):
         return obj.get_sources_with_distribution(obj.to_sources, 'get_to_source_map_type_distribution')
+
+
+class SourceSummaryFieldDistributionSerializer(ModelSerializer):
+    uuid = CharField(source='id')
+    id = CharField(source='mnemonic')
+    distribution = SerializerMethodField()
+
+    class Meta:
+        model = Source
+        fields = (
+            'id', 'uuid', 'distribution'
+        )
+
+    def get_distribution(self, obj):
+        result = {}
+        fields = (get(self.context, 'request.query_params.distribution') or '').split(',')
+        for field in fields:
+            func = get(obj, f"get_{field}_distribution")
+            if func:
+                result[field] = func()
+        return result
 
 
 class SourceVersionSummarySerializer(ModelSerializer):
@@ -288,13 +310,14 @@ class SourceVersionSummaryVerboseSerializer(ModelSerializer):
     to_sources = SerializerMethodField()
     concepts = JSONField(source='concepts_distribution')
     mappings = JSONField(source='mappings_distribution')
+    locales = JSONField(source='concept_names_distribution')
     uuid = CharField(source='id')
     id = CharField(source='version')
 
     class Meta:
         model = Source
         fields = (
-            'id', 'uuid', 'concepts', 'mappings', 'from_sources', 'to_sources'
+            'id', 'uuid', 'concepts', 'mappings', 'locales', 'from_sources', 'to_sources'
         )
 
     @staticmethod
@@ -304,6 +327,27 @@ class SourceVersionSummaryVerboseSerializer(ModelSerializer):
     @staticmethod
     def get_to_sources(obj):
         return obj.get_sources_with_distribution(obj.to_sources, 'get_to_source_map_type_distribution')
+
+
+class SourceVersionSummaryFieldDistributionSerializer(ModelSerializer):
+    uuid = CharField(source='id')
+    id = CharField(source='version')
+    distribution = SerializerMethodField()
+
+    class Meta:
+        model = Source
+        fields = (
+            'id', 'uuid', 'distribution'
+        )
+
+    def get_distribution(self, obj):
+        result = {}
+        fields = (get(self.context, 'request.query_params.distribution') or '').split(',')
+        for field in fields:
+            func = get(obj, f"get_{field}_distribution")
+            if func:
+                result[field] = func()
+        return result
 
 
 class SourceDetailSerializer(SourceCreateOrUpdateSerializer):

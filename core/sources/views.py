@@ -37,7 +37,8 @@ from core.sources.serializers import (
     SourceDetailSerializer, SourceListSerializer, SourceCreateSerializer, SourceVersionDetailSerializer,
     SourceVersionListSerializer, SourceVersionExportSerializer, SourceSummaryDetailSerializer,
     SourceVersionSummaryDetailSerializer, SourceMinimalSerializer, SourceSummaryVerboseSerializer,
-    SourceVersionSummaryVerboseSerializer)
+    SourceVersionSummaryVerboseSerializer, SourceSummaryFieldDistributionSerializer,
+    SourceVersionSummaryFieldDistributionSerializer)
 
 logger = logging.getLogger('oclapi')
 
@@ -503,6 +504,8 @@ class SourceSummaryView(SourceBaseView, RetrieveAPIView, SummaryMixin):
 
     def get_serializer_class(self):
         if self.is_verbose():
+            if self.request.query_params.get('distribution'):
+                return SourceSummaryFieldDistributionSerializer
             return SourceSummaryVerboseSerializer
         return SourceSummaryDetailSerializer
 
@@ -513,6 +516,8 @@ class SourceVersionSummaryView(SourceVersionBaseView, RetrieveAPIView, SummaryMi
 
     def get_serializer_class(self):
         if self.is_verbose():
+            if self.request.query_params.get('distribution'):
+                return SourceVersionSummaryFieldDistributionSerializer
             return SourceVersionSummaryVerboseSerializer
         return SourceVersionSummaryDetailSerializer
 
