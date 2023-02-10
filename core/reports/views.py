@@ -1,3 +1,4 @@
+from dateutil.relativedelta import relativedelta
 from django.conf import settings
 from django.utils import timezone
 from drf_yasg import openapi
@@ -6,8 +7,8 @@ from pydash import compact
 from rest_framework import status
 from rest_framework.generics import RetrieveAPIView
 from rest_framework.permissions import IsAdminUser
-from rest_framework.response import Response
 from rest_framework.renderers import TemplateHTMLRenderer, JSONRenderer
+from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from core.common.swagger_parameters import verbose_param, start_date_param, end_date_param
@@ -37,7 +38,7 @@ class MonthlyUsageView(BaseAPIView, RetrieveAPIView):  # pragma: no cover
         start = self.request.query_params.get('start', None)
         end = self.request.query_params.get('end', None)
         now = timezone.now().date()
-        three_months_from_now = now.replace(month=now.month - 3, day=1)
+        three_months_from_now = now.replace(day=1) - relativedelta(months=3)
         report = MonthlyUsageReport(
             verbose=is_verbose, start=start or three_months_from_now, end=end or get_end_of_month(now))
         report.prepare()
