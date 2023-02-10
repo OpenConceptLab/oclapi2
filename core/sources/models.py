@@ -431,8 +431,8 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
             mapping.from_concept_id = get(from_concept, 'id')
             mapping.to_concept_id = get(to_concept, 'id')
             mapping.to_concept_code = get(to_concept, 'mnemonic') or mapping.to_concept_code
-            mapping.to_source_id = get(to_concept, 'parent_id')
-            mapping.from_source_id = get(from_concept, 'parent_id')
+            mapping.to_source_id = get(to_concept, 'parent_id') or mapping.to_source_id
+            mapping.from_source_id = get(from_concept, 'parent_id') or mapping.from_source_id
             self._clone_resource(mapping, user)
             added.append(mapping)
             if mapping.id and update_count:
