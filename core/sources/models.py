@@ -534,15 +534,15 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
 
     @property
     def map_types_count(self):
-        return self.get_mappings_queryset().aggregate(count=Count('map_type', distinct=True))['count']
+        return self.get_active_mappings().aggregate(count=Count('map_type', distinct=True))['count']
 
     @property
     def concept_class_count(self):
-        return self.get_concepts_queryset().aggregate(count=Count('concept_class', distinct=True))['count']
+        return self.get_active_concepts().aggregate(count=Count('concept_class', distinct=True))['count']
 
     @property
     def datatype_count(self):
-        return self.get_concepts_queryset().aggregate(count=Count('datatype', distinct=True))['count']
+        return self.get_active_concepts().aggregate(count=Count('datatype', distinct=True))['count']
 
     @property
     def retired_concepts_count(self):
@@ -577,7 +577,7 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         )
 
     def get_name_locales_queryset(self):
-        return ConceptName.objects.filter(concept__in=self.get_concepts_queryset())
+        return ConceptName.objects.filter(concept__in=self.get_active_concepts())
 
     @property
     def concept_names_distribution(self):
@@ -593,13 +593,13 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         return self._get_distribution(self.get_name_locales_queryset(), 'type')
 
     def get_concept_class_distribution(self):
-        return self._get_distribution(self.get_concepts_queryset(), 'concept_class')
+        return self._get_distribution(self.get_active_concepts(), 'concept_class')
 
     def get_datatype_distribution(self):
-        return self._get_distribution(self.get_concepts_queryset(), 'datatype')
+        return self._get_distribution(self.get_active_concepts(), 'datatype')
 
     def get_map_type_distribution(self):
-        return self._get_distribution(self.get_mappings_queryset(), 'map_type')
+        return self._get_distribution(self.get_active_mappings(), 'map_type')
 
     @staticmethod
     def _get_distribution(queryset, field):
