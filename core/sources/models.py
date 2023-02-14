@@ -408,7 +408,7 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         if kwargs:
             kwargs.pop('view', None)
             kwargs['repo_version'] = kwargs.get('repo_version') or concept_to_clone.parent
-            result = concept_to_clone.cascade(**kwargs, omit_if_exists_in=self.uri)
+            result = concept_to_clone.cascade(**kwargs, omit_if_exists_in=self.uri, include_self=False)
             concepts = result['concepts']
             mappings = result['mappings']
         else:
