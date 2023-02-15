@@ -178,7 +178,10 @@ class BaseModel(models.Model):
         offset = 0
         limit = batch_size
         while offset < count:
-            document().update(queryset.order_by('-id')[offset:limit], parallel=True)
+            try:
+                document().update(queryset.order_by('-id')[offset:limit], parallel=True)
+            except:
+                pass
             offset = limit
             limit += batch_size
 
