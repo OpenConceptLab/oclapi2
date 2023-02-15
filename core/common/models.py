@@ -178,10 +178,7 @@ class BaseModel(models.Model):
         offset = 0
         limit = batch_size
         while offset < count:
-            try:
-                document().update(queryset.order_by('-id')[offset:limit], parallel=True)
-            except:  # pylint: disable=bare-except
-                pass
+            document().update(queryset.order_by('-id')[offset:limit], parallel=True)
             offset = limit
             limit += batch_size
 
