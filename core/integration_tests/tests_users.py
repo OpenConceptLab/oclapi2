@@ -1,3 +1,5 @@
+from unittest.mock import Mock
+
 from mock import patch
 from rest_framework.authtoken.models import Token
 from rest_framework.exceptions import ErrorDetail
@@ -846,3 +848,103 @@ class UserExtraRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 204)
         self.user.refresh_from_db()
         self.assertEqual(self.user.extras, dict(tao='ching'))
+
+
+class OIDCodeExchangeViewTest(OCLAPITestCase):
+    @patch('core.users.views.OIDCAuthService')
+    def test_post_200(self, service_mock):
+        service_mock.exchange_code_for_token = Mock(return_value='response')
+        response = self.client.post(
+            '/users/oidc/code-exchange/',
+            {
+                'client_id': 'client-id', 'client_secret': 'client-secret',
+                'redirect_uri': 'http://app.com', 'code': 'code'
+            },
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, 'response')
+        service_mock.exchange_code_for_token.assert_called_once_with(
+            'code', 'http://app.com', 'client-id', 'client-secret'
+        )
+
+    def test_post_400(self):
+        response = self.client.post(
+            '/users/oidc/code-exchange/',
+            {},
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.data,
+            dict(error='code, redirect_uri, client_id and client_secret are mandatory to exchange for token')
+        )
+
+        response = self.client.post(
+            '/users/oidc/code-exchange/',
+            {'redirect_uri': 'foobar'},
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.data,
+            dict(error='code, redirect_uri, client_id and client_secret are mandatory to exchange for token')
+        )
+
+        response = self.client.post(
+            '/users/oidc/code-exchange/',
+            {
+                'client_id': 'client-id',
+                'client_secret': None,
+                'redirect_uri': 'http://app.com',
+                'code': 'code'
+            },
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.data,
+            dict(error='code, redirect_uri, client_id and client_secret are mandatory to exchange for token')
+        )
+
+
+class TokenExchangeViewTest(OCLAPITestCase):
+    def test_get(self):
+        random_user = UserProfileFactory()
+        token = random_user.get_token()
+
+        response = self.client.get(
+            '/users/api-token/',
+            HTTP_AUTHORIZATION=f'Token {token}'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, dict(token=token))
+
+
+class OIDCLogoutViewTest(OCLAPITestCase):
+    @patch('core.users.views.AuthService.is_sso_enabled')
+    def test_get_405(self, is_sso_enabled_mock):
+        is_sso_enabled_mock.return_value = False
+
+        response = self.client.get(
+            '/users/logout/?id_token_hint=id-token-hint&post_logout_redirect_uri=http://post-logout-url')
+
+        self.assertEqual(response.status_code, 405)
+
+    @patch('core.users.views.OIDCAuthService.get_logout_redirect_url')
+    @patch('core.users.views.AuthService.is_sso_enabled')
+    def test_get_200(self, is_sso_enabled_mock, get_logout_url_mock):
+        is_sso_enabled_mock.return_value = True
+        get_logout_url_mock.return_value = 'http://logout-redirect.com'
+
+        response = self.client.get(
+            '/users/logout/?id_token_hint=id-token-hint&post_logout_redirect_uri=http://post-logout-url')
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.headers['Location'], 'http://logout-redirect.com')
+        get_logout_url_mock.assert_called_once_with('id-token-hint', 'http://post-logout-url')

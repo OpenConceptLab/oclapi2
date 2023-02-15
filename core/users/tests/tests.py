@@ -268,7 +268,7 @@ class UserProfileTest(OCLTestCase):
 
 
 class TokenAuthenticationViewTest(OCLAPITestCase):
-    def test_login(self):
+    def test_post(self):
         response = self.client.post('/users/login/', {})
 
         self.assertEqual(response.status_code, 400)
@@ -292,6 +292,32 @@ class TokenAuthenticationViewTest(OCLAPITestCase):
         self.assertEqual(response.data, dict(token=ANY))
         user.refresh_from_db()
         self.assertIsNotNone(user.last_login)
+
+    @patch('core.users.views.AuthService.is_sso_enabled')
+    def test_get_405(self, is_sso_enabled_mock):
+        is_sso_enabled_mock.return_value = False
+
+        response = self.client.get(
+            '/users/login/?client_id=client-id&redirect_uri=http://post-login-url&state=state&nonce=nonce'
+        )
+
+        self.assertEqual(response.status_code, 405)
+
+    @patch('core.users.views.OIDCAuthService.get_login_redirect_url')
+    @patch('core.users.views.AuthService.is_sso_enabled')
+    def test_get_200(self, is_sso_enabled_mock, get_login_url_mock):
+        is_sso_enabled_mock.return_value = True
+        get_login_url_mock.return_value = 'http://login-redirect.com'
+
+        response = self.client.get(
+            '/users/login/?client_id=client-id&redirect_uri=http://post-login-url&state=state&nonce=nonce'
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.headers['Location'], 'http://login-redirect.com')
+        get_login_url_mock.assert_called_once_with(
+            'client-id', 'http://post-login-url', 'state', 'nonce'
+        )
 
 
 class UserLogoViewTest(OCLAPITestCase):

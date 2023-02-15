@@ -52,7 +52,7 @@ class OIDCodeExchangeView(APIView):
         client_secret = request.data.get('client_secret', None)
         if not code or not redirect_uri or not client_id or not client_secret:
             return Response(
-                dict(error='code and redirect_uri are mandatory to exchange for token'),
+                dict(error='code, redirect_uri, client_id and client_secret are mandatory to exchange for token'),
                 status=status.HTTP_400_BAD_REQUEST
             )
         return Response(
