@@ -10,6 +10,7 @@ class CollectionSearch(CommonSearch):
     doc_types = [Collection]
     fields = [
         'collection_type', 'locale', 'owner', 'owner_type', 'is_active', 'version', 'custom_validation_schema',
+        'name', 'mnemonic', 'extras', 'identifier', 'publisher', 'immutable'
     ]
 
     facets = {

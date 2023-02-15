@@ -13,7 +13,7 @@ class MappingSearch(CommonSearch):
         'source', 'owner', 'owner_type', 'is_latest_version', 'is_active',
         'concept_source', 'concept_owner', 'from_concept_owner',
         'to_concept_owner', 'concept_owner_type', 'from_concept_owner_type', 'to_concept_owner_type',
-        'from_concept_source', 'to_concept_source', 'collection',
+        'from_concept_source', 'to_concept_source', 'collection', 'extras'
     ]
 
     facets = {

@@ -10,7 +10,8 @@ class SourceSearch(CommonSearch):
     doc_types = [Source]
     fields = [
         'source_type', 'locale', 'owner', 'owner_type', 'is_active', 'version', 'custom_validation_schema',
-        'hierarchy_meaning',
+        'hierarchy_meaning', 'name', 'canonical_url', 'mnemonic', 'identifier', 'jurisdiction',
+        'publisher', 'content_type', 'extras'
     ]
 
     facets = {
