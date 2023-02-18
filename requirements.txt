@@ -20,7 +20,7 @@ git+https://github.com/snyaggarwal/flower # use until https://github.com/mher/fl
 redis==4.3.4
 kombu==5.2.4
 django-elasticsearch-dsl==7.2.2
-drf-yasg==1.21.4
+drf-yasg==1.21.5
 git+https://github.com/snyaggarwal/django-queryset-csv
 git+https://github.com/OpenConceptLab/ocldev
 coverage==6.5.0
