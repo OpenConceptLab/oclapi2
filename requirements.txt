@@ -28,7 +28,7 @@ tblib==1.7.0
 django-ordered-model==3.6
 django-health-check>=3.16.2
 markdown==3.4.1
-mock==4.0.3
+mock==5.0.1
 django-request-logging==0.7.5
 django-cid==2.3
 django-dirtyfields==1.9.1
