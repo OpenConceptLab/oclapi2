@@ -597,6 +597,25 @@ class MappingRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.mapping.refresh_from_db()
         self.assertEqual(self.mapping.map_type, 'narrower than')
 
+    def test_put_200_sort_weight(self):
+        self.assertEqual(self.mapping.versions.count(), 1)
+        self.assertEqual(self.mapping.get_latest_version().sort_weight, None)
+
+        response = self.client.put(
+            self.mapping.uri,
+            dict(sort_weight=1.67983),
+            HTTP_AUTHORIZATION='Token ' + self.token,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['uuid'], str(self.mapping.get_latest_version().id))
+        self.assertEqual(response.data['sort_weight'], 1.67983)
+        self.assertEqual(self.mapping.versions.count(), 2)
+        self.assertEqual(self.mapping.get_latest_version().sort_weight, 1.67983)
+
+        self.mapping.refresh_from_db()
+        self.assertEqual(self.mapping.sort_weight, 1.67983)
+
     def test_put_400(self):
         self.assertEqual(self.mapping.versions.count(), 1)
         self.assertEqual(self.mapping.get_latest_version().map_type, SAME_AS)
