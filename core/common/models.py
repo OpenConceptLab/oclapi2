@@ -316,6 +316,9 @@ class VersionedModel(BaseResourceModel):
     def get_latest_version(self):
         return self.active_versions.filter(is_latest_version=True).order_by('-created_at').first()
 
+    def get_last_version(self):
+        return self.active_versions.order_by('-created_at').first()
+
     def get_latest_released_version(self):
         return self.released_versions.order_by('-created_at').first()
 

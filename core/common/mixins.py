@@ -502,7 +502,7 @@ class SourceChildMixin:
         return self.__update_retire(False, comment or self.WAS_UNRETIRED, user)
 
     def __update_retire(self, retired, comment, user):
-        latest_version = self.get_latest_version()
+        latest_version = self.get_latest_version() or self.get_last_version()
         new_version = latest_version.clone()
         new_version.retired = retired
         new_version.comment = comment
