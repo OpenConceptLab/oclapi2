@@ -31,7 +31,7 @@ class SourceDocument(Document):
     publisher = fields.KeywordField(attr='publisher', normalizer='lowercase')
     content_type = fields.KeywordField(attr='content_type', normalizer='lowercase')
     custom_validation_schema = fields.KeywordField(attr='custom_validation_schema', normalizer='lowercase')
-    hierarchy_meaning = fields.KeywordField(attr='hierarchy_meaning', normalizer='lowercase')
+    hierarchy_meaning = fields.KeywordField()
     created_by = fields.KeywordField()
 
     class Django:
@@ -100,3 +100,10 @@ class SourceDocument(Document):
     @staticmethod
     def prepare_created_by(instance):
         return instance.created_by.username
+
+    @staticmethod
+    def prepare_hierarchy_meaning(instance):
+        hierarchy_meaning = instance.hierarchy_meaning
+        if hierarchy_meaning:
+            return hierarchy_meaning.lower()
+        return 'None'
