@@ -1056,5 +1056,5 @@ class TasksTest(OCLTestCase):
         )
 
         source.refresh_from_db()
-        self.assertEqual(source.custom_validation_schema, None)
+        self.assertEqual(source.custom_validation_schema, 'None')
         validate_child_concepts_mock.assert_called_once()
