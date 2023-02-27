@@ -4,7 +4,7 @@ from django.contrib.contenttypes.fields import GenericRelation
 from django.contrib.postgres.fields import ArrayField
 from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator
-from django.db import models, IntegrityError
+from django.db import models, IntegrityError, transaction
 from django.db.models import Value, Q
 from django.db.models.expressions import CombinedExpression, F
 from django.utils import timezone
@@ -183,6 +183,7 @@ class BaseModel(models.Model):
             limit += batch_size
 
     @staticmethod
+    @transaction.atomic
     def batch_delete(queryset):
         for batch in queryset.iterator(chunk_size=1000):
             batch.delete()
