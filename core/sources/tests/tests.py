@@ -1036,7 +1036,7 @@ class TasksTest(OCLTestCase):
         validate_child_concepts_mock.return_value = None
         source = OrganizationSourceFactory()
 
-        self.assertEqual(source.custom_validation_schema, None)
+        self.assertEqual(source.custom_validation_schema, 'None')
 
         update_validation_schema('source', source.id, 'OpenMRS')
 
@@ -1049,7 +1049,7 @@ class TasksTest(OCLTestCase):
         validate_child_concepts_mock.return_value = dict(errors='Failed')
         source = OrganizationSourceFactory()
 
-        self.assertEqual(source.custom_validation_schema, None)
+        self.assertEqual(source.custom_validation_schema, 'None')
         self.assertEqual(
             update_validation_schema('source', source.id, 'OpenMRS'),
             {'failed_concept_validations': {'errors': 'Failed'}}
