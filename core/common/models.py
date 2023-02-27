@@ -23,7 +23,8 @@ from .constants import (
     ACCESS_TYPE_CHOICES, DEFAULT_ACCESS_TYPE, NAMESPACE_REGEX,
     ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT, SUPER_ADMIN_USER_ID,
     HEAD, PERSIST_NEW_ERROR_MESSAGE, SOURCE_PARENT_CANNOT_BE_NONE, PARENT_RESOURCE_CANNOT_BE_NONE,
-    CREATOR_CANNOT_BE_NONE, CANNOT_DELETE_ONLY_VERSION, CUSTOM_VALIDATION_SCHEMA_OPENMRS)
+    CREATOR_CANNOT_BE_NONE, CANNOT_DELETE_ONLY_VERSION, OPENMRS_VALIDATION_SCHEMA, VALIDATION_SCHEMAS,
+    DEFAULT_VALIDATION_SCHEMA)
 from .fields import URIField
 from .tasks import handle_save, handle_m2m_changed, seed_children_to_new_version, update_validation_schema, \
     update_source_active_concepts_count, update_source_active_mappings_count
@@ -364,6 +365,9 @@ class ConceptContainerModel(VersionedModel):
     meta = models.JSONField(null=True, blank=True)
     active_concepts = models.IntegerField(null=True, blank=True, default=None)
     active_mappings = models.IntegerField(null=True, blank=True, default=None)
+    custom_validation_schema = models.CharField(
+        choices=VALIDATION_SCHEMAS, default=DEFAULT_VALIDATION_SCHEMA, max_length=100
+    )
 
     class Meta:
         abstract = True
@@ -384,7 +388,7 @@ class ConceptContainerModel(VersionedModel):
 
     @property
     def is_openmrs_schema(self):
-        return self.custom_validation_schema == CUSTOM_VALIDATION_SCHEMA_OPENMRS
+        return self.custom_validation_schema == OPENMRS_VALIDATION_SCHEMA
 
     def update_children_counts(self, sync=False):
         self.update_concepts_count(sync)
@@ -854,6 +858,9 @@ class ConceptContainerModel(VersionedModel):
         return instance
 
     def clean(self):
+        if not self.custom_validation_schema:
+            self.custom_validation_schema = DEFAULT_VALIDATION_SCHEMA
+
         super().clean()
 
         if self.released and not self.revision_date:

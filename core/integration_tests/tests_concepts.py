@@ -6,7 +6,7 @@ from mock import ANY
 
 from core.bundles.models import Bundle
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
-from core.common.constants import CUSTOM_VALIDATION_SCHEMA_OPENMRS
+from core.common.constants import OPENMRS_VALIDATION_SCHEMA
 from core.common.tests import OCLAPITestCase
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept
@@ -234,7 +234,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
 
     def test_put_200_openmrs_schema(self):  # pylint: disable=too-many-statements
         self.create_lookup_concept_classes()
-        source = OrganizationSourceFactory(custom_validation_schema=CUSTOM_VALIDATION_SCHEMA_OPENMRS)
+        source = OrganizationSourceFactory(custom_validation_schema=OPENMRS_VALIDATION_SCHEMA)
         name = ConceptNameFactory.build(locale='fr')
         concept = ConceptFactory(parent=source, names=[name])
         self.assertEqual(concept.versions.count(), 1)

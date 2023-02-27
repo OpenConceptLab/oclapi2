@@ -10,7 +10,7 @@ from core.collections.parsers import CollectionReferenceExpressionStringParser, 
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory, UserCollectionFactory
 from core.collections.utils import is_mapping, is_concept, is_version_specified, \
     get_concept_by_expression
-from core.common.constants import CUSTOM_VALIDATION_SCHEMA_OPENMRS
+from core.common.constants import OPENMRS_VALIDATION_SCHEMA
 from core.common.tasks import add_references, seed_children_to_new_version
 from core.common.tasks import update_collection_active_concepts_count
 from core.common.tasks import update_collection_active_mappings_count
@@ -96,7 +96,7 @@ class CollectionTest(OCLTestCase):
         self.assertEqual(collection.active_concepts, 1)
 
     def test_add_expressions_openmrs_schema(self):
-        collection = OrganizationCollectionFactory(custom_validation_schema=CUSTOM_VALIDATION_SCHEMA_OPENMRS)
+        collection = OrganizationCollectionFactory(custom_validation_schema=OPENMRS_VALIDATION_SCHEMA)
         expansion = ExpansionFactory(collection_version=collection)
         collection.expansion_uri = expansion.uri
         collection.save()
@@ -208,7 +208,7 @@ class CollectionTest(OCLTestCase):
         ch_locale = ConceptNameFactory.build(locale_preferred=True, locale='ch')
         en_locale = ConceptNameFactory.build(locale_preferred=True, locale='en')
         concept1 = ConceptFactory(names=[ch_locale, en_locale])
-        collection = OrganizationCollectionFactory(custom_validation_schema=CUSTOM_VALIDATION_SCHEMA_OPENMRS)
+        collection = OrganizationCollectionFactory(custom_validation_schema=OPENMRS_VALIDATION_SCHEMA)
         expansion = ExpansionFactory(collection_version=collection)
         collection.expansion_uri = expansion.uri
         collection.save()
@@ -234,7 +234,7 @@ class CollectionTest(OCLTestCase):
     def test_validate_openmrs_schema_matching_name_locale(self):
         ch_locale = ConceptNameFactory.build(locale_preferred=False, locale='ch')
         concept1 = ConceptFactory(names=[ch_locale])
-        collection = OrganizationCollectionFactory(custom_validation_schema=CUSTOM_VALIDATION_SCHEMA_OPENMRS)
+        collection = OrganizationCollectionFactory(custom_validation_schema=OPENMRS_VALIDATION_SCHEMA)
         expansion = ExpansionFactory(collection_version=collection)
         collection.expansion_uri = expansion.uri
         collection.save()

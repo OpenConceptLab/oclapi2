@@ -12,7 +12,7 @@ from mock import patch, Mock, ANY, call, PropertyMock
 from ocldev.oclcsvtojsonconverter import OclStandardCsvToJsonConverter
 
 from core.collections.models import Collection
-from core.common.constants import CUSTOM_VALIDATION_SCHEMA_OPENMRS
+from core.common.constants import OPENMRS_VALIDATION_SCHEMA
 from core.common.tests import OCLAPITestCase, OCLTestCase
 from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory
@@ -618,7 +618,7 @@ class BulkImportInlineTest(OCLTestCase):
         call_command('import_lookup_values')
         org = OrganizationFactory(mnemonic='MSFOCP')
         OrganizationSourceFactory(
-            mnemonic='Implementationtest', organization=org, custom_validation_schema=CUSTOM_VALIDATION_SCHEMA_OPENMRS)
+            mnemonic='Implementationtest', organization=org, custom_validation_schema=OPENMRS_VALIDATION_SCHEMA)
         file_content = open(
             os.path.join(os.path.dirname(__file__), '..', 'samples/msfocp_concepts.csv'), 'r').read()
         data = OclStandardCsvToJsonConverter(

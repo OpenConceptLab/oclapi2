@@ -3,7 +3,7 @@ from pydash import omit
 
 from core.collections.models import CollectionReference
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
-from core.common.constants import CUSTOM_VALIDATION_SCHEMA_OPENMRS, HEAD, ACCESS_TYPE_EDIT, ACCESS_TYPE_VIEW
+from core.common.constants import OPENMRS_VALIDATION_SCHEMA, HEAD, ACCESS_TYPE_EDIT, ACCESS_TYPE_VIEW
 from core.common.tests import OCLTestCase
 from core.concepts.constants import (
     OPENMRS_MUST_HAVE_EXACTLY_ONE_PREFERRED_NAME,
@@ -1277,7 +1277,7 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
         self.create_lookup_concept_classes()
 
     def test_concept_class_is_valid_attribute_negative(self):
-        source = OrganizationSourceFactory(custom_validation_schema=CUSTOM_VALIDATION_SCHEMA_OPENMRS)
+        source = OrganizationSourceFactory(custom_validation_schema=OPENMRS_VALIDATION_SCHEMA)
         concept = Concept.persist_new(
             dict(
                 mnemonic='concept1', version=HEAD, name='concept1', parent=source,
@@ -1292,7 +1292,7 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
         )
 
     def test_data_type_is_valid_attribute_negative(self):
-        source = OrganizationSourceFactory(custom_validation_schema=CUSTOM_VALIDATION_SCHEMA_OPENMRS)
+        source = OrganizationSourceFactory(custom_validation_schema=OPENMRS_VALIDATION_SCHEMA)
         concept = Concept.persist_new(
             dict(
                 mnemonic='concept1', version=HEAD, name='concept1', parent=source,
@@ -1306,7 +1306,7 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
         )
 
     def test_description_type_is_valid_attribute_negative(self):
-        source = OrganizationSourceFactory(custom_validation_schema=CUSTOM_VALIDATION_SCHEMA_OPENMRS)
+        source = OrganizationSourceFactory(custom_validation_schema=OPENMRS_VALIDATION_SCHEMA)
         concept = Concept.persist_new(
             dict(
                 mnemonic='concept1', version=HEAD, name='concept1', parent=source,
@@ -1322,7 +1322,7 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
         )
 
     def test_name_locale_is_valid_attribute_negative(self):
-        source = OrganizationSourceFactory(custom_validation_schema=CUSTOM_VALIDATION_SCHEMA_OPENMRS)
+        source = OrganizationSourceFactory(custom_validation_schema=OPENMRS_VALIDATION_SCHEMA)
         concept = Concept.persist_new(
             dict(
                 mnemonic='concept1', version=HEAD, name='concept1', parent=source,
@@ -1338,7 +1338,7 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
         )
 
     def test_description_locale_is_valid_attribute_negative(self):
-        source = OrganizationSourceFactory(custom_validation_schema=CUSTOM_VALIDATION_SCHEMA_OPENMRS)
+        source = OrganizationSourceFactory(custom_validation_schema=OPENMRS_VALIDATION_SCHEMA)
         concept = Concept.persist_new(
             dict(
                 mnemonic='concept1', version=HEAD, name='concept1', parent=source,
@@ -1356,7 +1356,7 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
         name_en1 = ConceptNameFactory.build(name='PreferredName1', locale_preferred=True)
         name_en2 = ConceptNameFactory.build(name='PreferredName2', locale_preferred=True)
         name_tr = ConceptNameFactory.build(name='PreferredName3', locale="tr", locale_preferred=True)
-        source = OrganizationSourceFactory(custom_validation_schema=CUSTOM_VALIDATION_SCHEMA_OPENMRS)
+        source = OrganizationSourceFactory(custom_validation_schema=OPENMRS_VALIDATION_SCHEMA)
 
         concept = Concept.persist_new(
             dict(
@@ -1373,7 +1373,7 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
     def test_concepts_should_have_unique_fully_specified_name_per_locale(self):
         name_fully_specified1 = ConceptNameFactory.build(name='FullySpecifiedName1')
 
-        source = OrganizationSourceFactory(custom_validation_schema=CUSTOM_VALIDATION_SCHEMA_OPENMRS, version=HEAD)
+        source = OrganizationSourceFactory(custom_validation_schema=OPENMRS_VALIDATION_SCHEMA, version=HEAD)
         concept1_data = {
             **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'c1', 'parent': source,
             'names': [name_fully_specified1]
@@ -1393,7 +1393,7 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
         )
 
     def test_at_least_one_fully_specified_name_per_concept_negative(self):
-        source = OrganizationSourceFactory(custom_validation_schema=CUSTOM_VALIDATION_SCHEMA_OPENMRS, version=HEAD)
+        source = OrganizationSourceFactory(custom_validation_schema=OPENMRS_VALIDATION_SCHEMA, version=HEAD)
 
         concept = Concept.persist_new(
             dict(
@@ -1410,7 +1410,7 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
         )
 
     def test_duplicate_preferred_name_per_source_should_fail(self):
-        source = OrganizationSourceFactory(custom_validation_schema=CUSTOM_VALIDATION_SCHEMA_OPENMRS, version=HEAD)
+        source = OrganizationSourceFactory(custom_validation_schema=OPENMRS_VALIDATION_SCHEMA, version=HEAD)
         concept1 = Concept.persist_new(
             dict(
                 mnemonic='concept1', version=HEAD, name='concept1', parent=source,
@@ -1444,7 +1444,7 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
         )
 
     def test_unique_preferred_name_per_locale_within_concept_negative(self):
-        source = OrganizationSourceFactory(custom_validation_schema=CUSTOM_VALIDATION_SCHEMA_OPENMRS, version=HEAD)
+        source = OrganizationSourceFactory(custom_validation_schema=OPENMRS_VALIDATION_SCHEMA, version=HEAD)
 
         concept = Concept.persist_new(
             dict(
@@ -1469,7 +1469,7 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
         )
 
     def test_a_preferred_name_can_not_be_a_short_name(self):
-        source = OrganizationSourceFactory(custom_validation_schema=CUSTOM_VALIDATION_SCHEMA_OPENMRS, version=HEAD)
+        source = OrganizationSourceFactory(custom_validation_schema=OPENMRS_VALIDATION_SCHEMA, version=HEAD)
 
         concept = Concept.persist_new(
             dict(
@@ -1486,7 +1486,7 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
         )
 
     def test_a_preferred_name_can_not_be_an_index_search_term(self):
-        source = OrganizationSourceFactory(custom_validation_schema=CUSTOM_VALIDATION_SCHEMA_OPENMRS, version=HEAD)
+        source = OrganizationSourceFactory(custom_validation_schema=OPENMRS_VALIDATION_SCHEMA, version=HEAD)
         concept = Concept.persist_new(
             dict(
                 mnemonic='concept', version=HEAD, name='concept', parent=source,
@@ -1502,7 +1502,7 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
         )
 
     def test_a_name_can_be_equal_to_a_short_name(self):
-        source = OrganizationSourceFactory(custom_validation_schema=CUSTOM_VALIDATION_SCHEMA_OPENMRS, version=HEAD)
+        source = OrganizationSourceFactory(custom_validation_schema=OPENMRS_VALIDATION_SCHEMA, version=HEAD)
 
         concept = Concept.persist_new(
             dict(
@@ -1518,7 +1518,7 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
         self.assertIsNotNone(concept.id)
 
     def test_a_name_should_be_unique(self):
-        source = OrganizationSourceFactory(custom_validation_schema=CUSTOM_VALIDATION_SCHEMA_OPENMRS, version=HEAD)
+        source = OrganizationSourceFactory(custom_validation_schema=OPENMRS_VALIDATION_SCHEMA, version=HEAD)
 
         concept = Concept.persist_new(
             dict(
@@ -1535,7 +1535,7 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
         )
 
     def test_only_one_fully_specified_name_per_locale(self):
-        source = OrganizationSourceFactory(custom_validation_schema=CUSTOM_VALIDATION_SCHEMA_OPENMRS, version=HEAD)
+        source = OrganizationSourceFactory(custom_validation_schema=OPENMRS_VALIDATION_SCHEMA, version=HEAD)
 
         concept = Concept.persist_new(
             dict(
@@ -1554,7 +1554,7 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
         )
 
     def test_no_more_than_one_short_name_per_locale(self):
-        source = OrganizationSourceFactory(custom_validation_schema=CUSTOM_VALIDATION_SCHEMA_OPENMRS, version=HEAD)
+        source = OrganizationSourceFactory(custom_validation_schema=OPENMRS_VALIDATION_SCHEMA, version=HEAD)
 
         concept = Concept.persist_new(
             dict(
@@ -1573,7 +1573,7 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
         )
 
     def test_locale_preferred_name_uniqueness_doesnt_apply_to_shorts(self):
-        source = OrganizationSourceFactory(custom_validation_schema=CUSTOM_VALIDATION_SCHEMA_OPENMRS, version=HEAD)
+        source = OrganizationSourceFactory(custom_validation_schema=OPENMRS_VALIDATION_SCHEMA, version=HEAD)
 
         concept = Concept.persist_new(
             dict(
@@ -1588,7 +1588,7 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
         self.assertIsNotNone(concept.id)
 
     def test_external_id_length(self):
-        source = OrganizationSourceFactory(custom_validation_schema=CUSTOM_VALIDATION_SCHEMA_OPENMRS)
+        source = OrganizationSourceFactory(custom_validation_schema=OPENMRS_VALIDATION_SCHEMA)
         concept = Concept.persist_new(dict(
                 mnemonic='concept', version=HEAD, name='concept', parent=source, external_id='1'*37,
                 concept_class='Diagnosis', datatype='None', names=[
@@ -1617,7 +1617,7 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
         self.assertIsNotNone(concept1.id)
 
     def test_names_external_id_length(self):
-        source = OrganizationSourceFactory(custom_validation_schema=CUSTOM_VALIDATION_SCHEMA_OPENMRS)
+        source = OrganizationSourceFactory(custom_validation_schema=OPENMRS_VALIDATION_SCHEMA)
         concept = Concept.persist_new(dict(
                 mnemonic='concept', version=HEAD, name='concept', parent=source, external_id='1'*36,
                 concept_class='Diagnosis', datatype='None', names=[
@@ -1634,7 +1634,7 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
         self.assertIsNone(concept.id)
 
     def test_description_external_id_length(self):
-        source = OrganizationSourceFactory(custom_validation_schema=CUSTOM_VALIDATION_SCHEMA_OPENMRS)
+        source = OrganizationSourceFactory(custom_validation_schema=OPENMRS_VALIDATION_SCHEMA)
         concept = Concept.persist_new(
             dict(
                 mnemonic='concept',
@@ -1668,7 +1668,7 @@ class ValidatorSpecifierTest(OCLTestCase):
         self.create_lookup_concept_classes()
 
     def test_specifier_should_initialize_openmrs_validator_with_reference_values(self):
-        source = OrganizationSourceFactory(custom_validation_schema=CUSTOM_VALIDATION_SCHEMA_OPENMRS, version=HEAD)
+        source = OrganizationSourceFactory(custom_validation_schema=OPENMRS_VALIDATION_SCHEMA, version=HEAD)
         expected_reference_values = {
             'DescriptionTypes': ['None', 'FULLY_SPECIFIED', 'Definition'],
             'Datatypes': ['None', 'N/A', 'Numeric', 'Coded', 'Text'],
@@ -1677,7 +1677,7 @@ class ValidatorSpecifierTest(OCLTestCase):
             'NameTypes': ['FULLY_SPECIFIED', 'Fully Specified', 'Short', 'SHORT', 'INDEX_TERM', 'Index Term', 'None']}
 
         validator = ValidatorSpecifier().with_validation_schema(
-            CUSTOM_VALIDATION_SCHEMA_OPENMRS
+            OPENMRS_VALIDATION_SCHEMA
         ).with_repo(source).with_reference_values().get()
 
         actual_reference_values = validator.reference_values

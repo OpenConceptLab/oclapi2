@@ -6,7 +6,7 @@ from mock import patch, Mock, ANY, PropertyMock
 from core.collections.models import Collection
 from core.collections.tests.factories import OrganizationCollectionFactory
 from core.common.constants import HEAD, ACCESS_TYPE_EDIT, ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW, \
-    CUSTOM_VALIDATION_SCHEMA_OPENMRS
+    OPENMRS_VALIDATION_SCHEMA
 from core.common.tasks import index_source_mappings, index_source_concepts
 from core.common.tasks import seed_children_to_new_version
 from core.common.tasks import update_source_active_concepts_count
@@ -586,7 +586,7 @@ class SourceTest(OCLTestCase):
 
         self.assertFalse(source.is_validation_necessary())
 
-        source.custom_validation_schema = CUSTOM_VALIDATION_SCHEMA_OPENMRS
+        source.custom_validation_schema = OPENMRS_VALIDATION_SCHEMA
 
         self.assertFalse(source.is_validation_necessary())
 

@@ -3,7 +3,7 @@ from uuid import UUID
 import factory
 from django.core.exceptions import ValidationError
 
-from core.common.constants import HEAD, CUSTOM_VALIDATION_SCHEMA_OPENMRS
+from core.common.constants import HEAD, OPENMRS_VALIDATION_SCHEMA
 from core.common.tests import OCLTestCase
 from core.concepts.tests.factories import ConceptFactory, ConceptNameFactory
 from core.mappings.documents import MappingDocument
@@ -337,7 +337,7 @@ class OpenMRSMappingValidatorTest(OCLTestCase):
         self.create_lookup_concept_classes()
 
     def test_single_mapping_between_concepts(self):
-        source = OrganizationSourceFactory(version=HEAD, custom_validation_schema=CUSTOM_VALIDATION_SCHEMA_OPENMRS)
+        source = OrganizationSourceFactory(version=HEAD, custom_validation_schema=OPENMRS_VALIDATION_SCHEMA)
         concept1 = ConceptFactory(parent=source, names=[ConceptNameFactory.build()])
         concept2 = ConceptFactory(parent=source, names=[ConceptNameFactory.build()])
         mapping1 = MappingFactory.build(parent=source, to_concept=concept1, from_concept=concept2)
@@ -359,7 +359,7 @@ class OpenMRSMappingValidatorTest(OCLTestCase):
         mapping3.clean()
 
     def test_invalid_map_type(self):
-        source = OrganizationSourceFactory(version=HEAD, custom_validation_schema=CUSTOM_VALIDATION_SCHEMA_OPENMRS)
+        source = OrganizationSourceFactory(version=HEAD, custom_validation_schema=OPENMRS_VALIDATION_SCHEMA)
         concept1 = ConceptFactory(parent=source, names=[ConceptNameFactory.build()])
         concept2 = ConceptFactory(parent=source, names=[ConceptNameFactory.build()])
 
@@ -376,7 +376,7 @@ class OpenMRSMappingValidatorTest(OCLTestCase):
         mapping.clean()
 
     def test_external_id(self):
-        source = OrganizationSourceFactory(custom_validation_schema=CUSTOM_VALIDATION_SCHEMA_OPENMRS)
+        source = OrganizationSourceFactory(custom_validation_schema=OPENMRS_VALIDATION_SCHEMA)
         concept1 = ConceptFactory(parent=source, names=[ConceptNameFactory.build()])
         concept2 = ConceptFactory(parent=source, names=[ConceptNameFactory.build()])
 
