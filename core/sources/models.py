@@ -180,6 +180,8 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         return hierarchy_root.parent_id == self.head.id
 
     def clean(self):
+        self.hierarchy_meaning = self.hierarchy_meaning or None
+
         super().clean()
         if self.hierarchy_root_id and not self.is_hierarchy_root_belonging_to_self():
             raise ValidationError({'hierarchy_root': [HIERARCHY_ROOT_MUST_BELONG_TO_SAME_SOURCE]})
