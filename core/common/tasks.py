@@ -694,3 +694,30 @@ def monthly_usage_report():  # pragma: no cover
     mail.content_subtype = "html"
     res = mail.send()
     return res
+
+
+@app.task(ignore_result=True)
+def post_import_update_resource_counts():
+    from core.sources.models import Source
+    from core.concepts.models import Concept
+    from core.mappings.models import Mapping
+
+    uncounted_concepts = Concept.objects.filter(_counted__isnull=True)
+    sources = Source.objects.filter(id__in=uncounted_concepts.values_list('parent_id', flat=True))
+    for source in sources:
+        source.update_concepts_count(sync=True)
+        try:
+            uncounted_concepts.filter(parent_id=source.id).update(_counted=True)
+        except:  # pylint: disable=bare-except
+            pass
+
+    uncounted_mappings = Mapping.objects.filter(_counted__isnull=True)
+    sources = Source.objects.filter(
+        id__in=uncounted_mappings.values_list('parent_id', flat=True))
+
+    for source in sources:
+        source.update_mappings_count(sync=True)
+        try:
+            uncounted_mappings.filter(parent_id=source.id).update(_counted=True)
+        except:  # pylint: disable=bare-except
+            pass

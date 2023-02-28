@@ -14,7 +14,8 @@ from pydash import compact, get
 from core.collections.models import Collection
 from core.common.constants import HEAD
 from core.common.services import RedisService
-from core.common.tasks import bulk_import_parts_inline, delete_organization, batch_index_resources
+from core.common.tasks import bulk_import_parts_inline, delete_organization, batch_index_resources, \
+    post_import_update_resource_counts
 from core.common.utils import drop_version, is_url_encoded_string, encode_string, to_parent_uri, chunks
 from core.concepts.models import Concept
 from core.mappings.models import Mapping
@@ -979,11 +980,7 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
                             self.resource_wise_time[part_type] = 0
                         self.resource_wise_time[part_type] += (time.time() - start_time)
 
-        print("Updating Active Concepts Count...")
-        self.update_concept_counts()
-
-        print("Updating Active Mappings Count...")
-        self.update_mappings_counts()
+        post_import_update_resource_counts.delay()
 
         self.update_elapsed_seconds()
 
@@ -1051,26 +1048,3 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
         group_result = jobs.apply_async(queue='concurrent')
         self.groups.append(group_result)
         self.tasks += group_result.results
-
-    @staticmethod
-    def update_concept_counts():
-        uncounted_concepts = Concept.objects.filter(_counted__isnull=True)
-        sources = Source.objects.filter(id__in=uncounted_concepts.values_list('parent_id', flat=True))
-        for source in sources:
-            source.update_concepts_count(sync=False)
-            try:
-                uncounted_concepts.filter(parent_id=source.id).update(_counted=True)
-            except:  # pylint: disable=bare-except
-                pass
-
-    @staticmethod
-    def update_mappings_counts():
-        uncounted_mappings = Mapping.objects.filter(_counted__isnull=True)
-        sources = Source.objects.filter(
-            id__in=uncounted_mappings.values_list('parent_id', flat=True))
-        for source in sources:
-            source.update_mappings_count(sync=False)
-            try:
-                uncounted_mappings.filter(parent_id=source.id).update(_counted=True)
-            except:  # pylint: disable=bare-except
-                pass
