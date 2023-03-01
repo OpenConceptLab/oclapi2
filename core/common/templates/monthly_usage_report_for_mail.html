@@ -106,7 +106,7 @@
 
 <body>
     <h1 class="main-heading" >{{env|title}} Usage Report</h1>
-    <h2><span>{{current_month_start}}</span> to <span>{{current_month_end}}</span></h2>
+    <h2><span>{{current_month_start|date:"M d, Y"}}</span> to <span>{{current_month_end|date:"M d, Y"}}</span></h2>
     <main style="margin-top: 15px;">
         <div class="flex" style="width:70%;margin:0 auto;margin-bottom:40px;">
             <table>
@@ -140,7 +140,7 @@
         </div>
 
         <h3 style="text-align:center;">Trends</h3>
-        <h3 style="text-align:center;"><span>{{start}}</span> to <span>{{end}}</span></h3>
+        <h3 style="text-align:center;"><span>{{start|date:"M d, Y"}}</span> to <span>{{end|date:"M d, Y"}}</span></h3>
         <div class="flex">
             <section>
                 <img src={{concepts_url}} id="concepts_created_monthly" class="chart" />

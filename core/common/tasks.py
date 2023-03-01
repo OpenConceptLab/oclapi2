@@ -686,8 +686,11 @@ def monthly_usage_report():  # pragma: no cover
         verbose=True, start=three_months_from_now, end=now, current_month_end=now, current_month_start=last_month)
     report.prepare()
     html_body = render_to_string('monthly_usage_report_for_mail.html', report.get_result_for_email())
+    FORMAT = '%Y-%m-%d'
+    start = report.start
+    end = report.end
     mail = EmailMessage(
-        subject=f"{settings.ENV.upper()} Monthly usage report: {report.start} to {report.end}",
+        subject=f"{settings.ENV.upper()} Monthly usage report: {start.strftime(FORMAT)} to {end.strftime(FORMAT)}",
         body=html_body,
         to=[settings.REPORTS_EMAIL]
     )
