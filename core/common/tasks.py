@@ -610,64 +610,6 @@ def link_references_to_resources(reference_ids):  # pragma: no cover
 
 
 @app.task(ignore_result=True)
-def link_all_references_to_resources():  # pragma: no cover
-    from core.collections.models import CollectionReference
-    queryset = CollectionReference.objects.filter(concepts__isnull=True, mappings__isnull=True)
-    total = queryset.count()
-    logger.info('Need to link %d references', total)
-    count = 1
-    for reference in queryset:
-        logger.info('(%d/%d) Linking Reference %s', count, total, reference.uri)
-        count += 1
-        reference.link_resources()
-
-
-@app.task(ignore_result=True)
-def link_expansions_repo_versions():  # pragma: no cover
-    from core.collections.models import Expansion
-    expansions = Expansion.objects.filter()
-    total = expansions.count()
-    logger.info('Total Expansions %d', total)
-    count = 1
-    for expansion in expansions:
-        if (
-                expansion.concepts.exists() or expansion.mappings.exists()
-        ) and (
-                not expansion.resolved_source_versions.exists() and not expansion.resolved_collection_versions.exists()
-        ):
-            logger.info('(%d/%d) Linking Repo Version %s', count, total, expansion.uri)
-            expansion.link_repo_versions()
-        else:
-            logger.info('(%d/%d) Skipping already Linked %s', count, total, expansion.uri)
-        count += 1
-
-
-@app.task(ignore_result=True)
-def reference_old_to_new_structure():  # pragma: no cover
-    from core.collections.parsers import CollectionReferenceExpressionStringParser
-    from core.collections.models import CollectionReference
-
-    queryset = CollectionReference.objects.filter(expression__isnull=False, system__isnull=True, valueset__isnull=True)
-    total = queryset.count()
-    logger.info('Need to migrate %d references', total)
-    count = 1
-    for reference in queryset:
-        logger.info('(%d/%d) Migrating %s', count, total, reference.uri)
-        count += 1
-        parser = CollectionReferenceExpressionStringParser(expression=reference.expression)
-        parser.parse()
-        ref_struct = parser.to_reference_structure()[0]
-        reference.reference_type = ref_struct['reference_type'] or 'concepts'
-        reference.system = ref_struct['system']
-        reference.version = ref_struct['version']
-        reference.code = ref_struct['code']
-        reference.resource_version = ref_struct['resource_version']
-        reference.valueset = ref_struct['valueset']
-        reference.filter = ref_struct['filter']
-        reference.save()
-
-
-@app.task(ignore_result=True)
 def beat_healthcheck():  # pragma: no cover
     from core.common.services import RedisService
     redis_service = RedisService()
