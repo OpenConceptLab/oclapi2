@@ -56,8 +56,6 @@ urlpatterns = [
     path(
         'admin/reports/monthly-usage/job/', report_views.MonthlyUsageReportJobView.as_view(), name='monthly-usage-job'),
     path('admin/concepts/amend-hierarchy/', ConceptsHierarchyAmendAdminView.as_view(), name='concepts-amend-hierarchy'),
-    path('admin/mappings/debug/', mapping_views.MappingDebugRetrieveDestroyView.as_view(), name='mapping-debug'),
-    path('admin/concepts/debug/<int:id>/', concept_views.ConceptDebugView.as_view(), name='concept-debug'),
     path('$resolveReference/', ReferenceExpressionResolveView.as_view(), name='reference-$resolve'),
     path('users/', include('core.users.urls'), name='users_urls'),
     path('user/', include('core.users.user_urls'), name='current_user_urls'),

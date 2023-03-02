@@ -3,7 +3,7 @@ from django.http import QueryDict, Http404
 from drf_yasg.utils import swagger_auto_schema
 from pydash import get
 from rest_framework import status
-from rest_framework.generics import DestroyAPIView, UpdateAPIView, RetrieveAPIView, ListAPIView
+from rest_framework.generics import DestroyAPIView, UpdateAPIView, RetrieveAPIView
 from rest_framework.mixins import CreateModelMixin
 from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
@@ -316,22 +316,3 @@ class MappingExtrasView(SourceChildExtrasView, MappingBaseView):
 class MappingExtraRetrieveUpdateDestroyView(SourceChildExtraRetrieveUpdateDestroyView, MappingBaseView):
     serializer_class = MappingVersionDetailSerializer
     model = Mapping
-
-
-class MappingDebugRetrieveDestroyView(ListAPIView):  # pragma: no cover
-    permission_classes = (IsAdminUser, )
-    serializer_class = MappingVersionDetailSerializer
-
-    def get_queryset(self):
-        params = self.request.query_params.dict()
-        if not params:
-            Mapping.objects.none()
-        to_concept_code = params.pop('to_concept_code', None)
-        from_concept_code = params.pop('from_concept_code', None)
-        filters = params
-        if to_concept_code:
-            filters['to_concept_code__icontains'] = to_concept_code
-        if from_concept_code:
-            filters['from_concept_code__icontains'] = from_concept_code
-
-        return Mapping.objects.filter(**filters)

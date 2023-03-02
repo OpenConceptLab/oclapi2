@@ -31,12 +31,12 @@ from core.common.constants import UPDATED_SINCE_PARAM, BULK_IMPORT_QUEUES_COUNT,
 from core.settings import EXPORT_SERVICE
 
 
-def get_latest_dir_in_path(path):  # pragma: no cover
+def get_latest_dir_in_path(path):
     all_sub_dirs = [path + d for d in os.listdir(path) if os.path.isdir(path + d)]
     return max(all_sub_dirs, key=os.path.getmtime)
 
 
-def cd_temp():  # pragma: no cover
+def cd_temp():
     cwd = os.getcwd()
     tmpdir = tempfile.mkdtemp()
     os.chdir(tmpdir)

@@ -702,37 +702,3 @@ class ConceptsHierarchyAmendAdminView(APIView):  # pragma: no cover
             dict(state=result.state, username=request.user.username, task=result.task_id, queue='default'),
             status=status.HTTP_202_ACCEPTED
         )
-
-
-class ConceptDebugView(RetrieveAPIView, UpdateAPIView):  # pragma: no cover
-    permission_classes = (IsAdminUser, )
-    serializer_class = ConceptVersionDetailSerializer
-    lookup_field = 'id'
-    swagger_schema = None
-
-    def get_queryset(self):
-        return Concept.objects.filter(id=self.kwargs['id'])
-
-    def patch(self, request, *args, **kwargs):
-        mark_versioned = self.request.data.get('mark_versioned', False) in ['true', True]
-        connect_parent_version = self.request.data.get('connect_parent_version', False) in ['true', True]
-
-        concept = self.get_object()
-        versioned_object = None
-        try:
-            versioned_object = concept.versioned_object
-            if versioned_object:
-                print("Versioned Object Found: ", versioned_object.id)
-        except:  # pylint: disable=bare-except
-            pass
-        if mark_versioned:
-            if not versioned_object:
-                concept.id = concept.versioned_object_id
-                concept.save()
-        if connect_parent_version and versioned_object:
-            print("Existing Source versions:", versioned_object.sources.values_list('uri', flat=True))
-            print("Connecting Source Version...")
-            parent = versioned_object.parent
-            versioned_object.sources.add(parent)
-            concept.sources.add(parent)
-        return Response(status=status.HTTP_204_NO_CONTENT)
