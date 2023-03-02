@@ -665,13 +665,6 @@ class SourceChildCommonBaseView(BaseAPIView):
             elif not has_parent_scope:
                 raise Http404()
 
-    def get_filter_params(self):
-        if self.params:
-            return self.params
-
-        self.__set_params()
-        return self.params
-
     def __get_params(self):
         kwargs = self.kwargs.copy()
         if self.user_is_self and self.request.user.is_authenticated:
@@ -886,11 +879,7 @@ class ConceptContainerExtraRetrieveUpdateDestroyView(RetrieveUpdateDestroyAPIVie
         instance.extras = get(instance, 'extras', {})
         instance.extras[key] = value
         instance.comment = f'Updated extras: {key}={value}.'
-        head = instance.head
-        head.extras = get(head, 'extras', {})
-        head.extras.update(instance.extras)
         instance.save()
-        head.save()
         return Response({key: value})
 
     def delete(self, request, *args, **kwargs):
@@ -901,11 +890,6 @@ class ConceptContainerExtraRetrieveUpdateDestroyView(RetrieveUpdateDestroyAPIVie
             del instance.extras[key]
             instance.comment = f'Deleted extra {key}.'
             instance.save()
-            if not instance.is_head:
-                head = instance.head
-                head.extras = get(head, 'extras', {})
-                del head.extras[key]
-                head.save()
             return Response(status=status.HTTP_204_NO_CONTENT)
 
         return Response(dict(detail=NOT_FOUND), status=status.HTTP_404_NOT_FOUND)
