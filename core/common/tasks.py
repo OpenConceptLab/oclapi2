@@ -602,14 +602,6 @@ def delete_s3_objects(path):
 
 
 @app.task(ignore_result=True)
-def link_references_to_resources(reference_ids):  # pragma: no cover
-    from core.collections.models import CollectionReference
-    for reference in CollectionReference.objects.filter(id__in=reference_ids):
-        logger.info('Linking Reference %s', reference.uri)
-        reference.link_resources()
-
-
-@app.task(ignore_result=True)
 def beat_healthcheck():  # pragma: no cover
     from core.common.services import RedisService
     redis_service = RedisService()

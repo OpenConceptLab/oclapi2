@@ -260,11 +260,6 @@ urlpatterns = [
         name='mapping-list'
     ),
     re_path(
-        r'^(?P<collection>{pattern})/(?P<version>{pattern})/references/link/$'.format(pattern=NAMESPACE_PATTERN),
-        views.CollectionVersionReferencesLinkView.as_view(),
-        name='collectionversion-references-link'
-    ),
-    re_path(
         r'^(?P<collection>{pattern})/(?P<version>{pattern})/references/(?P<reference>{pattern})/$'.format(
             pattern=NAMESPACE_PATTERN),
         views.CollectionReferenceView.as_view(),
