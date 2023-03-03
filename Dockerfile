@@ -38,6 +38,8 @@ RUN rm -rf /wheels
 
 ADD --chown=ocl:ocl . $APP_HOME
 
+RUN python manage.py collectstatic
+
 USER ocl
 
 RUN chmod +x set_build_version.sh wait_for_it.sh startup.sh start_celery_worker.sh ping_celery_worker.sh start_flower.sh
