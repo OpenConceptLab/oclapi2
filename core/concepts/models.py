@@ -180,7 +180,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             ),
             models.Index(
                 name='concepts_all_for_count3',
-                fields=['parent_id', 'is_active', 'retired', 'id', 'versioned_object_id'],
+                fields=['parent_id', '-updated_at', 'is_active', 'retired', 'id', 'versioned_object_id'],
                 condition=(Q(is_active=True) & Q(retired=False) & Q(id=F('versioned_object_id')))
             ),
             models.Index(
