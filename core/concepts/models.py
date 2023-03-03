@@ -231,8 +231,8 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         ] + VersionedModel.Meta.indexes
 
     external_id = models.TextField(null=True, blank=True)
-    concept_class = models.TextField()
-    datatype = models.TextField()
+    concept_class = models.TextField(db_index=True)
+    datatype = models.TextField(db_index=True)
     comment = models.TextField(null=True, blank=True)
     parent = models.ForeignKey('sources.Source', related_name='concepts_set', on_delete=models.CASCADE)
     sources = models.ManyToManyField('sources.Source', related_name='concepts')
