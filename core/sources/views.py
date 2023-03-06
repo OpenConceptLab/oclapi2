@@ -526,6 +526,13 @@ class SourceLatestVersionSummaryView(SourceVersionBaseView, RetrieveAPIView, Upd
     serializer_class = SourceVersionSummaryDetailSerializer
     permission_classes = (CanViewConceptDictionary,)
 
+    def get_serializer_class(self):
+        if self.is_verbose():
+            if self.request.query_params.get('distribution'):
+                return SourceVersionSummaryFieldDistributionSerializer
+            return SourceVersionSummaryVerboseSerializer
+        return SourceVersionSummaryDetailSerializer
+
     def get_object(self, queryset=None):
         obj = self.get_queryset().first()
         if not obj:

@@ -33,7 +33,9 @@ from core.collections.serializers import (
     CollectionCreateSerializer, CollectionReferenceSerializer, CollectionVersionDetailSerializer,
     CollectionVersionListSerializer, CollectionVersionExportSerializer, CollectionSummaryDetailSerializer,
     CollectionVersionSummaryDetailSerializer, CollectionReferenceDetailSerializer, ExpansionSerializer,
-    ExpansionDetailSerializer, ReferenceExpressionResolveSerializer, CollectionMinimalSerializer)
+    ExpansionDetailSerializer, ReferenceExpressionResolveSerializer, CollectionMinimalSerializer,
+    CollectionSummaryFieldDistributionSerializer, CollectionSummaryVerboseSerializer,
+    CollectionVersionSummaryFieldDistributionSerializer, CollectionVersionSummaryVerboseSerializer)
 from core.collections.utils import is_version_specified
 from core.common.constants import (
     HEAD, RELEASED_PARAM, PROCESSING_PARAM, OK_MESSAGE,
@@ -1137,6 +1139,13 @@ class CollectionSummaryView(CollectionBaseView, RetrieveAPIView, CreateAPIView):
     serializer_class = CollectionSummaryDetailSerializer
     permission_classes = (CanViewConceptDictionary,)
 
+    def get_serializer_class(self):
+        if self.is_verbose():
+            if self.request.query_params.get('distribution'):
+                return CollectionSummaryFieldDistributionSerializer
+            return CollectionSummaryVerboseSerializer
+        return CollectionSummaryDetailSerializer
+
     def get_object(self, queryset=None):
         instance = get_object_or_404(self.get_queryset())
         self.check_object_permissions(self.request, instance)
@@ -1154,6 +1163,13 @@ class CollectionVersionSummaryView(CollectionBaseView, RetrieveAPIView):
     serializer_class = CollectionVersionSummaryDetailSerializer
     permission_classes = (CanViewConceptDictionary,)
 
+    def get_serializer_class(self):
+        if self.is_verbose():
+            if self.request.query_params.get('distribution'):
+                return CollectionVersionSummaryFieldDistributionSerializer
+            return CollectionVersionSummaryVerboseSerializer
+        return CollectionVersionSummaryDetailSerializer
+
     def get_object(self, queryset=None):
         instance = get_object_or_404(self.get_queryset())
         self.check_object_permissions(self.request, instance)
@@ -1170,6 +1186,13 @@ class CollectionVersionSummaryView(CollectionBaseView, RetrieveAPIView):
 class CollectionLatestVersionSummaryView(CollectionVersionBaseView, RetrieveAPIView, UpdateAPIView):
     serializer_class = CollectionVersionSummaryDetailSerializer
     permission_classes = (CanViewConceptDictionary,)
+
+    def get_serializer_class(self):
+        if self.is_verbose():
+            if self.request.query_params.get('distribution'):
+                return CollectionVersionSummaryFieldDistributionSerializer
+            return CollectionVersionSummaryVerboseSerializer
+        return CollectionVersionSummaryDetailSerializer
 
     def get_object(self, queryset=None):
         obj = self.get_queryset().first()

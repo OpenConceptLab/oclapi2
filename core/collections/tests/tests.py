@@ -334,6 +334,162 @@ class CollectionTest(OCLTestCase):
             sorted([mapping1.url, mapping2.url])
         )
 
+    def test_references_distribution(self):
+        collection = OrganizationCollectionFactory()
+        reference1 = CollectionReference(expression='/foo/concepts/', collection=collection, reference_type='concepts')
+        reference2 = CollectionReference(expression='/foo/mappings', collection=collection, reference_type='mappings')
+        reference3 = CollectionReference(
+            expression='/bar/concepts', collection=collection, reference_type='mappings', include=False)
+        reference1.save()
+        reference2.save()
+        reference3.save()
+
+        self.assertEqual(collection.references.count(), 3)
+
+        distribution = collection.references_distribution
+
+        self.assertEqual(distribution, {'concepts': 1, 'mappings': 2, 'include': 2, 'exclude': 1, 'total': 3})
+
+    def test_referenced_sources_distribution(self):
+        self.maxDiff = None
+        collection = OrganizationCollectionFactory()
+        source1 = OrganizationSourceFactory()
+        source2 = OrganizationSourceFactory()
+        source2_v1 = OrganizationSourceFactory(mnemonic=source2.mnemonic, version='v1', organization=source2.parent)
+        concept1 = ConceptFactory(parent=source1)
+        concept2 = ConceptFactory(parent=source2)
+        concept3 = ConceptFactory(parent=source2)
+        mapping = MappingFactory(parent=source2)
+        concept2_latest_version = concept2.get_latest_version()
+        concept2_latest_version.sources.add(source2_v1)
+        reference1 = CollectionReference(
+            expression=concept1.uri, collection=collection, system=source1.uri, code=concept1.mnemonic
+        )
+        reference2 = CollectionReference(
+            expression=concept2_latest_version.uri, collection=collection, system=source2_v1.uri,
+            code=concept2.mnemonic, resource_version=concept2_latest_version.version
+        )
+        reference3 = CollectionReference(
+            expression=concept3.uri, collection=collection, system=source2.uri,
+            code=concept3.mnemonic
+        )
+        reference4 = CollectionReference(
+            expression=mapping.uri, collection=collection, system=source2.uri, reference_type='mappings'
+        )
+        reference1.clean()
+        reference1.save()
+        reference2.clean()
+        reference2.save()
+        reference3.clean()
+        reference3.save()
+        reference4.clean()
+        reference4.save()
+
+        distribution = collection.referenced_sources_distribution
+
+        self.assertCountEqual(
+            distribution,
+            [{
+                 'id': 'HEAD',
+                 'version_url': source1.uri,
+                 'type': 'Source Version',
+                 'short_code': source1.mnemonic,
+                 'distribution': {
+                     'include_reference': True,
+                     'concepts': 1,
+                     'mappings': 0,
+                     'references': 1
+                 }
+             }, {
+                 'id': 'v1',
+                 'version_url': source2_v1.uri,
+                 'type': 'Source Version',
+                 'short_code': source2.mnemonic,
+                 'distribution': {
+                     'include_reference': True,
+                     'concepts': 1,
+                     'mappings': 0,
+                     'references': 1
+                 }
+             }, {
+                'id': 'HEAD',
+                'version_url': source2.uri,
+                'type': 'Source Version',
+                'short_code': source2.mnemonic,
+                'distribution': {
+                    'include_reference': True,
+                    'concepts': 1,
+                    'mappings': 1,
+                    'references': 2
+                }
+            }]
+        )
+
+    def test_referenced_collections_distribution(self):  # pylint: disable=too-many-locals
+        self.maxDiff = None
+        collection = OrganizationCollectionFactory()
+        collection2 = OrganizationCollectionFactory()
+        source1 = OrganizationSourceFactory()
+        source2 = OrganizationSourceFactory()
+        source2_v1 = OrganizationSourceFactory(mnemonic=source2.mnemonic, version='v1', organization=source2.parent)
+        concept1 = ConceptFactory(parent=source1)
+        concept2 = ConceptFactory(parent=source2)
+        concept3 = ConceptFactory(parent=source2)
+        mapping = MappingFactory(parent=source2)
+        concept2_latest_version = concept2.get_latest_version()
+        concept2_latest_version.sources.add(source2_v1)
+        reference1 = CollectionReference(
+            expression=concept1.uri, collection=collection, system=source1.uri, code=concept1.mnemonic
+        )
+        reference2 = CollectionReference(
+            expression=concept2_latest_version.uri, collection=collection, system=source2_v1.uri,
+            code=concept2.mnemonic, resource_version=concept2_latest_version.version
+        )
+        reference3 = CollectionReference(
+            expression=concept3.uri, collection=collection, system=source2.uri,
+            code=concept3.mnemonic
+        )
+        reference4 = CollectionReference(
+            expression=mapping.uri, collection=collection, system=source2.uri, reference_type='mappings'
+        )
+        reference1.clean()
+        reference1.save()
+        reference2.clean()
+        reference2.save()
+        reference3.clean()
+        reference3.save()
+        reference4.clean()
+        reference4.save()
+
+        reference5 = CollectionReference(
+            expression=collection.uri, collection=collection2, valueset=[collection.uri], reference_type='concepts'
+        )
+        reference6 = CollectionReference(
+            expression=collection.uri, collection=collection2, valueset=[collection.uri], reference_type='mappings'
+        )
+        reference5.clean()
+        reference5.save()
+        reference6.clean()
+        reference6.save()
+
+        distribution = collection2.referenced_collections_distribution
+
+        self.assertCountEqual(
+            distribution,
+            [{
+                 'id': 'HEAD',
+                 'version_url': collection.uri,
+                 'type': 'Collection Version',
+                 'short_code': collection.mnemonic,
+                 'distribution': {
+                     'include_reference': True,
+                     'concepts': 0,  # no expansion
+                     'mappings': 0,
+                     'references': 2
+                 }
+             }]
+        )
+
 
 class CollectionReferenceTest(OCLTestCase):
     def test_uri(self):

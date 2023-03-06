@@ -309,6 +309,65 @@ class Collection(ConceptContainerModel):
     def expansions_url(self):
         return self.uri + 'expansions/'
 
+    def get_concepts_queryset(self):
+        expansion = self.expansion
+        return expansion.concepts.filter() if expansion else Concept.objects.none()
+
+    def get_mappings_queryset(self):
+        expansion = self.expansion
+        return expansion.mappings.filter() if expansion else Mapping.objects.none()
+
+    @property
+    def references_distribution(self):
+        return {
+            'include': self.references.filter(include=True).count(),
+            'exclude': self.references.filter(include=False).count(),
+            'concepts': self.references.filter(reference_type=CONCEPT_REFERENCE_TYPE).count(),
+            'mappings': self.references.filter(reference_type=MAPPING_REFERENCE_TYPE).count(),
+            'total': self.active_references,
+        }
+
+    @property
+    def referenced_sources_distribution(self):
+        from core.sources.serializers import SourceVersionMinimalSerializer
+        result = {}
+        for reference in self.references.filter(include=True):
+            version = reference.resolve_system_version
+            if version:
+                _result = get(result, version.uri)
+                if not _result:
+                    _result = {
+                        **SourceVersionMinimalSerializer(version).data,
+                        'distribution': {'include_reference': True, 'concepts': 0, 'mappings': 0, 'references': 0},
+                    }
+                _result['distribution']['concepts'] += reference.concepts.count()
+                _result['distribution']['mappings'] += reference.mappings.count()
+                _result['distribution']['references'] += 1
+                result[version.uri] = _result
+
+        return sorted(result.values(), key=lambda summary: get(summary, 'distribution.references'), reverse=True)
+
+    @property
+    def referenced_collections_distribution(self):
+        from core.collections.serializers import CollectionVersionMinimalSerializer
+        result = {}
+        for reference in self.references.filter(include=True):
+            versions = reference.resolve_valueset_versions
+            for version in versions:
+                if version:
+                    _result = get(result, version.uri)
+                    if not _result:
+                        _result = {
+                            **CollectionVersionMinimalSerializer(version).data,
+                            'distribution': {'include_reference': True, 'concepts': 0, 'mappings': 0, 'references': 0},
+                        }
+                    _result['distribution']['concepts'] += reference.concepts.count()
+                    _result['distribution']['mappings'] += reference.mappings.count()
+                    _result['distribution']['references'] += 1
+                    result[version.uri] = _result
+
+        return sorted(result.values(), key=lambda summary: get(summary, 'distribution.references'), reverse=True)
+
 
 class ReferencedConcept(models.Model):
     reference = models.ForeignKey('collections.CollectionReference', on_delete=models.CASCADE)

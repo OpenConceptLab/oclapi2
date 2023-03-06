@@ -27,6 +27,17 @@ class CollectionMinimalSerializer(ModelSerializer):
         fields = ('id', 'url')
 
 
+class CollectionVersionMinimalSerializer(ModelSerializer):
+    id = CharField(source='version')
+    version_url = CharField(source='uri')
+    type = CharField(source='resource_version_type')
+    short_code = CharField(source='mnemonic')
+
+    class Meta:
+        model = Collection
+        fields = ('id', 'version_url', 'type', 'short_code')
+
+
 class CollectionListSerializer(ModelSerializer):
     type = CharField(source='resource_type')
     short_code = CharField(source='mnemonic')
@@ -238,6 +249,84 @@ class CollectionSummaryDetailSerializer(CollectionSummarySerializer):
         fields = (
             *CollectionSummarySerializer.Meta.fields, 'id', 'uuid',
         )
+
+
+class CollectionSummaryVerboseSerializer(ModelSerializer):
+    sources = JSONField(source='referenced_sources_distribution')
+    collections = JSONField(source='referenced_collections_distribution')
+    concepts = JSONField(source='concepts_distribution')
+    mappings = JSONField(source='mappings_distribution')
+    locales = JSONField(source='concept_names_distribution')
+    versions = JSONField(source='versions_distribution')
+    references = JSONField(source='references_distribution')
+    expansions = IntegerField(source='expansions_count')
+    uuid = CharField(source='id')
+    id = CharField(source='mnemonic')
+
+    class Meta:
+        model = Collection
+        fields = (
+            'id', 'uuid', 'concepts', 'mappings', 'locales', 'versions', 'references', 'expansions', 'sources',
+            'collections'
+        )
+
+
+class CollectionVersionSummaryVerboseSerializer(ModelSerializer):
+    concepts = JSONField(source='concepts_distribution')
+    mappings = JSONField(source='mappings_distribution')
+    locales = JSONField(source='concept_names_distribution')
+    references = JSONField(source='references_distribution')
+    expansions = IntegerField(source='expansions_count')
+    uuid = CharField(source='id')
+    id = CharField(source='version')
+
+    class Meta:
+        model = Collection
+        fields = (
+            'id', 'uuid', 'concepts', 'mappings', 'locales', 'references', 'expansions'
+        )
+
+
+class CollectionSummaryFieldDistributionSerializer(ModelSerializer):
+    uuid = CharField(source='id')
+    id = CharField(source='mnemonic')
+    distribution = SerializerMethodField()
+
+    class Meta:
+        model = Collection
+        fields = (
+            'id', 'uuid', 'distribution'
+        )
+
+    def get_distribution(self, obj):
+        result = {}
+        fields = (get(self.context, 'request.query_params.distribution') or '').split(',')
+        for field in fields:
+            func = get(obj, f"get_{field}_distribution")
+            if func:
+                result[field] = func()
+        return result
+
+
+class CollectionVersionSummaryFieldDistributionSerializer(ModelSerializer):
+    uuid = CharField(source='id')
+    id = CharField(source='version')
+    distribution = SerializerMethodField()
+
+    class Meta:
+        model = Collection
+        fields = (
+            'id', 'uuid', 'distribution'
+        )
+
+    def get_distribution(self, obj):
+        result = {}
+        fields = (get(self.context, 'request.query_params.distribution') or '').split(',')
+        for field in fields:
+            func = get(obj, f"get_{field}_distribution")
+            if func:
+                result[field] = func()
+        return result
 
 
 class CollectionVersionSummarySerializer(ModelSerializer):
