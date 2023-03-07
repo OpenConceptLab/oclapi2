@@ -308,25 +308,15 @@ class CollectionSummaryFieldDistributionSerializer(ModelSerializer):
         return result
 
 
-class CollectionVersionSummaryFieldDistributionSerializer(ModelSerializer):
+class CollectionVersionSummaryFieldDistributionSerializer(CollectionSummaryFieldDistributionSerializer):
     uuid = CharField(source='id')
     id = CharField(source='version')
-    distribution = SerializerMethodField()
 
     class Meta:
         model = Collection
         fields = (
             'id', 'uuid', 'distribution'
         )
-
-    def get_distribution(self, obj):
-        result = {}
-        fields = (get(self.context, 'request.query_params.distribution') or '').split(',')
-        for field in fields:
-            func = get(obj, f"get_{field}_distribution")
-            if func:
-                result[field] = func()
-        return result
 
 
 class CollectionVersionSummarySerializer(ModelSerializer):

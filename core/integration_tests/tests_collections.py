@@ -40,7 +40,7 @@ class CollectionListViewTest(OCLAPITestCase):
         self.assertEqual(response.data[0]['url'], coll.uri)
 
         response = self.client.get(
-            f'/orgs/{coll.parent.mnemonic}/collections/?verbose=true',
+            f'/orgs/{coll.parent.mnemonic}/collections/?verbose=true&includeSummary=true',
             format='json'
         )
 
@@ -1026,6 +1026,22 @@ class CollectionVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.data['id'], 'v1')
         self.assertEqual(response.data['short_code'], 'coll')
         self.assertEqual(response.data['type'], 'Collection Version')
+
+        response = self.client.get(
+            self.collection_v1.uri + '?includeSummary=true',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['uuid'], str(self.collection_v1.id))
+        self.assertEqual(response.data['id'], 'v1')
+        self.assertEqual(response.data['short_code'], 'coll')
+        self.assertEqual(response.data['type'], 'Collection Version')
+        self.assertEqual(
+            response.data['summary'],
+            {'active_mappings': None, 'active_concepts': None, 'active_references': 0, 'expansions': 0}
+        )
 
     def test_get_404(self):
         response = self.client.get(
@@ -2439,3 +2455,26 @@ class CollectionVersionExpansionsViewTest(OCLAPITestCase):
         self.assertEqual(len(response.data), 1)
         self.assertEqual(response.data[0]['id'], expansion.id)
         self.assertEqual(response.data[0]['mnemonic'], 'e1')
+
+        response = self.client.get(
+            self.collection.url + 'HEAD/expansions/?includeSummary=true',
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['id'], expansion.id)
+        self.assertEqual(response.data[0]['mnemonic'], 'e1')
+        self.assertEqual(response.data[0]['summary'], {'active_concepts': 0, 'active_mappings': 0})
+
+        response = self.client.get(
+            self.collection.url + 'HEAD/expansions/?verbose=true&includeSummary=true',
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['id'], expansion.id)
+        self.assertEqual(response.data[0]['mnemonic'], 'e1')
+        self.assertEqual(response.data[0]['parameters'], expansion.parameters)
+        self.assertEqual(response.data[0]['summary'], {'active_concepts': 0, 'active_mappings': 0})
