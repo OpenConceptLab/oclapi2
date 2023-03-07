@@ -1,6 +1,7 @@
 import logging
 
 from django.core.exceptions import ValidationError
+from django.db.models import Q
 from pydash import get
 
 from core.bundles.serializers import FHIRBundleSerializer
@@ -95,14 +96,17 @@ class ConceptMapTranslateView(MappingListView):
                 case 'code':
                     queryset = queryset.filter(from_concept_code=param['valueCode'])
                 case 'system':
-                    queryset = queryset.filter(from_source_url=IdentifierSerializer.convert_fhir_url_to_ocl_uri(
-                        param['valueUri'], 'sources'))
-                case 'source':
-                    queryset = queryset.filter(parent__canonical_url=param['valueUri'])
-                case 'target':
-                    queryset = queryset.filter(to_source_url=IdentifierSerializer.convert_fhir_url_to_ocl_uri(
-                        param['valueUri'], 'sources'
-                    ))
+                    system_url = IdentifierSerializer.convert_fhir_url_to_ocl_uri(param['valueUri'], 'sources')
+                    queryset = queryset.filter(Q(from_source__canonical_url=param['valueUri']) |
+                                               Q(from_source_url=system_url) |
+                                               Q(from_source__uri=system_url))
+                #TODO: implement case 'source':
+                #TODO: implement case 'target':
+                case 'targetsystem':
+                    target_url = IdentifierSerializer.convert_fhir_url_to_ocl_uri(param['valueUri'], 'sources')
+                    queryset = queryset.filter(Q(to_source__canonical_url=param['valueUri']) |
+                                               Q(to_source_url=target_url) |
+                                               Q(to_source__uri=target_url))
         return queryset
 
     def get_serializer(self, *args, **kwargs):
@@ -118,8 +122,10 @@ class ConceptMapTranslateView(MappingListView):
 
                     if mapping.to_source and mapping.to_source.canonical_url:
                         to_url = mapping.to_source.canonical_url
-                    else:
+                    elif mapping.to_source_url:
                         to_url = IdentifierSerializer.convert_ocl_uri_to_fhir_url(mapping.to_source_url, RESOURCE_TYPE)
+                    elif mapping.to_source:
+                        to_url = IdentifierSerializer.convert_ocl_uri_to_fhir_url(mapping.to_source.uri, RESOURCE_TYPE)
 
                     matches.append({
                         'name': 'match',
