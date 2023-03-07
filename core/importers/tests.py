@@ -13,12 +13,14 @@ from ocldev.oclcsvtojsonconverter import OclStandardCsvToJsonConverter
 
 from core.collections.models import Collection
 from core.common.constants import OPENMRS_VALIDATION_SCHEMA
+from core.common.tasks import post_import_update_resource_counts
 from core.common.tests import OCLAPITestCase, OCLTestCase
 from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory
 from core.importers.models import BulkImport, BulkImportInline, BulkImportParallelRunner
 from core.importers.views import csv_file_data_to_input_list
 from core.mappings.models import Mapping
+from core.mappings.tests.factories import MappingFactory
 from core.orgs.models import Organization
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.models import Source
@@ -1336,3 +1338,28 @@ class BulkImportViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 403)
+
+
+class PostImportUpdateResourceCountsTaskTest(OCLTestCase):
+    @patch('core.sources.models.Source.update_mappings_count')
+    @patch('core.sources.models.Source.update_concepts_count')
+    def test_post_import_update_resource_counts(self, update_concepts_count_mock, update_mappings_count_mock):
+        source = OrganizationSourceFactory()
+        concept1 = ConceptFactory(_counted=None, parent=source)
+        concept2 = ConceptFactory(_counted=True, parent=source)
+        mapping1 = MappingFactory(_counted=None, parent=source)
+        mapping2 = MappingFactory(_counted=True, parent=source)
+
+        post_import_update_resource_counts()
+        concept1.refresh_from_db()
+        mapping1.refresh_from_db()
+        concept2.refresh_from_db()
+        mapping2.refresh_from_db()
+
+        self.assertTrue(concept1._counted)
+        self.assertTrue(mapping1._counted)
+        self.assertTrue(concept2._counted)
+        self.assertTrue(mapping2._counted)
+
+        update_concepts_count_mock.assert_called_once_with(sync=True)
+        update_mappings_count_mock.assert_called_once_with(sync=True)
