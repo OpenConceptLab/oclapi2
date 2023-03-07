@@ -221,17 +221,15 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         )
 
     def set_active_concepts(self):
+        queryset = self.concepts
         if self.is_head:
             queryset = self.concepts_set.filter(id=F('versioned_object_id'))
-        else:
-            queryset = self.concepts
         self.active_concepts = queryset.filter(retired=False, is_active=True).count()
 
     def set_active_mappings(self):
+        queryset = self.mappings
         if self.is_head:
             queryset = self.mappings_set.filter(id=F('versioned_object_id'))
-        else:
-            queryset = self.mappings
         self.active_mappings = queryset.filter(retired=False, is_active=True).count()
 
     def seed_concepts(self, index=True):
@@ -407,16 +405,15 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         ).first() if equivalency_map_type and concept else None
 
     def clone_with_cascade(self, concept_to_clone, user, **kwargs):
+        from core.mappings.models import Mapping
+        mappings = Mapping.objects.none()
+        concepts = Concept.objects.filter(id=concept_to_clone.id)
         if kwargs:
             kwargs.pop('view', None)
             kwargs['repo_version'] = kwargs.get('repo_version') or concept_to_clone.parent
             result = concept_to_clone.cascade(**kwargs, omit_if_exists_in=self.uri, include_self=False)
             concepts = result['concepts']
             mappings = result['mappings']
-        else:
-            from core.mappings.models import Mapping
-            concepts = Concept.objects.filter(id=concept_to_clone.id)
-            mappings = Mapping.objects.none()
         return self.clone_resources(user, concepts, mappings, **kwargs)
 
     def clone_mappings(self, cloned_mappings, user, update_count=True):

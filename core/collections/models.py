@@ -500,9 +500,10 @@ class CollectionReference(models.Model):
         return self.calculate_uri(self.collection)
 
     def calculate_uri(self, collection):
+        uri = None
         if collection:
-            return f'{collection.uri}references/{self.id}/'
-        return None
+            uri = f'{collection.uri}references/{self.id}/'
+        return uri
 
     def fetch_concepts(self, refetch=False):
         if not get(self, '_fetched') or refetch:
@@ -766,9 +767,9 @@ class CollectionReference(models.Model):
     def get_allowed_filter_properties(self):
         common = ['q', 'exact_match']
         if self.is_concept:
-            return [*Concept.es_fields.keys(), *common]
-        if self.is_mapping:
-            return [*Mapping.es_fields.keys(), *common]
+            common = [*Concept.es_fields.keys(), *common]
+        elif self.is_mapping:
+            common = [*Mapping.es_fields.keys(), *common]
         return common
 
     def __is_valid_filter_schema(self, filter_def):
@@ -807,16 +808,6 @@ class CollectionReference(models.Model):
     def get_related_uris(self):
         self.fetch_concepts()
         return [*set(self._concepts.values_list('uri', flat=True)), *set(self._mappings.values_list('uri', flat=True))]
-
-    def link_resources(self):
-        collection = self.collection
-        expansion = collection.expansion
-        is_concept_expression = self.is_concept
-        if self.expression and not is_canonical_uri(self.expression) and expansion:
-            if is_concept_expression and not self.concepts.exists():
-                self.concepts.add(*expansion.concepts.filter(uri=self.expression))
-            if not is_concept_expression and not self.mappings.exists():
-                self.mappings.add(*expansion.mappings.filter(uri=self.expression))
 
     @property
     def translation(self):
