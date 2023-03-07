@@ -1255,5 +1255,8 @@ class OCLOIDCAuthenticationBackendTest(OCLTestCase):
         UserProfileFactory(username='superman@not-gotham.com')
 
         users = self.backend.filter_users_by_claims(self.claim)
+
         self.assertEqual(users.count(), 1)
         self.assertEqual(users.first(), batman)
+
+        self.assertEqual(self.backend.filter_users_by_claims({**self.claim, 'preferred_username': None}).count(), 0)
