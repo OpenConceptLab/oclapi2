@@ -470,8 +470,8 @@ class ConceptMapTest(OCLTestCase):
 
         response = self.client.get(
             f'/users/{self.user.mnemonic}/ConceptMap/$translate?'
-            f'system={self.org_source_B_v1.canonical_url}&code=concept_B_1&targetsystem={self.org_source.canonical_url}',
-            HTTP_AUTHORIZATION='Token ' + self.user_token)
+            f'system={self.org_source_B_v1.canonical_url}&code=concept_B_1'
+            f'&targetsystem={self.org_source.canonical_url}', HTTP_AUTHORIZATION='Token ' + self.user_token)
 
         self.assertEqual(response.status_code, 200)
         self.assertDictEqual(response.data, {
@@ -490,7 +490,8 @@ class ConceptMapTest(OCLTestCase):
 
         response = self.client.get(
             f'/users/{self.user.mnemonic}/ConceptMap/$translate?'
-            f'system={self.org_source_B_v1.canonical_url}&code=concept_B_1&targetsystem={self.org_source_B_v1.canonical_url}',
+            f'system={self.org_source_B_v1.canonical_url}&code=concept_B_1'
+            f'&targetsystem={self.org_source_B_v1.canonical_url}',
             HTTP_AUTHORIZATION='Token ' + self.user_token)
 
         self.assertEqual(response.status_code, 200)
