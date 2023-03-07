@@ -13,7 +13,8 @@ from ocldev.oclcsvtojsonconverter import OclStandardCsvToJsonConverter
 
 from core.collections.models import Collection
 from core.common.constants import OPENMRS_VALIDATION_SCHEMA
-from core.common.tasks import post_import_update_resource_counts
+from core.common.tasks import post_import_update_resource_counts, bulk_import_parts_inline, bulk_import_inline, \
+    bulk_import
 from core.common.tests import OCLAPITestCase, OCLTestCase
 from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory
@@ -42,12 +43,12 @@ class BulkImportTest(OCLTestCase):
         flex_importer_mock.return_value = flex_importer_instance_mock
         content = '{"foo": "bar"}\n{"foobar": "foo"}'
 
-        bulk_import = BulkImport(content=content, username='ocladmin', update_if_exists=True)
-        bulk_import.run()
+        bulk_import_instance = BulkImport(content=content, username='ocladmin', update_if_exists=True)
+        bulk_import_instance.run()
 
-        self.assertEqual(bulk_import.result.json, {"all": "200"})
-        self.assertEqual(bulk_import.result.detailed_summary, 'summary')
-        self.assertEqual(bulk_import.result.report, 'report')
+        self.assertEqual(bulk_import_instance.result.json, {"all": "200"})
+        self.assertEqual(bulk_import_instance.result.detailed_summary, 'summary')
+        self.assertEqual(bulk_import_instance.result.report, 'report')
 
         flex_importer_mock.assert_called_once_with(
             input_list=[{"foo": "bar"}, {"foobar": "foo"}],
@@ -1340,7 +1341,7 @@ class BulkImportViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 403)
 
 
-class PostImportUpdateResourceCountsTaskTest(OCLTestCase):
+class TasksTest(OCLTestCase):
     @patch('core.sources.models.Source.update_mappings_count')
     @patch('core.sources.models.Source.update_concepts_count')
     def test_post_import_update_resource_counts(self, update_concepts_count_mock, update_mappings_count_mock):
@@ -1356,10 +1357,41 @@ class PostImportUpdateResourceCountsTaskTest(OCLTestCase):
         concept2.refresh_from_db()
         mapping2.refresh_from_db()
 
-        self.assertTrue(concept1._counted)
-        self.assertTrue(mapping1._counted)
-        self.assertTrue(concept2._counted)
-        self.assertTrue(mapping2._counted)
+        self.assertTrue(concept1._counted)  # pylint: disable=protected-access
+        self.assertTrue(mapping1._counted)  # pylint: disable=protected-access
+        self.assertTrue(concept2._counted)  # pylint: disable=protected-access
+        self.assertTrue(mapping2._counted)  # pylint: disable=protected-access
 
         update_concepts_count_mock.assert_called_once_with(sync=True)
         update_mappings_count_mock.assert_called_once_with(sync=True)
+
+    @patch('core.importers.models.BulkImportInline')
+    def test_bulk_import_parts_inline(self, bulk_import_inline_mock):
+        bulk_import_inline_mock.run = Mock()
+
+        bulk_import_parts_inline([1, 2], 'username', True)  # pylint: disable=no-value-for-parameter
+        bulk_import_inline_mock.assert_called_once_with(
+            content=None, username='username', update_if_exists=True, input_list=[1, 2],
+            self_task_id=ANY
+        )
+        bulk_import_inline_mock().run.assert_called_once()
+
+    @patch('core.importers.models.BulkImportInline')
+    def test_bulk_import_inline(self, bulk_import_inline_mock):
+        bulk_import_inline_mock.run = Mock()
+
+        bulk_import_inline([1, 2], 'username', True)
+        bulk_import_inline_mock.assert_called_once_with(
+            content=[1, 2], username='username', update_if_exists=True
+        )
+        bulk_import_inline_mock().run.assert_called_once()
+
+    @patch('core.importers.models.BulkImport')
+    def test_bulk_import(self, bulk_import_mock):
+        bulk_import_mock.run = Mock()
+
+        bulk_import([1, 2], 'username', True)
+        bulk_import_mock.assert_called_once_with(
+            content=[1, 2], username='username', update_if_exists=True
+        )
+        bulk_import_mock().run.assert_called_once()
