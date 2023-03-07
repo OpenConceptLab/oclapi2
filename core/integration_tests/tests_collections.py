@@ -40,7 +40,7 @@ class CollectionListViewTest(OCLAPITestCase):
         self.assertEqual(response.data[0]['url'], coll.uri)
 
         response = self.client.get(
-            f'/orgs/{coll.parent.mnemonic}/collections/?verbose=true&includeSummary=true',
+            f'/orgs/{coll.parent.mnemonic}/collections/?verbose=true',
             format='json'
         )
 
@@ -65,6 +65,21 @@ class CollectionListViewTest(OCLAPITestCase):
 
         response = self.client.get(
             f'/orgs/{coll.parent.mnemonic}/collections/?verbose=true&includeSummary=true',
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['short_code'], 'coll1')
+        self.assertEqual(response.data[0]['id'], 'coll1')
+        self.assertEqual(response.data[0]['url'], coll.uri)
+        self.assertEqual(
+            response.data[0]['summary'],
+            dict(versions=1, active_concepts=1, active_mappings=0, active_references=1, expansions=1)
+        )
+
+        response = self.client.get(
+            f'/orgs/{coll.parent.mnemonic}/collections/?includeSummary=true',
             format='json'
         )
 
