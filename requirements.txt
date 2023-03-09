@@ -25,7 +25,7 @@ git+https://github.com/snyaggarwal/django-queryset-csv
 git+https://github.com/OpenConceptLab/ocldev
 coverage==6.5.0
 tblib==1.7.0
-django-ordered-model==3.6
+django-ordered-model==3.7.1
 django-health-check>=3.16.2
 markdown==3.4.1
 mock==5.0.1
