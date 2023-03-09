@@ -697,8 +697,9 @@ class BulkImportParallelRunnerTest(OCLTestCase):
         self.assertEqual([l['type'] for l in importer.parts[5]], ['Source Version', 'Source Version'])
         self.assertEqual(list({l['type'] for l in importer.parts[6]}), ['Concept'])
 
+    @patch('core.importers.models.app.control')
     @patch('core.importers.models.RedisService')
-    def test_is_any_process_alive(self, redis_service_mock):
+    def test_is_any_process_alive(self, redis_service_mock, celery_app_mock):
         redis_service_mock.return_value = Mock()
         importer = BulkImportParallelRunner(
             open(
@@ -709,32 +710,41 @@ class BulkImportParallelRunnerTest(OCLTestCase):
         self.assertFalse(importer.is_any_process_alive())
 
         importer.groups = [
-            Mock(completed_count=Mock(return_value=5), __len__=Mock(return_value=5)),
-            Mock(completed_count=Mock(return_value=5), __len__=Mock(return_value=5)),
+            Mock(ready=Mock(return_value=True)),
+            Mock(ready=Mock(return_value=True)),
         ]
         self.assertFalse(importer.is_any_process_alive())
 
-        importer.groups = [
-            Mock(completed_count=Mock(return_value=10), __len__=Mock(return_value=10)),
-            Mock(completed_count=Mock(return_value=5), __len__=Mock(return_value=10)),
+        # worker1 and worker2 failed after processing some jobs and/or part of started jobs
+        # worker3 finished everything
+        importer.tasks = [
+            Mock(task_id='task1', worker='worker1', status='SUCCESS'),
+            Mock(task_id='task2', worker='worker1', status='FAILED'),
+            Mock(task_id='task3', worker='worker1', status='STARTED'),
+            Mock(task_id='task4', worker='worker1', status='STARTED'),
+            Mock(task_id='task5', worker='worker2', status='PENDING'),
+            Mock(task_id='task6', worker='worker2', status='STARTED'),
+            Mock(task_id='task7', worker='worker3', status='SUCCESS'),
         ]
-        self.assertTrue(importer.is_any_process_alive())
+
+        celery_app_mock.ping = Mock(return_value=[])
 
         importer.groups = [
-            Mock(completed_count=Mock(return_value=5), __len__=Mock(return_value=10)),
-            Mock(completed_count=Mock(return_value=5), __len__=Mock(return_value=10)),
+            Mock(ready=Mock(return_value=True)),
+            Mock(ready=Mock(return_value=False)),
         ]
+        self.assertFalse(importer.is_any_process_alive())
+
+        # worker1 is up
+        celery_app_mock.ping = Mock(return_value=[{'worker1': {'ping': 'ok'}}])
+
         self.assertTrue(importer.is_any_process_alive())
 
-        importer.groups = [
-            Mock(completed_count=Mock(return_value=0), __len__=Mock(return_value=10)),
-        ]
-        self.assertTrue(importer.is_any_process_alive())
+        # worker1 and worker2 both are up
+        celery_app_mock.ping = Mock(return_value=[{'worker1': {'ping': 'ok'}}, {'worker2': {'ping': 'ok'}}])
 
-        importer.groups = [
-            Mock(completed_count=Mock(return_value=9), __len__=Mock(return_value=10)),
-        ]
         self.assertTrue(importer.is_any_process_alive())
+        celery_app_mock.ping.assert_called_once_with(destination=['worker1', 'worker2'])
 
     @patch('core.importers.models.RedisService')
     def test_get_overall_tasks_progress(self, redis_service_mock):

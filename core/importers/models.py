@@ -11,6 +11,7 @@ from django.db.models import F
 from ocldev.oclfleximporter import OclFlexImporter
 from pydash import compact, get
 
+from core.celery import app
 from core.collections.models import Collection
 from core.common.constants import HEAD
 from core.common.services import RedisService
@@ -918,12 +919,20 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
         if not self.groups:
             return False
 
-        result = True
+        result = False
 
         try:
-            result = any(grp.completed_count() != len(grp) for grp in self.groups)
+            for grp in self.groups:
+                if result:
+                    return result
+                if grp.ready():  # all tasks in that group are done
+                    result = False
+                else:
+                    workers = list(set(compact([task.worker for task in self.tasks if task.status == 'STARTED'])))
+                    workers_status = app.control.ping(destination=workers)  # check if workers are up
+                    result = len(workers_status) != 0
         except:  # pylint: disable=bare-except
-            pass
+            result = True
 
         return result
 
@@ -1015,9 +1024,11 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
             others=[], unknown=[], permission_denied=[], elapsed_seconds=self.elapsed_seconds
         )
         for task in self.tasks:
-            result = task.result.get('json')
-            for key in total_result:
-                total_result[key] += result.get(key)
+            if task.result:
+                result = task.result.get('json')
+                for key in total_result:
+                    if result:
+                        total_result[key] += result.get(key)
 
         total_result['start_time'] = self.start_time_formatted
         total_result['elapsed_seconds'] = self.elapsed_seconds
