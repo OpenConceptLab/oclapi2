@@ -2,14 +2,13 @@ import logging
 
 from django.core.exceptions import ValidationError
 from rest_framework import status
-from rest_framework.generics import get_object_or_404
 from rest_framework.response import Response
 
 from core.bundles.serializers import FHIRBundleSerializer
 from core.code_systems.views import CodeSystemValidateCodeView
 from core.collections.models import Collection, default_expansion_parameters
 from core.collections.views import CollectionListView, CollectionRetrieveUpdateDestroyView, \
-    CollectionVersionExpansionsView, CollectionBaseView
+    CollectionVersionExpansionsView
 from core.common.constants import HEAD
 from core.common.fhir_helpers import translate_fhir_query
 from core.concepts.views import ConceptRetrieveUpdateDestroyView
