@@ -285,20 +285,6 @@ class ValueSetExpansionParametersSerializer(ParametersSerializer):
     def create(self, validated_data):
         pass
 
-    def to_internal_value(self, data):
-        parameters = {}
-
-        for parameter in data.get('parameter', []):
-            name = parameter.get('name')
-            value = None
-            match name:
-                case 'filter':
-                    value = parameter.get('valueString')
-            if value:
-                parameters[name] = value
-
-        return {'parameters': parameters}
-
 
 class ValueSetExpansionField(serializers.Field):
     default_count = 1000

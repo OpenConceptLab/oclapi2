@@ -8,6 +8,7 @@ from core.code_systems.serializers import CodeSystemDetailSerializer, \
     ValidateCodeParametersSerializer
 from core.common.constants import HEAD
 from core.common.fhir_helpers import translate_fhir_query
+from core.common.serializers import IdentifierSerializer
 from core.concepts.permissions import CanViewParentDictionaryAsGuest
 from core.concepts.views import ConceptRetrieveUpdateDestroyView
 from core.parameters.serializers import ParametersSerializer
@@ -59,6 +60,9 @@ class CodeSystemListLookupView(ConceptRetrieveUpdateDestroyView):
         system = self.request.query_params.get('system')
         if code and system:
             source = Source.objects.filter(canonical_url=system, is_latest_version=True).exclude(version=HEAD).first()
+            if not source:
+                system = IdentifierSerializer.convert_fhir_url_to_ocl_uri(system, 'sources')
+                source = Source.objects.filter(uri=system, is_latest_version=True).exclude(version=HEAD).first()
             if source:
                 queryset = queryset.filter(sources=source, mnemonic=code)
 
@@ -96,22 +100,32 @@ class CodeSystemValidateCodeView(ConceptRetrieveUpdateDestroyView):
         queryset = super().get_queryset()
 
         parameters = self.get_parameters()
-
         url = parameters.get('url')
         code = parameters.get('code')
         version = parameters.get('version')
         display = parameters.get('display')
 
-        if code and url:
+        if url:
             source = Source.objects.filter(canonical_url=url)
+            if not source:
+                url = IdentifierSerializer.convert_fhir_url_to_ocl_uri(url, 'sources')
+                source = Source.objects.filter(uri=url)
+
+            if not source:
+                return queryset.none()
+
             if version:
                 source = source.filter(version=version)
             else:
                 source = source.filter(is_latest_version=True).exclude(version=HEAD)
-            if source:
+
+        if code:
+            if not source:
+                return queryset.none()
+            else:
                 queryset = queryset.filter(sources=source.first(), mnemonic=code)
 
-        if display:
+        if display and queryset:
             instance = queryset.first()
             if display not in (instance.name, instance.display_name):
                 return queryset.none()
@@ -125,7 +139,9 @@ class CodeSystemValidateCodeView(ConceptRetrieveUpdateDestroyView):
             parameters = self.get_serializer_class().parse_query_params(self.request.query_params)
         if not parameters.is_valid():
             raise ValidationError(parameters.errors)
-        return parameters
+        params = parameters.validated_data
+        params = params.get('parameters', {})
+        return params
 
     def get_object(self, queryset=None):
         queryset = self.get_queryset()

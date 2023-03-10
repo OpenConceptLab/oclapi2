@@ -11,6 +11,7 @@ from core.collections.views import CollectionListView, CollectionRetrieveUpdateD
     CollectionVersionExpansionsView
 from core.common.constants import HEAD
 from core.common.fhir_helpers import translate_fhir_query
+from core.concepts.views import ConceptRetrieveUpdateDestroyView
 from core.sources.models import Source
 from core.value_sets.serializers import ValueSetDetailSerializer, \
     ValueSetExpansionParametersSerializer, ValueSetExpansionSerializer
@@ -53,7 +54,7 @@ class ValueSetListView(CollectionListView):
 class ValueSetValidateCodeView(CodeSystemValidateCodeView):
 
     def get_queryset(self):
-        queryset = super().get_queryset()
+        queryset = super(ConceptRetrieveUpdateDestroyView, self).get_queryset()
 
         parameters = self.get_parameters()
 

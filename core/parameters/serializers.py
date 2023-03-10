@@ -55,6 +55,18 @@ class ParametersSerializer(ReadSerializerMixin, serializers.Serializer):
             return cls(data={'parameter': parameters})
         return cls(data={'parameter': []})
 
+    def to_internal_value(self, data):
+        parameters = {}
+
+        for parameter in data.get('parameter', []):
+            name = parameter.get('name', None)
+            if name:
+                value = parameter.get(self.allowed_input_parameters.get(name, None), None)
+                if value:
+                    parameters[name] = value
+
+        return {'parameters': parameters}
+
     @classmethod
     def from_concept(cls, concept):
         source = concept.sources.filter(is_latest_version=True).exclude(version=HEAD).first()

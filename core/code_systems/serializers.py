@@ -30,14 +30,6 @@ class ValidateCodeParametersSerializer(ParametersSerializer):
         'system': 'valueUri'
     }
 
-    def get(self, field):
-        params = self.validated_data
-        for param in params['parameter']:
-            if param['name'] == field:
-                return param[self.allowed_input_parameters[field]]
-        return None
-
-
 class CodeSystemConceptDesignationUseSerializer(serializers.Field):
     def to_internal_value(self, data):
         if 'code' in data:

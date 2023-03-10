@@ -150,6 +150,16 @@ class CodeSystemTest(OCLTestCase):
                 {'name': 'result', 'valueBoolean': False}
             ]}))
 
+    def test_validate_code_for_code_system_with_invalid_url_negative(self):
+        response = self.client.get(f'/fhir/CodeSystem/$validate-code/'
+                                   f'?url=non_existing_url&code=${self.concept_1.mnemonic}')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertJSONEqual(json.dumps(response.data), json.dumps(
+            {'resourceType': 'Parameters', 'parameter': [
+                {'name': 'result', 'valueBoolean': False}
+            ]}))
+
     def test_validate_code_with_display_for_code_system(self):
         response = self.client.get(f'/fhir/CodeSystem/$validate-code/'
                                    f'?url={self.org_source.canonical_url}'

@@ -88,25 +88,34 @@ class ConceptMapTranslateView(MappingListView):
             raise ValidationError(message=parameters.errors)
 
         params = parameters.validated_data
+        params = params.get('parameters', {})
 
-        for param in params['parameter']:
-            match param['name']:
-                case 'url':
-                    queryset = queryset.filter(canonical_url=param['valueUri'])
-                case 'code':
-                    queryset = queryset.filter(from_concept_code=param['valueCode'])
-                case 'system':
-                    system_url = IdentifierSerializer.convert_fhir_url_to_ocl_uri(param['valueUri'], 'sources')
-                    queryset = queryset.filter(Q(from_source__canonical_url=param['valueUri']) |
-                                               Q(from_source_url=system_url) |
-                                               Q(from_source__uri=system_url))
-                #TODO: implement case 'source':
-                #TODO: implement case 'target':
-                case 'targetsystem':
-                    target_url = IdentifierSerializer.convert_fhir_url_to_ocl_uri(param['valueUri'], 'sources')
-                    queryset = queryset.filter(Q(to_source__canonical_url=param['valueUri']) |
-                                               Q(to_source_url=target_url) |
-                                               Q(to_source__uri=target_url))
+        url = params.get('url')
+        code = params.get('code')
+        system = params.get('system')
+        targetsystem = params.get('targetsystem')
+        # TODO: implement 'source' and 'target'
+        if url:
+            queryset = queryset.filter(canonical_url=url)
+            if not queryset:
+                return queryset
+
+        if code:
+            queryset = queryset.filter(from_concept_code=code)
+            if not queryset:
+                return queryset
+        if system:
+            system_url = IdentifierSerializer.convert_fhir_url_to_ocl_uri(system, 'sources')
+            queryset = queryset.filter(Q(from_source__canonical_url=system) |
+                                       Q(from_source_url=system_url) |
+                                       Q(from_source__uri=system_url))
+            if not queryset:
+                return queryset
+        if targetsystem:
+            target_url = IdentifierSerializer.convert_fhir_url_to_ocl_uri(targetsystem, 'sources')
+            queryset = queryset.filter(Q(to_source__canonical_url=targetsystem) |
+                                       Q(to_source_url=target_url) |
+                                       Q(to_source__uri=target_url))
         return queryset
 
     def get_serializer(self, *args, **kwargs):
