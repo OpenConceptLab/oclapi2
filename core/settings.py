@@ -94,6 +94,7 @@ INSTALLED_APPS = [
     'core.pins',
     'core.client_configs',
     'core.tasks',
+    'core.toggles',
 ]
 REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': (

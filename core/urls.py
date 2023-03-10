@@ -87,4 +87,5 @@ urlpatterns = [
         name='bulk_import_detail_url'
     ),
     path('manage/bulkimport/', BulkImportView.as_view(), name='bulk_import_urls'),
+    path('toggles/', include('core.toggles.urls'), name='toggles'),
 ]
