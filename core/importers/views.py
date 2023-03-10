@@ -171,10 +171,24 @@ class BulkImportView(APIView):
             )
 
         try:
-            flower_tasks = {
-                **flower_get('api/tasks?taskname=core.common.tasks.bulk_import').json(),
-                **flower_get('api/tasks?taskname=core.common.tasks.bulk_import_parallel_inline').json(),
-                **flower_get('api/tasks?taskname=core.common.tasks.bulk_import_inline').json()
+            flower_tasks = {}
+            import_task_names = [
+                'core.common.tasks.bulk_import',
+                'core.common.tasks.bulk_import_parallel_inline',
+                'core.common.tasks.bulk_import_inline',
+                'core.common.tasks.die',
+            ]
+            for import_task_name in import_task_names:
+                flower_tasks = {**flower_get(f'api/tasks?taskname={import_task_name}').json(),}
+
+            pending_tasks = RedisService().get_pending_tasks(
+                import_queue or 'bulk_import_root',
+                import_task_names,
+                ['bulk_import_parts_inline']
+            )
+            all_tasks = {
+                **flower_tasks,
+                **{task['task_id']: task for task in pending_tasks if task.get('task_id')},
             }
         except Exception as ex:
             return Response(
@@ -183,7 +197,7 @@ class BulkImportView(APIView):
             )
 
         tasks = []
-        for task_id, value in flower_tasks.items():
+        for task_id, value in all_tasks.items():
             task = parse_bulk_import_task_id(task_id)
 
             if user.is_staff or user.username == task['username']:

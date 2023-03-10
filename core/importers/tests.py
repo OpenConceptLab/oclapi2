@@ -734,17 +734,19 @@ class BulkImportParallelRunnerTest(OCLTestCase):
             Mock(ready=Mock(return_value=False)),
         ]
         self.assertFalse(importer.is_any_process_alive())
+        self.assertCountEqual(celery_app_mock.ping.call_args[1]['destination'], ['worker1', 'worker2'])
 
         # worker1 is up
         celery_app_mock.ping = Mock(return_value=[{'worker1': {'ping': 'ok'}}])
 
         self.assertTrue(importer.is_any_process_alive())
+        self.assertCountEqual(celery_app_mock.ping.call_args[1]['destination'], ['worker1', 'worker2'])
 
         # worker1 and worker2 both are up
         celery_app_mock.ping = Mock(return_value=[{'worker1': {'ping': 'ok'}}, {'worker2': {'ping': 'ok'}}])
 
         self.assertTrue(importer.is_any_process_alive())
-        celery_app_mock.ping.assert_called_once_with(destination=['worker1', 'worker2'])
+        self.assertCountEqual(celery_app_mock.ping.call_args[1]['destination'], ['worker1', 'worker2'])
 
     @patch('core.importers.models.RedisService')
     def test_get_overall_tasks_progress(self, redis_service_mock):
@@ -898,9 +900,11 @@ class BulkImportViewTest(OCLAPITestCase):
         self.superuser = UserProfile.objects.get(username='ocladmin')
         self.token = self.superuser.get_token()
 
+    @patch('core.importers.views.RedisService.get_pending_tasks')
     @patch('core.importers.views.AsyncResult')
     @patch('core.importers.views.flower_get')
-    def test_get_without_task_id(self, flower_get_mock, async_result_mock):
+    def test_get_without_task_id(self, flower_get_mock, async_result_mock, pending_tasks_mock):
+        pending_tasks_mock.return_value = []
         async_result_mock.return_value = Mock(state='DONE')
         task_id1 = f"{str(uuid.uuid4())}-ocladmin~priority"
         task_id2 = f"{str(uuid.uuid4())}-foobar~normal"
