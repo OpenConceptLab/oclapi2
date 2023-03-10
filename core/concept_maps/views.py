@@ -57,6 +57,8 @@ class ConceptMapRetrieveUpdateView(SourceRetrieveUpdateDestroyView):
 
     def get_queryset(self):
         queryset = super().get_queryset()
+        if self.request.method == 'DELETE':
+            return queryset  # Delete HEAD with all versions
         return queryset.exclude(version=HEAD)
 
     def get_detail_serializer(self, obj):

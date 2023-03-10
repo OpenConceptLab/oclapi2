@@ -2,13 +2,14 @@ import logging
 
 from django.core.exceptions import ValidationError
 from rest_framework import status
+from rest_framework.generics import get_object_or_404
 from rest_framework.response import Response
 
 from core.bundles.serializers import FHIRBundleSerializer
 from core.code_systems.views import CodeSystemValidateCodeView
 from core.collections.models import Collection, default_expansion_parameters
 from core.collections.views import CollectionListView, CollectionRetrieveUpdateDestroyView, \
-    CollectionVersionExpansionsView
+    CollectionVersionExpansionsView, CollectionBaseView
 from core.common.constants import HEAD
 from core.common.fhir_helpers import translate_fhir_query
 from core.concepts.views import ConceptRetrieveUpdateDestroyView
@@ -100,6 +101,9 @@ class ValueSetRetrieveUpdateView(CollectionRetrieveUpdateDestroyView):
 
     def get_queryset(self):
         queryset = super().get_queryset()
+        if self.request.method == 'DELETE':
+            return queryset  # Delete HEAD with all versions
+
         return queryset.exclude(version=HEAD)
 
     def get_detail_serializer(self, obj):
@@ -118,8 +122,17 @@ class ValueSetExpandView(CollectionVersionExpansionsView):
     def get_response_serializer_class(self):
         return ValueSetExpansionSerializer
 
+    def get_filter_params(self, default_version_to_head=True):
+        return super().get_filter_params(False)
+
+    def get_base_queryset(self):
+        queryset = super().get_base_queryset()
+        queryset = queryset.exclude(version=HEAD).filter(is_latest_version=True)[:1]
+        return queryset
+
     def get_queryset(self):
         qs = super().get_queryset()
+
         if self.request.method == 'GET':
             parameters = ValueSetExpansionParametersSerializer.parse_query_params(self.request.query_params)
             if not parameters.is_valid():

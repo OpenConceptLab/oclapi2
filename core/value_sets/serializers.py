@@ -188,6 +188,7 @@ class ValueSetDetailSerializer(serializers.ModelSerializer):
 
         collection.id = None  # pylint: disable=invalid-name
         collection.version = collection_version
+        collection.expansion_uri = None
         errors = Collection.persist_new_version(collection, user)
         self._errors.update(errors)
 

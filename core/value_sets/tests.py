@@ -436,6 +436,7 @@ class ValueSetTest(OCLAPITestCase):
                 'id': 'c2',
                 'url': 'http://c2.com',
                 'status': 'draft',
+                'version': '1',
                 'name': 'collection1',
                 'description': 'This is a test collection',
                 'compose': {
@@ -477,6 +478,7 @@ class ValueSetTest(OCLAPITestCase):
         self.assertEqual(resource['resourceType'], 'ValueSet')
         expansion = resource['expansion']
         self.assertIsNotNone(expansion['timestamp'])
+        self.assertIn('/users/' + self.user.mnemonic + '/collections/c2/1/expansions', expansion['identifier'])
         self.assertEqual(len(expansion['contains']), 1)
         self.assertEqual(expansion['contains'][0]['code'], self.concept_1.mnemonic)
 
