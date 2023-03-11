@@ -176,10 +176,9 @@ class BulkImportView(APIView):
                 'core.common.tasks.bulk_import',
                 'core.common.tasks.bulk_import_parallel_inline',
                 'core.common.tasks.bulk_import_inline',
-                'core.common.tasks.die',
             ]
             for import_task_name in import_task_names:
-                flower_tasks = {**flower_get(f'api/tasks?taskname={import_task_name}').json(),}
+                flower_tasks = {**flower_tasks, **flower_get(f'api/tasks?taskname={import_task_name}').json()}
 
             pending_tasks = RedisService().get_pending_tasks(
                 import_queue or 'bulk_import_root',
