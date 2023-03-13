@@ -825,10 +825,13 @@ class ExpansionResourcesIndexView(CollectionVersionExpansionBaseView):
 
     def post(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         expansion = self.get_object()
-        if self.resource == 'concepts':
-            result = index_expansion_concepts.delay(expansion.id)
-        else:
-            result = index_expansion_mappings.delay(expansion.id)
+        try:
+            if self.resource == 'concepts':
+                result = index_expansion_concepts.delay(expansion.id)
+            else:
+                result = index_expansion_mappings.delay(expansion.id)
+        except AlreadyQueued:
+            return Response(dict(detail='Already Queued'), status=status.HTTP_409_CONFLICT)
 
         return Response(
             dict(state=result.state, username=self.request.user.username, task=result.task_id, queue='default'),

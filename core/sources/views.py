@@ -315,7 +315,10 @@ class SourceConceptsIndexView(SourceBaseView):
 
     def post(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         source = self.get_object()
-        result = index_source_concepts.delay(source.id)
+        try:
+            result = index_source_concepts.delay(source.id)
+        except AlreadyQueued:
+            return Response(dict(detail='Already Queued'), status=status.HTTP_409_CONFLICT)
 
         return Response(
             dict(state=result.state, username=self.request.user.username, task=result.task_id, queue='default'),
@@ -336,7 +339,10 @@ class SourceMappingsIndexView(SourceBaseView):
 
     def post(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         source = self.get_object()
-        result = index_source_mappings.delay(source.id)
+        try:
+            result = index_source_mappings.delay(source.id)
+        except AlreadyQueued:
+            return Response(dict(detail='Already Queued'), status=status.HTTP_409_CONFLICT)
 
         return Response(
             dict(state=result.state, username=self.request.user.username, task=result.task_id, queue='default'),

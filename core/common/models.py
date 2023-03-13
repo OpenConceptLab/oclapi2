@@ -1,3 +1,4 @@
+from celery_once import AlreadyQueued
 from celery.result import AsyncResult
 from django.conf import settings
 from django.contrib.contenttypes.fields import GenericRelation
@@ -395,22 +396,28 @@ class ConceptContainerModel(VersionedModel):
         self.update_mappings_count(sync)
 
     def update_mappings_count(self, sync=False):
-        if sync or get(settings, 'TEST_MODE'):
-            self.set_active_mappings()
-            self.save(update_fields=['active_mappings'])
-        elif self.__class__.__name__ == 'Source':
-            update_source_active_mappings_count.apply_async((self.id,), queue='concurrent')
-        elif self.__class__.__name__ == 'Collection':
-            update_collection_active_mappings_count.apply_async((self.id,), queue='concurrent')
+        try:
+            if sync or get(settings, 'TEST_MODE'):
+                self.set_active_mappings()
+                self.save(update_fields=['active_mappings'])
+            elif self.__class__.__name__ == 'Source':
+                update_source_active_mappings_count.apply_async((self.id,), queue='concurrent')
+            elif self.__class__.__name__ == 'Collection':
+                update_collection_active_mappings_count.apply_async((self.id,), queue='concurrent')
+        except AlreadyQueued:
+            pass
 
     def update_concepts_count(self, sync=False):
-        if sync or get(settings, 'TEST_MODE'):
-            self.set_active_concepts()
-            self.save(update_fields=['active_concepts'])
-        elif self.__class__.__name__ == 'Source':
-            update_source_active_concepts_count.apply_async((self.id,), queue='concurrent')
-        elif self.__class__.__name__ == 'Collection':
-            update_collection_active_concepts_count.apply_async((self.id,), queue='concurrent')
+        try:
+            if sync or get(settings, 'TEST_MODE'):
+                self.set_active_concepts()
+                self.save(update_fields=['active_concepts'])
+            elif self.__class__.__name__ == 'Source':
+                update_source_active_concepts_count.apply_async((self.id,), queue='concurrent')
+            elif self.__class__.__name__ == 'Collection':
+                update_collection_active_concepts_count.apply_async((self.id,), queue='concurrent')
+        except AlreadyQueued:
+            pass
 
     @property
     def last_child_update(self):

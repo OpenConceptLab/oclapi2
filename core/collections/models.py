@@ -1,5 +1,6 @@
 import time
 
+from celery_once import AlreadyQueued
 from django.conf import settings
 from django.contrib.postgres.fields import ArrayField
 from django.core.exceptions import ValidationError
@@ -900,14 +901,20 @@ class Expansion(BaseResourceModel):
             if get(settings, 'TEST_MODE', False):
                 index_expansion_concepts(self.id)
             else:
-                index_expansion_concepts.apply_async((self.id, ), queue='indexing')
+                try:
+                    index_expansion_concepts.apply_async((self.id, ), queue='indexing')
+                except AlreadyQueued:
+                    pass
 
     def index_mappings(self):
         if self.mappings.exists():
             if get(settings, 'TEST_MODE', False):
                 index_expansion_mappings(self.id)
             else:
-                index_expansion_mappings.apply_async((self.id, ), queue='indexing')
+                try:
+                    index_expansion_mappings.apply_async((self.id, ), queue='indexing')
+                except AlreadyQueued:
+                    pass
 
     @staticmethod
     def to_ref_list(references):
