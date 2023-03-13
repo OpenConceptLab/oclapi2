@@ -482,7 +482,7 @@ def batch_index_resources(resource, filters, update_indexed=False):
 
 @app.task(
     ignore_result=True, autoretry_for=(Exception, WorkerLostError, ), retry_kwargs={'max_retries': 2, 'countdown': 2},
-    acks_late=True, reject_on_worker_lost=True
+    acks_late=True, reject_on_worker_lost=True, base=QueueOnce
 )
 def index_expansion_concepts(expansion_id):
     from core.collections.models import Expansion
@@ -494,7 +494,7 @@ def index_expansion_concepts(expansion_id):
 
 @app.task(
     ignore_result=True, autoretry_for=(Exception, WorkerLostError, ), retry_kwargs={'max_retries': 2, 'countdown': 2},
-    acks_late=True, reject_on_worker_lost=True
+    acks_late=True, reject_on_worker_lost=True, base=QueueOnce
 )
 def index_expansion_mappings(expansion_id):
     from core.collections.models import Expansion
@@ -529,7 +529,7 @@ def make_hierarchy(concept_map):  # pragma: no cover
 
 @app.task(
     ignore_result=True, autoretry_for=(Exception, WorkerLostError, ), retry_kwargs={'max_retries': 2, 'countdown': 2},
-    acks_late=True, reject_on_worker_lost=True
+    acks_late=True, reject_on_worker_lost=True, base=QueueOnce
 )
 def index_source_concepts(source_id):
     from core.sources.models import Source
@@ -541,7 +541,7 @@ def index_source_concepts(source_id):
 
 @app.task(
     ignore_result=True, autoretry_for=(Exception, WorkerLostError, ), retry_kwargs={'max_retries': 2, 'countdown': 2},
-    acks_late=True, reject_on_worker_lost=True
+    acks_late=True, reject_on_worker_lost=True, base=QueueOnce
 )
 def index_source_mappings(source_id):
     from core.sources.models import Source
@@ -551,7 +551,7 @@ def index_source_mappings(source_id):
         source.batch_index(source.mappings, MappingDocument)
 
 
-@app.task
+@app.task(base=QueueOnce)
 def update_source_active_concepts_count(source_id):
     from core.sources.models import Source
     source = Source.objects.filter(id=source_id).first()
@@ -562,7 +562,7 @@ def update_source_active_concepts_count(source_id):
             source.save(update_fields=['active_concepts'])
 
 
-@app.task
+@app.task(base=QueueOnce)
 def update_source_active_mappings_count(source_id):
     from core.sources.models import Source
     source = Source.objects.filter(id=source_id).first()
@@ -573,7 +573,7 @@ def update_source_active_mappings_count(source_id):
             source.save(update_fields=['active_mappings'])
 
 
-@app.task
+@app.task(base=QueueOnce)
 def update_collection_active_concepts_count(collection_id):
     from core.collections.models import Collection
     collection = Collection.objects.filter(id=collection_id).first()
@@ -584,7 +584,7 @@ def update_collection_active_concepts_count(collection_id):
             collection.save(update_fields=['active_concepts'])
 
 
-@app.task
+@app.task(base=QueueOnce)
 def update_collection_active_mappings_count(collection_id):
     from core.collections.models import Collection
     collection = Collection.objects.filter(id=collection_id).first()
