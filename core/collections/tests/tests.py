@@ -581,17 +581,9 @@ class CollectionReferenceTest(OCLTestCase):
         with self.assertRaises(ValidationError):
             ref = CollectionReference(expression='/concepts/', filter=[{'property': 'bar'}])
             ref.clean()
-        with self.assertRaises(ValidationError):
-            ref = CollectionReference(
-                expression='/concepts/', filter=[{'property': 'map_type', 'value': 'foobar', 'op': '='}])
-            ref.clean()
-        with self.assertRaises(ValidationError):
-            ref = CollectionReference(
-                expression='/concepts/', filter=[{'property': 'concept_class', 'value': 'foobar', 'op': 'foobar'}])
-            ref.clean()
         with self.assertRaises(ValidationError) as ex:
             ref = CollectionReference(
-                expression='/concepts/', filter=[{'property': 'concept_class', 'value': 'foobar', 'op': 'not in'}])
+                expression='/concepts/', filter=[{'property': 'map_type', 'value': 'foobar', 'op': '='}])
             ref.clean()
 
         self.assertEqual(ex.exception.message_dict, dict(filter=['Invalid filter schema.']))
@@ -624,23 +616,11 @@ class CollectionReferenceTest(OCLTestCase):
         with self.assertRaises(ValidationError):
             ref = CollectionReference(expression='/mappings/', filter=[{'property': 'bar'}], reference_type='mappings')
             ref.clean()
-        with self.assertRaises(ValidationError):
-            ref = CollectionReference(
-                expression='/mappings/',
-                reference_type='mappings',
-                filter=[{'property': 'concept_class', 'value': 'foobar', 'op': '='}])
-            ref.clean()
-        with self.assertRaises(ValidationError):
-            ref = CollectionReference(
-                expression='/mappings/',
-                reference_type='mappings',
-                filter=[{'property': 'map_type', 'value': 'foobar', 'op': 'foobar'}])
-            ref.clean()
         with self.assertRaises(ValidationError) as ex:
             ref = CollectionReference(
                 expression='/mappings/',
                 reference_type='mappings',
-                filter=[{'property': 'map_type', 'value': 'foobar', 'op': 'not in'}])
+                filter=[{'property': 'concept_class', 'value': 'foobar', 'op': '='}])
             ref.clean()
 
         self.assertEqual(ex.exception.message_dict, dict(filter=['Invalid filter schema.']))

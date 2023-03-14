@@ -777,7 +777,6 @@ class CollectionReference(models.Model):
         return isinstance(filter_def, dict) and \
                sorted(filter_def.keys()) == sorted(['property', 'op', 'value']) and \
                {type(val) for val in filter_def.values()} == {str} and \
-               filter_def['op'] in self.ALLOWED_FILTER_OPS and \
                to_snake_case(filter_def['property']) in self.get_allowed_filter_properties()
 
     def save(self, force_insert=False, force_update=False, using=None,
