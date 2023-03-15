@@ -31,7 +31,7 @@ class MappingListSerializer(ModelSerializer):
     to_concept_code = EncodedDecodedCharField(required=False)
     from_concept_code = EncodedDecodedCharField(required=False)
     references = SerializerMethodField()
-    sort_weight = FloatField(required=False)
+    sort_weight = FloatField(required=False, allow_null=True)
 
     class Meta:
         model = Mapping
