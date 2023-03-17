@@ -352,7 +352,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                     filters['collection_owner_url'] = f"/users/{owner}/"
                 if owner_type == ORG_OBJECT_TYPE:
                     filters['collection_owner_url'] = f"/orgs/{owner}/"
-                if not is_version_specified:
+                if not is_version_specified or self.kwargs['version'] == HEAD:
                     filters['collection_version'] = HEAD
                 if 'expansion' in self.kwargs:
                     filters['expansion'] = self.kwargs.get('expansion')
