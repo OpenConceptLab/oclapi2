@@ -787,6 +787,7 @@ class CollectionVersionExpansionChildrenView(CollectionVersionExpansionBaseView,
         return expansion
 
     def get(self, request, *args, **kwargs):
+        self.get_queryset()
         return self.list(request, *args, **kwargs)
 
 
