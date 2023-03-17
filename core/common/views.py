@@ -358,6 +358,9 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                     filters['expansion'] = self.kwargs.get('expansion')
                 elif version:
                     filters['expansion'] = get(version, 'expansion.mnemonic', 'NO_EXPANSION')
+                filters['collection_url'] = f"{filters['collection_owner_url']}collections/{self.kwargs['collection']}/"
+                if is_version_specified and self.kwargs['version'] != HEAD:
+                    filters['collection_url'] += f"{self.kwargs['version']}/"
             if is_source_specified and not is_version_specified:
                 filters['source_version'] = HEAD
         return filters
