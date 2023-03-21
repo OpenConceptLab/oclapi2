@@ -415,9 +415,9 @@ class SourceContainerMixin:
 class SourceChildMixin:
     @staticmethod
     def user_criteria(user):
-        public_criteria = Q(public_access=ACCESS_TYPE_NONE)
+        private_criteria = Q(public_access=ACCESS_TYPE_NONE)
         owner_criteria = Q(Q(parent__user_id=user.id) | Q(parent__organization__members__id=user.id))
-        return Q(public_criteria) | Q(~public_criteria & owner_criteria)
+        return ~private_criteria | Q(private_criteria & owner_criteria)
 
     @staticmethod
     def apply_attribute_based_filters(queryset, params):
