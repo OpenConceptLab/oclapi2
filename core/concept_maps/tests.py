@@ -28,7 +28,6 @@ class ConceptMapTest(OCLTestCase):
                                         names=[ConceptNameFactory.build(name="concept_1_name")])
         self.concept_2 = ConceptFactory(parent=self.org_source, mnemonic='concept_2')
 
-
         self.user = UserProfileFactory()
         self.user_token = self.user.get_token()
         self.user_source = UserSourceFactory(user=self.user, public_access='None', canonical_url='/some/url')
@@ -89,7 +88,6 @@ class ConceptMapTest(OCLTestCase):
                                           'target': [{'code': 'concept_2', 'relationship': 'equivalent'}]},
                                          {'code': 'concept_B_2',
                                           'target': [{'code': 'concept_1', 'relationship': 'equivalent'}]}]}])
-
 
     def test_private_can_view(self):
         response = self.client.get('/fhir/ConceptMap/?url=/some/url', HTTP_AUTHORIZATION='Token ' + self.user_token)
@@ -347,7 +345,6 @@ class ConceptMapTest(OCLTestCase):
         self.assertEqual(source.name, 'test')
         self.assertEqual(len(source.get_mappings_queryset().all()), 3)
 
-
     def test_put_concept_map_with_all_new_concepts(self):
         response = self.putConceptMap()
         self.assertEqual(response.data['id'], self.user_source.mnemonic)
@@ -392,16 +389,49 @@ class ConceptMapTest(OCLTestCase):
             HTTP_AUTHORIZATION='Token ' + self.user_token)
 
         self.assertEqual(response.status_code, 200)
-        self.assertDictEqual(response.data, {
-            'resourceType': 'Parameters',
-            'parameter': [OrderedDict(
-                [('name', 'result'), ('valueBoolean', True)]
-            ), OrderedDict(
-                [('name', 'match'), ('part', [
-                    OrderedDict([('name', 'equivalence'), ('valueCode', 'equivalent')]),
-                    OrderedDict([('name', 'concept'), ('valueCoding',
-                                                       OrderedDict(
-                                                           [('system', '/some/url'), ('code', 'concept_1')]))])])])]})
+        self.assertDictEqual(
+            response.data,
+            {
+                'resourceType': 'Parameters',
+                'parameter': [
+                    OrderedDict([
+                        ('name', 'result'),
+                        ('valueBoolean', True)
+                    ]),
+                    OrderedDict([
+                        ('name', 'match'),
+                        (
+                            'part',
+                            [
+                                OrderedDict([
+                                    ('name', 'equivalence'),
+                                    ('valueCode', 'equivalent')
+                                ]),
+                                OrderedDict([
+                                    ('name', 'concept'),
+                                    ('valueCoding', OrderedDict([('system', '/some/url'), ('code', 'concept_1')]))
+                                ])
+                            ]
+                        )
+                    ]),
+                    OrderedDict([
+                        ('name', 'match'),
+                        (
+                            'part',
+                            [
+                                OrderedDict([
+                                    ('name', 'equivalence'),
+                                    ('valueCode', 'equivalent')
+                                ]),
+                                OrderedDict([
+                                    ('name', 'concept'),
+                                    ('valueCoding', OrderedDict([('system', '/some/url'), ('code', 'concept_1')]))
+                                ])
+                            ]
+                        )
+                    ])
+                ]
+            })
 
     def test_public_translate_negative(self):
         self.putConceptMap()
@@ -474,16 +504,50 @@ class ConceptMapTest(OCLTestCase):
             f'&targetsystem={self.org_source.canonical_url}', HTTP_AUTHORIZATION='Token ' + self.user_token)
 
         self.assertEqual(response.status_code, 200)
-        self.assertDictEqual(response.data, {
-            'resourceType': 'Parameters',
-            'parameter': [OrderedDict(
-                [('name', 'result'), ('valueBoolean', True)]
-            ), OrderedDict(
-                [('name', 'match'), ('part', [
-                    OrderedDict([('name', 'equivalence'), ('valueCode', 'equivalent')]),
-                    OrderedDict([('name', 'concept'), ('valueCoding',
-                                                       OrderedDict(
-                                                           [('system', '/some/url'), ('code', 'concept_1')]))])])])]})
+        self.assertDictEqual(
+            response.data,
+            {
+                'resourceType': 'Parameters',
+                'parameter': [
+                    OrderedDict([
+                        ('name', 'result'),
+                        ('valueBoolean', True)
+                    ]),
+                    OrderedDict([
+                        ('name', 'match'),
+                        (
+                            'part',
+                            [
+                                OrderedDict([
+                                    ('name', 'equivalence'),
+                                    ('valueCode', 'equivalent')
+                                ]),
+                                OrderedDict([
+                                    ('name', 'concept'),
+                                    ('valueCoding', OrderedDict([('system', '/some/url'), ('code', 'concept_1')]))
+                                ])
+                            ]
+                        )
+                    ]),
+                    OrderedDict([
+                        ('name', 'match'),
+                        (
+                            'part',
+                            [
+                                OrderedDict([
+                                    ('name', 'equivalence'),
+                                    ('valueCode', 'equivalent')
+                                ]),
+                                OrderedDict([
+                                    ('name', 'concept'),
+                                    ('valueCoding', OrderedDict([('system', '/some/url'), ('code', 'concept_1')]))
+                                ])
+                            ]
+                        )
+                    ])
+                ]
+            }
+        )
 
     def test_translate_with_target_negative(self):
         self.putConceptMap()
