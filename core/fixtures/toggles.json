@@ -1,13 +1,1 @@
-[
-  {
-    "pk":1,
-    "model":"toggles.toggle",
-    "fields":{
-      "is_active":true,
-      "name":"MAPPING_SORTING_TOGGLE",
-      "dev":true,
-      "qa":true,
-      "staging": true
-    }
-  }
-]
+[]
