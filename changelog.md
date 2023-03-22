@@ -1,3 +1,16 @@
+##### 2.3.5 - Wed Mar 22 04:04:51 2023 +0000
+- [OpenConceptLab/ocl_issues#1458](https://github.com/OpenConceptLab/ocl_issues/issues/1458) | removed feature toggle
+- Fixing tests
+- [OpenConceptLab/ocl_issues#1521](https://github.com/OpenConceptLab/ocl_issues/issues/1521) | listing public criteria fix
+##### 2.3.4 - Fri Mar 17 04:18:25 2023 +0000
+- [OpenConceptLab/ocl_issues#1513](https://github.com/OpenConceptLab/ocl_issues/issues/1513) | concepts search in collection fix
+##### 2.3.3 - Fri Mar 17 02:50:49 2023 +0000
+- [OpenConceptLab/ocl_issues#1513](https://github.com/OpenConceptLab/ocl_issues/issues/1513) | concepts search in collection fix
+- Bug | collection concepts after search were not removable
+##### 2.3.2 - Wed Mar 15 04:24:47 2023 +0000
+- [OpenConceptLab/ocl_issues#1458](https://github.com/OpenConceptLab/ocl_issues/issues/1458) | sort_weight can be null
+- Reference filter schema to remove check from operation value
+- [OpenConceptLab/ocl_issues#1415](https://github.com/OpenConceptLab/ocl_issues/issues/1415) Implement automated import scripts for FHIR HL7 content
 ##### 2.3.0 - Mon Mar 13 10:36:40 2023 +0000
 ##### 2.2.79 - Mon Mar 13 10:36:40 2023 +0000
 - Bump whitenoise from 6.2.0 to 6.4.0 (#407)
