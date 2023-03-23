@@ -13,8 +13,10 @@ from core.collections.tests.factories import OrganizationCollectionFactory, Expa
 from core.common.tasks import export_source, rebuild_indexes
 from core.common.tests import OCLAPITestCase
 from core.common.utils import get_latest_dir_in_path
+from core.concepts.documents import ConceptDocument
 from core.concepts.serializers import ConceptVersionExportSerializer
 from core.concepts.tests.factories import ConceptFactory, ConceptNameFactory
+from core.mappings.documents import MappingDocument
 from core.mappings.serializers import MappingDetailSerializer
 from core.mappings.tests.factories import MappingFactory
 from core.orgs.models import Organization
@@ -1025,10 +1027,11 @@ class SourceVersionSummaryViewTest(OCLAPITestCase):
 
 
 class SourceSummaryViewTest(OCLAPITestCase):
-    @staticmethod
-    def index():
+    def index(self):
         if settings.ENV == 'ci':
             rebuild_indexes(['concepts', 'mappings'])
+            ConceptDocument().update(self.source.concepts_set.all())
+            MappingDocument().update(self.source.mappings_set.all())
 
     def setUp(self):
         self.maxDiff = None
