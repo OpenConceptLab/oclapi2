@@ -10,13 +10,11 @@ from rest_framework.exceptions import ErrorDetail
 
 from core.bundles.models import Bundle
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
-from core.common.tasks import export_source
+from core.common.tasks import export_source, rebuild_indexes
 from core.common.tests import OCLAPITestCase
 from core.common.utils import get_latest_dir_in_path
-from core.concepts.documents import ConceptDocument
 from core.concepts.serializers import ConceptVersionExportSerializer
 from core.concepts.tests.factories import ConceptFactory, ConceptNameFactory
-from core.mappings.documents import MappingDocument
 from core.mappings.serializers import MappingDetailSerializer
 from core.mappings.tests.factories import MappingFactory
 from core.orgs.models import Organization
@@ -1027,10 +1025,10 @@ class SourceVersionSummaryViewTest(OCLAPITestCase):
 
 
 class SourceSummaryViewTest(OCLAPITestCase):
-    def index(self):
+    @staticmethod
+    def index():
         if settings.ENV == 'ci':
-            ConceptDocument().update(self.source.concepts_set.all())
-            MappingDocument().update(self.source.mappings_set.all())
+            rebuild_indexes(['concepts', 'mappings'])
 
     def setUp(self):
         self.maxDiff = None
