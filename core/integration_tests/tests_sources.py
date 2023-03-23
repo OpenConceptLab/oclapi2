@@ -3,6 +3,7 @@ import time
 import zipfile
 
 from celery_once import AlreadyQueued
+from django.conf import settings
 from django.db import transaction
 from mock import patch, Mock, ANY, PropertyMock
 from rest_framework.exceptions import ErrorDetail
@@ -12,8 +13,10 @@ from core.collections.tests.factories import OrganizationCollectionFactory, Expa
 from core.common.tasks import export_source
 from core.common.tests import OCLAPITestCase
 from core.common.utils import get_latest_dir_in_path
+from core.concepts.documents import ConceptDocument
 from core.concepts.serializers import ConceptVersionExportSerializer
 from core.concepts.tests.factories import ConceptFactory, ConceptNameFactory
+from core.mappings.documents import MappingDocument
 from core.mappings.serializers import MappingDetailSerializer
 from core.mappings.tests.factories import MappingFactory
 from core.orgs.models import Organization
@@ -1024,6 +1027,11 @@ class SourceVersionSummaryViewTest(OCLAPITestCase):
 
 
 class SourceSummaryViewTest(OCLAPITestCase):
+    def index(self):
+        if settings.ENV == 'ci':
+            ConceptDocument().update(self.source.concepts_set.all())
+            MappingDocument().update(self.source.mappings_set.all())
+
     def setUp(self):
         self.maxDiff = None
         super().setUp()
@@ -1039,6 +1047,7 @@ class SourceSummaryViewTest(OCLAPITestCase):
             from_concept=self.concept1, to_concept=self.concept2, parent=self.source,
             map_type=self.random_key
         )
+        self.index()
 
     def test_get_200(self):
         self.source.active_concepts = 2
@@ -1103,6 +1112,7 @@ class SourceSummaryViewTest(OCLAPITestCase):
             map_type=f'FOOBAR-{self.random_key}', parent=self.source, to_concept=concept4, to_source=self.source,
             from_source=random_source2
         )
+        self.index()
         self.source.active_concepts = 4
         self.source.active_mappings = 3
         self.source.save()
