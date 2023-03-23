@@ -222,6 +222,11 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                 fields=['-updated_at', 'is_active', 'retired'],
                 condition=(Q(is_active=True) & Q(retired=False))
             ),
+            models.Index(
+                name='concepts_retired_count_idx',
+                fields=['parent_id'],
+                condition=(Q(retired=True) & Q(id=F('versioned_object_id')))
+            ),
             GinIndex(
                 name='concepts_uri_trgm_id_gin_idx',
                 fields=['uri', 'id'],

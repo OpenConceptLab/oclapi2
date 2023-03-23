@@ -101,6 +101,11 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
                 fields=['-updated_at', 'is_active', 'retired'],
                 condition=(Q(is_active=True) & Q(retired=False))
             ),
+            models.Index(
+                name='mapping_retired_count_idx',
+                fields=['parent_id'],
+                condition=(Q(retired=True) & Q(id=F('versioned_object_id')))
+            ),
         ] + VersionedModel.Meta.indexes
     parent = models.ForeignKey('sources.Source', related_name='mappings_set', on_delete=models.CASCADE)
     map_type = models.TextField(db_index=True)
