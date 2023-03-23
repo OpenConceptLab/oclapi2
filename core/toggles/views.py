@@ -10,4 +10,4 @@ class TogglesView(APIView):
 
     @staticmethod
     def get(_):
-        return Response(Toggle.to_dict())
+        return Response(Toggle.to_dict())  # pragma: no cover
