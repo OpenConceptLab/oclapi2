@@ -585,7 +585,6 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         try:
             facets = search.execute().facets.to_dict()
         except TransportError as ex:  # pragma: no cover
-            print("*****", ex)
             raise Http400(detail='Data too large.') from ex
 
         return facets

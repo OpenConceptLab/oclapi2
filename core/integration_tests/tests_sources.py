@@ -1030,8 +1030,8 @@ class SourceSummaryViewTest(OCLAPITestCase):
     def index(self):
         if settings.ENV == 'ci':
             rebuild_indexes(['concepts', 'mappings'])
-            ConceptDocument().update(self.source.concepts_set.all())
-            MappingDocument().update(self.source.mappings_set.all())
+        ConceptDocument().update(self.source.concepts_set.all())
+        MappingDocument().update(self.source.mappings_set.all())
 
     def setUp(self):
         self.maxDiff = None
@@ -1130,8 +1130,8 @@ class SourceSummaryViewTest(OCLAPITestCase):
                 'retired': 0,
                 'concept_class': [(self.random_key, 2), (f'foobar-{self.random_key}', 2)],
                 'datatype': [(self.random_key, 2), (f'foo-{self.random_key}', 1), (f'foobar-{self.random_key}', 1)],
-                'locale': [],
-                'name_type': []
+                'locale': [('en', 2)],
+                'name_type': [('SHORT', 2)]
             }
         )
         self.assertEqual(
