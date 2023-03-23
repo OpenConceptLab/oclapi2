@@ -1089,11 +1089,11 @@ class SourceSummaryViewTest(OCLAPITestCase):
             {
                 'active': 1,
                 'retired': 0,
-                'map_type': [(self.random_key, 1)]
+                'map_type': [(self.random_key, 1)],
+                'from_concept_source': 0,
+                'to_concept_source': 0,
             }
         )
-        self.assertEqual(response.data['from_sources'], [])
-        self.assertEqual(response.data['to_sources'], [])
 
         concept3 = ConceptFactory(
             parent=self.source, datatype=f'FOO-{self.random_key}', concept_class=f'FOOBAR-{self.random_key}',
@@ -1136,10 +1136,23 @@ class SourceSummaryViewTest(OCLAPITestCase):
         )
         self.assertEqual(
             response.data['mappings'],
-            {'active': 3, 'retired': 0, 'map_type': [(f'foobar-{self.random_key}', 2), (self.random_key, 1)]}
+            {
+                'active': 3,
+                'retired': 0,
+                'map_type': [(f'foobar-{self.random_key}', 2), (self.random_key, 1)],
+                'from_concept_source': 1,
+                'to_concept_source': 1,
+            }
         )
+        response = self.client.get(
+            self.source.url + 'summary/?verbose=true&distribution=from_sources_map_type'
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['uuid'], str(self.source.id))
+        self.assertEqual(response.data['id'], self.source.mnemonic)
+
         self.assertEqual(
-            response.data['from_sources'],
+            response.data['distribution']['from_sources_map_type'],
             [{
                 'id': 'HEAD',
                 'version_url': random_source2.url,
@@ -1160,8 +1173,15 @@ class SourceSummaryViewTest(OCLAPITestCase):
                 }
             }]
         )
+
+        response = self.client.get(
+            self.source.url + 'summary/?verbose=true&distribution=to_sources_map_type'
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['uuid'], str(self.source.id))
+        self.assertEqual(response.data['id'], self.source.mnemonic)
         self.assertEqual(
-            response.data['to_sources'],
+            response.data['distribution']['to_sources_map_type'],
             [{
                 'id': 'HEAD',
                 'version_url': random_source1.url,

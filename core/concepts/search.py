@@ -15,9 +15,9 @@ class ConceptSearch(CommonSearch):
     ]
 
     facets = {
-        'datatype': TermsFacet(field='datatype', size=FACET_SIZE),
-        'conceptClass': TermsFacet(field='concept_class', size=FACET_SIZE),
-        'locale': TermsFacet(field='locale', size=FACET_SIZE),
+        'datatype': TermsFacet(field='datatype', size=100),
+        'conceptClass': TermsFacet(field='concept_class', size=100),
+        'locale': TermsFacet(field='locale', size=100),
         'retired': TermsFacet(field='retired'),
         'source': TermsFacet(field='source', size=FACET_SIZE),
         'collection': TermsFacet(field='collection', size=FACET_SIZE),

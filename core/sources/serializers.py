@@ -243,8 +243,6 @@ class SourceSummaryDetailSerializer(SourceSummarySerializer):
 
 
 class SourceSummaryVerboseSerializer(ModelSerializer):
-    from_sources = SerializerMethodField()
-    to_sources = SerializerMethodField()
     concepts = JSONField(source='concepts_distribution')
     mappings = JSONField(source='mappings_distribution')
     versions = JSONField(source='versions_distribution')
@@ -254,16 +252,8 @@ class SourceSummaryVerboseSerializer(ModelSerializer):
     class Meta:
         model = Source
         fields = (
-            'id', 'uuid', 'concepts', 'mappings', 'versions', 'from_sources', 'to_sources'
+            'id', 'uuid', 'concepts', 'mappings', 'versions'
         )
-
-    @staticmethod
-    def get_from_sources(obj):
-        return obj.get_sources_with_distribution(obj.from_sources, 'get_from_source_map_type_distribution')
-
-    @staticmethod
-    def get_to_sources(obj):
-        return obj.get_sources_with_distribution(obj.to_sources, 'get_to_source_map_type_distribution')
 
 
 class SourceSummaryFieldDistributionSerializer(ModelSerializer):
@@ -305,8 +295,6 @@ class SourceVersionSummaryDetailSerializer(SourceVersionSummarySerializer):
 
 
 class SourceVersionSummaryVerboseSerializer(ModelSerializer):
-    from_sources = SerializerMethodField()
-    to_sources = SerializerMethodField()
     concepts = JSONField(source='concepts_distribution')
     mappings = JSONField(source='mappings_distribution')
     uuid = CharField(source='id')
@@ -315,16 +303,8 @@ class SourceVersionSummaryVerboseSerializer(ModelSerializer):
     class Meta:
         model = Source
         fields = (
-            'id', 'uuid', 'concepts', 'mappings', 'from_sources', 'to_sources'
+            'id', 'uuid', 'concepts', 'mappings'
         )
-
-    @staticmethod
-    def get_from_sources(obj):
-        return obj.get_sources_with_distribution(obj.from_sources, 'get_from_source_map_type_distribution')
-
-    @staticmethod
-    def get_to_sources(obj):
-        return obj.get_sources_with_distribution(obj.to_sources, 'get_to_source_map_type_distribution')
 
 
 class SourceVersionSummaryFieldDistributionSerializer(ModelSerializer):

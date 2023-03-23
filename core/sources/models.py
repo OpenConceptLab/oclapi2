@@ -512,6 +512,12 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
     def to_sources(self):
         return Source.objects.filter(id__in=self.referenced_to_sources().values_list('id', flat=True))
 
+    def get_to_sources_map_type_distribution(self):
+        return self.get_sources_with_distribution(self.to_sources, 'get_to_source_map_type_distribution')
+
+    def get_from_sources_map_type_distribution(self):
+        return self.get_sources_with_distribution(self.from_sources, 'get_from_source_map_type_distribution')
+
     def get_sources_with_distribution(self, sources, distribution_method):
         from core.sources.serializers import SourceVersionMinimalSerializer
         result = [
@@ -561,26 +567,32 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
     @property
     def mappings_distribution(self):
         facets = self.get_mapping_facets()
+
+        def _source_count(_facets):
+            return len([facet for facet in _facets if facet[0] != self.mnemonic])
+
         return dict(
             active=self.active_mappings,
             retired=self.retired_mappings_count,
-            map_type=self.__to_clean_facets(facets.get('mapType', []))
+            map_type=self.__to_clean_facets(facets.get('mapType', [])),
+            to_concept_source=_source_count(facets.get('toConceptSource')),
+            from_concept_source=_source_count(facets.get('fromConceptSource')),
         )
 
     @staticmethod
     def __to_clean_facets(facets):
         return [facet[:2] for facet in facets]
 
-    def get_concept_facets(self):
+    def get_concept_facets(self, filters=None):
         from core.concepts.search import ConceptSearch
-        return self._get_resource_facets(ConceptSearch)
+        return self._get_resource_facets(ConceptSearch, filters)
 
-    def get_mapping_facets(self):
+    def get_mapping_facets(self, filters=None):
         from core.mappings.search import MappingSearch
-        return self._get_resource_facets(MappingSearch)
+        return self._get_resource_facets(MappingSearch, filters)
 
-    def _get_resource_facets(self, facet_class):
-        search = facet_class('', filters=self._get_resource_facet_filters())
+    def _get_resource_facets(self, facet_class, filters=None):
+        search = facet_class('', filters=self._get_resource_facet_filters(filters))
         search.params(request_timeout=ES_REQUEST_TIMEOUT)
         try:
             facets = search.execute().facets.to_dict()
@@ -589,8 +601,8 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
 
         return facets
 
-    def _get_resource_facet_filters(self):
-        filters = {
+    def _get_resource_facet_filters(self, filters=None):
+        _filters = {
             'source': self.mnemonic,
             'ownerType': self.parent.resource_type,
             'owner': self.parent.mnemonic,
@@ -598,6 +610,6 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
             'retired': False
         }
         if self.is_head:
-            filters['is_latest_version'] = True
+            _filters['is_latest_version'] = True
 
-        return filters
+        return {**_filters, **(filters or {})}
