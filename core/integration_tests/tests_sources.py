@@ -1,4 +1,5 @@
 import json
+import time
 import zipfile
 
 from celery_once import AlreadyQueued
@@ -1026,10 +1027,18 @@ class SourceSummaryViewTest(OCLAPITestCase):
     def setUp(self):
         self.maxDiff = None
         super().setUp()
-        self.source = OrganizationSourceFactory()
-        self.concept1 = ConceptFactory(parent=self.source)
-        self.concept2 = ConceptFactory(parent=self.source)
-        self.mapping = MappingFactory(from_concept=self.concept1, to_concept=self.concept2, parent=self.source)
+        self.random_key = str(time.time())
+        self.source = OrganizationSourceFactory(mnemonic=self.random_key)
+        self.concept1 = ConceptFactory(
+            parent=self.source, concept_class=self.random_key, datatype=self.random_key,
+        )
+        self.concept2 = ConceptFactory(
+            parent=self.source, concept_class=self.random_key, datatype=self.random_key,
+        )
+        self.mapping = MappingFactory(
+            from_concept=self.concept1, to_concept=self.concept2, parent=self.source,
+            map_type=self.random_key
+        )
 
     def test_get_200(self):
         self.source.active_concepts = 2
@@ -1054,27 +1063,44 @@ class SourceSummaryViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['uuid'], str(self.source.id))
         self.assertEqual(response.data['id'], self.source.mnemonic)
-        self.assertEqual(response.data['concepts'], {'active': 2, 'retired': 0, 'concept_class': 1, 'datatype': 1})
-        self.assertEqual(response.data['mappings'], {'active': 1, 'retired': 0, 'map_types': 1})
+        self.assertEqual(
+            response.data['concepts'],
+            {
+                'active': 2,
+                'retired': 0,
+                'concept_class': [(self.random_key, 2)],
+                'datatype': [(self.random_key, 2)],
+                'name_type': [],
+                'locale': []
+            }
+        )
+        self.assertEqual(
+            response.data['mappings'],
+            {
+                'active': 1,
+                'retired': 0,
+                'map_type': [(self.random_key, 1)]
+            }
+        )
         self.assertEqual(response.data['from_sources'], [])
         self.assertEqual(response.data['to_sources'], [])
 
         concept3 = ConceptFactory(
-            parent=self.source, datatype='FOO', concept_class='FOOBAR',
+            parent=self.source, datatype=f'FOO-{self.random_key}', concept_class=f'FOOBAR-{self.random_key}',
             names=[ConceptNameFactory.build(locale='en', type='SHORT')]
         )
         concept4 = ConceptFactory(
-            parent=self.source, datatype='FOOBAR', concept_class='FOOBAR',
+            parent=self.source, datatype=f'FOOBAR-{self.random_key}', concept_class=f'FOOBAR-{self.random_key}',
             names=[ConceptNameFactory.build(locale='en', type='SHORT')]
         )
         random_source1 = OrganizationSourceFactory()
         random_source2 = OrganizationSourceFactory()
         MappingFactory(
-            map_type='FOOBAR', parent=self.source, from_concept=concept3, from_source=self.source,
+            map_type=f'FOOBAR-{self.random_key}', parent=self.source, from_concept=concept3, from_source=self.source,
             to_source=random_source1
         )
         MappingFactory(
-            map_type='FOOBAR', parent=self.source, to_concept=concept4, to_source=self.source,
+            map_type=f'FOOBAR-{self.random_key}', parent=self.source, to_concept=concept4, to_source=self.source,
             from_source=random_source2
         )
         self.source.active_concepts = 4
@@ -1086,8 +1112,21 @@ class SourceSummaryViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['uuid'], str(self.source.id))
         self.assertEqual(response.data['id'], self.source.mnemonic)
-        self.assertEqual(response.data['concepts'], {'active': 4, 'retired': 0, 'concept_class': 2, 'datatype': 3})
-        self.assertEqual(response.data['mappings'], {'active': 3, 'retired': 0, 'map_types': 2})
+        self.assertEqual(
+            response.data['concepts'],
+            {
+                'active': 4,
+                'retired': 0,
+                'concept_class': [(self.random_key, 2), (f'foobar-{self.random_key}', 2)],
+                'datatype': [(self.random_key, 2), (f'foo-{self.random_key}', 1), (f'foobar-{self.random_key}', 1)],
+                'locale': [],
+                'name_type': []
+            }
+        )
+        self.assertEqual(
+            response.data['mappings'],
+            {'active': 3, 'retired': 0, 'map_type': [(f'foobar-{self.random_key}', 2), (self.random_key, 1)]}
+        )
         self.assertEqual(
             response.data['from_sources'],
             [{
@@ -1101,7 +1140,7 @@ class SourceSummaryViewTest(OCLAPITestCase):
                     'active': 1,
                     'concepts': 1,
                     'map_types': [{
-                                      'map_type': 'FOOBAR',
+                                      'map_type': f'FOOBAR-{self.random_key}',
                                       'concepts': 1,
                                       'total': 1,
                                       'retired': 0,
@@ -1123,7 +1162,7 @@ class SourceSummaryViewTest(OCLAPITestCase):
                     'active': 1,
                     'concepts': 1,
                     'map_types': [{
-                        'map_type': 'FOOBAR',
+                        'map_type': f'FOOBAR-{self.random_key}',
                         'concepts': 1,
                         'total': 1,
                         'retired': 0,
@@ -1143,23 +1182,23 @@ class SourceSummaryViewTest(OCLAPITestCase):
         self.assertCountEqual(
             response.data['distribution']['concept_class'],
             [
-                {'concept_class': 'Diagnosis', 'count': 2},
-                {'concept_class': 'FOOBAR', 'count': 2}
+                {'concept_class': self.random_key, 'count': 2},
+                {'concept_class': f'FOOBAR-{self.random_key}', 'count': 2}
             ]
         )
         self.assertCountEqual(
             response.data['distribution']['datatype'],
             [
-                {'count': 2, 'datatype': 'None'},
-                {'count': 1, 'datatype': 'FOOBAR'},
-                {'count': 1, 'datatype': 'FOO'}
+                {'count': 2, 'datatype': self.random_key},
+                {'count': 1, 'datatype': f'FOOBAR-{self.random_key}'},
+                {'count': 1, 'datatype': f'FOO-{self.random_key}'}
             ]
         )
         self.assertCountEqual(
             response.data['distribution']['map_type'],
             [
-                {'count': 2, 'map_type': 'FOOBAR'},
-                {'count': 1, 'map_type': 'SAME-AS'}
+                {'count': 2, 'map_type': f'FOOBAR-{self.random_key}'},
+                {'count': 1, 'map_type': self.random_key}
             ]
         )
         self.assertCountEqual(

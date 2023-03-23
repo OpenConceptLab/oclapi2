@@ -247,7 +247,6 @@ class SourceSummaryVerboseSerializer(ModelSerializer):
     to_sources = SerializerMethodField()
     concepts = JSONField(source='concepts_distribution')
     mappings = JSONField(source='mappings_distribution')
-    locales = JSONField(source='concept_names_distribution')
     versions = JSONField(source='versions_distribution')
     uuid = CharField(source='id')
     id = CharField(source='mnemonic')
@@ -255,7 +254,7 @@ class SourceSummaryVerboseSerializer(ModelSerializer):
     class Meta:
         model = Source
         fields = (
-            'id', 'uuid', 'concepts', 'mappings', 'locales', 'versions', 'from_sources', 'to_sources'
+            'id', 'uuid', 'concepts', 'mappings', 'versions', 'from_sources', 'to_sources'
         )
 
     @staticmethod
@@ -310,14 +309,13 @@ class SourceVersionSummaryVerboseSerializer(ModelSerializer):
     to_sources = SerializerMethodField()
     concepts = JSONField(source='concepts_distribution')
     mappings = JSONField(source='mappings_distribution')
-    locales = JSONField(source='concept_names_distribution')
     uuid = CharField(source='id')
     id = CharField(source='version')
 
     class Meta:
         model = Source
         fields = (
-            'id', 'uuid', 'concepts', 'mappings', 'locales', 'from_sources', 'to_sources'
+            'id', 'uuid', 'concepts', 'mappings', 'from_sources', 'to_sources'
         )
 
     @staticmethod

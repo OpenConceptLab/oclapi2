@@ -4,8 +4,11 @@ from dirtyfields import DirtyFieldsMixin
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import UniqueConstraint, F, Max, Count
+from elasticsearch import TransportError
 from pydash import compact, get
 
+from core.common.constants import ES_REQUEST_TIMEOUT
+from core.common.exceptions import Http400
 from core.common.models import ConceptContainerModel
 from core.common.services import PostgresQL
 from core.common.validators import validate_non_negative
@@ -542,3 +545,59 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
             return self.mappings_set.filter(id=F('versioned_object_id'))
 
         return self.mappings.filter()
+
+    @property
+    def concepts_distribution(self):
+        facets = self.get_concept_facets()
+        return dict(
+            active=self.active_concepts,
+            retired=self.retired_concepts_count,
+            concept_class=self.__to_clean_facets(facets.get('conceptClass', [])),
+            datatype=self.__to_clean_facets(facets.get('datatype', [])),
+            locale=self.__to_clean_facets(facets.get('locale', [])),
+            name_type=self.__to_clean_facets(facets.get('nameTypes', []))
+        )
+
+    @property
+    def mappings_distribution(self):
+        facets = self.get_mapping_facets()
+        return dict(
+            active=self.active_mappings,
+            retired=self.retired_mappings_count,
+            map_type=self.__to_clean_facets(facets.get('mapType', []))
+        )
+
+    @staticmethod
+    def __to_clean_facets(facets):
+        return [facet[:2] for facet in facets]
+
+    def get_concept_facets(self):
+        from core.concepts.search import ConceptSearch
+        return self._get_resource_facets(ConceptSearch)
+
+    def get_mapping_facets(self):
+        from core.mappings.search import MappingSearch
+        return self._get_resource_facets(MappingSearch)
+
+    def _get_resource_facets(self, facet_class):
+        search = facet_class('', filters=self._get_resource_facet_filters())
+        search.params(request_timeout=ES_REQUEST_TIMEOUT)
+        try:
+            facets = search.execute().facets.to_dict()
+        except TransportError as ex:  # pragma: no cover
+            raise Http400(detail='Data too large.') from ex
+
+        return facets
+
+    def _get_resource_facet_filters(self):
+        filters = {
+            'source': self.mnemonic,
+            'ownerType': self.parent.resource_type,
+            'owner': self.parent.mnemonic,
+            'is_active': True,
+            'retired': False
+        }
+        if self.is_head:
+            filters['is_latest_version'] = True
+
+        return filters
