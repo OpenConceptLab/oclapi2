@@ -512,21 +512,65 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
     def to_sources(self):
         return Source.objects.filter(id__in=self.referenced_to_sources().values_list('id', flat=True))
 
-    def get_to_sources_map_type_distribution(self):
-        return self.get_sources_with_distribution(self.to_sources, 'get_to_source_map_type_distribution')
+    def get_to_sources_map_type_distribution(self, source_names=None):
+        sources = self.to_sources
+        if source_names:
+            sources = sources.filter(mnemonic__in=source_names)
+        return self._get_sources_map_type_distribution(sources, 'toConceptSource')
 
-    def get_from_sources_map_type_distribution(self):
-        return self.get_sources_with_distribution(self.from_sources, 'get_from_source_map_type_distribution')
+    def get_from_sources_map_type_distribution(self, source_names=None):
+        sources = self.from_sources
+        if source_names:
+            sources = sources.filter(mnemonic__in=source_names)
+        return self._get_sources_map_type_distribution(sources, 'fromConceptSource')
 
-    def get_sources_with_distribution(self, sources, distribution_method):
+    @staticmethod
+    def __to_distribution(map_types, is_retired, result, total, active, retired):  # pylint: disable=too-many-arguments
+        for map_type in map_types:
+            if map_type[0] not in result:
+                result[map_type[0]] = {
+                    'total': 0,
+                    'active': 0,
+                    'retired': 0,
+                    'map_type': map_type[0]
+                }
+            result[map_type[0]]['total'] += map_type[1]
+            if is_retired:
+                result[map_type[0]]['retired'] += map_type[1]
+                retired += map_type[1]
+            else:
+                result[map_type[0]]['active'] += map_type[1]
+                active += map_type[1]
+            total += map_type[1]
+
+        return result, total, active, retired
+
+    def _get_sources_map_type_distribution(self, sources, facet_source_key):
         from core.sources.serializers import SourceVersionMinimalSerializer
-        result = [
-            {
-                **SourceVersionMinimalSerializer(source).data,
-                'distribution': get(self, distribution_method)(source)
-            } for source in sources
-        ]
-        return sorted(result, key=lambda _source: get(_source, 'distribution.total'), reverse=True)
+        distribution = []
+        for source in sources:
+            active_mapping_facets = self.get_mapping_facets({facet_source_key: source.mnemonic})
+            retired_mapping_facets = self.get_mapping_facets({facet_source_key: source.mnemonic, 'retired': True})
+
+            result, total, active, retired = {}, 0, 0, 0
+
+            result, total, active, retired = self.__to_distribution(
+                active_mapping_facets.mapType, False, result, total, active, retired)
+            result, total, active, retired = self.__to_distribution(
+                retired_mapping_facets.mapType, True, result, total, active, retired)
+
+            distribution.append(
+                {
+                    'distribution': {
+                        'active': active,
+                        'retired': retired,
+                        'total': total,
+                        'map_types': list(result.values())
+                    },
+                    **SourceVersionMinimalSerializer(source).data
+                }
+            )
+        return sorted(distribution, key=lambda dist: dist['distribution']['total'], reverse=True)
 
     def referenced_from_sources(self):
         return Source.objects.exclude(
@@ -558,30 +602,34 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         return dict(
             active=self.active_concepts,
             retired=self.retired_concepts_count,
-            concept_class=self.__to_clean_facets(facets.get('conceptClass', [])),
-            datatype=self.__to_clean_facets(facets.get('datatype', [])),
-            locale=self.__to_clean_facets(facets.get('locale', [])),
-            name_type=self.__to_clean_facets(facets.get('nameTypes', []))
+            concept_class=self.__to_clean_facets(facets.conceptClass or []),
+            datatype=self.__to_clean_facets(facets.datatype or []),
+            locale=self.__to_clean_facets(facets.locale or []),
+            name_type=self.__to_clean_facets(facets.nameTypes or [])
         )
 
     @property
     def mappings_distribution(self):
         facets = self.get_mapping_facets()
 
-        def _source_count(_facets):
-            return len([facet for facet in _facets if facet[0] != self.mnemonic])
-
         return dict(
             active=self.active_mappings,
             retired=self.retired_mappings_count,
-            map_type=self.__to_clean_facets(facets.get('mapType', [])),
-            to_concept_source=_source_count(facets.get('toConceptSource')),
-            from_concept_source=_source_count(facets.get('fromConceptSource')),
+            map_type=self.__to_clean_facets(facets.mapType or []),
+            to_concept_source=self.__to_clean_facets(facets.toConceptSource or [], True),
+            from_concept_source=self.__to_clean_facets(facets.fromConceptSource or [], True),
         )
 
-    @staticmethod
-    def __to_clean_facets(facets):
-        return [facet[:2] for facet in facets]
+    def __to_clean_facets(self, facets, remove_self=False):
+        _facets = []
+        for facet in facets:
+            _facet = facet[:2]
+            if remove_self:
+                if facet[0] != self.mnemonic:
+                    _facets.append(_facet)
+            else:
+                _facets.append(_facet)
+        return _facets
 
     def get_concept_facets(self, filters=None):
         from core.concepts.search import ConceptSearch
@@ -595,7 +643,7 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         search = facet_class('', filters=self._get_resource_facet_filters(filters))
         search.params(request_timeout=ES_REQUEST_TIMEOUT)
         try:
-            facets = search.execute().facets.to_dict()
+            facets = search.execute().facets
         except TransportError as ex:  # pragma: no cover
             raise Http400(detail='Data too large.') from ex
 

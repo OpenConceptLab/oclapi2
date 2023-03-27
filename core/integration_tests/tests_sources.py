@@ -1090,8 +1090,8 @@ class SourceSummaryViewTest(OCLAPITestCase):
                 'active': 1,
                 'retired': 0,
                 'map_type': [(self.random_key, 1)],
-                'from_concept_source': 0,
-                'to_concept_source': 0,
+                'from_concept_source': [],
+                'to_concept_source': [],
             }
         )
 
@@ -1140,8 +1140,8 @@ class SourceSummaryViewTest(OCLAPITestCase):
                 'active': 3,
                 'retired': 0,
                 'map_type': [(f'foobar-{self.random_key}', 2), (self.random_key, 1)],
-                'from_concept_source': 1,
-                'to_concept_source': 1,
+                'from_concept_source': [(random_source2.mnemonic, 1)],
+                'to_concept_source': [(random_source1.mnemonic, 1)],
             }
         )
         response = self.client.get(
@@ -1162,10 +1162,8 @@ class SourceSummaryViewTest(OCLAPITestCase):
                     'total': 1,
                     'retired': 0,
                     'active': 1,
-                    'concepts': 1,
                     'map_types': [{
-                                      'map_type': f'FOOBAR-{self.random_key}',
-                                      'concepts': 1,
+                                      'map_type': f'foobar-{self.random_key}',
                                       'total': 1,
                                       'retired': 0,
                                       'active': 1
@@ -1191,10 +1189,8 @@ class SourceSummaryViewTest(OCLAPITestCase):
                     'total': 1,
                     'retired': 0,
                     'active': 1,
-                    'concepts': 1,
                     'map_types': [{
-                        'map_type': f'FOOBAR-{self.random_key}',
-                        'concepts': 1,
+                        'map_type': f'foobar-{self.random_key}',
                         'total': 1,
                         'retired': 0,
                         'active': 1

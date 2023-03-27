@@ -1,7 +1,7 @@
 import json
 
 from django.core.validators import RegexValidator
-from pydash import get
+from pydash import get, compact
 from rest_framework.fields import CharField, IntegerField, DateTimeField, ChoiceField, JSONField, ListField, \
     BooleanField, SerializerMethodField
 from rest_framework.relations import PrimaryKeyRelatedField
@@ -269,11 +269,15 @@ class SourceSummaryFieldDistributionSerializer(ModelSerializer):
 
     def get_distribution(self, obj):
         result = {}
-        fields = (get(self.context, 'request.query_params.distribution') or '').split(',')
+        fields = compact((get(self.context, 'request.query_params.distribution') or '').split(','))
+        source_names = compact((get(self.context, 'request.query_params.sources') or '').split(','))
         for field in fields:
             func = get(obj, f"get_{field}_distribution")
             if func:
-                result[field] = func()
+                kwargs = {
+                    'source_names': source_names
+                } if field in ['to_sources_map_type', 'from_sources_map_type'] else {}
+                result[field] = func(**kwargs)
         return result
 
 
@@ -320,11 +324,15 @@ class SourceVersionSummaryFieldDistributionSerializer(ModelSerializer):
 
     def get_distribution(self, obj):
         result = {}
-        fields = (get(self.context, 'request.query_params.distribution') or '').split(',')
+        fields = compact((get(self.context, 'request.query_params.distribution') or '').split(','))
+        source_names = compact((get(self.context, 'request.query_params.sources') or '').split(','))
         for field in fields:
             func = get(obj, f"get_{field}_distribution")
             if func:
-                result[field] = func()
+                kwargs = {
+                    'source_names': source_names
+                } if field in ['to_sources_map_type', 'from_sources_map_type'] else {}
+                result[field] = func(**kwargs)
         return result
 
 
