@@ -242,12 +242,11 @@ class SourceSummaryDetailSerializer(SourceSummarySerializer):
         )
 
 
-class SourceSummaryVerboseSerializer(ModelSerializer):
+class AbstractSourceSummaryVerboseSerializer(ModelSerializer):
     concepts = JSONField(source='concepts_distribution')
     mappings = JSONField(source='mappings_distribution')
     versions = JSONField(source='versions_distribution')
     uuid = CharField(source='id')
-    id = CharField(source='mnemonic')
 
     class Meta:
         model = Source
@@ -256,9 +255,8 @@ class SourceSummaryVerboseSerializer(ModelSerializer):
         )
 
 
-class SourceSummaryFieldDistributionSerializer(ModelSerializer):
+class AbstractSourceSummaryFieldDistributionSerializer(ModelSerializer):
     uuid = CharField(source='id')
-    id = CharField(source='mnemonic')
     distribution = SerializerMethodField()
 
     class Meta:
@@ -279,6 +277,14 @@ class SourceSummaryFieldDistributionSerializer(ModelSerializer):
                 } if field in ['to_sources_map_type', 'from_sources_map_type'] else {}
                 result[field] = func(**kwargs)
         return result
+
+
+class SourceSummaryVerboseSerializer(AbstractSourceSummaryVerboseSerializer):
+    id = CharField(source='mnemonic')
+
+
+class SourceSummaryFieldDistributionSerializer(AbstractSourceSummaryFieldDistributionSerializer):
+    id = CharField(source='mnemonic')
 
 
 class SourceVersionSummarySerializer(ModelSerializer):
@@ -298,42 +304,20 @@ class SourceVersionSummaryDetailSerializer(SourceVersionSummarySerializer):
         )
 
 
-class SourceVersionSummaryVerboseSerializer(ModelSerializer):
-    concepts = JSONField(source='concepts_distribution')
-    mappings = JSONField(source='mappings_distribution')
-    uuid = CharField(source='id')
+class SourceVersionSummaryVerboseSerializer(AbstractSourceSummaryVerboseSerializer):
     id = CharField(source='version')
 
-    class Meta:
-        model = Source
-        fields = (
-            'id', 'uuid', 'concepts', 'mappings'
-        )
+    def __init__(self, *args, **kwargs):
+        try:
+            self.fields.pop('versions', None)
+        except:  # pylint: disable=bare-except
+            pass
+
+        super().__init__(*args, **kwargs)
 
 
-class SourceVersionSummaryFieldDistributionSerializer(ModelSerializer):
-    uuid = CharField(source='id')
+class SourceVersionSummaryFieldDistributionSerializer(AbstractSourceSummaryFieldDistributionSerializer):
     id = CharField(source='version')
-    distribution = SerializerMethodField()
-
-    class Meta:
-        model = Source
-        fields = (
-            'id', 'uuid', 'distribution'
-        )
-
-    def get_distribution(self, obj):
-        result = {}
-        fields = compact((get(self.context, 'request.query_params.distribution') or '').split(','))
-        source_names = compact((get(self.context, 'request.query_params.sources') or '').split(','))
-        for field in fields:
-            func = get(obj, f"get_{field}_distribution")
-            if func:
-                kwargs = {
-                    'source_names': source_names
-                } if field in ['to_sources_map_type', 'from_sources_map_type'] else {}
-                result[field] = func(**kwargs)
-        return result
 
 
 class SourceDetailSerializer(SourceCreateOrUpdateSerializer):
