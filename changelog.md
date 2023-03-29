@@ -1,3 +1,18 @@
+##### 2.3.8 - Mon Mar 27 05:14:47 2023 +0000
+- [OpenConceptLab/ocl_issues#1524](https://github.com/OpenConceptLab/ocl_issues/issues/1524) | getting Source mapped sources in separate APIs
+##### 2.3.7 - Thu Mar 23 09:03:07 2023 +0000
+Mon May 16 16:11:46 2022 +0530
+- [OpenConceptLab/ocl_issues#1524](https://github.com/OpenConceptLab/ocl_issues/issues/1524) | getting Source mapped sources in separate APIs
+##### 2.3.6 - Thu Mar 23 06:05:59 2023 +0000
+- skipping big import tests only on CI
+- running facets test on CI
+- [OpenConceptLab/ocl_issues#1524](https://github.com/OpenConceptLab/ocl_issues/issues/1524) | attempting test fix on CI
+- [OpenConceptLab/ocl_issues#1524](https://github.com/OpenConceptLab/ocl_issues/issues/1524) | attempting test fix on CI
+- [OpenConceptLab/ocl_issues#1524](https://github.com/OpenConceptLab/ocl_issues/issues/1524) | attempting test fix on CI
+- [OpenConceptLab/ocl_issues#1524](https://github.com/OpenConceptLab/ocl_issues/issues/1524) | attempting test fix on CI
+- [OpenConceptLab/ocl_issues#1524](https://github.com/OpenConceptLab/ocl_issues/issues/1524) | inspecting CI failure | added print for facets exception
+- [OpenConceptLab/ocl_issues#1524](https://github.com/OpenConceptLab/ocl_issues/issues/1524) | using ES facets for field distribution
+- [OpenConceptLab/ocl_issues#1524](https://github.com/OpenConceptLab/ocl_issues/issues/1524) | added index for retired counts
 ##### 2.3.5 - Wed Mar 22 04:04:51 2023 +0000
 - [OpenConceptLab/ocl_issues#1458](https://github.com/OpenConceptLab/ocl_issues/issues/1458) | removed feature toggle
 - Fixing tests
