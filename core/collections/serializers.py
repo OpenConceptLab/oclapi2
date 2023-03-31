@@ -252,11 +252,10 @@ class CollectionSummaryDetailSerializer(CollectionSummarySerializer):
 
 
 class AbstractCollectionSummaryVerboseSerializer(ModelSerializer):
-    sources = JSONField(source='referenced_sources_distribution')
-    collections = JSONField(source='referenced_collections_distribution')
+    # sources = JSONField(source='referenced_sources_distribution')
+    # collections = JSONField(source='referenced_collections_distribution')
     concepts = JSONField(source='concepts_distribution')
     mappings = JSONField(source='mappings_distribution')
-    locales = JSONField(source='concept_names_distribution')
     versions = JSONField(source='versions_distribution')
     references = JSONField(source='references_distribution')
     expansions = IntegerField(source='expansions_count')
@@ -265,8 +264,8 @@ class AbstractCollectionSummaryVerboseSerializer(ModelSerializer):
     class Meta:
         model = Collection
         fields = (
-            'id', 'uuid', 'concepts', 'mappings', 'locales', 'versions', 'references', 'expansions', 'sources',
-            'collections'
+            'id', 'uuid', 'concepts', 'mappings', 'versions', 'references', 'expansions',
+            # 'sources', 'collections'
         )
 
 

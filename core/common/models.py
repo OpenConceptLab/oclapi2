@@ -12,6 +12,7 @@ from django.utils import timezone
 from django.utils.functional import cached_property
 from django_elasticsearch_dsl.registries import registry
 from django_elasticsearch_dsl.signals import RealTimeSignalProcessor
+from elasticsearch import TransportError
 from pydash import get
 
 from core.common.tasks import update_collection_active_concepts_count, update_collection_active_mappings_count, \
@@ -25,7 +26,8 @@ from .constants import (
     ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT, SUPER_ADMIN_USER_ID,
     HEAD, PERSIST_NEW_ERROR_MESSAGE, SOURCE_PARENT_CANNOT_BE_NONE, PARENT_RESOURCE_CANNOT_BE_NONE,
     CREATOR_CANNOT_BE_NONE, CANNOT_DELETE_ONLY_VERSION, OPENMRS_VALIDATION_SCHEMA, VALIDATION_SCHEMAS,
-    DEFAULT_VALIDATION_SCHEMA)
+    DEFAULT_VALIDATION_SCHEMA, ES_REQUEST_TIMEOUT)
+from .exceptions import Http400
 from .fields import URIField
 from .tasks import handle_save, handle_m2m_changed, seed_children_to_new_version, update_validation_schema, \
     update_source_active_concepts_count, update_source_active_mappings_count
@@ -883,19 +885,24 @@ class ConceptContainerModel(VersionedModel):
 
     @property
     def concepts_distribution(self):
+        facets = self.get_concept_facets()
         return dict(
             active=self.active_concepts,
             retired=self.retired_concepts_count,
-            concept_class=self.concept_class_count,
-            datatype=self.datatype_count
+            concept_class=self._to_clean_facets(facets.conceptClass or []),
+            datatype=self._to_clean_facets(facets.datatype or []),
+            locale=self._to_clean_facets(facets.locale or []),
+            name_type=self._to_clean_facets(facets.nameTypes or [])
         )
 
     @property
     def mappings_distribution(self):
+        facets = self.get_mapping_facets()
+
         return dict(
             active=self.active_mappings,
             retired=self.retired_mappings_count,
-            map_types=self.map_types_count
+            map_type=self._to_clean_facets(facets.mapType or []),
         )
 
     @property
@@ -934,6 +941,35 @@ class ConceptContainerModel(VersionedModel):
     @staticmethod
     def _get_distribution(queryset, field):
         return list(queryset.values(field).annotate(count=Count('id')).values(field, 'count').order_by('-count'))
+
+    def get_concept_facets(self, filters=None):
+        from core.concepts.search import ConceptSearch
+        return self._get_resource_facets(ConceptSearch, filters)
+
+    def get_mapping_facets(self, filters=None):
+        from core.mappings.search import MappingSearch
+        return self._get_resource_facets(MappingSearch, filters)
+
+    def _get_resource_facets(self, facet_class, filters=None):
+        search = facet_class('', filters=self._get_resource_facet_filters(filters))
+        search.params(request_timeout=ES_REQUEST_TIMEOUT)
+        try:
+            facets = search.execute().facets
+        except TransportError as ex:  # pragma: no cover
+            raise Http400(detail='Data too large.') from ex
+
+        return facets
+
+    def _to_clean_facets(self, facets, remove_self=False):
+        _facets = []
+        for facet in facets:
+            _facet = facet[:2]
+            if remove_self:
+                if facet[0] != self.mnemonic:
+                    _facets.append(_facet)
+            else:
+                _facets.append(_facet)
+        return _facets
 
 
 class CelerySignalProcessor(RealTimeSignalProcessor):

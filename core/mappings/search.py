@@ -39,4 +39,6 @@ class MappingSearch(CommonSearch):
         'is_latest_version': TermsFacet(field='is_latest_version'),
         'collection_owner_url': TermsFacet(field='collection_owner_url', size=FACET_SIZE),
         'expansion': TermsFacet(field='expansion', size=FACET_SIZE),
+        'source_version': TermsFacet(field='source_version', size=FACET_SIZE),
+        'collection_version': TermsFacet(field='collection_version', size=FACET_SIZE),
     }

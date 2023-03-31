@@ -29,4 +29,6 @@ class ConceptSearch(CommonSearch):
         'expansion': TermsFacet(field='expansion', size=FACET_SIZE),
         'nameTypes': TermsFacet(field='name_types', size=FACET_SIZE),
         'descriptionTypes': TermsFacet(field='description_types', size=FACET_SIZE),
+        'source_version': TermsFacet(field='source_version', size=FACET_SIZE),
+        'collection_version': TermsFacet(field='collection_version', size=FACET_SIZE),
     }

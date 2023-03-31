@@ -4,11 +4,8 @@ from dirtyfields import DirtyFieldsMixin
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import UniqueConstraint, F, Max, Count
-from elasticsearch import TransportError
 from pydash import compact, get
 
-from core.common.constants import ES_REQUEST_TIMEOUT
-from core.common.exceptions import Http400
 from core.common.models import ConceptContainerModel
 from core.common.services import PostgresQL
 from core.common.validators import validate_non_negative
@@ -597,57 +594,16 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         return self.mappings.filter()
 
     @property
-    def concepts_distribution(self):
-        facets = self.get_concept_facets()
-        return dict(
-            active=self.active_concepts,
-            retired=self.retired_concepts_count,
-            concept_class=self.__to_clean_facets(facets.conceptClass or []),
-            datatype=self.__to_clean_facets(facets.datatype or []),
-            locale=self.__to_clean_facets(facets.locale or []),
-            name_type=self.__to_clean_facets(facets.nameTypes or [])
-        )
-
-    @property
     def mappings_distribution(self):
         facets = self.get_mapping_facets()
 
         return dict(
             active=self.active_mappings,
             retired=self.retired_mappings_count,
-            map_type=self.__to_clean_facets(facets.mapType or []),
-            to_concept_source=self.__to_clean_facets(facets.toConceptSource or [], True),
-            from_concept_source=self.__to_clean_facets(facets.fromConceptSource or [], True),
+            map_type=self._to_clean_facets(facets.mapType or []),
+            to_concept_source=self._to_clean_facets(facets.toConceptSource or [], True),
+            from_concept_source=self._to_clean_facets(facets.fromConceptSource or [], True),
         )
-
-    def __to_clean_facets(self, facets, remove_self=False):
-        _facets = []
-        for facet in facets:
-            _facet = facet[:2]
-            if remove_self:
-                if facet[0] != self.mnemonic:
-                    _facets.append(_facet)
-            else:
-                _facets.append(_facet)
-        return _facets
-
-    def get_concept_facets(self, filters=None):
-        from core.concepts.search import ConceptSearch
-        return self._get_resource_facets(ConceptSearch, filters)
-
-    def get_mapping_facets(self, filters=None):
-        from core.mappings.search import MappingSearch
-        return self._get_resource_facets(MappingSearch, filters)
-
-    def _get_resource_facets(self, facet_class, filters=None):
-        search = facet_class('', filters=self._get_resource_facet_filters(filters))
-        search.params(request_timeout=ES_REQUEST_TIMEOUT)
-        try:
-            facets = search.execute().facets
-        except TransportError as ex:  # pragma: no cover
-            raise Http400(detail='Data too large.') from ex
-
-        return facets
 
     def _get_resource_facet_filters(self, filters=None):
         _filters = {
@@ -659,5 +615,7 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         }
         if self.is_head:
             _filters['is_latest_version'] = True
+        else:
+            _filters['source_version'] = self.version
 
         return {**_filters, **(filters or {})}

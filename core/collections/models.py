@@ -369,6 +369,18 @@ class Collection(ConceptContainerModel):
 
         return sorted(result.values(), key=lambda summary: get(summary, 'distribution.references'), reverse=True)
 
+    def _get_resource_facet_filters(self, filters=None):
+        _filters = {
+            'collection': self.mnemonic,
+            'collection_owner_url': to_owner_uri(self.uri),
+            'expansion': self.expansion.mnemonic,
+            'is_active': True,
+            'retired': False,
+            'collection_version': self.version
+        }
+
+        return {**_filters, **(filters or {})}
+
 
 class ReferencedConcept(models.Model):
     reference = models.ForeignKey('collections.CollectionReference', on_delete=models.CASCADE)
