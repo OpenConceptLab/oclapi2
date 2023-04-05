@@ -143,52 +143,29 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         db_table = 'concepts'
         unique_together = ('mnemonic', 'version', 'parent')
         indexes = [
-                      models.Index(name='concepts_updated_6490d8_idx', fields=['-updated_at'],
-                                   condition=(Q(is_active=True) & Q(retired=False) & ~Q(public_access='None'))),
-                      models.Index(name='concepts_ver_sort_idx', fields=['-updated_at'],
-                                   condition=(Q(is_active=True) & Q(retired=False) & Q(is_latest_version=True) &
-                                              ~Q(public_access='None'))),
-                      models.Index(name='concepts_public_conditional', fields=['public_access'],
-                                   condition=(Q(is_active=True) & Q(retired=False) & Q(is_latest_version=True) &
-                                              ~Q(public_access='None'))),
-                      models.Index(name='concepts_ver_public', fields=['public_access'],
-                                   condition=(Q(is_active=True) & Q(retired=False) & ~Q(public_access='None'))),
-                      models.Index(name='concepts_public_cond', fields=['parent_id'],
-                                   condition=(Q(is_active=True) & Q(retired=False) & Q(is_latest_version=True) &
-                                              ~Q(public_access='None'))),
-                      models.Index(name='concepts_all_for_count', fields=['is_active'],
-                                   condition=(Q(is_active=True) & Q(retired=False) & Q(is_latest_version=True))),
-                      models.Index(name='concepts_ver_for_count', fields=['is_active'],
-                                   condition=(Q(is_active=True) & Q(retired=False))),
-                      models.Index(name='concepts_all_for_count2', fields=['parent_id'],
-                                   condition=(Q(is_active=True) & Q(retired=False) & Q(is_latest_version=True))),
-                      models.Index(name='concepts_all_for_sort', fields=['-updated_at'],
-                                   condition=(Q(is_active=True) & Q(retired=False) & Q(is_latest_version=True))),
-                      models.Index(name='concepts_ver_for_sort', fields=['-updated_at'],
-                                   condition=(Q(is_active=True) & Q(retired=False))),
-                      models.Index(name='concepts_ver_updated_idx', fields=['-updated_at'],
-                                   condition=(Q(is_active=True) & Q(retired=False) & Q(id=F('versioned_object_id')) &
-                                              ~Q(public_access='None'))),
-                      models.Index(name='concepts_ver_public_cond', fields=['public_access'],
-                                   condition=(Q(is_active=True) & Q(retired=False) & Q(id=F('versioned_object_id')) &
-                                              ~Q(public_access='None'))),
-                      models.Index(name='concepts_ver_public_cond2', fields=['parent_id'],
-                                   condition=(Q(is_active=True) & Q(retired=False) & Q(id=F('versioned_object_id')) &
-                                              ~Q(public_access='None'))),
-                      models.Index(name='concepts_ver_all_for_count', fields=['is_active'],
-                                   condition=(Q(is_active=True) & Q(retired=False) & Q(id=F('versioned_object_id')))),
-                      models.Index(name='concepts_ver_all_for_count2', fields=['parent_id'],
-                                   condition=(Q(is_active=True) & Q(retired=False) & Q(id=F('versioned_object_id')))),
-                      models.Index(name='concepts_ver_all_for_sort', fields=['-updated_at'],
-                                   condition=(Q(is_active=True) & Q(retired=False) & Q(id=F('versioned_object_id')))),
-                      models.Index(name='concepts_ver_all_for_sort_2', fields=['-updated_at'],
-                                   condition=(Q(is_active=True) & Q(retired=False))),
-                      GinIndex(
-                          name='concepts_uri_trgm_id_gin_idx',
-                          fields=['uri', 'id'],
-                          opclasses=['gin_trgm_ops', 'int8_ops'],
-                          condition=Q(is_latest_version=True)
-                      )
+            models.Index(name='concepts_up_pub_latest', fields=['-updated_at', 'public_access', 'is_latest_version'],
+                         condition=(Q(is_active=True) & Q(retired=False))),
+            models.Index(name='concepts_head_up_pub_latest', fields=['-updated_at', 'public_access',
+                                                                     'is_latest_version'],
+                         condition=(Q(is_active=True) & Q(retired=False) & Q(id=F('versioned_object_id')))),
+            models.Index(name='concepts_pub_latest', fields=['public_access', 'is_latest_version'],
+                         condition=(Q(is_active=True) & Q(retired=False))),
+            models.Index(name='concepts_head_pub_latest', fields=['public_access', 'is_latest_version'],
+                         condition=(Q(is_active=True) & Q(retired=False) & Q(id=F('versioned_object_id')))),
+            models.Index(name='concepts_latest_parent_pub', fields=['is_latest_version', 'parent_id', 'public_access'],
+                         condition=(Q(is_active=True) & Q(retired=False))),
+            models.Index(name='concepts_up_latest', fields=['-updated_at', 'is_latest_version'],
+                         condition=(Q(is_active=True) & Q(retired=False))),
+
+            models.Index(name='concepts_head_parent_pub', fields=['parent_id', 'public_access'],
+                         condition=(Q(is_active=True) & Q(retired=False) & Q(id=F('versioned_object_id')))),
+
+            GinIndex(
+                name='concepts_uri_trgm_id_gin_idx',
+                fields=['uri', 'id'],
+                opclasses=['gin_trgm_ops', 'int8_ops'],
+                condition=Q(is_latest_version=True)
+            )
                   ] + VersionedModel.Meta.indexes
 
     external_id = models.TextField(null=True, blank=True)
