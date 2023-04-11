@@ -93,7 +93,7 @@ class ComposeValueSetField(serializers.Field):
             references += self.transform_to_ref(include)
         for exclude in data.get('exclude', []):
             exclude.update({'transform': 'resourceversions'})
-            exclude.udpate({'include': False})
+            exclude.update({'include': False})
             references += self.transform_to_ref(exclude)
         if references:
             res = dict(references=references)
