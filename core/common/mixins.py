@@ -19,7 +19,7 @@ from core.common.constants import HEAD, ACCESS_TYPE_NONE, INCLUDE_FACETS, \
 from core.common.permissions import HasPrivateAccess, HasOwnership, CanViewConceptDictionary, \
     CanViewConceptDictionaryVersion
 from .utils import write_csv_to_s3, get_csv_from_s3, get_query_params_from_url_string, compact_dict_by_values, \
-    to_owner_uri, parse_updated_since_param, get_export_service
+    to_owner_uri, parse_updated_since_param, get_export_service, to_int
 
 logger = logging.getLogger('oclapi')
 
@@ -30,7 +30,7 @@ class CustomPaginator:
         self.queryset = queryset
         self.total = total_count or self.queryset.count()
         self.page_size = int(page_size)
-        self.page_number = int(request.GET.get('page', '1') or '1')
+        self.page_number = to_int(request.GET.get('page', '1'), 1)
         if not is_sliced:
             bottom = (self.page_number - 1) * self.page_size
             top = bottom + self.page_size
