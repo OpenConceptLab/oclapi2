@@ -123,7 +123,7 @@ def export_collection(self, version_id):
     version.add_processing(self.request.id)
 
     if version.expansion_uri:
-        version.expansion.wait_until_processed()
+        version.expansion.wait_until_processed() if version.expansion else None
     try:
         logger.info('Found collection version %s.  Beginning export...', version.version)
         write_export_file(
