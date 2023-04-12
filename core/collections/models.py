@@ -273,11 +273,14 @@ class Collection(ConceptContainerModel):
 
     def index_children(self):
         if self.expansion_uri:
+            expansion = self.expansion
+            if not expansion:
+                return
             from core.concepts.documents import ConceptDocument
             from core.mappings.documents import MappingDocument
 
-            self.batch_index(self.expansion.concepts, ConceptDocument)
-            self.batch_index(self.expansion.mappings, MappingDocument)
+            self.batch_index(expansion.concepts, ConceptDocument)
+            self.batch_index(expansion.mappings, MappingDocument)
 
     @property
     def expansion(self):
