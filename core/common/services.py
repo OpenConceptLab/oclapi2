@@ -88,6 +88,16 @@ class S3:
         return True
 
     @classmethod
+    def has_path(cls, prefix='/', delimiter='/'):
+        return len(cls.__fetch_keys(prefix, delimiter)) > 0
+
+    @classmethod
+    def get_last_key_from_path(cls, prefix='/', delimiter='/'):
+        keys = cls.__fetch_keys(prefix, delimiter)
+        key = sorted(keys, key=lambda k: k['LastModified'], reverse=True)[0] if len(keys) > 1 else get(keys, '0')
+        return get(key, 'Key')
+
+    @classmethod
     def delete_objects(cls, path):  # pragma: no cover
         try:
             s3_resource = cls.__resource()
@@ -176,11 +186,14 @@ class S3:
         return None
 
     @classmethod
-    def __fetch_keys(cls, prefix='/', delimiter='/'):  # pragma: no cover
+    def __fetch_keys(cls, prefix='/', delimiter='/', verbose=False):  # pragma: no cover
         prefix = prefix[1:] if prefix.startswith(delimiter) else prefix
         s3_resource = cls.__resource()
         objects = s3_resource.meta.client.list_objects(Bucket=settings.AWS_STORAGE_BUCKET_NAME, Prefix=prefix)
-        return [{'Key': k} for k in [obj['Key'] for obj in objects.get('Contents', [])]]
+        content = objects.get('Contents', [])
+        if verbose:
+            return content
+        return [{'Key': k} for k in [obj['Key'] for obj in content]]
 
     @classmethod
     def __resource(cls):

@@ -637,6 +637,9 @@ class ConceptContainerExportMixin:
         if version.is_head and not request.user.is_staff:
             return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
 
+        if version.is_exporting:
+            return Response(status=status.HTTP_208_ALREADY_REPORTED)
+
         if version.has_export():
             export_url = version.get_export_url()
 
@@ -651,12 +654,9 @@ class ConceptContainerExportMixin:
             response['Cache-Control'] = 'no-cache, no-store, must-revalidate'
             response['Pragma'] = 'no-cache'
             response['Expires'] = '0'
-            response['Last-Updated'] = version.last_child_update.isoformat()
+            response['Last-Updated'] = version.get_last_child_update_from_export_url(export_url)
             response['Last-Updated-Timezone'] = settings.TIME_ZONE_PLACE
             return response
-
-        if version.is_exporting:
-            return Response(status=status.HTTP_208_ALREADY_REPORTED)
 
         return Response(status=status.HTTP_204_NO_CONTENT)
 

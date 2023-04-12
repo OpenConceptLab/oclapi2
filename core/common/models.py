@@ -18,7 +18,7 @@ from pydash import get
 from core.common.tasks import update_collection_active_concepts_count, update_collection_active_mappings_count, \
     delete_s3_objects
 from core.common.utils import reverse_resource, reverse_resource_version, parse_updated_since_param, drop_version, \
-    to_parent_uri, is_canonical_uri, get_export_service
+    to_parent_uri, is_canonical_uri, get_export_service, from_string_to_date
 from core.common.utils import to_owner_uri
 from core.settings import DEFAULT_LOCALE
 from .constants import (
@@ -429,6 +429,15 @@ class ConceptContainerModel(VersionedModel):
             return max(last_concept_update, last_mapping_update)
         return last_concept_update or last_mapping_update or self.updated_at or timezone.now()
 
+    def get_last_child_update_from_export_url(self, export_url):
+        generic_path = self.generic_export_path(suffix=None)
+        try:
+            last_child_updated_at = export_url.split(generic_path)[1].split('?')[0].replace('.zip', '')
+            return from_string_to_date(last_child_updated_at).isoformat()
+        except:  # pylint: disable=bare-except
+            return None
+
+
     @classmethod
     def get_base_queryset(cls, params):
         username = params.get('user', None)
@@ -789,10 +798,18 @@ class ConceptContainerModel(VersionedModel):
         return path
 
     def get_export_url(self):
-        return get_export_service().url_for(self.export_path)
+        service = get_export_service()
+        if self.is_head:
+            path = self.export_path
+        else:
+            path = service.get_last_key_from_path(self.generic_export_path(suffix=None)) or self.export_path
+        return service.url_for(path)
 
     def has_export(self):
-        return get_export_service().exists(self.export_path)
+        service = get_export_service()
+        if self.is_head:
+            return service.exists(self.export_path)
+        return service.has_path(self.generic_export_path(suffix=None))
 
     def can_view_all_content(self, user):
         if get(user, 'is_anonymous'):
