@@ -27,7 +27,7 @@ from core.common.exceptions import Http400
 from core.common.mixins import PathWalkerMixin
 from core.common.serializers import RootSerializer
 from core.common.utils import compact_dict_by_values, to_snake_case, to_camel_case, parse_updated_since_param, \
-    is_url_encoded_string
+    is_url_encoded_string, to_int
 from core.concepts.permissions import CanViewParentDictionary, CanEditParentDictionary
 from core.orgs.constants import ORG_OBJECT_TYPE
 from core.users.constants import USER_OBJECT_TYPE
@@ -616,7 +616,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         self.limit = int(self.limit)
 
         self.limit = self.limit or LIST_DEFAULT_LIMIT
-        page = max(int(self.request.GET.get('page') or '1'), 1)
+        page = max(to_int(self.request.GET.get('page'), 1), 1)
         start = (page - 1) * self.limit
         end = start + self.limit
         try:
@@ -680,12 +680,10 @@ class SourceChildCommonBaseView(BaseAPIView):
     def __set_params(self):
         self.params = self.__get_params()
         if self.params:
-            try:
-                self.limit = CSV_DEFAULT_LIMIT if self.params.get('csv') else int(self.params.get(
-                    LIMIT_PARAM, LIST_DEFAULT_LIMIT
-                ))
-            except:  # pylint: disable=bare-except
-                self.limit = LIST_DEFAULT_LIMIT
+            self.limit = to_int(
+                CSV_DEFAULT_LIMIT if self.params.get('csv') else self.params.get(LIMIT_PARAM),
+                LIST_DEFAULT_LIMIT
+            )
 
 
 class SourceChildExtrasBaseView:
