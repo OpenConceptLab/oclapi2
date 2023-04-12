@@ -680,9 +680,12 @@ class SourceChildCommonBaseView(BaseAPIView):
     def __set_params(self):
         self.params = self.__get_params()
         if self.params:
-            self.limit = CSV_DEFAULT_LIMIT if self.params.get('csv') else int(self.params.get(
-                LIMIT_PARAM, LIST_DEFAULT_LIMIT
-            ))
+            try:
+                self.limit = CSV_DEFAULT_LIMIT if self.params.get('csv') else int(self.params.get(
+                    LIMIT_PARAM, LIST_DEFAULT_LIMIT
+                ))
+            except:  # pylint: disable=bare-except
+                self.limit = LIST_DEFAULT_LIMIT
 
 
 class SourceChildExtrasBaseView:
