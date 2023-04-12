@@ -523,6 +523,9 @@ class ConceptContainerModel(VersionedModel):
     def get_active_mappings(self):
         return self.get_mappings_queryset().filter(is_active=True, retired=False)
 
+    active_concepts_queryset = property(get_active_concepts)
+    active_mappings_queryset = property(get_active_mappings)
+
     def has_parent_edit_access(self, user):
         if user.is_staff:
             return True

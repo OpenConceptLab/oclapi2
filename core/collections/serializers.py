@@ -9,10 +9,10 @@ from rest_framework.relations import PrimaryKeyRelatedField
 from rest_framework.serializers import ModelSerializer, Serializer
 
 from core.client_configs.serializers import ClientConfigSerializer
-from core.collections.constants import INCLUDE_REFERENCES_PARAM
 from core.collections.models import Collection, CollectionReference, Expansion
 from core.common.constants import HEAD, DEFAULT_ACCESS_TYPE, NAMESPACE_REGEX, ACCESS_TYPE_CHOICES, INCLUDE_SUMMARY, \
     INCLUDE_CLIENT_CONFIGS, INVALID_EXPANSION_URL
+from core.common.serializers import AbstractRepoResourcesSerializer
 from core.orgs.models import Organization
 from core.settings import DEFAULT_LOCALE
 from core.sources.serializers import SourceVersionListSerializer
@@ -331,7 +331,7 @@ class CollectionVersionSummaryDetailSerializer(CollectionVersionSummarySerialize
         )
 
 
-class CollectionDetailSerializer(CollectionCreateOrUpdateSerializer):
+class CollectionDetailSerializer(CollectionCreateOrUpdateSerializer, AbstractRepoResourcesSerializer):
     type = CharField(source='resource_type')
     uuid = CharField(source='id')
     id = CharField(source='mnemonic')
@@ -344,7 +344,6 @@ class CollectionDetailSerializer(CollectionCreateOrUpdateSerializer):
     supported_locales = ListField(required=False, allow_empty=True)
     created_by = CharField(read_only=True, source='created_by.username')
     updated_by = CharField(read_only=True, source='updated_by.username')
-    references = SerializerMethodField()
     summary = SerializerMethodField()
     client_configs = SerializerMethodField()
     expansion_url = CharField(source='expansion_uri', read_only=True, allow_null=True, allow_blank=True)
@@ -358,11 +357,11 @@ class CollectionDetailSerializer(CollectionCreateOrUpdateSerializer):
             'url', 'owner', 'owner_type', 'owner_url',
             'created_on', 'updated_on', 'created_by', 'updated_by', 'extras', 'external_id', 'versions_url',
             'version', 'concepts_url', 'mappings_url', 'expansions_url',
-            'custom_resources_linked_source', 'preferred_source', 'references',
+            'custom_resources_linked_source', 'preferred_source',
             'canonical_url', 'identifier', 'publisher', 'contact', 'jurisdiction', 'purpose', 'copyright', 'meta',
             'immutable', 'revision_date', 'logo_url', 'summary', 'text', 'client_configs',
             'experimental', 'locked_date', 'autoexpand_head', 'expansion_url'
-        )
+        ) + AbstractRepoResourcesSerializer.Meta.fields
 
     def __init__(self, *args, **kwargs):
         params = get(kwargs, 'context.request.query_params')
@@ -397,19 +396,13 @@ class CollectionDetailSerializer(CollectionCreateOrUpdateSerializer):
 
         return None
 
-    def get_references(self, obj):
-        if self.context.get(INCLUDE_REFERENCES_PARAM, False):
-            return CollectionReferenceSerializer(obj.references.all(), many=True).data
-
-        return []
-
     def to_representation(self, instance):  # used to be to_native
         ret = super().to_representation(instance)
         ret.update({"supported_locales": instance.get_supported_locales()})
         return ret
 
 
-class CollectionVersionDetailSerializer(CollectionCreateOrUpdateSerializer):
+class CollectionVersionDetailSerializer(CollectionCreateOrUpdateSerializer, AbstractRepoResourcesSerializer):
     type = CharField(source='resource_version_type')
     uuid = CharField(source='id')
     id = CharField(source='version')
@@ -443,7 +436,7 @@ class CollectionVersionDetailSerializer(CollectionCreateOrUpdateSerializer):
             'canonical_url', 'identifier', 'publisher', 'contact', 'jurisdiction', 'purpose', 'copyright', 'meta',
             'immutable', 'revision_date', 'summary', 'text', 'experimental', 'locked_date',
             'autoexpand', 'expansion_url'
-        )
+        ) + AbstractRepoResourcesSerializer.Meta.fields
 
     def __init__(self, *args, **kwargs):
         params = get(kwargs, 'context.request.query_params')

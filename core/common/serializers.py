@@ -1,12 +1,17 @@
-from rest_framework.fields import CharField, JSONField
-from rest_framework.serializers import Serializer, Field, ValidationError
+from pydash import get
+from rest_framework.fields import CharField, JSONField, SerializerMethodField
+from rest_framework.serializers import Serializer, Field, ValidationError, ModelSerializer
 
 from core import settings
 from core.code_systems.constants import RESOURCE_TYPE as CODE_SYSTEM_RESOURCE_TYPE
+from core.common.constants import INCLUDE_CONCEPTS_PARAM, INCLUDE_MAPPINGS_PARAM, LIMIT_PARAM, OFFSET_PARAM, \
+    INCLUDE_VERBOSE_REFERENCES
+from core.common.feeds import DEFAULT_LIMIT
+from core.common.utils import to_int
+from core.concept_maps.constants import RESOURCE_TYPE as CONCEPT_MAP_RESOURCE_TYPE
 from core.orgs.models import Organization
 from core.users.models import UserProfile
 from core.value_sets.constants import RESOURCE_TYPE as VALUESET_RESOURCE_TYPE
-from core.concept_maps.constants import RESOURCE_TYPE as CONCEPT_MAP_RESOURCE_TYPE
 
 
 class RootSerializer(Serializer):  # pylint: disable=abstract-method
@@ -160,3 +165,73 @@ class IdentifierSerializer(ReadSerializerMixin, Serializer):
                                               "'type': {'coding': [{'code': 'ACSN', "
                                               "'system': 'http://hl7.org/fhir/v2/0203'}]}}")
         return value
+
+
+class AbstractRepoResourcesSerializer(ModelSerializer):
+    concepts = SerializerMethodField()
+    mappings = SerializerMethodField()
+    references = SerializerMethodField()
+
+    class Meta:
+        abstract = True
+        fields = ('concepts', 'mappings', 'references')
+
+    def __init__(self, *args, **kwargs):
+        params = get(kwargs, 'context.request.query_params')
+
+        self.query_params = {}
+        self.include_concepts = False
+        self.include_mappings = False
+        self.include_references = False
+        if params:
+            self.query_params = params if isinstance(params, dict) else params.dict()
+            self.include_concepts = self.query_params.get(INCLUDE_CONCEPTS_PARAM) in ['true', True]
+            self.include_mappings = self.query_params.get(INCLUDE_MAPPINGS_PARAM) in ['true', True]
+            self.include_references = self.query_params.get(INCLUDE_VERBOSE_REFERENCES) in ['true', True]
+            self.limit = to_int(self.query_params.get(LIMIT_PARAM), DEFAULT_LIMIT)
+            self.offset = to_int(self.query_params.get(OFFSET_PARAM), 0)
+        try:
+            if not self.include_concepts:
+                self.fields.pop('concepts', None)
+            if not self.include_mappings:
+                self.fields.pop('mappings', None)
+            if not self.include_references:
+                self.fields.pop('references', None)
+        except:  # pylint: disable=bare-except
+            pass
+
+        super().__init__(*args, **kwargs)
+
+    def get_concepts(self, obj):
+        results = []
+        if self.include_concepts:
+            from core.concepts.models import Concept
+            from core.concepts.serializers import ConceptListSerializer
+            queryset = self._paginate(
+                Concept.apply_attribute_based_filters(obj.get_concepts_queryset(), self.query_params))
+            results = self._serialize(queryset, ConceptListSerializer)
+        return results
+
+    def get_mappings(self, obj):
+        results = []
+        if self.include_mappings:
+            from core.mappings.models import Mapping
+            from core.mappings.serializers import MappingListSerializer
+            queryset = self._paginate(
+                Mapping.apply_attribute_based_filters(obj.get_mappings_queryset(), self.query_params))
+            results = self._serialize(queryset, MappingListSerializer)
+        return results
+
+    def get_references(self, obj):
+        results = []
+        if self.include_references and obj.is_collection:
+            from core.collections.serializers import CollectionReferenceSerializer
+            results = self._serialize(self._paginate(obj.references, '-id'), CollectionReferenceSerializer)
+        return results
+
+    def _paginate(self, queryset, order_by='-updated_at'):
+        return queryset.order_by(order_by)[self.offset:self.offset + self.limit]
+
+    @staticmethod
+    def _serialize(queryset, klass):
+        return klass(queryset, many=True).data

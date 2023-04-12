@@ -10,6 +10,7 @@ from rest_framework.serializers import ModelSerializer
 from core.client_configs.serializers import ClientConfigSerializer
 from core.common.constants import DEFAULT_ACCESS_TYPE, NAMESPACE_REGEX, ACCESS_TYPE_CHOICES, HEAD, \
     INCLUDE_SUMMARY, INCLUDE_CLIENT_CONFIGS, INCLUDE_HIERARCHY_ROOT
+from core.common.serializers import AbstractRepoResourcesSerializer
 from core.orgs.models import Organization
 from core.settings import DEFAULT_LOCALE
 from core.sources.models import Source
@@ -320,7 +321,7 @@ class SourceVersionSummaryFieldDistributionSerializer(AbstractSourceSummaryField
     id = CharField(source='version')
 
 
-class SourceDetailSerializer(SourceCreateOrUpdateSerializer):
+class SourceDetailSerializer(SourceCreateOrUpdateSerializer, AbstractRepoResourcesSerializer):
     type = CharField(source='resource_type')
     uuid = CharField(source='id')
     id = CharField(source='mnemonic')
@@ -354,7 +355,7 @@ class SourceDetailSerializer(SourceCreateOrUpdateSerializer):
             'autoid_mapping_mnemonic', 'autoid_mapping_external_id',
             'autoid_concept_mnemonic_start_from', 'autoid_concept_external_id_start_from',
             'autoid_mapping_mnemonic_start_from', 'autoid_mapping_external_id_start_from',
-        )
+        ) + AbstractRepoResourcesSerializer.Meta.fields
 
     def __init__(self, *args, **kwargs):
         params = get(kwargs, 'context.request.query_params')
@@ -404,7 +405,7 @@ class SourceDetailSerializer(SourceCreateOrUpdateSerializer):
         return ret
 
 
-class SourceVersionDetailSerializer(SourceCreateOrUpdateSerializer):
+class SourceVersionDetailSerializer(SourceCreateOrUpdateSerializer, AbstractRepoResourcesSerializer):
     type = CharField(source='resource_version_type')
     uuid = CharField(source='id')
     id = CharField(source='version')
@@ -438,7 +439,7 @@ class SourceVersionDetailSerializer(SourceCreateOrUpdateSerializer):
             'content_type', 'revision_date', 'summary', 'text', 'meta',
             'experimental', 'case_sensitive', 'collection_reference', 'hierarchy_meaning', 'compositional',
             'version_needed', 'hierarchy_root_url'
-        )
+        ) + AbstractRepoResourcesSerializer.Meta.fields
 
     def __init__(self, *args, **kwargs):
         params = get(kwargs, 'context.request.query_params')

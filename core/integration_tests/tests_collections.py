@@ -321,6 +321,43 @@ class CollectionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.data['active_mappings'], None)
         self.assertEqual(response.data['versions'], 1)
 
+    def test_get_200_with_resources(self):
+        concept = ConceptFactory()
+        mapping = MappingFactory()
+        coll = OrganizationCollectionFactory(mnemonic='coll1')
+        expansion = ExpansionFactory(collection_version=coll)
+        coll.expansion_uri = expansion.uri
+        coll.save()
+
+        response = self.client.get(
+            coll.uri + '?includeConcepts=true&includeMappings=true&includeReferences=true', format='json')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['uuid'], str(coll.id))
+        self.assertEqual(response.data['short_code'], 'coll1')
+        self.assertEqual(response.data['url'], coll.uri)
+        self.assertEqual(response.data['type'], 'Collection')
+        self.assertEqual(len(response.data['concepts']), 0)
+        self.assertEqual(len(response.data['mappings']), 0)
+        self.assertEqual(len(response.data['references']), 0)
+
+        expansion.concepts.add(concept)
+        expansion.mappings.add(mapping)
+        coll_ref = CollectionReference(expression='/foo/bar', collection=coll)
+        coll_ref.save()
+
+        response = self.client.get(
+            coll.uri + '?includeConcepts=true&includeMappings=true&includeReferences=true', format='json')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['uuid'], str(coll.id))
+        self.assertEqual(response.data['short_code'], 'coll1')
+        self.assertEqual(response.data['url'], coll.uri)
+        self.assertEqual(response.data['type'], 'Collection')
+        self.assertEqual(len(response.data['concepts']), 1)
+        self.assertEqual(len(response.data['mappings']), 1)
+        self.assertEqual(len(response.data['references']), 1)
+
     def test_get_404(self):
         response = self.client.get(
             '/orgs/foobar/collections/coll1/',
