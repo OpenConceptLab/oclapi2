@@ -252,7 +252,6 @@ class VersionedModel(BaseResourceModel):
         abstract = True
         indexes = [
             models.Index(fields=['retired']),
-            models.Index(fields=['is_latest_version']),
         ] + BaseResourceModel.Meta.indexes
 
     @property
