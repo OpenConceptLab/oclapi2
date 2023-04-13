@@ -41,7 +41,6 @@ class BaseModel(models.Model):
     class Meta:
         abstract = True
         indexes = [
-            models.Index(fields=['uri']),
             models.Index(fields=['-updated_at']),
             models.Index(fields=['-created_at']),
             models.Index(fields=['is_active']),
@@ -70,7 +69,7 @@ class BaseModel(models.Model):
     )
     is_active = models.BooleanField(default=True)
     extras = models.JSONField(null=True, blank=True, default=dict)
-    uri = models.TextField(null=True, blank=True, db_index=True)
+    uri = models.TextField(null=True, blank=True)
     _index = True
 
     @property

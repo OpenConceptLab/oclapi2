@@ -20,7 +20,9 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
     class Meta:
         db_table = 'user_profiles'
         swappable = 'AUTH_USER_MODEL'
-        indexes = [] + BaseModel.Meta.indexes
+        indexes = [
+                      models.Index(fields=['uri']),
+                  ] + BaseModel.Meta.indexes
 
     OBJECT_TYPE = USER_OBJECT_TYPE
     first_name = models.CharField(max_length=100, blank=True)

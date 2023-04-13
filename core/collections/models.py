@@ -851,7 +851,9 @@ def default_expansion_parameters():
 class Expansion(BaseResourceModel):
     class Meta:
         db_table = 'collection_expansions'
-        indexes = [] + BaseResourceModel.Meta.indexes
+        indexes = [
+                      models.Index(fields=['uri']),
+                  ] + BaseResourceModel.Meta.indexes
 
     parameters = models.JSONField(default=default_expansion_parameters)
     canonical_url = models.URLField(null=True, blank=True)

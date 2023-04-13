@@ -46,7 +46,9 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
                 condition=models.Q(organization=None),
             )
         ]
-        indexes = [] + ConceptContainerModel.Meta.indexes
+        indexes = [
+                      models.Index(fields=['uri']),
+                  ] + ConceptContainerModel.Meta.indexes
         # + index on UPPER(mnemonic) in custom migration 0022
 
     source_type = models.TextField(blank=True, null=True)
