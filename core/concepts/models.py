@@ -26,8 +26,6 @@ class AbstractLocalizedText(models.Model):
         indexes = [
             HashIndex(fields=['name']),
             models.Index(fields=['type']),
-            models.Index(fields=['locale']),
-            models.Index(fields=['locale_preferred']),
             models.Index(fields=['created_at']),
         ]
 
@@ -116,7 +114,9 @@ class ConceptName(AbstractLocalizedText):
 
     class Meta:
         db_table = 'concept_names'
-        indexes = AbstractLocalizedText.Meta.indexes
+        indexes = [
+            models.Index(fields=['locale']),
+        ] + AbstractLocalizedText.Meta.indexes
 
     @staticmethod
     def _build(params):
