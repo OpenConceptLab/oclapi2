@@ -218,10 +218,7 @@ class BaseResourceModel(BaseModel, CommonLogoModel):
     A base resource may contain sub-resources.
     (An Organization is a base resource, but a Concept is not.)
     """
-    mnemonic = models.CharField(
-        max_length=255, validators=[RegexValidator(regex=NAMESPACE_REGEX)],
-        db_index=True
-    )
+    mnemonic = models.CharField(max_length=255, validators=[RegexValidator(regex=NAMESPACE_REGEX)],)
     mnemonic_attr = 'mnemonic'
 
     class Meta:

@@ -63,7 +63,9 @@ class Collection(ConceptContainerModel):
                 condition=models.Q(organization=None),
             )
         ]
-        indexes = [] + ConceptContainerModel.Meta.indexes
+        indexes = [
+                      models.Index(name="coll_mnemonic_like", fields=["mnemonic"], opclasses=["text_pattern_ops"])
+                  ] + ConceptContainerModel.Meta.indexes
 
     collection_type = models.TextField(blank=True)
     preferred_source = models.TextField(blank=True)
@@ -853,6 +855,7 @@ class Expansion(BaseResourceModel):
         db_table = 'collection_expansions'
         indexes = [
                       models.Index(fields=['uri']),
+                      models.Index(name="expansion_mnemonic_like", fields=["mnemonic"], opclasses=["text_pattern_ops"])
                   ] + BaseResourceModel.Meta.indexes
 
     parameters = models.JSONField(default=default_expansion_parameters)

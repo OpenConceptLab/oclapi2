@@ -178,7 +178,6 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     )
     mnemonic = models.CharField(
         max_length=255, validators=[RegexValidator(regex=CONCEPT_REGEX)],
-        db_index=True
     )
     _counted = models.BooleanField(default=True, null=True, blank=True)
     _index = models.BooleanField(default=True)
