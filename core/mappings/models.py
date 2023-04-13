@@ -22,24 +22,27 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         db_table = 'mappings'
         unique_together = ('mnemonic', 'version', 'parent')
         indexes = [
-            models.Index(name='mappings_up_pub_latest', fields=['-updated_at', 'public_access', 'is_latest_version'],
-                         condition=(Q(is_active=True) & Q(retired=False))),
-            models.Index(name='mappings_head_up_pub', fields=['-updated_at', 'public_access'],
-                         condition=(Q(is_active=True) & Q(retired=False) & Q(id=F('versioned_object_id')))),
-            models.Index(name='mappings_up_latest', fields=['-updated_at', 'is_latest_version'],
-                         condition=(Q(is_active=True) & Q(retired=False))),
-            models.Index(name='mappings_pub_latest', fields=['public_access', 'is_latest_version'],
-                         condition=(Q(is_active=True) & Q(retired=False))),
-            models.Index(name='mappings_head_pub', fields=['public_access'],
-                         condition=(Q(is_active=True) & Q(retired=False) & Q(id=F('versioned_object_id')))),
-            models.Index(name='mappings_parent_pub_latest', fields=['parent_id', 'public_access', 'is_latest_version'],
-                         condition=(Q(is_active=True) & Q(retired=False))),
-            models.Index(name='mappings_head_parent_pub', fields=['parent_id', 'public_access'],
-                         condition=(Q(is_active=True) & Q(retired=False) & Q(id=F('versioned_object_id')))),
-            models.Index(name='mappings_latest_parent', fields=['is_latest_version', 'parent_id'],
-                         condition=(Q(is_active=True) & Q(retired=False))),
-            models.Index(name="mappings_map_type_like", fields=["map_type"], opclasses=["text_pattern_ops"])
-        ] + VersionedModel.Meta.indexes
+                      models.Index(name='mappings_up_pub_latest',
+                                   fields=['-updated_at', 'public_access', 'is_latest_version'],
+                                   condition=(Q(is_active=True) & Q(retired=False))),
+                      models.Index(name='mappings_head_up_pub', fields=['-updated_at', 'public_access'],
+                                   condition=(Q(is_active=True) & Q(retired=False) & Q(id=F('versioned_object_id')))),
+                      models.Index(name='mappings_up_latest', fields=['-updated_at', 'is_latest_version'],
+                                   condition=(Q(is_active=True) & Q(retired=False))),
+                      models.Index(name='mappings_pub_latest', fields=['public_access', 'is_latest_version'],
+                                   condition=(Q(is_active=True) & Q(retired=False))),
+                      models.Index(name='mappings_head_pub', fields=['public_access'],
+                                   condition=(Q(is_active=True) & Q(retired=False) & Q(id=F('versioned_object_id')))),
+                      models.Index(name='mappings_parent_pub_latest',
+                                   fields=['parent_id', 'public_access', 'is_latest_version'],
+                                   condition=(Q(is_active=True) & Q(retired=False))),
+                      models.Index(name='mappings_head_parent_pub', fields=['parent_id', 'public_access'],
+                                   condition=(Q(is_active=True) & Q(retired=False) & Q(id=F('versioned_object_id')))),
+                      models.Index(name='mappings_latest_parent', fields=['is_latest_version', 'parent_id'],
+                                   condition=(Q(is_active=True) & Q(retired=False))),
+                      models.Index(name="mappings_map_type_like", fields=["map_type"], opclasses=["text_pattern_ops"]),
+                      models.Index(fields=['uri']),
+                  ] + VersionedModel.Meta.indexes
     parent = models.ForeignKey('sources.Source', related_name='mappings_set', on_delete=models.CASCADE)
     map_type = models.TextField()
     sort_weight = models.FloatField(db_index=True, null=True, blank=True)
