@@ -169,7 +169,7 @@ class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
             if is_anonymous:
                 queryset = queryset.exclude(public_access=ACCESS_TYPE_NONE)
             elif not is_staff:
-                queryset = queryset.filter(Concept.user_criteria(user))
+                queryset = Concept.apply_user_criteria(queryset, user)
 
         return queryset
 

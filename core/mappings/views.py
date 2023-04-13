@@ -80,7 +80,7 @@ class MappingListView(MappingBaseView, ListWithHeadersMixin, CreateModelMixin):
             if get(user, 'is_anonymous'):
                 queryset = queryset.exclude(public_access=ACCESS_TYPE_NONE)
             elif not get(user, 'is_staff'):
-                queryset = queryset.filter(Mapping.user_criteria(user))
+                queryset = Mapping.apply_user_criteria(queryset, user)
 
         return queryset
 
