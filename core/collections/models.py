@@ -64,7 +64,8 @@ class Collection(ConceptContainerModel):
             )
         ]
         indexes = [
-                      models.Index(name="coll_mnemonic_like", fields=["mnemonic"], opclasses=["text_pattern_ops"])
+                      models.Index(name="coll_mnemonic_like", fields=["mnemonic"], opclasses=["text_pattern_ops"]),
+                      models.Index(fields=['public_access']),
                   ] + ConceptContainerModel.Meta.indexes
 
     collection_type = models.TextField(blank=True)

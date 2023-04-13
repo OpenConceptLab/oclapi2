@@ -22,6 +22,7 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
         swappable = 'AUTH_USER_MODEL'
         indexes = [
                       models.Index(fields=['uri']),
+                      models.Index(fields=['public_access']),
                   ] + BaseModel.Meta.indexes
 
     OBJECT_TYPE = USER_OBJECT_TYPE
