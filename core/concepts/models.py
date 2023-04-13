@@ -1,5 +1,5 @@
 from django.conf import settings
-from django.contrib.postgres.indexes import GinIndex, HashIndex
+from django.contrib.postgres.indexes import HashIndex
 from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator
 from django.db import models, IntegrityError, transaction
@@ -23,11 +23,6 @@ from core.concepts.mixins import ConceptValidationMixin
 class AbstractLocalizedText(models.Model):
     class Meta:
         abstract = True
-        indexes = [
-            HashIndex(fields=['name']),
-            models.Index(fields=['type']),
-            models.Index(fields=['created_at']),
-        ]
 
     id = models.BigAutoField(primary_key=True)
     external_id = models.TextField(null=True, blank=True)
@@ -89,7 +84,6 @@ class ConceptDescription(AbstractLocalizedText):
 
     class Meta:
         db_table = 'concept_descriptions'
-        indexes = AbstractLocalizedText.Meta.indexes
 
     @staticmethod
     def _build(params):
@@ -115,8 +109,11 @@ class ConceptName(AbstractLocalizedText):
     class Meta:
         db_table = 'concept_names'
         indexes = [
-            models.Index(fields=['locale']),
-        ] + AbstractLocalizedText.Meta.indexes
+                      HashIndex(fields=['name']),
+                      models.Index(fields=['locale']),
+                      models.Index(fields=['created_at']),
+                      models.Index(fields=['type']),
+                  ]
 
     @staticmethod
     def _build(params):
