@@ -38,9 +38,10 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
                          condition=(Q(is_active=True) & Q(retired=False) & Q(id=F('versioned_object_id')))),
             models.Index(name='mappings_latest_parent', fields=['is_latest_version', 'parent_id'],
                          condition=(Q(is_active=True) & Q(retired=False))),
-                  ] + VersionedModel.Meta.indexes
+            models.Index(name="mappings_map_type_like", fields=["map_type"], opclasses=["text_pattern_ops"])
+        ] + VersionedModel.Meta.indexes
     parent = models.ForeignKey('sources.Source', related_name='mappings_set', on_delete=models.CASCADE)
-    map_type = models.TextField(db_index=True)
+    map_type = models.TextField()
     sort_weight = models.FloatField(db_index=True, null=True, blank=True)
     sources = models.ManyToManyField('sources.Source', related_name='mappings')
     external_id = models.TextField(null=True, blank=True)
