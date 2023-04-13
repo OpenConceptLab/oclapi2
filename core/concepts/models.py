@@ -161,7 +161,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                       models.Index(name='concepts_head_parent_pub', fields=['parent_id', 'public_access'],
                                    condition=(Q(is_active=True) & Q(retired=False) & Q(id=F('versioned_object_id')))),
                       models.Index(fields=['uri']),
-
+                      models.Index(fields=['version']),
                   ] + VersionedModel.Meta.indexes
 
     external_id = models.TextField(null=True, blank=True)

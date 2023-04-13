@@ -251,7 +251,6 @@ class VersionedModel(BaseResourceModel):
     class Meta:
         abstract = True
         indexes = [
-            models.Index(fields=['version']),
             models.Index(fields=['retired']),
             models.Index(fields=['is_latest_version']),
         ] + BaseResourceModel.Meta.indexes
@@ -373,7 +372,9 @@ class ConceptContainerModel(VersionedModel):
 
     class Meta:
         abstract = True
-        indexes = [] + VersionedModel.Meta.indexes
+        indexes = [
+                      models.Index(fields=['version'])
+                  ] + VersionedModel.Meta.indexes
 
     @property
     def is_collection(self):
