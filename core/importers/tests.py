@@ -25,6 +25,7 @@ from core.mappings.models import Mapping
 from core.mappings.tests.factories import MappingFactory
 from core.orgs.models import Organization
 from core.orgs.tests.factories import OrganizationFactory
+from core.sources.constants import AUTO_ID_UUID
 from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory
 from core.users.models import UserProfile
@@ -245,7 +246,7 @@ class BulkImportInlineTest(OCLTestCase):
     def test_concept_import(self, batch_index_resources_mock):
         self.assertFalse(Concept.objects.filter(mnemonic='Food').exists())
 
-        OrganizationSourceFactory(
+        source = OrganizationSourceFactory(
             organization=(OrganizationFactory(mnemonic='DemoOrg')), mnemonic='DemoSource', version='HEAD'
         )
 
@@ -259,15 +260,17 @@ class BulkImportInlineTest(OCLTestCase):
         importer = BulkImportInline(json.dumps(data), 'ocladmin', True)
         importer.run()
 
+        self.assertEqual(importer.processed, 1)
+        self.assertEqual(len(importer.created), 1)
+        self.assertEqual(importer.failed, [])
+        self.assertTrue(importer.elapsed_seconds > 0)
+
+        self.assertEqual(source.concepts_set.count(), 2)
         self.assertEqual(Concept.objects.filter(mnemonic='Food').count(), 2)
         self.assertEqual(
             Concept.objects.filter(mnemonic='Food', id=F('versioned_object_id')).first().versions.count(), 1
         )
         self.assertTrue(Concept.objects.filter(mnemonic='Food', is_latest_version=True).exists())
-        self.assertEqual(importer.processed, 1)
-        self.assertEqual(len(importer.created), 1)
-        self.assertEqual(importer.failed, [])
-        self.assertTrue(importer.elapsed_seconds > 0)
 
         data = {
             "type": "Concept", "id": "Food", "concept_class": "Root",
@@ -279,15 +282,72 @@ class BulkImportInlineTest(OCLTestCase):
         importer = BulkImportInline(json.dumps(data), 'ocladmin', True)
         importer.run()
 
-        self.assertEqual(
-            Concept.objects.filter(mnemonic='Food', id=F('versioned_object_id')).first().versions.count(), 2
-        )
-        self.assertTrue(Concept.objects.filter(mnemonic='Food', is_latest_version=True, datatype='Rule').exists())
         self.assertEqual(importer.processed, 1)
         self.assertEqual(len(importer.created), 0)
         self.assertEqual(len(importer.updated), 1)
         self.assertEqual(importer.failed, [])
         self.assertTrue(importer.elapsed_seconds > 0)
+        self.assertEqual(source.concepts_set.count(), 3)
+        self.assertEqual(
+            Concept.objects.filter(mnemonic='Food', id=F('versioned_object_id')).first().versions.count(), 2
+        )
+        self.assertTrue(Concept.objects.filter(mnemonic='Food', is_latest_version=True, datatype='Rule').exists())
+        batch_index_resources_mock.apply_async.assert_called()
+
+    @patch('core.importers.models.batch_index_resources')
+    def test_concept_import_with_auto_assignment_mnemonic(self, batch_index_resources_mock):
+        self.assertFalse(Concept.objects.filter(mnemonic='Food').exists())
+
+        source = OrganizationSourceFactory(
+            organization=(OrganizationFactory(mnemonic='DemoOrg')), mnemonic='DemoSource', version='HEAD',
+            autoid_concept_mnemonic=AUTO_ID_UUID
+        )
+
+        data = {
+            "type": "Concept", "concept_class": "Root",
+            "datatype": "None", "source": "DemoSource", "owner": "DemoOrg", "owner_type": "Organization",
+            "names": [{"name": "Food", "locale": "en", "locale_preferred": "True", "name_type": "Fully Specified"}],
+            "descriptions": [],
+        }
+
+        importer = BulkImportInline(json.dumps(data), 'ocladmin', True)
+        importer.run()
+
+        self.assertEqual(importer.processed, 1)
+        self.assertEqual(len(importer.created), 1)
+        self.assertEqual(importer.failed, [])
+        self.assertTrue(importer.elapsed_seconds > 0)
+
+        self.assertEqual(source.concepts_set.count(), 2)
+        concept = source.concepts_set.filter(id=F('versioned_object_id')).first()
+
+        self.assertEqual(len(concept.mnemonic), 36)
+        self.assertEqual(
+            concept.versions.count(), 1
+        )
+        self.assertTrue(Concept.objects.filter(mnemonic=concept.mnemonic, is_latest_version=True).exists())
+
+        data = {
+            "type": "Concept", "id": concept.mnemonic, "concept_class": "Root",
+            "datatype": "Rule", "source": "DemoSource", "owner": "DemoOrg", "owner_type": "Organization",
+            "names": [{"name": "Food", "locale": "en", "locale_preferred": "True", "name_type": "Fully Specified"}],
+            "descriptions": [],
+        }
+
+        importer = BulkImportInline(json.dumps(data), 'ocladmin', True)
+        importer.run()
+
+        self.assertEqual(importer.processed, 1)
+        self.assertEqual(len(importer.created), 0)
+        self.assertEqual(len(importer.updated), 1)
+        self.assertEqual(importer.failed, [])
+        self.assertTrue(importer.elapsed_seconds > 0)
+
+        self.assertEqual(
+            Concept.objects.filter(mnemonic=concept.mnemonic, id=F('versioned_object_id')).first().versions.count(), 2
+        )
+        self.assertTrue(
+            Concept.objects.filter(mnemonic=concept.mnemonic, is_latest_version=True, datatype='Rule').exists())
         batch_index_resources_mock.apply_async.assert_called()
 
     def test_concept_import_permission_denied(self):
@@ -366,6 +426,42 @@ class BulkImportInlineTest(OCLTestCase):
         self.assertEqual(importer.processed, 1)
         self.assertEqual(len(importer.created), 0)
         self.assertEqual(len(importer.updated), 1)
+        self.assertEqual(importer.failed, [])
+        self.assertTrue(importer.elapsed_seconds > 0)
+        batch_index_resources_mock.apply_async.assert_called()
+
+    @patch('core.importers.models.batch_index_resources')
+    def test_mapping_import_with_autoid_assignment(self, batch_index_resources_mock):
+        self.assertEqual(Mapping.objects.count(), 0)
+
+        source = OrganizationSourceFactory(
+            organization=(OrganizationFactory(mnemonic='DemoOrg')), mnemonic='DemoSource', version='HEAD',
+            autoid_mapping_mnemonic=AUTO_ID_UUID
+        )
+        ConceptFactory(parent=source, mnemonic='Corn')
+        ConceptFactory(parent=source, mnemonic='Vegetable')
+
+        data = {
+            "to_concept_url": "/orgs/DemoOrg/sources/DemoSource/concepts/Corn/",
+            "from_concept_url": "/orgs/DemoOrg/sources/DemoSource/concepts/Vegetable/",
+            "type": "Mapping", "source": "DemoSource",
+            "extras": None, "owner": "DemoOrg", "map_type": "Has Child", "owner_type": "Organization",
+            "external_id": None
+        }
+
+        importer = BulkImportInline(json.dumps(data), 'ocladmin', True)
+        importer.run()
+
+        self.assertEqual(Mapping.objects.filter(map_type='Has Child').count(), 2)
+        self.assertEqual(
+            Mapping.objects.filter(map_type='Has Child', id=F('versioned_object_id')).first().versions.count(), 1
+        )
+        self.assertEqual(
+            len(Mapping.objects.filter(map_type='Has Child', id=F('versioned_object_id')).first().mnemonic), 36
+        )
+        self.assertTrue(Mapping.objects.filter(map_type='Has Child', is_latest_version=True).exists())
+        self.assertEqual(importer.processed, 1)
+        self.assertEqual(len(importer.created), 1)
         self.assertEqual(importer.failed, [])
         self.assertTrue(importer.elapsed_seconds > 0)
         batch_index_resources_mock.apply_async.assert_called()

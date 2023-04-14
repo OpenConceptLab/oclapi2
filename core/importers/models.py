@@ -370,7 +370,7 @@ class CollectionVersionImporter(BaseResourceImporter):
 
 
 class ConceptImporter(BaseResourceImporter):
-    mandatory_fields = {"id"}
+    mandatory_fields = {"concept_class"}
     allowed_fields = [
         "id", "external_id", "concept_class", "datatype", "names", "descriptions", "retired", "extras",
         "parent_concept_urls", 'update_comment', 'comment'
