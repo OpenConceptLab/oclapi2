@@ -318,14 +318,15 @@ class ConceptDictionaryCreateMixin(ConceptDictionaryMixin):
         permission = HasOwnership()
         if not permission.has_object_permission(request, self, self.parent_resource):
             return Response(status=status.HTTP_403_FORBIDDEN)
-        supported_locales = request.data.pop('supported_locales', '')
+        data = request.data.copy()
+        supported_locales = data.pop('supported_locales', '')
         if isinstance(supported_locales, str):
             supported_locales = compact(supported_locales.split(','))
 
         data = {
-            'mnemonic': request.data.get('id'),
+            'mnemonic': data.get('id'),
             'supported_locales': supported_locales,
-            'version': HEAD, **request.data, **{self.parent_resource.resource_type.lower(): self.parent_resource.id}
+            'version': HEAD, **data, **{self.parent_resource.resource_type.lower(): self.parent_resource.id}
         }
 
         serializer = self.get_serializer(data=data)
