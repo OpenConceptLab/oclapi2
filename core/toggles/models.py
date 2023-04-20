@@ -31,14 +31,17 @@ class Toggle(models.Model):
         return Toggle.objects.filter(is_active=True)
 
     @classmethod
-    def to_dict(cls):  # pylint: disable=arguments-differ
+    def to_dict(cls, name=None):
         env = settings.ENV
         if not env or env in ['development', 'ci']:
             env = 'dev'
         if env in ['who-staging']:
             env = 'who_staging'
-        return {toggle.name: get(toggle, env) for toggle in cls.all()}
+        toggles = cls.all()
+        if name:
+            toggles = toggles.filter(name=name)
+        return {toggle.name: get(toggle, env) for toggle in toggles}
 
     @classmethod
-    def get(cls, key):
-        return get(cls.to_dict(), key, None)
+    def get(cls, name):
+        return get(cls.to_dict(name), name, None)

@@ -6,6 +6,7 @@ from django.db import models
 from pydash import get
 
 from core.common.utils import generic_sort
+from core.toggles.models import Toggle
 
 
 class ChecksumModel(models.Model):
@@ -20,6 +21,8 @@ class ChecksumModel(models.Model):
     ALL_CHECKSUM_KEY = 'all'
 
     def get_checksums(self):
+        if not Toggle.get('CHECKSUMS_TOGGLE'):
+            return
         if self.checksums:
             return self.checksums
 
@@ -33,6 +36,8 @@ class ChecksumModel(models.Model):
 
     @property
     def checksum(self):
+        if not Toggle.get('CHECKSUMS_TOGGLE'):
+            return
         """Returns the checksum of the model instance or metadata only checksum."""
         if get(self, f'checksums.{self.METADATA_CHECKSUM_KEY}'):
             return self.checksums[self.METADATA_CHECKSUM_KEY]
@@ -52,6 +57,8 @@ class ChecksumModel(models.Model):
         return result
 
     def get_basic_checksums(self):
+        if not Toggle.get('CHECKSUMS_TOGGLE'):
+            return
         return {self.METADATA_CHECKSUM_KEY: self._calculate_meta_checksum()}
 
     def get_all_checksums(self):
