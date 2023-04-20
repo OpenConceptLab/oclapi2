@@ -632,7 +632,7 @@ class SourceChildMixin(ChecksumModel):
         return criteria
 
     def save(self, force_insert=False, force_update=False, using=None, update_fields=None):
-        result = super().save(force_insert, force_update, using, update_fields)
+        super().save(force_insert, force_update, using, update_fields)
 
         if self.is_latest_version and self._counted is False:
             if self.__class__.__name__ == 'Concept':
@@ -642,8 +642,6 @@ class SourceChildMixin(ChecksumModel):
 
             self._counted = True
             self.save(update_fields=['_counted'])
-
-        return result
 
     def collection_references_uris(self, collection):
         ids = self.collection_references(collection).values_list('id', flat=True)

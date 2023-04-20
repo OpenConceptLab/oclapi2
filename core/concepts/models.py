@@ -33,7 +33,7 @@ class AbstractLocalizedText(ChecksumModel):
     locale_preferred = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
-    CHECKSUM_EXCLUSIONS = ['id', 'created_at', 'concept_id', 'concept']
+    CHECKSUM_EXCLUSIONS = ['id', 'created_at', 'concept_id', 'concept', 'type']
 
     def to_dict(self):
         return dict(
@@ -83,10 +83,16 @@ class AbstractLocalizedText(ChecksumModel):
 
 
 class ConceptDescription(AbstractLocalizedText):
+    CHECKSUM_INCLUSIONS = ['description_type']
+
     concept = models.ForeignKey('concepts.Concept', on_delete=models.CASCADE, related_name='descriptions')
 
     class Meta:
         db_table = 'concept_descriptions'
+
+    @property
+    def description_type(self):
+        return self.type
 
     @staticmethod
     def _build(params):
@@ -106,6 +112,8 @@ class ConceptDescription(AbstractLocalizedText):
 
 
 class ConceptName(AbstractLocalizedText):
+    CHECKSUM_INCLUSIONS = ['name_type']
+
     concept = models.ForeignKey(
         'concepts.Concept', on_delete=models.CASCADE, related_name='names')
 
@@ -117,6 +125,10 @@ class ConceptName(AbstractLocalizedText):
                       models.Index(fields=['created_at']),
                       models.Index(fields=['type']),
                   ]
+
+    @property
+    def name_type(self):
+        return self.type
 
     @staticmethod
     def _build(params):
@@ -755,6 +767,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
                     obj.sources.set([parent])
                     obj.set_checksums()
+                    versioned_object.set_checksums()
                     persisted = True
                     cls.resume_indexing()
                     if get(settings, 'TEST_MODE', False):

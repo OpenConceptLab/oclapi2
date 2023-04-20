@@ -887,6 +887,5 @@ def generic_sort(_list):
     def compare(item):
         if isinstance(item, (int, float, str, bool)):
             return item
-        else:
-            return str(item)
+        return str(item)
     return sorted(_list, key=compare)

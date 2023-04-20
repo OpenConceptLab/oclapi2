@@ -20,7 +20,7 @@ class LocalizedNameSerializer(ModelSerializer):
     class Meta:
         model = ConceptName
         fields = (
-            'uuid', 'name', 'external_id', 'type', 'locale', 'locale_preferred', 'name_type',
+            'uuid', 'name', 'external_id', 'type', 'locale', 'locale_preferred', 'name_type', 'checksum'
         )
 
     def to_representation(self, instance):
@@ -38,7 +38,7 @@ class LocalizedDescriptionSerializer(ModelSerializer):
     class Meta:
         model = ConceptName
         fields = (
-            'uuid', 'description', 'external_id', 'type', 'locale', 'locale_preferred', 'description_type'
+            'uuid', 'description', 'external_id', 'type', 'locale', 'locale_preferred', 'description_type', 'checksum'
         )
 
     def to_representation(self, instance):
@@ -65,7 +65,10 @@ class ConceptLabelSerializer(ModelSerializer):
         locale.name = validated_data.get('name', locale.name)
         locale.locale = validated_data.get('locale', locale.locale)
         locale.locale_preferred = validated_data.get('locale_preferred', locale.locale_preferred)
-        locale.type = validated_data.get('type', locale.type)
+        _type = validated_data.get('type', None)
+        if _type in ['ConceptName', 'ConceptDescription']:
+            _type = validated_data.get('name_type', validated_data.get('description_type', locale.type))
+        locale.type = _type
         locale.external_id = validated_data.get('external_id', locale.external_id)
         locale.concept_id = validated_data.get('concept_id', locale.concept_id)
         locale.save()
@@ -74,7 +77,7 @@ class ConceptLabelSerializer(ModelSerializer):
 
 class ConceptNameSerializer(ConceptLabelSerializer):
     name = CharField(required=True)
-    name_type = CharField(required=False, source='type')
+    name_type = CharField(required=False)
 
     class Meta:
         model = ConceptName
@@ -88,7 +91,7 @@ class ConceptNameSerializer(ConceptLabelSerializer):
 
 class ConceptDescriptionSerializer(ConceptLabelSerializer):
     description = CharField(required=True, source='name')
-    description_type = CharField(required=False, source='type')
+    description_type = CharField(required=False)
 
     class Meta:
         model = ConceptName

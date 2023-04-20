@@ -28,6 +28,7 @@ class ChecksumModel(models.Model):
             self.set_checksums()
 
             return self.checksums
+        return None
 
     def set_checksums(self):
         if Toggle.get('CHECKSUMS_TOGGLE'):
@@ -43,6 +44,7 @@ class ChecksumModel(models.Model):
             self.get_checksums()
 
             return self.checksums.get(self.METADATA_CHECKSUM_KEY)
+        return None
 
     def get_checksum_fields(self):
         result = {
@@ -58,6 +60,7 @@ class ChecksumModel(models.Model):
     def get_basic_checksums(self):
         if Toggle.get('CHECKSUMS_TOGGLE'):
             return {self.METADATA_CHECKSUM_KEY: self._calculate_meta_checksum()}
+        return None
 
     def get_all_checksums(self):
         return self.get_basic_checksums()

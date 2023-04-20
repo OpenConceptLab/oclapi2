@@ -500,6 +500,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
 
                     obj.sources.set([parent])
                     obj.set_checksums()
+                    obj.versioned_object.set_checksums()
                     persisted = True
                     cls.resume_indexing()
 
