@@ -84,10 +84,12 @@ class CustomPaginator:
 
     @property
     def headers(self):
-        headers = dict(
-            num_found=self.total_count, num_returned=len(self.current_page_results),
-            pages=self.page_count, page_number=self.page_number
-        )
+        headers = {
+            'num_found': self.total_count,
+            'num_returned': len(self.current_page_results),
+            'pages': self.page_count,
+            'page_number': self.page_number
+        }
         if self.has_next():
             headers['next'] = self.get_next_page_url()
         if self.has_previous():
@@ -124,7 +126,7 @@ class ListWithHeadersMixin(ListModelMixin):
             return self.get_csv(request)
 
         if self.only_facets():
-            return Response(dict(facets=dict(fields=self.get_facets())))
+            return Response({'facets': {'fields': self.get_facets()}})
 
         if self.object_list is None:
             self.object_list = self.filter_queryset()
@@ -163,7 +165,7 @@ class ListWithHeadersMixin(ListModelMixin):
     def serialize_list(self, results, paginator=None):
         result_dict = self.get_serializer(results, many=True).data
         if self.should_include_facets():
-            data = dict(results=result_dict, facets=dict(fields=self.get_facets()))
+            data = {'results': result_dict, 'facets': {'fields': self.get_facets()}}
         elif hasattr(self.__class__, 'bundle_response'):
             data = self.bundle_response(result_dict, paginator)
         else:
@@ -684,7 +686,7 @@ class ConceptContainerExportMixin:
 
             no_redirect = request.query_params.get('noRedirect', False) in ['true', 'True', True]
             if no_redirect:
-                return Response(dict(url=export_url), status=status.HTTP_200_OK)
+                return Response({'url': export_url}, status=status.HTTP_200_OK)
 
             response = Response(status=status.HTTP_303_SEE_OTHER)
             response['Location'] = export_url
@@ -758,8 +760,7 @@ class ConceptContainerProcessingMixin:
         is_debug = request.query_params.get('debug', None) in ['true', True]
 
         if is_debug:
-            return Response(dict(is_processing=version.is_processing,
-                                 process_ids=version._background_process_ids))  # pylint: disable=protected-access
+            return Response({'is_processing': version.is_processing, 'process_ids': version._background_process_ids})  # pylint: disable=protected-access
 
         logger.debug('Processing flag requested for %s version %s', self.resource, version)
 

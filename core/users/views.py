@@ -52,7 +52,7 @@ class OIDCodeExchangeView(APIView):
         client_secret = request.data.get('client_secret', None)
         if not code or not redirect_uri or not client_id or not client_secret:
             return Response(
-                dict(error='code, redirect_uri, client_id and client_secret are mandatory to exchange for token'),
+                {'error': 'code, redirect_uri, client_id and client_secret are mandatory to exchange for token'},
                 status=status.HTTP_400_BAD_REQUEST
             )
         return Response(
@@ -75,7 +75,7 @@ class SSOMigrateView(APIView):  # pragma: no cover
         password = request.data.get('password')
         if not username or not password:
             return Response(
-                dict(error='keycloak admin username/password are required'),
+                {'error': 'keycloak admin username/password are required'},
                 status=status.HTTP_400_BAD_REQUEST
             )
         user = self.get_object()
@@ -88,7 +88,7 @@ class TokenExchangeView(APIView):
 
     @staticmethod
     def get(request):
-        return Response(dict(token=request.user.get_token()))
+        return Response({'token': request.user.get_token()})
 
 
 class OIDCLogoutView(APIView):
@@ -126,12 +126,12 @@ class TokenAuthenticationView(ObtainAuthToken):
     def post(self, request, *args, **kwargs):
         if AuthService.is_sso_enabled():
             raise Http400(
-                dict(error=["Single Sign On is enabled in this environment. Cannot login via API directly."]))
+                {'error': ["Single Sign On is enabled in this environment. Cannot login via API directly."]})
 
         user = UserProfile.objects.filter(username=request.data.get('username')).first()
 
         if not user or not user.check_password(request.data.get('password')):
-            raise Http400(dict(non_field_errors=["Unable to log in with provided credentials."]))
+            raise Http400({'non_field_errors': ["Unable to log in with provided credentials."]})
 
         if not user.is_active:
             user.verify()
@@ -275,7 +275,7 @@ class UserSignup(UserBaseView, mixins.CreateModelMixin):
     def perform_create(self, serializer):
         if AuthService.is_sso_enabled():
             raise Http400(
-                dict(error=["Single Sign On is enabled in this environment. Cannot signup via API directly."]))
+                {'error': ["Single Sign On is enabled in this environment. Cannot signup via API directly."]})
         data = self.request.data
         try:
             validate_password(data.get('password'))
@@ -304,7 +304,7 @@ class UserEmailVerificationView(UserBaseView):
         if result is True:
             return Response(status=status.HTTP_200_OK)
 
-        return Response(dict(detail=VERIFICATION_TOKEN_MISMATCH), status=status.HTTP_401_UNAUTHORIZED)
+        return Response({'detail': VERIFICATION_TOKEN_MISMATCH}, status=status.HTTP_401_UNAUTHORIZED)
 
 
 class UserPasswordResetView(UserBaseView):
@@ -331,7 +331,7 @@ class UserPasswordResetView(UserBaseView):
 
         if AuthService.is_sso_enabled():
             raise Http400(
-                dict(error=["Single Sign On is enabled in this environment. Cannot reset password via API directly."]))
+                {'error': ["Single Sign On is enabled in this environment. Cannot reset password via API directly."]})
 
         token = request.data.get('token', None)
         password = request.data.get('new_password', None)
@@ -346,7 +346,7 @@ class UserPasswordResetView(UserBaseView):
         try:
             validate_password(password)
         except ValidationError as ex:
-            return Response(dict(errors=ex.messages), status=status.HTTP_400_BAD_REQUEST)
+            return Response({'errors': ex.messages}, status=status.HTTP_400_BAD_REQUEST)
 
         result = AuthService.get(user=user).update_password(password)
         if get(result, 'errors'):
@@ -468,7 +468,7 @@ class UserExtraRetrieveUpdateDestroyView(UserExtrasBaseView, RetrieveUpdateDestr
         if key in extras:
             return Response({key: extras[key]})
 
-        return Response(dict(detail=NOT_FOUND), status=status.HTTP_404_NOT_FOUND)
+        return Response({'detail': NOT_FOUND}, status=status.HTTP_404_NOT_FOUND)
 
     def update(self, request, **kwargs):  # pylint: disable=arguments-differ
         key = kwargs.get('extra')
@@ -491,4 +491,4 @@ class UserExtraRetrieveUpdateDestroyView(UserExtrasBaseView, RetrieveUpdateDestr
             instance.save()
             return Response(status=status.HTTP_204_NO_CONTENT)
 
-        return Response(dict(detail=NOT_FOUND), status=status.HTTP_404_NOT_FOUND)
+        return Response({'detail': NOT_FOUND}, status=status.HTTP_404_NOT_FOUND)

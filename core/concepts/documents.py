@@ -47,7 +47,7 @@ class ConceptDocument(Document):
 
     @staticmethod
     def get_boostable_search_attrs():
-        return dict(id=dict(boost=1.5), _name=dict(boost=2), synonyms=dict(boost=1, wildcard=True, lower=True))
+        return {'id': {'boost': 1.5}, '_name': {'boost': 2}, 'synonyms': {'boost': 1, 'wildcard': True, 'lower': True}}
 
     @staticmethod
     def prepare_numeric_id(instance):

@@ -501,7 +501,7 @@ class ConceptContainerModel(VersionedModel):
         elif self.is_latest_version:
             prev_version = self.prev_version
             if not force and not prev_version:
-                raise ValidationError(dict(detail=CANNOT_DELETE_ONLY_VERSION))
+                raise ValidationError({'detail': CANNOT_DELETE_ONLY_VERSION})
             if prev_version:
                 prev_version.is_latest_version = True
                 prev_version.save()
@@ -692,9 +692,11 @@ class ConceptContainerModel(VersionedModel):
             try:
                 validator.validate(concept)
             except ValidationError as validation_error:
-                concept_validation_error = dict(
-                    mnemonic=concept.mnemonic, url=concept.url, errors=validation_error.message_dict
-                )
+                concept_validation_error = {
+                    'mnemonic': concept.mnemonic,
+                    'url': concept.url,
+                    'errors': validation_error.message_dict
+                }
                 failed_concept_validations.append(concept_validation_error)
 
         return failed_concept_validations
@@ -901,31 +903,31 @@ class ConceptContainerModel(VersionedModel):
     @property
     def concepts_distribution(self):
         facets = self.get_concept_facets()
-        return dict(
-            active=self.active_concepts,
-            retired=self.retired_concepts_count,
-            concept_class=self._to_clean_facets(facets.conceptClass or []),
-            datatype=self._to_clean_facets(facets.datatype or []),
-            locale=self._to_clean_facets(facets.locale or []),
-            name_type=self._to_clean_facets(facets.nameTypes or [])
-        )
+        return {
+            'active': self.active_concepts,
+            'retired': self.retired_concepts_count,
+            'concept_class': self._to_clean_facets(facets.conceptClass or []),
+            'datatype': self._to_clean_facets(facets.datatype or []),
+            'locale': self._to_clean_facets(facets.locale or []),
+            'name_type': self._to_clean_facets(facets.nameTypes or [])
+        }
 
     @property
     def mappings_distribution(self):
         facets = self.get_mapping_facets()
 
-        return dict(
-            active=self.active_mappings,
-            retired=self.retired_mappings_count,
-            map_type=self._to_clean_facets(facets.mapType or []),
-        )
+        return {
+            'active': self.active_mappings,
+            'retired': self.retired_mappings_count,
+            'map_type': self._to_clean_facets(facets.mapType or [])
+        }
 
     @property
     def versions_distribution(self):
-        return dict(
-            total=self.num_versions,
-            released=self.released_versions_count,
-        )
+        return {
+            'total': self.num_versions,
+            'released': self.released_versions_count
+        }
 
     def get_name_locales_queryset(self):
         from core.concepts.models import ConceptName
@@ -936,7 +938,7 @@ class ConceptContainerModel(VersionedModel):
         locales = self.get_name_locales_queryset()
         locales_total = locales.distinct('locale').count()
         names_total = locales.distinct('type').count()
-        return dict(locales=locales_total, names=names_total)
+        return {'locales': locales_total, 'names': names_total}
 
     def get_name_locale_distribution(self):
         return self._get_distribution(self.get_name_locales_queryset(), 'locale')

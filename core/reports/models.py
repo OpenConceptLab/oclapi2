@@ -49,22 +49,26 @@ class MonthlyUsageReport:
             labels.append(key)
             data.append(ele[key])
 
-        config = dict(
-            type=chart_type,
-            data=dict(
-                labels=labels,
-                datasets=[dict(
-                    label=label,
-                    data=data,
-                    backgroundColor=[color_light],
-                    borderColor=[color],
-                    borderWidth=1
-                )]
-            ),
-            options=dict(
-                scales=dict(y=dict(beginAtZero=True))
-            )
-        )
+        config = {
+            'type': chart_type,
+            'data': {
+                'labels': labels,
+                'datasets': [{
+                    'label': label,
+                    'data': data,
+                    'backgroundColor': [color_light],
+                    'borderColor': [color],
+                    'borderWidth': 1
+                }]
+            },
+            'options': {
+                'scales': {
+                    'y': {
+                        'beginAtZero': True
+                    }
+                }
+            }
+        }
         return f'https://quickchart.io/chart?c={quote(json.dumps(config))}'
 
     def make_resources(self):
@@ -108,18 +112,20 @@ class MonthlyUsageReport:
         for resource in self.resources:
             entity = resource.resource
             stats = [
-                dict(
-                    data=self.result[entity]['created_monthly'],
-                    label=f"{entity.title()} Created Monthly",
-                    key=f"{entity}_url")
+                {
+                    'data': self.result[entity]['created_monthly'],
+                    'label': f"{entity.title()} Created Monthly",
+                    'key': f"{entity}_url"
+                }
             ]
 
             if entity == 'users':
                 stats.append(
-                    dict(
-                        data=self.result[entity]['last_login_monthly'],
-                        label=f"{entity.title()} Joined Monthly",
-                        key=f"{entity}_last_login_monthly_url"),
+                    {
+                        'data': self.result[entity]['last_login_monthly'],
+                        'label': f"{entity.title()} Joined Monthly",
+                        'key': f"{entity}_last_login_monthly_url"
+                    },
                 )
             for stat in stats:
                 urls[stat['key']] = self.to_chart_url(stat['label'], stat['data'])
@@ -173,7 +179,7 @@ class ResourceReport:
 
     @staticmethod
     def get_active_filter(active=True):
-        return dict(retired=not active)
+        return {'retired': not active}
 
     def set_date_range(self):
         self.queryset = self.queryset.filter(created_at__gte=self.start, created_at__lte=self.end)
@@ -201,9 +207,10 @@ class ResourceReport:
         self.set_total()
         self.set_created_monthly_distribution()
 
-        self.result = dict(
-            total=self.total, created_monthly=self.format_distribution(self.created_monthly_distribution)
-        )
+        self.result = {
+            'total': self.total,
+            'created_monthly': self.format_distribution(self.created_monthly_distribution)
+        }
         if self.resource not in ['collection_references']:
             self.set_active()
             self.set_inactive()
@@ -234,7 +241,7 @@ class UserReport(ResourceReport):
 
     @staticmethod
     def get_active_filter(active=True):
-        return dict(is_active=active)
+        return {'is_active': active}
 
     def set_last_login_monthly_distribution(self):
         self.last_login_monthly_distribution = self.get_distribution('last_login')
@@ -264,7 +271,7 @@ class UserReport(ResourceReport):
                 ]:
                     created = get(user, f"{app}_{model}_related_created_by").count()
                     updated = get(user, f"{app}_{model}_related_updated_by").count()
-                    user_result[app] = dict(created=created, updated=updated)
+                    user_result[app] = {'created': created, 'updated': updated}
 
                 self.result[user.username] = user_result
 
@@ -277,7 +284,7 @@ class OrganizationReport(ResourceReport):
 
     @staticmethod
     def get_active_filter(active=True):
-        return dict(is_active=active)
+        return {'is_active': active}
 
 
 class SourceReport(ResourceReport):

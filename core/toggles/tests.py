@@ -7,11 +7,11 @@ from core.toggles.models import Toggle
 class ToggleTest(OCLTestCase):
     def setUp(self):
         super().setUp()
-        Toggle(**dict(name='qa-active-default-true',  qa=True, is_active=True, dev=False)).save()
-        Toggle(**dict(name='qa-default-active-false', qa=False, dev=False)).save()
-        Toggle(**dict(name='qa-inactive-default-true', qa=True, is_active=False, dev=False)).save()
-        Toggle(**dict(name='qa-inactive-false', qa=True, is_active=False, dev=False)).save()
-        Toggle(**dict(name='dev')).save()
+        Toggle(name='qa-active-default-true',  qa=True, is_active=True, dev=False).save()
+        Toggle(name='qa-default-active-false', qa=False, dev=False).save()
+        Toggle(name='qa-inactive-default-true', qa=True, is_active=False, dev=False).save()
+        Toggle(name='qa-inactive-false', qa=True, is_active=False, dev=False).save()
+        Toggle(name='dev').save()
 
     @patch('core.toggles.models.settings', Mock(ENV='qa'))
     def test_all(self):

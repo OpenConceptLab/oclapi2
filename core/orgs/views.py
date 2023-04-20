@@ -283,7 +283,7 @@ class OrganizationExtraRetrieveUpdateDestroyView(OrganizationExtrasBaseView, Ret
         if key in extras:
             return Response({key: extras[key]})
 
-        return Response(dict(detail=NOT_FOUND), status=status.HTTP_404_NOT_FOUND)
+        return Response({'detail': NOT_FOUND}, status=status.HTTP_404_NOT_FOUND)
 
     def update(self, request, **kwargs):  # pylint: disable=arguments-differ
         key = kwargs.get('extra')
@@ -306,4 +306,4 @@ class OrganizationExtraRetrieveUpdateDestroyView(OrganizationExtrasBaseView, Ret
             instance.save()
             return Response(status=status.HTTP_204_NO_CONTENT)
 
-        return Response(dict(detail=NOT_FOUND), status=status.HTTP_404_NOT_FOUND)
+        return Response({'detail': NOT_FOUND}, status=status.HTTP_404_NOT_FOUND)

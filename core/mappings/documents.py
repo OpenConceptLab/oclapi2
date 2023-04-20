@@ -51,7 +51,7 @@ class MappingDocument(Document):
 
     @staticmethod
     def get_boostable_search_attrs():
-        return dict(id=dict(boost=5), from_concept=dict(boost=3), to_concept=dict(boost=2))
+        return {'id': {'boost': 5}, 'from_concept': {'boost': 3}, 'to_concept': {'boost': 2}}
 
     @staticmethod
     def prepare_from_concept(instance):

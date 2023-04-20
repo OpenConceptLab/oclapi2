@@ -27,30 +27,30 @@ class Command(BaseCommand):
 
         current_path = os.path.dirname(__file__)
         importer_confs = [
-            dict(
-                source=sources['Classes'],
-                file=os.path.join(current_path, "../../../lookup_fixtures/concept_classes.json")
-            ),
-            dict(
-                source=sources['Locales'],
-                file=os.path.join(current_path, "../../../lookup_fixtures/locales.json")
-            ),
-            dict(
-                source=sources['Datatypes'],
-                file=os.path.join(current_path, "../../../lookup_fixtures/datatypes_fixed.json")
-            ),
-            dict(
-                source=sources['NameTypes'],
-                file=os.path.join(current_path, "../../../lookup_fixtures/nametypes_fixed.json")
-            ),
-            dict(
-                source=sources['DescriptionTypes'],
-                file=os.path.join(current_path, "../../../lookup_fixtures/description_types.json")
-            ),
-            dict(
-                source=sources['MapTypes'],
-                file=os.path.join(current_path, "../../../lookup_fixtures/maptypes_fixed.json")
-            ),
+            {
+                'source': sources['Classes'],
+                'file': os.path.join(current_path, "../../../lookup_fixtures/concept_classes.json")
+            },
+            {
+                'source': sources['Locales'],
+                'file': os.path.join(current_path, "../../../lookup_fixtures/locales.json")
+            },
+            {
+                'source': sources['Datatypes'],
+                'file': os.path.join(current_path, "../../../lookup_fixtures/datatypes_fixed.json")
+            },
+            {
+                'source': sources['NameTypes'],
+                'file': os.path.join(current_path, "../../../lookup_fixtures/nametypes_fixed.json")
+            },
+            {
+                'source': sources['DescriptionTypes'],
+                'file': os.path.join(current_path, "../../../lookup_fixtures/description_types.json")
+            },
+            {
+                'source': sources['MapTypes'],
+                'file': os.path.join(current_path, "../../../lookup_fixtures/maptypes_fixed.json")
+            },
         ]
 
         for conf in importer_confs:
@@ -63,7 +63,7 @@ class Command(BaseCommand):
 
     @staticmethod
     def get_or_create(org, user):
-        sources = dict()
+        sources = {}
 
         kwargs = {
             'parent_resource': org

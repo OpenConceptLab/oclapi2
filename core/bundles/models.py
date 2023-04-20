@@ -174,7 +174,7 @@ class Bundle:
 
         from core.concepts.serializers import ConceptMinimalSerializerRecursive
         self.entries = ConceptMinimalSerializerRecursive(
-            self.root, context=dict(request=dict(query_params=self.params))).data
+            self.root, context={'request': {'query_params': self.params}}).data
 
     def set_entries(self):
         self.entries += self.get_concept_serializer()(self.concepts, many=True).data
@@ -209,18 +209,18 @@ class Bundle:
         bundle.set_cascade_parameters()
         _parameters = {}
         if parameters:
-            _parameters = dict(
-                repo_version=clone_from_source,
-                map_types=bundle.map_types or '',
-                exclude_map_types=bundle.exclude_map_types,
-                cascade_mappings=bundle.cascade_mappings,
-                cascade_hierarchy=bundle.cascade_hierarchy,
-                cascade_levels=bundle.cascade_levels,
-                include_retired=bundle.include_retired,
-                reverse=bundle.reverse,
-                return_map_types=bundle.return_map_types,
-                equivalency_map_types=bundle.equivalency_map_types
-            )
+            _parameters = {
+                'repo_version': clone_from_source,
+                'map_types': bundle.map_types or '',
+                'exclude_map_types': bundle.exclude_map_types,
+                'cascade_mappings': bundle.cascade_mappings,
+                'cascade_hierarchy': bundle.cascade_hierarchy,
+                'cascade_levels': bundle.cascade_levels,
+                'include_retired': bundle.include_retired,
+                'reverse': bundle.reverse,
+                'return_map_types': bundle.return_map_types,
+                'equivalency_map_types': bundle.equivalency_map_types
+            }
             if bundle.cascade_method:
                 _parameters['source_mappings'] = bundle.cascade_method == SOURCE_MAPPINGS
                 _parameters['source_to_concepts'] = bundle.cascade_method == SOURCE_TO_CONCEPTS

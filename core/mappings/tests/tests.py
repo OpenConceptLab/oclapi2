@@ -291,7 +291,7 @@ class MappingTest(OCLTestCase):
 
         self.assertEqual(
             Mapping.persist_clone(cloned_mapping),
-            dict(version_created_by='Must specify which user is attempting to create a new mapping version.')
+            {'version_created_by': 'Must specify which user is attempting to create a new mapping version.'}
         )
 
         self.assertEqual(Mapping.persist_clone(cloned_mapping, mapping.created_by), {})

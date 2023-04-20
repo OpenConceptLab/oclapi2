@@ -48,10 +48,10 @@ class ConceptBaseView(SourceChildCommonBaseView):
     document_model = ConceptDocument
     facet_class = ConceptSearch
     es_fields = Concept.es_fields
-    default_filters = dict(is_active=True)
+    default_filters = {'is_active': True}
 
     def get_detail_serializer(self, obj, data=None, files=None, partial=False):
-        return ConceptDetailSerializer(obj, data, files, partial, context=dict(request=self.request))
+        return ConceptDetailSerializer(obj, data, files, partial, context={'request': self.request})
 
     def get_queryset(self):
         return Concept.get_base_queryset(self.params)
@@ -62,10 +62,10 @@ class ConceptBaseView(SourceChildCommonBaseView):
         collection = self.kwargs.pop('collection', None) if __pop else self.kwargs.get('collection', None)
         container_version = self.kwargs.pop('version', HEAD) if __pop else self.kwargs.get('version', HEAD)
         if 'org' in self.kwargs:
-            filters = dict(organization__mnemonic=self.kwargs['org'])
+            filters = {'organization__mnemonic': self.kwargs['org']}
         else:
             username = self.request.user.username if self.user_is_self else self.kwargs.get('user')
-            filters = dict(user__username=username)
+            filters = {'user__username': username}
         if source:
             from core.sources.models import Source
             parent_resource = Source.get_version(source, container_version or HEAD, filters)
@@ -85,10 +85,10 @@ class ConceptLookupValuesView(ListAPIView, BaseAPIView):  # pragma: no cover
         parent_resource = None
         source = self.kwargs.get('source', None)
         if 'org' in self.kwargs:
-            filters = dict(organization__mnemonic=self.kwargs['org'])
+            filters = {'organization__mnemonic': self.kwargs['org']}
         else:
             username = self.request.user.username if self.user_is_self else self.kwargs.get('user')
-            filters = dict(user__username=username)
+            filters = {'user__username': username}
         if source:
             from core.sources.models import Source
             parent_resource = Source.get_version(source, HEAD, filters)
@@ -377,7 +377,7 @@ class ConceptCascadeView(ConceptBaseView):
             repo_version=self.parent_resource, requested_url=self.request.get_full_path()
         )
         bundle.cascade()
-        return Response(BundleSerializer(bundle, context=dict(request=request)).data)
+        return Response(BundleSerializer(bundle, context={'request': request}).data)
 
 
 class ConceptCloneView(ConceptCascadeView):
@@ -397,7 +397,7 @@ class ConceptCloneView(ConceptCascadeView):
             self.get_object(), self.parent_resource, clone_to_source, request.user,
             self.request.get_full_path(), self.is_verbose(), **(request.data.get('parameters') or {})
         )
-        return Response(BundleSerializer(bundle, context=dict(request=request)).data)
+        return Response(BundleSerializer(bundle, context={'request': request}).data)
 
     def get_clone_to_source(self):
         source_uri = self.request.data.get('source_uri')
@@ -699,6 +699,11 @@ class ConceptsHierarchyAmendAdminView(APIView):  # pragma: no cover
         result = make_hierarchy.delay(concept_map)
 
         return Response(
-            dict(state=result.state, username=request.user.username, task=result.task_id, queue='default'),
+            {
+                'state': result.state,
+                'username': request.user.username,
+                'task': result.task_id,
+                'queue': 'default'
+            },
             status=status.HTTP_202_ACCEPTED
         )

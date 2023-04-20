@@ -166,7 +166,7 @@ class Collection(ConceptContainerModel):
         names = concept.names.filter(**{attribute: value})
 
         for name in names:
-            validation_error = dict(names=[error_message])
+            validation_error = {'names': [error_message]}
             # making sure names in the submitted concept meet the same rule
             name_key = name.locale + name.name
             if name_key in matching_names_in_concept:
@@ -745,7 +745,7 @@ class CollectionReference(models.Model):
 
     def clean(self):
         if not self.is_valid_filter():
-            raise ValidationError(dict(filter=['Invalid filter schema.']))
+            raise ValidationError({'filter': ['Invalid filter schema.']})
 
         self.original_expression = str(self.expression)
         if self.transform and self.transform.lower() != TRANSFORM_TO_RESOURCE_VERSIONS:
@@ -961,13 +961,13 @@ class Expansion(BaseResourceModel):
             concepts = reference.concepts
             if concepts.exists():
                 index_concepts = True
-                filters = dict(id__in=list(concepts.values_list('id', flat=True)))
+                filters = {'id__in': list(concepts.values_list('id', flat=True))}
                 self.concepts.set(self.concepts.exclude(**filters))
                 batch_index_resources.apply_async(('concept', filters), queue='indexing')
             mappings = reference.mappings
             if mappings.exists():
                 index_mappings = True
-                filters = dict(id__in=list(mappings.values_list('id', flat=True)))
+                filters = {'id__in': list(mappings.values_list('id', flat=True))}
                 self.mappings.set(self.mappings.exclude(**filters))
                 batch_index_resources.apply_async(('mapping', filters), queue='indexing')
 
@@ -985,14 +985,13 @@ class Expansion(BaseResourceModel):
         mappings_filters = None
         if expressions == ALL:
             if self.concepts.exists():
-                concepts_filters = dict(id__in=list(self.concepts.values_list('id', flat=True)))
+                concepts_filters = {'id__in': list(self.concepts.values_list('id', flat=True))}
                 self.concepts.clear()
             if self.mappings.exists():
-                mappings_filters = dict(id__in=list(self.mappings.values_list('id', flat=True)))
+                mappings_filters = {'id__in': list(self.mappings.values_list('id', flat=True))}
                 self.mappings.clear()
         else:
-            concepts_filters = dict(uri__in=expressions)
-            mappings_filters = dict(uri__in=expressions)
+            concepts_filters = mappings_filters = {'uri__in': expressions}
             self.concepts.set(self.concepts.exclude(**concepts_filters))
             self.mappings.set(self.mappings.exclude(**mappings_filters))
 
@@ -1240,7 +1239,7 @@ class ExpansionParameter:
 
 class ExpansionActiveParameter(ExpansionParameter):
     before_filter = True
-    default_filters = dict(is_active=True, retired=False)
+    default_filters = {'is_active': True, 'retired': False}
 
     @property
     def filters(self):
@@ -1280,7 +1279,7 @@ class ExpansionSystemParameter(ExpansionParameter):
             version = None
             if '|' in system:
                 canonical_url, version = system.split('|')
-            filters = dict(canonical_url=canonical_url)
+            filters = {'canonical_url': canonical_url}
             if version:
                 filters['version'] = version
             criterion |= models.Q(**filters)
@@ -1329,9 +1328,9 @@ class ExpansionDateParameter(ExpansionIncludeSystemParameter):
     @staticmethod
     def get_date_filter(date):
         if date.count('-') >= 3 or date.count(":"):
-            return dict(revision_date=date)
+            return {'revision_date': date}
         parts = date.split('-')
-        filters = dict(revision_date__year=parts[0])
+        filters = {'revision_date__year': parts[0]}
         if len(parts) > 1:
             filters['revision_date__month'] = parts[1]
         if len(parts) > 2:

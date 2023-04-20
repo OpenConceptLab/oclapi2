@@ -19,7 +19,7 @@ class PinTest(OCLTestCase):
             pin.full_clean()
 
         self.assertEqual(
-            ex.exception.message_dict, dict(parent=['Pin needs to be owned by a user or an organization.'])
+            ex.exception.message_dict, {'parent': ['Pin needs to be owned by a user or an organization.']}
         )
 
         pin.organization = org
@@ -230,7 +230,10 @@ class PinListViewTest(OCLAPITestCase):
 
         response = self.client.post(
             user.uri + 'pins/',
-            dict(resource_type='Source', resource_id=source.id),
+            {
+                'resource_type': 'Source',
+                'resource_id': source.id
+            },
             HTTP_AUTHORIZATION='Token ' + token,
             format='json'
         )
@@ -244,7 +247,10 @@ class PinListViewTest(OCLAPITestCase):
 
         response = self.client.post(
             org.uri + 'pins/',
-            dict(resource_type='Source', resource_id=source.id),
+            {
+                'resource_type': 'Source',
+                'resource_id': source.id
+            },
             HTTP_AUTHORIZATION='Token ' + token,
             format='json'
         )
@@ -262,13 +268,16 @@ class PinListViewTest(OCLAPITestCase):
 
         response = self.client.post(
             user.uri + 'pins/',
-            dict(resource_type='Source', resource_id=1209),
+            {
+                'resource_type': 'Source',
+                'resource_id': 1209
+            },
             HTTP_AUTHORIZATION='Token ' + token,
             format='json'
         )
 
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.data, dict(resource='Resource type Source with id 1209 does not exists.'))
+        self.assertEqual(response.data, {'resource': 'Resource type Source with id 1209 does not exists.'})
 
 
 class PinRetrieveUpdateDestroyViewTest(OCLAPITestCase):
@@ -331,7 +340,7 @@ class PinRetrieveUpdateDestroyViewTest(OCLAPITestCase):
 
         response = self.client.put(
             self.user.uri + 'pins/' + str(user_pin2.id) + '/',
-            dict(order=0),
+            {'order': 0},
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )

@@ -140,14 +140,16 @@ class UserProfileTest(OCLTestCase):
 
         self.assertEqual(
             user.update_password(password='newpassword'),
-            dict(errors=['This password is too common.', 'This password is not alphanumeric.'])
+            {'errors': ['This password is too common.', 'This password is not alphanumeric.']}
         )
         self.assertEqual(
             user.update_password(password='short'),
-            dict(errors=[
-                'This password is too short. It must contain at least 8 characters.',
-                'This password is not alphanumeric.'
-            ])
+            {
+                'errors': [
+                    'This password is too short. It must contain at least 8 characters.',
+                    'This password is not alphanumeric.'
+                ]
+            }
         )
 
         user.verification_token = 'some-token'
@@ -273,12 +275,12 @@ class TokenAuthenticationViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 400)
 
-        response = self.client.post('/users/login/', dict(username='foo', password='bar'))
+        response = self.client.post('/users/login/', {'username': 'foo', 'password': 'bar'})
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(
             response.data,
-            dict(non_field_errors=["Unable to log in with provided credentials."])
+            {'non_field_errors': ["Unable to log in with provided credentials."]}
         )
 
         user = UserProfileFactory()
@@ -286,10 +288,10 @@ class TokenAuthenticationViewTest(OCLAPITestCase):
         user.save()
         self.assertIsNone(user.last_login)
 
-        response = self.client.post('/users/login/', dict(username=user.username, password='password'))
+        response = self.client.post('/users/login/', {'username': user.username, 'password': 'password'})
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data, dict(token=ANY))
+        self.assertEqual(response.data, {'token': ANY})
         user.refresh_from_db()
         self.assertIsNotNone(user.last_login)
 
@@ -334,7 +336,7 @@ class UserLogoViewTest(OCLAPITestCase):
 
         response = self.client.post(
             self.user.uri + 'logo/',
-            dict(base64='base64-data'),
+            {'base64': 'base64-data'},
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )

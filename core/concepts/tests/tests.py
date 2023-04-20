@@ -377,10 +377,10 @@ class ConceptTest(OCLTestCase):
         # Av1 -> None and Av2 -> Bv1,Bv2 -> Cv1 and Av3 -> Bv3,Cv2
         Concept.create_new_version_for(
             instance=child_child_concept.clone(),
-            data=dict(
-                parent_concept_urls=[parent_concept.uri],
-                names=[dict(locale='en', name='English', locale_preferred=True)]
-            ),
+            data={
+                'parent_concept_urls': [parent_concept.uri],
+                'names': [{'locale': 'en', 'name': 'English', 'locale_preferred': True}]
+            },
             user=child_child_concept.created_by
         )
 
@@ -414,10 +414,10 @@ class ConceptTest(OCLTestCase):
         # Av1 -> None and Av2 -> Bv1,Bv2 -> Cv1 and Av3 -> Bv3,Cv2 and Av4 -> Bv4 -> Cv3
         Concept.create_new_version_for(
             instance=child_child_concept.clone(),
-            data=dict(
-                parent_concept_urls=[child_concept.uri],
-                names=[dict(locale='en', name='English', locale_preferred=True)]
-            ),
+            data={
+                'parent_concept_urls': [child_concept.uri],
+                'names': [{'locale': 'en', 'name': 'English', 'locale_preferred': True}]
+            },
             user=child_child_concept.created_by
         )
 
@@ -475,10 +475,10 @@ class ConceptTest(OCLTestCase):
         # Av1 -> None and Av2 -> Bv1,Bv2 -> Cv1 and Av3 -> Bv3,Cv2 and Av4 -> Bv4 -> Cv3 and Av4 -> Bv5 -> None and Cv4
         Concept.create_new_version_for(
             instance=child_child_concept.clone(),
-            data=dict(
-                parent_concept_urls=[],
-                names=[dict(locale='en', name='English', locale_preferred=True)]
-            ),
+            data={
+                'parent_concept_urls': [],
+                'names': [{'locale': 'en', 'name': 'English', 'locale_preferred': True}]
+            },
             user=child_child_concept.created_by
         )
 
@@ -587,10 +587,10 @@ class ConceptTest(OCLTestCase):
         # Av1 to Av1 -> Bv1 to Av1 -> Bv1 -> Cv1 to Av1 -> Bv2,Cv2 and Bv1 -> Cv1
         Concept.create_new_version_for(
             instance=child_child_concept.clone(),
-            data=dict(
-                parent_concept_urls=[parent_concept.uri],
-                names=[dict(locale='en', name='English', locale_preferred=True)]
-            ),
+            data={
+                'parent_concept_urls': [parent_concept.uri],
+                'names': [{'locale': 'en', 'name': 'English', 'locale_preferred': True}]
+            },
             user=child_child_concept.created_by,
             create_parent_version=False
         )
@@ -622,10 +622,10 @@ class ConceptTest(OCLTestCase):
         # Av1 -> Bv1 -> Cv1 to Av1 -> Bv2,Cv2 and Bv1 -> Cv1 to Av2 -> Bv2 -> Cv3 and Av1 -> Bv1, Cv2 and Bv1 -> Cv1
         Concept.create_new_version_for(
             instance=child_child_concept.clone(),
-            data=dict(
-                parent_concept_urls=[child_concept.uri],
-                names=[dict(locale='en', name='English', locale_preferred=True)]
-            ),
+            data={
+                'parent_concept_urls': [child_concept.uri],
+                'names': [{'locale': 'en', 'name': 'English', 'locale_preferred': True}]
+            },
             user=child_child_concept.created_by,
             create_parent_version=False
         )
@@ -668,10 +668,10 @@ class ConceptTest(OCLTestCase):
         # Av2 -> Bv3 and Bv2 -> Cv3 and Av1 -> Bv1, Cv2 and Bv1 -> Cv1 and Cv4
         Concept.create_new_version_for(
             instance=child_child_concept.clone(),
-            data=dict(
-                parent_concept_urls=[],
-                names=[dict(locale='en', name='English', locale_preferred=True)]
-            ),
+            data={
+                'parent_concept_urls': [],
+                'names': [{'locale': 'en', 'name': 'English', 'locale_preferred': True}]
+            },
             user=child_child_concept.created_by,
             create_parent_version=False
         )
@@ -767,7 +767,7 @@ class ConceptTest(OCLTestCase):
 
         self.assertEqual(
             Concept.persist_clone(cloned_concept),
-            dict(version_created_by='Must specify which user is attempting to create a new concept version.')
+            {'version_created_by': 'Must specify which user is attempting to create a new concept version.'}
         )
 
         self.assertEqual(Concept.persist_clone(cloned_concept, concept.created_by), {})
@@ -988,15 +988,24 @@ class ConceptTest(OCLTestCase):
 
         self.assertEqual(
             Concept.get_parent_and_owner_filters_from_uri('/users/foo/sources/bar/concepts/'),
-            dict(parent__mnemonic='bar', parent__user__username='foo')
+            {
+                'parent__mnemonic': 'bar',
+                'parent__user__username': 'foo'
+            }
         )
         self.assertEqual(
             Concept.get_parent_and_owner_filters_from_uri('/users/foo/sources/bar/concepts/concept1/'),
-            dict(parent__mnemonic='bar', parent__user__username='foo')
+            {
+                'parent__mnemonic': 'bar',
+                'parent__user__username': 'foo'
+            }
         )
         self.assertEqual(
             Concept.get_parent_and_owner_filters_from_uri('/orgs/foo/sources/bar/concepts/concept1/'),
-            dict(parent__mnemonic='bar', parent__organization__mnemonic='foo')
+            {
+                'parent__mnemonic': 'bar',
+                'parent__organization__mnemonic': 'foo'
+            }
         )
 
     def test_get_hierarchy_path(self):
@@ -1367,77 +1376,94 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
     def test_concept_class_is_valid_attribute_negative(self):
         source = OrganizationSourceFactory(custom_validation_schema=OPENMRS_VALIDATION_SCHEMA)
         concept = Concept.persist_new(
-            dict(
-                mnemonic='concept1', version=HEAD, name='concept1', parent=source,
-                concept_class='XYZQWERT', datatype='None',
-                names=[ConceptNameFactory.build(name='Grip', locale='es', locale_preferred=True)]
-            )
+            {
+                'mnemonic': 'concept1',
+                'version': HEAD,
+                'name': 'concept1',
+                'parent': source,
+                'concept_class': 'XYZQWERT',
+                'datatype': 'None',
+                'names': [ConceptNameFactory.build(name='Grip', locale='es', locale_preferred=True)]
+            }
         )
 
-        self.assertEqual(
-            concept.errors,
-            dict(concept_class=[OPENMRS_CONCEPT_CLASS])
-        )
+        self.assertEqual(concept.errors, {'concept_class': [OPENMRS_CONCEPT_CLASS]})
 
     def test_data_type_is_valid_attribute_negative(self):
         source = OrganizationSourceFactory(custom_validation_schema=OPENMRS_VALIDATION_SCHEMA)
         concept = Concept.persist_new(
-            dict(
-                mnemonic='concept1', version=HEAD, name='concept1', parent=source,
-                concept_class='Diagnosis', datatype='XYZWERRTR',
-                names=[ConceptNameFactory.build(name='Grip', locale='es', locale_preferred=True)]
-            )
+            {
+                'mnemonic': 'concept1',
+                'version': HEAD,
+                'name': 'concept1',
+                'parent': source,
+                'concept_class': 'Diagnosis',
+                'datatype': 'XYZWERRTR',
+                'names': [ConceptNameFactory.build(name='Grip', locale='es', locale_preferred=True)]
+            }
         )
         self.assertEqual(
             concept.errors,
-            dict(data_type=[OPENMRS_DATATYPE])
+            {'data_type': [OPENMRS_DATATYPE]}
         )
 
     def test_description_type_is_valid_attribute_negative(self):
         source = OrganizationSourceFactory(custom_validation_schema=OPENMRS_VALIDATION_SCHEMA)
         concept = Concept.persist_new(
-            dict(
-                mnemonic='concept1', version=HEAD, name='concept1', parent=source,
-                concept_class='Diagnosis', datatype='None',
-                names=[ConceptNameFactory.build(locale_preferred=True)],
-                descriptions=[ConceptDescriptionFactory.build(type='XYZWERRTR')]
-            )
+            {
+                'mnemonic': 'concept1',
+                'version': HEAD,
+                'name': 'concept1',
+                'parent': source,
+                'concept_class': 'Diagnosis',
+                'datatype': 'None',
+                'names': [ConceptNameFactory.build(locale_preferred=True)],
+                'descriptions': [ConceptDescriptionFactory.build(type='XYZWERRTR')]
+            }
         )
 
         self.assertEqual(
             concept.errors,
-            dict(descriptions=[OPENMRS_DESCRIPTION_TYPE])
+            {'descriptions': [OPENMRS_DESCRIPTION_TYPE]}
         )
 
     def test_name_locale_is_valid_attribute_negative(self):
         source = OrganizationSourceFactory(custom_validation_schema=OPENMRS_VALIDATION_SCHEMA)
         concept = Concept.persist_new(
-            dict(
-                mnemonic='concept1', version=HEAD, name='concept1', parent=source,
-                concept_class='Diagnosis', datatype='None',
-                names=[ConceptNameFactory.build(locale_preferred=True, locale='FOOBAR')],
-                descriptions=[ConceptDescriptionFactory.build(locale_preferred=True, type='Definition')]
-            )
+            {
+                'mnemonic': 'concept1',
+                'version': HEAD,
+                'name': 'concept1',
+                'parent': source,
+                'concept_class': 'Diagnosis',
+                'datatype': 'None',
+                'names': [ConceptNameFactory.build(locale_preferred=True, locale='FOOBAR')],
+                'descriptions': [ConceptDescriptionFactory.build(locale_preferred=True, type='Definition')]
+            }
         )
 
         self.assertEqual(
             concept.errors,
-            dict(names=[OPENMRS_NAME_LOCALE])
+            {'names': [OPENMRS_NAME_LOCALE]}
         )
 
     def test_description_locale_is_valid_attribute_negative(self):
         source = OrganizationSourceFactory(custom_validation_schema=OPENMRS_VALIDATION_SCHEMA)
         concept = Concept.persist_new(
-            dict(
-                mnemonic='concept1', version=HEAD, name='concept1', parent=source,
-                concept_class='Diagnosis', datatype='None',
-                names=[ConceptNameFactory.build(locale_preferred=True)],
-                descriptions=[ConceptDescriptionFactory.build(locale_preferred=True, locale='FOOBAR')]
-            )
+            {
+                'mnemonic': 'concept1',
+                'version': HEAD,
+                'name': 'concept1',
+                'parent': source,
+                'concept_class': 'Diagnosis',
+                'datatype': 'None',
+                'names': [ConceptNameFactory.build(locale_preferred=True)],
+                'descriptions': [ConceptDescriptionFactory.build(locale_preferred=True, locale='FOOBAR')]
+            }
         )
         self.assertEqual(
             concept.errors,
-            dict(descriptions=[OPENMRS_DESCRIPTION_TYPE])
+            {'descriptions': [OPENMRS_DESCRIPTION_TYPE]}
         )
 
     def test_concept_should_have_exactly_one_preferred_name_per_locale(self):
@@ -1447,15 +1473,23 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
         source = OrganizationSourceFactory(custom_validation_schema=OPENMRS_VALIDATION_SCHEMA)
 
         concept = Concept.persist_new(
-            dict(
-                mnemonic='concept', version=HEAD, name='concept', parent=source,
-                concept_class='Diagnosis', datatype='None', names=[name_en1, name_en2, name_tr]
-            )
+            {
+                'mnemonic': 'concept',
+                'version': HEAD,
+                'name': 'concept',
+                'parent': source,
+                'concept_class': 'Diagnosis',
+                'datatype': 'None',
+                'names': [name_en1, name_en2, name_tr]
+            }
         )
 
         self.assertEqual(
             concept.errors,
-            dict(names=[OPENMRS_MUST_HAVE_EXACTLY_ONE_PREFERRED_NAME + ': PreferredName2 (locale: en, preferred: yes)'])
+            {
+                'names': [
+                    OPENMRS_MUST_HAVE_EXACTLY_ONE_PREFERRED_NAME + ': PreferredName2 (locale: en, preferred: yes)']
+            }
         )
 
     def test_concepts_should_have_unique_fully_specified_name_per_locale(self):
@@ -1476,44 +1510,61 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
         self.assertEqual(concept1.errors, {})
         self.assertEqual(
             concept2.errors,
-            dict(names=[OPENMRS_FULLY_SPECIFIED_NAME_UNIQUE_PER_SOURCE_LOCALE +
-                        ': FullySpecifiedName1 (locale: en, preferred: no)'])
+            {
+                'names': [OPENMRS_FULLY_SPECIFIED_NAME_UNIQUE_PER_SOURCE_LOCALE +
+                          ': FullySpecifiedName1 (locale: en, preferred: no)']
+            }
         )
 
     def test_at_least_one_fully_specified_name_per_concept_negative(self):
         source = OrganizationSourceFactory(custom_validation_schema=OPENMRS_VALIDATION_SCHEMA, version=HEAD)
 
         concept = Concept.persist_new(
-            dict(
-                mnemonic='concept', version=HEAD, name='concept', parent=source,
-                concept_class='Diagnosis', datatype='None', names=[
+            {
+                'mnemonic': 'concept',
+                'version': HEAD,
+                'name': 'concept',
+                'parent': source,
+                'concept_class': 'Diagnosis',
+                'datatype': 'None',
+                'names': [
                     ConceptNameFactory.build(name='Fully Specified Name 1', locale='tr', type='Short'),
                     ConceptNameFactory.build(name='Fully Specified Name 2', locale='en', type='Short')
                 ]
-            )
+            }
         )
         self.assertEqual(
             concept.errors,
-            dict(names=[OPENMRS_AT_LEAST_ONE_FULLY_SPECIFIED_NAME])
+            {'names': [OPENMRS_AT_LEAST_ONE_FULLY_SPECIFIED_NAME]}
         )
 
     def test_duplicate_preferred_name_per_source_should_fail(self):
         source = OrganizationSourceFactory(custom_validation_schema=OPENMRS_VALIDATION_SCHEMA, version=HEAD)
         concept1 = Concept.persist_new(
-            dict(
-                mnemonic='concept1', version=HEAD, name='concept1', parent=source,
-                concept_class='Diagnosis', datatype='None', names=[
+            {
+                'mnemonic': 'concept1',
+                'version': HEAD,
+                'name': 'concept1',
+                'parent': source,
+                'concept_class': 'Diagnosis',
+                'datatype': 'None',
+                'names': [
                     ConceptNameFactory.build(
                         name='Concept Non Unique Preferred Name', locale='en',
                         locale_preferred=True, type='Fully Specified'
                     ),
                 ]
-            )
+            }
         )
         concept2 = Concept.persist_new(
-            dict(
-                mnemonic='concept2', version=HEAD, name='concept2', parent=source,
-                concept_class='Diagnosis', datatype='None', names=[
+            {
+                'mnemonic': 'concept2',
+                'version': HEAD,
+                'name': 'concept2',
+                'parent': source,
+                'concept_class': 'Diagnosis',
+                'datatype': 'None',
+                'names': [
                     ConceptNameFactory.build(
                         name='Concept Non Unique Preferred Name', locale='en', locale_preferred=True, type='None'
                     ),
@@ -1521,23 +1572,30 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
                         name='any name', locale='en', locale_preferred=False, type='Fully Specified'
                     ),
                 ]
-            )
+            }
         )
 
         self.assertEqual(concept1.errors, {})
         self.assertEqual(
             concept2.errors,
-            dict(names=[OPENMRS_PREFERRED_NAME_UNIQUE_PER_SOURCE_LOCALE +
-                        ': Concept Non Unique Preferred Name (locale: en, preferred: yes)'])
+            {
+                'names': [OPENMRS_PREFERRED_NAME_UNIQUE_PER_SOURCE_LOCALE +
+                          ': Concept Non Unique Preferred Name (locale: en, preferred: yes)']
+            }
         )
 
     def test_unique_preferred_name_per_locale_within_concept_negative(self):
         source = OrganizationSourceFactory(custom_validation_schema=OPENMRS_VALIDATION_SCHEMA, version=HEAD)
 
         concept = Concept.persist_new(
-            dict(
-                mnemonic='concept1', version=HEAD, name='concept1', parent=source,
-                concept_class='Diagnosis', datatype='None', names=[
+            {
+                'mnemonic': 'concept1',
+                'version': HEAD,
+                'name': 'concept1',
+                'parent': source,
+                'concept_class': 'Diagnosis',
+                'datatype': 'None',
+                'names': [
                     ConceptNameFactory.build(
                         name='Concept Non Unique Preferred Name', locale='es',
                         locale_preferred=True, type='FULLY_SPECIFIED'
@@ -1547,7 +1605,7 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
                         locale_preferred=True, type='FULLY_SPECIFIED'
                     ),
                 ]
-            )
+            }
         )
 
         self.assertEqual(
@@ -1560,46 +1618,65 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
         source = OrganizationSourceFactory(custom_validation_schema=OPENMRS_VALIDATION_SCHEMA, version=HEAD)
 
         concept = Concept.persist_new(
-            dict(
-                mnemonic='concept', version=HEAD, name='concept', parent=source,
-                concept_class='Diagnosis', datatype='None', names=[
+            {
+                'mnemonic': 'concept',
+                'version': HEAD,
+                'name': 'concept',
+                'parent': source,
+                'concept_class': 'Diagnosis',
+                'datatype': 'None',
+                'names': [
                     ConceptNameFactory.build(name="ShortName", locale_preferred=True, type="Short", locale='fr'),
                     ConceptNameFactory.build(name='Fully Specified Name'),
                 ]
-            )
+            }
         )
         self.assertEqual(
             concept.errors,
-            dict(names=[OPENMRS_SHORT_NAME_CANNOT_BE_PREFERRED + ': ShortName (locale: fr, preferred: yes)'])
+            {
+                'names': [OPENMRS_SHORT_NAME_CANNOT_BE_PREFERRED + ': ShortName (locale: fr, preferred: yes)']
+            }
         )
 
     def test_a_preferred_name_can_not_be_an_index_search_term(self):
         source = OrganizationSourceFactory(custom_validation_schema=OPENMRS_VALIDATION_SCHEMA, version=HEAD)
         concept = Concept.persist_new(
-            dict(
-                mnemonic='concept', version=HEAD, name='concept', parent=source,
-                concept_class='Diagnosis', datatype='None', names=[
+            {
+                'mnemonic': 'concept',
+                'version': HEAD,
+                'name': 'concept',
+                'parent': source,
+                'concept_class': 'Diagnosis',
+                'datatype': 'None',
+                'names': [
                     ConceptNameFactory.build(name="IndexTermName", locale_preferred=True, type=INDEX_TERM),
                     ConceptNameFactory.build(name='Fully Specified Name'),
                 ]
-            )
+            }
         )
         self.assertEqual(
             concept.errors,
-            dict(names=[OPENMRS_SHORT_NAME_CANNOT_BE_PREFERRED + ': IndexTermName (locale: en, preferred: yes)'])
+            {
+                'names': [OPENMRS_SHORT_NAME_CANNOT_BE_PREFERRED + ': IndexTermName (locale: en, preferred: yes)']
+            }
         )
 
     def test_a_name_can_be_equal_to_a_short_name(self):
         source = OrganizationSourceFactory(custom_validation_schema=OPENMRS_VALIDATION_SCHEMA, version=HEAD)
 
         concept = Concept.persist_new(
-            dict(
-                mnemonic='concept', version=HEAD, name='concept', parent=source,
-                concept_class='Diagnosis', datatype='None', names=[
+            {
+                'mnemonic': 'concept',
+                'version': HEAD,
+                'name': 'concept',
+                'parent': source,
+                'concept_class': 'Diagnosis',
+                'datatype': 'None',
+                'names': [
                     ConceptNameFactory.build(name="aName", type=SHORT),
                     ConceptNameFactory.build(name='aName'),
                 ]
-            )
+            }
         )
 
         self.assertEqual(concept.errors, {})
@@ -1609,109 +1686,159 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
         source = OrganizationSourceFactory(custom_validation_schema=OPENMRS_VALIDATION_SCHEMA, version=HEAD)
 
         concept = Concept.persist_new(
-            dict(
-                mnemonic='concept', version=HEAD, name='concept', parent=source,
-                concept_class='Diagnosis', datatype='None', names=[
+            {
+                'mnemonic': 'concept',
+                'version': HEAD,
+                'name': 'concept',
+                'parent': source,
+                'concept_class': 'Diagnosis',
+                'datatype': 'None',
+                'names': [
                     ConceptNameFactory.build(name="aName"),
                     ConceptNameFactory.build(name='aName'),
                 ]
-            )
+            }
         )
         self.assertEqual(
             concept.errors,
-            dict(names=[OPENMRS_NAMES_EXCEPT_SHORT_MUST_BE_UNIQUE])
+            {
+                'names': [OPENMRS_NAMES_EXCEPT_SHORT_MUST_BE_UNIQUE]
+            }
         )
 
     def test_only_one_fully_specified_name_per_locale(self):
         source = OrganizationSourceFactory(custom_validation_schema=OPENMRS_VALIDATION_SCHEMA, version=HEAD)
 
         concept = Concept.persist_new(
-            dict(
-                mnemonic='concept', version=HEAD, name='concept', parent=source,
-                concept_class='Diagnosis', datatype='None', names=[
+            {
+                'mnemonic': 'concept',
+                'version': HEAD,
+                'name': 'concept',
+                'parent': source,
+                'concept_class': 'Diagnosis',
+                'datatype': 'None',
+                'names': [
                     ConceptNameFactory.build(name="fully specified name1", locale='en'),
                     ConceptNameFactory.build(name='fully specified name2', locale='en'),
                     ConceptNameFactory.build(name='fully specified name3', locale='fr'),
                 ]
-            )
+            }
         )
         self.assertEqual(
             concept.errors,
-            dict(names=[OPENMRS_ONE_FULLY_SPECIFIED_NAME_PER_LOCALE +
-                        ': fully specified name2 (locale: en, preferred: no)'])
+            {
+                'names': [OPENMRS_ONE_FULLY_SPECIFIED_NAME_PER_LOCALE +
+                          ': fully specified name2 (locale: en, preferred: no)']
+            }
         )
 
     def test_no_more_than_one_short_name_per_locale(self):
         source = OrganizationSourceFactory(custom_validation_schema=OPENMRS_VALIDATION_SCHEMA, version=HEAD)
 
         concept = Concept.persist_new(
-            dict(
-                mnemonic='concept', version=HEAD, name='concept', parent=source,
-                concept_class='Diagnosis', datatype='None', names=[
+            {
+                'mnemonic': 'concept',
+                'version': HEAD,
+                'name': 'concept',
+                'parent': source,
+                'concept_class': 'Diagnosis',
+                'datatype': 'None',
+                'names': [
                     ConceptNameFactory.build(name="fully specified name1", locale='en', type='Short'),
                     ConceptNameFactory.build(name='fully specified name2', locale='en', type='Short'),
                     ConceptNameFactory.build(name='fully specified name3', locale='fr'),
                 ]
-            )
+            }
         )
         self.assertEqual(
             concept.errors,
-            dict(names=[OPENMRS_NO_MORE_THAN_ONE_SHORT_NAME_PER_LOCALE +
-                        ': fully specified name2 (locale: en, preferred: no)'])
+            {
+                'names': [OPENMRS_NO_MORE_THAN_ONE_SHORT_NAME_PER_LOCALE +
+                          ': fully specified name2 (locale: en, preferred: no)']
+            }
         )
 
     def test_locale_preferred_name_uniqueness_doesnt_apply_to_shorts(self):
         source = OrganizationSourceFactory(custom_validation_schema=OPENMRS_VALIDATION_SCHEMA, version=HEAD)
 
         concept = Concept.persist_new(
-            dict(
-                mnemonic='concept', version=HEAD, name='concept', parent=source,
-                concept_class='Diagnosis', datatype='None', names=[
+            {
+                'mnemonic': 'concept',
+                'version': HEAD,
+                'name': 'concept',
+                'parent': source,
+                'concept_class': 'Diagnosis',
+                'datatype': 'None',
+                'names': [
                     ConceptNameFactory.build(name="mg", locale='en', locale_preferred=True),
                     ConceptNameFactory.build(name='mg', locale='en', type='Short'),
                 ]
-            )
+            }
         )
         self.assertEqual(concept.errors, {})
         self.assertIsNotNone(concept.id)
 
     def test_external_id_length(self):
         source = OrganizationSourceFactory(custom_validation_schema=OPENMRS_VALIDATION_SCHEMA)
-        concept = Concept.persist_new(dict(
-                mnemonic='concept', version=HEAD, name='concept', parent=source, external_id='1'*37,
-                concept_class='Diagnosis', datatype='None', names=[
-                    ConceptNameFactory.build(name="mg", locale='en', locale_preferred=True),
-                ]
-            ))
+        concept = Concept.persist_new({
+            'mnemonic': 'concept',
+            'version': HEAD,
+            'name': 'concept',
+            'parent': source,
+            'external_id': '1' * 37,
+            'concept_class': 'Diagnosis',
+            'datatype': 'None',
+            'names': [
+                ConceptNameFactory.build(name="mg", locale='en', locale_preferred=True)
+            ]
+        })
         self.assertEqual(concept.errors, {'external_id': ['Concept External ID cannot be more than 36 characters.']})
         self.assertIsNone(concept.id)
 
-        concept = Concept.persist_new(dict(
-                mnemonic='concept', version=HEAD, name='concept', parent=source, external_id='1'*36,
-                concept_class='Diagnosis', datatype='None', names=[
-                    ConceptNameFactory.build(name="mg", locale='en', locale_preferred=True),
-                ]
-            ))
+        concept = Concept.persist_new({
+            'mnemonic': 'concept',
+            'version': HEAD,
+            'name': 'concept',
+            'parent': source,
+            'external_id': '1' * 36,
+            'concept_class': 'Diagnosis',
+            'datatype': 'None',
+            'names': [
+                ConceptNameFactory.build(name="mg", locale='en', locale_preferred=True),
+            ]
+        })
         self.assertEqual(concept.errors, {})
         self.assertIsNotNone(concept.id)
 
-        concept1 = Concept.persist_new(dict(
-                mnemonic='concept1', version=HEAD, name='concept1', parent=source, external_id='1'*10,
-                concept_class='Diagnosis', datatype='None', names=[
-                    ConceptNameFactory.build(name="mg1", locale='en', locale_preferred=True),
-                ]
-            ))
+        concept1 = Concept.persist_new({
+            'mnemonic': 'concept1',
+            'version': HEAD,
+            'name': 'concept1',
+            'parent': source,
+            'external_id': '1' * 10,
+            'concept_class': 'Diagnosis',
+            'datatype': 'None',
+            'names': [
+                ConceptNameFactory.build(name="mg1", locale='en', locale_preferred=True),
+            ]
+        })
         self.assertEqual(concept.errors, {})
         self.assertIsNotNone(concept1.id)
 
     def test_names_external_id_length(self):
         source = OrganizationSourceFactory(custom_validation_schema=OPENMRS_VALIDATION_SCHEMA)
-        concept = Concept.persist_new(dict(
-                mnemonic='concept', version=HEAD, name='concept', parent=source, external_id='1'*36,
-                concept_class='Diagnosis', datatype='None', names=[
-                    ConceptNameFactory.build(name="mg", locale='en', locale_preferred=True, external_id='2' * 37),
-                ]
-            ))
+        concept = Concept.persist_new({
+            'mnemonic': 'concept',
+            'version': HEAD,
+            'name': 'concept',
+            'parent': source,
+            'external_id': '1' * 36,
+            'concept_class': 'Diagnosis',
+            'datatype': 'None',
+            'names': [
+                ConceptNameFactory.build(name="mg", locale='en', locale_preferred=True, external_id='2' * 37),
+            ]
+        })
         self.assertEqual(
             concept.errors,
             {
@@ -1724,21 +1851,21 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
     def test_description_external_id_length(self):
         source = OrganizationSourceFactory(custom_validation_schema=OPENMRS_VALIDATION_SCHEMA)
         concept = Concept.persist_new(
-            dict(
-                mnemonic='concept',
-                version=HEAD,
-                name='concept',
-                parent=source,
-                external_id='1' * 36,
-                concept_class='Diagnosis',
-                datatype='None',
-                names=[
+            {
+                'mnemonic': 'concept',
+                'version': HEAD,
+                'name': 'concept',
+                'parent': source,
+                'external_id': '1' * 36,
+                'concept_class': 'Diagnosis',
+                'datatype': 'None',
+                'names': [
                     ConceptNameFactory.build(name="mg", locale='en', locale_preferred=True, external_id='2' * 36),
                 ],
-                descriptions=[
+                'descriptions': [
                     ConceptDescriptionFactory.build(name="mg", locale='en', external_id='2' * 37),
                 ]
-            )
+            }
         )
         self.assertEqual(
             concept.errors,

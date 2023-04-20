@@ -96,7 +96,7 @@ class ComposeValueSetField(serializers.Field):
             exclude.update({'include': False})
             references += self.transform_to_ref(exclude)
         if references:
-            res = dict(references=references)
+            res = {'references': references}
             if 'lockedDate' in data:
                 res['locked_date'] = data['lockedDate']
             return res
@@ -265,7 +265,7 @@ class ValueSetDetailSerializer(serializers.ModelSerializer):
 
     @staticmethod
     def get_meta(obj):
-        return dict(lastUpdated=obj.updated_at)
+        return {'lastUpdated': obj.updated_at}
 
 
 class ValueSetExpansionParametersSerializer(ParametersSerializer):

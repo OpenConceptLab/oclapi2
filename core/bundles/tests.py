@@ -19,7 +19,7 @@ class BundleTest(OCLTestCase):
 
         bundle = Bundle.clone(
             concept_to_clone, clone_from_source, clone_to_source, user,
-            'https://foo-url', True, **dict(cascadeLevels=2)
+            'https://foo-url', True, cascadeLevels=2
         )
 
         self.assertEqual(bundle.total, 2)

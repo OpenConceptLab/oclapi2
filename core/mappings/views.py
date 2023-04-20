@@ -104,10 +104,10 @@ class MappingListView(MappingBaseView, ListWithHeadersMixin, CreateModelMixin):
         container_version = self.kwargs.pop('version', HEAD) if __pop else self.kwargs.get('version', HEAD)
         parent_resource = None
         if 'org' in self.kwargs:
-            filters = dict(organization__mnemonic=self.kwargs['org'])
+            filters = {'organization__mnemonic': self.kwargs['org']}
         else:
             username = self.request.user.username if self.user_is_self else self.kwargs.get('user')
-            filters = dict(user__username=username)
+            filters = {'user__username': username}
         if source:
             parent_resource = Source.get_version(source, container_version or HEAD, filters)
         if collection:

@@ -15,11 +15,11 @@ def build_resource_data(obj):
     if resource_type == 'source':
         from core.sources.serializers import SourceDetailSerializer
         return SourceDetailSerializer(
-            resource, context=dict(request=dict(query_params={INCLUDE_SUMMARY: True}))).data
+            resource, context={'request': {'query_params': {INCLUDE_SUMMARY: True}}}).data
     if resource_type == 'collection':
         from core.collections.serializers import CollectionDetailSerializer
         return CollectionDetailSerializer(
-            resource, context=dict(request=dict(query_params={INCLUDE_SUMMARY: True}))).data
+            resource, context={'request': {'query_params': {INCLUDE_SUMMARY: True}}}).data
     if resource_type == 'organization':
         from core.orgs.serializers import OrganizationDetailSerializer
         return OrganizationDetailSerializer(resource).data
@@ -80,7 +80,7 @@ class PinSerializer(serializers.ModelSerializer):
             item.full_clean()
             item.save()
         except (ValidationError, IntegrityError):
-            self._errors.update(dict(__all__='This pin already exists.'))
+            self._errors.update({'__all__': 'This pin already exists.'})
 
         return item
 

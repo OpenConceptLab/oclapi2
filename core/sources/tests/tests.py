@@ -522,7 +522,7 @@ class SourceTest(OCLTestCase):
         with self.assertRaises(ValidationError) as ex:
             source.full_clean()
         self.assertEqual(
-            ex.exception.message_dict, dict(hierarchy_root=['Hierarchy Root must belong to the same Source.'])
+            ex.exception.message_dict, {'hierarchy_root': ['Hierarchy Root must belong to the same Source.']}
         )
         source.hierarchy_root = source_concept
         source.full_clean()
@@ -547,18 +547,29 @@ class SourceTest(OCLTestCase):
         })
 
         hierarchy = source.hierarchy()
-        self.assertEqual(hierarchy, dict(id=source.mnemonic, count=2, children=ANY, offset=0, limit=100))
+        self.assertEqual(hierarchy, {'id': source.mnemonic, 'count': 2, 'children': ANY, 'offset': 0, 'limit': 100})
         hierarchy_children = hierarchy['children']
         self.assertEqual(len(hierarchy_children), 2)
         self.assertEqual(
             hierarchy_children[1],
-            dict(uuid=str(root_concept.id), id=root_concept.mnemonic, url=root_concept.uri,
-                 name=root_concept.display_name, children=[child_concept.uri], root=True)
+            {
+                'uuid': str(root_concept.id),
+                'id': root_concept.mnemonic,
+                'url': root_concept.uri,
+                'name': root_concept.display_name,
+                'children': [child_concept.uri],
+                'root': True
+            }
         )
         self.assertEqual(
             hierarchy_children[0],
-            dict(uuid=str(parentless_concept.id), id=parentless_concept.mnemonic, url=parentless_concept.uri,
-                 name=parentless_concept.display_name, children=[parentless_concept_child.uri])
+            {
+                'uuid': str(parentless_concept.id),
+                'id': parentless_concept.mnemonic,
+                'url': parentless_concept.uri,
+                'name': parentless_concept.display_name,
+                'children': [parentless_concept_child.uri]
+            }
         )
 
     def test_hierarchy_without_hierarchy_root(self):
@@ -572,13 +583,18 @@ class SourceTest(OCLTestCase):
         })
 
         hierarchy = source.hierarchy()
-        self.assertEqual(hierarchy, dict(id=source.mnemonic, count=1, children=ANY, offset=0, limit=100))
+        self.assertEqual(hierarchy, {'id': source.mnemonic, 'count': 1, 'children': ANY, 'offset': 0, 'limit': 100})
         hierarchy_children = hierarchy['children']
         self.assertEqual(len(hierarchy_children), 1)
         self.assertEqual(
             hierarchy_children[0],
-            dict(uuid=str(parentless_concept.id), id=parentless_concept.mnemonic, url=parentless_concept.uri,
-                 name=parentless_concept.display_name, children=[parentless_concept_child.uri])
+            {
+                'uuid': str(parentless_concept.id),
+                'id': parentless_concept.mnemonic,
+                'url': parentless_concept.uri,
+                'name': parentless_concept.display_name,
+                'children': [parentless_concept_child.uri]
+            }
         )
 
     def test_is_validation_necessary(self):
@@ -1046,7 +1062,7 @@ class TasksTest(OCLTestCase):
 
     @patch('core.sources.models.Source.validate_child_concepts')
     def test_update_validation_schema_failure(self, validate_child_concepts_mock):
-        validate_child_concepts_mock.return_value = dict(errors='Failed')
+        validate_child_concepts_mock.return_value = {'errors': 'Failed'}
         source = OrganizationSourceFactory()
 
         self.assertEqual(source.custom_validation_schema, 'None')

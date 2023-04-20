@@ -34,9 +34,11 @@ class ImportResults:
         self.report = importer.import_results.display_report()
 
     def to_dict(self):
-        return dict(
-            json=self.json, detailed_summary=self.detailed_summary, report=self.report
-        )
+        return {
+            'json': self.json,
+            'detailed_summary': self.detailed_summary,
+            'report': self.report
+        }
 
 
 class BaseImporter:
@@ -252,7 +254,7 @@ class SourceImporter(BaseResourceImporter):
                     return DELETED
                 return PERMISSION_DENIED
             except Exception as ex:
-                return dict(errors=ex.args)
+                return {'errors': ex.args}
 
         return NOT_FOUND
 
@@ -335,7 +337,7 @@ class CollectionImporter(BaseResourceImporter):
                     return DELETED
                 return PERMISSION_DENIED
             except Exception as ex:
-                return dict(errors=ex.args)
+                return {'errors': ex.args}
 
         return NOT_FOUND
 
@@ -452,7 +454,7 @@ class ConceptImporter(BaseResourceImporter):
                     return DELETED
                 return PERMISSION_DENIED
             except Exception as ex:
-                return dict(errors=ex.args)
+                return {'errors': ex.args}
 
         return NOT_FOUND
 
@@ -588,7 +590,7 @@ class MappingImporter(BaseResourceImporter):
                     return DELETED
                 return PERMISSION_DENIED
             except Exception as ex:
-                return dict(errors=ex.args)
+                return {'errors': ex.args}
 
         return NOT_FOUND
 
@@ -629,9 +631,9 @@ class ReferenceImporter(BaseResourceImporter):
                         mapping_ids += list(ref.mappings.values_list('id', flat=True))
 
                     if concept_ids:
-                        batch_index_resources.apply_async(('concept', dict(id__in=concept_ids)), queue='indexing')
+                        batch_index_resources.apply_async(('concept', {'id__in': concept_ids}), queue='indexing')
                     if mapping_ids:
-                        batch_index_resources.apply_async(('mapping', dict(id__in=mapping_ids)), queue='indexing')
+                        batch_index_resources.apply_async(('mapping', {'id__in': mapping_ids}), queue='indexing')
 
                 return CREATED
             return PERMISSION_DENIED
@@ -768,11 +770,11 @@ class BulkImportInline(BaseImporter):
         if new_concept_ids:
             for chunk in chunks(list(new_concept_ids), 1000):
                 batch_index_resources.apply_async(
-                    ('concept', dict(versioned_object_id__in=chunk), True), queue='indexing')
+                    ('concept', {'versioned_object_id__in': chunk}, True), queue='indexing')
         if new_mapping_ids:
             for chunk in chunks(list(new_mapping_ids), 1000):
                 batch_index_resources.apply_async(
-                    ('mapping', dict(versioned_object_id__in=chunk), True), queue='indexing')
+                    ('mapping', {'versioned_object_id__in': chunk}, True), queue='indexing')
 
         self.elapsed_seconds = time.time() - self.start_time
 
@@ -789,12 +791,22 @@ class BulkImportInline(BaseImporter):
 
     @property
     def json_result(self):
-        return dict(
-            total=self.total, processed=self.processed, created=self.created, updated=self.updated,
-            invalid=self.invalid, exists=self.exists, failed=self.failed, deleted=self.deleted,
-            not_found=self.not_found, exception=self.exception, permission_denied=self.permission_denied,
-            others=self.others, unknown=self.unknown, elapsed_seconds=self.elapsed_seconds
-        )
+        return {
+            'total': self.total,
+            'processed': self.processed,
+            'created': self.created,
+            'updated': self.updated,
+            'invalid': self.invalid,
+            'exists': self.exists,
+            'failed': self.failed,
+            'deleted': self.deleted,
+            'not_found': self.not_found,
+            'exception': self.exception,
+            'permission_denied': self.permission_denied,
+            'others': self.others,
+            'unknown': self.unknown,
+            'elapsed_seconds': self.elapsed_seconds
+        }
 
     @property
     def report(self):
@@ -803,9 +815,11 @@ class BulkImportInline(BaseImporter):
         }
 
     def make_result(self):
-        self.result = dict(
-            json=self.json_result, detailed_summary=self.detailed_summary, report=self.report
-        )
+        self.result = {
+            'json': self.json_result,
+            'detailed_summary': self.detailed_summary,
+            'report': self.report
+        }
 
 
 class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
@@ -958,7 +972,7 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
             f"Processed: {self.get_overall_tasks_progress()}/{self.total} | " \
             f"Time: {self.elapsed_seconds}secs"
 
-        return dict(summary=summary)
+        return {'summary': summary}
 
     def notify_progress(self):
         if self.self_task_id:
@@ -1021,11 +1035,21 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
         if self._json_result:
             return self._json_result
 
-        total_result = dict(
-            total=0, processed=0, created=[], updated=[],
-            invalid=[], exists=[], failed=[], exception=[], deleted=[],
-            others=[], unknown=[], permission_denied=[], elapsed_seconds=self.elapsed_seconds
-        )
+        total_result = {
+            'total': 0,
+            'processed': 0,
+            'created': [],
+            'updated': [],
+            'invalid': [],
+            'exists': [],
+            'failed': [],
+            'exception': [],
+            'deleted': [],
+            'others': [],
+            'unknown': [],
+            'permission_denied': [],
+            'elapsed_seconds': self.elapsed_seconds
+        }
         for task in self.tasks:
             if task.result:
                 result = task.result.get('json')
@@ -1050,9 +1074,11 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
         return data
 
     def make_result(self):
-        self.result = dict(
-            json=self.json_result, detailed_summary=self.detailed_summary, report=self.report
-        )
+        self.result = {
+            'json': self.json_result,
+            'detailed_summary': self.detailed_summary,
+            'report': self.report
+        }
 
     def queue_tasks(self, part_list, is_child):
         has_delete_action = not is_child and any(line.get('__action') == 'DELETE' for line in part_list)

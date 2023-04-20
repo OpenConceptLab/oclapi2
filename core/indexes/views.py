@@ -25,7 +25,12 @@ class BaseESIndexView(APIView):  # pragma: no cover
         result = self.task.delay(apps)
 
         return Response(
-            dict(state=result.state, username=self.request.user.username, task=result.task_id, queue='default'),
+            {
+                'state': result.state,
+                'username': self.request.user.username,
+                'task': result.task_id,
+                'queue': 'default'
+            },
             status=status.HTTP_202_ACCEPTED
         )
 
@@ -60,7 +65,7 @@ class ResourceIndexView(APIView):
             if ids:
                 filters = {f"{model.mnemonic_attr}__in": ids}
         elif uri:
-            filters = dict(uri__icontains=uri)
+            filters = {'uri__icontains': uri}
         if not filters:
             return Response(status=status.HTTP_400_BAD_REQUEST)
 

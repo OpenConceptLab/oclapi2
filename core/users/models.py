@@ -95,7 +95,7 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
                 validate_password(password)
                 self.set_password(password)
             except ValidationError as ex:
-                return dict(errors=ex.messages)
+                return {'errors': ex.messages}
         elif hashed_password:
             self.password = hashed_password
 
@@ -172,7 +172,7 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
 
     @property
     def auth_headers(self):
-        return dict(Authorization=f'Token {self.get_token()}')
+        return {'Authorization': f'Token {self.get_token()}'}
 
     def deactivate(self):
         self.is_active = False

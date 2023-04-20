@@ -54,7 +54,7 @@ def write_csv_to_s3(data, is_owner, **kwargs):  # pragma: no cover
     key = get_downloads_path(is_owner) + zip_file.filename
     get_export_service().upload_file(
         key=key, file_path=os.path.abspath(zip_file.filename), binary=True,
-        metadata=dict(ContentType='application/zip'), headers={'content-type': 'application/zip'}
+        metadata={'ContentType': 'application/zip'}, headers={'content-type': 'application/zip'}
     )
     os.chdir(cwd)
     return get_export_service().url_for(key)
@@ -340,7 +340,7 @@ def write_export_file(
         export_service.delete_objects(version.generic_export_path(suffix=None))
 
     upload_status_code = export_service.upload_file(
-        key=s3_key, file_path=file_path, binary=True, metadata=dict(ContentType='application/zip'),
+        key=s3_key, file_path=file_path, binary=True, metadata={'ContentType': 'application/zip'},
         headers={'content-type': 'application/zip'}
     )
     logger.info(f'Upload response status: {str(upload_status_code)}')
@@ -380,7 +380,7 @@ def parse_bulk_import_task_id(task_id):
     :param task_id:
     :return: dictionary with uuid, username, queue
     """
-    task = dict(uuid=task_id[:37])
+    task = {'uuid': task_id[:37]}
     username = task_id[37:]
     queue_index = username.find('~')
     if queue_index != -1:
@@ -757,9 +757,9 @@ def es_id_in(search, ids):
 def get_es_wildcard_search_criterion(search_str, name_attr='name'):
     def get_query(_str):
         return es_Q(
-            "wildcard", id=dict(value=_str, boost=2)
+            "wildcard", id={'value': _str, 'boost': 2}
         ) | es_Q(
-            "wildcard", **{name_attr: dict(value=_str, boost=5)}
+            "wildcard", **{name_attr: {'value': _str, 'boost': 5}}
         ) | es_Q(
             "query_string", query=f"*{_str}*"
         )

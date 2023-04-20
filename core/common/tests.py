@@ -533,11 +533,11 @@ class UtilsTest(OCLTestCase):
 
     def test_compact_dict_by_values(self):
         self.assertEqual(compact_dict_by_values({}), {})
-        self.assertEqual(compact_dict_by_values(dict(foo=None)), {})
-        self.assertEqual(compact_dict_by_values(dict(foo=None, bar=None)), {})
-        self.assertEqual(compact_dict_by_values(dict(foo=None, bar=1)), dict(bar=1))
-        self.assertEqual(compact_dict_by_values(dict(foo=2, bar=1)), dict(foo=2, bar=1))
-        self.assertEqual(compact_dict_by_values(dict(foo=2, bar='')), dict(foo=2))
+        self.assertEqual(compact_dict_by_values({'foo': None}), {})
+        self.assertEqual(compact_dict_by_values({'foo': None, 'bar': None}), {})
+        self.assertEqual(compact_dict_by_values({'foo': None, 'bar': 1}), {'bar': 1})
+        self.assertEqual(compact_dict_by_values({'foo': 2, 'bar': 1}), {'foo': 2, 'bar': 1})
+        self.assertEqual(compact_dict_by_values({'foo': 2, 'bar': ''}), {'foo': 2})
 
     def test_to_snake_case(self):
         self.assertEqual(to_snake_case(""), "")
@@ -571,7 +571,7 @@ class UtilsTest(OCLTestCase):
 
         http_get_mock.assert_called_once_with(
             'http://localhost:8000/some-url',
-            headers=dict(Authorization=f'Token {user.get_token()}')
+            headers={'Authorization': f'Token {user.get_token()}'}
         )
 
     @patch('core.common.utils.requests.get')
@@ -610,13 +610,13 @@ class UtilsTest(OCLTestCase):
         task_id = f"{task_uuid}-username~queue"
         self.assertEqual(
             parse_bulk_import_task_id(task_id),
-            dict(uuid=task_uuid + '-', username='username', queue='queue')
+            {'uuid': task_uuid + '-', 'username': 'username', 'queue': 'queue'}
         )
 
         task_id = f"{task_uuid}-username"
         self.assertEqual(
             parse_bulk_import_task_id(task_id),
-            dict(uuid=task_uuid + '-', username='username', queue='default')
+            {'uuid': task_uuid + '-', 'username': 'username', 'queue': 'default'}
         )
 
     def test_drop_version(self):
@@ -785,9 +785,9 @@ class UtilsTest(OCLTestCase):
     def test_jsonify_safe(self):
         self.assertEqual(jsonify_safe(None), None)
         self.assertEqual(jsonify_safe({}), {})
-        self.assertEqual(jsonify_safe(dict(a=1)), dict(a=1))
+        self.assertEqual(jsonify_safe({'a': 1}), {'a': 1})
         self.assertEqual(jsonify_safe('foobar'), 'foobar')
-        self.assertEqual(jsonify_safe('{"foo": "bar"}'), dict(foo='bar'))
+        self.assertEqual(jsonify_safe('{"foo": "bar"}'), {'foo': 'bar'})
 
     def test_get_resource_class_from_resource_name(self):
         self.assertEqual(get_resource_class_from_resource_name('mappings').__name__, 'Mapping')
@@ -801,17 +801,16 @@ class UtilsTest(OCLTestCase):
             self.assertEqual(get_resource_class_from_resource_name(name).__name__, 'UserProfile')
 
     def test_flatten_dict(self):
-        self.assertEqual(flatten_dict(dict(foo='bar')), dict(foo='bar'))
-        self.assertEqual(flatten_dict(dict(foo=1)), dict(foo='1'))
-        self.assertEqual(flatten_dict(dict(foo=1.1)), dict(foo='1.1'))
-        self.assertEqual(flatten_dict(dict(foo=True)), dict(foo='True'))
+        self.assertEqual(flatten_dict({'foo': 'bar'}), {'foo': 'bar'})
+        self.assertEqual(flatten_dict({'foo': 1}), {'foo': '1'})
+        self.assertEqual(flatten_dict({'foo': 1.1}), {'foo': '1.1'})
+        self.assertEqual(flatten_dict({'foo': True}), {'foo': 'True'})
         self.assertEqual(
-            flatten_dict(dict(foo=True, bar=dict(tao=dict(te='ching')))),
-            dict(foo='True', bar__tao__te='ching')
-        )
+            flatten_dict({'foo': True, 'bar': {'tao': {'te': 'ching'}}}),
+            {'foo': 'True', 'bar__tao__te': 'ching'})
         self.assertEqual(
-            flatten_dict(dict(foo=True, bar=dict(tao=dict(te='tao-te-ching')))),
-            dict(foo='True', bar__tao__te='tao_te_ching')
+            flatten_dict({'foo': True, 'bar': {'tao': {'te': 'tao-te-ching'}}}),
+            {'foo': 'True', 'bar__tao__te': 'tao_te_ching'}
         )
         # self.assertEqual(
         #     flatten_dict(
@@ -916,16 +915,16 @@ class UtilsTest(OCLTestCase):
 
     def test_nested_dict_values(self):
         self.assertEqual(list(nested_dict_values({})), [])
-        self.assertEqual(list(nested_dict_values(dict(a=1))), [1])
-        self.assertEqual(list(nested_dict_values(dict(a=1, b='foobar'))), [1, 'foobar'])
+        self.assertEqual(list(nested_dict_values({'a': 1})), [1])
+        self.assertEqual(list(nested_dict_values({'a': 1, 'b': 'foobar'})), [1, 'foobar'])
         self.assertEqual(
-            list(nested_dict_values(dict(a=1, b='foobar', c=dict(a=1, b='foobar')))),
+            list(nested_dict_values({'a': 1, 'b': 'foobar', 'c': {'a': 1, 'b': 'foobar'}})),
             [1, 'foobar', 1, 'foobar']
         )
         self.assertEqual(
             list(
                 nested_dict_values(
-                    dict(a=1, b='foobar', c=dict(a=1, b='foobar', c=dict(d=[dict(a=1), dict(b='foobar')])))
+                    {'a': 1, 'b': 'foobar', 'c': {'a': 1, 'b': 'foobar', 'c': {'d': [{'a': 1}, {'b': 'foobar'}]}}}
                 )
             ),
             [1, 'foobar', 1, 'foobar', [{'a': 1}, {'b': 'foobar'}]]
@@ -982,7 +981,9 @@ class TaskTest(OCLTestCase):
 
         result = bulk_import_parallel_inline(to_import=content, username='ocladmin', update_if_exists=False)  # pylint: disable=no-value-for-parameter
 
-        self.assertEqual(result, dict(error='Invalid JSON (Expecting property name enclosed in double quotes)'))
+        self.assertEqual(result, {
+            'error': 'Invalid JSON (Expecting property name enclosed in double quotes)'
+        })
         import_run_mock.assert_not_called()
 
     @patch('core.importers.models.BulkImportParallelRunner.run')
@@ -992,7 +993,9 @@ class TaskTest(OCLTestCase):
 
         result = bulk_import_parallel_inline(to_import=content, username='ocladmin', update_if_exists=False)  # pylint: disable=no-value-for-parameter
 
-        self.assertEqual(result, dict(error='Invalid Input ("type" should be present in each line)'))
+        self.assertEqual(result, {
+            'error': 'Invalid Input ("type" should be present in each line)'
+        })
         import_run_mock.assert_not_called()
 
     @patch('core.importers.models.BulkImportParallelRunner.run')
@@ -1125,46 +1128,46 @@ class OIDCAuthServiceTest(OCLTestCase):
 
     @patch('requests.post')
     def test_exchange_code_for_token(self, post_mock):
-        post_mock.return_value = Mock(json=Mock(return_value=dict(token='token', foo='bar')))
+        post_mock.return_value = Mock(json=Mock(return_value={'token': 'token', 'foo': 'bar'}))
 
         result = OIDCAuthService.exchange_code_for_token(
             'code', 'http://localhost:4000', 'client-id', 'client-secret'
         )
 
-        self.assertEqual(result, dict(token='token', foo='bar'))
+        self.assertEqual(result, {'token': 'token', 'foo': 'bar'})
         post_mock.assert_called_once_with(
             '/realms/ocl/protocol/openid-connect/token',
-            data=dict(
-                grant_type='authorization_code',
-                client_id='client-id',
-                client_secret='client-secret',
-                code='code',
-                redirect_uri='http://localhost:4000'
-            )
+            data={
+                'grant_type': 'authorization_code',
+                'client_id': 'client-id',
+                'client_secret': 'client-secret',
+                'code': 'code',
+                'redirect_uri': 'http://localhost:4000'
+            }
         )
 
     @patch('requests.post')
     def test_get_admin_token(self, post_mock):
-        post_mock.return_value = Mock(json=Mock(return_value=dict(access_token='token', foo='bar')))
+        post_mock.return_value = Mock(json=Mock(return_value={'access_token': 'token', 'foo': 'bar'}))
 
         result = OIDCAuthService.get_admin_token('username', 'password')
 
         self.assertEqual(result, 'token')
         post_mock.assert_called_once_with(
             '/realms/master/protocol/openid-connect/token',
-            data=dict(
-                grant_type='password',
-                username='username',
-                password='password',
-                client_id='admin-cli'
-            ),
+            data={
+                'grant_type': 'password',
+                'username': 'username',
+                'password': 'password',
+                'client_id': 'admin-cli'
+            },
             verify=False
         )
 
     @patch('core.common.services.OIDCAuthService.get_admin_token')
     @patch('requests.post')
     def test_add_user(self, post_mock, get_admin_token_mock):
-        post_mock.return_value = Mock(status_code=201, json=Mock(return_value=dict(foo='bar')))
+        post_mock.return_value = Mock(status_code=201, json=Mock(return_value={'foo': 'bar'}))
         get_admin_token_mock.return_value = 'token'
         user = UserProfileFactory(username='username')
         user.set_password('password')
@@ -1176,17 +1179,17 @@ class OIDCAuthServiceTest(OCLTestCase):
         get_admin_token_mock.assert_called_once_with(username='username', password='password')
         post_mock.assert_called_once_with(
             '/admin/realms/ocl/users',
-            json=dict(
-                enabled=True,
-                emailVerified=user.verified,
-                firstName=user.first_name,
-                lastName=user.last_name,
-                email=user.email,
-                username=user.username,
-                credentials=ANY
-            ),
+            json={
+                'enabled': True,
+                'emailVerified': user.verified,
+                'firstName': user.first_name,
+                'lastName': user.last_name,
+                'email': user.email,
+                'username': user.username,
+                'credentials': ANY
+            },
             verify=False,
-            headers=dict(Authorization='Bearer token')
+            headers={'Authorization': 'Bearer token'}
         )
 
 
@@ -1225,11 +1228,14 @@ class OCLOIDCAuthenticationBackendTest(OCLTestCase):
     def setUp(self):
         super().setUp()
         self.backend = OCLOIDCAuthenticationBackend()
-        self.claim = dict(
-            preferred_username='batman', email='batman@gotham.com',
-            given_name='Bruce', family_name='Wayne',
-            email_verified=True, foo='bar'
-        )
+        self.claim = {
+            'preferred_username': 'batman',
+            'email': 'batman@gotham.com',
+            'given_name': 'Bruce',
+            'family_name': 'Wayne',
+            'email_verified': True,
+            'foo': 'bar'
+        }
 
     @patch('core.users.models.UserProfile.objects')
     def test_create_user(self, user_manager_mock):

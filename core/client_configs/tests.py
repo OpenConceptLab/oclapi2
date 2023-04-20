@@ -24,84 +24,109 @@ class ClientConfigTest(OCLTestCase):
 
         self.assertEqual(
             ex.exception.message_dict,
-            dict(
-                config=['This field cannot be blank.'],
-                resource_type=['This field cannot be null.'],
-                resource_id=['This field cannot be null.'],
-                tabs=['At least one tab config is mandatory.'],
-            )
+            {
+                'config': ['This field cannot be blank.'],
+                'resource_type': ['This field cannot be null.'],
+                'resource_id': ['This field cannot be null.'],
+                'tabs': ['At least one tab config is mandatory.']
+            }
         )
 
         org = OrganizationFactory()
         client_config.resource = org
-        client_config.config = dict(foo='bar')
+        client_config.config = {'foo': 'bar'}
 
         with self.assertRaises(ValidationError) as ex:
             client_config.full_clean()
 
-        self.assertEqual(ex.exception.message_dict, dict(tabs=['At least one tab config is mandatory.']))
+        self.assertEqual(ex.exception.message_dict, {'tabs': ['At least one tab config is mandatory.']})
 
-        client_config.config = dict(tabs='foobar')
-
-        with self.assertRaises(ValidationError) as ex:
-            client_config.full_clean()
-
-        self.assertEqual(ex.exception.message_dict, dict(tabs=['Tabs config must be a list.']))
-
-        client_config.config = dict(tabs=['foobar'])
+        client_config.config = {'tabs': 'foobar'}
 
         with self.assertRaises(ValidationError) as ex:
             client_config.full_clean()
 
-        self.assertEqual(ex.exception.message_dict, dict(tabs=['Invalid Tabs config.']))
+        self.assertEqual(ex.exception.message_dict, {'tabs': ['Tabs config must be a list.']})
 
-        client_config.config = dict(tabs=[dict(foo='bar')])
-
-        with self.assertRaises(ValidationError) as ex:
-            client_config.full_clean()
-
-        self.assertEqual(ex.exception.message_dict, dict(tabs=['Exactly one of the Tabs must be default.']))
-
-        client_config.config = dict(tabs=[dict(foo='bar', default=True), dict(foo='bar', default=True)])
+        client_config.config = {'tabs': ['foobar']}
 
         with self.assertRaises(ValidationError) as ex:
             client_config.full_clean()
 
-        self.assertEqual(ex.exception.message_dict, dict(tabs=['Exactly one of the Tabs must be default.']))
+        self.assertEqual(ex.exception.message_dict, {'tabs': ['Invalid Tabs config.']})
 
-        client_config.config = dict(tabs=[dict(foo='bar', default=True), dict(foo='bar', default=False)])
+        client_config.config = {'tabs': [{'foo': 'bar'}]}
+
+        with self.assertRaises(ValidationError) as ex:
+            client_config.full_clean()
+
+        self.assertEqual(ex.exception.message_dict, {'tabs': ['Exactly one of the Tabs must be default.']})
+
+        client_config.config = {'tabs': [{'foo': 'bar', 'default': True}, {'foo': 'bar', 'default': True}]}
+
+        with self.assertRaises(ValidationError) as ex:
+            client_config.full_clean()
+
+        self.assertEqual(ex.exception.message_dict, {'tabs': ['Exactly one of the Tabs must be default.']})
+
+        client_config.config = {'tabs': [{'foo': 'bar', 'default': True}, {'foo': 'bar', 'default': False}]}
         client_config.full_clean()
 
-        client_config.config = dict(
-            tabs=[dict(foo='bar', default=True, sortAsc='foo', sortDesc='bar', type='concepts'),
-                  dict(foo='bar', default=False)]
-        )
+        client_config.config = {
+            'tabs': [{
+                         'foo': 'bar',
+                         'default': True,
+                         'sortAsc': 'foo',
+                         'sortDesc': 'bar',
+                         'type': 'concepts'
+                     }, {
+                         'foo': 'bar',
+                         'default': False
+                     }]
+        }
         with self.assertRaises(ValidationError) as ex:
             client_config.full_clean()
 
         self.assertEqual(
-            ex.exception.message_dict, dict(tabs=['Sort either by asc (sortAsc) or desc (sortDesc) order.'])
+            ex.exception.message_dict, {
+                'tabs': ['Sort either by asc (sortAsc) or desc (sortDesc) order.']
+            }
         )
 
-        client_config.config = dict(tabs=[dict(foo='bar', default=True, sortAsc='foo', type='concepts'),
-                                          dict(foo='bar', default=False)])
+        client_config.config = {
+            'tabs': [{
+                         'foo': 'bar',
+                         'default': True,
+                         'sortAsc': 'foo',
+                         'type': 'concepts'
+                     },
+                {
+                    'foo': 'bar',
+                    'default': False
+                }]
+        }
         with self.assertRaises(ValidationError) as ex:
             client_config.full_clean()
 
-        self.assertEqual(ex.exception.message_dict, dict(tabs=['Unsupported sort attribute.']))
+        self.assertEqual(ex.exception.message_dict, {
+            'tabs': ['Unsupported sort attribute.']
+        })
 
-        client_config.config = dict(
-            tabs=[dict(foo='bar', default=True, sortAsc='id', type='concepts'), dict(foo='bar', default=False)]
-        )
+        client_config.config = {
+            'tabs': [
+                {'foo': 'bar', 'default': True, 'sortAsc': 'id', 'type': 'concepts'},
+                {'foo': 'bar', 'default': False}
+            ]
+        }
         client_config.full_clean()
 
     def test_format_home_config_tabs(self):
-        client_config = ClientConfig(config=dict(tabs=[dict(fields=[])]))
+        client_config = ClientConfig(config={'tabs': [{'fields': []}]})
         client_config.format_home_config_tabs()
 
-        self.assertEqual(client_config.config, dict(tabs=[dict(fields=[])]))
+        self.assertEqual(client_config.config, {'tabs': [{'fields': []}]})
 
-        client_config.config['tabs'] = [dict(fields={'source_type': 'Source Type', 'extras.foo': "foobar"})]
+        client_config.config['tabs'] = [{'fields': {'source_type': 'Source Type', 'extras.foo': "foobar"}}]
         client_config.format_home_config_tabs()
 
         self.assertEqual(
@@ -109,7 +134,7 @@ class ClientConfigTest(OCLTestCase):
             [{'source_type': 'Source Type'}, {'extras.foo': 'foobar'}]
         )
 
-        client_config.config['tabs'] = [dict(fields=[{'source_type': 'Source Type'}, {'extras.foo': 'foobar'}])]
+        client_config.config['tabs'] = [{'fields': [{'source_type': 'Source Type'}, {'extras.foo': 'foobar'}]}]
         client_config.format_home_config_tabs()
 
         self.assertEqual(
@@ -123,12 +148,12 @@ class ClientConfigTest(OCLTestCase):
 
     def test_siblings(self):
         org = OrganizationFactory()
-        config1 = ClientConfig(name='first', resource=org, config=dict(tabs=[dict(foo='bar', default=True)]))
+        config1 = ClientConfig(name='first', resource=org, config={'tabs': [{'foo': 'bar', 'default': True}]})
         config1.save()
 
         self.assertEqual(config1.siblings.count(), 0)
 
-        config2 = ClientConfig(name='second', resource=org, config=dict(tabs=[dict(foo='bar', default=True)]))
+        config2 = ClientConfig(name='second', resource=org, config={'tabs': [{'foo': 'bar', 'default': True}]})
         config2.save()
 
         self.assertEqual(config1.siblings.count(), 1)
@@ -144,7 +169,7 @@ class ClientConfigsViewTest(OCLAPITestCase):
         self.org = OrganizationFactory()
         self.user = self.org.created_by
         self.token = self.user.get_token()
-        self.dummy_config = dict(tabs=[dict(default=True)])
+        self.dummy_config = {'tabs': [{'default': True}]}
 
     def tearDown(self):
         ClientConfig.objects.all().delete()
@@ -165,7 +190,11 @@ class ClientConfigsViewTest(OCLAPITestCase):
 
         response = self.client.post(
             self.org.url + 'client-configs/',
-            dict(name='custom', config=self.dummy_config, is_default=True),
+            {
+                'name': 'custom',
+                'config': self.dummy_config,
+                'is_default': True
+            },
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -181,7 +210,11 @@ class ClientConfigsViewTest(OCLAPITestCase):
 
         response = self.client.post(
             self.org.url + 'client-configs/',
-            dict(name='custom1', config=self.dummy_config, is_default=True),
+            {
+                'name': 'custom1',
+                'config': self.dummy_config,
+                'is_default': True
+            },
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -219,7 +252,7 @@ class ClientConfigViewTest(OCLAPITestCase):
         self.org = OrganizationFactory()
         self.user = self.org.created_by
         self.token = self.user.get_token()
-        self.dummy_config = dict(tabs=[dict(default=True)])
+        self.dummy_config = {'tabs': [{'default': True}]}
         self.config = ClientConfig(config=self.dummy_config, name='foobar', resource=self.org)
         self.config.save()
 
@@ -230,7 +263,9 @@ class ClientConfigViewTest(OCLAPITestCase):
     def test_put(self):
         response = self.client.get(
             '/client-configs/12356/',
-            dict(name='updated'),
+            {
+                'name': 'updated'
+            },
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -238,7 +273,9 @@ class ClientConfigViewTest(OCLAPITestCase):
 
         response = self.client.put(
             self.config.uri,
-            dict(name='updated'),
+            {
+                'name': 'updated'
+            },
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )

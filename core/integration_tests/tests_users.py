@@ -19,26 +19,38 @@ class UserSignupVerificationViewTest(OCLAPITestCase):
     def test_signup_unverified_to_verified(self, send_mail_mock):
         response = self.client.post(
             '/users/signup/',
-            dict(username='charles', name='Charles Dickens', password='short1', email='charles@fiction.com'),
+            {
+                'username': 'charles',
+                'name': 'Charles Dickens',
+                'password': 'short1',
+                'email': 'charles@fiction.com'
+            },
             format='json'
         )
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(
             response.data,
-            dict(password=[
-                'This password is too short. It must contain at least 8 characters.', 'This password is too common.'
-            ])
+            {
+                'password': [
+                    'This password is too short. It must contain at least 8 characters.', 'This password is too common.'
+                ]
+            }
         )
 
         response = self.client.post(
             '/users/signup/',
-            dict(username='charles', name='Charles Dickens', password='scroooge1', email='charles@fiction.com'),
+            {
+                'username': 'charles',
+                'name': 'Charles Dickens',
+                'password': 'scroooge1',
+                'email': 'charles@fiction.com'
+            },
             format='json'
         )
 
         self.assertEqual(response.status_code, 201)
-        self.assertEqual(response.data, dict(detail=VERIFY_EMAIL_MESSAGE))
+        self.assertEqual(response.data, {'detail': VERIFY_EMAIL_MESSAGE})
         send_mail_mock.assert_called_once()
 
         created_user = UserProfile.objects.get(username='charles')
@@ -47,12 +59,15 @@ class UserSignupVerificationViewTest(OCLAPITestCase):
 
         response = self.client.post(
             '/users/login/',
-            dict(username='charles', password='scroooge1'),
+            {
+                'username': 'charles',
+                'password': 'scroooge1'
+            },
             format='json'
         )
 
         self.assertEqual(response.status_code, 401)
-        self.assertEqual(response.data, dict(detail=VERIFY_EMAIL_MESSAGE, email='charles@fiction.com'))
+        self.assertEqual(response.data, {'detail': VERIFY_EMAIL_MESSAGE, 'email': 'charles@fiction.com'})
 
         response = self.client.get(
             '/users/charles/verify/random-token/',
@@ -60,7 +75,7 @@ class UserSignupVerificationViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 401)
-        self.assertEqual(response.data, dict(detail=VERIFICATION_TOKEN_MISMATCH))
+        self.assertEqual(response.data, {'detail': VERIFICATION_TOKEN_MISMATCH})
 
         response = self.client.get(
             f'/users/unknown/verify/{created_user.verification_token}/',
@@ -80,12 +95,15 @@ class UserSignupVerificationViewTest(OCLAPITestCase):
 
         response = self.client.post(
             '/users/login/',
-            dict(username='charles', password='scroooge1'),
+            {
+                'username': 'charles',
+                'password': 'scroooge1'
+            },
             format='json'
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data, dict(token=created_user.get_token()))
+        self.assertEqual(response.data, {'token': created_user.get_token()})
 
 
 class UserPasswordResetViewTest(OCLAPITestCase):
@@ -103,14 +121,14 @@ class UserPasswordResetViewTest(OCLAPITestCase):
 
         response = self.client.post(
             '/users/password/reset/',
-            dict(email='bad@user.com'),
+            {'email': 'bad@user.com'},
             format='json'
         )
         self.assertEqual(response.status_code, 404)
 
         response = self.client.post(
             '/users/password/reset/',
-            dict(email='foo@user.com'),
+            {'email': 'foo@user.com'},
             format='json'
         )
         self.assertEqual(response.status_code, 200)
@@ -127,28 +145,34 @@ class UserPasswordResetViewTest(OCLAPITestCase):
 
         response = self.client.put(
             '/users/password/reset/',
-            dict(token='bad-token'),
+            {'token': 'bad-token'},
             format='json'
         )
         self.assertEqual(response.status_code, 400)
 
         response = self.client.put(
             '/users/password/reset/',
-            dict(new_password='new-password123'),
+            {'new_password': 'new-password123'},
             format='json'
         )
         self.assertEqual(response.status_code, 400)
 
         response = self.client.put(
             '/users/password/reset/',
-            dict(token='bad-token', new_password='new-password123'),
+            {
+                'token': 'bad-token',
+                'new_password': 'new-password123'
+            },
             format='json'
         )
         self.assertEqual(response.status_code, 404)
 
         response = self.client.put(
             '/users/password/reset/',
-            dict(token=user.verification_token, new_password='new-password123'),
+            {
+                'token': user.verification_token,
+                'new_password': 'new-password123'
+            },
             format='json'
         )
         self.assertEqual(response.status_code, 200)
@@ -159,12 +183,15 @@ class UserPasswordResetViewTest(OCLAPITestCase):
 
         response = self.client.post(
             '/users/login/',
-            dict(username='foo-user', password='new-password123'),
+            {
+                'username': 'foo-user',
+                'password': 'new-password123'
+            },
             format='json'
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data, dict(token=user.get_token()))
+        self.assertEqual(response.data, {'token': user.get_token()})
 
 
 class UserOrganizationListViewTest(OCLAPITestCase):
@@ -290,7 +317,10 @@ class UserOrganizationListViewTest(OCLAPITestCase):
     def test_post_405(self):
         response = self.client.post(
             f'/users/{self.user.username}/orgs/',
-            dict(id='test-org-1', name='Test Org 1'),
+            {
+                'id': 'test-org-1',
+                'name': 'Test Org 1'
+            },
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -309,23 +339,29 @@ class UserLoginViewTest(OCLAPITestCase):
 
         response = self.client.post(
             '/users/login/',
-            dict(username='marty', password='boogeyman'),
+            {
+                'username': 'marty',
+                'password': 'boogeyman'
+            },
             format='json'
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data, dict(token=user.get_token()))
+        self.assertEqual(response.data, {'token': user.get_token()})
         user.refresh_from_db()
         self.assertIsNotNone(user.last_login)
 
         response = self.client.post(
             '/users/login/',
-            dict(username='marty', password='wuss'),
+            {
+                'username': 'marty',
+                'password': 'wuss'
+            },
             format='json'
         )
 
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.data, dict(non_field_errors=["Unable to log in with provided credentials."]))
+        self.assertEqual(response.data, {'non_field_errors': ["Unable to log in with provided credentials."]})
 
     @patch('core.users.models.UserProfile.verify')
     def test_login_inactive_user(self, verify_mock):
@@ -335,18 +371,21 @@ class UserLoginViewTest(OCLAPITestCase):
 
         response = self.client.post(
             '/users/login/',
-            dict(username='marty', password='boogeyman'),
+            {
+                'username': 'marty',
+                'password': 'boogeyman'
+            },
             format='json'
         )
 
         self.assertEqual(response.status_code, 401)
         self.assertEqual(
             response.data,
-            dict(
-                detail='A verification email has been sent to the address on record. Verify your email address'
-                       ' to re-activate your account.',
-                email=user.email
-            )
+            {
+                'detail': 'A verification email has been sent to the address on record. Verify your email address'
+                          ' to re-activate your account.',
+                'email': user.email
+            }
         )
         verify_mock.assert_called_once()
 
@@ -358,18 +397,21 @@ class UserLoginViewTest(OCLAPITestCase):
 
         response = self.client.post(
             '/users/login/',
-            dict(username='marty', password='boogeyman'),
+            {
+                'username': 'marty',
+                'password': 'boogeyman'
+            },
             format='json'
         )
 
         self.assertEqual(response.status_code, 401)
         self.assertEqual(
             response.data,
-            dict(
-                detail='A verification email has been sent to the address on record. Verify your email address to '
-                       'activate your account.',
-                email=user.email
-            )
+            {
+                'detail': 'A verification email has been sent to the address on record. Verify your email address to '
+                          'activate your account.',
+                'email': user.email
+            }
         )
         send_verification_email_mock.assert_called_once()
 
@@ -475,7 +517,12 @@ class UserListViewTest(OCLAPITestCase):
     def test_post_201(self, job_mock):
         response = self.client.post(
             '/users/',
-            dict(username='charles', name='Charles Dickens', password='scroooge1', email='charles@fiction.com'),
+            {
+                'username': 'charles',
+                'name': 'Charles Dickens',
+                'password': 'scroooge1',
+                'email': 'charles@fiction.com'
+            },
             HTTP_AUTHORIZATION='Token ' + self.superuser.get_token(),
             format='json'
         )
@@ -487,7 +534,12 @@ class UserListViewTest(OCLAPITestCase):
 
         response = self.client.post(
             '/users/',
-            dict(username='charles', name='Charles Dickens', password='scroooge1', email='charles@fiction.com'),
+            {
+                'username': 'charles',
+                'name': 'Charles Dickens',
+                'password': 'scroooge1',
+                'email': 'charles@fiction.com'
+            },
             HTTP_AUTHORIZATION='Token ' + self.superuser.get_token(),
             format='json'
         )
@@ -501,7 +553,10 @@ class UserListViewTest(OCLAPITestCase):
 
         response = self.client.post(
             '/users/login/',
-            dict(username='charles', password='scroooge1'),
+            {
+                'username': 'charles',
+                'password': 'scroooge1'
+            },
             format='json'
         )
 
@@ -512,7 +567,12 @@ class UserListViewTest(OCLAPITestCase):
         random_user = UserProfileFactory()
         response = self.client.post(
             '/users/',
-            dict(username='johndoe', name='John Doe', password='unknown', email='john@doe.com'),
+            {
+                'username': 'johndoe',
+                'name': 'John Doe',
+                'password': 'unknown',
+                'email': 'john@doe.com'
+            },
             HTTP_AUTHORIZATION='Token ' + random_user.get_token(),
             format='json'
         )
@@ -605,7 +665,10 @@ class UserDetailViewTest(OCLAPITestCase):
 
         response = self.client.put(
             f'/users/{self.user.username}/',
-            dict(password='newpassword123', email='user@user.com'),
+            {
+                'password': 'newpassword123',
+                'email': 'user@user.com'
+            },
             HTTP_AUTHORIZATION='Token ' + self.user.get_token(),
             format='json'
         )
@@ -750,7 +813,7 @@ class UserExtrasViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data, {})
 
-        extras = dict(foo='bar')
+        extras = {'foo': 'bar'}
         self.user.extras = extras
         self.user.save()
 
@@ -781,29 +844,31 @@ class UserExtraRetrieveUpdateDestroyViewTest(OCLAPITestCase):
 
         response = self.client.put(
             f'/users/{self.user.username}/extras/foo/',
-            dict(foo='bar'),
+            {'foo': 'bar'},
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data, dict(foo='bar'))
+        self.assertEqual(response.data, {'foo': 'bar'})
         self.user.refresh_from_db()
-        self.assertEqual(self.user.extras, dict(foo='bar'))
+        self.assertEqual(self.user.extras, {'foo': 'bar'})
 
         response = self.client.put(
             f'/users/{self.user.username}/extras/bar/',
-            dict(foo='bar'),
+            {'foo': 'bar'},
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.data, ['Must specify bar param in body.'])
         self.user.refresh_from_db()
-        self.assertEqual(self.user.extras, dict(foo='bar'))
+        self.assertEqual(self.user.extras, {'foo': 'bar'})
 
         response = self.client.put(
             '/users/random/extras/foo/',
-            dict(foo='bar'),
+            {
+                'foo': 'bar'
+            },
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -818,7 +883,7 @@ class UserExtraRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         )
         self.assertEqual(response.status_code, 404)
 
-        self.user.extras = dict(foo='bar')
+        self.user.extras = {'foo': 'bar'}
         self.user.save()
 
         response = self.client.get(
@@ -827,7 +892,7 @@ class UserExtraRetrieveUpdateDestroyViewTest(OCLAPITestCase):
             format='json'
         )
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data, dict(foo='bar'))
+        self.assertEqual(response.data, {'foo': 'bar'})
 
     def test_delete(self):
         response = self.client.delete(
@@ -837,7 +902,7 @@ class UserExtraRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         )
         self.assertEqual(response.status_code, 404)
 
-        self.user.extras = dict(foo='bar', tao='ching')
+        self.user.extras = {'foo': 'bar', 'tao': 'ching'}
         self.user.save()
 
         response = self.client.delete(
@@ -847,7 +912,7 @@ class UserExtraRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         )
         self.assertEqual(response.status_code, 204)
         self.user.refresh_from_db()
-        self.assertEqual(self.user.extras, dict(tao='ching'))
+        self.assertEqual(self.user.extras, {'tao': 'ching'})
 
 
 class OIDCodeExchangeViewTest(OCLAPITestCase):
@@ -879,7 +944,7 @@ class OIDCodeExchangeViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(
             response.data,
-            dict(error='code, redirect_uri, client_id and client_secret are mandatory to exchange for token')
+            {'error': 'code, redirect_uri, client_id and client_secret are mandatory to exchange for token'}
         )
 
         response = self.client.post(
@@ -891,7 +956,7 @@ class OIDCodeExchangeViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(
             response.data,
-            dict(error='code, redirect_uri, client_id and client_secret are mandatory to exchange for token')
+            {'error': 'code, redirect_uri, client_id and client_secret are mandatory to exchange for token'}
         )
 
         response = self.client.post(
@@ -908,7 +973,7 @@ class OIDCodeExchangeViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(
             response.data,
-            dict(error='code, redirect_uri, client_id and client_secret are mandatory to exchange for token')
+            {'error': 'code, redirect_uri, client_id and client_secret are mandatory to exchange for token'}
         )
 
 
@@ -923,7 +988,7 @@ class TokenExchangeViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data, dict(token=token))
+        self.assertEqual(response.data, {'token': token})
 
 
 class OIDCLogoutViewTest(OCLAPITestCase):

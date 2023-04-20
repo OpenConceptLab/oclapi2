@@ -45,11 +45,23 @@ class CollectionDocument(Document):
 
     @staticmethod
     def get_boostable_search_attrs():
-        return dict(
-            mnemonic=dict(boost=5, lower=True, wildcard=True),
-            name=dict(boost=4, lower=True, wildcard=True),
-            canonical_url=dict(boost=3, lower=True, wildcard=True)
-        )
+        return {
+            'mnemonic': {
+                'boost': 5,
+                'lower': True,
+                'wildcard': True
+            },
+            'name': {
+                'boost': 4,
+                'lower': True,
+                'wildcard': True
+            },
+            'canonical_url': {
+                'boost': 3,
+                'lower': True,
+                'wildcard': True
+            }
+        }
 
     @staticmethod
     def prepare_locale(instance):
@@ -77,7 +89,7 @@ class CollectionDocument(Document):
             if isinstance(value, dict):
                 value = flatten_dict(value)
             if isinstance(value, str):
-                value = dict(value=value)
+                value = {'value': value}
 
         return value or {}
 

@@ -25,7 +25,7 @@ class CodeSystemListView(SourceListView):
     def bundle_response(data, paginator):
         bundle = FHIRBundleSerializer(
             {'meta': {}, 'type': 'searchset', 'entry': FHIRBundleSerializer.convert_to_entry(data)},
-            context=dict(paginator=paginator)
+            context={'paginator': paginator}
         )
         return bundle.data
 

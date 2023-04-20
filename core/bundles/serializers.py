@@ -61,11 +61,11 @@ class FHIRBundleSerializer(CommonSerializer):
 
     def get_link(self, _):
         paginator = self.context.get('paginator')
-        links = [dict(relation='self', url=paginator.get_current_page_url())]
+        links = [{'relation': 'self', 'url': paginator.get_current_page_url()}]
         if paginator.has_previous():
-            links.append(dict(relation='prev', url=paginator.get_previous_page_url()))
+            links.append({'relation': 'prev', 'url': paginator.get_previous_page_url()})
         if paginator.has_next():
-            links.append(dict(relation='next', url=paginator.get_next_page_url()))
+            links.append({'relation': 'next', 'url': paginator.get_next_page_url()})
         return BundleLinkSerializer(links, many=True).data
 
 

@@ -193,7 +193,7 @@ class UserDetailSerializer(serializers.ModelSerializer):
                 if instance.is_valid_auth_group(*auth_groups):
                     instance.groups.set(Group.objects.filter(name__in=auth_groups))
                 else:
-                    self._errors.update(dict(auth_groups=[INVALID_AUTH_GROUP_NAME]))
+                    self._errors.update({'auth_groups': [INVALID_AUTH_GROUP_NAME]})
                     return instance
 
         instance.save()

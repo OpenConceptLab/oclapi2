@@ -119,7 +119,11 @@ def run():
                      commits = [commit for commit in commits if commit]
                      if commits:
                          release_date = get_release_date(to_tag)
-                         batches.append(dict(heading=format_md(value="{} - {}".format(to_tag, release_date), heading_level=5), commits=format_md(value=commits), order=order))
+                         batches.append({
+                             'heading': format_md(value=f"{to_tag} - {release_date}", heading_level=5),
+                             'commits': format_md(value=commits),
+                             'order': order
+                         })
 
                  from_minor_version = next_minor_version
                  next_minor_version += 1

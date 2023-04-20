@@ -42,11 +42,11 @@ class PinBaseView(BaseAPIView):
 
     def get_parent_filter(self):
         if self.kwargs.get('user_is_self'):
-            return dict(user=self.request.user)
+            return {'user': self.request.user}
         if 'user' in self.kwargs:
-            return dict(user__username=self.kwargs['user'])
+            return {'user__username': self.kwargs['user']}
         if 'org' in self.kwargs:
-            return dict(organization__mnemonic=self.kwargs['org'])
+            return {'organization__mnemonic': self.kwargs['org']}
         return None
 
     def get_queryset(self):
@@ -66,7 +66,7 @@ class PinListView(PinBaseView, ListAPIView):
             return Response(status=status.HTTP_404_NOT_FOUND)
         if parent.pins.count() >= MAX_PINS_ALLOWED:
             return Response(
-                dict(error=[f"Can only keep max {MAX_PINS_ALLOWED} items pinned"]),
+                {'error': [f"Can only keep max {MAX_PINS_ALLOWED} items pinned"]},
                 status=status.HTTP_404_NOT_FOUND
             )
 

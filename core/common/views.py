@@ -45,7 +45,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     user_is_self = False
     is_searchable = False
     limit = LIST_DEFAULT_LIMIT
-    default_filters = dict(is_active=True)
+    default_filters = {'is_active': True}
     sort_asc_param = 'sortAsc'
     sort_desc_param = 'sortDesc'
     sort_param = 'sort'
@@ -201,7 +201,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
     @staticmethod
     def __get_order_by(is_desc):
-        return dict(order='desc') if is_desc else dict(order='asc')
+        return {'order': 'desc' if is_desc else 'asc'}
 
     def get_sort_attributes(self):
         sort_fields, desc = self.get_sort_and_desc()
@@ -219,9 +219,9 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
                 current_result = None
                 if field in ['score', '_score', 'best_match', 'best match']:
-                    current_result = dict(_score=order_details)
+                    current_result = {'_score': order_details}
                 if self.is_concept_document() and field == 'name':
-                    current_result = dict(_name=order_details)
+                    current_result = {'_name': order_details}
                 if self.is_valid_sort(field):
                     current_result = {field: order_details}
                 if current_result is not None:
@@ -328,7 +328,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             if is_version_specified:
                 container_version = self.kwargs['version']
                 is_latest_released = container_version == LATEST
-                params = dict(user__username=self.kwargs.get('user'), organization__mnemonic=self.kwargs.get('org'))
+                params = {'user__username': self.kwargs.get('user'), 'organization__mnemonic': self.kwargs.get('org')}
                 if is_latest_released:
                     if is_source_specified:
                         from core.sources.models import Source
@@ -568,7 +568,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             if sort_by:
                 results = results.sort(*sort_by)
             else:
-                results = results.sort(dict(_score=dict(order="desc")))
+                results = results.sort({'_score': {'order': "desc"}})
 
         return results
 
@@ -587,7 +587,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                     _search_string = self.get_search_string(decode=decode, lower=lower)
                 if is_wildcard:
                     _search_string = self.get_wildcard_search_string(_search_string)
-                query |= Q("wildcard", **{attr: dict(value=_search_string, boost=meta['boost'])})
+                query |= Q("wildcard", **{attr: {'value': _search_string, 'boost': meta['boost']}})
             return query
 
         if not search_string:
@@ -598,11 +598,11 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             criterion |= get_query(word)
 
         if self.is_concept_document() and ' ' in search_string:
-            criterion |= Q("wildcard", _name=dict(value=search_string, boost=3.5))
-            criterion |= Q("wildcard", synonyms=dict(value=search_string, boost=3.3))
-            criterion |= Q("wildcard", synonyms=dict(value=search_string.replace(' ', '*'), boost=3.2))
-            criterion |= Q("wildcard", synonyms=dict(value=search_string.replace(' ', '*') + '*', boost=3.1))
-            criterion |= Q("wildcard", synonyms=dict(value='*' + search_string.replace(' ', '*') + '*', boost=3))
+            criterion |= Q("wildcard", _name={'value': search_string, 'boost': 3.5})
+            criterion |= Q("wildcard", synonyms={'value': search_string, 'boost': 3.3})
+            criterion |= Q("wildcard", synonyms={'value': search_string.replace(' ', '*'), 'boost': 3.2})
+            criterion |= Q("wildcard", synonyms={'value': search_string.replace(' ', '*') + '*', 'boost': 3.1})
+            criterion |= Q("wildcard", synonyms={'value': '*' + search_string.replace(' ', '*') + '*', 'boost': 3})
 
         return criterion
 
@@ -653,7 +653,7 @@ class SourceChildCommonBaseView(BaseAPIView):
     pk_field = 'mnemonic'
     permission_classes = (CanViewParentDictionary, )
     is_searchable = True
-    default_filters = dict(is_active=True)
+    default_filters = {'is_active': True}
 
     def initial(self, request, *args, **kwargs):
         super().initial(request, *args, **kwargs)
@@ -721,7 +721,7 @@ class SourceChildExtraRetrieveUpdateDestroyView(SourceChildExtrasBaseView, Retri
         extras = get(instance, 'extras', {})
         if key in extras:
             return Response({key: extras[key]})
-        return Response(dict(detail=NOT_FOUND), status=status.HTTP_404_NOT_FOUND)
+        return Response({'detail': NOT_FOUND}, status=status.HTTP_404_NOT_FOUND)
 
     def update(self, request, **kwargs):  # pylint: disable=arguments-differ
         key = kwargs.get('extra')
@@ -747,7 +747,7 @@ class SourceChildExtraRetrieveUpdateDestroyView(SourceChildExtrasBaseView, Retri
             if errors:
                 return Response(errors, status=status.HTTP_400_BAD_REQUEST)
             return Response(status=status.HTTP_204_NO_CONTENT)
-        return Response(dict(detail=NOT_FOUND), status=status.HTTP_404_NOT_FOUND)
+        return Response({'detail': NOT_FOUND}, status=status.HTTP_404_NOT_FOUND)
 
 
 class APIVersionView(APIView):  # pragma: no cover
@@ -775,7 +775,7 @@ class RootView(BaseAPIView):  # pragma: no cover
 
     def get(self, _):
         from core.urls import urlpatterns
-        data = dict(version=__version__, routes={})
+        data = {'version': __version__, 'routes': {}}
         for pattern in urlpatterns:
             name = getattr(pattern, 'name', None) or getattr(pattern, 'app_name', None)
             if name in ['admin']:
@@ -872,7 +872,7 @@ class ConceptContainerExtraRetrieveUpdateDestroyView(RetrieveUpdateDestroyAPIVie
         if key in extras:
             return Response({key: extras[key]})
 
-        return Response(dict(detail=NOT_FOUND), status=status.HTTP_404_NOT_FOUND)
+        return Response({'detail': NOT_FOUND}, status=status.HTTP_404_NOT_FOUND)
 
     def update(self, request, **kwargs):  # pylint: disable=arguments-differ
         key = kwargs.get('extra')
@@ -897,7 +897,7 @@ class ConceptContainerExtraRetrieveUpdateDestroyView(RetrieveUpdateDestroyAPIVie
             instance.save()
             return Response(status=status.HTTP_204_NO_CONTENT)
 
-        return Response(dict(detail=NOT_FOUND), status=status.HTTP_404_NOT_FOUND)
+        return Response({'detail': NOT_FOUND}, status=status.HTTP_404_NOT_FOUND)
 
 
 class ChecksumView(APIView):

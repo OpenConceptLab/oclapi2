@@ -99,7 +99,7 @@ class SourceListView(SourceBaseView, ConceptDictionaryCreateMixin, ListWithHeade
     es_fields = Source.es_fields
     document_model = SourceDocument
     facet_class = SourceSearch
-    default_filters = dict(is_active=True, version=HEAD)
+    default_filters = {'is_active': True, 'version': HEAD}
 
     def apply_filters(self, queryset):
         return queryset
@@ -210,9 +210,9 @@ class SourceRetrieveUpdateDestroyView(SourceBaseView, ConceptDictionaryUpdateMix
         if not self.is_inline_requested():
             try:
                 task = delete_source.delay(source.id)
-                return Response(dict(task=task.id), status=status.HTTP_202_ACCEPTED)
+                return Response({'task': task.id}, status=status.HTTP_202_ACCEPTED)
             except AlreadyQueued:
-                return Response(dict(detail='Already Queued'), status=status.HTTP_409_CONFLICT)
+                return Response({'detail': 'Already Queued'}, status=status.HTTP_409_CONFLICT)
 
         result = delete_source(source.id)
 
@@ -257,7 +257,10 @@ class SourceVersionListView(SourceVersionBaseView, CreateAPIView, ListWithHeader
                     return Response(serializer.data, status=status.HTTP_201_CREATED)
             except IntegrityError as ex:
                 return Response(
-                    dict(error=str(ex), detail=VERSION_ALREADY_EXISTS.format(version)),
+                    {
+                        'error': str(ex),
+                        'detail': VERSION_ALREADY_EXISTS.format(version)
+                    },
                     status=status.HTTP_409_CONFLICT
                 )
 
@@ -318,10 +321,15 @@ class SourceConceptsIndexView(SourceBaseView):
         try:
             result = index_source_concepts.delay(source.id)
         except AlreadyQueued:
-            return Response(dict(detail='Already Queued'), status=status.HTTP_409_CONFLICT)
+            return Response({'detail': 'Already Queued'}, status=status.HTTP_409_CONFLICT)
 
         return Response(
-            dict(state=result.state, username=self.request.user.username, task=result.task_id, queue='default'),
+            {
+                'state': result.state,
+                'username': self.request.user.username,
+                'task': result.task_id,
+                'queue': 'default'
+            },
             status=status.HTTP_202_ACCEPTED
         )
 
@@ -342,10 +350,15 @@ class SourceMappingsIndexView(SourceBaseView):
         try:
             result = index_source_mappings.delay(source.id)
         except AlreadyQueued:
-            return Response(dict(detail='Already Queued'), status=status.HTTP_409_CONFLICT)
+            return Response({'detail': 'Already Queued'}, status=status.HTTP_409_CONFLICT)
 
         return Response(
-            dict(state=result.state, username=self.request.user.username, task=result.task_id, queue='default'),
+            {
+                'state': result.state,
+                'username': self.request.user.username,
+                'task': result.task_id,
+                'queue': 'default'
+            },
             status=status.HTTP_202_ACCEPTED
         )
 
@@ -384,7 +397,7 @@ class SourceConceptsCloneView(SourceBaseView):
                     self.request.get_full_path(), is_verbose, **parameters
                 )
                 result['status'] = status.HTTP_200_OK
-                result['bundle'] = BundleSerializer(bundle, context=dict(request=request)).data
+                result['bundle'] = BundleSerializer(bundle, context={'request': request}).data
             else:
                 result['status'] = status.HTTP_404_NOT_FOUND
                 result['errors'] = [f'Concept to clone with expression {expression} not found.']

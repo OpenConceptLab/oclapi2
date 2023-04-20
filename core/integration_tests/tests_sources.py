@@ -86,7 +86,7 @@ class SourceListViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 1)
-        self.assertEqual(response.data[0], dict(id=source.mnemonic, url=source.uri))
+        self.assertEqual(response.data[0], {'id': source.mnemonic, 'url': source.uri})
 
     def test_get_200_zip(self):
         response = self.client.get(
@@ -280,7 +280,7 @@ class SourceRetrieveUpdateDestroyViewTest(OCLAPITestCase):
 
         response = self.client.put(
             sources_url,
-            dict(hierarchy_root_url=concept.uri),
+            {'hierarchy_root_url': concept.uri},
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -296,7 +296,7 @@ class SourceRetrieveUpdateDestroyViewTest(OCLAPITestCase):
 
         response = self.client.put(
             sources_url,
-            dict(hierarchy_root_url=concept2.uri),
+            {'hierarchy_root_url': concept2.uri},
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -312,7 +312,7 @@ class SourceRetrieveUpdateDestroyViewTest(OCLAPITestCase):
 
         response = self.client.put(
             sources_url,
-            dict(hierarchy_root_url=unknown_concept.uri),
+            {'hierarchy_root_url': unknown_concept.uri},
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -334,7 +334,7 @@ class SourceRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 202)
-        self.assertEqual(response.data, dict(task='task-id'))
+        self.assertEqual(response.data, {'task': 'task-id'})
         delete_source_task_mock.delay.assert_called_once_with(source.id)
 
     @patch('core.common.models.delete_s3_objects')
@@ -384,7 +384,10 @@ class SourceVersionListViewTest(OCLAPITestCase):
     def test_post_201(self):
         response = self.client.post(
             f'/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}/versions/',
-            dict(id='v1', description='Version 1'),
+            {
+                'id': 'v1',
+                'description': 'Version 1'
+            },
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -399,7 +402,10 @@ class SourceVersionListViewTest(OCLAPITestCase):
         with transaction.atomic():
             response = self.client.post(
                 f'/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}/versions/',
-                dict(id='v1', description='Version 1'),
+                {
+                    'id': 'v1',
+                    'description': 'Version 1'
+                },
                 HTTP_AUTHORIZATION='Token ' + self.token,
                 format='json'
             )
@@ -411,7 +417,10 @@ class SourceVersionListViewTest(OCLAPITestCase):
     def test_post_400(self, export_source_mock):
         response = self.client.post(
             f'/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}/versions/',
-            dict(id=None, description='Version 1'),
+            {
+                'id': None,
+                'description': 'Version 1'
+            },
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -462,7 +471,7 @@ class SourceLatestVersionRetrieveUpdateViewTest(OCLAPITestCase):
         external_id = '123'
         response = self.client.put(
             f'/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}/latest/',
-            dict(external_id=external_id),
+            {'external_id': external_id},
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -479,7 +488,7 @@ class SourceLatestVersionRetrieveUpdateViewTest(OCLAPITestCase):
     def test_put_400(self):
         response = self.client.put(
             f'/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}/latest/',
-            dict(id=None),
+            {'id': None},
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -494,7 +503,7 @@ class SourceExtrasViewTest(OCLAPITestCase):
         self.organization = Organization.objects.first()
         self.user = UserProfile.objects.filter(is_superuser=True).first()
         self.token = self.user.get_token()
-        self.extras = dict(foo='bar', tao='ching')
+        self.extras = {'foo': 'bar', 'tao': 'ching'}
         self.source = OrganizationSourceFactory(organization=self.organization, extras=self.extras)
 
     def test_get_200(self):
@@ -510,7 +519,7 @@ class SourceVersionExtrasViewTest(OCLAPITestCase):
         self.organization = Organization.objects.first()
         self.user = UserProfile.objects.filter(is_superuser=True).first()
         self.token = self.user.get_token()
-        self.extras = dict(foo='bar', tao='ching')
+        self.extras = {'foo': 'bar', 'tao': 'ching'}
         self.source = OrganizationSourceFactory(organization=self.organization, extras=self.extras)
         self.source_v1 = OrganizationSourceFactory(
             organization=self.organization, extras=self.extras, mnemonic=self.source.mnemonic, version='v1')
@@ -547,10 +556,10 @@ class SourceVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(self.source.extras, {})
         self.assertEqual(self.source_v1.extras, {})
 
-        extras = dict(foo='bar')
+        extras = {'foo': 'bar'}
         response = self.client.put(
             self.source_v1.uri,
-            dict(extras=extras),
+            {'extras': extras},
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -564,7 +573,7 @@ class SourceVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
     def test_put_400(self):
         response = self.client.put(
             self.source_v1.uri,
-            dict(id=None),
+            {'id': None},
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -593,7 +602,7 @@ class SourceVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         concept = ConceptFactory(parent=self.source_v1)
 
         collection = OrganizationCollectionFactory(public_access='None', autoexpand_head=False)
-        collection.add_expressions(dict(expressions=[concept.uri]), collection.created_by)
+        collection.add_expressions({'expressions': [concept.uri]}, collection.created_by)
         self.assertEqual(collection.expansions.count(), 0)
         self.assertEqual(collection.references.count(), 1)
 
@@ -625,7 +634,7 @@ class SourceVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         collection.expansion_uri = expansion.uri
         collection.autoexpand_head = True
         collection.save()
-        collection.add_expressions(dict(expressions=[concept2.uri]), collection.created_by)
+        collection.add_expressions({'expressions': [concept2.uri]}, collection.created_by)
         self.assertEqual(collection.expansion.concepts.count(), 1)
         self.assertEqual(collection.references.count(), 2)
 
@@ -646,7 +655,7 @@ class SourceExtraRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.organization = Organization.objects.first()
         self.user = UserProfile.objects.filter(is_superuser=True).first()
         self.token = self.user.get_token()
-        self.extras = dict(foo='bar', tao='ching')
+        self.extras = {'foo': 'bar', 'tao': 'ching'}
         self.source = OrganizationSourceFactory(organization=self.organization, extras=self.extras)
 
     def test_get_200(self):
@@ -657,7 +666,7 @@ class SourceExtraRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data, dict(foo='bar'))
+        self.assertEqual(response.data, {'foo': 'bar'})
 
     def test_get_404(self):
         response = self.client.get(
@@ -671,20 +680,20 @@ class SourceExtraRetrieveUpdateDestroyViewTest(OCLAPITestCase):
     def test_put_200(self):
         response = self.client.put(
             self.source.uri + 'extras/foo/',
-            dict(foo='foobar'),
+            {'foo': 'foobar'},
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data, dict(foo='foobar'))
+        self.assertEqual(response.data, {'foo': 'foobar'})
         self.source.refresh_from_db()
-        self.assertEqual(self.source.extras, dict(foo='foobar', tao='ching'))
+        self.assertEqual(self.source.extras, {'foo': 'foobar', 'tao': 'ching'})
 
     def test_put_400(self):
         response = self.client.put(
             self.source.uri + 'extras/foo/',
-            dict(tao='te-ching'),
+            {'tao': 'te-ching'},
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -701,7 +710,7 @@ class SourceExtraRetrieveUpdateDestroyViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 204)
         self.source.refresh_from_db()
-        self.assertEqual(self.source.extras, dict(tao='ching'))
+        self.assertEqual(self.source.extras, {'tao': 'ching'})
 
         response = self.client.delete(
             self.source.uri + 'extras/foo/',
@@ -711,7 +720,7 @@ class SourceExtraRetrieveUpdateDestroyViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 404)
         self.source.refresh_from_db()
-        self.assertEqual(self.source.extras, dict(tao='ching'))
+        self.assertEqual(self.source.extras, {'tao': 'ching'})
 
 
 class SourceVersionExportViewTest(OCLAPITestCase):
@@ -819,7 +828,7 @@ class SourceVersionExportViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data, dict(url=s3_url))
+        self.assertEqual(response.data, {'url': s3_url})
         s3_exists_mock.assert_called_once_with(f"username/source1_HEAD.{self.HEAD_updated_at}.zip")
         s3_url_for_mock.assert_called_once_with(f"username/source1_HEAD.{self.HEAD_updated_at}.zip")
 
@@ -839,7 +848,7 @@ class SourceVersionExportViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data, dict(url=s3_url))
+        self.assertEqual(response.data, {'url': s3_url})
         s3_has_path_mock.assert_called_once_with("username/source1_v1.")
         s3_get_last_key_from_path_mock.assert_called_once_with("username/source1_v1.")
         s3_url_for_mock.assert_called_once_with(f"username/source1_v1.{self.v1_updated_at}.zip")
@@ -1087,7 +1096,9 @@ class SourceLogoViewTest(OCLAPITestCase):
 
         response = self.client.post(
             self.source.uri + 'logo/',
-            dict(base64='base64-data'),
+            {
+                'base64': 'base64-data'
+            },
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -1460,7 +1471,7 @@ class SourceVersionProcessingViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data, dict(is_processing=True, process_ids=['Task123']))
+        self.assertEqual(response.data, {'is_processing': True, 'process_ids': ['Task123']})
 
     @patch('core.common.models.AsyncResult.failed')
     @patch('core.common.models.AsyncResult.successful')
@@ -1535,7 +1546,7 @@ class SourceMappedSourcesListViewTest(OCLAPITestCase):
     def test_post_405(self):
         response = self.client.post(
             self.source.url + 'mapped-sources/',
-            dict(default_locale='en'),
+            {'default_locale': 'en'},
             HTTP_AUTHORIZATION=f'Token {self.token}'
         )
 

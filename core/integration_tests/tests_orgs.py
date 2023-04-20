@@ -128,7 +128,7 @@ class OrganizationListViewTest(OCLAPITestCase):
     def test_post_201(self):
         response = self.client.post(
             '/orgs/',
-            dict(id='test-org-1', name='Test Org 1'),
+            {'id': 'test-org-1', 'name': 'Test Org 1'},
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -142,24 +142,27 @@ class OrganizationListViewTest(OCLAPITestCase):
     def test_post_400(self):
         response = self.client.post(
             '/orgs/',
-            dict(id='test-org-1'),
+            {'id': 'test-org-1'},
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
 
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.data, dict(name=[ErrorDetail(string='This field is required.', code='required')]))
+        self.assertEqual(response.data, {'name': [ErrorDetail(string='This field is required.', code='required')]})
         self.assertFalse(self.user.organizations.filter(mnemonic='test-org-1').exists())
 
         response = self.client.post(
             '/orgs/',
-            dict(id='OCL', name='another ocl'),
+            {
+                'id': 'OCL',
+                'name': 'another ocl'
+            },
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
 
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.data, dict(mnemonic='Organization with mnemonic OCL already exists.'))
+        self.assertEqual(response.data, {'mnemonic': 'Organization with mnemonic OCL already exists.'})
 
 
 class OrganizationDetailViewTest(OCLAPITestCase):
@@ -219,7 +222,7 @@ class OrganizationDetailViewTest(OCLAPITestCase):
     def test_put_200(self):
         response = self.client.put(
             f'/orgs/{self.org.mnemonic}/',
-            dict(name='Wayne Corporation'),
+            {'name': 'Wayne Corporation'},
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -413,7 +416,7 @@ class OrganizationExtrasViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data, {})
 
-        org = OrganizationFactory(extras=dict(foo='bar'))
+        org = OrganizationFactory(extras={'foo': 'bar'})
 
         response = self.client.get(
             org.uri + 'extras/',
@@ -422,13 +425,13 @@ class OrganizationExtrasViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data, dict(foo='bar'))
+        self.assertEqual(response.data, {'foo': 'bar'})
 
 
 class OrganizationExtraRetrieveUpdateDestroyViewTest(OCLAPITestCase):
     def setUp(self):
         super().setUp()
-        self.extras = dict(foo='bar', tao='ching')
+        self.extras = {'foo': 'bar', 'tao': 'ching'}
         self.organization = OrganizationFactory(extras=self.extras)
         self.user = UserProfileFactory(organizations=[self.organization])
         self.token = self.user.get_token()
@@ -441,7 +444,7 @@ class OrganizationExtraRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data, dict(foo='bar'))
+        self.assertEqual(response.data, {'foo': 'bar'})
 
     def test_get_404(self):
         response = self.client.get(
@@ -463,20 +466,20 @@ class OrganizationExtraRetrieveUpdateDestroyViewTest(OCLAPITestCase):
     def test_put_200(self):
         response = self.client.put(
             self.organization.uri + 'extras/foo/',
-            dict(foo='foobar'),
+            {'foo': 'foobar'},
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data, dict(foo='foobar'))
+        self.assertEqual(response.data, {'foo': 'foobar'})
         self.organization.refresh_from_db()
-        self.assertEqual(self.organization.extras, dict(foo='foobar', tao='ching'))
+        self.assertEqual(self.organization.extras, {'foo': 'foobar', 'tao': 'ching'})
 
     def test_put_400(self):
         response = self.client.put(
             self.organization.uri + 'extras/foo/',
-            dict(tao='te-ching'),
+            {'tao': 'te-ching'},
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -493,7 +496,7 @@ class OrganizationExtraRetrieveUpdateDestroyViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 204)
         self.organization.refresh_from_db()
-        self.assertEqual(self.organization.extras, dict(tao='ching'))
+        self.assertEqual(self.organization.extras, {'tao': 'ching'})
 
         response = self.client.delete(
             self.organization.uri + 'extras/foo/',
@@ -503,7 +506,7 @@ class OrganizationExtraRetrieveUpdateDestroyViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 404)
         self.organization.refresh_from_db()
-        self.assertEqual(self.organization.extras, dict(tao='ching'))
+        self.assertEqual(self.organization.extras, {'tao': 'ching'})
 
 
 class OrganizationLogoViewTest(OCLAPITestCase):
@@ -521,7 +524,7 @@ class OrganizationLogoViewTest(OCLAPITestCase):
 
         response = self.client.post(
             self.organization.uri + 'logo/',
-            dict(base64='base64-data'),
+            {'base64': 'base64-data'},
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -557,7 +560,7 @@ class OrganizationOverviewViewTest(OCLAPITestCase):
     def test_put_200(self):
         response = self.client.put(
             f'/orgs/{self.org.mnemonic}/overview/',
-            dict(overview=dict(foo='bar')),
+            {'overview': {'foo': 'bar'}},
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -565,9 +568,9 @@ class OrganizationOverviewViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['id'], self.org.mnemonic)
         self.assertEqual(response.data['name'], 'Stark Enterprises')
-        self.assertEqual(response.data['overview'], dict(foo='bar'))
+        self.assertEqual(response.data['overview'], {'foo': 'bar'})
         self.org.refresh_from_db()
-        self.assertEqual(self.org.overview, dict(foo='bar'))
+        self.assertEqual(self.org.overview, {'foo': 'bar'})
 
 
 class OrganizationSourceListViewTest(OCLAPITestCase):

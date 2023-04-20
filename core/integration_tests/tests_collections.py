@@ -53,7 +53,7 @@ class CollectionListViewTest(OCLAPITestCase):
             self.assertFalse(attr in response.data[0])
 
         concept = ConceptFactory()
-        coll.add_expressions(dict(expressions=[concept.uri]), coll.created_by)
+        coll.add_expressions({'expressions': [concept.uri]}, coll.created_by)
         response = self.client.get(
             f'/orgs/{coll.parent.mnemonic}/collections/?contains={concept.uri}'
             f'&includeReferences=true',
@@ -75,7 +75,13 @@ class CollectionListViewTest(OCLAPITestCase):
         self.assertEqual(response.data[0]['url'], coll.uri)
         self.assertEqual(
             response.data[0]['summary'],
-            dict(versions=1, active_concepts=1, active_mappings=0, active_references=1, expansions=1)
+            {
+                'versions': 1,
+                'active_concepts': 1,
+                'active_mappings': 0,
+                'active_references': 1,
+                'expansions': 1
+            }
         )
 
         response = self.client.get(
@@ -90,7 +96,13 @@ class CollectionListViewTest(OCLAPITestCase):
         self.assertEqual(response.data[0]['url'], coll.uri)
         self.assertEqual(
             response.data[0]['summary'],
-            dict(versions=1, active_concepts=1, active_mappings=0, active_references=1, expansions=1)
+            {
+                'versions': 1,
+                'active_concepts': 1,
+                'active_mappings': 0,
+                'active_references': 1,
+                'expansions': 1
+            }
         )
 
         response = self.client.get(
@@ -100,7 +112,7 @@ class CollectionListViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 1)
-        self.assertEqual(response.data[0], dict(id=coll.mnemonic, url=coll.uri))
+        self.assertEqual(response.data[0], {'id': coll.mnemonic, 'url': coll.uri})
 
     def test_post_201(self):
         org = OrganizationFactory(mnemonic='org')
@@ -108,10 +120,16 @@ class CollectionListViewTest(OCLAPITestCase):
 
         response = self.client.post(
             '/orgs/org/collections/',
-            dict(
-                default_locale='en', supported_locales='en,fr', id='coll', name='Collection', mnemonic='coll',
-                extras=dict(foo='bar')
-            ),
+            {
+                'default_locale': 'en',
+                'supported_locales': 'en,fr',
+                'id': 'coll',
+                'name': 'Collection',
+                'mnemonic': 'coll',
+                'extras': {
+                    'foo': 'bar'
+                }
+            },
             HTTP_AUTHORIZATION='Token ' + user.get_token(),
             format='json'
         )
@@ -126,10 +144,16 @@ class CollectionListViewTest(OCLAPITestCase):
 
         response = self.client.post(
             '/users/user/collections/',
-            dict(
-                default_locale='en', supported_locales='en,fr', id='coll', name='Collection', mnemonic='coll',
-                extras=dict(foo='bar')
-            ),
+            {
+                'default_locale': 'en',
+                'supported_locales': 'en,fr',
+                'id': 'coll',
+                'name': 'Collection',
+                'mnemonic': 'coll',
+                'extras': {
+                    'foo': 'bar'
+                }
+            },
             HTTP_AUTHORIZATION='Token ' + user.get_token(),
             format='json'
         )
@@ -153,10 +177,16 @@ class CollectionListViewTest(OCLAPITestCase):
         token = user.get_token()
         response = self.client.post(
             '/orgs/org/collections/',
-            dict(
-                default_locale='en', supported_locales='en,fr', id='coll', name='Collection', mnemonic='coll',
-                extras=dict(foo='bar')
-            ),
+            {
+                'default_locale': 'en',
+                'supported_locales': 'en,fr',
+                'id': 'coll',
+                'name': 'Collection',
+                'mnemonic': 'coll',
+                'extras': {
+                    'foo': 'bar'
+                }
+            },
             HTTP_AUTHORIZATION='Token ' + token,
             format='json'
         )
@@ -176,7 +206,7 @@ class CollectionListViewTest(OCLAPITestCase):
         concept = ConceptFactory(parent=source)
         response = self.client.put(
             '/orgs/org/collections/coll/references/',
-            dict(data=dict(concepts=[concept.uri])),
+            {'data': {'concepts': [concept.uri]}},
             HTTP_AUTHORIZATION='Token ' + token,
             format='json'
         )
@@ -191,11 +221,12 @@ class CollectionListViewTest(OCLAPITestCase):
         self.assertEqual(
             response.data,
             [
-                dict(
-                    added=True, expression=concept.uri,
-                    message='Added the latest versions of concept to the collection. Future updates will not be added'
-                            ' automatically.'
-                )
+                {
+                    'added': True,
+                    'expression': concept.uri,
+                    'message': 'Added the latest versions of concept to the collection. Future updates will not be '\
+                               'added automatically.'
+                }
             ]
         )
 
@@ -205,10 +236,17 @@ class CollectionListViewTest(OCLAPITestCase):
         token = user.get_token()
         response = self.client.post(
             '/orgs/org/collections/',
-            dict(
-                default_locale='en', supported_locales='en,fr', id='coll', name='Collection', mnemonic='coll',
-                extras=dict(foo='bar'), autoexpand_head=False
-            ),
+            {
+                'default_locale': 'en',
+                'supported_locales': 'en,fr',
+                'id': 'coll',
+                'name': 'Collection',
+                'mnemonic': 'coll',
+                'extras': {
+                    'foo': 'bar'
+                },
+                'autoexpand_head': False
+            },
             HTTP_AUTHORIZATION='Token ' + token,
             format='json'
         )
@@ -223,7 +261,7 @@ class CollectionListViewTest(OCLAPITestCase):
         concept = ConceptFactory(parent=source)
         response = self.client.put(
             '/orgs/org/collections/coll/references/',
-            dict(data=dict(concepts=[concept.uri])),
+            {'data': {'concepts': [concept.uri]}},
             HTTP_AUTHORIZATION='Token ' + token,
             format='json'
         )
@@ -238,11 +276,12 @@ class CollectionListViewTest(OCLAPITestCase):
         self.assertEqual(
             response.data,
             [
-                dict(
-                    added=True, expression=concept.uri,
-                    message='Added the latest versions of concept to the collection. Future updates will not be added'
-                            ' automatically.'
-                )
+                {
+                    'added': True,
+                    'expression': concept.uri,
+                    'message': 'Added the latest versions of concept to the collection. Future updates will not be' \
+                               ' added automatically.'
+                }
             ]
         )
 
@@ -252,16 +291,20 @@ class CollectionListViewTest(OCLAPITestCase):
 
         response = self.client.post(
             '/orgs/org/collections/',
-            dict(
-                default_locale='en', supported_locales='en,fr', id='coll',
-                extras=dict(foo='bar')
-            ),
+            {
+                'default_locale': 'en',
+                'supported_locales': 'en,fr',
+                'id': 'coll',
+                'extras': {
+                    'foo': 'bar'
+                }
+            },
             HTTP_AUTHORIZATION='Token ' + user.get_token(),
             format='json'
         )
 
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.data, dict(name=[ErrorDetail(string='This field is required.', code='required')]))
+        self.assertEqual(response.data, {'name': [ErrorDetail(string='This field is required.', code='required')]})
         self.assertEqual(org.collection_set.count(), 0)
 
     def test_post_403(self):
@@ -269,9 +312,11 @@ class CollectionListViewTest(OCLAPITestCase):
 
         response = self.client.post(
             '/orgs/org/collections/',
-            dict(
-                default_locale='en', supported_locales='en,fr', id='coll',
-            ),
+            {
+                'default_locale': 'en',
+                'supported_locales': 'en,fr',
+                'id': 'coll'
+            },
             format='json'
         )
 
@@ -280,9 +325,11 @@ class CollectionListViewTest(OCLAPITestCase):
     def test_post_405(self):
         response = self.client.post(
             '/orgs/org/collections/',
-            dict(
-                default_locale='en', supported_locales='en,fr', id='coll',
-            ),
+            {
+                'default_locale': 'en',
+                'supported_locales': 'en,fr',
+                'id': 'coll'
+            },
             format='json'
         )
 
@@ -401,7 +448,7 @@ class CollectionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 202)
-        self.assertEqual(response.data, dict(task='task-id'))
+        self.assertEqual(response.data, {'task': 'task-id'})
         delete_collection_task_mock.delay.assert_called_once_with(coll.id)
 
     def test_put_401(self):
@@ -410,7 +457,7 @@ class CollectionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
 
         response = self.client.put(
             coll.uri,
-            dict(name='Collection1'),
+            {'name': 'Collection1'},
             format='json'
         )
 
@@ -423,7 +470,7 @@ class CollectionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
 
         response = self.client.put(
             coll.uri,
-            dict(name='Collection1'),
+            {'name': 'Collection1'},
             HTTP_AUTHORIZATION='Token ' + user.get_token(),
             format='json'
         )
@@ -441,13 +488,13 @@ class CollectionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
 
         response = self.client.put(
             coll.uri,
-            dict(name=''),
+            {'name': ''},
             HTTP_AUTHORIZATION='Token ' + user.get_token(),
             format='json'
         )
 
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.data, dict(name=[ErrorDetail(string='This field may not be blank.', code='blank')]))
+        self.assertEqual(response.data, {'name': [ErrorDetail(string='This field may not be blank.', code='blank')]})
 
 
 class CollectionReferencesViewTest(OCLAPITestCase):
@@ -526,7 +573,7 @@ class CollectionReferencesViewTest(OCLAPITestCase):
     def test_delete_204_random(self):
         response = self.client.delete(
             self.collection.uri + 'references/',
-            dict(expressions=['/foo/']),
+            {'expressions': ['/foo/']},
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -539,7 +586,7 @@ class CollectionReferencesViewTest(OCLAPITestCase):
     def test_delete_204_all_expressions(self):
         response = self.client.delete(
             self.collection.uri + 'references/',
-            dict(expressions='*'),
+            {'expressions': '*'},
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -552,7 +599,7 @@ class CollectionReferencesViewTest(OCLAPITestCase):
     def test_delete_204_bulk_reference_ids(self):
         response = self.client.delete(
             self.collection.uri + 'references/',
-            dict(ids=[self.reference.id]),
+            {'ids': [self.reference.id]},
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -565,7 +612,9 @@ class CollectionReferencesViewTest(OCLAPITestCase):
     def test_delete_204_specific_expression(self):
         response = self.client.delete(
             self.collection.uri + 'references/',
-            dict(expressions=[self.concept.uri]),
+            {
+                'expressions': [self.concept.uri]
+            },
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -578,7 +627,9 @@ class CollectionReferencesViewTest(OCLAPITestCase):
         MappingFactory(from_concept=concept, parent=concept.parent)
         response = self.client.put(
             self.collection.uri + 'references/?cascade=sourcemappings',
-            dict(data=dict(mappings=[concept.uri])),
+            {
+                'data': {'mappings': [concept.uri]}
+            },
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -590,7 +641,9 @@ class CollectionReferencesViewTest(OCLAPITestCase):
 
         response = self.client.delete(
             self.collection.uri + 'references/',
-            dict(expressions=[concept.uri]),
+            {
+                'expressions': [concept.uri]
+            },
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -606,19 +659,21 @@ class CollectionReferencesViewTest(OCLAPITestCase):
 
         response = self.client.put(
             self.collection.uri + 'references/',
-            dict(data=dict(concepts='*')),
+            {'data': {'concepts': '*'}},
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
 
         self.assertEqual(response.status_code, 202)
         self.assertEqual(response.data, [])
-        add_references_mock.delay.assert_called_once_with(self.user.id, dict(concepts='*'), self.collection.id, '', '')
+        add_references_mock.delay.assert_called_once_with(self.user.id, {'concepts': '*'}, self.collection.id, '', '')
 
     def test_put_200_specific_expression(self):  # pylint: disable=too-many-statements
         response = self.client.put(
             self.collection.uri + 'references/',
-            dict(data=dict(concepts=[self.concept.uri])),
+            {
+                'data': {'concepts': [self.concept.uri]}
+            },
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -627,17 +682,22 @@ class CollectionReferencesViewTest(OCLAPITestCase):
         self.assertEqual(
             response.data,
             [
-                dict(
-                    added=False, expression=self.concept.uri,
-                    message=['Concept or Mapping reference name must be unique in a collection.']
-                )
+                {
+                    'added': False,
+                    'expression': self.concept.uri,
+                    'message': ['Concept or Mapping reference name must be unique in a collection.']
+                }
             ]
         )
 
         concept2 = ConceptFactory()
         response = self.client.put(
             self.collection.uri + 'references/',
-            dict(data=dict(concepts=[concept2.uri])),
+            {
+                'data': {
+                    'concepts': [concept2.uri]
+                }
+            },
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -652,11 +712,12 @@ class CollectionReferencesViewTest(OCLAPITestCase):
         self.assertEqual(
             response.data,
             [
-                dict(
-                    added=True, expression=concept2.uri,
-                    message='Added the latest versions of concept to the collection. Future updates will not be added'
-                            ' automatically.'
-                )
+                {
+                    'added': True,
+                    'expression': concept2.uri,
+                    'message': 'Added the latest versions of concept to the collection. '
+                               'Future updates will not be added automatically.'
+                }
             ]
         )
 
@@ -664,7 +725,11 @@ class CollectionReferencesViewTest(OCLAPITestCase):
 
         response = self.client.put(
             self.collection.uri + 'references/',
-            dict(data=dict(mappings=[mapping.uri])),
+            {
+                'data': {
+                    'mappings': [mapping.uri]
+                }
+            },
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -680,11 +745,12 @@ class CollectionReferencesViewTest(OCLAPITestCase):
         self.assertEqual(
             response.data,
             [
-                dict(
-                    added=True, expression=mapping.uri,
-                    message='Added the latest versions of mapping to the collection. Future updates will not be added'
-                            ' automatically.'
-                )
+                {
+                    'added': True,
+                    'expression': mapping.uri,
+                    'message': 'Added the latest versions of mapping to the collection.'
+                               ' Future updates will not be added automatically.'
+                }
             ]
         )
 
@@ -694,7 +760,11 @@ class CollectionReferencesViewTest(OCLAPITestCase):
 
         response = self.client.put(
             self.collection.uri + 'references/?cascade=sourcemappings',
-            dict(data=dict(concepts=[latest_version.uri])),
+            {
+                'data': {
+                    'concepts': [latest_version.uri]
+                }
+            },
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -719,14 +789,14 @@ class CollectionReferencesViewTest(OCLAPITestCase):
 
         response = self.client.put(
             self.collection.uri + 'references/',
-            dict(
-                data=dict(
-                    system=latest_version.parent.url,
-                    code=latest_version.mnemonic,
-                    resource_version=latest_version.version,
-                    cascade='sourcemappings'
-                )
-            ),
+            {
+                'data': {
+                    'system': latest_version.parent.url,
+                    'code': latest_version.mnemonic,
+                    'resource_version': latest_version.version,
+                    'cascade': 'sourcemappings'
+                }
+            },
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -741,15 +811,15 @@ class CollectionReferencesViewTest(OCLAPITestCase):
 
         response = self.client.put(
             self.collection.uri + 'references/',
-            dict(
-                data=dict(
-                    system=latest_version.parent.url,
-                    code=latest_version.mnemonic,
-                    resource_version=latest_version.version,
-                    cascade='sourcemappings',
-                    exclude=True
-                )
-            ),
+            {
+                'data': {
+                    'system': latest_version.parent.url,
+                    'code': latest_version.mnemonic,
+                    'resource_version': latest_version.version,
+                    'cascade': 'sourcemappings',
+                    'exclude': True
+                }
+            },
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -792,7 +862,11 @@ class CollectionReferencesViewTest(OCLAPITestCase):
 
         response = self.client.put(
             self.collection.uri + 'references/?cascade=sourceToConcepts',
-            dict(data=dict(concepts=[concept1.get_latest_version().uri])),
+            {
+                'data': {
+                    'concepts': [concept1.get_latest_version().uri]
+                }
+            },
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -816,7 +890,11 @@ class CollectionReferencesViewTest(OCLAPITestCase):
 
         response = self.client.put(
             self.collection.uri + 'references/?cascade=sourceToConcepts',
-            dict(data=dict(concepts=[concept4.get_latest_version().uri])),
+            {
+                'data': {
+                    'concepts': [concept4.get_latest_version().uri]
+                }
+            },
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -843,7 +921,11 @@ class CollectionReferencesViewTest(OCLAPITestCase):
 
         response = self.client.put(
             self.collection.uri + 'references/?transformReferences=resourceVersions',
-            dict(data=dict(concepts=[concept2.uri])),
+            {
+                'data': {
+                    'concepts': [concept2.uri]
+                }
+            },
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -852,16 +934,21 @@ class CollectionReferencesViewTest(OCLAPITestCase):
         self.assertEqual(
             response.data,
             [
-                dict(
-                    added=True, expression=concept2_latest_version.uri,
-                    message=ANY
-                )
+                {
+                    'added': True,
+                    'expression': concept2_latest_version.uri,
+                    'message': ANY
+                }
             ]
         )
 
         response = self.client.put(
             self.collection.uri + 'references/',
-            dict(data=dict(concepts=[concept3.uri])),
+            {
+                'data': {
+                    'concepts': [concept3.uri]
+                }
+            },
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -870,10 +957,11 @@ class CollectionReferencesViewTest(OCLAPITestCase):
         self.assertEqual(
             response.data,
             [
-                dict(
-                    added=True, expression=concept3.uri,
-                    message=ANY
-                )
+                {
+                    'added': True,
+                    'expression': concept3.uri,
+                    'message': ANY
+                }
             ]
         )
 
@@ -896,10 +984,16 @@ class CollectionReferencesViewTest(OCLAPITestCase):
         self.assertNotEqual(mapping.uri, mapping_latest_version.uri)
         response = self.client.put(
             self.collection.uri + 'references/?transformReferences=resourceVersions',
-            dict(
-                data=dict(expressions=[concept2.uri]),
-                cascade=dict(cascade_levels="*", return_map_types='*', method='sourcetoconcepts')
-            ),
+            {
+                'data': {
+                    'expressions': [concept2.uri]
+                },
+                'cascade': {
+                    'cascade_levels': "*",
+                    'return_map_types': '*',
+                    'method': 'sourcetoconcepts'
+                }
+            },
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -909,28 +1003,31 @@ class CollectionReferencesViewTest(OCLAPITestCase):
         self.assertEqual(
             [data for data in response.data if data['expression'] == concept2_latest_version.uri],
             [
-                dict(
-                    added=True, expression=concept2_latest_version.uri,
-                    message=ANY
-                )
+                {
+                    'added': True,
+                    'expression': concept2_latest_version.uri,
+                    'message': ANY
+                }
             ]
         )
         self.assertEqual(
             [data for data in response.data if data['expression'] == concept3_latest_version.uri],
             [
-                dict(
-                    added=True, expression=concept3_latest_version.uri,
-                    message=ANY
-                )
+                {
+                    'added': True,
+                    'expression': concept3_latest_version.uri,
+                    'message': ANY
+                }
             ]
         )
         self.assertEqual(
             [data for data in response.data if data['expression'] == mapping_latest_version.uri],
             [
-                dict(
-                    added=True, expression=mapping_latest_version.uri,
-                    message=ANY
-                )
+                {
+                    'added': True,
+                    'expression': mapping_latest_version.uri,
+                    'message': ANY
+                }
             ]
         )
 
@@ -1111,7 +1208,7 @@ class CollectionVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         external_id = 'EXT-123'
         response = self.client.put(
             self.collection_v1.uri,
-            dict(external_id=external_id),
+            {'external_id': external_id},
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -1128,7 +1225,7 @@ class CollectionVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
     def test_put_400(self):
         response = self.client.put(
             self.collection_v1.uri,
-            dict(version=None),
+            {'version': None},
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -1191,7 +1288,7 @@ class CollectionLatestVersionRetrieveUpdateViewTest(OCLAPITestCase):
         external_id = 'EXT-123'
         response = self.client.put(
             self.collection.uri + 'latest/',
-            dict(external_id=external_id),
+            {'external_id': external_id},
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -1211,7 +1308,7 @@ class CollectionLatestVersionRetrieveUpdateViewTest(OCLAPITestCase):
 
         response = self.client.put(
             self.collection.uri + 'latest/',
-            dict(version=None),
+            {'version': None},
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -1225,7 +1322,7 @@ class CollectionExtrasViewTest(OCLAPITestCase):
         super().setUp()
         self.user = UserProfileFactory()
         self.token = self.user.get_token()
-        self.extras = dict(foo='bar', tao='ching')
+        self.extras = {'foo': 'bar', 'tao': 'ching'}
         self.collection = UserCollectionFactory(mnemonic='coll', user=self.user, extras=self.extras)
 
     def test_get_200(self):
@@ -1251,7 +1348,7 @@ class CollectionVersionExtrasViewTest(OCLAPITestCase):
         super().setUp()
         self.user = UserProfileFactory()
         self.token = self.user.get_token()
-        self.extras = dict(foo='bar', tao='ching')
+        self.extras = {'foo': 'bar', 'tao': 'ching'}
         self.collection = UserCollectionFactory(mnemonic='coll', user=self.user, extras=self.extras)
         self.collection_v1 = UserCollectionFactory(mnemonic='coll', user=self.user, extras=self.extras, version='v1')
 
@@ -1278,7 +1375,7 @@ class CollectionExtraRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         super().setUp()
         self.user = UserProfileFactory()
         self.token = self.user.get_token()
-        self.extras = dict(foo='bar', tao='ching')
+        self.extras = {'foo': 'bar', 'tao': 'ching'}
         self.collection = UserCollectionFactory(mnemonic='coll', user=self.user, extras=self.extras)
 
     def test_get_200(self):
@@ -1288,7 +1385,7 @@ class CollectionExtraRetrieveUpdateDestroyViewTest(OCLAPITestCase):
             format='json'
         )
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data, dict(foo='bar'))
+        self.assertEqual(response.data, {'foo': 'bar'})
 
     def test_get_404(self):
         response = self.client.get(
@@ -1301,19 +1398,19 @@ class CollectionExtraRetrieveUpdateDestroyViewTest(OCLAPITestCase):
     def test_put_200(self):
         response = self.client.put(
             self.collection.uri + 'extras/foo/',
-            dict(foo='barbar'),
+            {'foo': 'barbar'},
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data, dict(foo='barbar'))
+        self.assertEqual(response.data, {'foo': 'barbar'})
         self.collection.refresh_from_db()
         self.assertEqual(self.collection.extras['foo'], 'barbar')
 
     def test_put_400(self):
         response = self.client.put(
             self.collection.uri + 'extras/foo/',
-            dict(foo=None),
+            {'foo': None},
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -1330,7 +1427,7 @@ class CollectionExtraRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         )
         self.assertEqual(response.status_code, 204)
         self.collection.refresh_from_db()
-        self.assertEqual(self.collection.extras, dict(tao='ching'))
+        self.assertEqual(self.collection.extras, {'tao': 'ching'})
 
     def test_delete_404(self):
         response = self.client.delete(
@@ -1582,7 +1679,10 @@ class CollectionVersionListViewTest(OCLAPITestCase):
     def test_post_201(self):
         response = self.client.post(
             self.collection.uri + 'versions/',
-            dict(id='v1', description='version1'),
+            {
+                'id': 'v1',
+                'description': 'version1'
+            },
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -1606,7 +1706,11 @@ class CollectionVersionListViewTest(OCLAPITestCase):
     def test_post_201_autoexpand_false(self):
         response = self.client.post(
             self.collection.uri + 'versions/',
-            dict(id='v1', description='version1', autoexpand=False),
+            {
+                'id': 'v1',
+                'description': 'version1',
+                'autoexpand': False
+            },
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -1641,7 +1745,9 @@ class ExportCollectionTaskTest(OCLAPITestCase):
         collection.save()
 
         collection.add_expressions(
-            data=dict(expressions=[concept1.uri, concept2.uri, mapping.uri]), user=collection.created_by,
+            data={
+                'expressions': [concept1.uri, concept2.uri, mapping.uri]
+            }, user=collection.created_by,
             transform='resourceversions'
         )
         collection.refresh_from_db()
@@ -1721,7 +1827,7 @@ class CollectionConceptsViewTest(OCLAPITestCase):
         concept2 = ConceptFactory(parent=source2, mnemonic='concept')
         concept3 = ConceptFactory(parent=source2, mnemonic='concept3')
         self.collection.add_expressions(
-            dict(expressions=[concept1.uri, concept2.uri, concept3.uri]), self.collection.created_by)
+            {'expressions': [concept1.uri, concept2.uri, concept3.uri]}, self.collection.created_by)
 
         response = self.client.get(
             self.collection.concepts_url,
@@ -1762,7 +1868,7 @@ class CollectionConceptsViewTest(OCLAPITestCase):
         source2 = OrganizationSourceFactory()
         concept1 = ConceptFactory(parent=source1, mnemonic='concept')
         concept2 = ConceptFactory(parent=source2, mnemonic='concept')
-        self.collection.add_expressions(dict(expressions=[concept1.uri, concept2.uri]), self.collection.created_by)
+        self.collection.add_expressions({'expressions': [concept1.uri, concept2.uri]}, self.collection.created_by)
 
         response = self.client.get(
             self.collection.concepts_url + 'concept/',
@@ -1817,7 +1923,7 @@ class CollectionMappingsViewTest(OCLAPITestCase):
         mapping2 = MappingFactory(parent=source2, mnemonic='mapping')
         mapping3 = MappingFactory(parent=source2, mnemonic='mapping3')
         self.collection.add_expressions(
-            dict(expressions=[mapping1.uri, mapping2.uri, mapping3.uri]), self.collection.created_by)
+            {'expressions': [mapping1.uri, mapping2.uri, mapping3.uri]}, self.collection.created_by)
 
         response = self.client.get(
             self.collection.mappings_url,
@@ -1858,7 +1964,7 @@ class CollectionMappingsViewTest(OCLAPITestCase):
         source2 = OrganizationSourceFactory()
         mapping1 = MappingFactory(parent=source1, mnemonic='mapping')
         mapping2 = MappingFactory(parent=source2, mnemonic='mapping')
-        self.collection.add_expressions(dict(expressions=[mapping1.uri, mapping2.uri]), self.collection.created_by)
+        self.collection.add_expressions({'expressions': [mapping1.uri, mapping2.uri]}, self.collection.created_by)
         response = self.client.get(
             self.collection.mappings_url + 'mapping/',
             HTTP_AUTHORIZATION='Token ' + self.token,
@@ -1901,7 +2007,7 @@ class CollectionLogoViewTest(OCLAPITestCase):
 
         response = self.client.post(
             self.collection.uri + 'logo/',
-            dict(base64='base64-data'),
+            {'base64': 'base64-data'},
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -1992,7 +2098,7 @@ class ReferenceExpressionResolveViewTest(OCLAPITestCase):
 
         response = self.client.post(
             '/$resolveReference/',
-            [dict(url=collection.uri), mapping.parent.uri, '/orgs/foobar/'],
+            [{'url': collection.uri}, mapping.parent.uri, '/orgs/foobar/'],
             HTTP_AUTHORIZATION='Token ' + token,
             format='json'
         )
@@ -2004,7 +2110,7 @@ class ReferenceExpressionResolveViewTest(OCLAPITestCase):
         self.assertTrue(collection_resolution['resolved'])
         self.assertIsNotNone(collection_resolution['timestamp'])
         self.assertEqual(collection_resolution['resolution_url'], collection.uri)
-        self.assertEqual(collection_resolution['request'], dict(url=collection.uri))
+        self.assertEqual(collection_resolution['request'], {'url': collection.uri})
         self.assertEqual(collection_resolution['result']['short_code'], collection.mnemonic)
         self.assertEqual(collection_resolution['result']['id'], collection.version)
         self.assertEqual(collection_resolution['result']['url'], collection.uri)
@@ -2528,7 +2634,7 @@ class CollectionVersionExpansionViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.data, dict(erors=['Cannot delete default expansion']))
+        self.assertEqual(response.data, {'errors': ['Cannot delete default expansion']})
 
     def test_delete_204(self):
         response = self.client.delete(
@@ -2549,7 +2655,7 @@ class CollectionVersionExpansionsViewTest(OCLAPITestCase):
     def test_post(self):
         response = self.client.post(
             self.collection.url + 'HEAD/expansions/',
-            dict(mnemonic='e1'),
+            {'mnemonic': 'e1'},
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -2560,7 +2666,7 @@ class CollectionVersionExpansionsViewTest(OCLAPITestCase):
 
         response = self.client.post(
             self.collection.url + 'HEAD/expansions/',
-            dict(mnemonic='e1', parameters=dict(activeOnly=False)),
+            {'mnemonic': 'e1', 'parameters': {'activeOnly': False}},
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )

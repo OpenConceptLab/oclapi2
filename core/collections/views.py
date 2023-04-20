@@ -154,7 +154,7 @@ class CollectionListView(CollectionBaseView, ConceptDictionaryCreateMixin, ListW
     es_fields = Collection.es_fields
     document_model = CollectionDocument
     facet_class = CollectionSearch
-    default_filters = dict(is_active=True, version=HEAD)
+    default_filters = {'is_active': True, 'version': HEAD}
 
     def apply_filters(self, queryset):
         return queryset
@@ -265,9 +265,9 @@ class CollectionRetrieveUpdateDestroyView(CollectionBaseView, ConceptDictionaryU
         if not self.is_inline_requested():
             try:
                 task = delete_collection.delay(collection.id)
-                return Response(dict(task=task.id), status=status.HTTP_202_ACCEPTED)
+                return Response({'task': task.id}, status=status.HTTP_202_ACCEPTED)
             except AlreadyQueued:
-                return Response(dict(detail='Already Queued'), status=status.HTTP_409_CONFLICT)
+                return Response({'detail': 'Already Queued'}, status=status.HTTP_409_CONFLICT)
 
         result = delete_collection(collection.id)
 
@@ -460,9 +460,12 @@ class CollectionReferencesView(
         if adding_all or is_async:
             result = add_references.delay(self.request.user.id, data, collection.id, cascade, transform)
             return Response(
-                dict(
-                    state=result.state, username=request.user.username, task=result.task_id, queue='default'
-                ) if result else [],
+                {
+                    'state': result.state,
+                    'username': request.user.username,
+                    'task': result.task_id,
+                    'queue': 'default'
+                } if result else [],
                 status=status.HTTP_202_ACCEPTED
             )
 
@@ -609,9 +612,10 @@ class CollectionVersionListView(CollectionVersionBaseView, CreateAPIView, ListWi
                     return Response(serializer.data, status=status.HTTP_201_CREATED)
             except IntegrityError as ex:
                 return Response(
-                    dict(
-                        error=str(ex), detail=VERSION_ALREADY_EXISTS.format(version)
-                    ),
+                    {
+                        'error': str(ex),
+                        'detail': VERSION_ALREADY_EXISTS.format(version)
+                    },
                     status=status.HTTP_409_CONFLICT
                 )
 
@@ -773,7 +777,7 @@ class CollectionVersionExpansionView(CollectionVersionExpansionBaseView, Retriev
     def destroy(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         obj = self.get_object()
         if obj.is_default:
-            return Response(dict(erors=['Cannot delete default expansion']), status=status.HTTP_400_BAD_REQUEST)
+            return Response({'errors': ['Cannot delete default expansion']}, status=status.HTTP_400_BAD_REQUEST)
         obj.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
@@ -833,10 +837,10 @@ class ExpansionResourcesIndexView(CollectionVersionExpansionBaseView):
             else:
                 result = index_expansion_mappings.delay(expansion.id)
         except AlreadyQueued:
-            return Response(dict(detail='Already Queued'), status=status.HTTP_409_CONFLICT)
+            return Response({'detail': 'Already Queued'}, status=status.HTTP_409_CONFLICT)
 
         return Response(
-            dict(state=result.state, username=self.request.user.username, task=result.task_id, queue='default'),
+            {'state': result.state, 'username': self.request.user.username, 'task': result.task_id, 'queue': 'default'},
             status=status.HTTP_202_ACCEPTED
         )
 

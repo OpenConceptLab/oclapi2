@@ -63,7 +63,11 @@ class MonthlyUsageReportJobView(APIView):  # pragma: no cover
     def post(_):
         task = monthly_usage_report.delay()
         return Response(
-            dict(task=task.id, state=task.state, queue=task.queue or 'default'),
+            {
+                'task': task.id,
+                'state': task.state,
+                'queue': task.queue or 'default'
+            },
             status=status.HTTP_202_ACCEPTED
         )
 

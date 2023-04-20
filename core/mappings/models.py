@@ -306,7 +306,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
 
             parent_uri = to_parent_uri(expression)
             code = expression.replace(parent_uri, '').replace('concepts/', '').split('/')[0]
-            return dict(mnemonic=code)
+            return {'mnemonic': code}
 
         def get_source_info(parent_uri, child_uri, existing_version, concept):
             if not parent_uri and not child_uri:
@@ -400,7 +400,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         except ValidationError as ex:
             self.errors.update(ex.message_dict)
         except IntegrityError as ex:
-            self.errors.update(dict(__all__=ex.args))
+            self.errors.update({'__all__': ex.args})
 
     @classmethod
     def persist_new(cls, data, user):
@@ -415,7 +415,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         mapping.version = temp_version
         mapping.errors = {}
         if mapping.is_existing_in_parent():
-            mapping.errors = dict(__all__=[ALREADY_EXISTS])
+            mapping.errors = {'__all__': [ALREADY_EXISTS]}
             return mapping
         mapping.populate_fields_from_relations(url_params)
 
@@ -441,7 +441,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         except ValidationError as ex:
             mapping.errors.update(ex.message_dict)
         except IntegrityError as ex:
-            mapping.errors.update(dict(__all__=ex.args))
+            mapping.errors.update({'__all__': ex.args})
 
         return mapping
 
@@ -540,7 +540,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         latest_released_version = None
         is_latest_released = container_version == LATEST
         if is_latest_released:
-            filters = dict(user__username=user, organization__mnemonic=org)
+            filters = {'user__username': user, 'organization__mnemonic': org}
             if source:
                 from core.sources.models import Source
                 latest_released_version = Source.find_latest_released_version_by(

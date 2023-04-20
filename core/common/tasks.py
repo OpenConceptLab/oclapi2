@@ -241,9 +241,9 @@ def bulk_import_parallel_inline(self, to_import, username, update_if_exists, thr
             parallel=threads, self_task_id=self.request.id
         )
     except JSONDecodeError as ex:
-        return dict(error=f"Invalid JSON ({ex.msg})")
+        return {'error': f"Invalid JSON ({ex.msg})"}
     except ValidationError as ex:
-        return dict(error=f"Invalid Input ({ex.message})")
+        return {'error': f"Invalid Input ({ex.message})"}
     return importer.run()
 
 

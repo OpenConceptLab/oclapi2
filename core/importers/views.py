@@ -29,14 +29,14 @@ def csv_file_data_to_input_list(file_content):
 
 def import_response(request, import_queue, data, threads=None, inline=False):
     if not data:
-        return Response(dict(exception=NO_CONTENT_TO_IMPORT), status=status.HTTP_400_BAD_REQUEST)
+        return Response({'exception': NO_CONTENT_TO_IMPORT}, status=status.HTTP_400_BAD_REQUEST)
 
     user = request.user
     username = user.username
     update_if_exists = request.GET.get('update_if_exists', 'true')
     if update_if_exists not in ['true', 'false']:
         return Response(
-            dict(exception=INVALID_UPDATE_IF_EXISTS),
+            {'exception': INVALID_UPDATE_IF_EXISTS},
             status=status.HTTP_400_BAD_REQUEST
         )
     update_if_exists = update_if_exists == 'true'
@@ -46,10 +46,15 @@ def import_response(request, import_queue, data, threads=None, inline=False):
     try:
         task = queue_bulk_import(data, import_queue, username, update_if_exists, threads, inline)
     except AlreadyQueued:
-        return Response(dict(exception=ALREADY_QUEUED), status=status.HTTP_409_CONFLICT)
+        return Response({'exception': ALREADY_QUEUED}, status=status.HTTP_409_CONFLICT)
     parsed_task = parse_bulk_import_task_id(task.id)
     return Response(
-        dict(task=task.id, state=task.state, username=username, queue=parsed_task['queue']),
+        {
+            'task': task.id,
+            'state': task.state,
+            'username': username,
+            'queue': parsed_task['queue']
+        },
         status=status.HTTP_202_ACCEPTED
     )
 
@@ -65,7 +70,7 @@ class BulkImportFileUploadView(APIView):
         file = request.data.get('file', None)
 
         if not file:
-            return Response(dict(exception=NO_CONTENT_TO_IMPORT), status=status.HTTP_400_BAD_REQUEST)
+            return Response({'exception': NO_CONTENT_TO_IMPORT}, status=status.HTTP_400_BAD_REQUEST)
 
         if is_csv_file(name=file.name):
             try:
@@ -74,7 +79,7 @@ class BulkImportFileUploadView(APIView):
                     allow_special_characters=True
                 ).process()
             except Exception as ex:  # pylint: disable=broad-except
-                return Response(dict(exception=f'Bad CSV ({str(ex)})'), status=status.HTTP_400_BAD_REQUEST)
+                return Response({'exception': f'Bad CSV ({str(ex)})'}, status=status.HTTP_400_BAD_REQUEST)
         else:
             data = file.read()
 
@@ -101,14 +106,14 @@ class BulkImportFileURLView(APIView):
             pass
 
         if not file:
-            return Response(dict(exception=NO_CONTENT_TO_IMPORT), status=status.HTTP_400_BAD_REQUEST)
+            return Response({'exception': NO_CONTENT_TO_IMPORT}, status=status.HTTP_400_BAD_REQUEST)
 
         if is_csv_file(name=file_url):
             try:
                 data = OclStandardCsvToJsonConverter(
                     input_list=csv_file_data_to_input_list(file.text), allow_special_characters=True).process()
             except Exception as ex:  # pylint: disable=broad-except
-                return Response(dict(exception=f'Bad CSV ({str(ex)})'), status=status.HTTP_400_BAD_REQUEST)
+                return Response({'exception': f'Bad CSV ({str(ex)})'}, status=status.HTTP_400_BAD_REQUEST)
         else:
             data = file.text
 
@@ -151,22 +156,30 @@ class BulkImportView(APIView):
                 if result:
                     return Response(result.get('detailed_summary', None))
             if task.failed():
-                return Response(dict(exception=str(task.result)), status=status.HTTP_400_BAD_REQUEST)
+                return Response({'exception': str(task.result)}, status=status.HTTP_400_BAD_REQUEST)
             if task.state == 'STARTED':
                 service = RedisService()
                 if service.exists(task_id):
                     return Response(
-                        dict(
-                            details=service.get_formatted(task_id), task=task.id, state=task.state,
-                            username=username, queue=parsed_task['queue']
-                        ),
+                        {
+                            'details': service.get_formatted(task_id),
+                            'task': task.id,
+                            'state': task.state,
+                            'username': username,
+                            'queue': parsed_task['queue']
+                        },
                         status=status.HTTP_200_OK
                     )
             if task.state == 'PENDING' and not task_exists(task_id):
-                return Response(dict(exception='task ' + task_id + ' not found'), status=status.HTTP_404_NOT_FOUND)
+                return Response({'exception': 'task ' + task_id + ' not found'}, status=status.HTTP_404_NOT_FOUND)
 
             return Response(
-                dict(task=task.id, state=task.state, username=username, queue=parsed_task['queue']),
+                {
+                    'task': task.id,
+                    'state': task.state,
+                    'username': username,
+                    'queue': parsed_task['queue']
+                },
                 status=status.HTTP_202_ACCEPTED
             )
 
@@ -191,7 +204,7 @@ class BulkImportView(APIView):
             }
         except Exception as ex:
             return Response(
-                dict(detail='Flower service returned unexpected result. Maybe check healthcheck.', exception=str(ex)),
+                {'detail': 'Flower service returned unexpected result. Maybe check healthcheck.', 'exception': str(ex)},
                 status=status.HTTP_422_UNPROCESSABLE_ENTITY
             )
 
@@ -202,7 +215,12 @@ class BulkImportView(APIView):
             if user.is_staff or user.username == task['username']:
                 if (not import_queue or task['queue'] == import_queue) and \
                         (not username or task['username'] == username):
-                    details = dict(task=task_id, state=value['state'], queue=task['queue'], username=task['username'])
+                    details = {
+                        'task': task_id,
+                        'state': value['state'],
+                        'queue': task['queue'],
+                        'username': task['username']
+                    }
                     if value['state'] in ['RECEIVED', 'PENDING']:
                         result = AsyncResult(task_id)
                         if result.state and result.state != value['state']:
@@ -252,7 +270,7 @@ class BulkImportView(APIView):
                     celery_once.name = result.name
                     celery_once.once_backend.clear_lock(celery_once_key)
         except Exception as ex:
-            return Response(dict(errors=ex.args), status=status.HTTP_400_BAD_REQUEST)
+            return Response({'errors': ex.args}, status=status.HTTP_400_BAD_REQUEST)
 
         return Response(status=status.HTTP_204_NO_CONTENT)
 
@@ -288,7 +306,7 @@ class BulkImportParallelInlineView(APIView):  # pragma: no cover
             pass
 
         if not file_content and not is_data:
-            return Response(dict(exception=NO_CONTENT_TO_IMPORT), status=status.HTTP_400_BAD_REQUEST)
+            return Response({'exception': NO_CONTENT_TO_IMPORT}, status=status.HTTP_400_BAD_REQUEST)
 
         if file_name and is_csv_file(name=file_name):
             try:
@@ -297,7 +315,7 @@ class BulkImportParallelInlineView(APIView):  # pragma: no cover
                     allow_special_characters=True
                 ).process()
             except Exception as ex:  # pylint: disable=broad-except
-                return Response(dict(exception=f'Bad CSV ({str(ex)})'), status=status.HTTP_400_BAD_REQUEST)
+                return Response({'exception': f'Bad CSV ({str(ex)})'}, status=status.HTTP_400_BAD_REQUEST)
         elif file:
             data = file_content
         else:
@@ -336,7 +354,7 @@ class BulkImportInlineView(APIView):  # pragma: no cover
             pass
 
         if not file_content and not is_data:
-            return Response(dict(exception=NO_CONTENT_TO_IMPORT), status=status.HTTP_400_BAD_REQUEST)
+            return Response({'exception': NO_CONTENT_TO_IMPORT}, status=status.HTTP_400_BAD_REQUEST)
 
         if file_name and is_csv_file(name=file_name):
             try:
@@ -345,7 +363,7 @@ class BulkImportInlineView(APIView):  # pragma: no cover
                     allow_special_characters=True
                 ).process()
             except Exception as ex:  # pylint: disable=broad-except
-                return Response(dict(exception=f'Bad CSV ({str(ex)})'), status=status.HTTP_400_BAD_REQUEST)
+                return Response({'exception': f'Bad CSV ({str(ex)})'}, status=status.HTTP_400_BAD_REQUEST)
         elif file:
             data = file_content
         else:

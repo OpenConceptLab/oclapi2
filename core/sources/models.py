@@ -215,13 +215,13 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         if hierarchy_root:
             children.append({**ConceptHierarchySerializer(hierarchy_root).data, 'root': True})
 
-        return dict(
-            id=self.mnemonic,
-            children=children,
-            count=total_count + (1 if hierarchy_root else 0),
-            offset=offset,
-            limit=limit
-        )
+        return {
+            'id': self.mnemonic,
+            'children': children,
+            'count': total_count + (1 if hierarchy_root else 0),
+            'offset': offset,
+            'limit': limit
+        }
 
     def set_active_concepts(self):
         queryset = self.concepts
@@ -474,8 +474,8 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         ).first()
 
     def _get_map_type_distribution(self, filters, concept_field):
-        _result = dict(total=0, retired=0, active=0, concepts=0)
-        result = dict(**_result, map_types=[])
+        _result = {'total': 0, 'retired': 0, 'active': 0, 'concepts': 0}
+        result = {**_result, 'map_types': []}
 
         queryset = self.get_mappings_queryset().filter(**filters)
         queryset = queryset.values(
@@ -499,10 +499,10 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         return result
 
     def get_from_source_map_type_distribution(self, from_source):
-        return self._get_map_type_distribution(dict(from_source_id=from_source.id), 'to_concept__versioned_object_id')
+        return self._get_map_type_distribution({'from_source_id': from_source.id}, 'to_concept__versioned_object_id')
 
     def get_to_source_map_type_distribution(self, to_source):
-        return self._get_map_type_distribution(dict(to_source_id=to_source.id), 'from_concept__versioned_object_id')
+        return self._get_map_type_distribution({'to_source_id': to_source.id}, 'from_concept__versioned_object_id')
 
     @property
     def from_sources(self):
@@ -600,13 +600,13 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
     def mappings_distribution(self):
         facets = self.get_mapping_facets()
 
-        return dict(
-            active=self.active_mappings,
-            retired=self.retired_mappings_count,
-            map_type=self._to_clean_facets(facets.mapType or []),
-            to_concept_source=self._to_clean_facets(facets.toConceptSource or [], True),
-            from_concept_source=self._to_clean_facets(facets.fromConceptSource or [], True),
-        )
+        return {
+            'active': self.active_mappings,
+            'retired': self.retired_mappings_count,
+            'map_type': self._to_clean_facets(facets.mapType or []),
+            'to_concept_source': self._to_clean_facets(facets.toConceptSource or [], True),
+            'from_concept_source': self._to_clean_facets(facets.fromConceptSource or [], True)
+        }
 
     def _get_resource_facet_filters(self, filters=None):
         _filters = {

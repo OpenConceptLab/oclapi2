@@ -30,7 +30,18 @@ class OrganizationDocument(Document):
 
     @staticmethod
     def get_boostable_search_attrs():
-        return dict(mnemonic=dict(boost=5, wildcard=True, lower=True), name=dict(boost=4, wildcard=True, lower=True))
+        return {
+            'mnemonic': {
+                'boost': 5,
+                'wildcard': True,
+                'lower': True
+            },
+            'name': {
+                'boost': 4,
+                'wildcard': True,
+                'lower': True
+            }
+        }
 
     @staticmethod
     def prepare_extras(instance):

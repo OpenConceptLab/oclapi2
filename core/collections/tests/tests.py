@@ -77,7 +77,7 @@ class CollectionTest(OCLTestCase):
         concept = ConceptFactory(parent=source, sources=[source])
         concept_expression = concept.uri
 
-        collection.add_expressions(dict(expressions=[concept_expression]), collection.created_by)
+        collection.add_expressions({'expressions': [concept_expression]}, collection.created_by)
         collection.refresh_from_db()
 
         self.assertEqual(collection.expansion.concepts.count(), 1)
@@ -86,7 +86,7 @@ class CollectionTest(OCLTestCase):
         self.assertEqual(collection.expansion.concepts.first().id, concept.id)
         self.assertEqual(collection.active_concepts, 1)
 
-        _, errors = collection.add_expressions(dict(concepts=[concept_expression]), collection.created_by)
+        _, errors = collection.add_expressions({'concepts': [concept_expression]}, collection.created_by)
         self.assertEqual(
             errors, {concept_expression: ['Concept or Mapping reference name must be unique in a collection.']}
         )
@@ -108,7 +108,7 @@ class CollectionTest(OCLTestCase):
         concept = ConceptFactory(parent=source, sources=[source])
         concept_expression = concept.uri
 
-        collection.add_expressions(dict(expressions=[concept_expression]), collection.created_by)
+        collection.add_expressions({'expressions': [concept_expression]}, collection.created_by)
 
         self.assertEqual(collection.references.count(), 1)
         self.assertEqual(collection.references.first().expression, concept.uri)
@@ -116,7 +116,7 @@ class CollectionTest(OCLTestCase):
         self.assertEqual(collection.expansion.concepts.first(), concept)
 
         concept2 = ConceptFactory(parent=source, sources=[source])
-        collection.add_expressions(dict(expressions=[concept2.uri]), collection.created_by)
+        collection.add_expressions({'expressions': [concept2.uri]}, collection.created_by)
 
         self.assertEqual(collection.expansion.concepts.count(), 2)
         self.assertEqual(collection.references.count(), 2)
@@ -132,7 +132,7 @@ class CollectionTest(OCLTestCase):
         concept1 = ConceptFactory(parent=source)
         concept2 = ConceptFactory(parent=source)
         mapping = MappingFactory(from_concept=concept1, to_concept=concept2, parent=source)
-        collection.add_expressions(dict(expressions=[concept1.uri, concept2.uri, mapping.uri]), collection.created_by)
+        collection.add_expressions({'expressions': [concept1.uri, concept2.uri, mapping.uri]}, collection.created_by)
 
         self.assertEqual(collection.expansion.concepts.count(), 2)
         self.assertEqual(collection.expansion.mappings.count(), 1)
@@ -167,7 +167,7 @@ class CollectionTest(OCLTestCase):
         concept = ConceptFactory(parent=source, sources=[source])
         concept_expression = concept.uri
 
-        collection1.add_expressions(dict(expressions=[concept_expression]), collection1.created_by)
+        collection1.add_expressions({'expressions': [concept_expression]}, collection1.created_by)
 
         self.assertEqual(collection1.references.count(), 1)
         self.assertEqual(collection2.references.count(), 0)
@@ -586,7 +586,7 @@ class CollectionReferenceTest(OCLTestCase):
                 expression='/concepts/', filter=[{'property': 'map_type', 'value': 'foobar', 'op': '='}])
             ref.clean()
 
-        self.assertEqual(ex.exception.message_dict, dict(filter=['Invalid filter schema.']))
+        self.assertEqual(ex.exception.message_dict, {'filter': ['Invalid filter schema.']})
 
         ref = CollectionReference(
             expression='/concepts/', filter=[{'property': 'concept_class', 'value': 'foobar', 'op': '='}])
@@ -623,7 +623,7 @@ class CollectionReferenceTest(OCLTestCase):
                 filter=[{'property': 'concept_class', 'value': 'foobar', 'op': '='}])
             ref.clean()
 
-        self.assertEqual(ex.exception.message_dict, dict(filter=['Invalid filter schema.']))
+        self.assertEqual(ex.exception.message_dict, {'filter': ['Invalid filter schema.']})
 
         ref = CollectionReference(
             expression='/mappings/',
@@ -676,7 +676,7 @@ class CollectionReferenceTest(OCLTestCase):
         self.assertEqual(mappings.count(), 0)
 
         reference = CollectionReference(
-            system=source.uri, created_by=source.created_by, cascade=dict(method='sourcemappings')
+            system=source.uri, created_by=source.created_by, cascade={'method': 'sourcemappings'}
         )
         concepts, mappings = reference.get_concepts()
 
@@ -691,7 +691,7 @@ class CollectionReferenceTest(OCLTestCase):
             system=source.uri,
             code=concept1.mnemonic,
             created_by=source.created_by,
-            cascade=dict(method='sourcemappings')
+            cascade={'method': 'sourcemappings'}
         )
         concepts, mappings = reference.get_concepts()
 
@@ -706,7 +706,7 @@ class CollectionReferenceTest(OCLTestCase):
             system=source.uri,
             code=concept1.mnemonic,
             created_by=source.created_by,
-            cascade=dict(method='sourcetoconcepts')
+            cascade={'method': 'sourcetoconcepts'}
         )
         concepts, mappings = reference.get_concepts()
 
@@ -721,7 +721,7 @@ class CollectionReferenceTest(OCLTestCase):
             system=source.uri,
             code=concept1.mnemonic,
             created_by=source.created_by,
-            cascade=dict(method='sourcetoconcepts'),
+            cascade={'method': 'sourcetoconcepts'},
             transform='resourceVersions'
         )
         concepts, mappings = reference.get_concepts()
@@ -799,7 +799,7 @@ class CollectionReferenceTest(OCLTestCase):
         )
         self.assertEqual(mappings.count(), 0)
 
-        parser = CollectionReferenceParser(dict(expression='/concepts/'))
+        parser = CollectionReferenceParser({'expression': '/concepts/'})
         parser.parse()
         parser.to_reference_structure()
         references = parser.to_objects()
@@ -879,7 +879,7 @@ class CollectionReferenceTest(OCLTestCase):
         reference = CollectionReference(
             system='/orgs/MyOrg/sources/MySource/',
             reference_type='concepts',
-            filter=[dict(property='q', value='foo', op='='), dict(property='name', value='foobar', op='=')]
+            filter=[{'property': 'q', 'value': 'foo', 'op': '='}, {'property': 'name', 'value': 'foobar', 'op': '='}]
         )
         self.assertEqual(
             reference.build_expression(), '/orgs/MyOrg/sources/MySource/concepts/?q=foo&name=foobar'
@@ -888,7 +888,7 @@ class CollectionReferenceTest(OCLTestCase):
         reference = CollectionReference(
             valueset=['/orgs/MyOrg/collections/Coll/'],
             reference_type='concepts',
-            filter=[dict(property='q', value='foo', op='='), dict(property='name', value='foobar', op='=')]
+            filter=[{'property': 'q', 'value': 'foo', 'op': '='}, {'property': 'name', 'value': 'foobar', 'op': '='}]
         )
         self.assertEqual(
             reference.build_expression(), '/orgs/MyOrg/collections/Coll/concepts/?q=foo&name=foobar'
@@ -897,7 +897,7 @@ class CollectionReferenceTest(OCLTestCase):
         reference = CollectionReference(
             valueset=['/orgs/MyOrg/collections/Coll/', '/orgs/MyOrg/collections/Coll1/'],
             reference_type='concepts',
-            filter=[dict(property='q', value='foo', op='='), dict(property='name', value='foobar', op='=')]
+            filter=[{'property': 'q', 'value': 'foo', 'op': '='}, {'property': 'name', 'value': 'foobar', 'op': '='}]
         )
         self.assertEqual(
             reference.build_expression(), '/orgs/MyOrg/collections/Coll/concepts/?q=foo&name=foobar'
@@ -962,9 +962,9 @@ class TasksTest(OCLTestCase):
 
         errors = add_references(
             collection.created_by.id,
-            dict(expressions=[
-                obj.get_latest_version().url for obj in [concept1, concept2, mapping2]
-            ]),
+            {
+                'expressions': [obj.get_latest_version().url for obj in [concept1, concept2, mapping2]]
+            },
             collection.id,
             'sourcemappings'
         )
@@ -1000,7 +1000,9 @@ class TasksTest(OCLTestCase):
         concept_latest_version = concept.get_latest_version()
         mapping_latest_version = mapping.get_latest_version()
         collection.add_expressions(
-            dict(expressions=[concept_latest_version.version_url, mapping_latest_version.version_url]),
+            {
+                'expressions': [concept_latest_version.version_url, mapping_latest_version.version_url]
+            },
             collection.created_by
         )
 
@@ -1037,7 +1039,9 @@ class TasksTest(OCLTestCase):
         concept_latest_version = concept.get_latest_version()
         mapping_latest_version = mapping.get_latest_version()
         collection.add_expressions(
-            dict(expressions=[concept_latest_version.version_url, mapping_latest_version.version_url]),
+            {
+                'expressions': [concept_latest_version.version_url, mapping_latest_version.version_url]
+            },
             collection.created_by
         )
 
@@ -1274,11 +1278,11 @@ class ExpansionParametersTest(OCLTestCase):
         ConceptFactory(id=2, retired=True, mnemonic='retired')
         queryset = Concept.objects.filter(id__in=[1, 2])
 
-        result = ExpansionParameters(dict(activeOnly=True)).apply(queryset)
+        result = ExpansionParameters({'activeOnly': True}).apply(queryset)
         self.assertEqual(result.count(), 1)
         self.assertEqual(result.first().id, 1)
 
-        result = ExpansionParameters(dict(activeOnly=False)).apply(queryset)
+        result = ExpansionParameters({'activeOnly': False}).apply(queryset)
         self.assertEqual(result.count(), 2)
         self.assertEqual(
             list(result.order_by('id').values_list('id', flat=True)),
@@ -1291,15 +1295,15 @@ class ExpansionParametersTest(OCLTestCase):
         queryset = Concept.objects.filter(id__in=[1, 2])
         ConceptDocument().update(queryset)  # needed for parallel test execution
 
-        result = ExpansionParameters(dict(filter='foo tao')).apply(queryset)
+        result = ExpansionParameters({'filter': 'foo tao'}).apply(queryset)
         self.assertEqual(result.count(), 1)
         self.assertEqual(result.first().id, 1)
 
-        result = ExpansionParameters(dict(filter='foobar')).apply(queryset)
+        result = ExpansionParameters({'filter': 'foobar'}).apply(queryset)
         self.assertEqual(result.count(), 1)
         self.assertEqual(result.first().id, 1)
 
-        result = ExpansionParameters(dict(filter='bar')).apply(queryset)
+        result = ExpansionParameters({'filter': 'bar'}).apply(queryset)
         self.assertEqual(result.count(), 2)
         self.assertEqual(
             list(result.order_by('id').values_list('id', flat=True)),
@@ -1429,14 +1433,28 @@ class ExpansionParametersTest(OCLTestCase):
 
         errors = Concept.create_new_version_for(
             concept1.clone(),
-            dict(extras='c1.1', names=[dict(locale='en', name='English', locale_preferred=True)]),
+            {
+                'extras': 'c1.1',
+                'names': [{
+                              'locale': 'en',
+                              'name': 'English',
+                              'locale_preferred': True
+                          }]
+            },
             concept1.created_by
         )
         self.assertEqual(errors, {})
         concept1_v1 = concept1.get_latest_version()
         errors = Concept.create_new_version_for(
             concept1.clone(),
-            dict(extras='c1.2', names=[dict(locale='en', name='English', locale_preferred=True)]),
+            {
+                'extras': 'c1.2',
+                'names': [{
+                              'locale': 'en',
+                              'name': 'English',
+                              'locale_preferred': True
+                          }]
+            },
             concept1.created_by
         )
         self.assertEqual(errors, {})
@@ -1613,451 +1631,491 @@ class CollectionReferenceExpressionStringParserTest(OCLTestCase):
         reference = self.get_structure(expression='/concepts/')
         self.assertEqual(
             reference,
-            dict(
-                expression='/concepts/',
-                system=None,
-                valueset=None,
-                filter=None,
-                cascade=None,
-                reference_type='concepts',
-                version=None,
-                code=None,
-                resource_version=None,
-                transform=None,
-                created_by=None,
-                display=None,
-                include=True
-            )
+            {
+                'expression': '/concepts/',
+                'system': None,
+                'valueset': None,
+                'filter': None,
+                'cascade': None,
+                'reference_type': 'concepts',
+                'version': None,
+                'code': None,
+                'resource_version': None,
+                'transform': None,
+                'created_by': None,
+                'display': None,
+                'include': True
+            }
         )
 
         reference = self.get_structure(expression='/concepts/?q=foobar&conceptClass=drug')
         self.assertEqual(
             reference,
-            dict(
-                expression='/concepts/?q=foobar&conceptClass=drug',
-                system=None,
-                valueset=None,
-                filter=[
-                    dict(property='q', value='foobar', op='='),
-                    dict(property='conceptClass', value='drug', op='='),
+            {
+                'expression': '/concepts/?q=foobar&conceptClass=drug',
+                'system': None,
+                'valueset': None,
+                'filter': [
+                    {'property': 'q', 'value': 'foobar', 'op': '='},
+                    {'property': 'conceptClass', 'value': 'drug', 'op': '='},
                 ],
-                cascade=None,
-                reference_type='concepts',
-                version=None,
-                code=None,
-                resource_version=None,
-                transform=None,
-                created_by=None,
-                display=None,
-                include=True
-            )
+                'cascade': None,
+                'reference_type': 'concepts',
+                'version': None,
+                'code': None,
+                'resource_version': None,
+                'transform': None,
+                'created_by': None,
+                'display': None,
+                'include': True
+            }
         )
 
         reference = self.get_structure(expression='/orgs/MyOrg/sources/MySource/concepts/')
         self.assertEqual(
             reference,
-            dict(
-                expression='/orgs/MyOrg/sources/MySource/concepts/',
-                system='/orgs/MyOrg/sources/MySource/',
-                valueset=None,
-                filter=None,
-                cascade=None,
-                reference_type='concepts',
-                version=None,
-                code=None,
-                resource_version=None,
-                transform=None,
-                created_by=None,
-                display=None,
-                include=True
-            )
+            {
+                'expression': '/orgs/MyOrg/sources/MySource/concepts/',
+                'system': '/orgs/MyOrg/sources/MySource/',
+                'valueset': None,
+                'filter': None,
+                'cascade': None,
+                'reference_type': 'concepts',
+                'version': None,
+                'code': None,
+                'resource_version': None,
+                'transform': None,
+                'created_by': None,
+                'display': None,
+                'include': True
+            }
         )
 
         reference = self.get_structure(expression='/orgs/MyOrg/sources/MySource/v1/concepts/')
         self.assertEqual(
             reference,
-            dict(
-                expression='/orgs/MyOrg/sources/MySource/v1/concepts/',
-                system='/orgs/MyOrg/sources/MySource/',
-                valueset=None,
-                filter=None,
-                cascade=None,
-                reference_type='concepts',
-                version='v1',
-                code=None,
-                resource_version=None,
-                transform=None,
-                created_by=None,
-                display=None,
-                include=True
-            )
+            {
+                'expression': '/orgs/MyOrg/sources/MySource/v1/concepts/',
+                'system': '/orgs/MyOrg/sources/MySource/',
+                'valueset': None,
+                'filter': None,
+                'cascade': None,
+                'reference_type': 'concepts',
+                'version': 'v1',
+                'code': None,
+                'resource_version': None,
+                'transform': None,
+                'created_by': None,
+                'display': None,
+                'include': True
+            }
         )
 
         reference = self.get_structure(expression='/orgs/MyOrg/sources/MySource/v1/concepts/1234/')
         self.assertEqual(
             reference,
-            dict(
-                expression='/orgs/MyOrg/sources/MySource/v1/concepts/1234/',
-                system='/orgs/MyOrg/sources/MySource/',
-                valueset=None,
-                filter=None,
-                cascade=None,
-                reference_type='concepts',
-                version='v1',
-                code='1234',
-                resource_version=None,
-                transform=None,
-                created_by=None,
-                display=None,
-                include=True
-            )
+            {
+                'expression': '/orgs/MyOrg/sources/MySource/v1/concepts/1234/',
+                'system': '/orgs/MyOrg/sources/MySource/',
+                'valueset': None,
+                'filter': None,
+                'cascade': None,
+                'reference_type': 'concepts',
+                'version': 'v1',
+                'code': '1234',
+                'resource_version': None,
+                'transform': None,
+                'created_by': None,
+                'display': None,
+                'include': True
+            }
         )
 
         reference = self.get_structure(expression='/orgs/MyOrg/sources/MySource/concepts/1234/')
         self.assertEqual(
             reference,
-            dict(
-                expression='/orgs/MyOrg/sources/MySource/concepts/1234/',
-                system='/orgs/MyOrg/sources/MySource/',
-                valueset=None,
-                filter=None,
-                cascade=None,
-                reference_type='concepts',
-                version=None,
-                code='1234',
-                resource_version=None,
-                transform=None,
-                created_by=None,
-                display=None,
-                include=True
-            )
+            {
+                'expression': '/orgs/MyOrg/sources/MySource/concepts/1234/',
+                'system': '/orgs/MyOrg/sources/MySource/',
+                'valueset': None,
+                'filter': None,
+                'cascade': None,
+                'reference_type': 'concepts',
+                'version': None,
+                'code': '1234',
+                'resource_version': None,
+                'transform': None,
+                'created_by': None,
+                'display': None,
+                'include': True
+            }
         )
 
         reference = self.get_structure(
             expression='/orgs/MyOrg/sources/MySource/concepts/1234/', cascade='sourceToConcept')
         self.assertEqual(
             reference,
-            dict(
-                expression='/orgs/MyOrg/sources/MySource/concepts/1234/',
-                system='/orgs/MyOrg/sources/MySource/',
-                valueset=None,
-                filter=None,
-                cascade='sourceToConcept',
-                reference_type='concepts',
-                version=None,
-                code='1234',
-                resource_version=None,
-                transform=None,
-                created_by=None,
-                display=None,
-                include=True
-            )
+            {
+                'expression': '/orgs/MyOrg/sources/MySource/concepts/1234/',
+                'system': '/orgs/MyOrg/sources/MySource/',
+                'valueset': None,
+                'filter': None,
+                'cascade': 'sourceToConcept',
+                'reference_type': 'concepts',
+                'version': None,
+                'code': '1234',
+                'resource_version': None,
+                'transform': None,
+                'created_by': None,
+                'display': None,
+                'include': True
+            }
         )
 
         reference = self.get_structure(expression='/orgs/MyOrg/sources/MySource/concepts/?q=foo&external_id=alpha,beta')
         self.assertEqual(
             reference,
-            dict(
-                expression='/orgs/MyOrg/sources/MySource/concepts/?q=foo&external_id=alpha,beta',
-                system='/orgs/MyOrg/sources/MySource/',
-                valueset=None,
-                filter=[
-                    dict(property='q', value='foo', op='='),
-                    dict(property='external_id', value='alpha,beta', op='='),
+            {
+                'expression': '/orgs/MyOrg/sources/MySource/concepts/?q=foo&external_id=alpha,beta',
+                'system': '/orgs/MyOrg/sources/MySource/',
+                'valueset': None,
+                'filter': [
+                    {
+                        'property': 'q',
+                        'value': 'foo',
+                        'op': '='
+                    },
+                    {
+                        'property': 'external_id',
+                        'value': 'alpha,beta',
+                        'op': '='
+                    },
                 ],
-                cascade=None,
-                reference_type='concepts',
-                version=None,
-                code=None,
-                resource_version=None,
-                transform=None,
-                created_by=None,
-                display=None,
-                include=True
-            )
+                'cascade': None,
+                'reference_type': 'concepts',
+                'version': None,
+                'code': None,
+                'resource_version': None,
+                'transform': None,
+                'created_by': None,
+                'display': None,
+                'include': True
+            }
         )
 
         reference = self.get_structure(expression='/orgs/MyOrg/collections/Coll/concepts/?q=foo&external_id=alpha,beta')
         self.assertEqual(
             reference,
-            dict(
-                expression='/orgs/MyOrg/collections/Coll/concepts/?q=foo&external_id=alpha,beta',
-                system=None,
-                valueset=[
+            {
+                'expression': '/orgs/MyOrg/collections/Coll/concepts/?q=foo&external_id=alpha,beta',
+                'system': None,
+                'valueset': [
                     '/orgs/MyOrg/collections/Coll/'
                 ],
-                filter=[
-                    dict(property='q', value='foo', op='='),
-                    dict(property='external_id', value='alpha,beta', op='='),
+                'filter': [
+                    {
+                        'property': 'q',
+                        'value': 'foo',
+                        'op': '='
+                    },
+                    {
+                        'property': 'external_id',
+                        'value': 'alpha,beta',
+                        'op': '='
+                    },
                 ],
-                cascade=None,
-                reference_type='concepts',
-                version=None,
-                code=None,
-                resource_version=None,
-                transform=None,
-                created_by=None,
-                display=None,
-                include=True
-            )
+                'cascade': None,
+                'reference_type': 'concepts',
+                'version': None,
+                'code': None,
+                'resource_version': None,
+                'transform': None,
+                'created_by': None,
+                'display': None,
+                'include': True
+            }
         )
         reference = self.get_structure(expression='/orgs/MyOrg/collections/Coll/v1/concepts/1234/')
         self.assertEqual(
             reference,
-            dict(
-                expression='/orgs/MyOrg/collections/Coll/v1/concepts/1234/',
-                system=None,
-                valueset=[
+            {
+                'expression': '/orgs/MyOrg/collections/Coll/v1/concepts/1234/',
+                'system': None,
+                'valueset': [
                     '/orgs/MyOrg/collections/Coll/|v1'
                 ],
-                filter=None,
-                cascade=None,
-                reference_type='concepts',
-                version=None,
-                code='1234',
-                resource_version=None,
-                transform=None,
-                created_by=None,
-                display=None,
-                include=True
-            )
+                'filter': None,
+                'cascade': None,
+                'reference_type': 'concepts',
+                'version': None,
+                'code': '1234',
+                'resource_version': None,
+                'transform': None,
+                'created_by': None,
+                'display': None,
+                'include': True
+            }
         )
 
         reference = self.get_structure(expression='/orgs/MyOrg/collections/Coll/v1/concepts/1234/3456/')
         self.assertEqual(
             reference,
-            dict(
-                expression='/orgs/MyOrg/collections/Coll/v1/concepts/1234/3456/',
-                system=None,
-                valueset=[
+            {
+                'expression': '/orgs/MyOrg/collections/Coll/v1/concepts/1234/3456/',
+                'system': None,
+                'valueset': [
                     '/orgs/MyOrg/collections/Coll/|v1'
                 ],
-                filter=None,
-                cascade=None,
-                reference_type='concepts',
-                version=None,
-                code='1234',
-                resource_version='3456',
-                transform=None,
-                created_by=None,
-                display=None,
-                include=True
-            )
+                'filter': None,
+                'cascade': None,
+                'reference_type': 'concepts',
+                'version': None,
+                'code': '1234',
+                'resource_version': '3456',
+                'transform': None,
+                'created_by': None,
+                'display': None,
+                'include': True
+            }
         )
 
     def test_parse_mapping_expressions(self):
         reference = self.get_structure(expression='/mappings/')
         self.assertEqual(
             reference,
-            dict(
-                expression='/mappings/',
-                system=None,
-                valueset=None,
-                filter=None,
-                cascade=None,
-                reference_type='mappings',
-                version=None,
-                code=None,
-                resource_version=None,
-                transform=None,
-                created_by=None,
-                display=None,
-                include=True
-            )
+            {
+                'expression': '/mappings/',
+                'system': None,
+                'valueset': None,
+                'filter': None,
+                'cascade': None,
+                'reference_type': 'mappings',
+                'version': None,
+                'code': None,
+                'resource_version': None,
+                'transform': None,
+                'created_by': None,
+                'display': None,
+                'include': True
+            }
         )
 
         reference = self.get_structure(expression='/mappings/?q=foobar&mapType=Q-AND-A')
         self.assertEqual(
             reference,
-            dict(
-                expression='/mappings/?q=foobar&mapType=Q-AND-A',
-                system=None,
-                valueset=None,
-                filter=[
-                    dict(property='q', value='foobar', op='='),
-                    dict(property='mapType', value='Q-AND-A', op='='),
+            {
+                'expression': '/mappings/?q=foobar&mapType=Q-AND-A',
+                'system': None,
+                'valueset': None,
+                'filter': [
+                    {
+                        'property': 'q',
+                        'value': 'foobar',
+                        'op': '='
+                    },
+                    {
+                        'property': 'mapType',
+                        'value': 'Q-AND-A',
+                        'op': '='
+                    },
                 ],
-                cascade=None,
-                reference_type='mappings',
-                version=None,
-                code=None,
-                resource_version=None,
-                transform=None,
-                created_by=None,
-                display=None,
-                include=True
-            )
+                'cascade': None,
+                'reference_type': 'mappings',
+                'version': None,
+                'code': None,
+                'resource_version': None,
+                'transform': None,
+                'created_by': None,
+                'display': None,
+                'include': True
+            }
         )
 
         reference = self.get_structure(expression='/orgs/MyOrg/sources/MySource/mappings/')
         self.assertEqual(
             reference,
-            dict(
-                expression='/orgs/MyOrg/sources/MySource/mappings/',
-                system='/orgs/MyOrg/sources/MySource/',
-                valueset=None,
-                filter=None,
-                cascade=None,
-                reference_type='mappings',
-                version=None,
-                code=None,
-                resource_version=None,
-                transform=None,
-                created_by=None,
-                display=None,
-                include=True
-            )
+            {
+                'expression': '/orgs/MyOrg/sources/MySource/mappings/',
+                'system': '/orgs/MyOrg/sources/MySource/',
+                'valueset': None,
+                'filter': None,
+                'cascade': None,
+                'reference_type': 'mappings',
+                'version': None,
+                'code': None,
+                'resource_version': None,
+                'transform': None,
+                'created_by': None,
+                'display': None,
+                'include': True
+            }
         )
 
         reference = self.get_structure(expression='/orgs/MyOrg/sources/MySource/v1/mappings/')
         self.assertEqual(
             reference,
-            dict(
-                expression='/orgs/MyOrg/sources/MySource/v1/mappings/',
-                system='/orgs/MyOrg/sources/MySource/',
-                valueset=None,
-                filter=None,
-                cascade=None,
-                reference_type='mappings',
-                version='v1',
-                code=None,
-                resource_version=None,
-                transform=None,
-                created_by=None,
-                display=None,
-                include=True
-            )
+            {
+                'expression': '/orgs/MyOrg/sources/MySource/v1/mappings/',
+                'system': '/orgs/MyOrg/sources/MySource/',
+                'valueset': None,
+                'filter': None,
+                'cascade': None,
+                'reference_type': 'mappings',
+                'version': 'v1',
+                'code': None,
+                'resource_version': None,
+                'transform': None,
+                'created_by': None,
+                'display': None,
+                'include': True
+            }
         )
 
         reference = self.get_structure(expression='/orgs/MyOrg/sources/MySource/v1/mappings/1234/')
         self.assertEqual(
             reference,
-            dict(
-                expression='/orgs/MyOrg/sources/MySource/v1/mappings/1234/',
-                system='/orgs/MyOrg/sources/MySource/',
-                valueset=None,
-                filter=None,
-                cascade=None,
-                reference_type='mappings',
-                version='v1',
-                code='1234',
-                resource_version=None,
-                transform=None,
-                created_by=None,
-                display=None,
-                include=True
-            )
+            {
+                'expression': '/orgs/MyOrg/sources/MySource/v1/mappings/1234/',
+                'system': '/orgs/MyOrg/sources/MySource/',
+                'valueset': None,
+                'filter': None,
+                'cascade': None,
+                'reference_type': 'mappings',
+                'version': 'v1',
+                'code': '1234',
+                'resource_version': None,
+                'transform': None,
+                'created_by': None,
+                'display': None,
+                'include': True
+            }
         )
 
         reference = self.get_structure(expression='/orgs/MyOrg/sources/MySource/mappings/1234/')
         self.assertEqual(
             reference,
-            dict(
-                expression='/orgs/MyOrg/sources/MySource/mappings/1234/',
-                system='/orgs/MyOrg/sources/MySource/',
-                valueset=None,
-                filter=None,
-                cascade=None,
-                reference_type='mappings',
-                version=None,
-                code='1234',
-                resource_version=None,
-                transform=None,
-                created_by=None,
-                display=None,
-                include=True
-            )
+            {
+                'expression': '/orgs/MyOrg/sources/MySource/mappings/1234/',
+                'system': '/orgs/MyOrg/sources/MySource/',
+                'valueset': None,
+                'filter': None,
+                'cascade': None,
+                'reference_type': 'mappings',
+                'version': None,
+                'code': '1234',
+                'resource_version': None,
+                'transform': None,
+                'created_by': None,
+                'display': None,
+                'include': True
+            }
         )
 
         reference = self.get_structure(expression='/orgs/MyOrg/sources/MySource/mappings/?q=foo&external_id=alpha,beta')
         self.assertEqual(
             reference,
-            dict(
-                expression='/orgs/MyOrg/sources/MySource/mappings/?q=foo&external_id=alpha,beta',
-                system='/orgs/MyOrg/sources/MySource/',
-                valueset=None,
-                filter=[
-                    dict(property='q', value='foo', op='='),
-                    dict(property='external_id', value='alpha,beta', op='='),
+            {
+                'expression': '/orgs/MyOrg/sources/MySource/mappings/?q=foo&external_id=alpha,beta',
+                'system': '/orgs/MyOrg/sources/MySource/',
+                'valueset': None,
+                'filter': [
+                    {
+                        'property': 'q',
+                        'value': 'foo',
+                        'op': '='
+                    },
+                    {
+                        'property': 'external_id',
+                        'value': 'alpha,beta',
+                        'op': '='
+                    },
                 ],
-                cascade=None,
-                reference_type='mappings',
-                version=None,
-                code=None,
-                resource_version=None,
-                transform=None,
-                created_by=None,
-                display=None,
-                include=True
-            )
+                'cascade': None,
+                'reference_type': 'mappings',
+                'version': None,
+                'code': None,
+                'resource_version': None,
+                'transform': None,
+                'created_by': None,
+                'display': None,
+                'include': True
+            }
         )
 
         reference = self.get_structure(expression='/orgs/MyOrg/collections/Coll/mappings/?q=foo&external_id=alpha,beta')
         self.assertEqual(
             reference,
-            dict(
-                expression='/orgs/MyOrg/collections/Coll/mappings/?q=foo&external_id=alpha,beta',
-                system=None,
-                valueset=[
+            {
+                'expression': '/orgs/MyOrg/collections/Coll/mappings/?q=foo&external_id=alpha,beta',
+                'system': None,
+                'valueset': [
                     '/orgs/MyOrg/collections/Coll/'
                 ],
-                filter=[
-                    dict(property='q', value='foo', op='='),
-                    dict(property='external_id', value='alpha,beta', op='='),
+                'filter': [
+                    {
+                        'property': 'q',
+                        'value': 'foo',
+                        'op': '='
+                    },
+                    {
+                        'property': 'external_id',
+                        'value': 'alpha,beta',
+                        'op': '='
+                    },
                 ],
-                cascade=None,
-                reference_type='mappings',
-                version=None,
-                code=None,
-                resource_version=None,
-                transform=None,
-                created_by=None,
-                display=None,
-                include=True
-            )
+                'cascade': None,
+                'reference_type': 'mappings',
+                'version': None,
+                'code': None,
+                'resource_version': None,
+                'transform': None,
+                'created_by': None,
+                'display': None,
+                'include': True
+            }
         )
         reference = self.get_structure(expression='/orgs/MyOrg/collections/Coll/v1/mappings/1234/')
         self.assertEqual(
             reference,
-            dict(
-                expression='/orgs/MyOrg/collections/Coll/v1/mappings/1234/',
-                system=None,
-                valueset=[
+            {
+                'expression': '/orgs/MyOrg/collections/Coll/v1/mappings/1234/',
+                'system': None,
+                'valueset': [
                     '/orgs/MyOrg/collections/Coll/|v1'
                 ],
-                filter=None,
-                cascade=None,
-                reference_type='mappings',
-                version=None,
-                code='1234',
-                resource_version=None,
-                transform=None,
-                created_by=None,
-                display=None,
-                include=True
-            )
+                'filter': None,
+                'cascade': None,
+                'reference_type': 'mappings',
+                'version': None,
+                'code': '1234',
+                'resource_version': None,
+                'transform': None,
+                'created_by': None,
+                'display': None,
+                'include': True
+            }
         )
 
         reference = self.get_structure(expression='/orgs/MyOrg/collections/Coll/v1/mappings/1234/3456/')
         self.assertEqual(
             reference,
-            dict(
-                expression='/orgs/MyOrg/collections/Coll/v1/mappings/1234/3456/',
-                system=None,
-                valueset=[
+            {
+                'expression': '/orgs/MyOrg/collections/Coll/v1/mappings/1234/3456/',
+                'system': None,
+                'valueset': [
                     '/orgs/MyOrg/collections/Coll/|v1'
                 ],
-                filter=None,
-                cascade=None,
-                reference_type='mappings',
-                version=None,
-                code='1234',
-                resource_version='3456',
-                transform=None,
-                created_by=None,
-                display=None,
-                include=True
-            )
+                'filter': None,
+                'cascade': None,
+                'reference_type': 'mappings',
+                'version': None,
+                'code': '1234',
+                'resource_version': '3456',
+                'transform': None,
+                'created_by': None,
+                'display': None,
+                'include': True
+            }
         )
 
 
@@ -2070,166 +2128,186 @@ class CollectionReferenceSourceAllExpressionParserTest(OCLTestCase):
 
     def test_parse(self):
         reference = self.get_structure(
-            expression=dict(uri="/users/Me/sources/MySource/", concepts="*", mappings="*"))
+            expression={
+                'uri': "/users/Me/sources/MySource/",
+                'concepts': "*",
+                'mappings': "*"
+            })
         self.assertEqual(
             reference,
             [
-                dict(
-                    expression='/users/Me/sources/MySource/concepts/',
-                    system='/users/Me/sources/MySource/',
-                    valueset=None,
-                    filter=None,
-                    cascade=None,
-                    reference_type='concepts',
-                    version=None,
-                    code=None,
-                    resource_version=None,
-                    transform=None,
-                    created_by=None,
-                    display=None,
-                    include=True
-                ),
-                dict(
-                    expression='/users/Me/sources/MySource/mappings/',
-                    system='/users/Me/sources/MySource/',
-                    valueset=None,
-                    filter=None,
-                    cascade=None,
-                    reference_type='mappings',
-                    version=None,
-                    code=None,
-                    resource_version=None,
-                    transform=None,
-                    created_by=None,
-                    display=None,
-                    include=True
-                )
+                {
+                    'expression': '/users/Me/sources/MySource/concepts/',
+                    'system': '/users/Me/sources/MySource/',
+                    'valueset': None,
+                    'filter': None,
+                    'cascade': None,
+                    'reference_type': 'concepts',
+                    'version': None,
+                    'code': None,
+                    'resource_version': None,
+                    'transform': None,
+                    'created_by': None,
+                    'display': None,
+                    'include': True
+                },
+                {
+                    'expression': '/users/Me/sources/MySource/mappings/',
+                    'system': '/users/Me/sources/MySource/',
+                    'valueset': None,
+                    'filter': None,
+                    'cascade': None,
+                    'reference_type': 'mappings',
+                    'version': None,
+                    'code': None,
+                    'resource_version': None,
+                    'transform': None,
+                    'created_by': None,
+                    'display': None,
+                    'include': True
+                }
             ]
         )
         reference = self.get_structure(
-            expression=dict(uri="/users/Me/sources/MySource/v1/", concepts="*", mappings="*"))
+            expression={
+                'uri': "/users/Me/sources/MySource/v1/",
+                'concepts': "*",
+                'mappings': "*"
+            })
         self.assertEqual(
             reference,
             [
-                dict(
-                    expression='/users/Me/sources/MySource/v1/concepts/',
-                    system='/users/Me/sources/MySource/',
-                    valueset=None,
-                    filter=None,
-                    cascade=None,
-                    reference_type='concepts',
-                    version='v1',
-                    code=None,
-                    resource_version=None,
-                    transform=None,
-                    created_by=None,
-                    display=None,
-                    include=True
-                ),
-                dict(
-                    expression='/users/Me/sources/MySource/v1/mappings/',
-                    system='/users/Me/sources/MySource/',
-                    valueset=None,
-                    filter=None,
-                    cascade=None,
-                    reference_type='mappings',
-                    version='v1',
-                    code=None,
-                    resource_version=None,
-                    transform=None,
-                    created_by=None,
-                    display=None,
-                    include=True
-                )
+                {
+                    'expression': '/users/Me/sources/MySource/v1/concepts/',
+                    'system': '/users/Me/sources/MySource/',
+                    'valueset': None,
+                    'filter': None,
+                    'cascade': None,
+                    'reference_type': 'concepts',
+                    'version': 'v1',
+                    'code': None,
+                    'resource_version': None,
+                    'transform': None,
+                    'created_by': None,
+                    'display': None,
+                    'include': True
+                },
+                {
+                    'expression': '/users/Me/sources/MySource/v1/mappings/',
+                    'system': '/users/Me/sources/MySource/',
+                    'valueset': None,
+                    'filter': None,
+                    'cascade': None,
+                    'reference_type': 'mappings',
+                    'version': 'v1',
+                    'code': None,
+                    'resource_version': None,
+                    'transform': None,
+                    'created_by': None,
+                    'display': None,
+                    'include': True
+                }
             ]
         )
 
         reference = self.get_structure(
-            expression=dict(uri="/users/Me/sources/MySource/v1/", concepts="*"))
+            expression={
+                'uri': "/users/Me/sources/MySource/v1/",
+                'concepts': "*"
+            })
         self.assertEqual(
             reference,
             [
-                dict(
-                    expression='/users/Me/sources/MySource/v1/concepts/',
-                    system='/users/Me/sources/MySource/',
-                    valueset=None,
-                    filter=None,
-                    cascade=None,
-                    reference_type='concepts',
-                    version='v1',
-                    code=None,
-                    resource_version=None,
-                    transform=None,
-                    created_by=None,
-                    display=None,
-                    include=True
-                ),
+                {
+                    'expression': '/users/Me/sources/MySource/v1/concepts/',
+                    'system': '/users/Me/sources/MySource/',
+                    'valueset': None,
+                    'filter': None,
+                    'cascade': None,
+                    'reference_type': 'concepts',
+                    'version': 'v1',
+                    'code': None,
+                    'resource_version': None,
+                    'transform': None,
+                    'created_by': None,
+                    'display': None,
+                    'include': True
+                },
             ]
         )
         reference = self.get_structure(
-            expression=dict(uri="/users/Me/sources/MySource/v1/", mappings="*"))
+            expression={
+                'uri': "/users/Me/sources/MySource/v1/",
+                'mappings': "*"
+            })
         self.assertEqual(
             reference,
             [
-                dict(
-                    expression='/users/Me/sources/MySource/v1/mappings/',
-                    system='/users/Me/sources/MySource/',
-                    valueset=None,
-                    filter=None,
-                    cascade=None,
-                    reference_type='mappings',
-                    version='v1',
-                    code=None,
-                    resource_version=None,
-                    transform=None,
-                    created_by=None,
-                    display=None,
-                    include=True
-                ),
+                {
+                    'expression': '/users/Me/sources/MySource/v1/mappings/',
+                    'system': '/users/Me/sources/MySource/',
+                    'valueset': None,
+                    'filter': None,
+                    'cascade': None,
+                    'reference_type': 'mappings',
+                    'version': 'v1',
+                    'code': None,
+                    'resource_version': None,
+                    'transform': None,
+                    'created_by': None,
+                    'display': None,
+                    'include': True
+                },
             ]
         )
         reference = self.get_structure(
-            expression=dict(uri="/users/Me/sources/MySource/", concepts="*"))
+            expression={
+                'uri': "/users/Me/sources/MySource/",
+                'concepts': "*"
+            })
         self.assertEqual(
             reference,
             [
-                dict(
-                    expression='/users/Me/sources/MySource/concepts/',
-                    system='/users/Me/sources/MySource/',
-                    valueset=None,
-                    filter=None,
-                    cascade=None,
-                    reference_type='concepts',
-                    version=None,
-                    code=None,
-                    resource_version=None,
-                    transform=None,
-                    created_by=None,
-                    display=None,
-                    include=True
-                ),
+                {
+                    'expression': '/users/Me/sources/MySource/concepts/',
+                    'system': '/users/Me/sources/MySource/',
+                    'valueset': None,
+                    'filter': None,
+                    'cascade': None,
+                    'reference_type': 'concepts',
+                    'version': None,
+                    'code': None,
+                    'resource_version': None,
+                    'transform': None,
+                    'created_by': None,
+                    'display': None,
+                    'include': True
+                },
             ]
         )
         reference = self.get_structure(
-            expression=dict(uri="/users/Me/sources/MySource/", mappings="*"))
+            expression={
+                'uri': "/users/Me/sources/MySource/",
+                'mappings': "*"
+            })
         self.assertEqual(
             reference,
             [
-                dict(
-                    expression='/users/Me/sources/MySource/mappings/',
-                    system='/users/Me/sources/MySource/',
-                    valueset=None,
-                    filter=None,
-                    cascade=None,
-                    reference_type='mappings',
-                    version=None,
-                    code=None,
-                    resource_version=None,
-                    transform=None,
-                    created_by=None,
-                    display=None,
-                    include=True
-                ),
+                {
+                    'expression': '/users/Me/sources/MySource/mappings/',
+                    'system': '/users/Me/sources/MySource/',
+                    'valueset': None,
+                    'filter': None,
+                    'cascade': None,
+                    'reference_type': 'mappings',
+                    'version': None,
+                    'code': None,
+                    'resource_version': None,
+                    'transform': None,
+                    'created_by': None,
+                    'display': None,
+                    'include': True
+                },
             ]
         )
 
@@ -2274,13 +2352,15 @@ class CollectionReferenceOldStyleToExpandedStructureParserTest(OCLTestCase):
         self.assertIsNone(reference.cascade)
 
         references = self.get_expanded_references(
-            expression=dict(expressions=[
-                "/orgs/MyOrg/sources/MySource/concepts/c-1234/",
-                "/orgs/MyOrg/sources/MySource/mappings/m-1234/",
-                "/users/Me/sources/MySource/concepts/?q=foobar",
-                "/users/Me/sources/MySource/v1/concepts/?q=foobar&datatype=rule",
-                "/users/Me/collections/MyColl/v1/mappings/?mapType=Q-AND-A",
-            ])
+            expression={
+                'expressions': [
+                    "/orgs/MyOrg/sources/MySource/concepts/c-1234/",
+                    "/orgs/MyOrg/sources/MySource/mappings/m-1234/",
+                    "/users/Me/sources/MySource/concepts/?q=foobar",
+                    "/users/Me/sources/MySource/v1/concepts/?q=foobar&datatype=rule",
+                    "/users/Me/collections/MyColl/v1/mappings/?mapType=Q-AND-A",
+                ]
+            }
         )
         self.assertEqual(len(references), 5)
 
@@ -2308,7 +2388,7 @@ class CollectionReferenceOldStyleToExpandedStructureParserTest(OCLTestCase):
         self.assertEqual(reference.expression, "/users/Me/sources/MySource/concepts/?q=foobar")
         self.assertEqual(reference.system, "/users/Me/sources/MySource/")
         self.assertEqual(reference.reference_type, 'concepts')
-        self.assertEqual(reference.filter, [dict(property='q', value='foobar', op='=')])
+        self.assertEqual(reference.filter, [{'property': 'q', 'value': 'foobar', 'op': '='}])
         self.assertIsNone(reference.version)
         self.assertIsNone(reference.valueset)
         self.assertIsNone(reference.cascade)
@@ -2320,7 +2400,8 @@ class CollectionReferenceOldStyleToExpandedStructureParserTest(OCLTestCase):
         self.assertEqual(reference.reference_type, 'concepts')
         self.assertEqual(
             reference.filter,
-            [dict(property='q', value='foobar', op='='), dict(property='datatype', value='rule', op='=')])
+            [{'property': 'q', 'value': 'foobar', 'op': '='}, {'property': 'datatype', 'value': 'rule', 'op': '='}]
+        )
         self.assertEqual(reference.version, 'v1')
         self.assertIsNone(reference.valueset)
         self.assertIsNone(reference.cascade)
@@ -2332,7 +2413,8 @@ class CollectionReferenceOldStyleToExpandedStructureParserTest(OCLTestCase):
         self.assertEqual(reference.reference_type, 'mappings')
         self.assertEqual(
             reference.filter,
-            [dict(property='mapType', value='Q-AND-A', op='=')])
+            [{'property': 'mapType', 'value': 'Q-AND-A', 'op': '='}]
+        )
         self.assertIsNone(reference.version)
         self.assertIsNone(reference.system)
         self.assertIsNone(reference.cascade)
@@ -2340,14 +2422,17 @@ class CollectionReferenceOldStyleToExpandedStructureParserTest(OCLTestCase):
 
     def test_parse_string_expression_concepts_mappings_explicit(self):  # pylint: disable=too-many-statements
         references = self.get_expanded_references(
-            expression=dict(concepts=[
-                "/orgs/MyOrg/sources/MySource/concepts/c-1234/",
-                "/users/Me/sources/MySource/concepts/?q=foobar",
-                "/users/Me/sources/MySource/v1/concepts/?q=foobar&datatype=rule",
-            ], mappings=[
-                "/orgs/MyOrg/sources/MySource/mappings/m-1234/",
-                "/users/Me/collections/MyColl/v1/mappings/?mapType=Q-AND-A",
-            ])
+            expression={
+                'concepts': [
+                    "/orgs/MyOrg/sources/MySource/concepts/c-1234/",
+                    "/users/Me/sources/MySource/concepts/?q=foobar",
+                    "/users/Me/sources/MySource/v1/concepts/?q=foobar&datatype=rule",
+                ],
+                'mappings': [
+                    "/orgs/MyOrg/sources/MySource/mappings/m-1234/",
+                    "/users/Me/collections/MyColl/v1/mappings/?mapType=Q-AND-A",
+                ]
+            }
         )
         self.assertEqual(len(references), 5)
 
@@ -2367,7 +2452,7 @@ class CollectionReferenceOldStyleToExpandedStructureParserTest(OCLTestCase):
         self.assertEqual(reference.expression, "/users/Me/sources/MySource/concepts/?q=foobar")
         self.assertEqual(reference.system, "/users/Me/sources/MySource/")
         self.assertEqual(reference.reference_type, 'concepts')
-        self.assertEqual(reference.filter, [dict(property='q', value='foobar', op='=')])
+        self.assertEqual(reference.filter, [{'property': 'q', 'value': 'foobar', 'op': '='}])
         self.assertIsNone(reference.version)
         self.assertIsNone(reference.valueset)
         self.assertIsNone(reference.cascade)
@@ -2380,7 +2465,7 @@ class CollectionReferenceOldStyleToExpandedStructureParserTest(OCLTestCase):
         self.assertEqual(reference.reference_type, 'concepts')
         self.assertEqual(
             reference.filter,
-            [dict(property='q', value='foobar', op='='), dict(property='datatype', value='rule', op='=')])
+            [{'property': 'q', 'value': 'foobar', 'op': '='}, {'property': 'datatype', 'value': 'rule', 'op': '='}])
         self.assertEqual(reference.version, 'v1')
         self.assertIsNone(reference.valueset)
         self.assertIsNone(reference.cascade)
@@ -2404,7 +2489,7 @@ class CollectionReferenceOldStyleToExpandedStructureParserTest(OCLTestCase):
         self.assertEqual(reference.reference_type, 'mappings')
         self.assertEqual(
             reference.filter,
-            [dict(property='mapType', value='Q-AND-A', op='=')])
+            [{'property': 'mapType', 'value': 'Q-AND-A', 'op': '='}])
         self.assertIsNone(reference.version)
         self.assertIsNone(reference.system)
         self.assertIsNone(reference.cascade)
@@ -2412,7 +2497,11 @@ class CollectionReferenceOldStyleToExpandedStructureParserTest(OCLTestCase):
 
     def test_parse_source_all_resources_expression(self):
         references = self.get_expanded_references(
-            expression=dict(concepts="*", mappings="*", uri='/orgs/MyOrg/sources/MySource/')
+            expression={
+                'concepts': "*",
+                'mappings': "*",
+                'uri': '/orgs/MyOrg/sources/MySource/'
+            }
         )
         self.assertEqual(len(references), 2)
 
@@ -2449,14 +2538,16 @@ class CollectionReferenceParserTest(OCLTestCase):
 
     def test_parse_string_expression_generic(self):  # pylint: disable=too-many-statements
         references = self.get_expanded_references(
-            expression=dict(expressions=[
-                "/orgs/MyOrg/sources/MySource/concepts/c-1234/",
-                "/orgs/MyOrg/sources/MySource/mappings/m-1234/",
-                "/users/Me/sources/MySource/concepts/?q=foobar",
-                "/users/Me/sources/MySource/v1/concepts/?q=foobar&datatype=rule",
-                "/users/Me/collections/MyColl/v1/mappings/?mapType=Q-AND-A",
-                "/orgs/MyOrg/sources/MySource/concepts/foo%252Fbar/",
-            ])
+            expression={
+                'expressions': [
+                    "/orgs/MyOrg/sources/MySource/concepts/c-1234/",
+                    "/orgs/MyOrg/sources/MySource/mappings/m-1234/",
+                    "/users/Me/sources/MySource/concepts/?q=foobar",
+                    "/users/Me/sources/MySource/v1/concepts/?q=foobar&datatype=rule",
+                    "/users/Me/collections/MyColl/v1/mappings/?mapType=Q-AND-A",
+                    "/orgs/MyOrg/sources/MySource/concepts/foo%252Fbar/",
+                ]
+            }
         )
         self.assertEqual(len(references), 6)
 
@@ -2486,7 +2577,7 @@ class CollectionReferenceParserTest(OCLTestCase):
         self.assertEqual(reference.expression, "/users/Me/sources/MySource/concepts/?q=foobar")
         self.assertEqual(reference.system, "/users/Me/sources/MySource/")
         self.assertEqual(reference.reference_type, 'concepts')
-        self.assertEqual(reference.filter, [dict(property='q', value='foobar', op='=')])
+        self.assertEqual(reference.filter, [{'property': 'q', 'value': 'foobar', 'op': '='}])
         self.assertIsNone(reference.version)
         self.assertIsNone(reference.valueset)
         self.assertIsNone(reference.cascade)
@@ -2499,7 +2590,7 @@ class CollectionReferenceParserTest(OCLTestCase):
         self.assertEqual(reference.reference_type, 'concepts')
         self.assertEqual(
             reference.filter,
-            [dict(property='q', value='foobar', op='='), dict(property='datatype', value='rule', op='=')])
+            [{'property': 'q', 'value': 'foobar', 'op': '='}, {'property': 'datatype', 'value': 'rule', 'op': '='}])
         self.assertEqual(reference.version, 'v1')
         self.assertIsNone(reference.valueset)
         self.assertIsNone(reference.cascade)
@@ -2515,7 +2606,7 @@ class CollectionReferenceParserTest(OCLTestCase):
         self.assertEqual(reference.reference_type, 'mappings')
         self.assertEqual(
             reference.filter,
-            [dict(property='mapType', value='Q-AND-A', op='=')])
+            [{'property': 'mapType', 'value': 'Q-AND-A', 'op': '='}])
         self.assertIsNone(reference.version)
         self.assertIsNone(reference.system)
         self.assertIsNone(reference.cascade)
@@ -2538,14 +2629,17 @@ class CollectionReferenceParserTest(OCLTestCase):
 
     def test_parse_string_expression_concepts_mappings_explicit(self):  # pylint: disable=too-many-statements
         references = self.get_expanded_references(
-            expression=dict(concepts=[
-                "/orgs/MyOrg/sources/MySource/concepts/c-1234/",
-                "/users/Me/sources/MySource/concepts/?q=foobar",
-                "/users/Me/sources/MySource/v1/concepts/?q=foobar&datatype=rule",
-            ], mappings=[
-                "/orgs/MyOrg/sources/MySource/mappings/m-1234/",
-                "/users/Me/collections/MyColl/v1/mappings/?mapType=Q-AND-A",
-            ])
+            expression={
+                'concepts': [
+                    "/orgs/MyOrg/sources/MySource/concepts/c-1234/",
+                    "/users/Me/sources/MySource/concepts/?q=foobar",
+                    "/users/Me/sources/MySource/v1/concepts/?q=foobar&datatype=rule",
+                ],
+                'mappings': [
+                    "/orgs/MyOrg/sources/MySource/mappings/m-1234/",
+                    "/users/Me/collections/MyColl/v1/mappings/?mapType=Q-AND-A",
+                ]
+            }
         )
         self.assertEqual(len(references), 5)
 
@@ -2566,7 +2660,7 @@ class CollectionReferenceParserTest(OCLTestCase):
         self.assertEqual(reference.expression, "/users/Me/sources/MySource/concepts/?q=foobar")
         self.assertEqual(reference.system, "/users/Me/sources/MySource/")
         self.assertEqual(reference.reference_type, 'concepts')
-        self.assertEqual(reference.filter, [dict(property='q', value='foobar', op='=')])
+        self.assertEqual(reference.filter, [{'property': 'q', 'value': 'foobar', 'op': '='}])
         self.assertIsNone(reference.version)
         self.assertIsNone(reference.valueset)
         self.assertIsNone(reference.cascade)
@@ -2580,7 +2674,7 @@ class CollectionReferenceParserTest(OCLTestCase):
         self.assertEqual(reference.reference_type, 'concepts')
         self.assertEqual(
             reference.filter,
-            [dict(property='q', value='foobar', op='='), dict(property='datatype', value='rule', op='=')])
+            [{'property': 'q', 'value': 'foobar', 'op': '='}, {'property': 'datatype', 'value': 'rule', 'op': '='}])
         self.assertEqual(reference.version, 'v1')
         self.assertIsNone(reference.valueset)
         self.assertIsNone(reference.cascade)
@@ -2609,7 +2703,7 @@ class CollectionReferenceParserTest(OCLTestCase):
         self.assertEqual(reference.reference_type, 'mappings')
         self.assertEqual(
             reference.filter,
-            [dict(property='mapType', value='Q-AND-A', op='=')])
+            [{'property': 'mapType', 'value': 'Q-AND-A', 'op': '='}])
         self.assertIsNone(reference.version)
         self.assertIsNone(reference.system)
         self.assertIsNone(reference.cascade)
@@ -2621,7 +2715,11 @@ class CollectionReferenceParserTest(OCLTestCase):
 
     def test_parse_source_all_resources_expression(self):
         references = self.get_expanded_references(
-            expression=dict(concepts="*", mappings="*", uri='/orgs/MyOrg/sources/MySource/')
+            expression={
+                'concepts': "*",
+                'mappings': "*",
+                'uri': '/orgs/MyOrg/sources/MySource/'
+            }
         )
         self.assertEqual(len(references), 2)
 
