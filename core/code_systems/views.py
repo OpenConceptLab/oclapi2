@@ -7,6 +7,7 @@ from core.bundles.serializers import FHIRBundleSerializer
 from core.code_systems.serializers import CodeSystemDetailSerializer, \
     ValidateCodeParametersSerializer
 from core.common.constants import HEAD
+from core.common.exceptions import Http400
 from core.common.fhir_helpers import translate_fhir_query
 from core.common.serializers import IdentifierSerializer
 from core.concepts.permissions import CanViewParentDictionaryAsGuest
@@ -48,6 +49,28 @@ class CodeSystemListView(SourceListView):
         return self.serializer_class(obj)
 
 
+class CodeSystemLookupNotFoundError(ValidationError):
+    def __init__(self):
+        super().__init__(detail=
+            {
+                "resourceType": "OperationOutcome",
+                "id": "exception",
+                "text": {
+                    "status": "additional",
+                    "div": "<div xmlns=\"http://www.w3.org/1999/xhtml\">Code not found</div>"
+                },
+                "issue": [
+                    {
+                        "severity": "error",
+                        "code": "not-found",
+                        "details": {
+                            "text": "Code not found"
+                        }
+                    }
+                ]
+            })
+
+
 class CodeSystemListLookupView(ConceptRetrieveUpdateDestroyView):
     serializer_class = ParametersSerializer
 
@@ -58,20 +81,28 @@ class CodeSystemListLookupView(ConceptRetrieveUpdateDestroyView):
         queryset = super().get_queryset()
         code = self.request.query_params.get('code')
         system = self.request.query_params.get('system')
+        version = self.request.query_params.get('version')
         if code and system:
-            source = Source.objects.filter(canonical_url=system, is_latest_version=True).exclude(version=HEAD).first()
+            source = Source.objects.filter(canonical_url=system)
             if not source:
                 system = IdentifierSerializer.convert_fhir_url_to_ocl_uri(system, 'sources')
-                source = Source.objects.filter(uri=system, is_latest_version=True).exclude(version=HEAD).first()
+                source = Source.objects.filter(uri=system)
             if source:
-                queryset = queryset.filter(sources=source, mnemonic=code)
+                if version:
+                    source = source.filter(version=version)
+                else:
+                    source = source.filter(is_latest_version=True).exclude(version=HEAD)
 
-        return queryset
+                if source:
+                    queryset = queryset.filter(sources=source.first(), mnemonic=code)
+                    return queryset
+
+        raise CodeSystemLookupNotFoundError()
 
     def get_serializer(self, instance=None):  # pylint: disable=arguments-differ
         if instance:
             return ParametersSerializer.from_concept(instance)
-        return ParametersSerializer()
+        return None
 
 
 class CodeSystemValidateCodeView(ConceptRetrieveUpdateDestroyView):
