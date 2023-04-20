@@ -7,6 +7,7 @@ from django.db import IntegrityError
 from django.db.models import Q
 from django.http import Http404
 from django.shortcuts import get_object_or_404
+from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
 from pydash import get
 from rest_framework import status
@@ -1243,5 +1244,22 @@ class ReferenceExpressionResolveView(APIView):
 
         return results
 
+    @swagger_auto_schema(
+        responses={
+            200: ReferenceExpressionResolveSerializer(many=True)
+        },
+        request_body=openapi.Schema(
+            type=openapi.TYPE_ARRAY,
+            items=openapi.Schema(
+                type=openapi.TYPE_OBJECT,
+                properties={
+                    'url': openapi.Schema(type=openapi.TYPE_STRING),
+                    'version': openapi.Schema(type=openapi.TYPE_STRING),
+                    'namespace': openapi.Schema(type=openapi.TYPE_STRING),
+                },
+                required=['url', 'version']
+            )
+        ),
+    )
     def post(self, _):
         return Response(self.get_results(), status=status.HTTP_200_OK)
