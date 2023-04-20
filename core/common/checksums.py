@@ -21,29 +21,28 @@ class ChecksumModel(models.Model):
     ALL_CHECKSUM_KEY = 'all'
 
     def get_checksums(self):
-        if not Toggle.get('CHECKSUMS_TOGGLE'):
-            return
-        if self.checksums:
+        if Toggle.get('CHECKSUMS_TOGGLE'):
+            if self.checksums:
+                return self.checksums
+
+            self.set_checksums()
+
             return self.checksums
 
-        self.set_checksums()
-
-        return self.checksums
-
     def set_checksums(self):
-        self.checksums = self._calculate_checksums()
-        self.save()
+        if Toggle.get('CHECKSUMS_TOGGLE'):
+            self.checksums = self._calculate_checksums()
+            self.save()
 
     @property
     def checksum(self):
-        if not Toggle.get('CHECKSUMS_TOGGLE'):
-            return
         """Returns the checksum of the model instance or metadata only checksum."""
-        if get(self, f'checksums.{self.METADATA_CHECKSUM_KEY}'):
-            return self.checksums[self.METADATA_CHECKSUM_KEY]
-        self.get_checksums()
+        if Toggle.get('CHECKSUMS_TOGGLE'):
+            if get(self, f'checksums.{self.METADATA_CHECKSUM_KEY}'):
+                return self.checksums[self.METADATA_CHECKSUM_KEY]
+            self.get_checksums()
 
-        return self.checksums.get(self.METADATA_CHECKSUM_KEY)
+            return self.checksums.get(self.METADATA_CHECKSUM_KEY)
 
     def get_checksum_fields(self):
         result = {
@@ -57,9 +56,8 @@ class ChecksumModel(models.Model):
         return result
 
     def get_basic_checksums(self):
-        if not Toggle.get('CHECKSUMS_TOGGLE'):
-            return
-        return {self.METADATA_CHECKSUM_KEY: self._calculate_meta_checksum()}
+        if Toggle.get('CHECKSUMS_TOGGLE'):
+            return {self.METADATA_CHECKSUM_KEY: self._calculate_meta_checksum()}
 
     def get_all_checksums(self):
         return self.get_basic_checksums()
@@ -74,6 +72,8 @@ class ChecksumModel(models.Model):
         for instance in queryset:
             instance.get_checksums()
             _checksums.append(instance.checksum)
+        if len(_checksums) == 1:
+            return _checksums[0]
         return ChecksumModel.generate_checksum(_checksums)
 
     def _calculate_meta_checksum(self):
@@ -98,6 +98,8 @@ class Checksum:
 
     @classmethod
     def _serialize(cls, obj):
+        if isinstance(obj, list) and len(obj) == 1:
+            obj = obj[0]
         if isinstance(obj, list):
             return f"[{','.join(map(cls._serialize, generic_sort(obj)))}]"
 

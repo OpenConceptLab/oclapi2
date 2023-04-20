@@ -914,5 +914,5 @@ class ChecksumView(APIView):
     )
     def post(self, request):
         if not request.data:
-            return Response(status=status.HTTP_400_BAD_REQUEST)
+            return Response({'error': 'Request body is required'}, status=status.HTTP_400_BAD_REQUEST)
         return Response(Checksum.generate(request.data))
