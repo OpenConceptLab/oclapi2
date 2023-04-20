@@ -7,7 +7,6 @@ from core.bundles.serializers import FHIRBundleSerializer
 from core.code_systems.serializers import CodeSystemDetailSerializer, \
     ValidateCodeParametersSerializer
 from core.common.constants import HEAD
-from core.common.exceptions import Http400
 from core.common.fhir_helpers import translate_fhir_query
 from core.common.serializers import IdentifierSerializer
 from core.concepts.permissions import CanViewParentDictionaryAsGuest

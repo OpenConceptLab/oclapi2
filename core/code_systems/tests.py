@@ -196,9 +196,7 @@ class CodeSystemTest(OCLTestCase):
                 {'name': 'display', 'valueString': self.concept_1.display_name}]}))
 
     def test_lookup_for_empty_code_system(self):
-        response = self.client.get(f'/fhir/CodeSystem/$lookup/'
-                                   f'?system='
-                                   f'&code=')
+        response = self.client.get('/fhir/CodeSystem/$lookup/?system=&code=')
 
         self.assertEqual(response.status_code, 400)
         self.assertJSONEqual(json.dumps(response.data), json.dumps(CodeSystemLookupNotFoundError().detail))
