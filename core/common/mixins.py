@@ -18,8 +18,9 @@ from core.common.constants import HEAD, ACCESS_TYPE_NONE, INCLUDE_FACETS, \
     LIST_DEFAULT_LIMIT, HTTP_COMPRESS_HEADER, CSV_DEFAULT_LIMIT, FACETS_ONLY, INCLUDE_RETIRED_PARAM
 from core.common.permissions import HasPrivateAccess, HasOwnership, CanViewConceptDictionary, \
     CanViewConceptDictionaryVersion
+from .checksums import ChecksumModel
 from .utils import write_csv_to_s3, get_csv_from_s3, get_query_params_from_url_string, compact_dict_by_values, \
-    to_owner_uri, parse_updated_since_param, get_export_service, to_int
+    to_owner_uri, parse_updated_since_param, get_export_service, to_int, drop_version
 
 logger = logging.getLogger('oclapi')
 
@@ -413,7 +414,42 @@ class SourceContainerMixin:
         return reverse('collection-list', kwargs={self.get_url_kwarg(): self.mnemonic})
 
 
-class SourceChildMixin:
+class SourceChildMixin(ChecksumModel):
+    class Meta:
+        abstract = True
+
+    def get_all_checksums(self):
+        return {
+            **super().get_all_checksums(),
+            'repo_versions': self.source_versions_checksum,
+        }
+
+    @property
+    def source_versions_checksum(self):
+        return self.generate_checksum(list(self.source_versions))
+
+    @staticmethod
+    def is_strictly_equal(instance1, instance2):
+        return instance1.get_checksums() == instance2.get_checksums()
+
+    @staticmethod
+    def is_equal(instance1, instance2):
+        return instance1.get_basic_checksums() == instance2.get_basic_checksums()
+
+    def __eq__(self, other):
+        return self.__class__.is_equal(self, other)
+
+    def __hash__(self):
+        return super().__hash__()
+
+    def get_checksum_fields(self):
+        result = super().get_checksum_fields()
+
+        if not self.is_versioned_object:
+            result['uri'] = drop_version(self.uri)
+
+        return result
+
     @staticmethod
     def apply_user_criteria(queryset, user):
         queryset = queryset.exclude(

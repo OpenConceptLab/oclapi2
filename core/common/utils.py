@@ -881,3 +881,12 @@ def to_int(value, default_value):
         return int(value) or default_value
     except (ValueError, TypeError):
         return default_value
+
+
+def generic_sort(_list):
+    def compare(item):
+        if isinstance(item, (int, float, str, bool)):
+            return item
+        else:
+            return str(item)
+    return sorted(_list, key=compare)

@@ -101,6 +101,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
                 'created_by',
                 'parent_concept_urls',
                 'public_can_view',
+                'checksums',
                 'versioned_object_id',
             ])
         )
@@ -201,6 +202,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
                     'created_by',
                     'parent_concept_urls',
                     'public_can_view',
+                    'checksums',
                     'versioned_object_id'])
         )
 
@@ -276,6 +278,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
                     'created_by',
                     'parent_concept_urls',
                     'public_can_view',
+                    'checksums',
                     'versioned_object_id'])
         )
 
@@ -711,7 +714,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
                     'owner', 'owner_type', 'owner_url', 'display_name', 'display_locale', 'names', 'descriptions',
                     'created_on', 'updated_on', 'versions_url', 'version', 'extras', 'name', 'type',
                     'update_comment', 'version_url', 'updated_by', 'created_by',
-                    'public_can_view', 'versioned_object_id'])
+                    'public_can_view', 'versioned_object_id', 'checksums'])
         )
 
         response = self.client.get(

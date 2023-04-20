@@ -97,11 +97,12 @@ class MappingVersionListSerializer(MappingListSerializer):
     previous_version_url = CharField(read_only=True, source='prev_version_uri')
     source_versions = ListField(read_only=True)
     collection_versions = ListField(read_only=True)
+    checksums = SerializerMethodField()
 
     class Meta:
         model = Mapping
         fields = MappingListSerializer.Meta.fields + (
-            'previous_version_url', 'source_versions', 'collection_versions',
+            'previous_version_url', 'source_versions', 'collection_versions', 'checksums'
         )
 
     def __init__(self, *args, **kwargs):
@@ -119,6 +120,10 @@ class MappingVersionListSerializer(MappingListSerializer):
             pass
 
         super().__init__(*args, **kwargs)
+
+    @staticmethod
+    def get_checksums(obj):
+        return obj.get_checksums()
 
 
 class MappingMinimalSerializer(ModelSerializer):
@@ -187,12 +192,14 @@ class MappingDetailSerializer(MappingListSerializer):
     to_source = SourceDetailSerializer()
     created_on = DateTimeField(source='created_at', read_only=True)
     updated_on = DateTimeField(source='updated_at', read_only=True)
+    checksums = SerializerMethodField()
 
     class Meta:
         model = Mapping
         fields = MappingListSerializer.Meta.fields + (
             'type', 'uuid', 'extras', 'created_on', 'updated_on', 'created_by',
-            'updated_by', 'parent_id', 'public_can_view',)
+            'updated_by', 'parent_id', 'public_can_view', 'checksums'
+        )
 
     def create(self, validated_data):
         mapping = Mapping.persist_new(data=validated_data, user=self.context.get('request').user)
@@ -205,6 +212,10 @@ class MappingDetailSerializer(MappingListSerializer):
         if errors:
             self._errors.update(errors)
         return instance
+
+    @staticmethod
+    def get_checksums(obj):
+        return obj.get_checksums()
 
 
 class MappingVersionDetailSerializer(MappingDetailSerializer):

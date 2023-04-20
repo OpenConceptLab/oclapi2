@@ -35,6 +35,7 @@ from core.sources.models import Source
 from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
 from .backends import OCLOIDCAuthenticationBackend
+from .checksums import Checksum
 from .fhir_helpers import translate_fhir_query
 from .serializers import IdentifierSerializer
 from .services import S3, PostgresQL, DjangoAuthService, OIDCAuthService
@@ -1260,3 +1261,26 @@ class OCLOIDCAuthenticationBackendTest(OCLTestCase):
         self.assertEqual(users.first(), batman)
 
         self.assertEqual(self.backend.filter_users_by_claims({**self.claim, 'preferred_username': None}).count(), 0)
+
+
+class ChecksumTest(OCLTestCase):
+    def test_generate(self):
+        self.assertIsNotNone(Checksum.generate('foo'))
+        self.assertEqual(len(Checksum.generate('foo')), 32)
+        self.assertIsInstance(Checksum.generate('foo'), str)
+
+        # keys order
+        self.assertEqual(
+            Checksum.generate({'foo': 'bar', 'bar': 'foo'}), Checksum.generate({'bar': 'foo', 'foo': 'bar'})
+        )
+        self.assertEqual(
+            Checksum.generate({'a': 1, 'z': 100}), Checksum.generate({'z': 100, 'a': 1})
+        )
+
+        # datatype
+        self.assertNotEqual(Checksum.generate({'a': 1}), Checksum.generate({'a': 1.0}))
+        self.assertEqual(Checksum.generate({'a': 1.1}), Checksum.generate({'a': 1.10}))
+
+        # value order
+        self.assertEqual(Checksum.generate({'a': [1, 2, 3]}), Checksum.generate({'a': [2, 1, 3]}))
+        self.assertEqual(Checksum.generate([1, 2, 3]), Checksum.generate([2, 1, 3]))

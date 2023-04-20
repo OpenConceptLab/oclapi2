@@ -6,6 +6,7 @@ from django.db import models, IntegrityError, transaction
 from django.db.models import F, Q
 from pydash import get, compact
 
+from core.common.checksums import ChecksumModel
 from core.common.constants import ISO_639_1, LATEST, HEAD, ALL
 from core.common.mixins import SourceChildMixin
 from core.common.models import VersionedModel, ConceptContainerModel
@@ -20,7 +21,7 @@ from core.concepts.constants import CONCEPT_TYPE, LOCALES_FULLY_SPECIFIED, LOCAL
 from core.concepts.mixins import ConceptValidationMixin
 
 
-class AbstractLocalizedText(models.Model):
+class AbstractLocalizedText(ChecksumModel):
     class Meta:
         abstract = True
 
@@ -31,6 +32,8 @@ class AbstractLocalizedText(models.Model):
     locale = models.TextField()
     locale_preferred = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
+
+    CHECKSUM_EXCLUSIONS = ['id', 'created_at', 'concept_id', 'concept']
 
     def to_dict(self):
         return dict(
@@ -186,6 +189,15 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     WAS_RETIRED = CONCEPT_WAS_RETIRED
     WAS_UNRETIRED = CONCEPT_WAS_UNRETIRED
 
+    CHECKSUM_EXCLUSIONS = [
+        'id', 'created_at', 'updated_at', 'version', 'released', 'is_latest_version', 'comment',
+        'created_by_id', 'updated_by_id', 'parent_id', 'versioned_object_id', '_counted', '_index',
+        'created_by', 'updated_by', 'parent', 'versioned_object', 'name'
+    ]
+    CHECKSUM_INCLUSIONS = [
+        'display_name', 'display_locale'
+    ]
+
     # $cascade as hierarchy attributes
     cascaded_entries = None
     terminal = None
@@ -212,6 +224,26 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         'name_types': {'sortable': False, 'filterable': True, 'facet': True},
         'description_types': {'sortable': False, 'filterable': True, 'facet': True},
     }
+
+    def get_basic_checksums(self):
+        return {
+            **super().get_basic_checksums(),
+            'names': self.names_checksum,
+            'descriptions': self.descriptions_checksum,
+            'mappings': self.mappings_checksum
+        }
+
+    @property
+    def mappings_checksum(self):
+        return self.generate_queryset_checksum(self.get_unidirectional_mappings().filter(retired=False))
+
+    @property
+    def names_checksum(self):
+        return self.generate_queryset_checksum(self.names.filter())
+
+    @property
+    def descriptions_checksum(self):
+        return self.generate_queryset_checksum(self.descriptions.filter())
 
     @staticmethod
     def get_search_document():
@@ -542,6 +574,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             new_locale = locale.clone() if isinstance(locale, locale_klass) else locale_klass.build(locale)
             new_locale.concept_id = self.id
             new_locale.save()
+            new_locale.set_checksums()
 
     def remove_locales(self):
         self.names.all().delete()
@@ -648,6 +681,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                     )
             if create_initial_version and concept._counted is True:
                 parent_resource.update_concepts_count()
+            concept.set_checksums()
         except ValidationError as ex:
             if concept.id:
                 concept.delete()
@@ -720,6 +754,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                                 )
 
                     obj.sources.set([parent])
+                    obj.set_checksums()
                     persisted = True
                     cls.resume_indexing()
                     if get(settings, 'TEST_MODE', False):

@@ -95,6 +95,14 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
     WAS_RETIRED = MAPPING_WAS_RETIRED
     WAS_UNRETIRED = MAPPING_WAS_UNRETIRED
 
+    CHECKSUM_EXCLUSIONS = [
+        'id', 'created_at', 'updated_at', 'version', 'released', 'is_latest_version', 'comment',
+        'created_by_id', 'updated_by_id', 'parent_id', 'versioned_object_id', '_counted', '_index',
+        'created_by', 'updated_by', 'parent', 'versioned_object', 'name',
+        'from_concept_id', 'to_concept_id', 'from_source_id', 'to_source_id',
+        'from_concept', 'to_concept', 'from_source', 'to_source',
+    ]
+
     es_fields = {
         'id': {'sortable': True, 'filterable': True, 'exact': True},
         'last_update': {'sortable': True, 'filterable': False, 'facet': False, 'default': 'desc'},
@@ -427,6 +435,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
             initial_version = cls.create_initial_version(mapping)
             initial_version.sources.set([parent])
             mapping.sources.set([parent])
+            mapping.set_checksums()
             if mapping._counted is True:
                 parent.update_mappings_count()
         except ValidationError as ex:
@@ -490,6 +499,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
                         prev_latest_version.sources.remove(parent)
 
                     obj.sources.set([parent])
+                    obj.set_checksums()
                     persisted = True
                     cls.resume_indexing()
 

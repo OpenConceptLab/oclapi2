@@ -268,11 +268,12 @@ class ConceptVersionListSerializer(ConceptListSerializer):
     previous_version_url = CharField(read_only=True, source='prev_version_uri')
     source_versions = ListField(read_only=True)
     collection_versions = ListField(read_only=True)
+    checksums = SerializerMethodField()
 
     class Meta:
         model = Concept
         fields = ConceptListSerializer.Meta.fields + (
-            'previous_version_url', 'source_versions', 'collection_versions'
+            'previous_version_url', 'source_versions', 'collection_versions', 'checksums'
         )
 
     def __init__(self, *args, **kwargs):
@@ -290,6 +291,10 @@ class ConceptVersionListSerializer(ConceptListSerializer):
             pass
 
         super().__init__(*args, **kwargs)
+
+    @staticmethod
+    def get_checksums(obj):
+        return obj.get_checksums()
 
 
 class ConceptVersionCascadeSerializer(ConceptVersionListSerializer):
@@ -397,6 +402,7 @@ class ConceptDetailSerializer(ConceptAbstractSerializer):
     url = CharField(required=False, source='versioned_object_url')
     updated_by = DateTimeField(source='updated_by.username', read_only=True)
     created_by = DateTimeField(source='created_by.username', read_only=True)
+    checksums = SerializerMethodField()
 
     class Meta:
         model = Concept
@@ -405,7 +411,7 @@ class ConceptDetailSerializer(ConceptAbstractSerializer):
             'owner', 'owner_type', 'owner_url', 'display_name', 'display_locale', 'names', 'descriptions',
             'created_on', 'updated_on', 'versions_url', 'version', 'extras', 'parent_id', 'name', 'type',
             'update_comment', 'version_url', 'updated_by', 'created_by',
-            'public_can_view', 'versioned_object_id'
+            'public_can_view', 'versioned_object_id', 'checksums'
         )
 
     def create(self, validated_data):
@@ -425,6 +431,10 @@ class ConceptDetailSerializer(ConceptAbstractSerializer):
         if errors:
             self._errors.update(errors)
         return instance
+
+    @staticmethod
+    def get_checksums(obj):
+        return obj.get_checksums()
 
 
 class ConceptVersionExportSerializer(ModelSerializer):
@@ -483,6 +493,7 @@ class ConceptVersionDetailSerializer(ModelSerializer):
     source_versions = ListField(read_only=True)
     collection_versions = ListField(read_only=True)
     references = SerializerMethodField()
+    checksums = SerializerMethodField()
 
     def __init__(self, *args, **kwargs):
         request = get(kwargs, 'context.request')
@@ -524,8 +535,12 @@ class ConceptVersionDetailSerializer(ModelSerializer):
             'version', 'created_on', 'updated_on', 'version_created_on', 'version_created_by', 'update_comment',
             'is_latest_version', 'locale', 'url', 'owner_type', 'version_url', 'mappings', 'previous_version_url',
             'parent_concepts', 'child_concepts', 'parent_concept_urls', 'child_concept_urls',
-            'source_versions', 'collection_versions', 'versioned_object_id', 'references'
+            'source_versions', 'collection_versions', 'versioned_object_id', 'references', 'checksums'
         )
+
+    @staticmethod
+    def get_checksums(obj):
+        return obj.get_checksums()
 
     def get_references(self, obj):
         collection = get(self, 'context.request.instance')

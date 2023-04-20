@@ -1670,7 +1670,11 @@ class ExportCollectionTaskTest(OCLAPITestCase):
         expected_mappings = MappingDetailSerializer([mapping.get_latest_version()], many=True).data
 
         self.assertEqual(len(exported_mappings), 1)
-        self.assertEqual(expected_mappings, exported_mappings)
+        self.assertEqual(expected_mappings[0]['checksums'], exported_mappings[0]['checksums'])
+        self.assertEqual(
+            {k: v for k, v in expected_mappings[0].items() if k not in ['checksums', 'updated_on']},
+            {k: v for k, v in exported_mappings[0].items() if k not in ['checksums', 'updated_on']}
+        )
 
         exported_references = exported_data['references']
         expected_references = CollectionReferenceSerializer(collection.references.all(), many=True).data
