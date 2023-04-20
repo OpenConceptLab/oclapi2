@@ -1284,3 +1284,35 @@ class ChecksumTest(OCLTestCase):
         # value order
         self.assertEqual(Checksum.generate({'a': [1, 2, 3]}), Checksum.generate({'a': [2, 1, 3]}))
         self.assertEqual(Checksum.generate([1, 2, 3]), Checksum.generate([2, 1, 3]))
+
+
+class ChecksumViewTest(OCLAPITestCase):
+    def setUp(self):
+        self.token = UserProfile.objects.get(username='ocladmin').get_token()
+
+    @patch('core.common.checksums.Checksum.generate')
+    def test_post_400(self, checksum_generate_mock):
+        response = self.client.post(
+            '/$checksum/',
+            data={},
+            HTTP_AUTHORIZATION=f"Token {self.token}",
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 400)
+        checksum_generate_mock.assert_not_called()
+
+    @patch('core.common.checksums.Checksum.generate')
+    def test_post_200(self, checksum_generate_mock):
+        checksum_generate_mock.return_value = 'checksum'
+
+        response = self.client.post(
+            '/$checksum/',
+            data={'foo': 'bar'},
+            HTTP_AUTHORIZATION=f"Token {self.token}",
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, 'checksum')
+        checksum_generate_mock.assert_called_once_with({'foo': 'bar'})

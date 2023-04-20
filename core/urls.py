@@ -26,7 +26,7 @@ from core import VERSION
 from core.collections.views import ReferenceExpressionResolveView
 from core.common.constants import NAMESPACE_PATTERN
 from core.common.utils import get_api_base_url
-from core.common.views import RootView, FeedbackView, APIVersionView, ChangeLogView
+from core.common.views import RootView, FeedbackView, APIVersionView, ChangeLogView, ChecksumView
 from core.concepts.views import ConceptsHierarchyAmendAdminView
 from core.importers.views import BulkImportView
 
@@ -56,7 +56,8 @@ urlpatterns = [
     path(
         'admin/reports/monthly-usage/job/', report_views.MonthlyUsageReportJobView.as_view(), name='monthly-usage-job'),
     path('admin/concepts/amend-hierarchy/', ConceptsHierarchyAmendAdminView.as_view(), name='concepts-amend-hierarchy'),
-    path('$resolveReference/', ReferenceExpressionResolveView.as_view(), name='reference-$resolve'),
+    re_path(r'^\$resolveReference/$', ReferenceExpressionResolveView.as_view(), name='$resolveReference'),
+    re_path(r'^\$checksum/$', ChecksumView.as_view(), name='$checksum'),
     path('users/', include('core.users.urls'), name='users_urls'),
     path('user/', include('core.users.user_urls'), name='current_user_urls'),
     path('orgs/', include('core.orgs.urls'), name='orgs_url'),

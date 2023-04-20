@@ -15,11 +15,12 @@ from elasticsearch_dsl import Q
 from pydash import get
 from rest_framework import response, generics, status
 from rest_framework.generics import ListAPIView, RetrieveUpdateDestroyAPIView
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from core import __version__
+from core.common.checksums import Checksum
 from core.common.constants import SEARCH_PARAM, LIST_DEFAULT_LIMIT, CSV_DEFAULT_LIMIT, \
     LIMIT_PARAM, NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY, INCLUDE_RETIRED_PARAM, VERBOSE_PARAM, HEAD, LATEST, \
     BRIEF_PARAM, ES_REQUEST_TIMEOUT, INCLUDE_INACTIVE, FHIR_LIMIT_PARAM
@@ -897,3 +898,21 @@ class ConceptContainerExtraRetrieveUpdateDestroyView(RetrieveUpdateDestroyAPIVie
             return Response(status=status.HTTP_204_NO_CONTENT)
 
         return Response(dict(detail=NOT_FOUND), status=status.HTTP_404_NOT_FOUND)
+
+
+class ChecksumView(APIView):
+    permission_classes = (IsAuthenticated,)
+
+    @swagger_auto_schema(
+        request_body=openapi.Schema(type=openapi.TYPE_OBJECT),
+        responses={
+            200: openapi.Response(
+                'MD5 checksum of the request body',
+                openapi.Schema(type=openapi.TYPE_STRING),
+            )
+        },
+    )
+    def post(self, request):
+        if not request.data:
+            return Response(status=status.HTTP_400_BAD_REQUEST)
+        return Response(Checksum.generate(request.data))
