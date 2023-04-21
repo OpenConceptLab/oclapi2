@@ -17,23 +17,46 @@ class ChecksumModel(models.Model):
 
     CHECKSUM_EXCLUSIONS = []
     CHECKSUM_INCLUSIONS = []
+    CHECKSUM_TYPES = {'meta'}
+    BASIC_CHECKSUM_TYPES = {'meta'}
     METADATA_CHECKSUM_KEY = 'meta'
     ALL_CHECKSUM_KEY = 'all'
 
-    def get_checksums(self):
+    def get_checksums(self, basic=False):
         if Toggle.get('CHECKSUMS_TOGGLE'):
-            if self.checksums:
+            if self.checksums and self.has_checksums(basic):
                 return self.checksums
-
-            self.set_checksums()
+            if basic:
+                self.set_basic_checksums()
+            else:
+                self.set_checksums()
 
             return self.checksums
         return None
 
+    def set_specific_checksums(self, checksum_type, checksum):
+        self.checksums = self.checksums or {}
+        self.checksums[checksum_type] = checksum
+        self.save()
+
+    def has_checksums(self, basic=False):
+        return self.has_basic_checksums() if basic else self.has_all_checksums()
+
+    def has_all_checksums(self):
+        return set(self.checksums.keys()) - set(self.CHECKSUM_TYPES) == set()
+
+    def has_basic_checksums(self):
+        return set(self.checksums.keys()) - set(self.BASIC_CHECKSUM_TYPES) == set()
+
     def set_checksums(self):
         if Toggle.get('CHECKSUMS_TOGGLE'):
             self.checksums = self._calculate_checksums()
-            self.save()
+            self.save(update_fields=['checksums'])
+
+    def set_basic_checksums(self):
+        if Toggle.get('CHECKSUMS_TOGGLE'):
+            self.checksums = self.get_basic_checksums()
+            self.save(update_fields=['checksums'])
 
     @property
     def checksum(self):
@@ -70,10 +93,10 @@ class ChecksumModel(models.Model):
         return Checksum.generate(data)
 
     @staticmethod
-    def generate_queryset_checksum(queryset):
+    def generate_queryset_checksum(queryset, basic=False):
         _checksums = []
         for instance in queryset:
-            instance.get_checksums()
+            instance.get_checksums(basic)
             _checksums.append(instance.checksum)
         if len(_checksums) == 1:
             return _checksums[0]

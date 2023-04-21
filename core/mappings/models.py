@@ -102,6 +102,9 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         'from_concept_id', 'to_concept_id', 'from_source_id', 'to_source_id',
         'from_concept', 'to_concept', 'from_source', 'to_source',
     ]
+    CHECKSUM_TYPES = {
+        'meta', 'repo_versions', 'all'
+    }
 
     es_fields = {
         'id': {'sortable': True, 'filterable': True, 'exact': True},
@@ -397,6 +400,9 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
                 initial_version = Mapping.create_initial_version(self)
                 initial_version.sources.set([parent])
                 self.sources.set([parent])
+                self.set_checksums()
+                if self.from_concept_id:
+                    self.from_concept.set_mappings_checksum()
         except ValidationError as ex:
             self.errors.update(ex.message_dict)
         except IntegrityError as ex:
@@ -436,6 +442,8 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
             initial_version.sources.set([parent])
             mapping.sources.set([parent])
             mapping.set_checksums()
+            if mapping.from_concept_id:
+                mapping.from_concept.set_mappings_checksum()
             if mapping._counted is True:
                 parent.update_mappings_count()
         except ValidationError as ex:
@@ -501,6 +509,8 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
                     obj.sources.set([parent])
                     obj.set_checksums()
                     obj.versioned_object.set_checksums()
+                    if obj.from_concept_id:
+                        obj.from_concept.set_mappings_checksum()
                     persisted = True
                     cls.resume_indexing()
 

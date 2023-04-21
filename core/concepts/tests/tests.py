@@ -1284,8 +1284,7 @@ class ConceptTest(OCLTestCase):
     @patch('core.common.checksums.Checksum.generate')
     def test_checksum(self, checksum_generate_mock):
         checksum_generate_mock.side_effect = [
-            'meta-checksum', 'names-checksum', 'descriptions-checksum', 'mappings-checksum', 'repo-checksum',
-            'all-checksum'
+            'meta-checksum', 'names-checksum', 'descriptions-checksum', 'mappings-checksum', 'all-checksum'
         ]
         concept = ConceptFactory()
 
@@ -1298,7 +1297,7 @@ class ConceptTest(OCLTestCase):
                 'names': 'names-checksum',
                 'descriptions': 'descriptions-checksum',
                 'mappings': 'mappings-checksum',
-                'repo_versions': 'repo-checksum',
+                'repo_versions': None,
                 'all': 'all-checksum'
             }
         )
@@ -1314,7 +1313,8 @@ class ConceptTest(OCLTestCase):
         MappingFactory(from_concept=concept, parent=parent, checksums={'meta': 'm3-checksum'}, retired=True)
 
         self.assertEqual(concept.mappings_checksum, 'checksum')
-        checksum_generate_mock.assert_called_once_with(['m1-checksum', 'm2-checksum'])
+        checksum_generate_mock.assert_called_once()
+        self.assertCountEqual(checksum_generate_mock.call_args[0][0], ['m1-checksum', 'm2-checksum'])
 
     @patch('core.common.checksums.Checksum.generate')
     def test_names_checksum(self, checksum_generate_mock):
@@ -1364,8 +1364,7 @@ class ConceptTest(OCLTestCase):
 
         self.assertEqual(name.checksums, {'meta': ANY})
         self.assertEqual(description.checksums, {'meta': ANY})
-        self.assertEqual(mapping.checksums, {'meta': ANY, 'repo_versions': ANY, 'all': ANY})
-
+        self.assertEqual(mapping.checksums, {'meta': ANY})
 
 
 class OpenMRSConceptValidatorTest(OCLTestCase):

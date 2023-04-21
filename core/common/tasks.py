@@ -660,3 +660,13 @@ def post_import_update_resource_counts():
             uncounted_mappings.filter(parent_id=source.id).update(_counted=True)
         except:  # pylint: disable=bare-except
             pass
+
+
+@app.task(ignore_result=True)
+def set_source_children_checksums(source_id):
+    from core.sources.models import Source
+    source = Source.objects.filter(id__in=source_id)
+    for concept in source.concepts.filter():
+        concept.set_source_versions_checksum()
+    for mapping in source.mappings.filter():
+        mapping.set_source_versions_checksum()

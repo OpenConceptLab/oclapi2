@@ -212,6 +212,10 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     CHECKSUM_INCLUSIONS = [
         'display_name', 'display_locale'
     ]
+    CHECKSUM_TYPES = {
+        'meta', 'names', 'descriptions', 'mappings', 'repo_versions', 'all'
+    }
+    BASIC_CHECKSUM_TYPES = {'meta', 'names', 'descriptions'}
 
     # $cascade as hierarchy attributes
     cascaded_entries = None
@@ -248,9 +252,12 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             'mappings': self.mappings_checksum
         }
 
+    def set_mappings_checksum(self):
+        self.set_specific_checksums('mappings', self.mappings_checksum)
+
     @property
     def mappings_checksum(self):
-        return self.generate_queryset_checksum(self.get_unidirectional_mappings().filter(retired=False))
+        return self.generate_queryset_checksum(self.get_unidirectional_mappings().filter(retired=False), True)
 
     @property
     def names_checksum(self):
@@ -632,6 +639,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                 initial_version.set_locales(descriptions, ConceptDescription)
                 initial_version.sources.set([parent])
                 self.sources.set([parent])
+                self.set_checksums()
         except ValidationError as ex:
             if self.id:
                 self.delete()

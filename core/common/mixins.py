@@ -426,9 +426,13 @@ class SourceChildMixin(ChecksumModel):
             'repo_versions': self.source_versions_checksum,
         }
 
+    def set_source_versions_checksum(self):
+        self.set_specific_checksums('repo_versions', self.source_versions_checksum)
+
     @property
     def source_versions_checksum(self):
-        return self.generate_checksum(list(self.source_versions))
+        versions = list(self.source_versions)
+        return self.generate_checksum(versions) if versions else None
 
     @staticmethod
     def is_strictly_equal(instance1, instance2):
