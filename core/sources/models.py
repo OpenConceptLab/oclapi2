@@ -12,7 +12,7 @@ from core.common.validators import validate_non_negative
 from core.concepts.models import ConceptName, Concept
 from core.sources.constants import SOURCE_TYPE, SOURCE_VERSION_TYPE, HIERARCHY_ROOT_MUST_BELONG_TO_SAME_SOURCE, \
     HIERARCHY_MEANINGS, AUTO_ID_CHOICES, AUTO_ID_SEQUENTIAL, AUTO_ID_UUID
-from core.common.tasks import set_source_children_checksums
+
 
 class Source(DirtyFieldsMixin, ConceptContainerModel):
     DEFAULT_AUTO_ID_START_FROM = 1
@@ -243,7 +243,6 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
             if index:
                 from core.concepts.documents import ConceptDocument
                 self.batch_index(self.concepts, ConceptDocument)
-            set_source_children_checksums.apply_async((self.id, ), queue='indexing')
 
     def seed_mappings(self, index=True):
         head = self.head

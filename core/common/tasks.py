@@ -332,6 +332,10 @@ def seed_children_to_new_version(self, resource, obj_id, export=True, sync=False
             if is_source:
                 instance.seed_concepts(index=index)
                 instance.seed_mappings(index=index)
+                if get(settings, 'TEST_MODE', False):
+                    set_source_children_checksums(instance.id)
+                else:
+                    set_source_children_checksums.apply_async((instance.id,), queue='indexing')
             elif autoexpand:
                 instance.cascade_children_to_expansion(index=index, sync=sync)
 
@@ -665,7 +669,9 @@ def post_import_update_resource_counts():
 @app.task(ignore_result=True)
 def set_source_children_checksums(source_id):
     from core.sources.models import Source
-    source = Source.objects.filter(id__in=source_id)
+    source = Source.objects.filter(id=source_id).first()
+    if not source:
+        return
     for concept in source.concepts.filter():
         concept.set_source_versions_checksum()
     for mapping in source.mappings.filter():
