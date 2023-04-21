@@ -37,7 +37,7 @@ class ChecksumModel(models.Model):
     def set_specific_checksums(self, checksum_type, checksum):
         self.checksums = self.checksums or {}
         self.checksums[checksum_type] = checksum
-        self.save()
+        self.save(update_fields=['checksums'])
 
     def has_checksums(self, basic=False):
         return self.has_basic_checksums() if basic else self.has_all_checksums()
