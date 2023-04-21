@@ -18,6 +18,7 @@ from pydash import get
 from core.celery import app
 from core.common.constants import CONFIRM_EMAIL_ADDRESS_MAIL_SUBJECT, PASSWORD_RESET_MAIL_SUBJECT
 from core.common.utils import write_export_file, web_url, get_resource_class_from_resource_name, get_export_service
+from core.toggles.models import Toggle
 
 logger = get_task_logger(__name__)
 
@@ -332,10 +333,11 @@ def seed_children_to_new_version(self, resource, obj_id, export=True, sync=False
             if is_source:
                 instance.seed_concepts(index=index)
                 instance.seed_mappings(index=index)
-                if get(settings, 'TEST_MODE', False):
-                    set_source_children_checksums(instance.id)
-                else:
-                    set_source_children_checksums.apply_async((instance.id,), queue='indexing')
+                if Toggle.get('CHECKSUMS_TOGGLE'):
+                    if get(settings, 'TEST_MODE', False):
+                        set_source_children_checksums(instance.id)
+                    else:
+                        set_source_children_checksums.apply_async((instance.id,), queue='indexing')
             elif autoexpand:
                 instance.cascade_children_to_expansion(index=index, sync=sync)
 
