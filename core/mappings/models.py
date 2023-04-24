@@ -95,12 +95,10 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
     WAS_RETIRED = MAPPING_WAS_RETIRED
     WAS_UNRETIRED = MAPPING_WAS_UNRETIRED
 
-    CHECKSUM_EXCLUSIONS = [
-        'id', 'created_at', 'updated_at', 'version', 'released', 'is_latest_version', 'comment',
-        'created_by_id', 'updated_by_id', 'parent_id', 'versioned_object_id', '_counted', '_index',
-        'created_by', 'updated_by', 'parent', 'versioned_object', 'name',
-        'from_concept_id', 'to_concept_id', 'from_source_id', 'to_source_id',
-        'from_concept', 'to_concept', 'from_source', 'to_source',
+    CHECKSUM_INCLUSIONS = [
+        'extras', 'map_type',
+        'from_concept_code', 'from_concept_name',
+        'to_concept_code', 'to_concept_name'
     ]
     CHECKSUM_TYPES = {
         'meta', 'repo_versions', 'all'

@@ -33,7 +33,7 @@ class AbstractLocalizedText(ChecksumModel):
     locale_preferred = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
-    CHECKSUM_EXCLUSIONS = ['id', 'created_at', 'concept_id', 'concept', 'type']
+    CHECKSUM_INCLUSIONS = ['locale', 'locale_preferred']
 
     def to_dict(self):
         return {
@@ -86,7 +86,7 @@ class AbstractLocalizedText(ChecksumModel):
 
 
 class ConceptDescription(AbstractLocalizedText):
-    CHECKSUM_INCLUSIONS = ['description_type']
+    CHECKSUM_INCLUSIONS = AbstractLocalizedText.CHECKSUM_INCLUSIONS + ['description', 'description_type']
 
     concept = models.ForeignKey('concepts.Concept', on_delete=models.CASCADE, related_name='descriptions')
 
@@ -96,6 +96,10 @@ class ConceptDescription(AbstractLocalizedText):
     @property
     def description_type(self):
         return self.type
+
+    @property
+    def description(self):
+        return self.name
 
     @staticmethod
     def _build(params):
@@ -115,7 +119,7 @@ class ConceptDescription(AbstractLocalizedText):
 
 
 class ConceptName(AbstractLocalizedText):
-    CHECKSUM_INCLUSIONS = ['name_type']
+    CHECKSUM_INCLUSIONS = AbstractLocalizedText.CHECKSUM_INCLUSIONS + ['name', 'name_type']
 
     concept = models.ForeignKey(
         'concepts.Concept', on_delete=models.CASCADE, related_name='names')
@@ -204,13 +208,8 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     WAS_RETIRED = CONCEPT_WAS_RETIRED
     WAS_UNRETIRED = CONCEPT_WAS_UNRETIRED
 
-    CHECKSUM_EXCLUSIONS = [
-        'id', 'created_at', 'updated_at', 'version', 'released', 'is_latest_version', 'comment',
-        'created_by_id', 'updated_by_id', 'parent_id', 'versioned_object_id', '_counted', '_index',
-        'created_by', 'updated_by', 'parent', 'versioned_object', 'name'
-    ]
     CHECKSUM_INCLUSIONS = [
-        'display_name', 'display_locale'
+        'extras', 'concept_class', 'datatype', 'retired'
     ]
     CHECKSUM_TYPES = {
         'meta', 'names', 'descriptions', 'mappings', 'repo_versions', 'all'

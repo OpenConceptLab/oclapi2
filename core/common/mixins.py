@@ -448,14 +448,6 @@ class SourceChildMixin(ChecksumModel):
     def __hash__(self):
         return super().__hash__()
 
-    def get_checksum_fields(self):
-        result = super().get_checksum_fields()
-
-        if not self.is_versioned_object:
-            result['uri'] = drop_version(self.uri)
-
-        return result
-
     @staticmethod
     def apply_user_criteria(queryset, user):
         queryset = queryset.exclude(

@@ -70,15 +70,7 @@ class ChecksumModel(models.Model):
         return None
 
     def get_checksum_fields(self):
-        result = {
-            field.name: getattr(
-                self, field.name
-            ) for field in self._meta.fields if field.name not in [*self.CHECKSUM_EXCLUSIONS, 'checksums', 'checksum']
-        }
-        for field in self.CHECKSUM_INCLUSIONS:
-            result[field] = getattr(self, field)
-
-        return result
+        return {field: getattr(self, field) for field in self.CHECKSUM_INCLUSIONS}
 
     def get_basic_checksums(self):
         if Toggle.get('CHECKSUMS_TOGGLE'):
