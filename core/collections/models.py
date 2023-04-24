@@ -133,6 +133,10 @@ class Collection(ConceptContainerModel):
 
         return self.autoexpand
 
+    def post_create_actions(self):
+        if self.should_auto_expand:
+            self.cascade_children_to_expansion(index=False)
+
     def validate(self, reference):
         if self.should_auto_expand:
             reference.full_clean()

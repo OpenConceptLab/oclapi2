@@ -20,7 +20,7 @@ from core.common.permissions import HasPrivateAccess, HasOwnership, CanViewConce
     CanViewConceptDictionaryVersion
 from .checksums import ChecksumModel
 from .utils import write_csv_to_s3, get_csv_from_s3, get_query_params_from_url_string, compact_dict_by_values, \
-    to_owner_uri, parse_updated_since_param, get_export_service, to_int, drop_version
+    to_owner_uri, parse_updated_since_param, get_export_service, to_int
 
 logger = logging.getLogger('oclapi')
 

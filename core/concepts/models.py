@@ -11,7 +11,7 @@ from core.common.constants import ISO_639_1, LATEST, HEAD, ALL
 from core.common.mixins import SourceChildMixin
 from core.common.models import VersionedModel, ConceptContainerModel
 from core.common.tasks import process_hierarchy_for_new_concept, process_hierarchy_for_concept_version, \
-    process_hierarchy_for_new_parent_concept_version
+    process_hierarchy_for_new_parent_concept_version, update_mappings_concept
 from core.common.utils import generate_temp_version, drop_version, \
     encode_string, decode_string, startswith_temp_version, is_versioned_uri
 from core.concepts.constants import CONCEPT_TYPE, LOCALES_FULLY_SPECIFIED, LOCALES_SHORT, LOCALES_SEARCH_INDEX_TERM, \
@@ -19,6 +19,7 @@ from core.concepts.constants import CONCEPT_TYPE, LOCALES_FULLY_SPECIFIED, LOCAL
     PERSIST_CLONE_ERROR, PERSIST_CLONE_SPECIFY_USER_ERROR, ALREADY_EXISTS, CONCEPT_REGEX, MAX_LOCALES_LIMIT, \
     MAX_NAMES_LIMIT, MAX_DESCRIPTIONS_LIMIT
 from core.concepts.mixins import ConceptValidationMixin
+from core.toggles.models import Toggle
 
 
 class AbstractLocalizedText(ChecksumModel):
@@ -252,7 +253,8 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         }
 
     def set_mappings_checksum(self):
-        self.set_specific_checksums('mappings', self.mappings_checksum)
+        if Toggle.get('CHECKSUMS_TOGGLE'):
+            self.set_specific_checksums('mappings', self.mappings_checksum)
 
     @property
     def mappings_checksum(self):
@@ -691,7 +693,11 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                     initial_version.sources.set([parent_resource])
 
             concept.sources.set([parent_resource])
-            concept.update_mappings()
+            if get(settings, 'TEST_MODE', False):
+                update_mappings_concept(concept.id)
+            else:
+                update_mappings_concept.delay(concept.id)
+
             if parent_concept_uris:
                 if get(settings, 'TEST_MODE', False):
                     process_hierarchy_for_new_concept(
@@ -895,19 +901,19 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         return Concept.objects.filter(query)
 
     def update_mappings(self):
+        # Updates mappings where mapping.to_concept or mapping.from_concepts matches concept's mnemonic and parent
         from core.mappings.models import Mapping
-        parent_uris = compact([self.parent.uri, self.parent.canonical_url])
-        for mapping in Mapping.objects.filter(
-                to_concept_code=self.mnemonic, to_source_url__in=parent_uris, to_concept__isnull=True
-        ):
-            mapping.to_concept = self
-            mapping.save()
+        parent_uris = self.parent.identity_uris
 
-        for mapping in Mapping.objects.filter(
-                from_concept_code=self.mnemonic, from_source_url__in=parent_uris, from_concept__isnull=True
-        ):
-            mapping.from_concept = self
-            mapping.save()
+        Mapping.objects.filter(
+            to_concept_code=self.mnemonic, to_source_url__in=parent_uris, to_concept__isnull=True
+        ).update(to_concept=self)
+
+        Mapping.objects.filter(
+            from_concept_code=self.mnemonic, from_source_url__in=parent_uris, from_concept__isnull=True
+        ).update(from_concept=self)
+
+        self.set_mappings_checksum()
 
     @property
     def parent_concept_urls(self):

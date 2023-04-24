@@ -1,5 +1,5 @@
-from celery_once import AlreadyQueued
 from celery.result import AsyncResult
+from celery_once import AlreadyQueued
 from django.conf import settings
 from django.contrib.contenttypes.fields import GenericRelation
 from django.contrib.postgres.fields import ArrayField
@@ -13,7 +13,7 @@ from django.utils.functional import cached_property
 from django_elasticsearch_dsl.registries import registry
 from django_elasticsearch_dsl.signals import RealTimeSignalProcessor
 from elasticsearch import TransportError
-from pydash import get
+from pydash import get, compact
 
 from core.common.tasks import update_collection_active_concepts_count, update_collection_active_mappings_count, \
     delete_s3_objects
@@ -571,6 +571,10 @@ class ConceptContainerModel(VersionedModel):
     def should_auto_expand(self):
         return True
 
+    @property
+    def identity_uris(self):
+        return compact([self.uri, self.canonical_url])
+
     @classmethod
     def persist_new(cls, obj, created_by, **kwargs):
         errors = {}
@@ -598,9 +602,8 @@ class ConceptContainerModel(VersionedModel):
         obj.version = HEAD
         try:
             obj.save(**kwargs)
-            obj.update_mappings()
-            if obj.should_auto_expand:
-                obj.cascade_children_to_expansion(index=False)
+            if obj.id:
+                obj.post_create_actions()
             persisted = True
         except IntegrityError as ex:
             errors.update({'__all__': ex.args})

@@ -678,3 +678,21 @@ def set_source_children_checksums(source_id):
         concept.set_source_versions_checksum()
     for mapping in source.mappings.filter():
         mapping.set_source_versions_checksum()
+
+
+@app.task(ignore_result=True)
+def update_mappings_source(source_id):
+    # Updates mappings where mapping.to_source_url or mapping.from_source_url matches source url or canonical url
+    from core.sources.models import Source
+    source = Source.objects.filter(id=source_id).first()
+    if source:
+        source.update_mappings()
+
+
+@app.task(ignore_result=True)
+def update_mappings_concept(concept_id):
+    # Updates mappings where mapping.to_concept or mapping.from_concepts matches concept's mnemonic and parent
+    from core.concepts.models import Concept
+    concept = Concept.objects.filter(id=concept_id).first()
+    if concept:
+        concept.update_mappings()

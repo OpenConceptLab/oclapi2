@@ -1,13 +1,15 @@
 import uuid
 
 from dirtyfields import DirtyFieldsMixin
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import UniqueConstraint, F, Max, Count
-from pydash import compact, get
+from pydash import get
 
 from core.common.models import ConceptContainerModel
 from core.common.services import PostgresQL
+from core.common.tasks import update_mappings_source
 from core.common.validators import validate_non_negative
 from core.concepts.models import ConceptName, Concept
 from core.sources.constants import SOURCE_TYPE, SOURCE_VERSION_TYPE, HIERARCHY_ROOT_MUST_BELONG_TO_SAME_SOURCE, \
@@ -166,15 +168,20 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         return self.custom_validation_schema is not None and self.active_concepts
 
     def update_mappings(self):
+        # Updates mappings where mapping.to_source_url or mapping.from_source_url matches source url or canonical url
         from core.mappings.models import Mapping
-        uris = compact([self.uri, self.canonical_url])
-        for mapping in Mapping.objects.filter(to_source__isnull=True, to_source_url__in=uris):
-            mapping.to_source = self
-            mapping.save()
+        from core.mappings.documents import MappingDocument
 
-        for mapping in Mapping.objects.filter(from_source__isnull=True, from_source_url__in=uris):
-            mapping.from_source = self
-            mapping.save()
+        uris = self.identity_uris
+
+        to_queryset = Mapping.objects.filter(to_source_url__in=uris)
+        from_queryset = Mapping.objects.filter(from_source_url__in=uris)
+
+        to_queryset.filter(to_source_id__isnull=True).update(to_source=self)
+        from_queryset.filter(from_source_id__isnull=True).update(from_source=self)
+
+        Mapping.batch_index(to_queryset.filter(to_source=self), MappingDocument)
+        Mapping.batch_index(from_queryset.filter(to_source=self), MappingDocument)
 
     def is_hierarchy_root_belonging_to_self(self):
         hierarchy_root = self.hierarchy_root
@@ -350,6 +357,12 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
             PostgresQL.drop_seq(self.concepts_external_id_seq_name)
             PostgresQL.drop_seq(self.mappings_mnemonic_seq_name)
             PostgresQL.drop_seq(self.mappings_external_id_seq_name)
+
+    def post_create_actions(self):
+        if get(settings, 'TEST_MODE', False):
+            update_mappings_source(self.id)
+        else:
+            update_mappings_source.delay(self.id)
 
     @property
     def last_concept_update(self):
