@@ -93,7 +93,6 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
                 'versions_url',
                 'version',
                 'extras',
-                'name',
                 'type',
                 'update_comment',
                 'version_url',
@@ -130,7 +129,6 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.data['versions_url'], concept.uri + 'versions/')
         self.assertEqual(response.data['version'], str(concept.id))
         self.assertEqual(response.data['extras'], {'foo': 'bar'})
-        self.assertEqual(response.data['name'], 'c1')
         self.assertEqual(response.data['type'], 'Concept')
         self.assertEqual(response.data['version_url'], latest_version.uri)
 
@@ -194,7 +192,6 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
                     'versions_url',
                     'version',
                     'extras',
-                    'name',
                     'type',
                     'update_comment',
                     'version_url',
@@ -270,7 +267,6 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
                     'versions_url',
                     'version',
                     'extras',
-                    'name',
                     'type',
                     'update_comment',
                     'version_url',
@@ -712,7 +708,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
             sorted(response.data[0].keys()),
             sorted(['uuid', 'id', 'external_id', 'concept_class', 'datatype', 'url', 'retired', 'source',
                     'owner', 'owner_type', 'owner_url', 'display_name', 'display_locale', 'names', 'descriptions',
-                    'created_on', 'updated_on', 'versions_url', 'version', 'extras', 'name', 'type',
+                    'created_on', 'updated_on', 'versions_url', 'version', 'extras', 'type',
                     'update_comment', 'version_url', 'updated_by', 'created_by',
                     'public_can_view', 'versioned_object_id', 'checksums'])
         )

@@ -122,7 +122,6 @@ class Command(BaseCommand):
             mnemonic = data.pop('id', None)
             if not Concept.objects.filter(parent=source, mnemonic=mnemonic, is_latest_version=True).exists():
                 data['mnemonic'] = mnemonic
-                data['name'] = mnemonic
                 data['parent'] = source
                 Concept.persist_new(data, user)
                 if not created:
