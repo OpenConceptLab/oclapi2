@@ -194,19 +194,22 @@ class Collection(ConceptContainerModel):
     def add_references(self, references, user=None):
         errors = {}
         added_references = []
+        total_references = []
         for reference in references:
             reference.expression = reference.build_expression()
+            total_references += reference.generate_references()
+        total_references = CollectionReference.dedupe_by_expression(total_references)
+        for reference in total_references:
             reference.collection = self
             reference.created_by = user
-            for _reference in reference.generate_references():
-                try:
-                    self.validate(_reference)
-                    _reference.save()
-                except Exception as ex:
-                    errors[_reference.expression] = ex.messages if hasattr(ex, 'messages') else ex
-                    continue
-                if _reference.id:
-                    added_references.append(_reference)
+            try:
+                self.validate(reference)
+                reference.save()
+            except Exception as ex:
+                errors[reference.expression] = ex.messages if hasattr(ex, 'messages') else ex
+                continue
+            if reference.id:
+                added_references.append(reference)
 
         if self.expansion_uri:
             self.expansion.add_references(added_references)
@@ -592,6 +595,10 @@ class CollectionReference(models.Model):
                 self.resource_version = mapping.version
                 self.expression = mapping.uri
         return queryset
+
+    @staticmethod
+    def dedupe_by_expression(references):
+        return list({reference.expression: reference for reference in references}.values())
 
     def generate_references(self):
         references = []
