@@ -93,7 +93,7 @@ class S3:
 
     @classmethod
     def get_last_key_from_path(cls, prefix='/', delimiter='/'):
-        keys = cls.__fetch_keys(prefix, delimiter)
+        keys = cls.__fetch_keys(prefix, delimiter, True)
         key = sorted(keys, key=lambda k: k.get('LastModified'), reverse=True)[0] if len(keys) > 1 else get(keys, '0')
         return get(key, 'Key')
 
