@@ -202,6 +202,10 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     _counted = models.BooleanField(default=True, null=True, blank=True)
     _index = models.BooleanField(default=True)
     logo_path = None
+    default_locale = None
+    supported_locales = None
+    website = None
+    description = None
 
     OBJECT_TYPE = CONCEPT_TYPE
     ALREADY_RETIRED = CONCEPT_IS_ALREADY_RETIRED
