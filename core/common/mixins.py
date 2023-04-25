@@ -431,8 +431,8 @@ class SourceChildMixin(ChecksumModel):
 
     @property
     def source_versions_checksum(self):
-        versions = list(self.source_versions)
-        return self.generate_checksum(versions) if versions else None
+        checksums = [version.checksum for version in self.sources.exclude(version=HEAD)]
+        return self.generate_checksum(checksums) if checksums else None
 
     @staticmethod
     def is_strictly_equal(instance1, instance2):

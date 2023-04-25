@@ -123,7 +123,7 @@ class MappingVersionListSerializer(MappingListSerializer):
 
     @staticmethod
     def get_checksums(obj):
-        return obj.get_checksums()
+        return obj.get_checksums(queue=True)
 
 
 class MappingMinimalSerializer(ModelSerializer):
@@ -215,7 +215,7 @@ class MappingDetailSerializer(MappingListSerializer):
 
     @staticmethod
     def get_checksums(obj):
-        return obj.get_checksums()
+        return obj.get_checksums(queue=True)
 
 
 class MappingVersionDetailSerializer(MappingDetailSerializer):

@@ -18,6 +18,10 @@ from core.sources.constants import SOURCE_TYPE, SOURCE_VERSION_TYPE, HIERARCHY_R
 
 class Source(DirtyFieldsMixin, ConceptContainerModel):
     DEFAULT_AUTO_ID_START_FROM = 1
+    CHECKSUM_INCLUSIONS = ConceptContainerModel.CHECKSUM_INCLUSIONS + [
+        'hierarchy_meaning',
+        'source_type'
+    ]
 
     es_fields = {
         'source_type': {'sortable': True, 'filterable': True, 'facet': True, 'exact': True},

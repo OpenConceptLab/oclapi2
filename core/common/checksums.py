@@ -2,6 +2,7 @@ import json
 import hashlib
 from uuid import UUID
 
+from django.conf import settings
 from django.db import models
 from pydash import get
 
@@ -22,10 +23,13 @@ class ChecksumModel(models.Model):
     METADATA_CHECKSUM_KEY = 'meta'
     ALL_CHECKSUM_KEY = 'all'
 
-    def get_checksums(self, basic=False):
+    def get_checksums(self, basic=False, queue=False):
         if Toggle.get('CHECKSUMS_TOGGLE'):
             if self.checksums and self.has_checksums(basic):
                 return self.checksums
+            if queue:
+                self.queue_checksum_calculation()
+                return self.checksums or {}
             if basic:
                 self.set_basic_checksums()
             else:
@@ -33,6 +37,14 @@ class ChecksumModel(models.Model):
 
             return self.checksums
         return None
+
+    def queue_checksum_calculation(self):
+        from core.common.tasks import calculate_checksums
+        if get(settings, 'TEST_MODE', False):
+            calculate_checksums(self.__class__.__name__, self.id)
+            self.refresh_from_db()
+        else:
+            calculate_checksums.delay(self.__class__.__name__, self.id)
 
     def set_specific_checksums(self, checksum_type, checksum):
         self.checksums = self.checksums or {}

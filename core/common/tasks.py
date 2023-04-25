@@ -696,3 +696,18 @@ def update_mappings_concept(concept_id):
     concept = Concept.objects.filter(id=concept_id).first()
     if concept:
         concept.update_mappings()
+
+
+@app.task(ignore_result=True)
+def calculate_checksums(resource_type, resource_id):
+    model = get_resource_class_from_resource_name(resource_type)
+    if model:
+        is_source_child = model.__class__.__name__ in ('Concept', 'Mapping')
+        instance = model.objects.filter(id=resource_id).first()
+        if instance:
+            instance.set_checksums()
+            if is_source_child:
+                if not instance.is_latest_version:
+                    instance.get_latest_version().set_checksums()
+                if not instance.is_versioned_object:
+                    instance.versioned_object.set_checksums()

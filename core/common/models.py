@@ -21,6 +21,7 @@ from core.common.utils import reverse_resource, reverse_resource_version, parse_
     to_parent_uri, is_canonical_uri, get_export_service, from_string_to_date
 from core.common.utils import to_owner_uri
 from core.settings import DEFAULT_LOCALE
+from .checksums import ChecksumModel
 from .constants import (
     ACCESS_TYPE_CHOICES, DEFAULT_ACCESS_TYPE, NAMESPACE_REGEX,
     ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT, SUPER_ADMIN_USER_ID,
@@ -334,7 +335,7 @@ class VersionedModel(BaseResourceModel):
         return drop_version(self.uri) + 'versions/'
 
 
-class ConceptContainerModel(VersionedModel):
+class ConceptContainerModel(VersionedModel, ChecksumModel):
     """
     A sub-resource is an object that exists within the scope of its parent resource.
     Its mnemonic is unique within the scope of its parent resource.
@@ -364,6 +365,13 @@ class ConceptContainerModel(VersionedModel):
     custom_validation_schema = models.CharField(
         choices=VALIDATION_SCHEMAS, default=DEFAULT_VALIDATION_SCHEMA, max_length=100
     )
+
+    CHECKSUM_INCLUSIONS = [
+        'canonical_url',
+        'extras', 'released', 'retired',
+        'default_locale', 'supported_locales',
+        'website', 'custom_validation_schema',
+    ]
 
     class Meta:
         abstract = True

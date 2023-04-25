@@ -297,7 +297,7 @@ class ConceptVersionListSerializer(ConceptListSerializer):
 
     @staticmethod
     def get_checksums(obj):
-        return obj.get_checksums()
+        return obj.get_checksums(queue=True)
 
 
 class ConceptVersionCascadeSerializer(ConceptVersionListSerializer):
@@ -437,7 +437,7 @@ class ConceptDetailSerializer(ConceptAbstractSerializer):
 
     @staticmethod
     def get_checksums(obj):
-        return obj.get_checksums()
+        return obj.get_checksums(queue=True)
 
 
 class ConceptVersionExportSerializer(ModelSerializer):
@@ -543,7 +543,7 @@ class ConceptVersionDetailSerializer(ModelSerializer):
 
     @staticmethod
     def get_checksums(obj):
-        return obj.get_checksums()
+        return obj.get_checksums(queue=True)
 
     def get_references(self, obj):
         collection = get(self, 'context.request.instance')

@@ -35,6 +35,10 @@ from core.mappings.models import Mapping
 class Collection(ConceptContainerModel):
     OBJECT_TYPE = COLLECTION_TYPE
     OBJECT_VERSION_TYPE = COLLECTION_VERSION_TYPE
+    CHECKSUM_INCLUSIONS = ConceptContainerModel.CHECKSUM_INCLUSIONS + [
+        'collection_type'
+    ]
+
     es_fields = {
         'collection_type': {'sortable': True, 'filterable': True, 'facet': True, 'exact': True},
         'mnemonic': {'sortable': True, 'filterable': True, 'exact': True},
