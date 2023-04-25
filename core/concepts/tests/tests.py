@@ -1378,7 +1378,6 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
             {
                 'mnemonic': 'concept1',
                 'version': HEAD,
-                'name': 'concept1',
                 'parent': source,
                 'concept_class': 'XYZQWERT',
                 'datatype': 'None',
@@ -1394,7 +1393,6 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
             {
                 'mnemonic': 'concept1',
                 'version': HEAD,
-                'name': 'concept1',
                 'parent': source,
                 'concept_class': 'Diagnosis',
                 'datatype': 'XYZWERRTR',
@@ -1412,7 +1410,6 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
             {
                 'mnemonic': 'concept1',
                 'version': HEAD,
-                'name': 'concept1',
                 'parent': source,
                 'concept_class': 'Diagnosis',
                 'datatype': 'None',
@@ -1432,7 +1429,6 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
             {
                 'mnemonic': 'concept1',
                 'version': HEAD,
-                'name': 'concept1',
                 'parent': source,
                 'concept_class': 'Diagnosis',
                 'datatype': 'None',
@@ -1452,7 +1448,6 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
             {
                 'mnemonic': 'concept1',
                 'version': HEAD,
-                'name': 'concept1',
                 'parent': source,
                 'concept_class': 'Diagnosis',
                 'datatype': 'None',
@@ -1475,7 +1470,6 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
             {
                 'mnemonic': 'concept',
                 'version': HEAD,
-                'name': 'concept',
                 'parent': source,
                 'concept_class': 'Diagnosis',
                 'datatype': 'None',
@@ -1522,7 +1516,6 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
             {
                 'mnemonic': 'concept',
                 'version': HEAD,
-                'name': 'concept',
                 'parent': source,
                 'concept_class': 'Diagnosis',
                 'datatype': 'None',
@@ -1543,7 +1536,6 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
             {
                 'mnemonic': 'concept1',
                 'version': HEAD,
-                'name': 'concept1',
                 'parent': source,
                 'concept_class': 'Diagnosis',
                 'datatype': 'None',
@@ -1559,7 +1551,6 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
             {
                 'mnemonic': 'concept2',
                 'version': HEAD,
-                'name': 'concept2',
                 'parent': source,
                 'concept_class': 'Diagnosis',
                 'datatype': 'None',
@@ -1590,7 +1581,6 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
             {
                 'mnemonic': 'concept1',
                 'version': HEAD,
-                'name': 'concept1',
                 'parent': source,
                 'concept_class': 'Diagnosis',
                 'datatype': 'None',
@@ -1620,7 +1610,6 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
             {
                 'mnemonic': 'concept',
                 'version': HEAD,
-                'name': 'concept',
                 'parent': source,
                 'concept_class': 'Diagnosis',
                 'datatype': 'None',
@@ -1643,7 +1632,6 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
             {
                 'mnemonic': 'concept',
                 'version': HEAD,
-                'name': 'concept',
                 'parent': source,
                 'concept_class': 'Diagnosis',
                 'datatype': 'None',
@@ -1667,7 +1655,6 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
             {
                 'mnemonic': 'concept',
                 'version': HEAD,
-                'name': 'concept',
                 'parent': source,
                 'concept_class': 'Diagnosis',
                 'datatype': 'None',
@@ -1688,7 +1675,6 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
             {
                 'mnemonic': 'concept',
                 'version': HEAD,
-                'name': 'concept',
                 'parent': source,
                 'concept_class': 'Diagnosis',
                 'datatype': 'None',
@@ -1712,7 +1698,6 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
             {
                 'mnemonic': 'concept',
                 'version': HEAD,
-                'name': 'concept',
                 'parent': source,
                 'concept_class': 'Diagnosis',
                 'datatype': 'None',
@@ -1738,7 +1723,6 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
             {
                 'mnemonic': 'concept',
                 'version': HEAD,
-                'name': 'concept',
                 'parent': source,
                 'concept_class': 'Diagnosis',
                 'datatype': 'None',
@@ -1764,7 +1748,6 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
             {
                 'mnemonic': 'concept',
                 'version': HEAD,
-                'name': 'concept',
                 'parent': source,
                 'concept_class': 'Diagnosis',
                 'datatype': 'None',
@@ -1782,7 +1765,6 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
         concept = Concept.persist_new({
             'mnemonic': 'concept',
             'version': HEAD,
-            'name': 'concept',
             'parent': source,
             'external_id': '1' * 37,
             'concept_class': 'Diagnosis',
@@ -1797,7 +1779,6 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
         concept = Concept.persist_new({
             'mnemonic': 'concept',
             'version': HEAD,
-            'name': 'concept',
             'parent': source,
             'external_id': '1' * 36,
             'concept_class': 'Diagnosis',
@@ -1812,7 +1793,6 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
         concept1 = Concept.persist_new({
             'mnemonic': 'concept1',
             'version': HEAD,
-            'name': 'concept1',
             'parent': source,
             'external_id': '1' * 10,
             'concept_class': 'Diagnosis',
@@ -1829,7 +1809,6 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
         concept = Concept.persist_new({
             'mnemonic': 'concept',
             'version': HEAD,
-            'name': 'concept',
             'parent': source,
             'external_id': '1' * 36,
             'concept_class': 'Diagnosis',
@@ -1853,7 +1832,6 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
             {
                 'mnemonic': 'concept',
                 'version': HEAD,
-                'name': 'concept',
                 'parent': source,
                 'external_id': '1' * 36,
                 'concept_class': 'Diagnosis',

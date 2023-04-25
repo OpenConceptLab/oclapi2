@@ -23,7 +23,7 @@ class CodeSystemTest(OCLTestCase):
         self.org_source_v1 = OrganizationSourceFactory.build(
             version='v1', mnemonic=self.org_source.mnemonic, organization=self.org_source.parent)
         Source.persist_new_version(self.org_source_v1, self.org_source.created_by)
-        self.concept_1 = ConceptFactory(parent=self.org_source, names=1, name__name="concept_1_name")
+        self.concept_1 = ConceptFactory(parent=self.org_source, names=1, names__name="concept_1_name")
         self.concept_2 = ConceptFactory(parent=self.org_source)
         self.org_source_v2 = OrganizationSourceFactory.build(
             version='v2', mnemonic=self.org_source.mnemonic, organization=self.org_source.parent)

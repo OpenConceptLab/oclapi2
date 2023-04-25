@@ -412,7 +412,7 @@ class ConceptDetailSerializer(ConceptAbstractSerializer):
         fields = ConceptAbstractSerializer.Meta.fields + (
             'id', 'external_id', 'concept_class', 'datatype', 'url', 'retired', 'source',
             'owner', 'owner_type', 'owner_url', 'display_name', 'display_locale', 'names', 'descriptions',
-            'created_on', 'updated_on', 'versions_url', 'version', 'extras', 'parent_id', 'name', 'type',
+            'created_on', 'updated_on', 'versions_url', 'version', 'extras', 'parent_id', 'type',
             'update_comment', 'version_url', 'updated_by', 'created_by',
             'public_can_view', 'versioned_object_id', 'checksums'
         )
