@@ -150,7 +150,7 @@ def add_references(  # pylint: disable=too-many-arguments,too-many-locals
 
     try:
         (added_references, errors) = collection.add_expressions(
-            data, user, cascade, transform_to_resource_version)
+            data, user, cascade, transform_to_resource_version, True)
     finally:
         head.remove_processing(self.request.id)
 

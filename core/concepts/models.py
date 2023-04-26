@@ -1094,7 +1094,8 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
         def iterate(level):
             if level == ALL or level > 0:
-                if not cascaded or (result['concepts'].count() + result['mappings'].count()) < max_results:
+                if not cascaded or max_results is None or (
+                        result['concepts'].count() + result['mappings'].count()) < max_results:
                     not_cascaded = result['concepts'].exclude(
                         versioned_object_id__in=cascaded) if cascaded else result['concepts']
                     if not_cascaded.exists():

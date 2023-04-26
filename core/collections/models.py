@@ -188,14 +188,14 @@ class Collection(ConceptContainerModel):
 
     @transaction.atomic
     def add_expressions(
-            self, data, user, cascade=False, transform=False):
+            self, data, user, cascade=False, transform=False, _async=False):
         parser = CollectionReferenceParser(data, transform, cascade, user)
         parser.parse()
         parser.to_reference_structure()
         references = parser.to_objects()
-        return self.add_references(references, user)
+        return self.add_references(references, user, _async)
 
-    def add_references(self, references, user=None):
+    def add_references(self, references, user=None, _async=False):
         errors = {}
         added_references = []
         total_references = []
@@ -206,6 +206,7 @@ class Collection(ConceptContainerModel):
         for reference in total_references:
             reference.collection = self
             reference.created_by = user
+            reference._async = _async  # pylint: disable=protected-access
             try:
                 self.validate(reference)
                 reference.save()
@@ -673,6 +674,8 @@ class CollectionReference(models.Model):
             cascade_params['map_types'] = map_types
             cascade_params['exclude_map_types'] = exclude_map_types
             cascade_params['return_map_types'] = return_map_types
+        if get(self, '_async'):
+            cascade_params['max_results'] = None
         return cascade_params
 
     def __is_exact_search_filter(self):
