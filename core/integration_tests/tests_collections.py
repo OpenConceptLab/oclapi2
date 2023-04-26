@@ -655,18 +655,35 @@ class CollectionReferencesViewTest(OCLAPITestCase):
 
     @patch('core.collections.views.add_references')
     def test_put_202_all(self, add_references_mock):
-        add_references_mock.delay = Mock(return_value=None)
+        add_references_mock.apply_async = Mock(return_value=Mock(task_id='task-id', state='PENDING'))
 
         response = self.client.put(
-            self.collection.uri + 'references/',
+            self.collection.uri + 'references/?async=true',
             {'data': {'concepts': '*'}},
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
 
         self.assertEqual(response.status_code, 202)
-        self.assertEqual(response.data, [])
-        add_references_mock.delay.assert_called_once_with(self.user.id, {'concepts': '*'}, self.collection.id, '', '')
+        self.assertEqual(
+            response.data,
+            {'task': 'task-id', 'state': 'PENDING', 'username': self.user.username, 'queue': 'default'}
+        )
+        add_references_mock.apply_async.assert_called_once()
+        self.assertEqual(
+            add_references_mock.apply_async.call_args[0],
+            ((self.user.id, {'concepts': '*'}, self.collection.id, '', ''),)
+        )
+        self.assertEqual(
+            add_references_mock.apply_async.call_args[1],
+            {'task_id': ANY}
+        )
+        self.assertTrue(
+            '-foobar~default' in add_references_mock.apply_async.call_args[1]['task_id'],
+        )
+        self.assertEqual(
+            len(add_references_mock.apply_async.call_args[1]['task_id']), 36 + 1 + 7 + 1 + 6
+        )
 
     def test_put_200_specific_expression(self):  # pylint: disable=too-many-statements
         response = self.client.put(

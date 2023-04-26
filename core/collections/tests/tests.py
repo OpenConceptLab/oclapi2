@@ -960,7 +960,7 @@ class TasksTest(OCLTestCase):
         )
         mapping2 = MappingFactory()
 
-        errors = add_references(
+        added_references, errors = add_references(
             collection.created_by.id,
             {
                 'expressions': [obj.get_latest_version().url for obj in [concept1, concept2, mapping2]]
@@ -968,7 +968,7 @@ class TasksTest(OCLTestCase):
             collection.id,
             'sourcemappings'
         )
-
+        self.assertEqual(len(added_references), 4)
         self.assertEqual(errors, {})
         self.assertListEqual(
             sorted(list(

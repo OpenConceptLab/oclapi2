@@ -444,22 +444,7 @@ def queue_bulk_import(  # pylint: disable=too-many-arguments
     :param sub_task:
     :return: task
     """
-    task_id = str(uuid.uuid4()) + '-' + username
-
-    if username in ['root', 'ocladmin'] and import_queue != 'concurrent':
-        queue_id = 'bulk_import_root'
-        task_id += '~priority'
-    elif import_queue == 'concurrent':
-        queue_id = import_queue
-        task_id += '~' + import_queue
-    elif import_queue:
-        # assigning to one of 5 queues processed in order
-        queue_id = 'bulk_import_' + str(hash(username + import_queue) % BULK_IMPORT_QUEUES_COUNT)
-        task_id += '~' + import_queue
-    else:
-        # assigning randomly to one of 5 queues processed in order
-        queue_id = 'bulk_import_' + str(random.randrange(0, BULK_IMPORT_QUEUES_COUNT))
-        task_id += '~default'
+    queue_id, task_id = get_queue_task_names(import_queue, username)
 
     if inline:
         if sub_task:
@@ -480,6 +465,28 @@ def queue_bulk_import(  # pylint: disable=too-many-arguments
 
     from core.common.tasks import bulk_import
     return bulk_import.apply_async((to_import, username, update_if_exists), task_id=task_id, queue=queue_id)
+
+
+def get_queue_task_names(import_queue, username):
+    if username in ['root', 'ocladmin'] and import_queue != 'concurrent':
+        queue_id = 'bulk_import_root'
+        task_id = get_user_specific_task_id('priority', username)
+    elif import_queue == 'concurrent':
+        queue_id = import_queue
+        task_id = get_user_specific_task_id(import_queue, username)
+    elif import_queue:
+        # assigning to one of 5 queues processed in order
+        queue_id = 'bulk_import_' + str(hash(username + import_queue) % BULK_IMPORT_QUEUES_COUNT)
+        task_id = get_user_specific_task_id(import_queue, username)
+    else:
+        # assigning randomly to one of 5 queues processed in order
+        queue_id = 'bulk_import_' + str(random.randrange(0, BULK_IMPORT_QUEUES_COUNT))
+        task_id = get_user_specific_task_id('default', username)
+    return queue_id, task_id
+
+
+def get_user_specific_task_id(queue, username):
+    return str(uuid.uuid4()) + '-' + username + '~' + queue
 
 
 def drop_version(expression):

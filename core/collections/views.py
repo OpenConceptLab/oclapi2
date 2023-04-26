@@ -55,7 +55,7 @@ from core.common.swagger_parameters import q_param, compress_header, page_param,
     include_facets_header, sort_asc_param, sort_desc_param, updated_since_param, include_retired_param, limit_param
 from core.common.tasks import add_references, export_collection, delete_collection, index_expansion_concepts, \
     index_expansion_mappings
-from core.common.utils import compact_dict_by_values, parse_boolean_query_param
+from core.common.utils import compact_dict_by_values, parse_boolean_query_param, get_user_specific_task_id
 from core.common.views import BaseAPIView, BaseLogoView, ConceptContainerExtraRetrieveUpdateDestroyView
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept
@@ -63,6 +63,8 @@ from core.concepts.search import ConceptSearch
 from core.mappings.documents import MappingDocument
 from core.mappings.models import Mapping
 from core.mappings.search import MappingSearch
+from core.tasks.constants import TASK_NOT_COMPLETED
+from core.tasks.utils import wait_until_task_complete
 
 logger = logging.getLogger('oclapi')
 
@@ -447,29 +449,37 @@ class CollectionReferencesView(
     def update(self, request, *args, **kwargs):  # pylint: disable=too-many-locals,unused-argument # Fixme: Sny
         is_async = self.is_async_requested()
         collection = self.get_object()
-        data = request.data.get('data')
-        cascade_params = request.data.get('cascade', None)
-        is_dict = isinstance(data, dict)
-        concept_expressions = data.get('concepts', []) if is_dict else []
-        mapping_expressions = data.get('mappings', []) if is_dict else []
-        cascade = cascade_params or self.request.query_params.get('cascade', '').lower()
+        cascade = request.data.get('cascade', None) or self.request.query_params.get('cascade', '').lower()
         transform = self.request.query_params.get('transformReferences', '').lower()
 
-        adding_all = ALL in (mapping_expressions, concept_expressions)
+        task_args = (self.request.user.id, request.data.get('data'), collection.id, cascade, transform)
 
-        if adding_all or is_async:
-            result = add_references.delay(self.request.user.id, data, collection.id, cascade, transform)
+        def task_response():
             return Response(
-                {
-                    'state': result.state,
-                    'username': request.user.username,
-                    'task': result.task_id,
-                    'queue': 'default'
-                } if result else [],
+                {'state': task.state, 'username': request.user.username, 'task': task.task_id, 'queue': 'default'},
                 status=status.HTTP_202_ACCEPTED
             )
 
-        (added_references, errors) = collection.add_expressions(data, request.user, cascade, transform)
+        if not is_async and get(settings, 'TEST_MODE', False):
+            added_references_ids, errors = add_references(*task_args)
+        else:
+            task = add_references.apply_async(
+                task_args,
+                task_id=get_user_specific_task_id('default', request.user.username)
+            )
+            if is_async:
+                return task_response()
+
+            result = wait_until_task_complete(task.task_id, 15)
+
+            if result == TASK_NOT_COMPLETED:
+                return task_response()
+
+            added_references_ids, errors = result
+
+        added_references = CollectionReference.objects.filter(
+            id__in=added_references_ids) if added_references_ids else []
+
         added_expressions = set()
         added_original_expressions = set()
         for reference in added_references:
@@ -489,13 +499,6 @@ class CollectionReferencesView(
             response_item = self.create_response_item(added_expressions, errors, expression)
             if response_item:
                 response.append(response_item)
-
-        if collection.expansion_uri:
-            for ref in added_references:
-                if ref.concepts:
-                    collection.batch_index(ref.concepts, ConceptDocument)
-                if ref.mappings:
-                    collection.batch_index(ref.mappings, MappingDocument)
 
         return Response(response, status=status.HTTP_200_OK)
 
