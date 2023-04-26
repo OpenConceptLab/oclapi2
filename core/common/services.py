@@ -252,9 +252,6 @@ class RedisService:  # pragma: no cover
         return tasks
 
 
-
-
-
 class PostgresQL:
     @staticmethod
     def create_seq(seq_name, owned_by, min_value=0, start=1):
