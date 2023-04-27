@@ -665,7 +665,8 @@ class CollectionReference(models.Model):
             'cascade_levels': 1 if self.cascade == method else get(self.cascade, 'cascade_levels', ALL),
         }
         if is_dict:
-            for attr in ['cascade_mappings', 'cascade_hierarchy', 'reverse', 'max_results']:
+            for attr in ['cascade_mappings', 'cascade_hierarchy', 'reverse', 'max_results', 'include_retired',
+                         'reverse', 'omit_if_exists_in']:
                 if attr in self.cascade:
                     cascade_params[attr] = get(self.cascade, attr)
             map_types = get(self.cascade, 'map_types', None)
