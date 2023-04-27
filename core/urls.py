@@ -81,7 +81,7 @@ urlpatterns = [
         name='ocl-locales'
     ),
 
-    # just for ocldev
+    # just for ocldev - DEPRECATED
     re_path(
         f'manage/bulkimport/(?P<import_queue>{NAMESPACE_PATTERN})/',
         BulkImportView.as_view(),

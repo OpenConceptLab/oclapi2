@@ -13,7 +13,7 @@ from mock import patch, Mock, ANY, call, PropertyMock
 from ocldev.oclcsvtojsonconverter import OclStandardCsvToJsonConverter
 
 from core.collections.models import Collection
-from core.common.constants import OPENMRS_VALIDATION_SCHEMA
+from core.common.constants import OPENMRS_VALIDATION_SCHEMA, DEPRECATED_API_HEADER
 from core.common.tasks import post_import_update_resource_counts, bulk_import_parts_inline, bulk_import_inline, \
     bulk_import
 from core.common.tests import OCLAPITestCase, OCLTestCase
@@ -1192,7 +1192,7 @@ class BulkImportViewTest(OCLAPITestCase):
     def test_post_400(self):
         response = self.client.post(
             '/importers/bulk-import/?update_if_exists=1',
-            'some-data',
+            {'data': 'some-data'},
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -1215,7 +1215,7 @@ class BulkImportViewTest(OCLAPITestCase):
 
         response = self.client.post(
             '/importers/bulk-import/?update_if_exists=true',
-            'some-data',
+            {'data': 'some-data'},
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -1223,14 +1223,14 @@ class BulkImportViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 409)
         self.assertEqual(response.data, {'exception': "The same import has been already queued"})
 
-    @patch('core.common.tasks.bulk_import')
+    @patch('core.common.tasks.bulk_import_parallel_inline')
     def test_post_202(self, bulk_import_mock):
         task_mock = Mock(id='task-id', state='pending')
         bulk_import_mock.apply_async = Mock(return_value=task_mock)
 
         response = self.client.post(
             "/importers/bulk-import/?update_if_exists=true",
-            'some-data',
+            {'data': ['some-data']},
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -1238,16 +1238,17 @@ class BulkImportViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 202)
         self.assertEqual(
             response.data, {'task': 'task-id', 'state': 'pending', 'queue': 'default', 'username': 'ocladmin'})
+        self.assertTrue(DEPRECATED_API_HEADER not in response)
         self.assertEqual(bulk_import_mock.apply_async.call_count, 1)
-        self.assertEqual(bulk_import_mock.apply_async.call_args[0], (('"some-data"', 'ocladmin', True),))
-        self.assertEqual(bulk_import_mock.apply_async.call_args[1]['task_id'][37:], 'ocladmin~priority')
+        self.assertEqual(bulk_import_mock.apply_async.call_args[0], ((["some-data"], 'ocladmin', True, 5),))
+        self.assertEqual(bulk_import_mock.apply_async.call_args[1]['task_id'][36:], '-ocladmin~priority')
         self.assertEqual(bulk_import_mock.apply_async.call_args[1]['queue'], 'bulk_import_root')
 
         random_user = UserProfileFactory(username='oswell')
 
         response = self.client.post(
             "/importers/bulk-import/?update_if_exists=true",
-            'some-data',
+            {'data': ['some-data'], 'parallel': 2},
             HTTP_AUTHORIZATION='Token ' + random_user.get_token(),
             format='json'
         )
@@ -1260,13 +1261,13 @@ class BulkImportViewTest(OCLAPITestCase):
             'username': 'oswell'
         })
         self.assertEqual(bulk_import_mock.apply_async.call_count, 2)
-        self.assertEqual(bulk_import_mock.apply_async.call_args[0], (('"some-data"', 'oswell', True),))
-        self.assertEqual(bulk_import_mock.apply_async.call_args[1]['task_id'][37:], 'oswell~default')
+        self.assertEqual(bulk_import_mock.apply_async.call_args[0], ((["some-data"], 'oswell', True, 2),))
+        self.assertEqual(bulk_import_mock.apply_async.call_args[1]['task_id'][36:], '-oswell~default')
         self.assertTrue(bulk_import_mock.apply_async.call_args[1]['queue'].startswith('bulk_import_'))
 
         response = self.client.post(
             "/importers/bulk-import/foobar-queue/?update_if_exists=true",
-            'some-data',
+            {'data': ['some-data'], 'parallel': 10},
             HTTP_AUTHORIZATION='Token ' + random_user.get_token(),
             format='json'
         )
@@ -1279,13 +1280,13 @@ class BulkImportViewTest(OCLAPITestCase):
             'username': 'oswell'
         })
         self.assertEqual(bulk_import_mock.apply_async.call_count, 3)
-        self.assertEqual(bulk_import_mock.apply_async.call_args[0], (('"some-data"', 'oswell', True),))
-        self.assertEqual(bulk_import_mock.apply_async.call_args[1]['task_id'][37:], 'oswell~foobar-queue')
+        self.assertEqual(bulk_import_mock.apply_async.call_args[0], ((["some-data"], 'oswell', True, 10),))
+        self.assertEqual(bulk_import_mock.apply_async.call_args[1]['task_id'][36:], '-oswell~foobar-queue')
         self.assertTrue(bulk_import_mock.apply_async.call_args[1]['queue'].startswith('bulk_import_'))
 
     def test_post_file_upload_400(self):
         response = self.client.post(
-            "/importers/bulk-import/upload/?update_if_exists=true",
+            "/importers/bulk-import/?update_if_exists=true",
             {'file': ''},
             HTTP_AUTHORIZATION='Token ' + self.token,
         )
@@ -1296,7 +1297,7 @@ class BulkImportViewTest(OCLAPITestCase):
                 os.path.join(os.path.dirname(__file__), '..', 'samples/invalid_import_csv.csv'), 'r'
             )
         response = self.client.post(
-            "/importers/bulk-import/upload/?update_if_exists=true",
+            "/importers/bulk-import/?update_if_exists=true",
             {'file': file},
             HTTP_AUTHORIZATION='Token ' + self.token,
         )
@@ -1346,6 +1347,8 @@ class BulkImportViewTest(OCLAPITestCase):
             'queue': 'priority',
             'username': 'ocladmin'
         })
+        self.assertTrue(DEPRECATED_API_HEADER in response)
+        self.assertEqual(response[DEPRECATED_API_HEADER], 'True')
         self.assertEqual(bulk_import_mock.apply_async.call_count, 1)
         self.assertEqual(bulk_import_mock.apply_async.call_args[0], (('{"key": "value"}', 'ocladmin', True, 5),))
         self.assertEqual(bulk_import_mock.apply_async.call_args[1]['task_id'][37:], 'ocladmin~priority')
