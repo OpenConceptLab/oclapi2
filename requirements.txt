@@ -4,7 +4,7 @@ gunicorn==20.1.0 #production server
 whitenoise==6.4.0 #serving swagger static files
 djangorestframework==3.14.0
 pylint==2.17.2
-pydash==6.0.2
+pydash==7.0.1
 django-cors-headers==3.14.0
 pyyaml==6.0
 colour_runner==0.1.1
