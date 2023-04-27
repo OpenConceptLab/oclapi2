@@ -442,12 +442,6 @@ class SourceChildMixin(ChecksumModel):
     def is_equal(instance1, instance2):
         return instance1.get_basic_checksums() == instance2.get_basic_checksums()
 
-    def __eq__(self, other):
-        return self.__class__.is_equal(self, other)
-
-    def __hash__(self):
-        return super().__hash__()
-
     @staticmethod
     def apply_user_criteria(queryset, user):
         queryset = queryset.exclude(
