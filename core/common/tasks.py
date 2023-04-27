@@ -16,6 +16,7 @@ from django_elasticsearch_dsl.registries import registry
 from pydash import get
 
 from core.celery import app
+from core.common import ERRBIT_LOGGER
 from core.common.constants import CONFIRM_EMAIL_ADDRESS_MAIL_SUBJECT, PASSWORD_RESET_MAIL_SUBJECT
 from core.common.utils import write_export_file, web_url, get_resource_class_from_resource_name, get_export_service
 from core.toggles.models import Toggle
@@ -54,15 +55,19 @@ def delete_source(source_id):
         return None
 
     try:
-        logger.info('Found source %s.  Beginning purge...', source.mnemonic)
+        logger.info('Found source %s', source.mnemonic)
+        logger.info('Beginning concepts purge...')
         source.batch_delete(source.concepts_set)
+        logger.info('Beginning mappings purge...')
         source.batch_delete(source.mappings_set)
+        logger.info('Beginning versions and self purge...')
         source.delete(force=True)
         logger.info('Delete complete!')
         return True
     except Exception as ex:
         logger.info('Source delete failed for %s with exception %s', source.mnemonic, ex.args)
-        return ex
+        ERRBIT_LOGGER.log(ex)
+        return False
 
 
 @app.task(base=QueueOnce)
@@ -83,7 +88,8 @@ def delete_collection(collection_id):
         return True
     except Exception as ex:
         logger.info('Collection delete failed for %s with exception %s', collection.mnemonic, ex.args)
-        return ex
+        ERRBIT_LOGGER.log(ex)
+        return False
 
 
 @app.task(base=QueueOnce, bind=True)
