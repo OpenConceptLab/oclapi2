@@ -27,7 +27,7 @@ from core.common.swagger_parameters import q_param, limit_param, sort_desc_param
     page_param, verbose_param, include_retired_param, updated_since_param, include_facets_header, compress_header
 from core.common.tasks import export_source, index_source_concepts, index_source_mappings, delete_source
 from core.common.utils import parse_boolean_query_param, compact_dict_by_values, to_parent_uri
-from core.common.views import BaseAPIView, BaseLogoView, ConceptContainerExtraRetrieveUpdateDestroyView
+from core.common.views import BaseAPIView, BaseLogoView, ConceptContainerExtraRetrieveUpdateDestroyView, TaskMixin
 from core.sources.constants import DELETE_FAILURE, DELETE_SUCCESS, VERSION_ALREADY_EXISTS
 from core.sources.documents import SourceDocument
 from core.sources.mixins import SummaryMixin
@@ -177,7 +177,7 @@ class SourceLogoView(SourceBaseView, BaseLogoView):
         return [CanEditConceptDictionary()]
 
 
-class SourceRetrieveUpdateDestroyView(SourceBaseView, ConceptDictionaryUpdateMixin, RetrieveAPIView):
+class SourceRetrieveUpdateDestroyView(SourceBaseView, ConceptDictionaryUpdateMixin, RetrieveAPIView, TaskMixin):
     serializer_class = SourceDetailSerializer
 
     def get_object(self, queryset=None):
@@ -206,15 +206,10 @@ class SourceRetrieveUpdateDestroyView(SourceBaseView, ConceptDictionaryUpdateMix
 
     def delete(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         source = self.get_object()
+        result = self.perform_task(delete_source, (source.id, ))
 
-        if not self.is_inline_requested():
-            try:
-                task = delete_source.delay(source.id)
-                return Response({'task': task.id}, status=status.HTTP_202_ACCEPTED)
-            except AlreadyQueued:
-                return Response({'detail': 'Already Queued'}, status=status.HTTP_409_CONFLICT)
-
-        result = delete_source(source.id)
+        if isinstance(result, Response):
+            return result
 
         if result is True:
             return Response({'detail': DELETE_SUCCESS}, status=status.HTTP_204_NO_CONTENT)

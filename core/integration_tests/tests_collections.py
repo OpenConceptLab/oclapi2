@@ -435,21 +435,24 @@ class CollectionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
 
     @patch('core.collections.views.delete_collection')
     def test_delete_202(self, delete_collection_task_mock):  # async delete
-        delete_collection_task_mock.delay = Mock(return_value=Mock(id='task-id'))
+        delete_collection_task_mock.apply_async = Mock(return_value=Mock(task_id='task-id', state='PENDING'))
         coll = OrganizationCollectionFactory(mnemonic='coll1')
         OrganizationCollectionFactory(
             version='v1', is_latest_version=True, mnemonic='coll1', organization=coll.organization)
         user = UserProfileFactory(organizations=[coll.organization])
 
         response = self.client.delete(
-            coll.uri,
+            coll.uri + '?async=true',
             HTTP_AUTHORIZATION='Token ' + user.get_token(),
             format='json'
         )
 
         self.assertEqual(response.status_code, 202)
-        self.assertEqual(response.data, {'task': 'task-id'})
-        delete_collection_task_mock.delay.assert_called_once_with(coll.id)
+        self.assertEqual(
+            response.data,
+            {'task': 'task-id', 'queue': 'default', 'state': 'PENDING', 'username': user.username}
+        )
+        delete_collection_task_mock.apply_async.assert_called_once_with((coll.id, ), task_id=ANY)
 
     def test_put_401(self):
         coll = OrganizationCollectionFactory(mnemonic='coll1', name='Collection')

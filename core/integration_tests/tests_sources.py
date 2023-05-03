@@ -325,17 +325,20 @@ class SourceRetrieveUpdateDestroyViewTest(OCLAPITestCase):
 
     @patch('core.sources.views.delete_source')
     def test_delete_202(self, delete_source_task_mock):  # async delete
-        delete_source_task_mock.delay = Mock(return_value=Mock(id='task-id'))
+        delete_source_task_mock.apply_async = Mock(return_value=Mock(task_id='task-id', state='PENDING'))
         source = OrganizationSourceFactory(mnemonic='source', organization=self.organization)
         response = self.client.delete(
-            source.uri,
+            source.uri + '?async=true',
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
 
         self.assertEqual(response.status_code, 202)
-        self.assertEqual(response.data, {'task': 'task-id'})
-        delete_source_task_mock.delay.assert_called_once_with(source.id)
+        self.assertEqual(
+            response.data,
+            {'task': 'task-id', 'state': 'PENDING', 'queue': 'default', 'username': self.user.username}
+        )
+        delete_source_task_mock.apply_async.assert_called_once_with((source.id,), task_id=ANY)
 
     @patch('core.common.models.delete_s3_objects')
     def test_delete_204(self, delete_s3_objects_mock):  # sync delete
