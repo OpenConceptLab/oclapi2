@@ -141,8 +141,6 @@ REDOC_SETTINGS = {
 }
 
 MIDDLEWARE = [
-    'core.middlewares.middlewares.CustomLoggerMiddleware',
-    'cid.middleware.CidMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.middleware.gzip.GZipMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
@@ -153,6 +151,8 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'cid.middleware.CidMiddleware',
+    'core.middlewares.middlewares.CustomLoggerMiddleware',
     'core.middlewares.middlewares.FixMalformedLimitParamMiddleware',
     'core.middlewares.middlewares.ResponseHeadersMiddleware',
     'core.middlewares.middlewares.CurrentUserMiddleware',
