@@ -37,6 +37,9 @@ class Organization(BaseResourceModel, SourceContainerMixin):
     text = models.TextField(null=True, blank=True)  # for about description (markup)
     overview = models.JSONField(default=dict)
 
+    def calculate_uri(self):
+        return f"/orgs/{self.mnemonic}/"
+
     @staticmethod
     def get_search_document():
         from core.orgs.documents import OrganizationDocument

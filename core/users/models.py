@@ -48,6 +48,9 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
         'is_admin': {'sortable': False, 'filterable': False, 'exact': False, 'facet': True}
     }
 
+    def calculate_uri(self):
+        return f"/users/{self.username}/"
+
     @staticmethod
     def get_search_document():
         from core.users.documents import UserProfileDocument
