@@ -5,7 +5,6 @@ from django.contrib.auth.models import AbstractUser
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
 from django.db import models
-from django.urls import reverse
 from rest_framework.authtoken.models import Token
 
 from core.common.mixins import SourceContainerMixin
