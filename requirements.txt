@@ -1,4 +1,4 @@
-Django==4.1.7
+Django==4.1.9
 psycopg2==2.9.5
 gunicorn==20.1.0 #production server
 whitenoise==6.4.0 #serving swagger static files
