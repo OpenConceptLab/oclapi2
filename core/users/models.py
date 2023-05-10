@@ -87,7 +87,7 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
 
     @property
     def organizations_url(self):
-        return reverse('userprofile-orgs', kwargs={'user': self.mnemonic})
+        return f"/users/{self.mnemonic}/orgs/"
 
     def update_password(self, password=None, hashed_password=None):
         if not password and not hashed_password:
