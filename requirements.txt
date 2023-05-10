@@ -17,7 +17,7 @@ factory_boy==3.2.1
 celery[redis]==5.2.7
 celery_once==3.0.1
 git+https://github.com/snyaggarwal/flower # use until https://github.com/mher/flower/issues/1231 issue is resolved
-redis==4.5.4
+redis==4.5.5
 kombu==5.2.4
 django-elasticsearch-dsl==7.3
 drf-yasg==1.21.5
