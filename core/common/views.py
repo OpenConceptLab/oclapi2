@@ -784,10 +784,11 @@ class RootView(BaseAPIView):  # pragma: no cover
             if name in ['admin']:
                 continue
             route = str(pattern.pattern)
-            if route in ['v1-importers/']:
-                continue
-            if isinstance(route, str) and route.startswith('admin/'):
-                continue
+            if isinstance(route, str):
+                if any(route.startswith(path) for path in ['admin/', 'manage/bulkimport/', 'oidc/']):
+                    continue
+                if route.startswith('^\\'):
+                    route = route.replace('^\\', '')
             if route and name is None:
                 name = route.split('/', maxsplit=1)[0] + '_urls'
                 if name == 'user_urls':
