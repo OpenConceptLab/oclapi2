@@ -141,18 +141,18 @@ REDOC_SETTINGS = {
 }
 
 MIDDLEWARE = [
-    'django.middleware.security.SecurityMiddleware',
     'django.middleware.gzip.GZipMiddleware',
-    'django.contrib.sessions.middleware.SessionMiddleware',
+    'cid.middleware.CidMiddleware',
+    'core.middlewares.middlewares.CustomLoggerMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
+    'django.middleware.security.SecurityMiddleware',
+    'django.contrib.sessions.middleware.SessionMiddleware',
     'core.middlewares.middlewares.TokenAuthMiddleWare',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
-    'cid.middleware.CidMiddleware',
-    'core.middlewares.middlewares.CustomLoggerMiddleware',
     'core.middlewares.middlewares.FixMalformedLimitParamMiddleware',
     'core.middlewares.middlewares.ResponseHeadersMiddleware',
     'core.middlewares.middlewares.CurrentUserMiddleware',
@@ -203,7 +203,7 @@ ELASTICSEARCH_DSL = {
 ENV = os.environ.get('ENVIRONMENT', 'development')
 CID_GENERATE = True
 CID_RESPONSE_HEADER = None
-if ENV and ENV not in ['ci', 'development']:
+if True:
     LOGGING = {
         'version': 1,
         'disable_existing_loggers': False,
