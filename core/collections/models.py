@@ -1058,23 +1058,24 @@ class Expansion(BaseResourceModel):
             # attempt_reevaluate is False for delete reference(s)
             nonlocal resolved_valueset_versions
             nonlocal resolved_system_versions
-            resolved_valueset_versions += ref.resolve_valueset_versions
-            resolved_valueset_versions = list(set(resolved_valueset_versions))
+            ref_valueset_versions = ref.resolve_valueset_versions
+            ref_system_versions = []
 
             for _system_version in include_system_versions:
                 if ref.can_compute_against_system_version(_system_version):
-                    resolved_system_versions.append(_system_version)
+                    ref_system_versions.append(_system_version)
 
             _system_version = get_ref_system_version(ref)
             if _system_version:
-                resolved_system_versions.append(_system_version)
-                resolved_system_versions = list(set(resolved_system_versions))
+                ref_system_versions.append(_system_version)
+            if ref_system_versions:
+                ref_system_versions = list(set(ref_system_versions))
 
             _concepts = Concept.objects.none()
             _mappings = Mapping.objects.none()
 
             if should_reevaluate:
-                for _system_version in resolved_system_versions:
+                for _system_version in ref_system_versions:
                     if ref.is_mapping:
                         _mappings = _mappings.union(ref.get_mappings(_system_version))
                     else:
@@ -1087,6 +1088,8 @@ class Expansion(BaseResourceModel):
             else:
                 _concepts = ref.concepts.filter()
                 _mappings = ref.mappings.filter()
+            resolved_system_versions += ref_system_versions
+            resolved_valueset_versions += ref_valueset_versions
             return _concepts, _mappings
 
         for reference in include_refs:
