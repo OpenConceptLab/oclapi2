@@ -1060,18 +1060,11 @@ class Expansion(BaseResourceModel):
                 for _system_version in resolved_system_versions:
                     __concepts, __mappings = ref.get_concepts(_system_version)
                     _concepts = Concept.objects.filter(
-                        id__in=list(
-                            _concepts.union(__concepts).values_list('id', flat=True)
-                        )
+                        id__in=_concepts.union(__concepts).values_list('id', flat=True)
                     )
                     _mappings = Mapping.objects.filter(
-                        id__in=list(
-                            _mappings.union(
-                                __mappings
-                            ).union(
-                                ref.get_mappings(_system_version)
-                            ).values_list('id', flat=True)
-                        )
+                        id__in=_mappings.union(
+                            __mappings).union(ref.get_mappings(_system_version)).values_list('id', flat=True)
                     )
             else:
                 _concepts = ref.concepts.all()
