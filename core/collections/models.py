@@ -1018,13 +1018,13 @@ class Expansion(BaseResourceModel):
             batch_index_resources.apply_async(('concept', concepts_filters), queue='indexing')
             batch_index_resources.apply_async(('mapping', mappings_filters), queue='indexing')
 
-    def add_references(self, references, index=True, is_adding_all_references=False, attempt_reevaluate=True):  # pylint: disable=too-many-locals,too-many-statements
+    def add_references(self, references, index=True, is_adding_all=False, attempt_reevaluate=True):  # pylint: disable=too-many-locals,too-many-statements
         include_refs, exclude_refs = self.to_ref_list_separated(references)
         resolved_valueset_versions = []
         resolved_system_versions = []
         _system_version_cache = {}
 
-        if not is_adding_all_references:
+        if not is_adding_all:
             existing_exclude_refs = self.collection_version.references.exclude(
                 include=True).exclude(id__in=[ref.id for ref in exclude_refs])
             if isinstance(exclude_refs, QuerySet):
@@ -1032,9 +1032,11 @@ class Expansion(BaseResourceModel):
             else:
                 exclude_refs += [*existing_exclude_refs.all()]
 
-        index_concepts = False
-        index_mappings = False
+        index_concepts = index_mappings = False
+
+        # attempt_reevaluate is False for delete reference(s)
         should_reevaluate = attempt_reevaluate and not self.is_auto_generated
+
         include_system_versions = []
         system_versions = self.parameters.get(ExpansionParameters.INCLUDE_SYSTEM)
         if should_reevaluate and system_versions:
@@ -1055,19 +1057,20 @@ class Expansion(BaseResourceModel):
             return None
 
         def get_ref_results(ref):
-            # attempt_reevaluate is False for delete reference(s)
             nonlocal resolved_valueset_versions
             nonlocal resolved_system_versions
-            ref_valueset_versions = ref.resolve_valueset_versions
+            resolved_valueset_versions += ref.resolve_valueset_versions
             ref_system_versions = []
-
+            should_use_ref_system_version = True
             for _system_version in include_system_versions:
                 if ref.can_compute_against_system_version(_system_version):
                     ref_system_versions.append(_system_version)
+                    should_use_ref_system_version = False
 
-            _system_version = get_ref_system_version(ref)
-            if _system_version:
-                ref_system_versions.append(_system_version)
+            if should_use_ref_system_version:
+                _system_version = get_ref_system_version(ref)
+                if _system_version:
+                    ref_system_versions.append(_system_version)
             if ref_system_versions:
                 ref_system_versions = list(set(ref_system_versions))
 
@@ -1089,7 +1092,6 @@ class Expansion(BaseResourceModel):
                 _concepts = ref.concepts.filter()
                 _mappings = ref.mappings.filter()
             resolved_system_versions += ref_system_versions
-            resolved_valueset_versions += ref_valueset_versions
             return _concepts, _mappings
 
         for reference in include_refs:
