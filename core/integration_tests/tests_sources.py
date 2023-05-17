@@ -1288,6 +1288,7 @@ class SourceSummaryViewTest(OCLAPITestCase):
                 'version_url': random_source2.url,
                 'type': 'Source Version',
                 'short_code': random_source2.mnemonic,
+                'released': False,
                 'distribution': {
                     'total': 1,
                     'retired': 0,
@@ -1315,6 +1316,7 @@ class SourceSummaryViewTest(OCLAPITestCase):
                 'version_url': random_source1.url,
                 'type': 'Source Version',
                 'short_code': random_source1.mnemonic,
+                'released': False,
                 'distribution': {
                     'total': 1,
                     'retired': 0,

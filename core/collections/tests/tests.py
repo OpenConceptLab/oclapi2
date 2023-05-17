@@ -394,6 +394,7 @@ class CollectionTest(OCLTestCase):
                  'version_url': source1.uri,
                  'type': 'Source Version',
                  'short_code': source1.mnemonic,
+                 'released': False,
                  'distribution': {
                      'include_reference': True,
                      'concepts': 1,
@@ -405,6 +406,7 @@ class CollectionTest(OCLTestCase):
                  'version_url': source2_v1.uri,
                  'type': 'Source Version',
                  'short_code': source2.mnemonic,
+                 'released': False,
                  'distribution': {
                      'include_reference': True,
                      'concepts': 1,
@@ -416,6 +418,7 @@ class CollectionTest(OCLTestCase):
                 'version_url': source2.uri,
                 'type': 'Source Version',
                 'short_code': source2.mnemonic,
+                'released': False,
                 'distribution': {
                     'include_reference': True,
                     'concepts': 1,
@@ -481,6 +484,8 @@ class CollectionTest(OCLTestCase):
                  'version_url': collection.uri,
                  'type': 'Collection Version',
                  'short_code': collection.mnemonic,
+                 'released': False,
+                 'autoexpand': True,
                  'distribution': {
                      'include_reference': True,
                      'concepts': 0,  # no expansion
