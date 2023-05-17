@@ -32,10 +32,15 @@ class CollectionVersionMinimalSerializer(ModelSerializer):
     version_url = CharField(source='uri')
     type = CharField(source='resource_version_type')
     short_code = CharField(source='mnemonic')
+    autoexpand = SerializerMethodField()
 
     class Meta:
         model = Collection
-        fields = ('id', 'version_url', 'type', 'short_code')
+        fields = ('id', 'version_url', 'type', 'short_code', 'released', 'autoexpand')
+
+    @staticmethod
+    def get_autoexpand(obj):
+        return obj.should_auto_expand
 
 
 class CollectionListSerializer(ModelSerializer):

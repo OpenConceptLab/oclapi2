@@ -33,7 +33,7 @@ class SourceVersionMinimalSerializer(ModelSerializer):
 
     class Meta:
         model = Source
-        fields = ('id', 'version_url', 'type', 'short_code')
+        fields = ('id', 'version_url', 'type', 'short_code', 'released')
 
 
 class SourceListSerializer(ModelSerializer):

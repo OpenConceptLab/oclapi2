@@ -36,7 +36,8 @@ from core.collections.serializers import (
     CollectionVersionSummaryDetailSerializer, CollectionReferenceDetailSerializer, ExpansionSerializer,
     ExpansionDetailSerializer, ReferenceExpressionResolveSerializer, CollectionMinimalSerializer,
     CollectionSummaryFieldDistributionSerializer, CollectionSummaryVerboseSerializer,
-    CollectionVersionSummaryFieldDistributionSerializer, CollectionVersionSummaryVerboseSerializer)
+    CollectionVersionSummaryFieldDistributionSerializer, CollectionVersionSummaryVerboseSerializer,
+    CollectionVersionMinimalSerializer)
 from core.collections.utils import is_version_specified
 from core.common.constants import (
     HEAD, RELEASED_PARAM, PROCESSING_PARAM, OK_MESSAGE,
@@ -566,6 +567,8 @@ class CollectionVersionListView(CollectionVersionBaseView, CreateAPIView, ListWi
             return CollectionVersionDetailSerializer
         if self.request.method == 'POST':
             return CollectionCreateSerializer
+        if self.is_brief():
+            return CollectionVersionMinimalSerializer
 
         return CollectionVersionListSerializer
 

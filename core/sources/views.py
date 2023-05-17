@@ -38,7 +38,7 @@ from core.sources.serializers import (
     SourceVersionListSerializer, SourceVersionExportSerializer, SourceSummaryDetailSerializer,
     SourceVersionSummaryDetailSerializer, SourceMinimalSerializer, SourceSummaryVerboseSerializer,
     SourceVersionSummaryVerboseSerializer, SourceSummaryFieldDistributionSerializer,
-    SourceVersionSummaryFieldDistributionSerializer)
+    SourceVersionSummaryFieldDistributionSerializer, SourceVersionMinimalSerializer)
 
 logger = logging.getLogger('oclapi')
 
@@ -227,6 +227,8 @@ class SourceVersionListView(SourceVersionBaseView, CreateAPIView, ListWithHeader
             return SourceVersionDetailSerializer
         if self.request.method == 'POST':
             return SourceCreateSerializer
+        if self.is_brief():
+            return SourceVersionMinimalSerializer
 
         return SourceVersionListSerializer
 
