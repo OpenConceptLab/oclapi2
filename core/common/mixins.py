@@ -7,7 +7,7 @@ from django.core.paginator import Paginator
 from django.db.models import Q, F
 from django.http import HttpResponseForbidden, Http404
 from django.shortcuts import get_object_or_404
-from django.urls import resolve, reverse, Resolver404
+from django.urls import resolve, Resolver404
 from django.utils.functional import cached_property
 from pydash import compact, get
 from rest_framework import status
@@ -409,11 +409,11 @@ class SourceContainerMixin:
 
     @property
     def sources_url(self):
-        return reverse('source-list', kwargs={self.get_url_kwarg(): self.mnemonic})
+        return self.uri + 'sources/'
 
     @property
     def collections_url(self):
-        return reverse('collection-list', kwargs={self.get_url_kwarg(): self.mnemonic})
+        return self.uri + 'collections/'
 
 
 class SourceChildMixin(ChecksumModel):
