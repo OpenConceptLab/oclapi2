@@ -1,4 +1,3 @@
-from celery_once import AlreadyQueued
 from django.db.models import Count
 from django.http import Http404
 from drf_yasg.utils import swagger_auto_schema
@@ -17,8 +16,8 @@ from core.common.permissions import HasPrivateAccess, CanViewConceptDictionary
 from core.common.swagger_parameters import org_no_members_param
 from core.common.tasks import delete_organization
 from core.common.utils import parse_updated_since_param
-from core.common.views import BaseAPIView, BaseLogoView
-from core.orgs.constants import DELETE_ACCEPTED, NO_MEMBERS
+from core.common.views import BaseAPIView, BaseLogoView, TaskMixin
+from core.orgs.constants import NO_MEMBERS
 from core.orgs.documents import OrganizationDocument
 from core.orgs.models import Organization
 from core.orgs.serializers import OrganizationDetailSerializer, OrganizationListSerializer, \
@@ -124,7 +123,7 @@ class OrganizationOverviewView(OrganizationBaseView, RetrieveAPIView, UpdateAPIV
         return super().get_queryset().filter(mnemonic=self.kwargs['org'])
 
 
-class OrganizationDetailView(OrganizationBaseView, mixins.UpdateModelMixin, mixins.CreateModelMixin):
+class OrganizationDetailView(OrganizationBaseView, mixins.UpdateModelMixin, mixins.CreateModelMixin, TaskMixin):
     def get_queryset(self):
         return super().get_queryset().filter(mnemonic=self.kwargs['org'])
 
@@ -159,16 +158,12 @@ class OrganizationDetailView(OrganizationBaseView, mixins.UpdateModelMixin, mixi
     def destroy(self, request, *args, **kwargs):
         obj = self.get_object()
 
-        if self.is_inline_requested():
-            delete_organization(obj.id)
-            return Response(status=status.HTTP_204_NO_CONTENT)
+        result = self.perform_task(delete_organization, (obj.id, ))
 
-        try:
-            delete_organization.delay(obj.id)
-        except AlreadyQueued:  # pragma: no cover
-            return Response({'detail': 'Already Queued'}, status=status.HTTP_409_CONFLICT)
+        if isinstance(result, Response):
+            return result
 
-        return Response({'detail': DELETE_ACCEPTED}, status=status.HTTP_202_ACCEPTED)
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class OrganizationClientConfigsView(ResourceClientConfigsView):

@@ -1,4 +1,5 @@
 from mock import patch
+from mock.mock import Mock, ANY
 from rest_framework.exceptions import ErrorDetail
 
 from core.collections.documents import CollectionDocument
@@ -244,25 +245,29 @@ class OrganizationDetailViewTest(OCLAPITestCase):
 
     @patch('core.orgs.views.delete_organization')
     def test_delete_202_by_superuser(self, delete_organization_mock):
+        delete_organization_mock.apply_async = Mock(return_value=Mock(task_id='task-id', state='PENDING'))
+
         response = self.client.delete(
-            f'/orgs/{self.org.mnemonic}/',
+            f'/orgs/{self.org.mnemonic}/?async=true',
             HTTP_AUTHORIZATION='Token ' + self.superuser.get_token(),
             format='json'
         )
 
         self.assertEqual(response.status_code, 202)
-        delete_organization_mock.delay.assert_called_once_with(self.org.id)
+        delete_organization_mock.apply_async.assert_called_once_with((self.org.id, ), task_id=ANY)
 
     @patch('core.orgs.views.delete_organization')
     def test_delete_202_by_owner(self, delete_organization_mock):
+        delete_organization_mock.apply_async = Mock(return_value=Mock(task_id='task-id', state='PENDING'))
+
         response = self.client.delete(
-            f'/orgs/{self.org.mnemonic}/',
+            f'/orgs/{self.org.mnemonic}/?async=true',
             HTTP_AUTHORIZATION='Token ' + self.user.get_token(),
             format='json'
         )
 
         self.assertEqual(response.status_code, 202)
-        delete_organization_mock.delay.assert_called_once_with(self.org.id)
+        delete_organization_mock.apply_async.assert_called_once_with((self.org.id, ), task_id=ANY)
 
     def test_delete_204_inline(self):
         response = self.client.delete(
