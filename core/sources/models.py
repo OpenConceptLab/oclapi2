@@ -309,7 +309,7 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
 
     def __update_sequences(self, dirty_fields=[]):  # pylint: disable=dangerous-default-value
         def should_update(is_seq, field):
-            start_from = get(self, 'field')
+            start_from = get(self, field)
             return field in dirty_fields and is_seq and start_from and start_from > 0
 
         def should_create(is_seq, field):
