@@ -785,6 +785,22 @@ class SourceTest(OCLTestCase):
         ]:
             Source(**{field: 1}, mnemonic='foo', version='HEAD', name='foo').full_clean()
 
+    @patch('core.common.services.PostgresQL.create_seq')
+    def test_autoid_field_changes(self, create_seq):
+        org = OrganizationFactory(mnemonic='org')
+        source = OrganizationSourceFactory(mnemonic='sequence', organization=org)
+        self.assertEqual(source.autoid_concept_mnemonic, None)
+
+        source.autoid_concept_mnemonic = 'sequential'
+        source.autoid_concept_mnemonic_start_from = 100
+        source.save()
+
+        self.assertEqual(source.autoid_concept_mnemonic, 'sequential')
+        self.assertEqual(source.autoid_concept_mnemonic_start_from, 100)
+        create_seq.assert_called_once_with(
+            '_orgs_org_sources_sequence__concepts_mnemonic_seq', 'sources.uri', 0, 100
+        )
+
     def test_get_mapped_sources(self):
         source = OrganizationSourceFactory(mnemonic='subject')
         source1 = OrganizationSourceFactory(mnemonic='source1')
