@@ -257,7 +257,7 @@ class AbstractSourceSummaryVerboseSerializer(ModelSerializer):
     class Meta:
         model = Source
         fields = (
-            'id', 'uuid', 'concepts', 'mappings', 'versions'
+            'id', 'uuid', 'concepts', 'mappings', 'versions', 'default_locale', 'supported_locales'
         )
 
 
