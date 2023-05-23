@@ -6,7 +6,7 @@ from django.db import models, IntegrityError, transaction
 from django.db.models import Q, F
 from pydash import get
 
-from core.common.constants import NAMESPACE_REGEX, HEAD, LATEST
+from core.common.constants import NAMESPACE_REGEX, LATEST
 from core.common.mixins import SourceChildMixin
 from core.common.models import VersionedModel
 from core.common.utils import separate_version, to_parent_uri, generate_temp_version, \
@@ -356,13 +356,9 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
             to_source_url, to_concept_url, self.to_source_version, to_concept
         )
         if self.to_source_url:
-            self.to_source = Source.objects.filter(
-                models.Q(uri=self.to_source_url) | models.Q(canonical_url=self.to_source_url)
-            ).filter(version=HEAD).first()
+            self.to_source = Source.get_first_or_head(self.to_source_url)
         if self.from_source_url:
-            self.from_source = Source.objects.filter(
-                models.Q(uri=self.from_source_url) | models.Q(canonical_url=self.from_source_url)
-            ).filter(version=HEAD).first()
+            self.from_source = Source.get_first_or_head(self.from_source_url)
 
     def is_existing_in_parent(self):
         return self.parent.mappings_set.filter(mnemonic__exact=self.mnemonic).exists()

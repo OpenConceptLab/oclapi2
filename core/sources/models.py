@@ -7,6 +7,7 @@ from django.db import models
 from django.db.models import UniqueConstraint, F, Max, Count
 from pydash import get
 
+from core.common.constants import HEAD
 from core.common.models import ConceptContainerModel
 from core.common.services import PostgresQL
 from core.common.tasks import update_mappings_source
@@ -148,6 +149,13 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
     @property
     def source(self):
         return self.mnemonic
+
+    @classmethod
+    def get_first_or_head(cls, url):
+        queryset = cls.objects.filter(models.Q(uri=url) | models.Q(canonical_url=url))
+        if queryset.count() > 1:
+            return queryset.filter(version=HEAD).first() or queryset.first()
+        return queryset.first()
 
     def update_version_data(self, head):
         super().update_version_data(head)
