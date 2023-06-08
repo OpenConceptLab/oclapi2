@@ -195,12 +195,23 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         if lower:
             search_str = search_str.lower()
         if decode:
+            search_str = search_str.replace('**', '*')
+            starts_with_asterisk = search_str.startswith('*')
+            ends_with_asterisk = search_str.endswith('*')
+            if starts_with_asterisk:
+                search_str = search_str[1:]
+            if ends_with_asterisk:
+                search_str = search_str[:-1]
             search_str = search_str if is_url_encoded_string(search_str) else urllib.parse.quote_plus(search_str)
+            if starts_with_asterisk:
+                search_str = f'*{search_str}'
+            if ends_with_asterisk:
+                search_str = f'{search_str}*'
 
         return search_str
 
     def get_wildcard_search_string(self, _str):
-        return f"*{_str or self.get_search_string()}*"
+        return f"*{_str or self.get_search_string()}*".replace('**', '*')
 
     @staticmethod
     def __get_order_by(is_desc):
