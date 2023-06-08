@@ -566,7 +566,6 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                     results = results.query(criteria)
                 else:
                     results = results.query('match', **{attr: value})
-
             sort_by = self.get_sort_attributes()
             if sort_by:
                 results = results.sort(*sort_by)
@@ -583,11 +582,9 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             query = Q("query_string", query=self.get_wildcard_search_string(_str), boost=0)
             for attr, meta in boost_attrs.items():
                 is_wildcard = meta.get('wildcard', False)
-                decode = meta.get('decode', False)
-                lower = meta.get('lower', False)
-                _search_string = _str
-                if lower or decode:
-                    _search_string = self.get_search_string(decode=decode, lower=lower)
+                decode = meta['decode'] if 'decode' in meta else True
+                lower = meta['lower'] if 'lower' in meta else True
+                _search_string = self.get_search_string(decode=decode, lower=lower)
                 if is_wildcard:
                     _search_string = self.get_wildcard_search_string(_search_string)
                 query |= Q("wildcard", **{attr: {'value': _search_string, 'boost': meta['boost']}})
