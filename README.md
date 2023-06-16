@@ -49,6 +49,13 @@ After modifying model you need to create migration files. Run:
 
 Make sure to commit newly created migration files.
 
+### Indexing in ES:
+- `cd oclapi2/`
+- `docker exec -it oclapi2-api-1 python manage.py search_index --populate -f --parallel` -- for populating all indexes
+- `docker exec -it oclapi2-api-1  python manage.py search_index --rebuild -f --parallel` -- for rebuild (delete and create) all indexes.
+You can also populate/re-index specific indexes, [read more](https://django-elasticsearch-dsl.readthedocs.io/en/latest/management.html)
+
+
 ### Debugging
 
 In order to debug tests or api you can use PDB. Set a breakpoint in code with:
