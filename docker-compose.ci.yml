@@ -61,5 +61,7 @@ services:
     volumes:
       - .:/code
     restart: "no"
-  es:
+  opensearch:
+    restart: "no"
+  opensearch-dashboards:
     restart: "no"

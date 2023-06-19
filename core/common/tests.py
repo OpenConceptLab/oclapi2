@@ -49,7 +49,7 @@ class CustomTestRunner(ColourRunnerMixin, DiscoverRunner):
 
 class SetupTestEnvironment:
     settings.TEST_MODE = True
-    settings.ELASTICSEARCH_DSL_AUTOSYNC = True
+    settings.OPENSEARCH_DSL_AUTOSYNC = True
     settings.ES_SYNC = True
 
 

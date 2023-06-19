@@ -21,7 +21,7 @@ from django.conf import settings
 from django.urls import NoReverseMatch, reverse, get_resolver
 from django.utils import timezone
 from djqscsv import csv_file_for
-from elasticsearch_dsl import Q as es_Q
+from opensearch_dsl import Q as es_Q
 from pydash import flatten, compact, get
 from requests.auth import HTTPBasicAuth
 from rest_framework.utils import encoders

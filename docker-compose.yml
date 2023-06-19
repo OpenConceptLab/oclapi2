@@ -30,7 +30,7 @@ services:
       - DB_HOST=${DB_HOST-db}
       - DB_PORT=${DB_PORT-5432}
       - DB_PASSWORD=${DB_PASSWORD-Postgres123}
-      - ES_HOST=${ES_HOST-es}
+      - ES_HOST=${ES_HOST-opensearch}
       - ES_PORT=${ES_PORT-9200}
       - ENVIRONMENT=${ENVIRONMENT-production}
       - DEBUG=${DEBUG-FALSE}
@@ -58,6 +58,7 @@ services:
     environment:
       - REDIS_HOST=${REDIS_HOST-redis}
       - REDIS_PORT=${REDIS_PORT-6379}
+      - ES_HOST=${ES_HOST-opensearch}
       - DEBUG=${DEBUG-FALSE}
       - ERRBIT_URL
       - ERRBIT_KEY
@@ -76,6 +77,7 @@ services:
       - DB_PORT=${DB_PORT-5432}
       - REDIS_HOST=${REDIS_HOST-redis}
       - REDIS_PORT=${REDIS_PORT-6379}
+      - ES_HOST=${ES_HOST-opensearch}
       - DEBUG=${DEBUG-FALSE}
       - ERRBIT_URL
       - ERRBIT_KEY
@@ -88,6 +90,7 @@ services:
     environment:
       - REDIS_HOST=${REDIS_HOST-redis}
       - REDIS_PORT=${REDIS_PORT-6379}
+      - ES_HOST=${ES_HOST-opensearch}
       - DEBUG=${DEBUG-FALSE}
       - ERRBIT_URL
       - ERRBIT_KEY
@@ -100,6 +103,7 @@ services:
     environment:
       - REDIS_HOST=${REDIS_HOST-redis}
       - REDIS_PORT=${REDIS_PORT-6379}
+      - ES_HOST=${ES_HOST-opensearch}
       - DEBUG=${DEBUG-FALSE}
       - ERRBIT_URL
       - ERRBIT_KEY
@@ -112,6 +116,7 @@ services:
     environment:
       - REDIS_HOST=${REDIS_HOST-redis}
       - REDIS_PORT=${REDIS_PORT-6379}
+      - ES_HOST=${ES_HOST-opensearch}
       - DEBUG=${DEBUG-FALSE}
       - ERRBIT_URL
       - ERRBIT_KEY
@@ -124,6 +129,7 @@ services:
     environment:
       - REDIS_HOST=${REDIS_HOST-redis}
       - REDIS_PORT=${REDIS_PORT-6379}
+      - ES_HOST=${ES_HOST-opensearch}
       - DEBUG=${DEBUG-FALSE}
       - ERRBIT_URL
       - ERRBIT_KEY
@@ -136,6 +142,7 @@ services:
     environment:
       - REDIS_HOST=${REDIS_HOST-redis}
       - REDIS_PORT=${REDIS_PORT-6379}
+      - ES_HOST=${ES_HOST-opensearch}
       - DEBUG=${DEBUG-FALSE}
       - ERRBIT_URL
       - ERRBIT_KEY
@@ -154,21 +161,32 @@ services:
     restart: "always"
     healthcheck:
       test: "curl --silent --fail -u $${FLOWER_USER:-root}:$${FLOWER_PASSWORD:-Root123} http://localhost:5555/metrics || exit 1"
-  es:
-    image: elasticsearch:7.17.1
+  opensearch:
+    image: opensearchproject/opensearch:2.8.0
     environment:
       - discovery.type=single-node
+      - name=opensearch
       - bootstrap.memory_lock=true
-      - "ES_JAVA_OPTS=-Xms1024m -Xmx1024m"
+      - "DISABLE_INSTALL_DEMO_CONFIG=true"
+      - "DISABLE_SECURITY_PLUGIN=true"
+      - "OPENSEARCH_JAVA_OPTS=-Xms1024m -Xmx1024m"
     ulimits:
       memlock:
         soft: -1
         hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
     volumes:
-      - es-data:/usr/share/elasticsearch/data
+      - opensearch-data:/usr/share/opensearch/data
     restart: "always"
     healthcheck:
       test: "curl --silent --fail http://localhost:9200/_cluster/health || exit 1"
+  opensearch-dashboards:
+    image: opensearchproject/opensearch-dashboards:2.8.0
+    environment:
+      - "DISABLE_SECURITY_DASHBOARDS_PLUGIN=true"
+      - 'OPENSEARCH_HOSTS=["http://opensearch:9200"]'
 volumes:
   postgres-data:
-  es-data:
+  opensearch-data:

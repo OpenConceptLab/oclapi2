@@ -75,7 +75,7 @@ INSTALLED_APPS = [
     'rest_framework',
     'rest_framework.authtoken',
     'drf_yasg',
-    'django_elasticsearch_dsl',
+    'django_opensearch_dsl',
     'corsheaders',
     'ordered_model',
     'cid.apps.CidAppConfig',
@@ -194,7 +194,7 @@ DATABASES = {
 
 ES_HOST = os.environ.get('ES_HOST', 'es')
 ES_PORT = os.environ.get('ES_PORT', '9200')
-ELASTICSEARCH_DSL = {
+OPENSEARCH_DSL = {
     'default': {
         'hosts': [ES_HOST + ':' + ES_PORT]
     },
@@ -365,10 +365,10 @@ CELERYBEAT_SCHEDULE = {
     },
 }
 CELERYBEAT_HEALTHCHECK_KEY = 'celery_beat_healthcheck'
-ELASTICSEARCH_DSL_PARALLEL = True
-ELASTICSEARCH_DSL_AUTO_REFRESH = True
-ELASTICSEARCH_DSL_AUTOSYNC = True
-ELASTICSEARCH_DSL_SIGNAL_PROCESSOR = 'core.common.models.CelerySignalProcessor'
+OPENSEARCH_DSL_PARALLEL = True
+OPENSEARCH_DSL_AUTO_REFRESH = True
+OPENSEARCH_DSL_AUTOSYNC = True
+OPENSEARCH_DSL_SIGNAL_PROCESSOR = 'core.common.models.CelerySignalProcessor'
 ES_SYNC = True
 USE_X_FORWARDED_HOST = True
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')

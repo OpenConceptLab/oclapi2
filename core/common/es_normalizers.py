@@ -1,3 +1,3 @@
-from elasticsearch_dsl import normalizer
+from opensearch_dsl import normalizer
 
 normalizer("lowercase", type='lowercase')

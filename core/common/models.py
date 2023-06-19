@@ -10,10 +10,11 @@ from django.db.models import Value, Q, Count
 from django.db.models.expressions import CombinedExpression, F
 from django.utils import timezone
 from django.utils.functional import cached_property
-from django_elasticsearch_dsl.registries import registry
-from django_elasticsearch_dsl.signals import RealTimeSignalProcessor
-from elasticsearch import TransportError
+from django_opensearch_dsl.registries import registry
+from django_opensearch_dsl.signals import RealTimeSignalProcessor
+from opensearchpy import TransportError
 from pydash import get, compact
+
 
 from core.common.tasks import update_collection_active_concepts_count, update_collection_active_mappings_count, \
     delete_s3_objects
@@ -158,8 +159,8 @@ class BaseModel(models.Model):
 
     @staticmethod
     def toggle_indexing(state=True):
-        settings.ELASTICSEARCH_DSL_AUTO_REFRESH = state
-        settings.ELASTICSEARCH_DSL_AUTOSYNC = state
+        settings.OPENSEARCH_DSL_AUTO_REFRESH = state
+        settings.OPENSEARCH_DSL_AUTOSYNC = state
         settings.ES_SYNC = state
 
     @staticmethod
@@ -1002,14 +1003,14 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
 class CelerySignalProcessor(RealTimeSignalProcessor):
     def handle_save(self, sender, instance, **kwargs):
-        if settings.ES_SYNC and instance.__class__ in registry.get_models() and instance.should_index:
+        if settings.ES_SYNC and instance.__class__ in registry._models and instance.should_index:
             if get(settings, 'TEST_MODE', False):
                 handle_save(instance.app_name, instance.model_name, instance.id)
             else:
                 handle_save.delay(instance.app_name, instance.model_name, instance.id)
 
     def handle_m2m_changed(self, sender, instance, action, **kwargs):
-        if settings.ES_SYNC and instance.__class__ in registry.get_models() and instance.should_index:
+        if settings.ES_SYNC and instance.__class__ in registry._models and instance.should_index:
             if get(settings, 'TEST_MODE', False):
                 handle_m2m_changed(instance.app_name, instance.model_name, instance.id, action)
             else:

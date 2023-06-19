@@ -1,4 +1,4 @@
-from elasticsearch_dsl import FacetedSearch
+from opensearch_dsl import FacetedSearch
 
 
 class CommonSearch(FacetedSearch):

@@ -1,4 +1,4 @@
-from elasticsearch_dsl import TermsFacet
+from opensearch_dsl import TermsFacet
 
 from core.collections.models import Collection
 from core.common.constants import FACET_SIZE

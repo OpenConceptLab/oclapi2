@@ -12,7 +12,7 @@ from django.core.mail import EmailMessage
 from django.core.management import call_command
 from django.template.loader import render_to_string
 from django.utils import timezone
-from django_elasticsearch_dsl.registries import registry
+from django_opensearch_dsl.registries import registry
 from pydash import get
 
 from core.celery import app

@@ -91,13 +91,17 @@ services:
     depends_on:
       - celery
       - redis
-  es:
+  opensearch:
     ports:
       - 9200:9200
     restart: "no"
     volumes:
-      - es-data:/usr/share/elasticsearch/data
+      - opensearch-data:/usr/share/opensearch/data
+  opensearch-dashboards:
+    ports:
+      - 5601:5601
+    restart: "no"
 volumes:
   postgres-data:
-  es-data:
+  opensearch-data:
   keycloak-data:

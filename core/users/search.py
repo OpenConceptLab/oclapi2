@@ -1,4 +1,4 @@
-from elasticsearch_dsl import TermsFacet
+from opensearch_dsl import TermsFacet
 
 from core.common.search import CommonSearch
 from core.users.models import UserProfile
