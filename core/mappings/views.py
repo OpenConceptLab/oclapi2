@@ -32,7 +32,7 @@ class MappingBaseView(SourceChildCommonBaseView):
     queryset = Mapping.objects.filter(is_active=True)
     document_model = MappingDocument
     facet_class = MappingSearch
-    es_fields = Mapping.es_fields
+    search_fields = Mapping.search_fields
 
     @staticmethod
     def get_detail_serializer(obj, data=None, files=None, partial=False):

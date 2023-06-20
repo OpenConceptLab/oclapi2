@@ -24,7 +24,7 @@ from core import __version__
 from core.common.checksums import Checksum
 from core.common.constants import SEARCH_PARAM, LIST_DEFAULT_LIMIT, CSV_DEFAULT_LIMIT, \
     LIMIT_PARAM, NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY, INCLUDE_RETIRED_PARAM, VERBOSE_PARAM, HEAD, LATEST, \
-    BRIEF_PARAM, ES_REQUEST_TIMEOUT, INCLUDE_INACTIVE, FHIR_LIMIT_PARAM
+    BRIEF_PARAM, SEARCH_REQUEST_TIMEOUT, INCLUDE_INACTIVE, FHIR_LIMIT_PARAM
 from core.common.exceptions import Http400
 from core.common.mixins import PathWalkerMixin
 from core.common.serializers import RootSerializer
@@ -143,7 +143,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         return self.request.META['wsgi.url_scheme'] + '://' + self.request.get_host()
 
     def filter_queryset(self, queryset=None):
-        if self.is_searchable and self.should_perform_es_search():
+        if self.is_searchable and self.should_perform_search():
             return self.get_search_results_qs()
 
         if queryset is None:
@@ -176,10 +176,10 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         return None, None
 
     def is_valid_sort(self, field):
-        if not self.es_fields or not field:
+        if not self.search_fields or not field:
             return False
-        if field in self.es_fields:
-            attrs = self.es_fields[field]
+        if field in self.search_fields:
+            attrs = self.search_fields[field]
             return attrs.get('sortable', False)
 
         return False
@@ -188,7 +188,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         return self.request.query_params.dict().get(self.exact_match, None) == 'on'
 
     def get_exact_search_fields(self):
-        return [field for field, config in get(self, 'es_fields', {}).items() if config.get('exact', False)]
+        return [field for field, config in get(self, 'search_fields', {}).items() if config.get('exact', False)]
 
     def get_search_string(self, lower=True, decode=True):
         search_str = self.request.query_params.dict().get(SEARCH_PARAM, '').strip()
@@ -300,7 +300,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         return faceted_filters
 
     def get_faceted_fields(self):
-        return [field for field, config in get(self, 'es_fields', {}).items() if config.get('facet', False)]
+        return [field for field, config in get(self, 'search_fields', {}).items() if config.get('facet', False)]
 
     def get_facet_filters_from_kwargs(self):
         kwargs = self.kwargs
@@ -402,7 +402,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                 self.get_search_string(lower=not is_exact_match_on),
                 filters=filters, exact_match=is_exact_match_on
             )
-            faceted_search.params(request_timeout=ES_REQUEST_TIMEOUT)
+            faceted_search.params(request_timeout=SEARCH_REQUEST_TIMEOUT)
             try:
                 facets = faceted_search.execute().facets.to_dict()
             except TransportError as ex:  # pragma: no cover
@@ -504,7 +504,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     def __search_results(self):  # pylint: disable=too-many-branches,too-many-locals,too-many-statements
         results = None
 
-        if self.should_perform_es_search():
+        if self.should_perform_search():
             results = self.document_model.search()
             default_filters = self.default_filters.copy()
             if self.is_user_document() and self.should_include_inactive():
@@ -619,7 +619,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
     def get_search_results_qs(self):
         search_results = self.__search_results
-        search_results = search_results.params(request_timeout=ES_REQUEST_TIMEOUT)
+        search_results = search_results.params(request_timeout=SEARCH_REQUEST_TIMEOUT)
         try:
             self.total_count = search_results.count()
         except TransportError as ex:
@@ -641,7 +641,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         except TransportError as ex:  # pragma: no cover
             raise Http400(detail='Data too large.') from ex
 
-    def should_perform_es_search(self):
+    def should_perform_search(self):
         return bool(self.get_search_string()) or self.has_searchable_extras_fields() or bool(self.get_faceted_filters())
 
     def has_searchable_extras_fields(self):
@@ -660,7 +660,7 @@ class SourceChildCommonBaseView(BaseAPIView):
     queryset = None
     params = None
     document_model = None
-    es_fields = {}
+    search_fields = {}
     pk_field = 'mnemonic'
     permission_classes = (CanViewParentDictionary, )
     is_searchable = True

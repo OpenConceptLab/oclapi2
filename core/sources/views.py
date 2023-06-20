@@ -96,7 +96,7 @@ class SourceVersionBaseView(SourceBaseView):
 class SourceListView(SourceBaseView, ConceptDictionaryCreateMixin, ListWithHeadersMixin):
     serializer_class = SourceListSerializer
     is_searchable = True
-    es_fields = Source.es_fields
+    search_fields = Source.search_fields
     document_model = SourceDocument
     facet_class = SourceSearch
     default_filters = {'is_active': True, 'version': HEAD}

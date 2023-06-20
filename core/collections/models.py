@@ -20,13 +20,13 @@ from core.collections.translators import CollectionReferenceTranslator
 from core.collections.utils import is_concept, is_mapping
 from core.common.constants import (
     ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT,
-    ES_REQUEST_TIMEOUT, ES_REQUEST_TIMEOUT_ASYNC, HEAD, ALL)
+    SEARCH_REQUEST_TIMEOUT, SEARCH_REQUEST_TIMEOUT_ASYNC, HEAD, ALL)
 from core.common.models import ConceptContainerModel, BaseResourceModel
 from core.common.tasks import seed_children_to_expansion, batch_index_resources, index_expansion_concepts, \
     index_expansion_mappings
-from core.common.utils import drop_version, to_owner_uri, generate_temp_version, es_id_in, \
-    es_wildcard_search, get_resource_class_from_resource_name, get_exact_search_fields, to_snake_case, \
-    es_exact_search, es_to_pks, batch_qs, split_list_by_condition, decode_string, is_canonical_uri, encode_string
+from core.common.utils import drop_version, to_owner_uri, generate_temp_version, opensearch_id_in, \
+    wildcard_search, get_resource_class_from_resource_name, get_exact_search_fields, to_snake_case, \
+    exact_search, search_hits_to_pks, batch_qs, split_list_by_condition, decode_string, is_canonical_uri, encode_string
 from core.concepts.constants import LOCALES_FULLY_SPECIFIED
 from core.concepts.models import Concept
 from core.mappings.models import Mapping
@@ -39,7 +39,7 @@ class Collection(ConceptContainerModel):
         'collection_type'
     ]
 
-    es_fields = {
+    search_fields = {
         'collection_type': {'sortable': True, 'filterable': True, 'facet': True, 'exact': True},
         'mnemonic': {'sortable': True, 'filterable': True, 'exact': True},
         'name': {'sortable': True, 'filterable': True, 'exact': True},
@@ -699,16 +699,16 @@ class CollectionReference(models.Model):
                 if filter_def['property'] == 'q':
                     exact_search_fields = get_exact_search_fields(resource_klass)
                     if is_exact_search:
-                        search = es_exact_search(search, val, exact_search_fields)
+                        search = exact_search(search, val, exact_search_fields)
                     else:
                         name_attr = '_name' if self.is_concept else 'name'
-                        search = es_wildcard_search(search, val, exact_search_fields, name_attr)
+                        search = wildcard_search(search, val, exact_search_fields, name_attr)
                 else:
                     search = search.filter("match", **{to_snake_case(filter_def["property"]): filter_def["value"]})
             for _queryset in batch_qs(queryset.order_by('id'), 500):
-                # iterating on queryset because ES has max_clause limit default to 1024
-                search_within_queryset = es_id_in(search, list(_queryset.values_list('id', flat=True)))
-                pks += es_to_pks(search_within_queryset.params(request_timeout=ES_REQUEST_TIMEOUT_ASYNC))
+                # iterating on queryset because OpenSearch has max_clause limit default to 1024
+                search_within_queryset = opensearch_id_in(search, list(_queryset.values_list('id', flat=True)))
+                pks += search_hits_to_pks(search_within_queryset.params(request_timeout=SEARCH_REQUEST_TIMEOUT_ASYNC))
             if pks:
                 resource_versions = resource_klass.objects.filter(id__in=set(pks))
                 if self.version or self.valueset or self.transform:
@@ -806,9 +806,9 @@ class CollectionReference(models.Model):
     def get_allowed_filter_properties(self):
         common = ['q', 'exact_match']
         if self.is_concept:
-            common = [*Concept.es_fields.keys(), *common]
+            common = [*Concept.search_fields.keys(), *common]
         elif self.is_mapping:
-            common = [*Mapping.es_fields.keys(), *common]
+            common = [*Mapping.search_fields.keys(), *common]
         return common
 
     def __is_valid_filter_schema(self, filter_def):
@@ -1292,13 +1292,13 @@ class ExpansionTextFilterParameter(ExpansionParameter):
             klass = get_resource_class_from_resource_name('concept' if is_concept_queryset else 'mapping')
             document = klass.get_search_document()
             search = document.search()
-            search = es_wildcard_search(
+            search = wildcard_search(
                 search, self.value, get_exact_search_fields(klass),
                 name_attr='_name' if is_concept_queryset else 'name'
             )
             for _queryset in batch_qs(queryset.order_by('id'), 500):
-                new_search = es_id_in(search, list(_queryset.values_list('id', flat=True)))
-                pks += es_to_pks(new_search.params(request_timeout=ES_REQUEST_TIMEOUT))
+                new_search = opensearch_id_in(search, list(_queryset.values_list('id', flat=True)))
+                pks += search_hits_to_pks(new_search.params(request_timeout=SEARCH_REQUEST_TIMEOUT))
             queryset = klass.objects.filter(id__in=set(pks)) if pks else klass.objects.none()
 
         return queryset

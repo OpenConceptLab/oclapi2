@@ -149,7 +149,7 @@ class ListWithHeadersMixin(ListModelMixin):
                 self.limit = LIST_DEFAULT_LIMIT
             paginator = CustomPaginator(
                 request=request, queryset=sorted_list, page_size=self.limit, total_count=self.total_count,
-                is_sliced=self.should_perform_es_search()
+                is_sliced=self.should_perform_search()
             )
             headers = paginator.headers
             results = paginator.current_page_results

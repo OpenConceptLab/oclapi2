@@ -4,7 +4,7 @@ from health_check.backends import BaseHealthCheckBackend
 from health_check.exceptions import ServiceReturnedUnexpectedResult, ServiceUnavailable
 from pydash import get
 
-from core.common.utils import flower_get, es_get
+from core.common.utils import flower_get, opensearch_get
 
 
 class BaseHealthCheck(BaseHealthCheckBackend):
@@ -33,12 +33,12 @@ class FlowerHealthCheck(BaseHealthCheck):
         return "Flower"
 
 
-class ESHealthCheck(BaseHealthCheck):
+class SearchHealthCheck(BaseHealthCheck):
     critical_service = False
 
     def check_status(self):
         try:
-            response = es_get('_cluster/health', timeout=2)
+            response = opensearch_get('_cluster/health', timeout=2)
             status = get(response.json(), 'status')
             is_ok = status == 'green'
 
@@ -48,7 +48,7 @@ class ESHealthCheck(BaseHealthCheck):
             raise ServiceReturnedUnexpectedResult(ex.args) from ex
 
     def identifier(self):
-        return 'ElasticSearch'
+        return 'OpenSearch'
 
 
 class CeleryQueueHealthCheck(BaseHealthCheck):

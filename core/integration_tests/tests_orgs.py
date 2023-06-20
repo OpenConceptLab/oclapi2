@@ -590,7 +590,7 @@ class OrganizationSourceListViewTest(OCLAPITestCase):
         source2 = OrganizationSourceFactory(mnemonic='corporate', organization=org2)
         source3 = UserSourceFactory(mnemonic='bat-cave', user=user)
 
-        SourceDocument().update([source1, source2, source3])
+        SourceDocument().update([source1, source2, source3], action='index', parallel=True)
 
         response = self.client.get('/users/batman/orgs/sources/')
 
@@ -650,7 +650,7 @@ class OrganizationCollectionListViewTest(OCLAPITestCase):
         coll2 = OrganizationCollectionFactory(mnemonic='corporate', organization=org2)
         coll3 = UserCollectionFactory(mnemonic='bat-cave', user=user)
 
-        CollectionDocument().update([coll1, coll2, coll3])
+        CollectionDocument().update([coll1, coll2, coll3], action='index', parallel=True)
 
         response = self.client.get('/users/batman/orgs/collections/')
 

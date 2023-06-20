@@ -17,7 +17,7 @@ class Organization(BaseResourceModel, SourceContainerMixin):
                   ] + BaseResourceModel.Meta.indexes
 
     OBJECT_TYPE = ORG_OBJECT_TYPE
-    es_fields = {
+    search_fields = {
         'name': {'sortable': True, 'filterable': True, 'exact': True},
         'mnemonic': {'sortable': True, 'filterable': True, 'exact': True},
         'last_update': {'sortable': True, 'default': 'desc', 'filterable': False},

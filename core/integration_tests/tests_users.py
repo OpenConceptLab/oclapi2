@@ -208,7 +208,7 @@ class UserOrganizationListViewTest(OCLAPITestCase):
         OrganizationDocument().update([
             self.org_private, self.org_public_view, self.org_public_edit,
             self.user_org_public, self.user_org_private
-        ])
+        ], action='index', parallel=True)
 
     def test_get_200(self):
         response = self.client.get(
@@ -420,7 +420,7 @@ class UserListViewTest(OCLAPITestCase):
     def setUp(self):
         super().setUp()
         self.superuser = UserProfile.objects.get(username='ocladmin')
-        UserProfileDocument().update([self.superuser])
+        UserProfileDocument().update([self.superuser], action='index', parallel=True)
 
     def test_get_200(self):
         response = self.client.get(
@@ -460,7 +460,7 @@ class UserListViewTest(OCLAPITestCase):
 
     def test_get_200_with_inactive_user(self):
         inactive_user = UserProfileFactory(is_active=False, username='inactive')
-        UserProfileDocument().update([inactive_user])
+        UserProfileDocument().update([inactive_user], action='index', parallel=True)
 
         response = self.client.get(
             '/users/',

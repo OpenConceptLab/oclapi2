@@ -9,7 +9,7 @@ class CommonConfig(AppConfig):
     verbose_name = "Common"
 
     def ready(self):
-        plugin_dir.register(healthcheck.ESHealthCheck)
+        plugin_dir.register(healthcheck.SearchHealthCheck)
         plugin_dir.register(healthcheck.FlowerHealthCheck)
         plugin_dir.register(healthcheck.CeleryDefaultQueueHealthCheck)
         plugin_dir.register(healthcheck.CeleryIndexingQueueHealthCheck)

@@ -25,7 +25,7 @@ from core.common.tasks import delete_s3_objects, bulk_import_parallel_inline, mo
 from core.common.utils import (
     compact_dict_by_values, to_snake_case, flower_get, task_exists, parse_bulk_import_task_id,
     to_camel_case,
-    drop_version, is_versioned_uri, separate_version, to_parent_uri, jsonify_safe, es_get,
+    drop_version, is_versioned_uri, separate_version, to_parent_uri, jsonify_safe, opensearch_get,
     get_resource_class_from_resource_name, flatten_dict, is_csv_file, is_url_encoded_string, to_parent_uri_from_kwargs,
     set_current_user, get_current_user, set_request_url, get_request_url, nested_dict_values, chunks, api_get,
     split_list_by_condition)
@@ -50,7 +50,7 @@ class CustomTestRunner(ColourRunnerMixin, DiscoverRunner):
 class SetupTestEnvironment:
     settings.TEST_MODE = True
     settings.OPENSEARCH_DSL_AUTOSYNC = True
-    settings.ES_SYNC = True
+    settings.OPENSEARCH_SYNC = True
 
 
 class BaseTestCase(SetupTestEnvironment):
@@ -576,12 +576,12 @@ class UtilsTest(OCLTestCase):
         )
 
     @patch('core.common.utils.requests.get')
-    def test_es_get(self, http_get_mock):
+    def test_opensearch_get(self, http_get_mock):
         http_get_mock.return_value = 'dummy-response'
 
-        self.assertEqual(es_get('some-url', timeout=1), 'dummy-response')
+        self.assertEqual(opensearch_get('some-url', timeout=1), 'dummy-response')
 
-        http_get_mock.assert_called_once_with('http://es:9200/some-url', timeout=1)
+        http_get_mock.assert_called_once_with('http://opensearch:9200/some-url', timeout=1)
 
     @patch('core.common.utils.flower_get')
     def test_task_exists(self, flower_get_mock):

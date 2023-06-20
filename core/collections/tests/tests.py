@@ -602,7 +602,7 @@ class CollectionReferenceTest(OCLTestCase):
 
     def test_mapping_filter_schema(self):
         mapping = MappingFactory()
-        MappingDocument().update([mapping])  # to create mappings index in ES
+        MappingDocument().update([mapping], action='index', parallel=True)  # to create mappings index in OpenSearch
 
         ref = CollectionReference(expression='/mappings/', filter=None, reference_type='mappings')
         ref.clean()
@@ -1298,7 +1298,7 @@ class ExpansionParametersTest(OCLTestCase):
         ConceptFactory(id=1, mnemonic='foobar')
         ConceptFactory(id=2, mnemonic='bar')
         queryset = Concept.objects.filter(id__in=[1, 2])
-        ConceptDocument().update(queryset)  # needed for parallel test execution
+        ConceptDocument().update(queryset, action='index', parallel=True)  # needed for parallel test execution
 
         result = ExpansionParameters({'filter': 'foo tao'}).apply(queryset)
         self.assertEqual(result.count(), 1)

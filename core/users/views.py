@@ -165,7 +165,7 @@ class UserBaseView(BaseAPIView):
     pk_field = 'username'
     model = UserProfile
     queryset = UserProfile.objects
-    es_fields = UserProfile.es_fields
+    search_fields = UserProfile.search_fields
     document_model = UserProfileDocument
     facet_class = UserProfileSearch
     is_searchable = True

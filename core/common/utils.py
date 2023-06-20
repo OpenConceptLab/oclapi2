@@ -21,7 +21,7 @@ from django.conf import settings
 from django.urls import NoReverseMatch, reverse, get_resolver
 from django.utils import timezone
 from djqscsv import csv_file_for
-from opensearch_dsl import Q as es_Q
+from opensearch_dsl import Q as os_Q
 from pydash import flatten, compact, get
 from requests.auth import HTTPBasicAuth
 from rest_framework.utils import encoders
@@ -407,7 +407,7 @@ def flower_get(url, **kwargs):
     )
 
 
-def es_get(url, **kwargs):
+def opensearch_get(url, **kwargs):
     """
     Returns a flower response from the given endpoint url.
     :param url:
@@ -755,19 +755,19 @@ def chunks(lst, size):
         yield lst[i:i + size]
 
 
-def es_id_in(search, ids):
+def opensearch_id_in(search, ids):
     if ids:
         return search.query("terms", _id=ids)
     return search
 
 
-def get_es_wildcard_search_criterion(search_str, name_attr='name'):
+def get_wildcard_search_criterion(search_str, name_attr='name'):
     def get_query(_str):
-        return es_Q(
+        return os_Q(
             "wildcard", id={'value': _str, 'boost': 2}
-        ) | es_Q(
+        ) | os_Q(
             "wildcard", **{name_attr: {'value': _str, 'boost': 5}}
-        ) | es_Q(
+        ) | os_Q(
             "query_string", query=f"*{_str}*"
         )
 
@@ -782,12 +782,12 @@ def get_es_wildcard_search_criterion(search_str, name_attr='name'):
     return criterion
 
 
-def get_es_exact_search_criterion(search_str, fields):
+def get_exact_search_criterion(search_str, fields):
     def get_query(attr):
         words = search_str.split(' ')
-        criteria = es_Q('match', **{attr: words[0]})
+        criteria = os_Q('match', **{attr: words[0]})
         for word in words[1:]:
-            criteria &= es_Q('match', **{attr: word})
+            criteria &= os_Q('match', **{attr: word})
         return criteria
 
     criterion = get_query(fields.pop())
@@ -797,27 +797,27 @@ def get_es_exact_search_criterion(search_str, fields):
     return criterion
 
 
-def es_wildcard_search(search, search_str, exact_search_fields, name_attr='name'):
+def wildcard_search(search, search_str, exact_search_fields, name_attr='name'):
     if not search_str:
         return search
 
     return search.query(
-        get_es_wildcard_search_criterion(
-            search_str, name_attr) | get_es_exact_search_criterion(search_str, exact_search_fields))
+        get_wildcard_search_criterion(
+            search_str, name_attr) | get_exact_search_criterion(search_str, exact_search_fields))
 
 
-def es_exact_search(search, search_str, exact_search_fields):
+def exact_search(search, search_str, exact_search_fields):
     if not search_str:
         return search
 
-    return search.query(get_es_exact_search_criterion(search_str, exact_search_fields))
+    return search.query(get_exact_search_criterion(search_str, exact_search_fields))
 
 
 def get_exact_search_fields(klass):
-    return [field for field, config in get(klass, 'es_fields', {}).items() if config.get('exact', False)]
+    return [field for field, config in get(klass, 'search_fields', {}).items() if config.get('exact', False)]
 
 
-def es_to_pks(search):
+def search_hits_to_pks(search):
     # doesn't care about the order
     default_limit = 25
     limit = default_limit

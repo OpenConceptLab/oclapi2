@@ -12,7 +12,7 @@ omit =
     */documents.py
     core/common/search.py
     core/common/errbit.py
-    */es_normalizers.py
+    */opensearch_normalizers.py
     */feeds.py
     *test*
     core/middlewares/*

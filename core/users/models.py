@@ -37,7 +37,7 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
     deactivated_at = models.DateTimeField(null=True, blank=True)
     mnemonic_attr = 'username'
 
-    es_fields = {
+    search_fields = {
         'username': {'sortable': True, 'filterable': True, 'exact': True},
         'date_joined': {'sortable': True, 'default': 'asc', 'filterable': False},
         'company': {'sortable': True, 'filterable': True, 'exact': True},

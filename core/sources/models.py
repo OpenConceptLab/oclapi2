@@ -24,7 +24,7 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         'source_type'
     ]
 
-    es_fields = {
+    search_fields = {
         'source_type': {'sortable': True, 'filterable': True, 'facet': True, 'exact': True},
         'mnemonic': {'sortable': True, 'filterable': True, 'exact': True},
         'name': {'sortable': True, 'filterable': True, 'exact': True},

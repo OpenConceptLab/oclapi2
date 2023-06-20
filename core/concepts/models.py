@@ -227,7 +227,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     cascaded_entries = None
     terminal = None
 
-    es_fields = {
+    search_fields = {
         'id': {'sortable': True, 'filterable': True, 'exact': True},
         'numeric_id': {'sortable': True, 'filterable': False, 'exact': False},
         'name': {'sortable': False, 'filterable': True, 'exact': True},

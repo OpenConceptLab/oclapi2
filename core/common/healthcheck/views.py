@@ -5,7 +5,7 @@ from health_check.views import MainView
 from core.common.healthcheck.healthcheck import FlowerHealthCheck, CeleryDefaultQueueHealthCheck, \
     CeleryBulkImport0QueueHealthCheck, CeleryBulkImportRootQueueHealthCheck, CeleryBulkImport3QueueHealthCheck, \
     CeleryBulkImport2QueueHealthCheck, CeleryBulkImport1QueueHealthCheck, CeleryConcurrentThreadsHealthCheck, \
-    ESHealthCheck, CeleryIndexingQueueHealthCheck
+    SearchHealthCheck, CeleryIndexingQueueHealthCheck
 
 
 class BaseHealthcheckView(MainView):
@@ -23,8 +23,8 @@ class FlowerHealthcheckView(BaseHealthcheckView):
     _plugins = [FlowerHealthCheck(critical_service=True)]
 
 
-class ESHealthcheckView(BaseHealthcheckView):
-    _plugins = [ESHealthCheck(critical_service=True)]
+class SearchHealthcheckView(BaseHealthcheckView):
+    _plugins = [SearchHealthCheck(critical_service=True)]
 
 
 class RedisHealthcheckView(BaseHealthcheckView):

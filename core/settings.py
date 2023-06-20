@@ -192,7 +192,7 @@ DATABASES = {
     }
 }
 
-ES_HOST = os.environ.get('ES_HOST', 'es')
+ES_HOST = os.environ.get('ES_HOST', 'opensearch')
 ES_PORT = os.environ.get('ES_PORT', '9200')
 OPENSEARCH_DSL = {
     'default': {
@@ -369,7 +369,7 @@ OPENSEARCH_DSL_PARALLEL = True
 OPENSEARCH_DSL_AUTO_REFRESH = True
 OPENSEARCH_DSL_AUTOSYNC = True
 OPENSEARCH_DSL_SIGNAL_PROCESSOR = 'core.common.models.CelerySignalProcessor'
-ES_SYNC = True
+OPENSEARCH_SYNC = True
 USE_X_FORWARDED_HOST = True
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 # Only used for flower

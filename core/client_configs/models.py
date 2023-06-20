@@ -106,10 +106,10 @@ class ClientConfig(models.Model):
                 return
 
     def __get_resource_sortable_fields(self, tab_type):
-        es_fields = self.__get_es_fields(tab_type) or {}
-        return [field for field, config in es_fields.items() if config.get('sortable', False)]
+        search_fields = self.__get_search_fields(tab_type) or {}
+        return [field for field, config in search_fields.items() if config.get('sortable', False)]
 
     @staticmethod
-    def __get_es_fields(tab_type):
+    def __get_search_fields(tab_type):
         klass = get_resource_class_from_resource_name(tab_type)
-        return klass.es_fields if klass else None
+        return klass.search_fields if klass else None

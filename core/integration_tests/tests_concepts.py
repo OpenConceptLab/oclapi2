@@ -1612,7 +1612,7 @@ class ConceptListViewTest(OCLAPITestCase):
             mnemonic='MyConcept2', parent=self.source, concept_class='classB', extras={'bar': 'foo'}
         )
         self.source_v1.concepts.add(self.concept2)
-        ConceptDocument().update(self.source.concepts.all())  # needed for parallel test execution
+        ConceptDocument().update(self.source.concepts.all(), action='index', parallel=True)  # needed for parallel test execution
         self.user = UserProfile.objects.filter(is_superuser=True).first()
         self.token = self.user.get_token()
         self.random_user = UserProfileFactory()
@@ -1700,7 +1700,7 @@ class ConceptListViewTest(OCLAPITestCase):
     def test_facets(self):
         if settings.ENV == 'ci':
             rebuild_indexes(['concepts'])
-        ConceptDocument().update(self.source.concepts_set.all())
+        ConceptDocument().update(self.source.concepts_set.all(), action='index', parallel=True)
 
         response = self.client.get(
             '/concepts/?facetsOnly=true'

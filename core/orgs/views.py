@@ -32,7 +32,7 @@ class OrganizationListView(BaseAPIView,
                            mixins.CreateModelMixin):
     model = Organization
     queryset = Organization.objects.filter(is_active=True)
-    es_fields = Organization.es_fields
+    search_fields = Organization.search_fields
     document_model = OrganizationDocument
     is_searchable = True
     permission_classes = (IsAuthenticatedOrReadOnly, )
@@ -213,7 +213,7 @@ class OrganizationMemberView(generics.GenericAPIView):
             return Response(status=status.HTTP_403_FORBIDDEN)
 
         self.userprofile.organizations.add(self.organization)
-        # ES Index
+        # OpenSearch Index
         self.organization.save()
         self.userprofile.save()
 
@@ -224,7 +224,7 @@ class OrganizationMemberView(generics.GenericAPIView):
             return Response(status=status.HTTP_403_FORBIDDEN)
 
         self.userprofile.organizations.remove(self.organization)
-        # ES Index
+        # OpenSearch Index
         self.organization.save()
         self.userprofile.save()
 

@@ -1160,8 +1160,8 @@ class SourceSummaryViewTest(OCLAPITestCase):
     def index(self):
         if settings.ENV == 'ci':
             rebuild_indexes(['concepts', 'mappings'])
-        ConceptDocument().update(self.source.concepts_set.all())
-        MappingDocument().update(self.source.mappings_set.all())
+        ConceptDocument().update(self.source.concepts_set.all(), action='index', parallel=True)
+        MappingDocument().update(self.source.mappings_set.all(), action='index', parallel=True)
 
     def setUp(self):
         self.maxDiff = None

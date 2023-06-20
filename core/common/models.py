@@ -28,7 +28,7 @@ from .constants import (
     ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT, SUPER_ADMIN_USER_ID,
     HEAD, PERSIST_NEW_ERROR_MESSAGE, SOURCE_PARENT_CANNOT_BE_NONE, PARENT_RESOURCE_CANNOT_BE_NONE,
     CREATOR_CANNOT_BE_NONE, CANNOT_DELETE_ONLY_VERSION, OPENMRS_VALIDATION_SCHEMA, VALIDATION_SCHEMAS,
-    DEFAULT_VALIDATION_SCHEMA, ES_REQUEST_TIMEOUT)
+    DEFAULT_VALIDATION_SCHEMA, SEARCH_REQUEST_TIMEOUT)
 from .exceptions import Http400
 from .fields import URIField
 from .tasks import handle_save, handle_m2m_changed, seed_children_to_new_version, update_validation_schema, \
@@ -161,7 +161,7 @@ class BaseModel(models.Model):
     def toggle_indexing(state=True):
         settings.OPENSEARCH_DSL_AUTO_REFRESH = state
         settings.OPENSEARCH_DSL_AUTOSYNC = state
-        settings.ES_SYNC = state
+        settings.OPENSEARCH_SYNC = state
 
     @staticmethod
     def get_exact_or_criteria(attr, values):
@@ -182,7 +182,7 @@ class BaseModel(models.Model):
         offset = 0
         limit = batch_size
         while offset < count:
-            document().update(queryset.order_by('-id')[offset:limit], parallel=True)
+            document().update(queryset.order_by('-id')[offset:limit], parallel=True, action='index')
             offset = limit
             limit += batch_size
 
@@ -981,7 +981,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
     def _get_resource_facets(self, facet_class, filters=None):
         search = facet_class('', filters=self._get_resource_facet_filters(filters))
-        search.params(request_timeout=ES_REQUEST_TIMEOUT)
+        search.params(request_timeout=SEARCH_REQUEST_TIMEOUT)
         try:
             facets = search.execute().facets
         except TransportError as ex:  # pragma: no cover
@@ -1003,14 +1003,14 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
 class CelerySignalProcessor(RealTimeSignalProcessor):
     def handle_save(self, sender, instance, **kwargs):
-        if settings.ES_SYNC and instance.__class__ in registry._models and instance.should_index:
+        if settings.OPENSEARCH_SYNC and instance.__class__ in registry._models and instance.should_index:
             if get(settings, 'TEST_MODE', False):
                 handle_save(instance.app_name, instance.model_name, instance.id)
             else:
                 handle_save.delay(instance.app_name, instance.model_name, instance.id)
 
     def handle_m2m_changed(self, sender, instance, action, **kwargs):
-        if settings.ES_SYNC and instance.__class__ in registry._models and instance.should_index:
+        if settings.OPENSEARCH_SYNC and instance.__class__ in registry._models and instance.should_index:
             if get(settings, 'TEST_MODE', False):
                 handle_m2m_changed(instance.app_name, instance.model_name, instance.id, action)
             else:

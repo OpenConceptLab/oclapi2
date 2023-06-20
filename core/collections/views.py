@@ -152,7 +152,7 @@ class CollectionVersionBaseView(CollectionBaseView):
 class CollectionListView(CollectionBaseView, ConceptDictionaryCreateMixin, ListWithHeadersMixin):
     serializer_class = CollectionListSerializer
     is_searchable = True
-    es_fields = Collection.es_fields
+    search_fields = Collection.search_fields
     document_model = CollectionDocument
     facet_class = CollectionSearch
     default_filters = {'is_active': True, 'version': HEAD}
@@ -352,7 +352,7 @@ class CollectionReferenceResolveView(CollectionReferenceAbstractResourcesView): 
 class CollectionReferenceConceptsView(CollectionReferenceAbstractResourcesView):
     is_searchable = True
     document_model = ConceptDocument
-    es_fields = Concept.es_fields
+    search_fields = Concept.search_fields
     facet_class = ConceptSearch
 
     def get_serializer_class(self):
@@ -366,7 +366,7 @@ class CollectionReferenceConceptsView(CollectionReferenceAbstractResourcesView):
 class CollectionReferenceMappingsView(CollectionReferenceAbstractResourcesView):
     is_searchable = True
     document_model = MappingDocument
-    es_fields = Mapping.es_fields
+    search_fields = Mapping.search_fields
     facet_class = MappingSearch
 
     def get_serializer_class(self):
@@ -781,7 +781,7 @@ class CollectionVersionExpansionChildrenView(CollectionVersionExpansionBaseView,
 class CollectionVersionExpansionConceptsView(CollectionVersionExpansionChildrenView):
     is_searchable = True
     document_model = ConceptDocument
-    es_fields = Concept.es_fields
+    search_fields = Concept.search_fields
     facet_class = ConceptSearch
 
     def get_serializer_class(self):
@@ -795,7 +795,7 @@ class CollectionVersionExpansionConceptsView(CollectionVersionExpansionChildrenV
 class CollectionVersionExpansionMappingsView(CollectionVersionExpansionChildrenView):
     is_searchable = True
     document_model = MappingDocument
-    es_fields = Mapping.es_fields
+    search_fields = Mapping.search_fields
     facet_class = MappingSearch
 
     def get_serializer_class(self):
@@ -838,7 +838,7 @@ class ExpansionMappingsIndexView(ExpansionResourcesIndexView):
 class CollectionVersionConceptsView(CollectionBaseView, ListWithHeadersMixin):
     is_searchable = True
     document_model = ConceptDocument
-    es_fields = Concept.es_fields
+    search_fields = Concept.search_fields
     facet_class = ConceptSearch
 
     def get_object(self, queryset=None):
@@ -1001,7 +1001,7 @@ class CollectionVersionExpansionConceptMappingsView(CollectionBaseView, ListWith
 class CollectionVersionMappingsView(CollectionBaseView, ListWithHeadersMixin):
     is_searchable = True
     document_model = MappingDocument
-    es_fields = Mapping.es_fields
+    search_fields = Mapping.search_fields
     facet_class = MappingSearch
 
     def get_object(self, queryset=None):

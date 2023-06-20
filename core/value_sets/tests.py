@@ -157,7 +157,7 @@ class ValueSetTest(OCLAPITestCase):
         self.assertEqual(len(resource['compose']['include'][0]['concept']), 1)
 
     def test_create_with_filter_and_system(self):
-        ConceptDocument().update(self.org_source_v2.head.concepts_set.all())
+        ConceptDocument().update(self.org_source_v2.head.concepts_set.all(), action='index', parallel=True)
 
         response = self.client.post(
             f'/users/{self.user.username}/ValueSet/',
@@ -197,7 +197,7 @@ class ValueSetTest(OCLAPITestCase):
         self.assertIsNone(resource['compose']['include'][0].get('concept'))
 
     def test_create_with_filter_and_concept(self):
-        ConceptDocument().update(self.org_source_v2.head.concepts_set.all())
+        ConceptDocument().update(self.org_source_v2.head.concepts_set.all(), action='index', parallel=True)
 
         response = self.client.post(
             f'/users/{self.user.mnemonic}/ValueSet/',
@@ -456,7 +456,7 @@ class ValueSetTest(OCLAPITestCase):
             format='json'
         )
 
-        ConceptDocument().update(self.concept_1.parent.concepts_set.all())
+        ConceptDocument().update(self.concept_1.parent.concepts_set.all(), action='index', parallel=True)
 
         response = self.client.post(
             '/users/' + self.user.mnemonic + '/ValueSet/c2/$expand/',
