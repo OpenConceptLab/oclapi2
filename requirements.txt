@@ -1,7 +1,7 @@
 Django==4.2.2
 psycopg2==2.9.6
 gunicorn==20.1.0 #production server
-whitenoise==6.4.0 #serving swagger static files
+whitenoise==6.5.0 #serving swagger static files
 djangorestframework==3.14.0
 pylint==2.17.4
 pydash==7.0.4
@@ -18,7 +18,7 @@ celery[redis]==5.2.7
 celery_once==3.0.1
 git+https://github.com/snyaggarwal/flower # use until https://github.com/mher/flower/issues/1231 issue is resolved
 redis==4.5.5
-kombu==5.3.0
+kombu==5.3.1
 django-opensearch-dsl==0.5.1
 opensearch-dsl==2.1.0
 drf-yasg==1.21.5
