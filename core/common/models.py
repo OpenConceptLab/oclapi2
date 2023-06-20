@@ -1003,14 +1003,14 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
 class CelerySignalProcessor(RealTimeSignalProcessor):
     def handle_save(self, sender, instance, **kwargs):
-        if settings.OPENSEARCH_SYNC and instance.__class__ in registry._models and instance.should_index:
+        if settings.OPENSEARCH_SYNC and instance.__class__ in registry._models and instance.should_index:  # pylint: disable=protected-access
             if get(settings, 'TEST_MODE', False):
                 handle_save(instance.app_name, instance.model_name, instance.id)
             else:
                 handle_save.delay(instance.app_name, instance.model_name, instance.id)
 
     def handle_m2m_changed(self, sender, instance, action, **kwargs):
-        if settings.OPENSEARCH_SYNC and instance.__class__ in registry._models and instance.should_index:
+        if settings.OPENSEARCH_SYNC and instance.__class__ in registry._models and instance.should_index:  # pylint: disable=protected-access
             if get(settings, 'TEST_MODE', False):
                 handle_m2m_changed(instance.app_name, instance.model_name, instance.id, action)
             else:
