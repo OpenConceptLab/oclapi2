@@ -49,11 +49,12 @@ After modifying model you need to create migration files. Run:
 
 Make sure to commit newly created migration files.
 
-### Indexing in ES:
+### Indexing in OpenSearch:
 - `cd oclapi2/`
-- `docker exec -it oclapi2-api-1 python manage.py search_index --populate -f --parallel` -- for populating all indexes
-- `docker exec -it oclapi2-api-1  python manage.py search_index --rebuild -f --parallel` -- for rebuild (delete and create) all indexes.
-You can also populate/re-index specific indexes, [read more](https://django-elasticsearch-dsl.readthedocs.io/en/latest/management.html)
+- `docker exec -it oclapi2-api-1  python manage.py opensearch index --force rebuild` -- for rebuild (delete and create) all indexes.
+- `docker exec -it oclapi2-api-1  python manage.py opensearch index --force rebuild concepts mappings` -- for rebuilding specific indexes.
+- `docker exec -it oclapi2-api-1  python manage.py opensearch document --force index --missing` -- for populating all missing indexes
+[Read More](https://django-opensearch-dsl.readthedocs.io/en/latest/management/)
 
 
 ### Debugging
