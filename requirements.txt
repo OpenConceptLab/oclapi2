@@ -24,7 +24,7 @@ drf-yasg==1.21.5
 git+https://github.com/snyaggarwal/django-queryset-csv
 git+https://github.com/OpenConceptLab/ocldev
 coverage==7.2.7
-tblib==1.7.0
+tblib==2.0.0
 django-ordered-model==3.7.4
 django-health-check>=3.16.2
 markdown==3.4.3
