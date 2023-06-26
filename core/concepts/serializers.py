@@ -117,13 +117,14 @@ class ConceptAbstractSerializer(ModelSerializer):
     references = SerializerMethodField()
     _score = FloatField(read_only=True)
     _confidence = CharField(read_only=True)
+    _highlight = JSONField(read_only=True)
 
     class Meta:
         model = Concept
         abstract = True
         fields = (
             'uuid', 'parent_concept_urls', 'child_concept_urls', 'parent_concepts', 'child_concepts', 'hierarchy_path',
-            'mappings', 'extras', 'summary', 'references', 'has_children', '_score', '_confidence'
+            'mappings', 'extras', 'summary', 'references', 'has_children', '_score', '_confidence', '_highlight'
         )
 
     def __init__(self, *args, **kwargs):  # pylint: disable=too-many-branches
@@ -173,6 +174,7 @@ class ConceptAbstractSerializer(ModelSerializer):
             if not self.query_params.get('q'):
                 self.fields.pop('_score', None)
                 self.fields.pop('_confidence', None)
+                self.fields.pop('_highlight', None)
         except:  # pylint: disable=bare-except
             pass
 

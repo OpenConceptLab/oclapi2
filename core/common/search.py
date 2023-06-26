@@ -1,6 +1,6 @@
 from django.db.models import Case, When, IntegerField
 from elasticsearch_dsl import FacetedSearch, Q
-from pydash import compact
+from pydash import compact, get
 
 
 class CustomESFacetedSearch(FacetedSearch):
@@ -32,7 +32,8 @@ class CustomESSearch:
         self._dsl_search = dsl_search
         self.queryset = None
         self.max_score = None
-        self.scores = None
+        self.scores = {}
+        self.highlights = {}
         self.score_stats = None
         self.score_distribution = None
         self.total = 0
@@ -74,14 +75,14 @@ class CustomESSearch:
         It cost a query to the sql db.
         """
         s, hits = self.__get_response()
-        scores = {}
-
-        # Do not query again if the es result is already cached
 
         for result in hits.hits:
-            _id = getattr(result, '_id')
-            _score = getattr(result, '_score')
-            scores[int(_id)] = _score
+            _id = get(result, '_id')
+            self.scores[int(_id)] = get(result, '_score')
+            highlight = get(result, 'highlight')
+            if highlight:
+                self.highlights[int(_id)] = highlight.to_dict()
+
         pks = [result.meta.id for result in s]
 
         qs = self._dsl_search._model.objects.filter(pk__in=pks)  # pylint: disable=protected-access
@@ -94,7 +95,6 @@ class CustomESSearch:
             qs = qs.order_by(preserved_order)
 
         self.queryset = qs
-        self.scores = scores
         self.total = hits.total.value
 
     def get_aggregations(self, verbose=False, raw=False):
@@ -157,6 +157,7 @@ class CustomESSearch:
         return [build_confidence(high), build_confidence(medium), build_confidence(low)]
 
     def __get_response(self):
+        # Do not query again if the es result is already cached
         if not hasattr(self._dsl_search, '_response'):
             # We only need the meta fields with the models ids
             s = self._dsl_search.source(excludes=['*'])

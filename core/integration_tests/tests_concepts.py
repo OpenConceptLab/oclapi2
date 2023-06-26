@@ -1667,6 +1667,10 @@ class ConceptListViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 1)
         self.assertEqual(response.data[0]['id'], 'MyConcept1')
+        self.assertEqual(
+            response.data[0]['_highlight'],
+            {'extras.foo': ['<em>bar</em>'], 'id': ['<em>myconcept1</em>']}
+        )
 
         response = self.client.get(
             self.source.concepts_url + '?q=MyConcept',

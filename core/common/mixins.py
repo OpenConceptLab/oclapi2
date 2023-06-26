@@ -27,7 +27,10 @@ logger = logging.getLogger('oclapi')
 
 
 class CustomPaginator:
-    def __init__(self, request, total_count, queryset, page_size, is_sliced=False, max_score=None, search_scores=None):  # pylint: disable=too-many-arguments
+    def __init__(  # pylint: disable=too-many-arguments
+            self, request, total_count, queryset, page_size, is_sliced=False, max_score=None, search_scores=None,
+            highlights=None
+    ):
         self.request = request
         self.queryset = queryset
         self.total = total_count or self.queryset.count()
@@ -45,6 +48,7 @@ class CustomPaginator:
         self.page_count = ceil(int(self.total_count) / int(self.page_size))
         self.max_score = max_score
         self.search_scores = search_scores
+        self.highlights = highlights
 
     @property
     def current_page_number(self):
@@ -56,6 +60,7 @@ class CustomPaginator:
         if self.search_scores and self.max_score:
             for result in results:
                 result._score = self.search_scores.get(result.id)  # pylint: disable=protected-access
+                result._highlight = self.highlights.get(result.id)  # pylint: disable=protected-access
                 result._confidence = f"{round((result._score / self.max_score) * 100, 2)}%"  # pylint: disable=protected-access
         return results
 
@@ -111,6 +116,7 @@ class ListWithHeadersMixin(ListModelMixin):
     object_list = None
     _max_score = None
     _scores = None
+    _highlights = None
     limit = LIST_DEFAULT_LIMIT
     document_model = None
 
@@ -162,7 +168,7 @@ class ListWithHeadersMixin(ListModelMixin):
             paginator = CustomPaginator(
                 request=request, queryset=sorted_list, page_size=self.limit, total_count=self.total_count,
                 is_sliced=self.should_perform_es_search(), max_score=get(self, '_max_score'),
-                search_scores=get(self, '_scores')
+                search_scores=get(self, '_scores'), highlights=get(self, '_highlights')
             )
             headers = paginator.headers
             results = paginator.current_page_results

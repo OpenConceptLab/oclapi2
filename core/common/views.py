@@ -13,7 +13,7 @@ from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
 from elasticsearch import RequestError, TransportError
 from elasticsearch_dsl import Q
-from pydash import get
+from pydash import get, compact
 from rest_framework import response, generics, status
 from rest_framework.generics import ListAPIView, RetrieveUpdateDestroyAPIView
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -149,10 +149,10 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     def filter_queryset(self, queryset=None):
         if self.is_searchable and self.should_perform_es_search():
             if self.is_fuzzy_search:
-                queryset, self._scores, self._max_score = self.get_fuzzy_search_results_qs(
+                queryset, self._scores, self._max_score, self._highlights = self.get_fuzzy_search_results_qs(
                     self._source_versions, self._extra_filters)
             else:
-                queryset, self._scores, self._max_score = self.get_search_results_qs()
+                queryset, self._scores, self._max_score, self._highlights = self.get_search_results_qs()
             return queryset
 
         if queryset is None:
@@ -619,17 +619,22 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         extras_fields_exists = self.get_extras_fields_exists_from_query_params()
 
         if self.is_exact_match_on():
+            fields = list(self.get_exact_search_fields())
             results = results.query(self.get_exact_search_criterion())
         else:
+            fields = list(self.document_model.get_boostable_search_attrs().keys())
             results = results.query(self.get_wildcard_search_criterion())
 
         if extras_fields:
+            fields += list(extras_fields.keys())
             for field, value in extras_fields.items():
                 results = results.filter("query_string", query=value, fields=[field])
         if extras_fields_exists:
+            fields += list(extras_fields_exists)
             for field in extras_fields_exists:
                 results = results.query("exists", field=f"extras.{field}")
         if extras_fields_exact:
+            fields += list(extras_fields_exact.keys())
             for field, value in extras_fields_exact.items():
                 results = results.query("match", **{field: value}, _expand__to_dot=False)
 
@@ -661,7 +666,9 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                 results = results.query(criteria)
             else:
                 results = results.query('match', **{attr: value})
-
+        fields = set(compact(fields))
+        if fields:
+            results = results.highlight(*fields)
         return results.sort(*self._get_sort_attribute())
 
     def _get_sort_attribute(self):
@@ -711,7 +718,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             es_search = CustomESSearch(search_results[start:end])
             es_search.to_queryset()
             self.total_count = es_search.total - offset
-            return es_search.queryset, es_search.scores, es_search.max_score
+            return es_search.queryset, es_search.scores, es_search.max_score, es_search.highlights
         except RequestError as ex:  # pragma: no cover
             if get(ex, 'info.error.caused_by.reason', '').startswith('Result window is too large'):
                 raise Http400(detail='Only 10000 results are available. Please apply additional filters'
