@@ -15,7 +15,8 @@ from rest_framework.mixins import ListModelMixin, CreateModelMixin
 from rest_framework.response import Response
 
 from core.common.constants import HEAD, ACCESS_TYPE_NONE, INCLUDE_FACETS, \
-    LIST_DEFAULT_LIMIT, HTTP_COMPRESS_HEADER, CSV_DEFAULT_LIMIT, FACETS_ONLY, INCLUDE_RETIRED_PARAM
+    LIST_DEFAULT_LIMIT, HTTP_COMPRESS_HEADER, CSV_DEFAULT_LIMIT, FACETS_ONLY, INCLUDE_RETIRED_PARAM,\
+    SEARCH_STATS_ONLY, INCLUDE_SEARCH_STATS
 from core.common.permissions import HasPrivateAccess, HasOwnership, CanViewConceptDictionary, \
     CanViewConceptDictionaryVersion
 from .checksums import ChecksumModel
@@ -26,7 +27,7 @@ logger = logging.getLogger('oclapi')
 
 
 class CustomPaginator:
-    def __init__(self, request, total_count, queryset, page_size, is_sliced=False):  # pylint: disable=too-many-arguments
+    def __init__(self, request, total_count, queryset, page_size, is_sliced=False, max_score=None, search_scores=None):  # pylint: disable=too-many-arguments
         self.request = request
         self.queryset = queryset
         self.total = total_count or self.queryset.count()
@@ -42,6 +43,8 @@ class CustomPaginator:
         self.paginator = Paginator(self.queryset, self.page_size)
         self.page_object = self.paginator.get_page(self.page_number)
         self.page_count = ceil(int(self.total_count) / int(self.page_size))
+        self.max_score = max_score
+        self.search_scores = search_scores
 
     @property
     def current_page_number(self):
@@ -49,7 +52,12 @@ class CustomPaginator:
 
     @property
     def current_page_results(self):
-        return self.page_object.object_list
+        results = self.page_object.object_list
+        if self.search_scores and self.max_score:
+            for result in results:
+                result._score = self.search_scores.get(result.id)  # pylint: disable=protected-access
+                result._confidence = f"{round((result._score / self.max_score) * 100, 2)}%"  # pylint: disable=protected-access
+        return results
 
     @cached_property
     def total_count(self):
@@ -101,6 +109,8 @@ class CustomPaginator:
 class ListWithHeadersMixin(ListModelMixin):
     default_filters = {'is_active': True}
     object_list = None
+    _max_score = None
+    _scores = None
     limit = LIST_DEFAULT_LIMIT
     document_model = None
 
@@ -127,6 +137,8 @@ class ListWithHeadersMixin(ListModelMixin):
 
         if self.only_facets():
             return Response({'facets': {'fields': self.get_facets()}})
+        if self.only_search_stats() and search_term:
+            return Response(self.get_search_stats(get(self, '_source_versions', []), get(self, '_extra_filters', None)))
 
         if self.object_list is None:
             self.object_list = self.filter_queryset()
@@ -149,7 +161,8 @@ class ListWithHeadersMixin(ListModelMixin):
                 self.limit = LIST_DEFAULT_LIMIT
             paginator = CustomPaginator(
                 request=request, queryset=sorted_list, page_size=self.limit, total_count=self.total_count,
-                is_sliced=self.should_perform_es_search()
+                is_sliced=self.should_perform_es_search(), max_score=get(self, '_max_score'),
+                search_scores=get(self, '_scores')
             )
             headers = paginator.headers
             results = paginator.current_page_results
@@ -165,7 +178,15 @@ class ListWithHeadersMixin(ListModelMixin):
     def serialize_list(self, results, paginator=None):
         result_dict = self.get_serializer(results, many=True).data
         if self.should_include_facets():
-            data = {'results': result_dict, 'facets': {'fields': self.get_facets()}}
+            data = {
+                'results': result_dict,
+                'facets': {'fields': self.get_facets()}
+            }
+        elif self.should_include_search_stats() and self.should_perform_es_search():
+            data = {
+                'results': result_dict,
+                'search_stats': self.get_search_stats(self._source_versions, self._extra_filters)
+            }
         elif hasattr(self.__class__, 'bundle_response'):
             data = self.bundle_response(result_dict, paginator)
         else:
@@ -175,8 +196,14 @@ class ListWithHeadersMixin(ListModelMixin):
     def should_include_facets(self):
         return self.request.META.get(INCLUDE_FACETS, False) in ['true', True]
 
+    def should_include_search_stats(self):
+        return self.request.META.get(INCLUDE_SEARCH_STATS, False) in ['true', True]
+
     def only_facets(self):
         return self.request.query_params.get(FACETS_ONLY, False) in ['true', True]
+
+    def only_search_stats(self):
+        return self.request.query_params.get(SEARCH_STATS_ONLY, False) in ['true', True]
 
     def should_compress(self):
         return self.request.META.get(HTTP_COMPRESS_HEADER, False) in ['true', True]

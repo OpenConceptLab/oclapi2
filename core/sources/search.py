@@ -1,11 +1,11 @@
 from elasticsearch_dsl import TermsFacet
 
 from core.common.constants import FACET_SIZE
-from core.common.search import CommonSearch
+from core.common.search import CustomESFacetedSearch
 from core.sources.models import Source
 
 
-class SourceSearch(CommonSearch):
+class SourceFacetedSearch(CustomESFacetedSearch):
     index = 'sources'
     doc_types = [Source]
     fields = [

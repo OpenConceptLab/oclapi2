@@ -1,11 +1,11 @@
 from elasticsearch_dsl import TermsFacet
 
 from core.common.constants import FACET_SIZE
-from core.common.search import CommonSearch
+from core.common.search import CustomESFacetedSearch
 from core.mappings.models import Mapping
 
 
-class MappingSearch(CommonSearch):
+class MappingFacetedSearch(CustomESFacetedSearch):
     index = 'mappings'
     doc_types = [Mapping]
     fields = [

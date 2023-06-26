@@ -21,7 +21,7 @@ from core.concepts.permissions import CanEditParentDictionary, CanViewParentDict
 from core.mappings.constants import PARENT_VERSION_NOT_LATEST_CANNOT_UPDATE_MAPPING
 from core.mappings.documents import MappingDocument
 from core.mappings.models import Mapping
-from core.mappings.search import MappingSearch
+from core.mappings.search import MappingFacetedSearch
 from core.mappings.serializers import MappingDetailSerializer, MappingListSerializer, MappingVersionListSerializer, \
     MappingVersionDetailSerializer
 
@@ -31,7 +31,7 @@ class MappingBaseView(SourceChildCommonBaseView):
     model = Mapping
     queryset = Mapping.objects.filter(is_active=True)
     document_model = MappingDocument
-    facet_class = MappingSearch
+    facet_class = MappingFacetedSearch
     es_fields = Mapping.es_fields
 
     @staticmethod

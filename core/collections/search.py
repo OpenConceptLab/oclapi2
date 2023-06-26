@@ -2,10 +2,10 @@ from elasticsearch_dsl import TermsFacet
 
 from core.collections.models import Collection
 from core.common.constants import FACET_SIZE
-from core.common.search import CommonSearch
+from core.common.search import CustomESFacetedSearch
 
 
-class CollectionSearch(CommonSearch):
+class CollectionFacetedSearch(CustomESFacetedSearch):
     index = 'collections'
     doc_types = [Collection]
     fields = [

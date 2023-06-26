@@ -2,7 +2,7 @@ from django.conf import settings
 from django.db.models import F
 from django.http import Http404
 from drf_yasg.utils import swagger_auto_schema
-from pydash import get
+from pydash import get, compact
 from rest_framework import status
 from rest_framework.generics import RetrieveAPIView, DestroyAPIView, ListCreateAPIView, RetrieveUpdateDestroyAPIView, \
     UpdateAPIView, ListAPIView
@@ -32,7 +32,7 @@ from core.concepts.constants import PARENT_VERSION_NOT_LATEST_CANNOT_UPDATE_CONC
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept, ConceptName
 from core.concepts.permissions import CanViewParentDictionary, CanEditParentDictionary
-from core.concepts.search import ConceptSearch
+from core.concepts.search import ConceptFacetedSearch
 from core.concepts.serializers import (
     ConceptDetailSerializer, ConceptListSerializer, ConceptDescriptionSerializer, ConceptNameSerializer,
     ConceptVersionDetailSerializer,
@@ -46,7 +46,7 @@ class ConceptBaseView(SourceChildCommonBaseView):
     model = Concept
     queryset = Concept.objects.filter(is_active=True)
     document_model = ConceptDocument
-    facet_class = ConceptSearch
+    facet_class = ConceptFacetedSearch
     es_fields = Concept.es_fields
     default_filters = {'is_active': True}
 
@@ -173,6 +173,15 @@ class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
 
         return queryset
 
+    def _set_source_versions(self):
+        from core.sources.models import Source
+        source_versions = []
+        for version_url in compact((self.request.query_params.dict().get('source_version', '')).split(',')):
+            source_version = Source.resolve_expression_to_version(version_url)
+            if source_version.id:
+                source_versions.append(source_version)
+        self._source_versions = source_versions
+
     @swagger_auto_schema(
         manual_parameters=[
             q_param, limit_param, sort_desc_param, sort_asc_param, exact_match_param, page_param, verbose_param,
@@ -181,6 +190,9 @@ class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
         ]
     )
     def get(self, request, *args, **kwargs):
+        if self.is_fuzzy_search:
+            self._set_source_versions()
+            self._extra_filters = None
         self.set_parent_resource(False)
         if self.parent_resource:
             self.check_object_permissions(request, self.parent_resource)

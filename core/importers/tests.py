@@ -1,11 +1,9 @@
 import json
 import os
-import unittest
 import uuid
 from json import JSONDecodeError
 
 from celery_once import AlreadyQueued
-from django.conf import settings
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.db.models import F
@@ -712,7 +710,6 @@ class BulkImportInlineTest(OCLTestCase):
             1.0
         )
 
-    @unittest.skipIf(settings.ENV == 'ci', '[Skipped] Gets hung sometimes')
     @patch('core.importers.models.batch_index_resources')
     def test_openmrs_schema_csv_import(self, batch_index_resources_mock):
         call_command('import_lookup_values')
@@ -735,7 +732,6 @@ class BulkImportInlineTest(OCLTestCase):
         self.assertEqual(len(importer.permission_denied), 0)
         batch_index_resources_mock.apply_async.assert_called()
 
-    @unittest.skipIf(settings.ENV == 'ci', '[Skipped] PEPFAR (small) Import Sample')
     @patch('core.importers.models.batch_index_resources')
     def test_pepfar_import(self, batch_index_resources_mock):
         importer = BulkImportInline(

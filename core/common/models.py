@@ -440,7 +440,6 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         except:  # pylint: disable=bare-except
             return None
 
-
     @classmethod
     def get_base_queryset(cls, params):
         username = params.get('user', None)
@@ -971,12 +970,12 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         return list(queryset.values(field).annotate(count=Count('id')).values(field, 'count').order_by('-count'))
 
     def get_concept_facets(self, filters=None):
-        from core.concepts.search import ConceptSearch
-        return self._get_resource_facets(ConceptSearch, filters)
+        from core.concepts.search import ConceptFacetedSearch
+        return self._get_resource_facets(ConceptFacetedSearch, filters)
 
     def get_mapping_facets(self, filters=None):
-        from core.mappings.search import MappingSearch
-        return self._get_resource_facets(MappingSearch, filters)
+        from core.mappings.search import MappingFacetedSearch
+        return self._get_resource_facets(MappingFacetedSearch, filters)
 
     def _get_resource_facets(self, facet_class, filters=None):
         search = facet_class('', filters=self._get_resource_facet_filters(filters))

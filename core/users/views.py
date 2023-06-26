@@ -29,7 +29,7 @@ from core.common.views import BaseAPIView, BaseLogoView
 from core.orgs.models import Organization
 from core.users.constants import VERIFICATION_TOKEN_MISMATCH, VERIFY_EMAIL_MESSAGE, REACTIVATE_USER_MESSAGE
 from core.users.documents import UserProfileDocument
-from core.users.search import UserProfileSearch
+from core.users.search import UserProfileFacetedSearch
 from core.users.serializers import UserDetailSerializer, UserCreateSerializer, UserListSerializer, UserSummarySerializer
 from .models import UserProfile
 from ..common import ERRBIT_LOGGER
@@ -167,7 +167,7 @@ class UserBaseView(BaseAPIView):
     queryset = UserProfile.objects
     es_fields = UserProfile.es_fields
     document_model = UserProfileDocument
-    facet_class = UserProfileSearch
+    facet_class = UserProfileFacetedSearch
     is_searchable = True
     default_qs_sort_attr = '-date_joined'
     serializer_class = UserDetailSerializer

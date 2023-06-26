@@ -55,6 +55,10 @@ class MappingDocument(Document):
             'id': {
                 'boost': 5
             },
+            'map_type': {
+                'boost': 4,
+                'lower': True
+            },
             'from_concept': {
                 'boost': 3,
                 'lower': False

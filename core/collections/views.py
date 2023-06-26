@@ -28,7 +28,7 @@ from core.collections.constants import (
     UNKNOWN_REFERENCE_ADDED_TO_COLLECTION_FMT)
 from core.collections.documents import CollectionDocument
 from core.collections.models import Collection, CollectionReference
-from core.collections.search import CollectionSearch
+from core.collections.search import CollectionFacetedSearch
 from core.collections.serializers import (
     CollectionDetailSerializer, CollectionListSerializer,
     CollectionCreateSerializer, CollectionReferenceSerializer, CollectionVersionDetailSerializer,
@@ -60,10 +60,10 @@ from core.common.utils import compact_dict_by_values, parse_boolean_query_param
 from core.common.views import BaseAPIView, BaseLogoView, ConceptContainerExtraRetrieveUpdateDestroyView, TaskMixin
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept
-from core.concepts.search import ConceptSearch
+from core.concepts.search import ConceptFacetedSearch
 from core.mappings.documents import MappingDocument
 from core.mappings.models import Mapping
-from core.mappings.search import MappingSearch
+from core.mappings.search import MappingFacetedSearch
 
 logger = logging.getLogger('oclapi')
 
@@ -154,7 +154,7 @@ class CollectionListView(CollectionBaseView, ConceptDictionaryCreateMixin, ListW
     is_searchable = True
     es_fields = Collection.es_fields
     document_model = CollectionDocument
-    facet_class = CollectionSearch
+    facet_class = CollectionFacetedSearch
     default_filters = {'is_active': True, 'version': HEAD}
 
     def apply_filters(self, queryset):
@@ -353,7 +353,7 @@ class CollectionReferenceConceptsView(CollectionReferenceAbstractResourcesView):
     is_searchable = True
     document_model = ConceptDocument
     es_fields = Concept.es_fields
-    facet_class = ConceptSearch
+    facet_class = ConceptFacetedSearch
 
     def get_serializer_class(self):
         from core.concepts.serializers import ConceptVersionDetailSerializer, ConceptVersionListSerializer
@@ -367,7 +367,7 @@ class CollectionReferenceMappingsView(CollectionReferenceAbstractResourcesView):
     is_searchable = True
     document_model = MappingDocument
     es_fields = Mapping.es_fields
-    facet_class = MappingSearch
+    facet_class = MappingFacetedSearch
 
     def get_serializer_class(self):
         from core.mappings.serializers import MappingVersionDetailSerializer, MappingVersionListSerializer
@@ -782,7 +782,7 @@ class CollectionVersionExpansionConceptsView(CollectionVersionExpansionChildrenV
     is_searchable = True
     document_model = ConceptDocument
     es_fields = Concept.es_fields
-    facet_class = ConceptSearch
+    facet_class = ConceptFacetedSearch
 
     def get_serializer_class(self):
         from core.concepts.serializers import ConceptDetailSerializer, ConceptListSerializer
@@ -796,7 +796,7 @@ class CollectionVersionExpansionMappingsView(CollectionVersionExpansionChildrenV
     is_searchable = True
     document_model = MappingDocument
     es_fields = Mapping.es_fields
-    facet_class = MappingSearch
+    facet_class = MappingFacetedSearch
 
     def get_serializer_class(self):
         from core.mappings.serializers import MappingDetailSerializer, MappingListSerializer
@@ -839,7 +839,7 @@ class CollectionVersionConceptsView(CollectionBaseView, ListWithHeadersMixin):
     is_searchable = True
     document_model = ConceptDocument
     es_fields = Concept.es_fields
-    facet_class = ConceptSearch
+    facet_class = ConceptFacetedSearch
 
     def get_object(self, queryset=None):
         instance = get_object_or_404(self.get_base_queryset())
@@ -1002,7 +1002,7 @@ class CollectionVersionMappingsView(CollectionBaseView, ListWithHeadersMixin):
     is_searchable = True
     document_model = MappingDocument
     es_fields = Mapping.es_fields
-    facet_class = MappingSearch
+    facet_class = MappingFacetedSearch
 
     def get_object(self, queryset=None):
         instance = get_object_or_404(self.get_base_queryset())

@@ -1,11 +1,11 @@
 from elasticsearch_dsl import TermsFacet
 
 from core.common.constants import FACET_SIZE
-from core.common.search import CommonSearch
+from core.common.search import CustomESFacetedSearch
 from core.concepts.models import Concept
 
 
-class ConceptSearch(CommonSearch):
+class ConceptFacetedSearch(CustomESFacetedSearch):
     index = 'concepts'
     doc_types = [Concept]
     fields = [

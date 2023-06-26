@@ -32,7 +32,7 @@ from core.sources.constants import DELETE_FAILURE, DELETE_SUCCESS, VERSION_ALREA
 from core.sources.documents import SourceDocument
 from core.sources.mixins import SummaryMixin
 from core.sources.models import Source
-from core.sources.search import SourceSearch
+from core.sources.search import SourceFacetedSearch
 from core.sources.serializers import (
     SourceDetailSerializer, SourceListSerializer, SourceCreateSerializer, SourceVersionDetailSerializer,
     SourceVersionListSerializer, SourceVersionExportSerializer, SourceSummaryDetailSerializer,
@@ -98,7 +98,7 @@ class SourceListView(SourceBaseView, ConceptDictionaryCreateMixin, ListWithHeade
     is_searchable = True
     es_fields = Source.es_fields
     document_model = SourceDocument
-    facet_class = SourceSearch
+    facet_class = SourceFacetedSearch
     default_filters = {'is_active': True, 'version': HEAD}
 
     def apply_filters(self, queryset):
