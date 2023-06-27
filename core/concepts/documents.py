@@ -37,6 +37,8 @@ class ConceptDocument(Document):
     created_by = fields.KeywordField(attr='created_by.username')
     name_types = fields.ListField(fields.KeywordField())
     description_types = fields.ListField(fields.KeywordField())
+    same_as_map_codes = fields.ListField(fields.KeywordField())
+    other_map_codes = fields.ListField(fields.KeywordField())
 
     class Django:
         model = Concept
@@ -47,7 +49,29 @@ class ConceptDocument(Document):
 
     @staticmethod
     def get_boostable_search_attrs():
-        return {'id': {'boost': 1.5}, '_name': {'boost': 2}, 'synonyms': {'boost': 1, 'wildcard': True, 'lower': True}}
+        return {
+            'id': {
+                'boost': 1.5
+            },
+            '_name': {
+                'boost': 2
+            },
+            'synonyms': {
+                'boost': 1,
+                'wildcard': True,
+                'lower': True
+            },
+            'same_as_map_codes': {
+                'boost': 0.1,
+                'wildcard': True,
+                'lower': True
+            },
+            'other_map_codes': {
+                'boost': 0,
+                'wildcard': True,
+                'lower': True
+            },
+        }
 
     @staticmethod
     def prepare_numeric_id(instance):
@@ -69,6 +93,18 @@ class ConceptDocument(Document):
     @staticmethod
     def prepare_locale(instance):
         return list(set(instance.names.filter(locale__isnull=False).values_list('locale', flat=True)))
+
+    @staticmethod
+    def prepare_same_as_map_codes(instance):
+        same_as_mappings = instance.get_unidirectional_mappings().filter(
+            map_type__istartswith='same', to_concept_code__isnull=False)
+        return [code.lower() for code in set(same_as_mappings.values_list('to_concept_code', flat=True))]
+
+    @staticmethod
+    def prepare_other_map_codes(instance):
+        other_mappings = instance.get_unidirectional_mappings().exclude(
+            map_type__istartswith='same').filter(to_concept_code__isnull=False)
+        return [code.lower() for code in set(other_mappings.values_list('to_concept_code', flat=True))]
 
     @staticmethod
     def prepare_synonyms(instance):

@@ -197,7 +197,17 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         return self.request.query_params.dict().get(self.exact_match, None) == 'on'
 
     def get_exact_search_fields(self):
-        return [field for field, config in get(self, 'es_fields', {}).items() if config.get('exact', False)]
+        fields = [field for field, config in get(self, 'es_fields', {}).items() if config.get('exact', False)]
+        return self.clean_fields(fields)
+
+    def clean_fields(self, fields):
+        if self.is_concept_document() and self.request.query_params.get('excludeMapCodes') in ['true', True, 'True']:
+            map_code_fields = ['same_as_map_codes', 'other_map_codes']
+            if isinstance(fields, dict):
+                fields = {key: value for key, value in fields.items() if key not in map_code_fields}
+            elif isinstance(fields, list):
+                fields = [field for field in fields if field not in map_code_fields]
+        return fields
 
     def get_search_string(self, lower=True, decode=True):
         search_str = self.request.query_params.dict().get(SEARCH_PARAM, '').strip()
@@ -554,14 +564,14 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         for key, value in (other_filters or {}).items():
             results = results.query('match', **{key: value})
         search_str = self.get_search_string(decode=False)
-        boost_attrs = self.document_model.get_boostable_search_attrs() or {}
+        wildcard_fields = self.get_wildcard_search_fields()
         if source_versions:
             results = results.query(
                 self.__get_source_versions_es_criterion(source_versions)
             )
-        if boost_attrs:
+        if wildcard_fields:
             criterion = None
-            for attr, meta in boost_attrs.items():
+            for attr, meta in wildcard_fields.items():
                 criteria = CustomESSearch.fuzzy_criteria(search_str, attr, meta['boost'], 5)
                 if criterion is None:
                     criterion = criteria
@@ -575,6 +585,11 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
         if sort:
             results = results.sort(*self._get_sort_attribute())
+
+        fields = set(compact(self.clean_fields(list(wildcard_fields.keys()))))
+        if fields:
+            results = results.highlight(*fields)
+
         return results
 
     def __get_search_aggregations(
@@ -622,7 +637,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             fields = list(self.get_exact_search_fields())
             results = results.query(self.get_exact_search_criterion())
         else:
-            fields = list(self.document_model.get_boostable_search_attrs().keys())
+            fields = list(self.get_wildcard_search_fields().keys())
             results = results.query(self.get_wildcard_search_criterion())
 
         if extras_fields:
@@ -676,11 +691,11 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
     def get_wildcard_search_criterion(self):
         search_string = self.get_search_string()
-        boost_attrs = self.document_model.get_boostable_search_attrs() or {}
+        wildcard_fields = self.get_wildcard_search_fields()
 
         def get_query(_str):
             query = None
-            for attr, meta in boost_attrs.items():
+            for attr, meta in wildcard_fields.items():
                 decode = meta['decode'] if 'decode' in meta else True
                 lower = meta['lower'] if 'lower' in meta else True
                 _search_string = self.get_wildcard_search_string(self.get_search_string(decode=decode, lower=lower))
@@ -706,6 +721,9 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             criterion |= Q("wildcard", synonyms={'value': '*' + search_string.replace(' ', '*') + '*', 'boost': 3})
 
         return criterion
+
+    def get_wildcard_search_fields(self):
+        return self.clean_fields(self.document_model.get_boostable_search_attrs() or {})
 
     def __get_queryset_from_search_results(self, search_results):
         offset = max(to_int(self.request.GET.get('offset'), 0), 0)

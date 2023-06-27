@@ -248,6 +248,8 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         'external_id': {'sortable': False, 'filterable': True, 'facet': False, 'exact': True},
         'name_types': {'sortable': False, 'filterable': True, 'facet': True},
         'description_types': {'sortable': False, 'filterable': True, 'facet': True},
+        'same_as_map_codes': {'sortable': False, 'filterable': True, 'facet': False, 'exact': True},
+        'other_map_codes': {'sortable': False, 'filterable': True, 'facet': False, 'exact': True},
     }
 
     def get_basic_checksums(self):
