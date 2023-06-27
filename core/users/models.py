@@ -39,6 +39,7 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
 
     es_fields = {
         'username': {'sortable': True, 'filterable': True, 'exact': True},
+        'name': {'sortable': True, 'filterable': True, 'exact': True},
         'date_joined': {'sortable': True, 'default': 'asc', 'filterable': False},
         'company': {'sortable': True, 'filterable': True, 'exact': True},
         'location': {'sortable': True, 'filterable': True, 'exact': True},
