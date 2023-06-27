@@ -1,5 +1,6 @@
 import uuid
 
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator
 from django.db import models, IntegrityError, transaction
@@ -406,10 +407,11 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
 
     def index_from_concept(self):
         if self.from_concept_id:
-            batch_index_resources.delay(
-                'concepts', {
-                    'versioned_object_id': self.from_concept.versioned_object_id
-                })
+            batch_index_resources(
+                'concepts', {'versioned_object_id': self.from_concept.versioned_object_id}
+            ) if get(settings, 'TEST_MODE', False) else batch_index_resources.delay(
+                'concepts', {'versioned_object_id': self.from_concept.versioned_object_id}
+            )
 
     @classmethod
     def persist_new(cls, data, user):
