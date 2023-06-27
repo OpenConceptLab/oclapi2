@@ -407,7 +407,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
 
     def index_from_concept(self):
         if self.from_concept_id:
-            batch_index_resources(
+            batch_index_resources(  # pylint: disable=expression-not-assigned
                 'concepts', {'versioned_object_id': self.from_concept.versioned_object_id}
             ) if get(settings, 'TEST_MODE', False) else batch_index_resources.delay(
                 'concepts', {'versioned_object_id': self.from_concept.versioned_object_id}
