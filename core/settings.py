@@ -198,7 +198,7 @@ ES_PORT = os.environ.get('ES_PORT', '9200')  # Deprecated. Use ES_HOSTS instead.
 ES_HOSTS = os.environ.get('ES_HOSTS', None)
 ELASTICSEARCH_DSL = {
     'default': {
-        'hosts': ES_HOSTS if ES_HOSTS else [ES_HOST + ':' + ES_PORT]
+        'hosts': ES_HOSTS.split(',') if ES_HOSTS else [ES_HOST + ':' + ES_PORT]
     },
 }
 
