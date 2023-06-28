@@ -429,6 +429,8 @@ def es_get(url, **kwargs):
             **kwargs
         )
 
+    return None
+
 
 def task_exists(task_id):
     """
