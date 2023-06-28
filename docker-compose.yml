@@ -30,8 +30,7 @@ services:
       - DB_HOST=${DB_HOST-db}
       - DB_PORT=${DB_PORT-5432}
       - DB_PASSWORD=${DB_PASSWORD-Postgres123}
-      - ES_HOST=${ES_HOST-es}
-      - ES_PORT=${ES_PORT-9200}
+      - ES_HOSTS=${ES_HOSTS-es:9200}
       - ENVIRONMENT=${ENVIRONMENT-production}
       - DEBUG=${DEBUG-FALSE}
       - SECRET_KEY
