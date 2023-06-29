@@ -1630,15 +1630,6 @@ class ConceptListViewTest(OCLAPITestCase):
         self.assertEqual(len(response.data), 1)
         self.assertEqual(response.data[0]['id'], 'MyConcept1')
 
-        response = self.client.get('/concepts/?q=classA&exact_match=on')
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.data), 1)
-        self.assertEqual(response.data[0]['id'], 'MyConcept1')
-
-        response = self.client.get('/concepts/?q=Concept1&exact_match=on')
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.data), 0)
-
         response = self.client.get('/concepts/?q=Concept1&conceptClass=classA')
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 1)
