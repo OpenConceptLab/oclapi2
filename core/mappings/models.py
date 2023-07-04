@@ -107,11 +107,11 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
     }
 
     es_fields = {
-        'id': {'sortable': True, 'filterable': True, 'exact': True},
+        'id': {'sortable': False, 'filterable': True, 'exact': True},
+        'id_lowercase': {'sortable': True, 'filterable': False, 'exact': False},
         'last_update': {'sortable': True, 'filterable': False, 'facet': False, 'default': 'desc'},
-        'concept': {'sortable': False, 'filterable': True, 'facet': False, 'exact': True},
-        'from_concept': {'sortable': False, 'filterable': True, 'facet': True, 'exact': True},
-        'to_concept': {'sortable': False, 'filterable': True, 'facet': True, 'exact': True},
+        'from_concept': {'sortable': False, 'filterable': True, 'facet': False, 'exact': True},
+        'to_concept': {'sortable': False, 'filterable': True, 'facet': False, 'exact': True},
         'retired': {'sortable': False, 'filterable': True, 'facet': True},
         'map_type': {'sortable': True, 'filterable': True, 'facet': True, 'exact': False},
         'source': {'sortable': True, 'filterable': True, 'facet': True, 'exact': False},

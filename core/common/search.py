@@ -11,7 +11,7 @@ class CustomESFacetedSearch(FacetedSearch):
     def format_search_str(self, search_str):
         if self.exact_match:
             return search_str.replace('*', '')
-        return f"*{search_str}*".replace('**', '*')
+        return f"{search_str}*".replace('**', '*')
 
     def query(self, search, query):
         if query:
@@ -39,8 +39,52 @@ class CustomESSearch:
         self.total = 0
 
     @staticmethod
-    def fuzzy_criteria(search_str, field, boost=1, max_expansions=10):
-        criterion = CustomESSearch.__fuzzy_criteria(boost + 1, field, max_expansions, search_str)
+    def get_match_phrase_criteria(field, search_str, boost):
+        return CustomESSearch.get_term_match_criteria(
+            field, search_str, boost
+        ) | CustomESSearch.get_prefix_criteria(
+            field, search_str, boost
+        ) | Q('match_phrase', **{field: {'query': search_str, 'boost': boost}})
+
+    @staticmethod
+    def get_term_match_criteria(field, search_str, boost):
+        return Q(
+            'term', **{field: {'value': search_str, 'boost': boost + 100}}
+        )
+
+    @staticmethod
+    def get_prefix_match_criteria(field, search_str, boost):
+        return Q(
+            'prefix', **{
+                field: {
+                    'value': search_str,
+                    'boost': boost + 95
+                }
+            }
+        )
+
+    @staticmethod
+    def get_prefix_criteria(field, search_str, boost):
+        return Q(
+            'prefix', **{
+                field: {
+                    'value': search_str,
+                    'boost': boost + 95
+                }
+            }
+        )
+
+    @staticmethod
+    def get_match_criteria(field, search_str, boost):
+        return Q('match', **{field: {'query': search_str, 'boost': boost}})
+
+    @staticmethod
+    def get_wildcard_criteria(field, search_str, boost):
+        return Q("wildcard", **{field: {'value': search_str, 'boost': boost, 'case_insensitive': True}})
+
+    @staticmethod
+    def fuzzy_criteria(search_str, field, boost=0, max_expansions=10):
+        criterion = CustomESSearch.__fuzzy_criteria(boost, field, max_expansions, search_str)
         words = compact(search_str.split())
         if len(words) > 1:
             for word in words:
@@ -93,7 +137,6 @@ class CustomESSearch:
                 output_field=IntegerField()
             )
             qs = qs.order_by(preserved_order)
-
         self.queryset = qs
         self.total = hits.total.value
 

@@ -11,13 +11,15 @@ class ConceptDocument(Document):
         name = 'concepts'
         settings = {'number_of_shards': 1, 'number_of_replicas': 0}
 
-    id = fields.KeywordField(attr='mnemonic', normalizer="lowercase")
+    id = fields.TextField(attr='mnemonic')
+    id_lowercase = fields.KeywordField(attr='mnemonic', normalizer="lowercase")
     numeric_id = fields.LongField()
     name = fields.TextField()
     _name = fields.KeywordField(attr='display_name', normalizer='lowercase')
     last_update = fields.DateField(attr='updated_at')
     locale = fields.ListField(fields.KeywordField())
-    synonyms = fields.ListField(fields.KeywordField(normalizer="lowercase"))
+    synonyms = fields.ListField(fields.TextField())
+    _synonyms = fields.ListField(fields.KeywordField(normalizer="lowercase"))
     source = fields.KeywordField(attr='parent_resource', normalizer="lowercase")
     owner = fields.KeywordField(attr='owner_name', normalizer="lowercase")
     owner_type = fields.KeywordField(attr='owner_type')
@@ -31,7 +33,6 @@ class ConceptDocument(Document):
     datatype = fields.KeywordField(attr='datatype', normalizer="lowercase")
     concept_class = fields.KeywordField(attr='concept_class', normalizer="lowercase")
     retired = fields.KeywordField(attr='retired')
-    is_active = fields.KeywordField(attr='is_active')
     is_latest_version = fields.KeywordField(attr='is_latest_version')
     extras = fields.ObjectField(dynamic=True)
     created_by = fields.KeywordField(attr='created_by.username')
@@ -48,26 +49,47 @@ class ConceptDocument(Document):
         ]
 
     @staticmethod
+    def get_match_phrase_attrs():
+        return ['_name', 'external_id']
+
+    @staticmethod
+    def get_exact_match_attrs():
+        return {
+            'id': {
+                'boost': 40
+            },
+            'name': {
+                'boost': 35
+            },
+            'same_as_map_codes': {
+                'boost': 5.5,
+            },
+            'other_map_codes': {
+                'boost': 5,
+            },
+        }
+
+    @staticmethod
     def get_boostable_search_attrs():
         return {
             'id': {
-                'boost': 1.5
+                'boost': 25
             },
-            '_name': {
-                'boost': 2
+            'name': {
+                'boost': 23
             },
             'synonyms': {
-                'boost': 1,
+                'boost': 0.3,
                 'wildcard': True,
                 'lower': True
             },
             'same_as_map_codes': {
-                'boost': 0.1,
+                'boost': 0.2,
                 'wildcard': True,
                 'lower': True
             },
             'other_map_codes': {
-                'boost': 0,
+                'boost': 0.1,
                 'wildcard': True,
                 'lower': True
             },
@@ -75,6 +97,8 @@ class ConceptDocument(Document):
 
     @staticmethod
     def prepare_numeric_id(instance):
+        if len(instance.mnemonic) > 19:  # long (-9223372036854775808 - 9223372036854775807)
+            return 0
         try:
             return int(instance.mnemonic)
         except:  # pylint: disable=bare-except
@@ -108,7 +132,8 @@ class ConceptDocument(Document):
 
     @staticmethod
     def prepare_synonyms(instance):
-        return list(map(lambda x: x.lower(), instance.names.filter(name__isnull=False).values_list('name', flat=True)))
+        names = instance.names.exclude(name=instance.display_name)
+        return list(map(lambda x: x.lower(), names.filter(name__isnull=False).values_list('name', flat=True)))
 
     @staticmethod
     def prepare_source_version(instance):

@@ -20,11 +20,12 @@ class SourceDocument(Document):
     owner_type = fields.KeywordField(attr='parent_resource_type')
     public_can_view = fields.TextField(attr='public_can_view')
     source_type = fields.KeywordField(attr='source_type', normalizer='lowercase')
-    is_active = fields.KeywordField(attr='is_active')
     version = fields.KeywordField(attr='version')
-    name = fields.KeywordField(attr='name', normalizer='lowercase')
-    canonical_url = fields.KeywordField(attr='canonical_url', normalizer='lowercase')
-    mnemonic = fields.KeywordField(attr='mnemonic', normalizer='lowercase')
+    name = fields.TextField(attr='name')
+    _name = fields.KeywordField(attr='name', normalizer='lowercase')
+    canonical_url = fields.TextField(attr='canonical_url')
+    mnemonic = fields.TextField(attr='mnemonic')
+    _mnemonic = fields.KeywordField(attr='mnemonic', normalizer='lowercase')
     extras = fields.ObjectField(dynamic=True)
     identifier = fields.ObjectField()
     jurisdiction = fields.ObjectField()
@@ -48,20 +49,38 @@ class SourceDocument(Document):
         ]
 
     @staticmethod
+    def get_match_phrase_attrs():
+        return ['name', 'external_id']
+
+    @staticmethod
+    def get_exact_match_attrs():
+        return {
+            'mnemonic': {
+                'boost': 4,
+            },
+            'name': {
+                'boost': 3.5,
+            },
+            'canonical_url': {
+                'boost': 3,
+            },
+        }
+
+    @staticmethod
     def get_boostable_search_attrs():
         return {
             'mnemonic': {
-                'boost': 5,
+                'boost': 1,
                 'lower': True,
                 'wildcard': True
             },
             'name': {
-                'boost': 4,
+                'boost': 0.8,
                 'lower': True,
                 'wildcard': True
             },
             'canonical_url': {
-                'boost': 3,
+                'boost': 0.6,
                 'lower': True,
                 'wildcard': True
             }

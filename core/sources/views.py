@@ -99,7 +99,7 @@ class SourceListView(SourceBaseView, ConceptDictionaryCreateMixin, ListWithHeade
     es_fields = Source.es_fields
     document_model = SourceDocument
     facet_class = SourceFacetedSearch
-    default_filters = {'is_active': True, 'version': HEAD}
+    default_filters = {'version': HEAD}
 
     def apply_filters(self, queryset):
         return queryset

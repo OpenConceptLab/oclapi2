@@ -155,7 +155,7 @@ class CollectionListView(CollectionBaseView, ConceptDictionaryCreateMixin, ListW
     es_fields = Collection.es_fields
     document_model = CollectionDocument
     facet_class = CollectionFacetedSearch
-    default_filters = {'is_active': True, 'version': HEAD}
+    default_filters = {'version': HEAD}
 
     def apply_filters(self, queryset):
         return queryset

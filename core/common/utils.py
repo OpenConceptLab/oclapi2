@@ -909,3 +909,11 @@ def generic_sort(_list):
             return item
         return str(item)
     return sorted(_list, key=compare)
+
+
+def get_falsy_values():
+    return ['false', False, 'False', 0, '0', 'None', 'null', None]
+
+
+def get_truthy_values():
+    return ['true', True, 'True', 1, '1']

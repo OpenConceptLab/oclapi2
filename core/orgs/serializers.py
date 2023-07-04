@@ -7,15 +7,16 @@ from core.client_configs.serializers import ClientConfigSerializer
 from core.common.constants import NAMESPACE_REGEX, ACCESS_TYPE_CHOICES, DEFAULT_ACCESS_TYPE, INCLUDE_CLIENT_CONFIGS, \
     INCLUDE_OVERVIEW
 from .models import Organization
+from ..common.serializers import AbstractResourceSerializer
 
 
-class OrganizationListSerializer(serializers.ModelSerializer):
+class OrganizationListSerializer(AbstractResourceSerializer):
     type = serializers.CharField(source='resource_type', read_only=True)
     id = serializers.CharField(source='mnemonic')
 
     class Meta:
         model = Organization
-        fields = ('id', 'name', 'url', 'type')
+        fields = AbstractResourceSerializer.Meta.fields + ('id', 'name', 'url', 'type')
 
 
 class OrganizationCreateSerializer(serializers.ModelSerializer):
@@ -66,7 +67,7 @@ class OrganizationCreateSerializer(serializers.ModelSerializer):
         return organization
 
 
-class OrganizationDetailSerializer(serializers.ModelSerializer):
+class OrganizationDetailSerializer(AbstractResourceSerializer):
     type = serializers.CharField(source='resource_type', read_only=True)
     uuid = serializers.CharField(source='id', read_only=True)
     id = serializers.CharField(source='mnemonic', read_only=True)
@@ -88,7 +89,7 @@ class OrganizationDetailSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Organization
-        fields = (
+        fields = AbstractResourceSerializer.Meta.fields + (
             'type', 'uuid', 'id', 'public_access', 'name', 'company', 'website', 'location', 'members',
             'created_on', 'updated_on', 'url', 'extras', 'members_url', 'created_by', 'updated_by', 'location',
             'sources_url', 'public_sources', 'collections_url', 'public_collections', 'logo_url', 'description',

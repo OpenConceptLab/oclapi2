@@ -13,12 +13,13 @@ from core.common.constants import NAMESPACE_REGEX, INCLUDE_SUBSCRIBED_ORGS, INCL
     INCLUDE_AUTH_GROUPS
 from core.users.constants import INVALID_AUTH_GROUP_NAME
 from .models import UserProfile
+from ..common.serializers import AbstractResourceSerializer
 
 
-class UserListSerializer(serializers.ModelSerializer):
+class UserListSerializer(AbstractResourceSerializer):
     class Meta:
         model = UserProfile
-        fields = (
+        fields = AbstractResourceSerializer.Meta.fields + (
             'username', 'name', 'url'
         )
 
@@ -114,7 +115,7 @@ class UserCreateSerializer(serializers.ModelSerializer):
         return user
 
 
-class UserDetailSerializer(serializers.ModelSerializer):
+class UserDetailSerializer(AbstractResourceSerializer):
     type = serializers.CharField(source='resource_type', read_only=True)
     uuid = serializers.CharField(source='id', read_only=True)
     username = serializers.CharField(required=False)
@@ -141,7 +142,7 @@ class UserDetailSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = UserProfile
-        fields = (
+        fields = AbstractResourceSerializer.Meta.fields + (
             'type', 'uuid', 'username', 'name', 'email', 'company', 'location', 'preferred_locale', 'orgs',
             'public_collections', 'public_sources', 'created_on', 'updated_on', 'created_by', 'updated_by',
             'url', 'organizations_url', 'extras', 'sources_url', 'collections_url', 'website', 'last_login',

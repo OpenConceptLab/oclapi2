@@ -18,8 +18,10 @@ class Organization(BaseResourceModel, SourceContainerMixin):
 
     OBJECT_TYPE = ORG_OBJECT_TYPE
     es_fields = {
-        'name': {'sortable': True, 'filterable': True, 'exact': True},
-        'mnemonic': {'sortable': True, 'filterable': True, 'exact': True},
+        'name': {'sortable': False, 'filterable': True, 'exact': True},
+        '_name': {'sortable': True, 'filterable': False, 'exact': False},
+        'mnemonic': {'sortable': False, 'filterable': True, 'exact': True},
+        '_mnemonic': {'sortable': True, 'filterable': False, 'exact': False},
         'last_update': {'sortable': True, 'default': 'desc', 'filterable': False},
         'company': {'sortable': False, 'filterable': True, 'exact': True},
         'location': {'sortable': False, 'filterable': True, 'exact': True},

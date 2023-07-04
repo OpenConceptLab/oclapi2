@@ -47,8 +47,8 @@ class CustomPaginator:
         self.page_object = self.paginator.get_page(self.page_number)
         self.page_count = ceil(int(self.total_count) / int(self.page_size))
         self.max_score = max_score
-        self.search_scores = search_scores
-        self.highlights = highlights
+        self.search_scores = search_scores or {}
+        self.highlights = highlights or {}
 
     @property
     def current_page_number(self):
@@ -57,11 +57,12 @@ class CustomPaginator:
     @property
     def current_page_results(self):
         results = self.page_object.object_list
-        if self.search_scores and self.max_score:
+        if self.search_scores or self.max_score or self.highlights:
             for result in results:
                 result._score = self.search_scores.get(result.id)  # pylint: disable=protected-access
                 result._highlight = self.highlights.get(result.id)  # pylint: disable=protected-access
-                result._confidence = f"{round((result._score / self.max_score) * 100, 2)}%"  # pylint: disable=protected-access
+                if result._score and self.max_score:  # pylint: disable=protected-access
+                    result._confidence = f"{round((result._score / self.max_score) * 100, 2)}%"  # pylint: disable=protected-access
         return results
 
     @cached_property

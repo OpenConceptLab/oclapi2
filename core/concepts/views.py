@@ -48,7 +48,7 @@ class ConceptBaseView(SourceChildCommonBaseView):
     document_model = ConceptDocument
     facet_class = ConceptFacetedSearch
     es_fields = Concept.es_fields
-    default_filters = {'is_active': True}
+    default_filters = {}
 
     def get_detail_serializer(self, obj, data=None, files=None, partial=False):
         return ConceptDetailSerializer(obj, data, files, partial, context={'request': self.request})

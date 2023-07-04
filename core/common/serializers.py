@@ -1,13 +1,13 @@
 from pydash import get
-from rest_framework.fields import CharField, JSONField, SerializerMethodField
+from rest_framework.fields import CharField, JSONField, SerializerMethodField, FloatField
 from rest_framework.serializers import Serializer, Field, ValidationError, ModelSerializer
 
 from core import settings
 from core.code_systems.constants import RESOURCE_TYPE as CODE_SYSTEM_RESOURCE_TYPE
 from core.common.constants import INCLUDE_CONCEPTS_PARAM, INCLUDE_MAPPINGS_PARAM, LIMIT_PARAM, OFFSET_PARAM, \
-    INCLUDE_VERBOSE_REFERENCES
+    INCLUDE_VERBOSE_REFERENCES, INCLUDE_SEARCH_META_PARAM
 from core.common.feeds import DEFAULT_LIMIT
-from core.common.utils import to_int
+from core.common.utils import to_int, get_truthy_values
 from core.concept_maps.constants import RESOURCE_TYPE as CONCEPT_MAP_RESOURCE_TYPE
 from core.orgs.models import Organization
 from core.users.models import UserProfile
@@ -167,14 +167,61 @@ class IdentifierSerializer(ReadSerializerMixin, Serializer):
         return value
 
 
-class AbstractRepoResourcesSerializer(ModelSerializer):
+class SearchResultSerializer(Serializer):  # pylint: disable=abstract-method
+    search_score = FloatField(source='_score', allow_null=True)
+    search_confidence = CharField(source='_confidence', allow_null=True, allow_blank=True)
+    search_highlight = SerializerMethodField()
+
+    class Meta:
+        fields = ('search_score', 'search_confidence', 'search_highlight')
+
+    @staticmethod
+    def get_search_highlight(obj):
+        highlight = get(obj, '_highlight')
+        cleaned_highlight = {}
+        if highlight:
+            for attr, value in highlight.items():
+                cleaned_highlight[attr] = value
+        return cleaned_highlight
+
+
+class AbstractResourceSerializer(ModelSerializer):
+    meta = SerializerMethodField()
+
+    class Meta:
+        abstract = True
+        fields = ('meta',)
+
+    def __init__(self, *args, **kwargs):  # pylint: disable=too-many-branches
+        request = get(kwargs, 'context.request')
+        params = get(request, 'query_params')
+
+        self.query_params = params.dict() if params else {}
+        self.include_search_meta = self.query_params.get(
+            INCLUDE_SEARCH_META_PARAM) in get_truthy_values() and self.query_params.get('q')
+
+        try:
+            if not self.include_search_meta:
+                self.fields.pop('meta', None)
+        except:  # pylint: disable=bare-except
+            pass
+
+        super().__init__(*args, **kwargs)
+
+    def get_meta(self, obj):
+        if self.include_search_meta:
+            return SearchResultSerializer(obj).data
+        return None
+
+
+class AbstractRepoResourcesSerializer(AbstractResourceSerializer):
     concepts = SerializerMethodField()
     mappings = SerializerMethodField()
     references = SerializerMethodField()
 
     class Meta:
         abstract = True
-        fields = ('concepts', 'mappings', 'references')
+        fields = AbstractResourceSerializer.Meta.fields + ('concepts', 'mappings', 'references')
 
     def __init__(self, *args, **kwargs):
         params = get(kwargs, 'context.request.query_params')

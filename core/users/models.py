@@ -38,8 +38,10 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
     mnemonic_attr = 'username'
 
     es_fields = {
-        'username': {'sortable': True, 'filterable': True, 'exact': True},
-        'name': {'sortable': True, 'filterable': True, 'exact': True},
+        'username': {'sortable': False, 'filterable': True, 'exact': True},
+        '_username': {'sortable': True, 'filterable': False, 'exact': False},
+        'name': {'sortable': False, 'filterable': True, 'exact': True},
+        '_name': {'sortable': True, 'filterable': False, 'exact': False},
         'date_joined': {'sortable': True, 'default': 'asc', 'filterable': False},
         'company': {'sortable': True, 'filterable': True, 'exact': True},
         'location': {'sortable': True, 'filterable': True, 'exact': True},

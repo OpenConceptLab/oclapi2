@@ -7,12 +7,13 @@ from core.common.constants import MAPPING_LOOKUP_CONCEPTS, MAPPING_LOOKUP_SOURCE
     MAPPING_LOOKUP_TO_CONCEPT, MAPPING_LOOKUP_FROM_SOURCE, MAPPING_LOOKUP_TO_SOURCE, INCLUDE_EXTRAS_PARAM, \
     INCLUDE_SOURCE_VERSIONS, INCLUDE_COLLECTION_VERSIONS, INCLUDE_VERBOSE_REFERENCES
 from core.common.fields import EncodedDecodedCharField
+from core.common.serializers import AbstractResourceSerializer
 from core.concepts.serializers import ConceptListSerializer, ConceptDetailSerializer
 from core.mappings.models import Mapping
 from core.sources.serializers import SourceListSerializer, SourceDetailSerializer
 
 
-class MappingListSerializer(ModelSerializer):
+class MappingListSerializer(AbstractResourceSerializer):
     type = CharField(source='resource_type', read_only=True)
     id = CharField(source='mnemonic', required=False)
     uuid = CharField(source='id', read_only=True)
@@ -35,7 +36,7 @@ class MappingListSerializer(ModelSerializer):
 
     class Meta:
         model = Mapping
-        fields = (
+        fields = AbstractResourceSerializer.Meta.fields + (
             'external_id', 'retired', 'map_type', 'source', 'owner', 'owner_type',
             'from_concept_code', 'from_concept_name', 'from_concept_url',
             'to_concept_code', 'to_concept_name', 'to_concept_url',
@@ -126,7 +127,7 @@ class MappingVersionListSerializer(MappingListSerializer):
         return obj.get_checksums(queue=True)
 
 
-class MappingMinimalSerializer(ModelSerializer):
+class MappingMinimalSerializer(AbstractResourceSerializer):
     id = CharField(source='mnemonic', read_only=True)
     type = CharField(source='resource_type', read_only=True)
     url = CharField(source='uri', read_only=True)
@@ -140,7 +141,7 @@ class MappingMinimalSerializer(ModelSerializer):
 
     class Meta:
         model = Mapping
-        fields = (
+        fields = AbstractResourceSerializer.Meta.fields + (
             'id', 'type', 'map_type', 'url', 'version_url', 'to_concept_code', 'to_concept_url',
             'cascade_target_concept_code', 'cascade_target_concept_url', 'cascade_target_source_owner',
             'cascade_target_source_name', 'cascade_target_concept_name', 'retired', 'sort_weight',

@@ -10,19 +10,19 @@ from rest_framework.serializers import ModelSerializer
 from core.client_configs.serializers import ClientConfigSerializer
 from core.common.constants import DEFAULT_ACCESS_TYPE, NAMESPACE_REGEX, ACCESS_TYPE_CHOICES, HEAD, \
     INCLUDE_SUMMARY, INCLUDE_CLIENT_CONFIGS, INCLUDE_HIERARCHY_ROOT
-from core.common.serializers import AbstractRepoResourcesSerializer
+from core.common.serializers import AbstractRepoResourcesSerializer, AbstractResourceSerializer
 from core.orgs.models import Organization
 from core.settings import DEFAULT_LOCALE
 from core.sources.models import Source
 from core.users.models import UserProfile
 
 
-class SourceMinimalSerializer(ModelSerializer):
+class SourceMinimalSerializer(AbstractResourceSerializer):
     id = CharField(source='mnemonic')
 
     class Meta:
         model = Source
-        fields = ('id', 'url')
+        fields = AbstractResourceSerializer.Meta.fields + ('id', 'url')
 
 
 class SourceVersionMinimalSerializer(ModelSerializer):
@@ -36,7 +36,7 @@ class SourceVersionMinimalSerializer(ModelSerializer):
         fields = ('id', 'version_url', 'type', 'short_code', 'released')
 
 
-class SourceListSerializer(ModelSerializer):
+class SourceListSerializer(AbstractResourceSerializer):
     type = CharField(source='resource_type')
     short_code = CharField(source='mnemonic')
     owner = CharField(source='parent_resource')
@@ -47,7 +47,7 @@ class SourceListSerializer(ModelSerializer):
 
     class Meta:
         model = Source
-        fields = (
+        fields = AbstractResourceSerializer.Meta.fields + (
             'short_code', 'name', 'url', 'owner', 'owner_type', 'owner_url', 'version', 'created_at', 'id',
             'source_type', 'updated_at', 'canonical_url', 'summary', 'type',
         )

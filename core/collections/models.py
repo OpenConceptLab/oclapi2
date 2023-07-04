@@ -41,14 +41,16 @@ class Collection(ConceptContainerModel):
 
     es_fields = {
         'collection_type': {'sortable': True, 'filterable': True, 'facet': True, 'exact': True},
-        'mnemonic': {'sortable': True, 'filterable': True, 'exact': True},
-        'name': {'sortable': True, 'filterable': True, 'exact': True},
+        'mnemonic': {'sortable': False, 'filterable': True, 'exact': True},
+        '_mnemonic': {'sortable': True, 'filterable': False, 'exact': False},
+        'name': {'sortable': False, 'filterable': True, 'exact': True},
+        '_name': {'sortable': True, 'filterable': False, 'exact': False},
         'last_update': {'sortable': True, 'filterable': False, 'default': 'desc'},
         'locale': {'sortable': False, 'filterable': True, 'facet': True},
         'owner': {'sortable': True, 'filterable': True, 'facet': True, 'exact': True},
         'owner_type': {'sortable': False, 'filterable': True, 'facet': True},
         'custom_validation_schema': {'sortable': False, 'filterable': True, 'facet': True},
-        'canonical_url': {'sortable': True, 'filterable': True, 'exact': True},
+        'canonical_url': {'sortable': False, 'filterable': True, 'exact': True},
         'experimental': {'sortable': False, 'filterable': False, 'facet': False},
         'external_id': {'sortable': False, 'filterable': True, 'facet': False, 'exact': True},
     }
