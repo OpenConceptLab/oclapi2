@@ -939,6 +939,14 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
             'released': self.released_versions_count
         }
 
+    def get_concepts_extras_distribution(self):
+        return self.get_distinct_extras_keys(self.get_concepts_queryset(), 'concepts')
+
+    @staticmethod
+    def get_distinct_extras_keys(queryset, resource):
+        return set(queryset.exclude(retired=True).extra(
+            select={'key': f"jsonb_object_keys({resource}.extras)"}).values_list('key', flat=True))
+
     def get_name_locales_queryset(self):
         from core.concepts.models import ConceptName
         return ConceptName.objects.filter(concept__in=self.get_active_concepts())
