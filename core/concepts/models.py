@@ -181,7 +181,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                       models.Index(name='concepts_head_parent_pub', fields=['parent_id', 'public_access'],
                                    condition=(Q(is_active=True) & Q(retired=False) & Q(id=F('versioned_object_id')))),
                       models.Index(name='concepts_parent_active', fields=['parent_id', 'id', 'retired'],
-                                   condition=(Q(retired=False, id=F('versioned_object_id')))),  # used in getting concept extras keys in source HEAD
+                                   condition=(Q(retired=False, id=F('versioned_object_id')))),
                       models.Index(fields=['uri']),
                       models.Index(fields=['version']),
                   ] + VersionedModel.Meta.indexes
