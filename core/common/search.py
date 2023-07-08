@@ -53,17 +53,6 @@ class CustomESSearch:
         )
 
     @staticmethod
-    def get_prefix_match_criteria(field, search_str, boost):
-        return Q(
-            'prefix', **{
-                field: {
-                    'value': search_str,
-                    'boost': boost + 95
-                }
-            }
-        )
-
-    @staticmethod
     def get_prefix_criteria(field, search_str, boost):
         return Q(
             'prefix', **{
