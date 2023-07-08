@@ -186,29 +186,28 @@ class SearchResultSerializer(Serializer):  # pylint: disable=abstract-method
 
 
 class AbstractResourceSerializer(ModelSerializer):
-    meta = SerializerMethodField()
+    search_meta = SerializerMethodField()
 
     class Meta:
         abstract = True
-        fields = ('meta',)
+        fields = ('search_meta',)
 
     def __init__(self, *args, **kwargs):  # pylint: disable=too-many-branches
         request = get(kwargs, 'context.request')
         params = get(request, 'query_params')
-
-        self.query_params = params.dict() if params else {}
+        self.query_params = (params or {}) if isinstance(params, dict) else (params.dict() if params else {})
         self.include_search_meta = self.query_params.get(
             INCLUDE_SEARCH_META_PARAM) in get_truthy_values() and self.query_params.get('q')
 
         try:
             if not self.include_search_meta:
-                self.fields.pop('meta', None)
+                self.fields.pop('search_meta', None)
         except:  # pylint: disable=bare-except
             pass
 
         super().__init__(*args, **kwargs)
 
-    def get_meta(self, obj):
+    def get_search_meta(self, obj):
         if self.include_search_meta:
             return SearchResultSerializer(obj).data
         return None

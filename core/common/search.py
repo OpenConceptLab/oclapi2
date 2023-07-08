@@ -48,20 +48,11 @@ class CustomESSearch:
 
     @staticmethod
     def get_term_match_criteria(field, search_str, boost):
-        return Q(
-            'term', **{field: {'value': search_str, 'boost': boost + 100}}
-        )
+        return Q('term', **{field: {'value': search_str, 'boost': boost + 100}})
 
     @staticmethod
     def get_prefix_criteria(field, search_str, boost):
-        return Q(
-            'prefix', **{
-                field: {
-                    'value': search_str,
-                    'boost': boost + 95
-                }
-            }
-        )
+        return Q('prefix', **{field: {'value': search_str, 'boost': boost + 95}})
 
     @staticmethod
     def get_match_criteria(field, search_str, boost):
@@ -83,17 +74,7 @@ class CustomESSearch:
     @staticmethod
     def __fuzzy_criteria(boost, field, max_expansions, word):
         return Q(
-            {
-                'fuzzy': {
-                    field: {
-                        'value': word,
-                        'boost': boost,
-                        'fuzziness': 'AUTO',
-                        'max_expansions': max_expansions
-                    }
-                }
-            }
-        )
+            {'fuzzy': {field: {'value': word, 'boost': boost, 'fuzziness': 'AUTO', 'max_expansions': max_expansions}}})
 
     def apply_aggregation_score_histogram(self):
         self._dsl_search.aggs.bucket(
