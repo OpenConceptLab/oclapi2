@@ -651,7 +651,6 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
             'source': self.mnemonic,
             'ownerType': self.parent.resource_type,
             'owner': self.parent.mnemonic,
-            'is_active': True,
             'retired': False
         }
         if self.is_head:

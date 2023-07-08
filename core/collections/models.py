@@ -395,7 +395,6 @@ class Collection(ConceptContainerModel):
             'collection': self.mnemonic,
             'collection_owner_url': to_owner_uri(self.uri),
             'expansion': self.expansion.mnemonic,
-            'is_active': True,
             'retired': False,
             'collection_version': self.version
         }
