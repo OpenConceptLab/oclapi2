@@ -113,7 +113,7 @@ class CustomPaginator:
 
 
 class ListWithHeadersMixin(ListModelMixin):
-    default_filters = {'is_active': True}
+    default_filters = {}
     object_list = None
     _max_score = None
     _scores = None
