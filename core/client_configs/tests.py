@@ -114,7 +114,7 @@ class ClientConfigTest(OCLTestCase):
 
         client_config.config = {
             'tabs': [
-                {'foo': 'bar', 'default': True, 'sortAsc': 'id', 'type': 'concepts'},
+                {'foo': 'bar', 'default': True, 'sortAsc': 'id_lowercase', 'type': 'concepts'},
                 {'foo': 'bar', 'default': False}
             ]
         }
