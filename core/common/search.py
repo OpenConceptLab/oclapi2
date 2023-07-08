@@ -40,9 +40,10 @@ class CustomESSearch:
 
     @staticmethod
     def get_match_phrase_criteria(field, search_str, boost):
-        return CustomESSearch.get_term_match_criteria(
-            field, search_str, boost
-        ) | CustomESSearch.get_prefix_criteria(
+        criteria = CustomESSearch.get_term_match_criteria(field, search_str, boost)
+        if field == 'external_id':
+            return criteria
+        return criteria | CustomESSearch.get_prefix_criteria(
             field, search_str, boost
         ) | Q('match_phrase', **{field: {'query': search_str, 'boost': boost}})
 
