@@ -1675,7 +1675,7 @@ class ConceptListViewTest(OCLAPITestCase):
             HTTP_AUTHORIZATION='Token ' + self.random_user.get_token(),
         )
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.data), 2)
+        self.assertEqual(len(response.data), 1)
         self.assertEqual(response.data[0]['id'], 'MyConcept2')
 
         response = self.client.get(
