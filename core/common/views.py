@@ -297,7 +297,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             return query
 
         if not search_string:
-            return get_query(search_string)
+            return get_query(search_string), []
         words = search_string.split()
         criterion = get_query(words[0])
         for word in words[1:]:
