@@ -8,6 +8,7 @@ from redis import Sentinel
 
 class QueueOnceRedisSentinelBackend(Redis):
     def __init__(self, backend_settings):
+        # pylint: disable=super-init-not-called
         self._sentinel = Sentinel(backend_settings['sentinels'])
         self._sentinel_master = backend_settings['sentinels_master']
         self.blocking_timeout = backend_settings.get("blocking_timeout", 1)
