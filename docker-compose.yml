@@ -12,10 +12,14 @@ services:
     volumes:
       - postgres-data:/usr/share/postgres/data
   redis:
-    image: redis:6.0.6-alpine
+    image: bitnami/redis:7.0.12
     restart: "always"
+    environment:
+      - ALLOW_EMPTY_PASSWORD=yes
     healthcheck:
       test: "redis-cli ping"
+    volumes:
+      - redis-data:/bitnami/redis/data
   api:
     image: openconceptlab/oclapi2:${ENVIRONMENT-production}
     restart: "always"
@@ -171,3 +175,4 @@ services:
 volumes:
   postgres-data:
   es-data:
+  redis-data:

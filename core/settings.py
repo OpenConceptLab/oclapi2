@@ -306,12 +306,27 @@ REDIS_DB = 0
 REDIS_HOST = os.environ.get('REDIS_HOST', 'redis')
 REDIS_URL = f"redis://{REDIS_HOST}:{REDIS_PORT}"
 
+REDIS_SENTINELS = os.environ.get('REDIS_SENTINELS', None)
+REDIS_SENTINELS_MASTER = os.environ.get('REDIS_SENTINELS_MASTER', 'default')
+REDIS_SENTINELS_LIST = []
+
 # django cache
 if ENV and ENV not in ['ci']:
+    OPTIONS = {}
+    if REDIS_SENTINELS:
+        for REDIS_SENTINEL in REDIS_SENTINELS.split(','):
+            SENTINEL = REDIS_SENTINEL.split(':')
+            REDIS_SENTINELS_LIST.append((SENTINEL[0], int(SENTINEL[1])))
+        OPTIONS.update({
+            'CLIENT_CLASS': 'django_redis.client.SentinelClient',
+            'SENTINELS': REDIS_SENTINELS_LIST
+        })
+
     CACHES = {
         'default': {
-            'BACKEND': 'django.core.cache.backends.redis.RedisCache',
+            'BACKEND': 'django_redis.cache.RedisCache',
             'LOCATION': REDIS_URL,
+            'OPTIONS': OPTIONS
         }
     }
 
@@ -337,25 +352,44 @@ CELERY_TASK_ROUTES = {
     'core.common.tasks.populate_indexes': {'queue': 'indexing'},
     'core.common.tasks.rebuild_indexes': {'queue': 'indexing'}
 }
-CELERY_RESULT_BACKEND = f'redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}'
-CELERY_RESULT_EXTENDED = True
+
+CELERY_BROKER_TRANSPORT_OPTIONS = {'visibility_timeout': 259200}  # 72 hours, the longest ETA
 CELERY_RESULT_BACKEND_TRANSPORT_OPTIONS = {
     'retry_policy': {
         'timeout': 10.0
     }
 }
+
+if REDIS_SENTINELS:
+    CELERY_RESULT_BACKEND = ''
+    for REDIS_SENTINEL in REDIS_SENTINELS.split(','):
+        CELERY_RESULT_BACKEND = CELERY_RESULT_BACKEND + f'sentinel://{REDIS_SENTINEL}/0;'
+        CELERY_BROKER_TRANSPORT_OPTIONS.update({'master_name': REDIS_SENTINELS_MASTER})
+        CELERY_RESULT_BACKEND_TRANSPORT_OPTIONS.update({'master_name': REDIS_SENTINELS_MASTER})
+else:
+    CELERY_RESULT_BACKEND = f'redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}'
+
+CELERY_RESULT_EXTENDED = True
 CELERY_RESULT_EXPIRES = 259200  # 72 hours
 CELERY_BROKER_URL = CELERY_RESULT_BACKEND
 CELERY_BROKER_POOL_LIMIT = 50  # should be adjusted considering the number of threads
 CELERY_BROKER_CONNECTION_TIMEOUT = 10.0
-CELERY_BROKER_TRANSPORT_OPTIONS = {'visibility_timeout': 259200}  # 72 hours, the lon
 CELERY_ACCEPT_CONTENT = ['application/json']
-CELERY_ONCE = {
-    'backend': 'celery_once.backends.Redis',
-    'settings': {
-        'url': CELERY_RESULT_BACKEND,
+if REDIS_SENTINELS:
+    CELERY_ONCE = {
+        'backend': 'core.common.backends.QueueOnceRedisSentinelBackend',
+        'settings': {
+            'sentinels': REDIS_SENTINELS_LIST,
+            'sentinels_master': REDIS_SENTINELS_MASTER
+        }
     }
-}
+else:
+    CELERY_ONCE = {
+        'backend': 'celery_once.backends.Redis',
+        'settings': {
+            'url': CELERY_RESULT_BACKEND,
+        }
+    }
 CELERYBEAT_SCHEDULE = {
     'healthcheck-every-minute': {
         'task': 'core.common.tasks.beat_healthcheck',
