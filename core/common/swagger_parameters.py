@@ -110,6 +110,9 @@ ids_param = openapi.Parameter(
 uri_param = openapi.Parameter(
     'uri', openapi.IN_FORM, description="Relative URI", type=openapi.TYPE_STRING
 )
+filter_param = openapi.Parameter(
+    'filter', openapi.IN_FORM, description="Generic Filter", type=openapi.TYPE_OBJECT
+)
 resources_body_param = openapi.Parameter(
     'resource', openapi.IN_PATH, type=openapi.TYPE_STRING,
     enum=['mappings', 'concepts', 'sources', 'orgs', 'users', 'collections']

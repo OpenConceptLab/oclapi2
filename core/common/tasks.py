@@ -1,3 +1,4 @@
+import json
 from datetime import datetime
 from json import JSONDecodeError
 
@@ -477,6 +478,8 @@ def delete_concept(concept_id):  # pragma: no cover
 )
 def batch_index_resources(resource, filters, update_indexed=False):
     model = get_resource_class_from_resource_name(resource)
+    if isinstance(filters, str):
+        filters = json.loads(filters)
     if model:
         queryset = model.objects.filter(**filters)
         model.batch_index(queryset, model.get_search_document())
