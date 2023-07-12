@@ -11,10 +11,14 @@ from core.client_configs.serializers import ClientConfigSerializer
 from core.common.constants import DEFAULT_ACCESS_TYPE, NAMESPACE_REGEX, ACCESS_TYPE_CHOICES, HEAD, \
     INCLUDE_SUMMARY, INCLUDE_CLIENT_CONFIGS, INCLUDE_HIERARCHY_ROOT
 from core.common.serializers import AbstractRepoResourcesSerializer, AbstractResourceSerializer
+from core.common.utils import get_truthy_values
 from core.orgs.models import Organization
 from core.settings import DEFAULT_LOCALE
 from core.sources.models import Source
 from core.users.models import UserProfile
+
+
+TRUTHY = get_truthy_values()
 
 
 class SourceMinimalSerializer(AbstractResourceSerializer):
@@ -58,7 +62,7 @@ class SourceListSerializer(AbstractResourceSerializer):
         self.query_params = {}
         if params:
             self.query_params = params if isinstance(params, dict) else params.dict()
-        self.include_summary = self.query_params.get(INCLUDE_SUMMARY) in ['true', True]
+        self.include_summary = self.query_params.get(INCLUDE_SUMMARY) in TRUTHY
         try:
             if not self.include_summary:
                 self.fields.pop('summary', None)
@@ -369,9 +373,9 @@ class SourceDetailSerializer(SourceCreateOrUpdateSerializer, AbstractRepoResourc
         self.query_params = {}
         if params:
             self.query_params = params if isinstance(params, dict) else params.dict()
-        self.include_summary = self.query_params.get(INCLUDE_SUMMARY) in ['true', True]
-        self.include_client_configs = self.query_params.get(INCLUDE_CLIENT_CONFIGS) in ['true', True]
-        self.include_hierarchy_root = self.query_params.get(INCLUDE_HIERARCHY_ROOT) in ['true', True]
+        self.include_summary = self.query_params.get(INCLUDE_SUMMARY) in TRUTHY
+        self.include_client_configs = self.query_params.get(INCLUDE_CLIENT_CONFIGS) in TRUTHY
+        self.include_hierarchy_root = self.query_params.get(INCLUDE_HIERARCHY_ROOT) in TRUTHY
 
         try:
             if not self.include_summary:
@@ -457,7 +461,7 @@ class SourceVersionDetailSerializer(SourceCreateOrUpdateSerializer, AbstractRepo
         self.include_summary = False
         if params:
             self.query_params = params.dict()
-            self.include_summary = self.query_params.get(INCLUDE_SUMMARY) in ['true', True]
+            self.include_summary = self.query_params.get(INCLUDE_SUMMARY) in TRUTHY
 
         try:
             if not self.include_summary:

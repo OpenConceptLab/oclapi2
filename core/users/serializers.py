@@ -14,6 +14,9 @@ from core.common.constants import NAMESPACE_REGEX, INCLUDE_SUBSCRIBED_ORGS, INCL
 from core.users.constants import INVALID_AUTH_GROUP_NAME
 from .models import UserProfile
 from ..common.serializers import AbstractResourceSerializer
+from ..common.utils import get_truthy_values
+
+TRUTHY = get_truthy_values()
 
 
 class UserListSerializer(AbstractResourceSerializer):
@@ -154,9 +157,9 @@ class UserDetailSerializer(AbstractResourceSerializer):
     def __init__(self, *args, **kwargs):
         params = get(kwargs, 'context.request.query_params')
         self.query_params = params.dict() if params else {}
-        self.include_subscribed_orgs = self.query_params.get(INCLUDE_SUBSCRIBED_ORGS) in ['true', True]
-        self.include_verification_token = self.query_params.get(INCLUDE_VERIFICATION_TOKEN) in ['true', True]
-        self.include_auth_groups = self.query_params.get(INCLUDE_AUTH_GROUPS) in ['true', True]
+        self.include_subscribed_orgs = self.query_params.get(INCLUDE_SUBSCRIBED_ORGS) in TRUTHY
+        self.include_verification_token = self.query_params.get(INCLUDE_VERIFICATION_TOKEN) in TRUTHY
+        self.include_auth_groups = self.query_params.get(INCLUDE_AUTH_GROUPS) in TRUTHY
 
         if not self.include_subscribed_orgs:
             self.fields.pop('subscribed_orgs')

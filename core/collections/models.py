@@ -26,10 +26,14 @@ from core.common.tasks import seed_children_to_expansion, batch_index_resources,
     index_expansion_mappings
 from core.common.utils import drop_version, to_owner_uri, generate_temp_version, es_id_in, \
     es_wildcard_search, get_resource_class_from_resource_name, get_exact_search_fields, to_snake_case, \
-    es_exact_search, es_to_pks, batch_qs, split_list_by_condition, decode_string, is_canonical_uri, encode_string
+    es_exact_search, es_to_pks, batch_qs, split_list_by_condition, decode_string, is_canonical_uri, encode_string, \
+    get_truthy_values
 from core.concepts.constants import LOCALES_FULLY_SPECIFIED
 from core.concepts.models import Concept
 from core.mappings.models import Mapping
+
+
+TRUTHY = get_truthy_values()
 
 
 class Collection(ConceptContainerModel):
@@ -103,7 +107,7 @@ class Collection(ConceptContainerModel):
     def get_base_queryset(cls, params):
         collection = params.pop('collection', None)
         contains_uri = params.pop('contains', None)
-        include_references = params.pop('include_references', None) in [True, 'true']
+        include_references = params.pop('include_references', None) in TRUTHY
         queryset = super().get_base_queryset(params)
         if collection:
             queryset = queryset.filter(cls.get_exact_or_criteria('mnemonic', collection))

@@ -5,6 +5,9 @@ from core.collections.constants import SOURCE_MAPPINGS, SOURCE_TO_CONCEPTS
 from core.common.constants import CASCADE_LEVELS_PARAM, CASCADE_MAPPINGS_PARAM, \
     CASCADE_HIERARCHY_PARAM, CASCADE_METHOD_PARAM, MAP_TYPES_PARAM, EXCLUDE_MAP_TYPES_PARAM, CASCADE_DIRECTION_PARAM, \
     INCLUDE_RETIRED_PARAM, RETURN_MAP_TYPES, ALL, OMIT_IF_EXISTS_IN, EQUIVALENCY_MAP_TYPES, HEAD, INCLUDE_SELF
+from core.common.utils import get_truthy_values
+
+TRUTHY = get_truthy_values()
 
 
 class Bundle:
@@ -13,8 +16,8 @@ class Bundle:
         self.repo_version = repo_version
         self.params = params
         self.verbose = verbose
-        self.listing = params.get('listing', '') in ['true', 'True']
-        self.brief = params.get('brief', '') in ['true', 'True'] or (not self.verbose and not self.listing)
+        self.listing = params.get('listing', '') in TRUTHY
+        self.brief = params.get('brief', '') in TRUTHY or (not self.verbose and not self.listing)
         self.root = root
         self.reverse = False
         self.cascade_hierarchy = True
@@ -61,7 +64,7 @@ class Bundle:
 
     def set_include_retired(self):
         if INCLUDE_RETIRED_PARAM in self.params:
-            self.include_retired = self.params[INCLUDE_RETIRED_PARAM] in ['true', True]
+            self.include_retired = self.params[INCLUDE_RETIRED_PARAM] in TRUTHY
 
     def set_map_types(self):
         self.map_types = self.params.get(MAP_TYPES_PARAM) or None
@@ -77,11 +80,11 @@ class Bundle:
 
     def set_cascade_mappings(self):
         if CASCADE_MAPPINGS_PARAM in self.params:
-            self.cascade_mappings = self.params[CASCADE_MAPPINGS_PARAM] in ['true', True]
+            self.cascade_mappings = self.params[CASCADE_MAPPINGS_PARAM] in TRUTHY
 
     def set_cascade_hierarchy(self):
         if CASCADE_HIERARCHY_PARAM in self.params:
-            self.cascade_hierarchy = self.params[CASCADE_HIERARCHY_PARAM] in ['true', True]
+            self.cascade_hierarchy = self.params[CASCADE_HIERARCHY_PARAM] in TRUTHY
 
     def set_cascade_method(self):
         if CASCADE_METHOD_PARAM in self.params:
@@ -89,14 +92,14 @@ class Bundle:
 
     def set_cascade_direction(self):
         if CASCADE_DIRECTION_PARAM in self.params:
-            self.reverse = self.params[CASCADE_DIRECTION_PARAM] in ['true', True]
+            self.reverse = self.params[CASCADE_DIRECTION_PARAM] in TRUTHY
 
     def set_omit_if_exists_in(self):
         self.omit_if_exists_in = self.params.get(OMIT_IF_EXISTS_IN, None) or None
 
     def set_include_self(self):
         if INCLUDE_SELF in self.params:
-            self.include_self = self.params[INCLUDE_SELF] in ['true', True]
+            self.include_self = self.params[INCLUDE_SELF] in TRUTHY
 
     @property
     def resource_type(self):

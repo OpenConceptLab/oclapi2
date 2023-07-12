@@ -21,9 +21,10 @@ from core.common.permissions import HasPrivateAccess, HasOwnership, CanViewConce
     CanViewConceptDictionaryVersion
 from .checksums import ChecksumModel
 from .utils import write_csv_to_s3, get_csv_from_s3, get_query_params_from_url_string, compact_dict_by_values, \
-    to_owner_uri, parse_updated_since_param, get_export_service, to_int
+    to_owner_uri, parse_updated_since_param, get_export_service, to_int, get_truthy_values
 
 logger = logging.getLogger('oclapi')
+TRUTHY = get_truthy_values()
 
 
 class CustomPaginator:
@@ -201,19 +202,19 @@ class ListWithHeadersMixin(ListModelMixin):
         return data
 
     def should_include_facets(self):
-        return self.request.META.get(INCLUDE_FACETS, False) in ['true', True]
+        return self.request.META.get(INCLUDE_FACETS, False) in TRUTHY
 
     def should_include_search_stats(self):
-        return self.request.META.get(INCLUDE_SEARCH_STATS, False) in ['true', True]
+        return self.request.META.get(INCLUDE_SEARCH_STATS, False) in TRUTHY
 
     def only_facets(self):
-        return self.request.query_params.get(FACETS_ONLY, False) in ['true', True]
+        return self.request.query_params.get(FACETS_ONLY, False) in TRUTHY
 
     def only_search_stats(self):
-        return self.request.query_params.get(SEARCH_STATS_ONLY, False) in ['true', True]
+        return self.request.query_params.get(SEARCH_STATS_ONLY, False) in TRUTHY
 
     def should_compress(self):
-        return self.request.META.get(HTTP_COMPRESS_HEADER, False) in ['true', True]
+        return self.request.META.get(HTTP_COMPRESS_HEADER, False) in TRUTHY
 
     def get_object_ids(self):
         self.object_list.limit_iter = False
@@ -488,8 +489,8 @@ class SourceChildMixin(ChecksumModel):
 
     @staticmethod
     def apply_attribute_based_filters(queryset, params):
-        is_latest = params.get('is_latest', None) in [True, 'true']
-        include_retired = params.get(INCLUDE_RETIRED_PARAM, None) in [True, 'true']
+        is_latest = params.get('is_latest', None) in TRUTHY
+        include_retired = params.get(INCLUDE_RETIRED_PARAM, None) in TRUTHY
         updated_since = parse_updated_since_param(params)
         if is_latest:
             queryset = queryset.filter(is_latest_version=True)
@@ -708,7 +709,7 @@ class ConceptContainerExportMixin:
         if version.has_export():
             export_url = version.get_export_url()
 
-            no_redirect = request.query_params.get('noRedirect', False) in ['true', 'True', True]
+            no_redirect = request.query_params.get('noRedirect', False) in TRUTHY
             if no_redirect:
                 return Response({'url': export_url}, status=status.HTTP_200_OK)
 
@@ -736,13 +737,13 @@ class ConceptContainerExportMixin:
         if version.is_exporting:
             return Response(status=status.HTTP_208_ALREADY_REPORTED)
 
-        force_export = request.query_params.get('force', False) in ['true', 'True', True]
+        force_export = request.query_params.get('force', False) in TRUTHY
 
         if force_export or not version.has_export():
             status_code = self.handle_export_version()
             return Response(status=status_code)
 
-        no_redirect = request.query_params.get('noRedirect', False) in ['true', 'True', True]
+        no_redirect = request.query_params.get('noRedirect', False) in TRUTHY
         if no_redirect:
             return Response(status=status.HTTP_204_NO_CONTENT)
 
@@ -781,7 +782,7 @@ class ConceptContainerProcessingMixin:
 
     def get(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         version = self.get_object()
-        is_debug = request.query_params.get('debug', None) in ['true', True]
+        is_debug = request.query_params.get('debug', None) in TRUTHY
 
         if is_debug:
             return Response({'is_processing': version.is_processing, 'process_ids': version._background_process_ids})  # pylint: disable=protected-access

@@ -7,11 +7,15 @@ from rest_framework.permissions import IsAuthenticatedOrReadOnly
 from rest_framework.response import Response
 
 from core.common.constants import MAX_PINS_ALLOWED, INCLUDE_CREATOR_PINS
+from core.common.utils import get_truthy_values
 from core.common.views import BaseAPIView
 from core.orgs.models import Organization
 from core.pins.models import Pin
 from core.pins.serializers import PinSerializer, PinUpdateSerializer
 from core.users.models import UserProfile
+
+
+TRUTHY = get_truthy_values()
 
 
 class PinBaseView(BaseAPIView):
@@ -22,7 +26,7 @@ class PinBaseView(BaseAPIView):
         return queryset
 
     def should_include_creator_pins(self):
-        return self.request.query_params.get(INCLUDE_CREATOR_PINS, None) in ['true', True]
+        return self.request.query_params.get(INCLUDE_CREATOR_PINS, None) in TRUTHY
 
     def get_parent_type(self):
         if self.kwargs.get('user_is_self') or 'user' in self.kwargs:

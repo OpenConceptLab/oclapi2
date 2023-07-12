@@ -13,10 +13,14 @@ from core.collections.models import Collection, CollectionReference, Expansion
 from core.common.constants import HEAD, DEFAULT_ACCESS_TYPE, NAMESPACE_REGEX, ACCESS_TYPE_CHOICES, INCLUDE_SUMMARY, \
     INCLUDE_CLIENT_CONFIGS, INVALID_EXPANSION_URL
 from core.common.serializers import AbstractRepoResourcesSerializer
+from core.common.utils import get_truthy_values
 from core.orgs.models import Organization
 from core.settings import DEFAULT_LOCALE
 from core.sources.serializers import SourceVersionListSerializer
 from core.users.models import UserProfile
+
+
+TRUTHY = get_truthy_values()
 
 
 class CollectionMinimalSerializer(ModelSerializer):
@@ -66,7 +70,7 @@ class CollectionListSerializer(ModelSerializer):
         self.query_params = {}
         if params:
             self.query_params = params if isinstance(params, dict) else params.dict()
-        self.include_summary = self.query_params.get(INCLUDE_SUMMARY) in ['true', True]
+        self.include_summary = self.query_params.get(INCLUDE_SUMMARY) in TRUTHY
         try:
             if not self.include_summary:
                 self.fields.pop('summary', None)
@@ -380,8 +384,8 @@ class CollectionDetailSerializer(CollectionCreateOrUpdateSerializer, AbstractRep
         self.query_params = {}
         if params:
             self.query_params = params if isinstance(params, dict) else params.dict()
-        self.include_summary = self.query_params.get(INCLUDE_SUMMARY) in ['true', True]
-        self.include_client_configs = self.query_params.get(INCLUDE_CLIENT_CONFIGS) in ['true', True]
+        self.include_summary = self.query_params.get(INCLUDE_SUMMARY) in TRUTHY
+        self.include_client_configs = self.query_params.get(INCLUDE_CLIENT_CONFIGS) in TRUTHY
 
         try:
             if not self.include_summary:
@@ -459,7 +463,7 @@ class CollectionVersionDetailSerializer(CollectionCreateOrUpdateSerializer, Abst
         self.include_summary = False
         if params:
             self.query_params = params.dict()
-            self.include_summary = self.query_params.get(INCLUDE_SUMMARY) in ['true', True]
+            self.include_summary = self.query_params.get(INCLUDE_SUMMARY) in TRUTHY
 
         try:
             if not self.include_summary:
@@ -535,7 +539,7 @@ class ExpansionSerializer(ModelSerializer):
         self.include_summary = False
         if params:
             self.query_params = params.dict()
-            self.include_summary = self.query_params.get(INCLUDE_SUMMARY) in ['true', True]
+            self.include_summary = self.query_params.get(INCLUDE_SUMMARY) in TRUTHY
 
         try:
             if not self.include_summary:
@@ -575,7 +579,7 @@ class ExpansionDetailSerializer(ModelSerializer):
         self.include_summary = False
         if params:
             self.query_params = params.dict()
-            self.include_summary = self.query_params.get(INCLUDE_SUMMARY) in ['true', True]
+            self.include_summary = self.query_params.get(INCLUDE_SUMMARY) in TRUTHY
 
         try:
             if not self.include_summary:

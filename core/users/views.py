@@ -24,7 +24,7 @@ from core.common.exceptions import Http400
 from core.common.mixins import ListWithHeadersMixin
 from core.common.swagger_parameters import last_login_before_param, last_login_since_param, updated_since_param, \
     date_joined_since_param, date_joined_before_param
-from core.common.utils import parse_updated_since_param, from_string_to_date
+from core.common.utils import parse_updated_since_param, from_string_to_date, get_truthy_values
 from core.common.views import BaseAPIView, BaseLogoView
 from core.orgs.models import Organization
 from core.users.constants import VERIFICATION_TOKEN_MISMATCH, VERIFY_EMAIL_MESSAGE, REACTIVATE_USER_MESSAGE
@@ -34,6 +34,9 @@ from core.users.serializers import UserDetailSerializer, UserCreateSerializer, U
 from .models import UserProfile
 from ..common import ERRBIT_LOGGER
 from ..common.services import AuthService, OIDCAuthService
+
+
+TRUTHY = get_truthy_values()
 
 
 class OCLOIDCAuthenticationCallbackView(OIDCAuthenticationCallbackView):
@@ -202,7 +205,7 @@ class UserListView(UserBaseView,
                    mixins.CreateModelMixin):
 
     def get_serializer_class(self):
-        if self.request.query_params.get('summary') in ['true', True] and self.request.method == 'GET':
+        if self.request.query_params.get('summary') in TRUTHY and self.request.method == 'GET':
             return UserSummarySerializer
         if self.request.method == 'GET' and self.is_verbose():
             return UserDetailSerializer
@@ -357,7 +360,7 @@ class UserPasswordResetView(UserBaseView):
 
 class UserDetailView(UserBaseView, RetrieveAPIView, DestroyAPIView, mixins.UpdateModelMixin):
     def get_serializer_class(self):
-        if self.request.query_params.get('summary') in ['true', True] and self.request.method == 'GET':
+        if self.request.query_params.get('summary') in TRUTHY and self.request.method == 'GET':
             return UserSummarySerializer
 
         return UserDetailSerializer

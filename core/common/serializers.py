@@ -14,6 +14,9 @@ from core.users.models import UserProfile
 from core.value_sets.constants import RESOURCE_TYPE as VALUESET_RESOURCE_TYPE
 
 
+TRUTHY = get_truthy_values()
+
+
 class RootSerializer(Serializer):  # pylint: disable=abstract-method
     version = CharField()
     routes = JSONField()
@@ -197,7 +200,7 @@ class AbstractResourceSerializer(ModelSerializer):
         params = get(request, 'query_params')
         self.query_params = (params or {}) if isinstance(params, dict) else (params.dict() if params else {})
         self.include_search_meta = self.query_params.get(
-            INCLUDE_SEARCH_META_PARAM) in get_truthy_values() and self.query_params.get('q')
+            INCLUDE_SEARCH_META_PARAM) in TRUTHY and self.query_params.get('q')
 
         try:
             if not self.include_search_meta:
@@ -231,9 +234,9 @@ class AbstractRepoResourcesSerializer(AbstractResourceSerializer):
         self.include_references = False
         if params:
             self.query_params = params if isinstance(params, dict) else params.dict()
-            self.include_concepts = self.query_params.get(INCLUDE_CONCEPTS_PARAM) in ['true', True]
-            self.include_mappings = self.query_params.get(INCLUDE_MAPPINGS_PARAM) in ['true', True]
-            self.include_references = self.query_params.get(INCLUDE_VERBOSE_REFERENCES) in ['true', True]
+            self.include_concepts = self.query_params.get(INCLUDE_CONCEPTS_PARAM) in TRUTHY
+            self.include_mappings = self.query_params.get(INCLUDE_MAPPINGS_PARAM) in TRUTHY
+            self.include_references = self.query_params.get(INCLUDE_VERBOSE_REFERENCES) in TRUTHY
             self.limit = to_int(self.query_params.get(LIMIT_PARAM), DEFAULT_LIMIT)
             self.offset = to_int(self.query_params.get(OFFSET_PARAM), 0)
         try:

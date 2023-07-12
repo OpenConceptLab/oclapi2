@@ -8,6 +8,9 @@ from core.common.constants import NAMESPACE_REGEX, ACCESS_TYPE_CHOICES, DEFAULT_
     INCLUDE_OVERVIEW
 from .models import Organization
 from ..common.serializers import AbstractResourceSerializer
+from ..common.utils import get_truthy_values
+
+TRUTHY = get_truthy_values()
 
 
 class OrganizationListSerializer(AbstractResourceSerializer):
@@ -99,8 +102,8 @@ class OrganizationDetailSerializer(AbstractResourceSerializer):
     def __init__(self, *args, **kwargs):
         params = get(kwargs, 'context.request.query_params')
         self.query_params = params.dict() if params else {}
-        self.include_client_configs = self.query_params.get(INCLUDE_CLIENT_CONFIGS) in ['true', True]
-        self.include_overview = self.query_params.get(INCLUDE_OVERVIEW) in ['true', True]
+        self.include_client_configs = self.query_params.get(INCLUDE_CLIENT_CONFIGS) in TRUTHY
+        self.include_overview = self.query_params.get(INCLUDE_OVERVIEW) in TRUTHY
 
         if not self.include_client_configs:
             self.fields.pop('client_configs')

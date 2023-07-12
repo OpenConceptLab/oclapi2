@@ -15,7 +15,7 @@ from core.common.mixins import ListWithHeadersMixin
 from core.common.permissions import HasPrivateAccess, CanViewConceptDictionary
 from core.common.swagger_parameters import org_no_members_param
 from core.common.tasks import delete_organization
-from core.common.utils import parse_updated_since_param
+from core.common.utils import parse_updated_since_param, get_truthy_values
 from core.common.views import BaseAPIView, BaseLogoView, TaskMixin
 from core.orgs.constants import NO_MEMBERS
 from core.orgs.documents import OrganizationDocument
@@ -25,6 +25,9 @@ from core.orgs.serializers import OrganizationDetailSerializer, OrganizationList
 from core.sources.views import SourceListView
 from core.users.models import UserProfile
 from core.users.serializers import UserDetailSerializer
+
+
+TRUTHY = get_truthy_values()
 
 
 class OrganizationListView(BaseAPIView,
@@ -39,7 +42,7 @@ class OrganizationListView(BaseAPIView,
 
     def get_queryset(self):
         username = self.kwargs.get('user')
-        no_members = self.request.query_params.get(NO_MEMBERS, False) in ['true', True]
+        no_members = self.request.query_params.get(NO_MEMBERS, False) in TRUTHY
 
         if not username and self.user_is_self:
             username = get(self.request.user, 'username')

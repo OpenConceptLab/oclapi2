@@ -39,6 +39,9 @@ from core.tasks.utils import wait_until_task_complete
 from core.users.constants import USER_OBJECT_TYPE
 
 
+TRUTHY = get_truthy_values()
+
+
 class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     """
     An extension of generics.GenericAPIView that:
@@ -78,33 +81,32 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             return False
 
         params = get(self, 'params') or self.request.query_params.dict()
-        include_retired = params.get('retired', None) in [True, 'true'] or params.get(
-            INCLUDE_RETIRED_PARAM, None) in [True, 'true']
+        include_retired = params.get('retired', None) in TRUTHY or params.get(INCLUDE_RETIRED_PARAM, None) in TRUTHY
         return not include_retired
 
     def should_include_inactive(self):
-        return self.request.query_params.get(INCLUDE_INACTIVE) in ['true', True]
+        return self.request.query_params.get(INCLUDE_INACTIVE) in TRUTHY
 
     def _should_include_private(self):
         return self.is_user_document() or self.request.user.is_staff or self.is_user_scope()
 
     def is_verbose(self):
-        return self.request.query_params.get(VERBOSE_PARAM, False) in ['true', True]
+        return self.request.query_params.get(VERBOSE_PARAM, False) in TRUTHY
 
     def is_raw(self):
-        return self.request.query_params.get(RAW_PARAM, False) in ['true', True]
+        return self.request.query_params.get(RAW_PARAM, False) in TRUTHY
 
     def is_brief(self):
-        return self.request.query_params.get(BRIEF_PARAM, False) in ['true', True]
+        return self.request.query_params.get(BRIEF_PARAM, False) in TRUTHY
 
     def is_hard_delete_requested(self):
-        return self.request.query_params.get('hardDelete', None) in ['true', True, 'True']
+        return self.request.query_params.get('hardDelete', None) in TRUTHY
 
     def is_async_requested(self):
-        return self.request.query_params.get('async', None) in ['true', True, 'True']
+        return self.request.query_params.get('async', None) in TRUTHY
 
     def is_inline_requested(self):
-        return self.request.query_params.get('inline', None) in ['true', True, 'True']
+        return self.request.query_params.get('inline', None) in TRUTHY
 
     def verify_scope(self):
         pass

@@ -18,7 +18,7 @@ from pydash import get, compact
 from core.common.tasks import update_collection_active_concepts_count, update_collection_active_mappings_count, \
     delete_s3_objects
 from core.common.utils import reverse_resource, reverse_resource_version, parse_updated_since_param, drop_version, \
-    to_parent_uri, is_canonical_uri, get_export_service, from_string_to_date
+    to_parent_uri, is_canonical_uri, get_export_service, from_string_to_date, get_truthy_values
 from core.common.utils import to_owner_uri
 from core.settings import DEFAULT_LOCALE
 from .checksums import ChecksumModel
@@ -32,6 +32,9 @@ from .exceptions import Http400
 from .fields import URIField
 from .tasks import handle_save, handle_m2m_changed, seed_children_to_new_version, update_validation_schema, \
     update_source_active_concepts_count, update_source_active_mappings_count
+
+
+TRUTHY = get_truthy_values()
 
 
 class BaseModel(models.Model):
@@ -446,7 +449,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         username = params.get('user', None)
         org = params.get('org', None)
         version = params.get('version', None)
-        is_latest = params.get('is_latest', None) in [True, 'true']
+        is_latest = params.get('is_latest', None) in TRUTHY
         updated_since = parse_updated_since_param(params)
 
         queryset = cls.objects.filter(is_active=True)

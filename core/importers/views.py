@@ -20,8 +20,11 @@ from core.common.services import RedisService
 from core.common.swagger_parameters import update_if_exists_param, task_param, result_param, username_param, \
     file_upload_param, file_url_param, parallel_threads_param, verbose_param
 from core.common.utils import parse_bulk_import_task_id, task_exists, flower_get, queue_bulk_import, \
-    get_bulk_import_celery_once_lock_key, is_csv_file
+    get_bulk_import_celery_once_lock_key, is_csv_file, get_truthy_values
 from core.importers.constants import ALREADY_QUEUED, INVALID_UPDATE_IF_EXISTS, NO_CONTENT_TO_IMPORT
+
+
+TRUTHY = get_truthy_values()
 
 
 def csv_file_data_to_input_list(file_content):
@@ -70,7 +73,7 @@ class ImportRetrieveDestroyMixin(APIView):
         task_id = request.GET.get('task')
         result_format = request.GET.get('result')
         username = request.GET.get('username')
-        is_verbose = request.GET.get('verbose') in ['true', True]
+        is_verbose = request.GET.get('verbose') in TRUTHY
         user = self.request.user
 
         if task_id:

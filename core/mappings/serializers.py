@@ -14,6 +14,9 @@ from core.mappings.models import Mapping
 from core.sources.serializers import SourceListSerializer, SourceDetailSerializer
 
 
+TRUTHY = get_truthy_values()
+
+
 class AbstractMappingSerializer(AbstractResourceSerializer):
     from_concept = SerializerMethodField()
     to_concept = SerializerMethodField()
@@ -30,14 +33,14 @@ class AbstractMappingSerializer(AbstractResourceSerializer):
         request = get(kwargs, 'context.request')
         params = get(request, 'query_params')
         self.query_params = params.dict() if params else {}
-        self.include_from_source = self.query_params.get(MAPPING_LOOKUP_FROM_SOURCE) in ['true', True]
-        self.include_to_source = self.query_params.get(MAPPING_LOOKUP_TO_SOURCE) in ['true', True]
-        self.include_sources = self.query_params.get(MAPPING_LOOKUP_SOURCES) in ['true', True]
-        self.include_from_concept = self.query_params.get(MAPPING_LOOKUP_FROM_CONCEPT) in ['true', True]
-        self.include_to_concept = self.query_params.get(MAPPING_LOOKUP_TO_CONCEPT) in ['true', True]
-        self.include_concepts = self.query_params.get(MAPPING_LOOKUP_CONCEPTS) in ['true', True]
-        self.include_extras = self.query_params.get(INCLUDE_EXTRAS_PARAM) in ['true', True]
-        self.include_verbose_references = self.query_params.get(INCLUDE_VERBOSE_REFERENCES) in ['true', True]
+        self.include_from_source = self.query_params.get(MAPPING_LOOKUP_FROM_SOURCE) in TRUTHY
+        self.include_to_source = self.query_params.get(MAPPING_LOOKUP_TO_SOURCE) in TRUTHY
+        self.include_sources = self.query_params.get(MAPPING_LOOKUP_SOURCES) in TRUTHY
+        self.include_from_concept = self.query_params.get(MAPPING_LOOKUP_FROM_CONCEPT) in TRUTHY
+        self.include_to_concept = self.query_params.get(MAPPING_LOOKUP_TO_CONCEPT) in TRUTHY
+        self.include_concepts = self.query_params.get(MAPPING_LOOKUP_CONCEPTS) in TRUTHY
+        self.include_extras = self.query_params.get(INCLUDE_EXTRAS_PARAM) in TRUTHY
+        self.include_verbose_references = self.query_params.get(INCLUDE_VERBOSE_REFERENCES) in TRUTHY
         if not self.include_concepts:
             if not self.include_from_concept:
                 self.fields.pop('from_concept')
@@ -72,9 +75,8 @@ class AbstractMappingSerializer(AbstractResourceSerializer):
     def get_concept_serializer(self):
         request = get(self.context, 'request')
         params = get(request, 'query_params')
-        truthy = get_truthy_values()
-        is_brief = params.get('brief') in truthy
-        is_verbose = params.get('verbose') in truthy
+        is_brief = params.get('brief') in TRUTHY
+        is_verbose = params.get('verbose') in TRUTHY
         from core.concepts.models import Concept
         return Concept.get_serializer_class(verbose=is_verbose, brief=is_brief)
 
@@ -136,8 +138,8 @@ class MappingVersionListSerializer(MappingListSerializer):
     def __init__(self, *args, **kwargs):
         params = get(kwargs, 'context.request.query_params')
         self.query_params = params.dict() if params else {}
-        self.include_source_versions = self.query_params.get(INCLUDE_SOURCE_VERSIONS) in ['true', True]
-        self.include_collection_versions = self.query_params.get(INCLUDE_COLLECTION_VERSIONS) in ['true', True]
+        self.include_source_versions = self.query_params.get(INCLUDE_SOURCE_VERSIONS) in TRUTHY
+        self.include_collection_versions = self.query_params.get(INCLUDE_COLLECTION_VERSIONS) in TRUTHY
 
         try:
             if not self.include_source_versions:

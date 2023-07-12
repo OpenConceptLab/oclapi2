@@ -9,8 +9,11 @@ from core.common.constants import INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_MAPPIN
     INCLUDE_CHILD_CONCEPT_URLS, HEAD, INCLUDE_SUMMARY, INCLUDE_VERBOSE_REFERENCES, VERBOSE_PARAM
 from core.common.fields import EncodedDecodedCharField
 from core.common.serializers import AbstractResourceSerializer
-from core.common.utils import to_parent_uri_from_kwargs
+from core.common.utils import to_parent_uri_from_kwargs, get_truthy_values
 from core.concepts.models import Concept, ConceptName
+
+
+TRUTHY = get_truthy_values()
 
 
 class LocalizedNameSerializer(ModelSerializer):
@@ -131,18 +134,18 @@ class ConceptAbstractSerializer(AbstractResourceSerializer):
         self.view_kwargs = get(kwargs, 'context.view.kwargs', {})
 
         self.query_params = params.dict() if params else {}
-        self.include_indirect_mappings = self.query_params.get(INCLUDE_INVERSE_MAPPINGS_PARAM) in ['true', True]
-        self.include_direct_mappings = self.query_params.get(INCLUDE_MAPPINGS_PARAM) in ['true', True]
-        self.include_parent_concept_urls = self.query_params.get(INCLUDE_PARENT_CONCEPT_URLS) in ['true', True]
-        self.include_child_concept_urls = self.query_params.get(INCLUDE_CHILD_CONCEPT_URLS) in ['true', True]
-        self.include_parent_concepts = self.query_params.get(INCLUDE_PARENT_CONCEPTS) in ['true', True]
-        self.include_child_concepts = self.query_params.get(INCLUDE_CHILD_CONCEPTS) in ['true', True]
-        self.include_hierarchy_path = self.query_params.get(INCLUDE_HIERARCHY_PATH) in ['true', True]
-        self.include_extras = self.query_params.get(INCLUDE_EXTRAS_PARAM) in ['true', True]
-        self.include_summary = self.query_params.get(INCLUDE_SUMMARY) in ['true', True]
-        self.include_verbose_references = self.query_params.get(INCLUDE_VERBOSE_REFERENCES) in ['true', True]
+        self.include_indirect_mappings = self.query_params.get(INCLUDE_INVERSE_MAPPINGS_PARAM) in TRUTHY
+        self.include_direct_mappings = self.query_params.get(INCLUDE_MAPPINGS_PARAM) in TRUTHY
+        self.include_parent_concept_urls = self.query_params.get(INCLUDE_PARENT_CONCEPT_URLS) in TRUTHY
+        self.include_child_concept_urls = self.query_params.get(INCLUDE_CHILD_CONCEPT_URLS) in TRUTHY
+        self.include_parent_concepts = self.query_params.get(INCLUDE_PARENT_CONCEPTS) in TRUTHY
+        self.include_child_concepts = self.query_params.get(INCLUDE_CHILD_CONCEPTS) in TRUTHY
+        self.include_hierarchy_path = self.query_params.get(INCLUDE_HIERARCHY_PATH) in TRUTHY
+        self.include_extras = self.query_params.get(INCLUDE_EXTRAS_PARAM) in TRUTHY
+        self.include_summary = self.query_params.get(INCLUDE_SUMMARY) in TRUTHY
+        self.include_verbose_references = self.query_params.get(INCLUDE_VERBOSE_REFERENCES) in TRUTHY
         if CREATE_PARENT_VERSION_QUERY_PARAM in self.query_params:
-            self.create_parent_version = self.query_params.get(CREATE_PARENT_VERSION_QUERY_PARAM) in ['true', True]
+            self.create_parent_version = self.query_params.get(CREATE_PARENT_VERSION_QUERY_PARAM) in TRUTHY
         else:
             self.create_parent_version = True
 
@@ -167,7 +170,7 @@ class ConceptAbstractSerializer(AbstractResourceSerializer):
                 self.fields.pop('summary', None)
             if not get(request, 'instance'):
                 self.fields.pop('references', None)
-            if get(params, 'onlyParentLess') not in ['true', True]:
+            if get(params, 'onlyParentLess') not in TRUTHY:
                 self.fields.pop('has_children', None)
         except:  # pylint: disable=bare-except
             pass
@@ -236,7 +239,7 @@ class ConceptLookupListSerializer(ModelSerializer):
         request = get(kwargs, 'context.request')
         params = get(request, 'query_params')
         self.query_params = params.dict() if params else {}
-        self.is_verbose = self.query_params.get(VERBOSE_PARAM) in ['true', True]
+        self.is_verbose = self.query_params.get(VERBOSE_PARAM) in TRUTHY
         try:
             if not self.is_verbose:
                 self.fields.pop('display_name', None)
@@ -283,8 +286,8 @@ class ConceptVersionListSerializer(ConceptListSerializer):
     def __init__(self, *args, **kwargs):
         params = get(kwargs, 'context.request.query_params')
         self.query_params = params.dict() if params else {}
-        self.include_source_versions = self.query_params.get(INCLUDE_SOURCE_VERSIONS) in ['true', True]
-        self.include_collection_versions = self.query_params.get(INCLUDE_COLLECTION_VERSIONS) in ['true', True]
+        self.include_source_versions = self.query_params.get(INCLUDE_SOURCE_VERSIONS) in TRUTHY
+        self.include_collection_versions = self.query_params.get(INCLUDE_COLLECTION_VERSIONS) in TRUTHY
 
         try:
             if not self.include_source_versions:
@@ -374,7 +377,7 @@ class ConceptMinimalSerializerRecursive(ConceptAbstractSerializer):
                 obj.cascaded_entries['concepts'], many=True, context=self.context).data
 
             from core.mappings.serializers import MappingMinimalSerializer, MappingReverseMinimalSerializer
-            if get(self, 'context.request.query_params.reverse') in ['true', True]:
+            if get(self, 'context.request.query_params.reverse') in TRUTHY:
                 result += MappingReverseMinimalSerializer(obj.cascaded_entries['mappings'], many=True).data
             else:
                 result += MappingMinimalSerializer(obj.cascaded_entries['mappings'], many=True).data
@@ -507,13 +510,13 @@ class ConceptVersionDetailSerializer(ModelSerializer):
         self.include_indirect_mappings = False
         self.include_direct_mappings = False
         self.query_params = params.dict() if params else {}
-        self.include_indirect_mappings = self.query_params.get(INCLUDE_INVERSE_MAPPINGS_PARAM) == 'true'
-        self.include_direct_mappings = self.query_params.get(INCLUDE_MAPPINGS_PARAM) == 'true'
-        self.include_parent_concepts = self.query_params.get(INCLUDE_PARENT_CONCEPTS) in ['true', True]
-        self.include_child_concepts = self.query_params.get(INCLUDE_CHILD_CONCEPTS) in ['true', True]
-        self.include_parent_concept_urls = self.query_params.get(INCLUDE_PARENT_CONCEPT_URLS) in ['true', True]
-        self.include_child_concept_urls = self.query_params.get(INCLUDE_CHILD_CONCEPT_URLS) in ['true', True]
-        self.include_verbose_references = self.query_params.get(INCLUDE_VERBOSE_REFERENCES) in ['true', True]
+        self.include_indirect_mappings = self.query_params.get(INCLUDE_INVERSE_MAPPINGS_PARAM) in TRUTHY
+        self.include_direct_mappings = self.query_params.get(INCLUDE_MAPPINGS_PARAM) in TRUTHY
+        self.include_parent_concepts = self.query_params.get(INCLUDE_PARENT_CONCEPTS) in TRUTHY
+        self.include_child_concepts = self.query_params.get(INCLUDE_CHILD_CONCEPTS) in TRUTHY
+        self.include_parent_concept_urls = self.query_params.get(INCLUDE_PARENT_CONCEPT_URLS) in TRUTHY
+        self.include_child_concept_urls = self.query_params.get(INCLUDE_CHILD_CONCEPT_URLS) in TRUTHY
+        self.include_verbose_references = self.query_params.get(INCLUDE_VERBOSE_REFERENCES) in TRUTHY
 
         try:
             if not self.include_parent_concepts:
@@ -607,7 +610,7 @@ class ConceptChildrenSerializer(ConceptListSerializer):
         params = get(kwargs, 'context.request.query_params')
 
         self.query_params = params.dict() if params else {}
-        self.include_child_concepts = self.query_params.get(INCLUDE_CHILD_CONCEPTS) in ['true', True]
+        self.include_child_concepts = self.query_params.get(INCLUDE_CHILD_CONCEPTS) in TRUTHY
 
         try:
             if not self.include_child_concepts:
@@ -641,7 +644,7 @@ class ConceptParentsSerializer(ModelSerializer):
         params = get(kwargs, 'context.request.query_params')
 
         self.query_params = params.dict() if params else {}
-        self.include_parent_concepts = self.query_params.get(INCLUDE_PARENT_CONCEPTS) in ['true', True]
+        self.include_parent_concepts = self.query_params.get(INCLUDE_PARENT_CONCEPTS) in TRUTHY
 
         try:
             if not self.include_parent_concepts:

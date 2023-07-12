@@ -25,7 +25,7 @@ from core.common.swagger_parameters import (
     cascade_levels_param, cascade_direction_param, cascade_view_hierarchy, return_map_types_param,
     omit_if_exists_in_param, equivalency_map_types_param)
 from core.common.tasks import delete_concept, make_hierarchy
-from core.common.utils import to_parent_uri_from_kwargs, generate_temp_version
+from core.common.utils import to_parent_uri_from_kwargs, generate_temp_version, get_truthy_values
 from core.common.views import SourceChildCommonBaseView, SourceChildExtrasView, \
     SourceChildExtraRetrieveUpdateDestroyView, BaseAPIView
 from core.concepts.constants import PARENT_VERSION_NOT_LATEST_CANNOT_UPDATE_CONCEPT
@@ -39,6 +39,9 @@ from core.concepts.serializers import (
     ConceptVersionListSerializer, ConceptSummarySerializer, ConceptMinimalSerializer,
     ConceptChildrenSerializer, ConceptParentsSerializer, ConceptLookupListSerializer)
 from core.mappings.serializers import MappingListSerializer
+
+
+TRUTHY = get_truthy_values()
 
 
 class ConceptBaseView(SourceChildCommonBaseView):
@@ -156,7 +159,7 @@ class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
         if is_latest_version:
             queryset = queryset.filter(id=F('versioned_object_id'))
 
-        if 'source' in self.kwargs and self.request.query_params.get('onlyParentLess', False) in ['true', True]:
+        if 'source' in self.kwargs and self.request.query_params.get('onlyParentLess', False) in TRUTHY:
             queryset = queryset.filter(parent_concepts__isnull=True)
 
         if not self.is_brief():
@@ -321,7 +324,7 @@ class ConceptRetrieveUpdateDestroyView(ConceptBaseView, RetrieveAPIView, UpdateA
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     def is_db_delete_requested(self):
-        return self.request.query_params.get('db', None) in ['true', True, 'True']
+        return self.request.query_params.get('db', None) in TRUTHY
 
     def destroy(self, request, *args, **kwargs):
         if self.is_container_version_specified():
@@ -513,7 +516,7 @@ class ConceptMappingsView(ConceptBaseView, ListWithHeadersMixin):
             raise Http404()
         self.check_object_permissions(self.request, concept)
         include_retired = self.request.query_params.get(INCLUDE_RETIRED_PARAM, False)
-        include_indirect_mappings = self.request.query_params.get(INCLUDE_INVERSE_MAPPINGS_PARAM, 'false') == 'true'
+        include_indirect_mappings = self.request.query_params.get(INCLUDE_INVERSE_MAPPINGS_PARAM, 'false') in TRUTHY
         is_collection = 'collection' in self.kwargs
         collection_version = self.kwargs.get('version', HEAD) if is_collection else None
         parent_uri = to_parent_uri_from_kwargs(self.kwargs) if is_collection else None
