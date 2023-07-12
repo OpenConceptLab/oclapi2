@@ -23,7 +23,7 @@ from core.mappings.documents import MappingDocument
 from core.mappings.models import Mapping
 from core.mappings.search import MappingFacetedSearch
 from core.mappings.serializers import MappingDetailSerializer, MappingListSerializer, MappingVersionListSerializer, \
-    MappingVersionDetailSerializer
+    MappingVersionDetailSerializer, MappingMinimalSerializer
 
 
 class MappingBaseView(SourceChildCommonBaseView):
@@ -52,7 +52,12 @@ class MappingListView(MappingBaseView, ListWithHeadersMixin, CreateModelMixin):
         return [CanViewParentDictionary(), ]
 
     def get_serializer_class(self):
-        if (self.request.method == 'GET' and self.is_verbose()) or self.request.method == 'POST':
+        method = self.request.method
+        is_get = method == 'GET'
+        if is_get and self.is_brief():
+            return MappingMinimalSerializer
+
+        if (is_get and self.is_verbose()) or method == 'POST':
             return MappingDetailSerializer
 
         return MappingListSerializer

@@ -8,45 +8,22 @@ from core.common.constants import MAPPING_LOOKUP_CONCEPTS, MAPPING_LOOKUP_SOURCE
     INCLUDE_SOURCE_VERSIONS, INCLUDE_COLLECTION_VERSIONS, INCLUDE_VERBOSE_REFERENCES
 from core.common.fields import EncodedDecodedCharField
 from core.common.serializers import AbstractResourceSerializer
-from core.concepts.serializers import ConceptListSerializer, ConceptDetailSerializer
+from core.common.utils import get_truthy_values
+from core.concepts.serializers import ConceptDetailSerializer
 from core.mappings.models import Mapping
 from core.sources.serializers import SourceListSerializer, SourceDetailSerializer
 
 
-class MappingListSerializer(AbstractResourceSerializer):
-    type = CharField(source='resource_type', read_only=True)
-    id = CharField(source='mnemonic', required=False)
-    uuid = CharField(source='id', read_only=True)
-    source = CharField(source='parent_resource', read_only=True)
-    owner = CharField(source='owner_name', read_only=True)
-    update_comment = CharField(source='comment', required=False, allow_null=True, allow_blank=True)
-    url = CharField(required=False, source='versioned_object_url')
-    version = CharField(read_only=True)
-    version_created_on = DateTimeField(source='created_at', read_only=True)
-    from_concept = ConceptListSerializer()
-    to_concept = ConceptListSerializer()
+class AbstractMappingSerializer(AbstractResourceSerializer):
+    from_concept = SerializerMethodField()
+    to_concept = SerializerMethodField()
     from_source = SourceListSerializer()
     to_source = SourceListSerializer()
-    from_concept_name_resolved = CharField(source='from_concept.display_name', read_only=True)
-    to_concept_name_resolved = CharField(source='to_concept.display_name', read_only=True)
-    to_concept_code = EncodedDecodedCharField(required=False)
-    from_concept_code = EncodedDecodedCharField(required=False)
-    references = SerializerMethodField()
-    sort_weight = FloatField(required=False, allow_null=True)
 
     class Meta:
-        model = Mapping
+        abstract = True
         fields = AbstractResourceSerializer.Meta.fields + (
-            'external_id', 'retired', 'map_type', 'source', 'owner', 'owner_type',
-            'from_concept_code', 'from_concept_name', 'from_concept_url',
-            'to_concept_code', 'to_concept_name', 'to_concept_url',
-            'from_source_owner', 'from_source_owner_type', 'from_source_url', 'from_source_name',
-            'to_source_owner', 'to_source_owner_type', 'to_source_url', 'to_source_name',
-            'url', 'version', 'id', 'versioned_object_id', 'versioned_object_url',
-            'is_latest_version', 'update_comment', 'version_url', 'uuid', 'version_created_on',
-            'from_source_version', 'to_source_version', 'from_concept', 'to_concept', 'from_source', 'to_source',
-            'from_concept_name_resolved', 'to_concept_name_resolved', 'extras', 'type', 'references',
-            'sort_weight'
+            'search_meta', 'from_concept', 'to_concept', 'from_source', 'to_source', 'extras', 'references'
         )
 
     def __init__(self, *args, **kwargs):
@@ -61,7 +38,6 @@ class MappingListSerializer(AbstractResourceSerializer):
         self.include_concepts = self.query_params.get(MAPPING_LOOKUP_CONCEPTS) in ['true', True]
         self.include_extras = self.query_params.get(INCLUDE_EXTRAS_PARAM) in ['true', True]
         self.include_verbose_references = self.query_params.get(INCLUDE_VERBOSE_REFERENCES) in ['true', True]
-
         if not self.include_concepts:
             if not self.include_from_concept:
                 self.fields.pop('from_concept')
@@ -75,7 +51,7 @@ class MappingListSerializer(AbstractResourceSerializer):
                 self.fields.pop('to_source')
 
         if not self.include_extras and self.__class__.__name__ in [
-                'MappingListSerializer', 'MappingVersionListSerializer'
+                'MappingListSerializer', 'MappingVersionListSerializer', 'MappingMinimalSerializer'
         ]:
             self.fields.pop('extras', None)
 
@@ -92,6 +68,57 @@ class MappingListSerializer(AbstractResourceSerializer):
                 return CollectionReferenceSerializer(obj.collection_references(collection), many=True).data
             return obj.collection_references_uris(collection)
         return None
+
+    def get_concept_serializer(self):
+        request = get(self.context, 'request')
+        params = get(request, 'query_params')
+        truthy = get_truthy_values()
+        is_brief = params.get('brief') in truthy
+        is_verbose = params.get('verbose') in truthy
+        from core.concepts.models import Concept
+        return Concept.get_serializer_class(verbose=is_verbose, brief=is_brief)
+
+    def get_from_concept(self, obj):
+        if self.include_from_concept or self.include_concepts:
+            return self.get_concept_serializer()(obj.from_concept, context=self.context).data
+        return None
+
+    def get_to_concept(self, obj):
+        if self.include_to_concept or self.include_concepts:
+            return self.get_concept_serializer()(obj.to_concept, context=self.context).data
+        return None
+
+
+class MappingListSerializer(AbstractMappingSerializer):
+    type = CharField(source='resource_type', read_only=True)
+    id = CharField(source='mnemonic', required=False)
+    uuid = CharField(source='id', read_only=True)
+    source = CharField(source='parent_resource', read_only=True)
+    owner = CharField(source='owner_name', read_only=True)
+    update_comment = CharField(source='comment', required=False, allow_null=True, allow_blank=True)
+    url = CharField(required=False, source='versioned_object_url')
+    version = CharField(read_only=True)
+    version_created_on = DateTimeField(source='created_at', read_only=True)
+    from_concept_name_resolved = CharField(source='from_concept.display_name', read_only=True)
+    to_concept_name_resolved = CharField(source='to_concept.display_name', read_only=True)
+    to_concept_code = EncodedDecodedCharField(required=False)
+    from_concept_code = EncodedDecodedCharField(required=False)
+    references = SerializerMethodField()
+    sort_weight = FloatField(required=False, allow_null=True)
+
+    class Meta:
+        model = Mapping
+        fields = AbstractMappingSerializer.Meta.fields + (
+            'external_id', 'retired', 'map_type', 'source', 'owner', 'owner_type',
+            'from_concept_code', 'from_concept_name', 'from_concept_url',
+            'to_concept_code', 'to_concept_name', 'to_concept_url',
+            'from_source_owner', 'from_source_owner_type', 'from_source_url', 'from_source_name',
+            'to_source_owner', 'to_source_owner_type', 'to_source_url', 'to_source_name',
+            'url', 'version', 'id', 'versioned_object_id', 'versioned_object_url',
+            'is_latest_version', 'update_comment', 'version_url', 'uuid', 'version_created_on',
+            'from_source_version', 'to_source_version', 'from_concept_name_resolved',
+            'to_concept_name_resolved', 'type', 'sort_weight'
+        )
 
 
 class MappingVersionListSerializer(MappingListSerializer):
@@ -127,7 +154,7 @@ class MappingVersionListSerializer(MappingListSerializer):
         return obj.get_checksums(queue=True)
 
 
-class MappingMinimalSerializer(AbstractResourceSerializer):
+class MappingMinimalSerializer(AbstractMappingSerializer):
     id = CharField(source='mnemonic', read_only=True)
     type = CharField(source='resource_type', read_only=True)
     url = CharField(source='uri', read_only=True)
@@ -141,7 +168,7 @@ class MappingMinimalSerializer(AbstractResourceSerializer):
 
     class Meta:
         model = Mapping
-        fields = AbstractResourceSerializer.Meta.fields + (
+        fields = AbstractMappingSerializer.Meta.fields + (
             'id', 'type', 'map_type', 'url', 'version_url', 'to_concept_code', 'to_concept_url',
             'cascade_target_concept_code', 'cascade_target_concept_url', 'cascade_target_source_owner',
             'cascade_target_source_name', 'cascade_target_concept_name', 'retired', 'sort_weight',
