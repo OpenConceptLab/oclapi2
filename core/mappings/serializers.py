@@ -22,6 +22,7 @@ class AbstractMappingSerializer(AbstractResourceSerializer):
     to_concept = SerializerMethodField()
     from_source = SourceListSerializer()
     to_source = SourceListSerializer()
+    references = SerializerMethodField()
 
     class Meta:
         abstract = True
@@ -105,7 +106,6 @@ class MappingListSerializer(AbstractMappingSerializer):
     to_concept_name_resolved = CharField(source='to_concept.display_name', read_only=True)
     to_concept_code = EncodedDecodedCharField(required=False)
     from_concept_code = EncodedDecodedCharField(required=False)
-    references = SerializerMethodField()
     sort_weight = FloatField(required=False, allow_null=True)
 
     class Meta:
@@ -141,13 +141,10 @@ class MappingVersionListSerializer(MappingListSerializer):
         self.include_source_versions = self.query_params.get(INCLUDE_SOURCE_VERSIONS) in TRUTHY
         self.include_collection_versions = self.query_params.get(INCLUDE_COLLECTION_VERSIONS) in TRUTHY
 
-        try:
-            if not self.include_source_versions:
-                self.fields.pop('source_versions', None)
-            if not self.include_collection_versions:
-                self.fields.pop('collection_versions', None)
-        except:  # pylint: disable=bare-except
-            pass
+        if not self.include_source_versions:
+            self.fields.pop('source_versions', None)
+        if not self.include_collection_versions:
+            self.fields.pop('collection_versions', None)
 
         super().__init__(*args, **kwargs)
 

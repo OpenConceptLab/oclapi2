@@ -47,10 +47,29 @@ class MappingListViewTest(OCLAPITestCase):
 
         collection.add_expressions({'expressions': [mapping.uri]}, collection.created_by)
 
+        response = self.client.get(collection.mappings_url + '?includeReferences=true', format='json')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(len(response.data[0]['references']), 1)
+        self.assertEqual(response.data[0]['references'][0]['expression'], mapping.uri)
+        self.assertEqual(response.data[0]['references'][0]['uri'], collection.references.first().uri)
+
         response = self.client.get(collection.mappings_url, format='json')
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['references'], [collection.references.first().uri])
+
+        response = self.client.get(
+            mapping.parent.mappings_url + '?lookupConcepts=true',
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['from_concept']['id'], mapping.from_concept.mnemonic)
+        self.assertEqual(response.data[0]['to_concept']['id'], mapping.to_concept.mnemonic)
 
     def test_post_400(self):
         source = UserSourceFactory(user=self.user)
