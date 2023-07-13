@@ -20,7 +20,8 @@ from core.collections.translators import CollectionReferenceTranslator
 from core.collections.utils import is_concept, is_mapping
 from core.common.constants import (
     ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT,
-    ES_REQUEST_TIMEOUT, ES_REQUEST_TIMEOUT_ASYNC, HEAD, ALL)
+    ES_REQUEST_TIMEOUT, ES_REQUEST_TIMEOUT_ASYNC, HEAD, ALL, EXCLUDE_WILDCARD_SEARCH_PARAM, EXCLUDE_FUZZY_SEARCH_PARAM,
+    SEARCH_MAP_CODES_PARAM)
 from core.common.models import ConceptContainerModel, BaseResourceModel
 from core.common.search import CustomESSearch
 from core.common.tasks import seed_children_to_expansion, batch_index_resources, index_expansion_concepts, \
@@ -28,12 +29,13 @@ from core.common.tasks import seed_children_to_expansion, batch_index_resources,
 from core.common.utils import drop_version, to_owner_uri, generate_temp_version, es_id_in, \
     get_resource_class_from_resource_name, to_snake_case, \
     es_to_pks, batch_qs, split_list_by_condition, decode_string, is_canonical_uri, encode_string, \
-    get_truthy_values
+    get_truthy_values, get_falsy_values
 from core.concepts.constants import LOCALES_FULLY_SPECIFIED
 from core.concepts.models import Concept
 from core.mappings.models import Mapping
 
 TRUTHY = get_truthy_values()
+FALSEY = get_falsy_values()
 
 
 class Collection(ConceptContainerModel):
@@ -684,17 +686,47 @@ class CollectionReference(models.Model):
             cascade_params['max_results'] = None
         return cascade_params
 
+    def has_param_in_filter(self, param, expected_values):
+        return bool(next(
+            (filter_def for filter_def in self.filter if  # pylint:disable=not-an-iterable
+             filter_def['property'].lower() == param and filter_def['value'] in expected_values),
+            False
+        ))
+
+    def _apply_search(self, search, val, document):
+        include_wildcard = self.has_param_in_filter(EXCLUDE_WILDCARD_SEARCH_PARAM.lower(), FALSEY)
+        include_fuzzy = self.has_param_in_filter(EXCLUDE_FUZZY_SEARCH_PARAM.lower(), FALSEY)
+        exclude_search_map_codes = self.has_param_in_filter(SEARCH_MAP_CODES_PARAM.lower(), FALSEY)
+
+        def clean_fields(_fields):
+            if exclude_search_map_codes:
+                return {key: value for key, value in _fields.items() if not key.endswith('map_codes')}
+            return _fields
+
+        search = search.query(CustomESSearch.get_exact_match_criterion(
+            val, document.get_match_phrase_attrs(), clean_fields(document.get_exact_match_attrs())
+        ))
+        if include_wildcard or include_fuzzy:
+            fields = clean_fields(document.get_boostable_search_attrs())
+            if include_wildcard:
+                search = search.query(CustomESSearch.get_wildcard_match_criterion(val, fields))
+            if include_fuzzy:
+                search = search.query(CustomESSearch.get_fuzzy_match_criterion(val, fields, 10000, 2))
+        return search
+
     def apply_filters(self, queryset, resource_klass):
         if self.filter:
             pks = []
             document = resource_klass.get_search_document()
             search = document.search()
             for filter_def in self.filter:  # pylint: disable=not-an-iterable
-                if to_snake_case(filter_def['property']) == 'exact_match':
+                if to_snake_case(filter_def['property']) == 'exact_match' or filter_def['property'] in [
+                    EXCLUDE_WILDCARD_SEARCH_PARAM, EXCLUDE_FUZZY_SEARCH_PARAM, SEARCH_MAP_CODES_PARAM
+                ]:
                     continue
                 val = filter_def['value']
                 if filter_def['property'] == 'q':
-                    search = search.query(CustomESSearch.get_exact_match_criteria(val, document, True))
+                    self._apply_search(search, val, document)
                 else:
                     search = search.filter("match", **{to_snake_case(filter_def["property"]): filter_def["value"]})
             for _queryset in batch_qs(queryset.order_by('id'), 500):
@@ -1284,7 +1316,10 @@ class ExpansionTextFilterParameter(ExpansionParameter):
             klass = get_resource_class_from_resource_name('concept' if is_concept_queryset else 'mapping')
             document = klass.get_search_document()
             search = document.search()
-            search = search.query(CustomESSearch.get_exact_match_criteria(self.value, document, True))
+            search = search.query(
+                CustomESSearch.get_exact_match_criterion(
+                    self.value, document.get_match_phrase_attrs(), document.get_exact_match_attrs())
+            )
             for _queryset in batch_qs(queryset.order_by('id'), 500):
                 new_search = es_id_in(search, list(_queryset.values_list('id', flat=True)))
                 pks += es_to_pks(new_search.params(request_timeout=ES_REQUEST_TIMEOUT))

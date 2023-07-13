@@ -1,6 +1,10 @@
+import urllib
+
 from django.db.models import Case, When, IntegerField
 from elasticsearch_dsl import FacetedSearch, Q
 from pydash import compact, get
+
+from core.common.utils import is_url_encoded_string
 
 
 class CustomESFacetedSearch(FacetedSearch):
@@ -39,24 +43,82 @@ class CustomESSearch:
         self.total = 0
 
     @staticmethod
-    def get_exact_match_criteria(search_str, document, return_criteria_only=False):
+    def get_wildcard_search_string(_str):
+        return f"{_str}*".replace('**', '*')
+
+    @staticmethod
+    def get_search_string(search_str, lower=True, decode=True):
+        if lower:
+            search_str = search_str.lower()
+        if decode:
+            search_str = search_str.replace('**', '*')
+            starts_with_asterisk = search_str.startswith('*')
+            ends_with_asterisk = search_str.endswith('*')
+            if starts_with_asterisk:
+                search_str = search_str[1:]
+            if ends_with_asterisk:
+                search_str = search_str[:-1]
+            search_str = search_str if is_url_encoded_string(search_str) else urllib.parse.quote_plus(search_str)
+            if starts_with_asterisk:
+                search_str = f'*{search_str}'
+            if ends_with_asterisk:
+                search_str = f'{search_str}*'
+
+        return search_str
+
+    @staticmethod
+    def get_fuzzy_match_criterion(search_str, fields, boost_divide_by=10, expansions=5):
         criterion = None
-        fields = []
-        match_phrase_attrs = document.get_match_phrase_attrs() or []
-        fields += match_phrase_attrs
-        if match_phrase_attrs:
-            criterion = CustomESSearch.get_match_phrase_criteria(match_phrase_attrs.pop(), search_str, 5)
-            for attr in match_phrase_attrs:
+        for attr, meta in fields.items():
+            criteria = CustomESSearch.fuzzy_criteria(search_str, attr, meta['boost'] / boost_divide_by, expansions)
+            if criterion is None:
+                criterion = criteria
+            else:
+                criterion |= criteria
+        return criterion
+
+    @staticmethod
+    def get_wildcard_match_criterion(search_str, fields):
+        def get_query(_str):
+            query = None
+            for attr, meta in fields.items():
+                decode = meta['decode'] if 'decode' in meta else True
+                lower = meta['lower'] if 'lower' in meta else True
+                _search_str = CustomESSearch.get_wildcard_search_string(
+                    CustomESSearch.get_search_string(search_str, decode=decode, lower=lower)
+                )
+                criteria = CustomESSearch.get_wildcard_criteria(attr, _search_str, meta['boost'])
+                if query is None:
+                    query = criteria
+                else:
+                    query |= criteria
+            return query
+
+        if not search_str:
+            return get_query(search_str)
+        words = search_str.split()
+        criterion = get_query(words[0])
+        for word in words[1:]:
+            criterion |= get_query(word)
+
+        return criterion
+
+    @staticmethod
+    def get_exact_match_criterion(
+            search_str, match_phrase_fields_list, match_word_fields_map):
+        criterion = None
+        if match_phrase_fields_list:
+            criterion = CustomESSearch.get_match_phrase_criteria(match_phrase_fields_list[0], search_str, 5)
+            for attr in match_phrase_fields_list[1:]:
                 criterion |= CustomESSearch.get_match_phrase_criteria(attr, search_str, 5)
 
-        for field, meta in document.get_exact_match_attrs().items():
-            fields.append(field)
+        for field, meta in match_word_fields_map.items():
             criteria = CustomESSearch.get_match_criteria(field, search_str, meta['boost'])
             if criterion is None:
                 criterion = criteria
             criterion |= criteria
 
-        return criterion if return_criteria_only else (criterion, fields)
+        return criterion
 
     @staticmethod
     def get_match_phrase_criteria(field, search_str, boost):

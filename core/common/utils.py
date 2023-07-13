@@ -877,7 +877,7 @@ def generic_sort(_list):
 
 
 def get_falsy_values():
-    return ['false', False, 'False', 0, '0', 'None', 'null', None]
+    return ['false', False, 'False', 0, '0', 'None', 'null']
 
 
 def get_truthy_values():

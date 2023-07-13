@@ -1,5 +1,4 @@
 import base64
-import urllib.parse
 from email.mime.image import MIMEImage
 
 import markdown
@@ -31,13 +30,12 @@ from core.common.mixins import PathWalkerMixin
 from core.common.search import CustomESSearch
 from core.common.serializers import RootSerializer
 from core.common.utils import compact_dict_by_values, to_snake_case, to_camel_case, parse_updated_since_param, \
-    is_url_encoded_string, to_int, get_user_specific_task_id, get_falsy_values, get_truthy_values
+    to_int, get_user_specific_task_id, get_falsy_values, get_truthy_values
 from core.concepts.permissions import CanViewParentDictionary, CanEditParentDictionary
 from core.orgs.constants import ORG_OBJECT_TYPE
 from core.tasks.constants import TASK_NOT_COMPLETED
 from core.tasks.utils import wait_until_task_complete
 from core.users.constants import USER_OBJECT_TYPE
-
 
 TRUTHY = get_truthy_values()
 
@@ -199,45 +197,24 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     def is_exact_match_on(self):
         return self.request.query_params.dict().get(self.exact_match, None) == 'on'
 
-    def get_exact_search_fields(self):
-        fields = [field for field, config in get(self, 'es_fields', {}).items() if config.get('exact', False)]
-        return self.clean_fields(fields)
-
     def clean_fields(self, fields):
         if self.is_concept_document() and self.request.query_params.get(SEARCH_MAP_CODES_PARAM) in get_falsy_values():
-            map_code_fields = ['same_as_map_codes', 'other_map_codes']
             if isinstance(fields, dict):
-                fields = {key: value for key, value in fields.items() if key not in map_code_fields}
+                fields = {key: value for key, value in fields.items() if not key.endswith('map_codes')}
             elif isinstance(fields, list):
-                fields = [field for field in fields if field not in map_code_fields]
+                fields = [field for field in fields if not field.endswith('map_codes')]
         return fields
 
     def get_search_string(self, lower=True, decode=True):
         search_str = self.request.query_params.dict().get(SEARCH_PARAM, '').strip()
-        if lower:
-            search_str = search_str.lower()
-        if decode:
-            search_str = search_str.replace('**', '*')
-            starts_with_asterisk = search_str.startswith('*')
-            ends_with_asterisk = search_str.endswith('*')
-            if starts_with_asterisk:
-                search_str = search_str[1:]
-            if ends_with_asterisk:
-                search_str = search_str[:-1]
-            search_str = search_str if is_url_encoded_string(search_str) else urllib.parse.quote_plus(search_str)
-            if starts_with_asterisk:
-                search_str = f'*{search_str}'
-            if ends_with_asterisk:
-                search_str = f'{search_str}*'
-
-        return search_str
+        return CustomESSearch.get_search_string(search_str, lower=lower, decode=decode)
 
     @property
     def is_fuzzy_search(self):
         return self.request.query_params.dict().get('fuzzy', None) in get_truthy_values()
 
     def get_wildcard_search_string(self, _str):
-        return f"{_str or self.get_search_string()}*".replace('**', '*')
+        return CustomESSearch.get_wildcard_search_string(_str or self.get_search_string())
 
     @staticmethod
     def __get_order_by(is_desc):
@@ -269,46 +246,30 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
         return result
 
-    def get_fuzzy_search_criteria(self, boost_divide_by=10, expansions=5):
-        search_string = self.get_search_string(decode=False)
-        wildcard_fields = self.get_wildcard_search_fields()
-        criterion = None
-        for attr, meta in wildcard_fields.items():
-            criteria = CustomESSearch.fuzzy_criteria(search_string, attr, meta['boost'] / boost_divide_by, expansions)
-            if criterion is None:
-                criterion = criteria
-            else:
-                criterion |= criteria
-        return criterion
+    def get_fuzzy_search_criterion(self, boost_divide_by=10, expansions=5):
+        return CustomESSearch.get_fuzzy_match_criterion(
+            search_str=self.get_search_string(decode=False),
+            fields=self.get_wildcard_search_fields(),
+            boost_divide_by=boost_divide_by,
+            expansions=expansions
+        )
 
     def get_wildcard_search_criterion(self):
-        search_string = self.get_search_string()
-        wildcard_fields = self.get_wildcard_search_fields()
-
-        def get_query(_str):
-            query = None
-            for attr, meta in wildcard_fields.items():
-                decode = meta['decode'] if 'decode' in meta else True
-                lower = meta['lower'] if 'lower' in meta else True
-                _search_string = self.get_wildcard_search_string(self.get_search_string(decode=decode, lower=lower))
-                criteria = CustomESSearch.get_wildcard_criteria(attr, _search_string, meta['boost'])
-                if query is None:
-                    query = criteria
-                else:
-                    query |= criteria
-            return query
-
-        if not search_string:
-            return get_query(search_string), []
-        words = search_string.split()
-        criterion = get_query(words[0])
-        for word in words[1:]:
-            criterion |= get_query(word)
-
-        return criterion, list(wildcard_fields.keys())
+        fields = self.get_wildcard_search_fields()
+        return CustomESSearch.get_wildcard_match_criterion(
+            search_str=self.get_search_string(),
+            fields=fields
+        ), fields.keys()
 
     def get_exact_search_criterion(self):
-        return CustomESSearch.get_exact_match_criteria(self.get_search_string(False, False), self.document_model)
+        match_phrase_field_list = self.document_model.get_match_phrase_attrs()
+        match_word_fields_map = self.clean_fields(self.document_model.get_exact_match_attrs())
+        fields = match_phrase_field_list + list(match_word_fields_map.keys())
+        return CustomESSearch.get_exact_match_criterion(
+            self.get_search_string(False, False),
+            match_phrase_field_list,
+            match_word_fields_map,
+        ), fields
 
     def get_faceted_criterion(self):
         filters = self.get_faceted_filters()
@@ -444,10 +405,9 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             if not self._should_exclude_retired_from_search_results() or not is_source_child_document_model:
                 filters.pop('retired')
 
-            is_exact_match_on = self.is_exact_match_on()
             faceted_search = self.facet_class(  # pylint: disable=not-callable
-                self.get_search_string(lower=not is_exact_match_on),
-                filters=filters, exact_match=is_exact_match_on
+                self.get_search_string(lower=False),
+                filters=filters, exact_match=True
             )
             faceted_search.params(request_timeout=ES_REQUEST_TIMEOUT)
             try:
@@ -592,7 +552,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             results = results.query(
                 self.__get_source_versions_es_criterion(source_versions)
             )
-        results = results.query(self.get_fuzzy_search_criteria())
+        results = results.query(self.get_fuzzy_search_criterion())
 
         min_score = self.request.query_params.get('min_score') or None
         if min_score:
@@ -657,7 +617,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             criterion |= wildcard_search_criterion
             fields += wildcard_search_fields
         if not exclude_fuzzy:
-            criterion |= self.get_fuzzy_search_criteria(boost_divide_by=10000, expansions=2)
+            criterion |= self.get_fuzzy_search_criterion(boost_divide_by=10000, expansions=2)
 
         results = results.query(criterion)
 
