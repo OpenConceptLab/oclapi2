@@ -21,7 +21,7 @@ from core.collections.utils import is_concept, is_mapping
 from core.common.constants import (
     ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT,
     ES_REQUEST_TIMEOUT, ES_REQUEST_TIMEOUT_ASYNC, HEAD, ALL, EXCLUDE_WILDCARD_SEARCH_PARAM, EXCLUDE_FUZZY_SEARCH_PARAM,
-    SEARCH_MAP_CODES_PARAM)
+    SEARCH_MAP_CODES_PARAM, INCLUDE_SEARCH_META_PARAM)
 from core.common.models import ConceptContainerModel, BaseResourceModel
 from core.common.search import CustomESSearch
 from core.common.tasks import seed_children_to_expansion, batch_index_resources, index_expansion_concepts, \
@@ -721,7 +721,8 @@ class CollectionReference(models.Model):
             search = document.search()
             for filter_def in self.filter:  # pylint: disable=not-an-iterable
                 if to_snake_case(filter_def['property']) == 'exact_match' or filter_def['property'] in [
-                    EXCLUDE_WILDCARD_SEARCH_PARAM, EXCLUDE_FUZZY_SEARCH_PARAM, SEARCH_MAP_CODES_PARAM
+                    EXCLUDE_WILDCARD_SEARCH_PARAM, EXCLUDE_FUZZY_SEARCH_PARAM, SEARCH_MAP_CODES_PARAM,
+                    INCLUDE_SEARCH_META_PARAM
                 ]:
                     continue
                 val = filter_def['value']
