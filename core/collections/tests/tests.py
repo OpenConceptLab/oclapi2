@@ -1295,12 +1295,12 @@ class ExpansionParametersTest(OCLTestCase):
         )
 
     def test_apply_text_filter(self):
-        ConceptFactory(id=1, mnemonic='foobar')
+        ConceptFactory(id=1, mnemonic='foobar bar')
         ConceptFactory(id=2, mnemonic='bar')
         queryset = Concept.objects.filter(id__in=[1, 2])
         ConceptDocument().update(queryset)  # needed for parallel test execution
 
-        result = ExpansionParameters({'filter': 'foo tao'}).apply(queryset)
+        result = ExpansionParameters({'filter': 'foobar'}).apply(queryset)
         self.assertEqual(result.count(), 1)
         self.assertEqual(result.first().id, 1)
 

@@ -184,7 +184,7 @@ class BaseModel(models.Model):
         offset = 0
         limit = batch_size
         while offset < count:
-            print(f"Indexing {offset}-{limit}/{count}")
+            print(f"Indexing {offset}-{min([limit, count])}/{count}")
             document().update(queryset.order_by('-id')[offset:limit], parallel=True)
             offset = limit
             limit += batch_size

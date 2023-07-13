@@ -25,7 +25,7 @@ from core.common.checksums import Checksum
 from core.common.constants import SEARCH_PARAM, LIST_DEFAULT_LIMIT, CSV_DEFAULT_LIMIT, \
     LIMIT_PARAM, NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY, INCLUDE_RETIRED_PARAM, VERBOSE_PARAM, HEAD, LATEST, \
     BRIEF_PARAM, ES_REQUEST_TIMEOUT, INCLUDE_INACTIVE, FHIR_LIMIT_PARAM, RAW_PARAM, SEARCH_MAP_CODES_PARAM, \
-    INCLUDE_SEARCH_META_PARAM
+    INCLUDE_SEARCH_META_PARAM, EXCLUDE_FUZZY_SEARCH_PARAM, EXCLUDE_WILDCARD_SEARCH_PARAM
 from core.common.exceptions import Http400
 from core.common.mixins import PathWalkerMixin
 from core.common.search import CustomESSearch
@@ -308,24 +308,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         return criterion, list(wildcard_fields.keys())
 
     def get_exact_search_criterion(self):
-        search_str = self.get_search_string(False, False)
-        criterion = None
-        fields = []
-        match_phrase_attrs = self.document_model.get_match_phrase_attrs() or []
-        fields += match_phrase_attrs
-        if match_phrase_attrs:
-            criterion = CustomESSearch.get_match_phrase_criteria(match_phrase_attrs.pop(), search_str, 5)
-            for attr in match_phrase_attrs:
-                criterion |= CustomESSearch.get_match_phrase_criteria(attr, search_str, 5)
-
-        for field, meta in self.document_model.get_exact_match_attrs().items():
-            fields.append(field)
-            criteria = CustomESSearch.get_match_criteria(field, search_str, meta['boost'])
-            if criterion is None:
-                criterion = criteria
-            criterion |= criteria
-
-        return criterion, fields
+        return CustomESSearch.get_exact_match_criteria(self.get_search_string(False, False), self.document_model)
 
     def get_faceted_criterion(self):
         filters = self.get_faceted_filters()
@@ -661,14 +644,23 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         if results is None:
             return results
 
+        exclude_fuzzy = self.request.query_params.get(EXCLUDE_FUZZY_SEARCH_PARAM) in TRUTHY
+        exclude_wildcard = self.request.query_params.get(EXCLUDE_WILDCARD_SEARCH_PARAM) in TRUTHY
+
         extras_fields = self.get_extras_searchable_fields_from_query_params()
         extras_fields_exact = self.get_extras_exact_fields_from_query_params()
         extras_fields_exists = self.get_extras_fields_exists_from_query_params()
-        exact_search_criterion, exact_search_fields = self.get_exact_search_criterion()
-        wildcard_search_criterion, wildcard_search_fields = self.get_wildcard_search_criterion()
-        fuzzy_search_criterion = self.get_fuzzy_search_criteria(boost_divide_by=10000, expansions=2)
-        results = results.query(exact_search_criterion | wildcard_search_criterion | fuzzy_search_criterion)
-        fields = exact_search_fields + wildcard_search_fields
+        criterion, fields = self.get_exact_search_criterion()
+
+        if not exclude_wildcard:
+            wildcard_search_criterion, wildcard_search_fields = self.get_wildcard_search_criterion()
+            criterion |= wildcard_search_criterion
+            fields += wildcard_search_fields
+        if not exclude_fuzzy:
+            criterion |= self.get_fuzzy_search_criteria(boost_divide_by=10000, expansions=2)
+
+        results = results.query(criterion)
+
         if extras_fields:
             fields += list(extras_fields.keys())
             for field, value in extras_fields.items():

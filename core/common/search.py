@@ -39,6 +39,26 @@ class CustomESSearch:
         self.total = 0
 
     @staticmethod
+    def get_exact_match_criteria(search_str, document, return_criteria_only=False):
+        criterion = None
+        fields = []
+        match_phrase_attrs = document.get_match_phrase_attrs() or []
+        fields += match_phrase_attrs
+        if match_phrase_attrs:
+            criterion = CustomESSearch.get_match_phrase_criteria(match_phrase_attrs.pop(), search_str, 5)
+            for attr in match_phrase_attrs:
+                criterion |= CustomESSearch.get_match_phrase_criteria(attr, search_str, 5)
+
+        for field, meta in document.get_exact_match_attrs().items():
+            fields.append(field)
+            criteria = CustomESSearch.get_match_criteria(field, search_str, meta['boost'])
+            if criterion is None:
+                criterion = criteria
+            criterion |= criteria
+
+        return criterion if return_criteria_only else (criterion, fields)
+
+    @staticmethod
     def get_match_phrase_criteria(field, search_str, boost):
         criteria = CustomESSearch.get_term_match_criteria(field, search_str, boost)
         if field == 'external_id':

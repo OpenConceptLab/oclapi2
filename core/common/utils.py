@@ -795,41 +795,6 @@ def get_es_wildcard_search_criterion(search_str, name_attr='name'):
     return criterion
 
 
-def get_es_exact_search_criterion(search_str, fields):
-    def get_query(attr):
-        words = search_str.split(' ')
-        criteria = es_Q('match', **{attr: words[0]})
-        for word in words[1:]:
-            criteria &= es_Q('match', **{attr: word})
-        return criteria
-
-    criterion = get_query(fields.pop())
-    for field in fields:
-        criterion |= get_query(field)
-
-    return criterion
-
-
-def es_wildcard_search(search, search_str, exact_search_fields, name_attr='name'):
-    if not search_str:
-        return search
-
-    return search.query(
-        get_es_wildcard_search_criterion(
-            search_str, name_attr) | get_es_exact_search_criterion(search_str, exact_search_fields))
-
-
-def es_exact_search(search, search_str, exact_search_fields):
-    if not search_str:
-        return search
-
-    return search.query(get_es_exact_search_criterion(search_str, exact_search_fields))
-
-
-def get_exact_search_fields(klass):
-    return [field for field, config in get(klass, 'es_fields', {}).items() if config.get('exact', False)]
-
-
 def es_to_pks(search):
     # doesn't care about the order
     default_limit = 25

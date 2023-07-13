@@ -22,16 +22,16 @@ from core.common.constants import (
     ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT,
     ES_REQUEST_TIMEOUT, ES_REQUEST_TIMEOUT_ASYNC, HEAD, ALL)
 from core.common.models import ConceptContainerModel, BaseResourceModel
+from core.common.search import CustomESSearch
 from core.common.tasks import seed_children_to_expansion, batch_index_resources, index_expansion_concepts, \
     index_expansion_mappings
 from core.common.utils import drop_version, to_owner_uri, generate_temp_version, es_id_in, \
-    es_wildcard_search, get_resource_class_from_resource_name, get_exact_search_fields, to_snake_case, \
-    es_exact_search, es_to_pks, batch_qs, split_list_by_condition, decode_string, is_canonical_uri, encode_string, \
+    get_resource_class_from_resource_name, to_snake_case, \
+    es_to_pks, batch_qs, split_list_by_condition, decode_string, is_canonical_uri, encode_string, \
     get_truthy_values
 from core.concepts.constants import LOCALES_FULLY_SPECIFIED
 from core.concepts.models import Concept
 from core.mappings.models import Mapping
-
 
 TRUTHY = get_truthy_values()
 
@@ -684,30 +684,17 @@ class CollectionReference(models.Model):
             cascade_params['max_results'] = None
         return cascade_params
 
-    def __is_exact_search_filter(self):
-        return bool(next(
-            (filter_def for filter_def in self.filter if  # pylint:disable=not-an-iterable
-             filter_def['property'] == 'exact_match' and filter_def['value'] == 'on'),
-            False
-        ))
-
     def apply_filters(self, queryset, resource_klass):
         if self.filter:
             pks = []
             document = resource_klass.get_search_document()
             search = document.search()
-            is_exact_search = self.__is_exact_search_filter()
             for filter_def in self.filter:  # pylint: disable=not-an-iterable
                 if to_snake_case(filter_def['property']) == 'exact_match':
                     continue
                 val = filter_def['value']
                 if filter_def['property'] == 'q':
-                    exact_search_fields = get_exact_search_fields(resource_klass)
-                    if is_exact_search:
-                        search = es_exact_search(search, val, exact_search_fields)
-                    else:
-                        name_attr = '_name' if self.is_concept else 'name'
-                        search = es_wildcard_search(search, val, exact_search_fields, name_attr)
+                    search = search.query(CustomESSearch.get_exact_match_criteria(val, document, True))
                 else:
                     search = search.filter("match", **{to_snake_case(filter_def["property"]): filter_def["value"]})
             for _queryset in batch_qs(queryset.order_by('id'), 500):
@@ -1297,10 +1284,7 @@ class ExpansionTextFilterParameter(ExpansionParameter):
             klass = get_resource_class_from_resource_name('concept' if is_concept_queryset else 'mapping')
             document = klass.get_search_document()
             search = document.search()
-            search = es_wildcard_search(
-                search, self.value, get_exact_search_fields(klass),
-                name_attr='_name' if is_concept_queryset else 'name'
-            )
+            search = search.query(CustomESSearch.get_exact_match_criteria(self.value, document, True))
             for _queryset in batch_qs(queryset.order_by('id'), 500):
                 new_search = es_id_in(search, list(_queryset.values_list('id', flat=True)))
                 pks += es_to_pks(new_search.params(request_timeout=ES_REQUEST_TIMEOUT))
