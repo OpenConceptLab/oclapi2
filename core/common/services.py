@@ -88,6 +88,20 @@ class S3:
         return True
 
     @classmethod
+    def rename(cls, old_key, new_key, delete=False):
+        try:
+            resource = cls.__resource()
+            resource.meta.client.copy(
+                {'Bucket': settings.AWS_STORAGE_BUCKET_NAME, 'Key': old_key}, settings.AWS_STORAGE_BUCKET_NAME, new_key
+            )
+            if delete:
+                cls.delete_objects(old_key)
+        except (ClientError, NoCredentialsError):
+            return False
+
+        return True
+
+    @classmethod
     def has_path(cls, prefix='/', delimiter='/'):
         return len(cls.__fetch_keys(prefix, delimiter)) > 0
 

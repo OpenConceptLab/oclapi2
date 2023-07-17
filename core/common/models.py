@@ -437,10 +437,10 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         return last_concept_update or last_mapping_update or self.updated_at or timezone.now()
 
     def get_last_child_update_from_export_url(self, export_url):
-        generic_path = self.generic_export_path(suffix=None)
+        generic_path = self.get_version_export_path(suffix=None)
         try:
             last_child_updated_at = export_url.split(generic_path)[1].split('?')[0].replace('.zip', '')
-            return from_string_to_date(last_child_updated_at).isoformat()
+            return from_string_to_date(last_child_updated_at.replace('_', ' ')).isoformat()
         except:  # pylint: disable=bare-except
             return None
 
@@ -519,9 +519,9 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
         self.delete_pins()
 
-        generic_export_path = self.generic_export_path(suffix=None)
+        export_path = self.get_version_export_path(suffix=None)
         super().delete(using=using, keep_parents=keep_parents)
-        delete_s3_objects.delay(generic_export_path)
+        delete_s3_objects.delay(export_path)
         self.post_delete_actions()
 
     def post_delete_actions(self):
@@ -796,13 +796,42 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
         return False
 
+    def migrate_to_new_export_path(self, move=False):  # needs to be deleted post migration to new export path  # pragma: no cover  # pylint: disable: line-too-long
+        from core.common.services import S3
+        for version in self.versions:
+            S3.rename(version.export_path, version.version_export_path, delete=move)
+
     @cached_property
-    def export_path(self):
+    def export_path(self):  # old export path, needs to be deleted post migration to new export path  # pragma: no cover
         last_update = self.last_child_update.strftime('%Y%m%d%H%M%S')
         return self.generic_export_path(suffix=f"{last_update}.zip")
 
-    def generic_export_path(self, suffix='*'):
+    def generic_export_path(self, suffix='*'):  # old export path, needs to be deleted post migration to new export path  # pragma: no cover  # pylint: disable: line-too-long
         path = f"{self.parent_resource}/{self.mnemonic}_{self.version}."
+        if suffix:
+            path += suffix
+
+        return path
+
+    @cached_property
+    def version_export_path(self):
+        last_update = self.last_child_update.strftime('%Y-%m-%d_%H%M%S')
+        return self.get_version_export_path(suffix=f"{last_update}.zip")
+
+    def get_version_export_path(self, suffix='*'):
+        version = self.version
+        if not version.lower().startswith('v'):
+            version = f"v{version}"
+
+        owner = self.parent
+        owner_mnemonic = owner.mnemonic
+        owner_type = f'{owner.get_url_kwarg()}s'
+        path = f"{owner_type}/{owner_mnemonic}/{owner_mnemonic}_{self.mnemonic}_{version}"
+        expansion = get(self, 'expansion.mnemonic')
+        if expansion:
+            path = f"{path}_{expansion}"
+        path = f'{path}.'
+
         if suffix:
             path += suffix
 
@@ -811,16 +840,18 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
     def get_export_url(self):
         service = get_export_service()
         if self.is_head:
-            path = self.export_path
+            path = self.version_export_path
         else:
-            path = service.get_last_key_from_path(self.generic_export_path(suffix=None)) or self.export_path
+            path = service.get_last_key_from_path(
+                self.get_version_export_path(suffix=None)
+            ) or self.version_export_path
         return service.url_for(path)
 
     def has_export(self):
         service = get_export_service()
         if self.is_head:
-            return service.exists(self.export_path)
-        return service.has_path(self.generic_export_path(suffix=None))
+            return service.exists(self.version_export_path)
+        return service.has_path(self.get_version_export_path(suffix=None))
 
     def can_view_all_content(self, user):
         if get(user, 'is_anonymous'):

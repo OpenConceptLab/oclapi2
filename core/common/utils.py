@@ -335,10 +335,10 @@ def write_export_file(
     logger.info(file_path)
     logger.info('Done compressing.  Uploading...')
 
-    s3_key = version.export_path
+    s3_key = version.version_export_path
     export_service = get_export_service()
     if version.is_head:
-        export_service.delete_objects(version.generic_export_path(suffix=None))
+        export_service.delete_objects(version.get_version_export_path(suffix=None))
 
     upload_status_code = export_service.upload_file(
         key=s3_key, file_path=file_path, binary=True, metadata={'ContentType': 'application/zip'},

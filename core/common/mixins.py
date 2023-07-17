@@ -764,7 +764,7 @@ class ConceptContainerExportMixin:
             return HttpResponseForbidden()
 
         if version.has_export():
-            get_export_service().remove(version.export_path)
+            get_export_service().remove(version.version_export_path)
             return Response(status=status.HTTP_204_NO_CONTENT)
 
         return Response(status=status.HTTP_404_NOT_FOUND)
