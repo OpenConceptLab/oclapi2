@@ -58,7 +58,7 @@ class ConceptDocument(Document):
             'id': {
                 'boost': 40
             },
-            'name': {
+            '_name': {
                 'boost': 35
             },
             'same_as_map_codes': {
