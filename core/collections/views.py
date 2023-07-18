@@ -56,7 +56,7 @@ from core.common.swagger_parameters import q_param, compress_header, page_param,
     include_facets_header, sort_asc_param, sort_desc_param, updated_since_param, include_retired_param, limit_param
 from core.common.tasks import add_references, export_collection, delete_collection, index_expansion_concepts, \
     index_expansion_mappings
-from core.common.utils import compact_dict_by_values, parse_boolean_query_param
+from core.common.utils import compact_dict_by_values, parse_boolean_query_param, get_truthy_values
 from core.common.views import BaseAPIView, BaseLogoView, ConceptContainerExtraRetrieveUpdateDestroyView, TaskMixin
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept
@@ -254,6 +254,11 @@ class CollectionRetrieveUpdateDestroyView(
                     version.update_concepts_count()
                 if version.should_set_active_mappings:
                     version.update_mappings_count()
+
+        truthy = get_truthy_values()
+        if self.request.user.is_staff and self.request.query_params.get('migrate_export_path', False) in truthy:  # pragma: no cover  # pylint: disable: line-too-long
+            instance.migrate_to_new_export_path(move=self.request.query_params.get('move', False) in truthy)
+
         return instance
 
     def get_permissions(self):
