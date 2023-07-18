@@ -139,7 +139,17 @@ class CustomESSearch:
 
     @staticmethod
     def get_match_criteria(field, search_str, boost):
-        return Q('match', **{field: {'query': search_str, 'boost': boost, 'auto_generate_synonyms_phrase_query': False, 'operator': 'AND'}})
+        return Q(
+            'match',
+            **{
+                field: {
+                    'query': search_str,
+                    'boost': boost,
+                    'auto_generate_synonyms_phrase_query': False,
+                    'operator': 'AND'
+                }
+            }
+        )
 
     @staticmethod
     def get_wildcard_criteria(field, search_str, boost):

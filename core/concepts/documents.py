@@ -19,7 +19,6 @@ class ConceptDocument(Document):
     last_update = fields.DateField(attr='updated_at')
     locale = fields.ListField(fields.KeywordField())
     synonyms = fields.ListField(fields.TextField())
-    _synonyms = fields.ListField(fields.KeywordField(normalizer="lowercase"))
     source = fields.KeywordField(attr='parent_resource', normalizer="lowercase")
     owner = fields.KeywordField(attr='owner_name', normalizer="lowercase")
     owner_type = fields.KeywordField(attr='owner_type')
