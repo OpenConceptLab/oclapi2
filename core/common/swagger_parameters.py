@@ -96,10 +96,10 @@ update_if_exists_param = openapi.Parameter(
     default='true'
 )
 file_upload_param = openapi.Parameter(
-    'file', openapi.IN_FORM, description="JSON Content File (mandatory)", type=openapi.TYPE_FILE
+    'file', openapi.IN_FORM, description="JSON Content File (json, csv or zip)", type=openapi.TYPE_FILE
 )
 file_url_param = openapi.Parameter(
-    'file_url', openapi.IN_FORM, description="Import FILE URL (mandatory)", type=openapi.TYPE_STRING
+    'file_url', openapi.IN_FORM, description="Import FILE URL (json, csv or zip)", type=openapi.TYPE_STRING
 )
 apps_param = openapi.Parameter(
     'apps', openapi.IN_FORM, description="App Names (comma separated)", type=openapi.TYPE_STRING

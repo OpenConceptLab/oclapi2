@@ -663,12 +663,20 @@ def guess_extension(file=None, name=None):
 
 
 def is_csv_file(file=None, name=None):
+    return is_file_extension('csv', file, name)
+
+
+def is_zip_file(file=None, name=None):
+    return is_file_extension('zip', file, name)
+
+
+def is_file_extension(extension, file=None, name=None):
     if not file and not name:
-        return None
+        return False
 
-    extension = guess_extension(file=file, name=name)
+    file_extension = guess_extension(file=file, name=name)
 
-    return extension and extension.endswith('csv')
+    return file_extension and file_extension.endswith(extension)
 
 
 def is_url_encoded_string(string, lower=True):
