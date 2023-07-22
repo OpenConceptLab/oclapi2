@@ -237,7 +237,10 @@ class BulkImportParallelInlineView(APIView):
         parser = ImportContentParser(
             file=get(request.data, 'file') if is_upload else None,
             file_url=get(request.data, 'file_url') if is_file_url else None,
-            content=get(request.data, 'data') if is_data else None
+            content=get(request.data, 'data') if is_data else None,
+            owner=get(request.data, 'owner') or None,
+            owner_type=get(request.data, 'owner_type') or None,
+            version=get(request.data, 'version') or None,
         )
         parser.parse()
         if parser.errors:
