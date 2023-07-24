@@ -28,7 +28,7 @@ from core.common.utils import (
     drop_version, is_versioned_uri, separate_version, to_parent_uri, jsonify_safe, es_get,
     get_resource_class_from_resource_name, flatten_dict, is_csv_file, is_url_encoded_string, to_parent_uri_from_kwargs,
     set_current_user, get_current_user, set_request_url, get_request_url, nested_dict_values, chunks, api_get,
-    split_list_by_condition, is_zip_file)
+    split_list_by_condition)
 from core.concepts.models import Concept
 from core.orgs.models import Organization
 from core.sources.models import Source
@@ -523,7 +523,6 @@ class IdentifierSerializerTest(OCLTestCase):
                      'text': 'Accession ID'},
                  'value': '/orgs/OCL/Code/1/'}])
 
-
 class UtilsTest(OCLTestCase):
     def test_set_and_get_current_user(self):
         set_current_user(lambda self: 'foo')
@@ -874,30 +873,6 @@ class UtilsTest(OCLTestCase):
 
         file_mock.name = 'unknown_file.csv'
         self.assertTrue(is_csv_file(file=file_mock))
-
-    def test_is_zip_file(self):
-        self.assertFalse(is_zip_file(name='foo/bar'))
-        self.assertFalse(is_zip_file(name='foo/bar.csv'))
-        self.assertTrue(is_zip_file(name='foo.zip'))
-        self.assertTrue(is_zip_file(name='foo.csv.zip'))
-        self.assertTrue(is_zip_file(name='foo.json.zip'))
-
-        file_mock = Mock(spec=File)
-
-        file_mock.name = 'unknown_file'
-        self.assertFalse(is_zip_file(file=file_mock))
-
-        file_mock.name = 'unknown_file.json'
-        self.assertFalse(is_zip_file(file=file_mock))
-
-        file_mock.name = 'unknown_file.csv'
-        self.assertFalse(is_zip_file(file=file_mock))
-
-        file_mock.name = 'unknown_file.csv.zip'
-        self.assertTrue(is_zip_file(file=file_mock))
-
-        file_mock.name = 'unknown_file.json.zip'
-        self.assertTrue(is_zip_file(file=file_mock))
 
     def test_is_url_encoded_string(self):
         self.assertTrue(is_url_encoded_string('foo'))

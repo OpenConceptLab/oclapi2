@@ -1,12 +1,10 @@
-import io
 import json
 import os
 import uuid
 from json import JSONDecodeError
-from zipfile import ZipFile
 
 from celery_once import AlreadyQueued
-from django.core.files.uploadedfile import SimpleUploadedFile, InMemoryUploadedFile
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.db.models import F
 from mock import patch, Mock, ANY, call, PropertyMock
@@ -19,7 +17,6 @@ from core.common.tasks import post_import_update_resource_counts, bulk_import_pa
 from core.common.tests import OCLAPITestCase, OCLTestCase
 from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory
-from core.importers.input_parsers import ImportContentParser
 from core.importers.models import BulkImport, BulkImportInline, BulkImportParallelRunner
 from core.importers.views import csv_file_data_to_input_list
 from core.mappings.models import Mapping
@@ -1206,7 +1203,7 @@ class BulkImportViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.data, {'exception': "Invalid input."})
+        self.assertEqual(response.data, {'exception': "No content to import"})
 
     @patch('core.importers.views.queue_bulk_import')
     def test_post_409(self, queue_bulk_import_mock):
@@ -1290,7 +1287,7 @@ class BulkImportViewTest(OCLAPITestCase):
             HTTP_AUTHORIZATION='Token ' + self.token,
         )
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.data, {'exception': 'Invalid input.'})
+        self.assertEqual(response.data, {'exception': 'No content to import'})
 
         file = open(
                 os.path.join(os.path.dirname(__file__), '..', 'samples/invalid_import_csv.csv'), 'r'
@@ -1301,7 +1298,7 @@ class BulkImportViewTest(OCLAPITestCase):
             HTTP_AUTHORIZATION='Token ' + self.token,
         )
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.data, {'exception': 'Invalid input.'})
+        self.assertEqual(response.data, {'exception': 'No content to import'})
 
     def test_post_file_url_400(self):
         response = self.client.post(
@@ -1534,232 +1531,3 @@ class TasksTest(OCLTestCase):
             content=[1, 2], username='username', update_if_exists=True
         )
         bulk_import_mock().run.assert_called_once()
-
-
-class ImportContentParserTest(OCLTestCase):
-    def test_parse_content(self):
-        parser = ImportContentParser(content='foobar')
-        parser.parse()
-
-        self.assertEqual(parser.content, 'foobar')
-
-    def test_parse_json_file(self):
-        file = open(os.path.join(os.path.dirname(__file__), '..', 'samples/sample_collection_references.json'), 'r')
-
-        parser = ImportContentParser(file=file)
-        parser.parse()
-
-        self.assertIsNotNone(parser.content)
-
-    def test_parse_csv_file(self):
-        file = open(os.path.join(os.path.dirname(__file__), '..', 'samples/ocl_csv_with_retired_concepts.csv'), 'r')
-
-        parser = ImportContentParser(file=file)
-        parser.parse()
-
-        self.assertEqual(
-            parser.content,
-            [{
-                 'type': 'Organization',
-                 'id': 'DemoOrg',
-                 'name': 'My Demo Organization',
-                 'company': 'DemoLand Inc.',
-                 'website': 'https://www.demoland.fake',
-                 'location': 'DemoLand',
-                 'public_access': 'View',
-                 'extras': {
-                     'Ex_Num': '6'
-                 }
-             }, {
-                 'type': 'Source',
-                 'id': 'MyDemoSource',
-                 'external_id': '164531246546-IDK',
-                 'short_code': 'MyDemoSource',
-                 'name': 'My Test Source',
-                 'full_name': 'My Demonstrative Test Source',
-                 'source_type': 'Dictionary',
-                 'public_access': 'Edit',
-                 'default_locale': 'en',
-                 'supported_locales': 'en,fk',
-                 'website': 'https://www.demoland.fake/source',
-                 'description': 'Using this source just for testing purposes',
-                 'custom_validation_schema': 'None',
-                 'owner': 'DemoOrg',
-                 'owner_type': 'Organization',
-                 'extras': {
-                     'ex_name': 'Source Name'
-                 }
-             }, {
-                 'type': 'Source',
-                 'id': 'MyFHIRSource',
-                 'external_id': 'FHIR1641246546-IDK',
-                 'short_code': 'MyFHIRSource',
-                 'name': 'My FHIR Source',
-                 'full_name': 'My Demonstrative FHIR Test Source',
-                 'source_type': 'Dictionary',
-                 'public_access': 'Edit',
-                 'default_locale': 'en',
-                 'supported_locales': 'en,fk',
-                 'website': 'https://www.demoland.fake/source',
-                 'description': 'Using this source just for FHIR testing purposes',
-                 'custom_validation_schema': 'None',
-                 'owner': 'DemoOrg',
-                 'owner_type': 'Organization',
-                 'extras': {
-                     'ex_name': 'FHIR Source Name'
-                 }
-             }, {
-                 'type': 'Collection',
-                 'id': 'MyDemoCollection',
-                 'external_id': '654246546-IDK',
-                 'short_code': 'MyDemoCollection',
-                 'name': 'My Test Collection',
-                 'full_name': 'My Demonstrative Test Collection',
-                 'collection_type': 'Value Set',
-                 'public_access': 'Edit',
-                 'default_locale': 'en',
-                 'supported_locales': 'en,fk',
-                 'website': 'https://www.demoland.fake/source',
-                 'description': 'Using this collection just for testing purposes',
-                 'custom_validation_schema': 'None',
-                 'owner': 'DemoOrg',
-                 'owner_type': 'Organization',
-                 'extras': {
-                     'ex_name': 'Collection Name'
-                 }
-             }, {
-                 'type': 'Concept',
-                 'id': 'Act',
-                 'retired': False,
-                 'external_id': 'HSpL3hSBx6F',
-                 'concept_class': 'Misc',
-                 'datatype': 'None',
-                 'owner': 'DemoOrg',
-                 'owner_type': 'Organization',
-                 'source': 'MyDemoSource',
-                 'names': [{
-                               'name': 'Active Demo Concept',
-                               'locale': 'en',
-                               'name_type': 'Fully Specified'
-                           }],
-                 'descriptions': [{
-                                      'description': 'Just one description',
-                                      'locale': 'en'
-                                  }]
-             }, {
-                 'type': 'Concept',
-                 'id': 'Ret',
-                 'retired': True,
-                 'external_id': 'HSpL3hSBx6F',
-                 'concept_class': 'Misc',
-                 'datatype': 'None',
-                 'owner': 'DemoOrg',
-                 'owner_type': 'Organization',
-                 'source': 'MyDemoSource',
-                 'names': [{
-                               'name': 'Retired Demo Concept',
-                               'locale': 'en',
-                               'name_type': 'Fully Specified'
-                           }]
-             }, {
-                 'type': 'Concept',
-                 'id': 'Child',
-                 'retired': False,
-                 'external_id': 'HSpL3hSBx6F',
-                 'concept_class': 'Misc',
-                 'datatype': 'None',
-                 'owner': 'DemoOrg',
-                 'owner_type': 'Organization',
-                 'source': 'MyDemoSource',
-                 'names': [{
-                               'name': 'Child Demo Concept',
-                               'locale': 'en',
-                               'name_type': 'Fully Specified'
-                           }]
-             }, {
-                 'type': 'Concept',
-                 'id': 'Child_of_child',
-                 'retired': False,
-                 'external_id': 'asdkfjhasLKfjhsa',
-                 'concept_class': 'Misc',
-                 'datatype': 'None',
-                 'owner': 'DemoOrg',
-                 'owner_type': 'Organization',
-                 'source': 'MyDemoSource',
-                 'names': [{
-                               'name': 'Child of the Child Demo Concept',
-                               'locale': 'en',
-                               'name_type': 'Fully Specified'
-                           }],
-                 'descriptions': [{
-                                      'description': 'Main description',
-                                      'locale': 'en'
-                                  }, {
-                                      'description': 'Secondary description',
-                                      'locale': 'en'
-                                  }]
-             }, {
-                 'type': 'Mapping',
-                 'retired': False,
-                 'map_type': 'Child-Parent',
-                 'owner': 'DemoOrg',
-                 'owner_type': 'Organization',
-                 'source': 'MyDemoSource',
-                 'from_concept_url': '/orgs/DemoOrg/sources/MyDemoSource/concepts//orgs/DemoOrg/sources/MyDemoSource/concepts/Child_of_child//',
-                 'to_concept_url': '/orgs/DemoOrg/sources/MyDemoSource/concepts//orgs/DemoOrg/sources/MyDemoSource/concepts/Child//'
-             }, {
-                 'type': 'Mapping',
-                 'map_type': 'Parent-child',
-                 'owner': 'DemoOrg',
-                 'owner_type': 'Organization',
-                 'source': 'MyDemoSource',
-                 'from_concept_url': '/orgs/DemoOrg/sources/MyDemoSource/concepts/Act/',
-                 'to_concept_url': '/orgs/DemoOrg/sources/MyDemoSource/concepts/Child/'
-             }, {
-                 'type': 'Mapping',
-                 'retired': True,
-                 'map_type': 'Parent-child-retired',
-                 'owner': 'DemoOrg',
-                 'owner_type': 'Organization',
-                 'source': 'MyDemoSource',
-                 'from_concept_url': '/orgs/DemoOrg/sources/MyDemoSource/concepts/Act/',
-                 'to_concept_url': '/orgs/DemoOrg/sources/MyDemoSource/concepts/Child/'
-             }]
-        )
-
-    @patch('core.importers.input_parsers.ZipFile')
-    def test_parse_zip_file(self, zipfile_mock):
-        file = open(os.path.join(os.path.dirname(__file__), '..', 'samples/DemoSource_v1.0.20230526120030.zip'), 'r')
-        real_zipfile = ZipFile(file.name, 'r')
-        zipfile_mock.return_value = real_zipfile
-
-        parser = ImportContentParser(file=file)
-        parser.parse()
-
-        self.assertIsNotNone(parser.content)
-        zipfile_mock.assert_called_once_with(file, 'r')
-
-    @patch('core.importers.input_parsers.ZipFile')
-    @patch('requests.get')
-    def test_parse_zip_file_url(self, requests_get_mock, zipfile_mock):
-        file = open(os.path.join(os.path.dirname(__file__), '..', 'samples/DemoSource_v1.0.20230526120030.zip'), 'r')
-        requests_get_mock.return_value = Mock(ok=True, content=b'file-content')
-        real_zipfile = ZipFile(file.name, 'r')
-        zipfile_mock.return_value = real_zipfile
-
-        parser = ImportContentParser(file_url='https://file.zip')
-        parser.parse()
-
-        self.assertIsNotNone(parser.content)
-
-        file = open(os.path.join(os.path.dirname(__file__), '..', 'samples/DemoSource_v1.0.20230526120030.zip'), 'r')
-        real_zipfile = ZipFile(file.name, 'r')
-        zipfile_mock.return_value = real_zipfile
-        parser1 = ImportContentParser(file=file)
-        parser1.parse()
-
-        self.assertEqual(parser1.content, parser.content)
-        requests_get_mock.assert_called_once_with(
-            'https://file.zip', headers={'User-Agent': 'OCL'}, stream=True, timeout=30)
-
-

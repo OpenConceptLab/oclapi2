@@ -1052,13 +1052,10 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
         }
         for task in self.tasks:
             if task.result:
-                try:
-                    result = task.result.get('json')
-                    for key in total_result:
-                        if result:
-                            total_result[key] += result.get(key)
-                except:
-                    pass
+                result = task.result.get('json')
+                for key in total_result:
+                    if result:
+                        total_result[key] += result.get(key)
 
         total_result['start_time'] = self.start_time_formatted
         total_result['elapsed_seconds'] = self.elapsed_seconds
