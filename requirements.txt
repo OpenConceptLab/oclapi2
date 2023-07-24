@@ -14,7 +14,7 @@ python-dateutil==2.8.2
 requests==2.31.0
 factory_boy==3.2.1
 # Celery
-celery[redis]==5.2.7
+celery[redis]==5.3.1
 celery_once==3.0.1
 gevent==23.7.0
 git+https://github.com/snyaggarwal/flower # use until https://github.com/mher/flower/issues/1231 issue is resolved
