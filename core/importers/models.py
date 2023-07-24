@@ -1057,7 +1057,7 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
                     for key in total_result:
                         if result:
                             total_result[key] += result.get(key)
-                except:
+                except:  # pylint: disable=bare-except
                     pass
 
         total_result['start_time'] = self.start_time_formatted

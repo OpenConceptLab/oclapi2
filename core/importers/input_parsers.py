@@ -63,6 +63,7 @@ class ImportContentParser:
             return requests.get(self.file_url, headers=headers, stream=True, timeout=30)
         except Exception as e:
             self.errors.append(f'Failed to download file from {self.file_url}, Exception: {e}.')
+        return None
 
     def set_file_from_response(self, response):
         if get(response, 'ok'):

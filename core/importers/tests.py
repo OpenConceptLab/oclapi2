@@ -1,4 +1,3 @@
-import io
 import json
 import os
 import uuid
@@ -6,7 +5,7 @@ from json import JSONDecodeError
 from zipfile import ZipFile
 
 from celery_once import AlreadyQueued
-from django.core.files.uploadedfile import SimpleUploadedFile, InMemoryUploadedFile
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.db.models import F
 from mock import patch, Mock, ANY, call, PropertyMock
@@ -1705,8 +1704,8 @@ class ImportContentParserTest(OCLTestCase):
                  'owner': 'DemoOrg',
                  'owner_type': 'Organization',
                  'source': 'MyDemoSource',
-                 'from_concept_url': '/orgs/DemoOrg/sources/MyDemoSource/concepts//orgs/DemoOrg/sources/MyDemoSource/concepts/Child_of_child//',
-                 'to_concept_url': '/orgs/DemoOrg/sources/MyDemoSource/concepts//orgs/DemoOrg/sources/MyDemoSource/concepts/Child//'
+                 'from_concept_url': '/orgs/DemoOrg/sources/MyDemoSource/concepts//orgs/DemoOrg/sources/MyDemoSource/concepts/Child_of_child//',  # pylint: disable=line-too-long
+                 'to_concept_url': '/orgs/DemoOrg/sources/MyDemoSource/concepts//orgs/DemoOrg/sources/MyDemoSource/concepts/Child//'  # pylint: disable=line-too-long
              }, {
                  'type': 'Mapping',
                  'map_type': 'Parent-child',
@@ -1761,5 +1760,3 @@ class ImportContentParserTest(OCLTestCase):
         self.assertEqual(parser1.content, parser.content)
         requests_get_mock.assert_called_once_with(
             'https://file.zip', headers={'User-Agent': 'OCL'}, stream=True, timeout=30)
-
-
