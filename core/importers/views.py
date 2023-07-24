@@ -22,7 +22,7 @@ from core.common.swagger_parameters import update_if_exists_param, task_param, r
 from core.common.utils import parse_bulk_import_task_id, task_exists, flower_get, queue_bulk_import, \
     get_bulk_import_celery_once_lock_key, is_csv_file, get_truthy_values
 from core.importers.constants import ALREADY_QUEUED, INVALID_UPDATE_IF_EXISTS, NO_CONTENT_TO_IMPORT
-
+from core.importers.input_parsers import ImportContentParser
 
 TRUTHY = get_truthy_values()
 
@@ -231,43 +231,19 @@ class BulkImportParallelInlineView(APIView):
     )
     def post(self, request, import_queue=None):
         parallel_threads = request.data.get('parallel') or 5
-        file = None
-        file_name = None
         is_upload = 'file' in request.data
         is_file_url = 'file_url' in request.data
         is_data = 'data' in request.data
-        file_content = None
-        try:
-            if is_upload:
-                file = request.data['file']
-                file_name = file.name
-                file_content = file.read().decode('utf-8')
-            elif is_file_url:
-                file_name = request.data['file_url']
-                headers = {
-                    'User-Agent': 'OCL'  # user-agent required by mod_security on some servers
-                }
-                file = requests.get(file_name, headers=headers)
-                file_content = file.text
-        except:  # pylint: disable=bare-except
-            pass
+        parser = ImportContentParser(
+            file=get(request.data, 'file') if is_upload else None,
+            file_url=get(request.data, 'file_url') if is_file_url else None,
+            content=get(request.data, 'data') if is_data else None
+        )
+        parser.parse()
+        if parser.errors:
+            return Response({'exception': ' '.join(parser.errors)}, status=status.HTTP_400_BAD_REQUEST)
 
-        if not file_content and not is_data:
-            return Response({'exception': NO_CONTENT_TO_IMPORT}, status=status.HTTP_400_BAD_REQUEST)
-
-        if file_name and is_csv_file(name=file_name):
-            try:
-                data = OclStandardCsvToJsonConverter(
-                    input_list=csv_file_data_to_input_list(file_content),
-                    allow_special_characters=True
-                ).process()
-            except Exception as ex:  # pylint: disable=broad-except
-                return Response({'exception': f'Bad CSV ({str(ex)})'}, status=status.HTTP_400_BAD_REQUEST)
-        elif file:
-            data = file_content
-        else:
-            data = request.data.get('data')
-        return import_response(self.request, import_queue, data, parallel_threads, True, self.deprecated)
+        return import_response(self.request, import_queue, parser.content, parallel_threads, True, self.deprecated)
 
 
 class ImportView(BulkImportParallelInlineView, ImportRetrieveDestroyMixin):
