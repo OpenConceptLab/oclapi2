@@ -3,7 +3,6 @@ import io
 from zipfile import ZipFile
 
 import requests
-from ocldev.oclexporttoimportconverter import OCLExportToImportConverter
 from ocldev.oclcsvtojsonconverter import OclStandardCsvToJsonConverter
 from pydash import get, compact
 
@@ -20,11 +19,10 @@ class ImportContentParser:
     2. Processes json/csv/zip file url from 'file_url' arg
     3. Processes json/csv/zip file from 'file' arg
     """
-    def __init__(self, content=None, file_url=None, file=None, **kwargs):
+    def __init__(self, content=None, file_url=None, file=None):
         self.content = content
         self.file_url = file_url
         self.file = file
-        self.kwargs = kwargs
         self.file_name = get(self, 'file.name') if self.file else None
         self.errors = []
         self.extracted_file = None
@@ -83,20 +81,6 @@ class ImportContentParser:
                     self.content = self.content.decode('utf-8')
                 if self.is_csv_file:
                     self.set_csv_content()
-            if self.is_ocl_source_version_export():
-                converter = OCLExportToImportConverter(
-                    content=self.content,
-                    return_output=True,
-                    version=self.kwargs.get('version', None),
-                    owner=self.kwargs.get('owner', None),
-                    owner_type=self.kwargs.get('owner_type', None)
-                )
-                converter.process()
-                self.content = converter.result
-
-    def is_ocl_source_version_export(self):
-        return isinstance(self.content, str) and self.content.startswith(
-            '{"type": "Source Version"') and '"concepts":' in self.content and '"mappings":' in self.content
 
     def set_csv_content(self):
         try:
