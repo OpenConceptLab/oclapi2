@@ -2,7 +2,6 @@ from celery.app import default_app as celery_app
 from django.conf import settings
 from django_redis import get_redis_connection
 from health_check.backends import BaseHealthCheckBackend, logger
-from health_check.contrib.redis.backends import RedisHealthCheck
 from health_check.exceptions import ServiceReturnedUnexpectedResult, ServiceUnavailable
 from pydash import get
 from redis import exceptions
