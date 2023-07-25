@@ -309,24 +309,23 @@ REDIS_SENTINELS_MASTER = os.environ.get('REDIS_SENTINELS_MASTER', 'default')
 REDIS_SENTINELS_LIST = []
 
 # django cache
-if ENV and ENV not in ['ci']:
-    OPTIONS = {}
-    if REDIS_SENTINELS:
-        for REDIS_SENTINEL in REDIS_SENTINELS.split(','):
-            SENTINEL = REDIS_SENTINEL.split(':')
-            REDIS_SENTINELS_LIST.append((SENTINEL[0], int(SENTINEL[1])))
-        OPTIONS.update({
-            'CLIENT_CLASS': 'django_redis.client.SentinelClient',
-            'SENTINELS': REDIS_SENTINELS_LIST
-        })
+OPTIONS = {}
+if REDIS_SENTINELS:
+    for REDIS_SENTINEL in REDIS_SENTINELS.split(','):
+        SENTINEL = REDIS_SENTINEL.split(':')
+        REDIS_SENTINELS_LIST.append((SENTINEL[0], int(SENTINEL[1])))
+    OPTIONS.update({
+        'CLIENT_CLASS': 'django_redis.client.SentinelClient',
+        'SENTINELS': REDIS_SENTINELS_LIST
+    })
 
-    CACHES = {
-        'default': {
-            'BACKEND': 'django_redis.cache.RedisCache',
-            'LOCATION': REDIS_URL,
-            'OPTIONS': OPTIONS
-        }
+CACHES = {
+    'default': {
+        'BACKEND': 'django_redis.cache.RedisCache',
+        'LOCATION': REDIS_URL,
+        'OPTIONS': OPTIONS
     }
+}
 
 # Celery
 CELERY_ENABLE_UTC = True
