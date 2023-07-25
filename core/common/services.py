@@ -10,6 +10,7 @@ from django.conf import settings
 from django.contrib.auth.backends import ModelBackend
 from django.core.files.base import ContentFile
 from django.db import connection
+from django_redis import get_redis_connection
 from mozilla_django_oidc.contrib.drf import OIDCAuthentication
 from pydash import get
 from rest_framework.authentication import TokenAuthentication
@@ -216,7 +217,7 @@ class S3:
 
 class RedisService:  # pragma: no cover
     def __init__(self):
-        self.conn = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB)
+        self.conn = get_redis_connection('default')
 
     def set(self, key, val, **kwargs):
         return self.conn.set(key, val, **kwargs)
