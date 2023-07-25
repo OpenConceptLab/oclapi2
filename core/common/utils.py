@@ -418,14 +418,14 @@ def es_get(url, **kwargs):
         for es_host in settings.ES_HOSTS.split(','):
             try:
                 return requests.get(
-                    f'http://{es_host}/{url}',
+                    f'{settings.ES_SCHEME}://{es_host}/{url}',
                     **kwargs
                 )
             except ConnectTimeout:
                 continue
     else:
         return requests.get(
-            f'http://{settings.ES_HOST}:{settings.ES_PORT}/{url}',
+            f'{settings.ES_SCHEME}://{settings.ES_HOST}:{settings.ES_PORT}/{url}',
             **kwargs
         )
 
