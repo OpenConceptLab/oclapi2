@@ -83,7 +83,6 @@ INSTALLED_APPS = [
     'health_check',  # required
     'health_check.db',  # stock Django health checkers
     # 'health_check.contrib.celery_ping',  # requires celery
-    'health_check.contrib.redis',  # requires Redis broker
     'core.common.apps.CommonConfig',
     'core.users',
     'core.orgs',
