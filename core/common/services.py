@@ -2,7 +2,6 @@ import base64
 import json
 
 import boto3
-import redis
 import requests
 from botocore.client import Config
 from botocore.exceptions import NoCredentialsError, ClientError
@@ -17,7 +16,6 @@ from rest_framework.authentication import TokenAuthentication
 from rest_framework.authtoken.models import Token
 
 from core.common.backends import OCLOIDCAuthenticationBackend
-from core.settings import REDIS_HOST, REDIS_PORT, REDIS_DB
 
 
 class S3:
