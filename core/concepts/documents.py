@@ -80,7 +80,7 @@ class ConceptDocument(Document):
             'synonyms': {
                 'boost': 0.3,
                 'wildcard': True,
-                'lower': True
+                'lower': False
             },
             'same_as_map_codes': {
                 'boost': 0.2,
@@ -132,7 +132,7 @@ class ConceptDocument(Document):
     @staticmethod
     def prepare_synonyms(instance):
         names = instance.names.exclude(name=instance.display_name)
-        return list(map(lambda x: x.lower(), names.filter(name__isnull=False).values_list('name', flat=True)))
+        return list(set(names.filter(name__isnull=False).values_list('name', flat=True)))
 
     @staticmethod
     def prepare_source_version(instance):
