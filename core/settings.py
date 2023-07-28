@@ -317,7 +317,8 @@ if REDIS_SENTINELS:
         REDIS_SENTINELS_LIST.append((SENTINEL[0], int(SENTINEL[1])))
     OPTIONS.update({
         'CLIENT_CLASS': 'django_redis.client.SentinelClient',
-        'SENTINELS': REDIS_SENTINELS_LIST
+        'SENTINELS': REDIS_SENTINELS_LIST,
+        'CONNECTION_POOL_CLASS': 'redis.sentinel.SentinelConnectionPool',
     })
 
 CACHES = {
