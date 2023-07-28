@@ -11,6 +11,7 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.mail import EmailMessage
 from django.core.management import call_command
+from django.db.models import Count
 from django.template.loader import render_to_string
 from django.utils import timezone
 from django_elasticsearch_dsl.registries import registry
@@ -18,7 +19,7 @@ from pydash import get
 
 from core.celery import app
 from core.common import ERRBIT_LOGGER
-from core.common.constants import CONFIRM_EMAIL_ADDRESS_MAIL_SUBJECT, PASSWORD_RESET_MAIL_SUBJECT
+from core.common.constants import CONFIRM_EMAIL_ADDRESS_MAIL_SUBJECT, PASSWORD_RESET_MAIL_SUBJECT, HEAD
 from core.common.utils import write_export_file, web_url, get_resource_class_from_resource_name, get_export_service
 from core.toggles.models import Toggle
 
@@ -728,3 +729,45 @@ def calculate_checksums(resource_type, resource_id):
                     instance.get_latest_version().set_checksums()
                 if not instance.is_versioned_object:
                     instance.versioned_object.set_checksums()
+
+
+@app.task(ignore_result=True)
+def fix_concept_latest_versions():  # pragma: no cover
+    from core.sources.models import Source
+    from core.concepts.models import Concept
+    index = []
+    for source in Source.objects.filter(version=HEAD):
+        for info in source.concepts_set.filter(
+                is_latest_version=True
+        ).values(
+            'versioned_object_id'
+        ).annotate(count=Count('versioned_object_id')).filter(count__gt=1).values('versioned_object_id'):
+            versioned_object_id = info['versioned_object_id']
+            concept = Concept.objects.get(id=versioned_object_id)
+            latest = concept.versions.filter(is_latest_version=True).order_by('-id').first()
+            concept.versions.exclude(id=latest.id).update(is_latest_version=False)
+            index.append(versioned_object_id)
+    print("Updated Concept Count: ", len(index))
+    from core.concepts.documents import ConceptDocument
+    Concept.batch_index(Concept.objects.filter(versioned_object_id__in=index), ConceptDocument)
+
+
+@app.task(ignore_result=True)
+def fix_mapping_latest_versions():  # pragma: no cover
+    from core.sources.models import Source
+    from core.mappings.models import Mapping
+    index = []
+    for source in Source.objects.filter(version=HEAD):
+        for info in source.mappings_set.filter(
+                is_latest_version=True
+        ).values(
+            'versioned_object_id'
+        ).annotate(count=Count('versioned_object_id')).filter(count__gt=1).values('versioned_object_id'):
+            versioned_object_id = info['versioned_object_id']
+            mapping = Mapping.objects.get(id=versioned_object_id)
+            latest = mapping.versions.filter(is_latest_version=True).order_by('-id').first()
+            mapping.versions.exclude(id=latest.id).update(is_latest_version=False)
+            index.append(versioned_object_id)
+    print("Updated Mapping Count: ", len(index))
+    from core.mappings.documents import MappingDocument
+    Mapping.batch_index(Mapping.objects.filter(versioned_object_id__in=index), MappingDocument)

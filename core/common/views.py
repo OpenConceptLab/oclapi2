@@ -15,7 +15,7 @@ from elasticsearch_dsl import Q
 from pydash import get, compact
 from rest_framework import response, generics, status
 from rest_framework.generics import ListAPIView, RetrieveUpdateDestroyAPIView
-from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated, IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -1039,3 +1039,27 @@ class TaskMixin:
                 return self.task_response(task, queue)
 
         return result
+
+
+class ConceptMappingLatestVersionDeDupeView(APIView):  # pragma: no cover
+    permission_classes = (IsAdminUser,)
+    swagger_schema = None
+
+    @staticmethod
+    def post(_):
+        from core.common.tasks import fix_concept_latest_versions, fix_mapping_latest_versions
+        concept_task = fix_concept_latest_versions.delay()
+        mapping_task = fix_mapping_latest_versions.delay()
+
+        return Response(
+            {
+                'concept': {
+                    'task': concept_task.id,
+                    'state': concept_task.state,
+                },
+                'mapping': {
+                    'task': mapping_task.id,
+                    'state': mapping_task.state,
+                }
+            }
+        )

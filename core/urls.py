@@ -26,7 +26,8 @@ from core import VERSION
 from core.collections.views import ReferenceExpressionResolveView
 from core.common.constants import NAMESPACE_PATTERN
 from core.common.utils import get_api_base_url
-from core.common.views import RootView, FeedbackView, APIVersionView, ChangeLogView, ChecksumView
+from core.common.views import RootView, FeedbackView, APIVersionView, ChangeLogView, ChecksumView, \
+    ConceptMappingLatestVersionDeDupeView
 from core.concepts.views import ConceptsHierarchyAmendAdminView
 from core.importers.views import BulkImportView
 
@@ -69,6 +70,9 @@ urlpatterns = [
     path('collections/', include('core.collections.urls'), name='collections_urls'),
     path('concepts/', concept_views.ConceptListView.as_view(), name='all_concepts_urls'),
     path('mappings/', mapping_views.MappingListView.as_view(), name='all_mappings_urls'),
+    path(
+        'concepts-mappings-latest-version-dedupe/',
+        ConceptMappingLatestVersionDeDupeView.as_view(), name='concepts-mappings-latest-version-dedupe'),
     path('importers/', include('core.importers.urls'), name='importer_urls'),
     path('indexes/', include('core.indexes.urls'), name='indexes_urls'),
     path('client-configs/', include('core.client_configs.urls'), name='client_config_urls'),
