@@ -482,6 +482,67 @@ class ValueSetTest(OCLAPITestCase):
         self.assertEqual(len(expansion['contains']), 1)
         self.assertEqual(expansion['contains'][0]['code'], self.concept_1.mnemonic)
 
+    def text_get_expand(self):
+        self.client.post(
+            f'/users/{self.user.mnemonic}/ValueSet/',
+            HTTP_AUTHORIZATION='Token ' + self.user_token,
+            data={
+                'resourceType': 'ValueSet',
+                'id': 'c2',
+                'url': 'http://c2.com',
+                'status': 'draft',
+                'version': '1',
+                'name': 'collection1',
+                'description': 'This is a test collection',
+                'compose': {
+                    'include': [
+                        {
+                            'system': 'http://some/url',
+                            'version': self.org_source_v2.version,
+                            'concept': [
+                                {
+                                    'code': self.concept_1.mnemonic
+                                }
+                            ]
+                        }
+                    ]
+                }
+            },
+            format='json'
+        )
+
+        ConceptDocument().update(self.concept_1.parent.concepts_set.all())
+
+        self.client.post(
+            '/users/' + self.user.mnemonic + '/ValueSet/c2/$expand/',
+            HTTP_AUTHORIZATION='Token ' + self.user_token,
+            data={
+                'resourceType': 'Parameters',
+                'parameter': [
+                    {
+                        'name': 'filter',
+                        'valueString': self.concept_1.mnemonic
+                    }
+                ]
+            },
+            format='json'
+        )
+
+        response = self.client.get(
+            '/users/' + self.user.mnemonic + '/ValueSet/c2/$expand/?filter=' + {self.concept_1.mnemonic},
+            HTTP_AUTHORIZATION='Token ' + self.user_token,
+            format='json'
+        )
+
+        resource = response.data
+
+        self.assertEqual(resource['resourceType'], 'ValueSet')
+        expansion = resource['expansion']
+        self.assertIsNotNone(expansion['timestamp'])
+        self.assertIn('/users/' + self.user.mnemonic + '/collections/c2/1/expansions', expansion['identifier'])
+        self.assertEqual(len(expansion['contains']), 1)
+        self.assertEqual(expansion['contains'][0]['code'], self.concept_1.mnemonic)
+
     def test_unable_to_represent_as_fhir(self):
         instance = Collection(id='1', uri='/invalid/uri')
         serialized = ValueSetDetailSerializer(instance=instance).data
