@@ -397,6 +397,11 @@ CELERYBEAT_SCHEDULE = {
         'task': 'core.common.tasks.monthly_usage_report',
         'schedule': crontab(1, 0, day_of_month='1'),
     },
+    'vacuum-and-analyze-db': {
+        'task': 'core.common.tasks.vacuum_and_analyze_db',
+        'schedule': crontab(0, 1),  # Run at 1 am
+    },
+
 }
 CELERYBEAT_HEALTHCHECK_KEY = 'celery_beat_healthcheck'
 ELASTICSEARCH_DSL_PARALLEL = True

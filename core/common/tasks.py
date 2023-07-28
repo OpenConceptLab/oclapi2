@@ -647,6 +647,18 @@ def monthly_usage_report():  # pragma: no cover
 
 
 @app.task(ignore_result=True)
+def vacuum_and_analyze_db():
+    from django.db import connections
+    conn_proxy = connections['default']
+    conn_proxy.cursor()  # init connection field
+    conn = conn_proxy.connection
+    old_isolation_level = conn.isolation_level
+    conn.set_isolation_level(0)
+    conn.cursor().execute('VACUUM ANALYZE')
+    conn.set_isolation_level(old_isolation_level)
+
+
+@app.task(ignore_result=True)
 def post_import_update_resource_counts():
     from core.sources.models import Source
     from core.concepts.models import Concept
