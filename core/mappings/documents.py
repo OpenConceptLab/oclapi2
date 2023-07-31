@@ -64,7 +64,7 @@ class MappingDocument(Document):
         }
 
     @staticmethod
-    def get_boostable_search_attrs():
+    def get_wildcard_search_attrs():
         return {
             'id': {
                 'boost': 1
@@ -76,6 +76,17 @@ class MappingDocument(Document):
             'to_concept': {
                 'boost': 0.6,
                 'lower': False
+            }
+        }
+
+    @staticmethod
+    def get_fuzzy_search_attrs():
+        return {
+            'from_concept': {
+                'boost': 0.8,
+            },
+            'to_concept': {
+                'boost': 0.6,
             }
         }
 

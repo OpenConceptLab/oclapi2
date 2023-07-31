@@ -249,7 +249,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     def get_fuzzy_search_criterion(self, boost_divide_by=10, expansions=5):
         return CustomESSearch.get_fuzzy_match_criterion(
             search_str=self.get_search_string(decode=False),
-            fields=self.get_wildcard_search_fields(),
+            fields=self.get_fuzzy_search_fields(),
             boost_divide_by=boost_divide_by,
             expansions=expansions
         )
@@ -675,7 +675,10 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         return self.get_sort_attributes() or [{'_score': {'order': 'desc'}}]
 
     def get_wildcard_search_fields(self):
-        return self.clean_fields(self.document_model.get_boostable_search_attrs() or {})
+        return self.clean_fields(self.document_model.get_wildcard_search_attrs() or {})
+
+    def get_fuzzy_search_fields(self):
+        return self.document_model.get_fuzzy_search_attrs() or {}
 
     def __get_queryset_from_search_results(self, search_results):
         offset = max(to_int(self.request.GET.get('offset'), 0), 0)

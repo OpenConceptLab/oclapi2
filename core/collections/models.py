@@ -707,11 +707,14 @@ class CollectionReference(models.Model):
             val, document.get_match_phrase_attrs(), clean_fields(document.get_exact_match_attrs())
         ))
         if include_wildcard or include_fuzzy:
-            fields = clean_fields(document.get_boostable_search_attrs())
             if include_wildcard:
-                search = search.query(CustomESSearch.get_wildcard_match_criterion(val, fields))
+                search = search.query(
+                    CustomESSearch.get_wildcard_match_criterion(val, clean_fields(document.get_wildcard_search_attrs()))
+                )
             if include_fuzzy:
-                search = search.query(CustomESSearch.get_fuzzy_match_criterion(val, fields, 10000, 2))
+                search = search.query(
+                    CustomESSearch.get_fuzzy_match_criterion(val, document.get_fuzzy_search_attrs(), 10000, 2)
+                )
         return search
 
     def apply_filters(self, queryset, resource_klass):

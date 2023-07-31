@@ -69,7 +69,7 @@ class ConceptDocument(Document):
         }
 
     @staticmethod
-    def get_boostable_search_attrs():
+    def get_wildcard_search_attrs():
         return {
             'id': {
                 'boost': 25
@@ -91,6 +91,17 @@ class ConceptDocument(Document):
                 'boost': 0.1,
                 'wildcard': True,
                 'lower': True
+            },
+        }
+
+    @staticmethod
+    def get_fuzzy_search_attrs():
+        return {
+            'name': {
+                'boost': 23
+            },
+            'synonyms': {
+                'boost': 0.3,
             },
         }
 

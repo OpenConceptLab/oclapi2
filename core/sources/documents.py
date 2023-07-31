@@ -67,7 +67,7 @@ class SourceDocument(Document):
         }
 
     @staticmethod
-    def get_boostable_search_attrs():
+    def get_wildcard_search_attrs():
         return {
             'mnemonic': {
                 'boost': 1,
@@ -84,6 +84,14 @@ class SourceDocument(Document):
                 'lower': True,
                 'wildcard': True
             }
+        }
+
+    @staticmethod
+    def get_fuzzy_search_attrs():
+        return {
+            'name': {
+                'boost': 0.8,
+            },
         }
 
     @staticmethod
