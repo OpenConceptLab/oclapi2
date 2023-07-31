@@ -197,7 +197,9 @@ ES_HOSTS = os.environ.get('ES_HOSTS', None)
 ES_SCHEME = os.environ.get('ES_SCHEME', 'http')
 ELASTICSEARCH_DSL = {
     'default': {
-        'hosts': ES_HOSTS.split(',') if ES_HOSTS else [ES_HOST + ':' + ES_PORT]
+        'hosts': ES_HOSTS.split(',') if ES_HOSTS else [ES_HOST + ':' + ES_PORT],
+        'use_ssl': ES_SCHEME == 'https',
+        'verify_certs': ES_SCHEME == 'https',
     },
 }
 
