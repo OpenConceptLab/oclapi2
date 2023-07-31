@@ -1693,7 +1693,7 @@ class ConceptListViewTest(OCLAPITestCase):
         self.assertTrue(response.data[0]['total'] >= 2)
 
         response = self.client.get(
-            self.source.concepts_url + '?q=MyConcpt&fuzzy=true',
+            self.source.concepts_url + '?q=name&fuzzy=true',
             HTTP_AUTHORIZATION='Token ' + self.token,
         )
         self.assertEqual(response.status_code, 200)
