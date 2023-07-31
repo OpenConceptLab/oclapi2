@@ -1026,7 +1026,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         try:
             facets = search.execute().facets
         except TransportError as ex:  # pragma: no cover
-            raise Http400(detail='Data too large.') from ex
+            raise Http400(detail=get(ex, 'error') or str(ex)) from ex
 
         return facets
 

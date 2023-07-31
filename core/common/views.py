@@ -698,7 +698,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                                      ' or fine tune your query to get more accurate results.') from ex
             raise ex
         except TransportError as ex:  # pragma: no cover
-            raise Http400(detail='Data too large.') from ex
+            raise Http400(detail=get(ex, 'error') or str(ex)) from ex
 
     def get_search_results_qs(self):
         return self.__get_queryset_from_search_results(self.__search_results)
