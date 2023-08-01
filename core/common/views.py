@@ -413,7 +413,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             try:
                 facets = faceted_search.execute().facets.to_dict()
             except TransportError as ex:  # pragma: no cover
-                raise Http400(detail='Data too large.') from ex
+                raise Http400(detail=get(ex, 'error') or str(ex)) from ex
 
         return facets
 
