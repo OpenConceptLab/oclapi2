@@ -24,7 +24,6 @@ class CustomESFacetedSearch(FacetedSearch):
                 return search.filter('query_string', fields=self.fields, query=search_str)
 
             return search.query('multi_match', query=search_str)
-
         return search
 
     def params(self, **kwargs):

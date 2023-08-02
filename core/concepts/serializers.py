@@ -118,13 +118,14 @@ class ConceptAbstractSerializer(AbstractResourceSerializer):
     child_concept_urls = ListField(read_only=True)
     summary = SerializerMethodField()
     references = SerializerMethodField()
+    latest_source_version = CharField(source='latest_source_version.version', allow_null=True, allow_blank=True)
 
     class Meta:
         model = Concept
         abstract = True
         fields = AbstractResourceSerializer.Meta.fields + (
             'uuid', 'parent_concept_urls', 'child_concept_urls', 'parent_concepts', 'child_concepts', 'hierarchy_path',
-            'mappings', 'extras', 'summary', 'references', 'has_children'
+            'mappings', 'extras', 'summary', 'references', 'has_children', 'latest_source_version'
         )
 
     def __init__(self, *args, **kwargs):  # pylint: disable=too-many-branches
@@ -151,6 +152,8 @@ class ConceptAbstractSerializer(AbstractResourceSerializer):
         is_verbose = self.__class__ == ConceptDetailSerializer
 
         try:
+            if request.user.is_anonymous or not request.user.should_search_released:
+                self.fields.pop('latest_source_version')
             if not self.include_parent_concepts:
                 self.fields.pop('parent_concepts', None)
             if not self.include_child_concepts:

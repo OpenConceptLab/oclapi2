@@ -13,6 +13,7 @@ from rest_framework.views import APIView
 
 from core.bundles.models import Bundle
 from core.bundles.serializers import BundleSerializer
+from core.collections.documents import CollectionDocument
 from core.common.constants import (
     HEAD, INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_RETIRED_PARAM, ACCESS_TYPE_NONE)
 from core.common.exceptions import Http400, Http403
@@ -243,6 +244,8 @@ class ConceptSummaryView(ConceptBaseView, RetrieveAPIView):
 
 
 class ConceptCollectionMembershipView(ConceptBaseView, ListWithHeadersMixin):
+    document_model = CollectionDocument
+
     def get_serializer_class(self):
         from core.collections.serializers import CollectionVersionListSerializer
         return CollectionVersionListSerializer

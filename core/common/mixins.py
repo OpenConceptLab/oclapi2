@@ -15,7 +15,7 @@ from rest_framework.mixins import ListModelMixin, CreateModelMixin
 from rest_framework.response import Response
 
 from core.common.constants import HEAD, ACCESS_TYPE_NONE, INCLUDE_FACETS, \
-    LIST_DEFAULT_LIMIT, HTTP_COMPRESS_HEADER, CSV_DEFAULT_LIMIT, FACETS_ONLY, INCLUDE_RETIRED_PARAM,\
+    LIST_DEFAULT_LIMIT, HTTP_COMPRESS_HEADER, CSV_DEFAULT_LIMIT, FACETS_ONLY, INCLUDE_RETIRED_PARAM, \
     SEARCH_STATS_ONLY, INCLUDE_SEARCH_STATS
 from core.common.permissions import HasPrivateAccess, HasOwnership, CanViewConceptDictionary, \
     CanViewConceptDictionaryVersion
@@ -454,6 +454,21 @@ class SourceContainerMixin:
 class SourceChildMixin(ChecksumModel):
     class Meta:
         abstract = True
+
+    @property
+    def is_in_latest_source_version(self):
+        version = self._cached_latest_source_version
+        return self.sources.filter(version=version.version).exists() if version else False
+
+    @property
+    def latest_source_version(self):
+        if self.is_in_latest_source_version:
+            return self._cached_latest_source_version
+        return None
+
+    @cached_property
+    def _cached_latest_source_version(self):
+        return self.parent.get_latest_released_version()
 
     def get_all_checksums(self):
         return {

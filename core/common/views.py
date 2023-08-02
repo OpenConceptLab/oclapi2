@@ -211,7 +211,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
     @property
     def is_fuzzy_search(self):
-        return self.request.query_params.dict().get('fuzzy', None) in get_truthy_values()
+        return self.request.query_params.dict().get('fuzzy', None) in TRUTHY
 
     def get_wildcard_search_string(self, _str):
         return CustomESSearch.get_wildcard_search_string(_str or self.get_search_string())
@@ -384,9 +384,12 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                 filters['collection_url'] = f"{filters['collection_owner_url']}collections/{self.kwargs['collection']}/"
                 if is_version_specified and self.kwargs['version'] != HEAD:
                     filters['collection_url'] += f"{self.kwargs['version']}/"
-            if is_source_specified and not is_version_specified:
+            if is_source_specified and not is_version_specified and not self.should_search_latest_released_repo():
                 filters['source_version'] = HEAD
         return filters
+
+    def get_latest_version_filter_field_for_source_child(self):
+        return 'is_in_latest_source_version' if self.should_search_latest_released_repo() else 'is_latest_version'
 
     def get_facets(self):
         facets = {}
@@ -397,8 +400,8 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             is_source_child_document_model = self.is_source_child_document_model()
             default_filters = self.default_filters.copy()
 
-            if is_source_child_document_model and 'collection' not in self.kwargs and 'version' not in self.kwargs:
-                default_filters['is_latest_version'] = True
+            if is_source_child_document_model and self.__should_query_latest_version():
+                default_filters[self.get_latest_version_filter_field_for_source_child()] = True
 
             faceted_filters = {to_camel_case(k): v for k, v in self.get_faceted_filters(True).items()}
             filters = {**default_filters, **self.get_facet_filters_from_kwargs(), **faceted_filters, 'retired': False}
@@ -413,7 +416,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             try:
                 facets = faceted_search.execute().facets.to_dict()
             except TransportError as ex:  # pragma: no cover
-                raise Http400(detail=get(ex, 'error') or str(ex)) from ex
+                raise Http400(detail='Data too large.') from ex
 
         return facets
 
@@ -517,7 +520,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         if self.is_user_document() and self.should_include_inactive():
             default_filters.pop('is_active', None)
         if self.is_source_child_document_model() and self.__should_query_latest_version():
-            default_filters['is_latest_version'] = True
+            default_filters[self.get_latest_version_filter_field_for_source_child()] = True
 
         for field, value in default_filters.items():
             results = results.query("match", **{field: value})
@@ -561,7 +564,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         if sort:
             results = results.sort(*self._get_sort_attribute())
 
-        if self.request.query_params.get(INCLUDE_SEARCH_META_PARAM) in get_truthy_values():
+        if self.request.query_params.get(INCLUDE_SEARCH_META_PARAM) in TRUTHY:
             results = results.highlight(
                 *self.clean_fields_for_highlight(set(compact(self.get_wildcard_search_fields().keys()))))
 
@@ -663,8 +666,9 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             else:
                 results = results.query('match', **{attr: value})
 
-        if self.request.query_params.get(INCLUDE_SEARCH_META_PARAM) in get_truthy_values():
+        if self.request.query_params.get(INCLUDE_SEARCH_META_PARAM) in TRUTHY:
             results = results.highlight(*self.clean_fields_for_highlight(fields))
+
         return results.sort(*self._get_sort_attribute())
 
     @staticmethod
@@ -716,7 +720,18 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         ).get_aggregations(self.is_verbose(), self.is_raw())
 
     def should_perform_es_search(self):
-        return bool(self.get_search_string()) or self.has_searchable_extras_fields() or bool(self.get_faceted_filters())
+        return (
+                bool(self.get_search_string()) or
+                self.has_searchable_extras_fields() or
+                bool(self.get_faceted_filters())
+        ) or self.should_search_latest_released_repo()
+
+    def should_search_latest_released_repo(self):
+        return bool(
+            self.is_source_child_document_model() and
+            not self.request.user.is_anonymous and
+            self.request.user.should_search_released
+        )
 
     def has_searchable_extras_fields(self):
         return bool(

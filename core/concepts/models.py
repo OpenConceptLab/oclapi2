@@ -237,6 +237,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         '_name': {'sortable': True, 'filterable': False, 'exact': False},
         'last_update': {'sortable': True, 'filterable': False, 'default': 'desc'},
         'is_latest_version': {'sortable': False, 'filterable': True},
+        'is_in_latest_source_version': {'sortable': False, 'filterable': True},
         'concept_class': {'sortable': True, 'filterable': True, 'facet': True, 'exact': False},
         'datatype': {'sortable': True, 'filterable': True, 'facet': True, 'exact': False},
         'locale': {'sortable': False, 'filterable': True, 'facet': True, 'exact': False},
