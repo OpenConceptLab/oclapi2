@@ -20,18 +20,19 @@ class SourceDocument(Document):
     owner_type = fields.KeywordField(attr='parent_resource_type')
     public_can_view = fields.TextField(attr='public_can_view')
     source_type = fields.KeywordField(attr='source_type', normalizer='lowercase')
-    is_active = fields.KeywordField(attr='is_active')
     version = fields.KeywordField(attr='version')
-    name = fields.KeywordField(attr='name', normalizer='lowercase')
-    canonical_url = fields.KeywordField(attr='canonical_url', normalizer='lowercase')
-    mnemonic = fields.KeywordField(attr='mnemonic', normalizer='lowercase')
+    name = fields.TextField(attr='name')
+    _name = fields.KeywordField(attr='name', normalizer='lowercase')
+    canonical_url = fields.TextField(attr='canonical_url')
+    mnemonic = fields.TextField(attr='mnemonic')
+    _mnemonic = fields.KeywordField(attr='mnemonic', normalizer='lowercase')
     extras = fields.ObjectField(dynamic=True)
     identifier = fields.ObjectField()
     jurisdiction = fields.ObjectField()
     publisher = fields.KeywordField(attr='publisher', normalizer='lowercase')
     content_type = fields.KeywordField(attr='content_type', normalizer='lowercase')
     custom_validation_schema = fields.KeywordField(attr='custom_validation_schema', normalizer='lowercase')
-    hierarchy_meaning = fields.KeywordField(attr='hierarchy_meaning', normalizer='lowercase')
+    hierarchy_meaning = fields.KeywordField()
     created_by = fields.KeywordField()
 
     class Django:
@@ -48,12 +49,50 @@ class SourceDocument(Document):
         ]
 
     @staticmethod
-    def get_boostable_search_attrs():
-        return dict(
-            mnemonic=dict(boost=5, lower=True, wildcard=True),
-            name=dict(boost=4, lower=True, wildcard=True),
-            canonical_url=dict(boost=3, lower=True, wildcard=True)
-        )
+    def get_match_phrase_attrs():
+        return ['name', 'external_id']
+
+    @staticmethod
+    def get_exact_match_attrs():
+        return {
+            'mnemonic': {
+                'boost': 4,
+            },
+            'name': {
+                'boost': 3.5,
+            },
+            'canonical_url': {
+                'boost': 3,
+            },
+        }
+
+    @staticmethod
+    def get_wildcard_search_attrs():
+        return {
+            'mnemonic': {
+                'boost': 1,
+                'lower': True,
+                'wildcard': True
+            },
+            'name': {
+                'boost': 0.8,
+                'lower': True,
+                'wildcard': True
+            },
+            'canonical_url': {
+                'boost': 0.6,
+                'lower': True,
+                'wildcard': True
+            }
+        }
+
+    @staticmethod
+    def get_fuzzy_search_attrs():
+        return {
+            'name': {
+                'boost': 0.8,
+            },
+        }
 
     @staticmethod
     def prepare_locale(instance):
@@ -81,7 +120,7 @@ class SourceDocument(Document):
             if isinstance(value, dict):
                 value = flatten_dict(value)
             if isinstance(value, str):
-                value = dict(value=value)
+                value = {'value': value}
 
         return value or {}
 
@@ -93,10 +132,17 @@ class SourceDocument(Document):
             if isinstance(value, dict):
                 value = flatten_dict(value)
             if isinstance(value, str):
-                value = dict(value=value)
+                value = {'value': value}
 
         return value or {}
 
     @staticmethod
     def prepare_created_by(instance):
         return instance.created_by.username
+
+    @staticmethod
+    def prepare_hierarchy_meaning(instance):
+        hierarchy_meaning = instance.hierarchy_meaning
+        if hierarchy_meaning:
+            return hierarchy_meaning.lower()
+        return 'None'

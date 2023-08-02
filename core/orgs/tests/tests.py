@@ -77,12 +77,12 @@ class OrganizationTest(OCLTestCase):
 
     @patch('core.orgs.models.Organization.source_set')
     def test_public_sources(self, source_set_mock):
-        source_set_mock.exclude = Mock(return_value=Mock(filter=Mock(return_value=Mock(count=Mock(return_value=10)))))
+        source_set_mock.filter = Mock(return_value=Mock(exclude=Mock(return_value=Mock(count=Mock(return_value=10)))))
 
         self.assertEqual(Organization().public_sources, 10)
-        source_set_mock.exclude.assert_called_once_with(public_access=ACCESS_TYPE_NONE)
-        source_set_mock.exclude().filter.assert_called_once_with(version=HEAD)
-        source_set_mock.exclude().filter().count.assert_called_once()
+        source_set_mock.filter.assert_called_once_with(version=HEAD)
+        source_set_mock.filter().exclude.assert_called_once_with(public_access=ACCESS_TYPE_NONE)
+        source_set_mock.filter().exclude().count.assert_called_once()
 
     def test_create_org_special_characters(self):
         # period in mnemonic
@@ -143,7 +143,7 @@ class OrganizationTest(OCLTestCase):
         expansion = ExpansionFactory(collection_version=collection)
         collection.expansion_uri = expansion.uri
         collection.save()
-        collection.add_expressions(dict(expressions=[concept.uri, mapping.uri]), collection.created_by)
+        collection.add_expressions({'expressions': [concept.uri, mapping.uri]}, collection.created_by)
 
         self.assertEqual(org.source_set.count(), 1)
         self.assertEqual(org.collection_set.count(), 1)

@@ -15,22 +15,57 @@ class OrganizationDocument(Document):
 
     last_update = fields.DateField(attr='updated_at')
     public_can_view = fields.BooleanField(attr='public_can_view')
-    name = fields.KeywordField(attr='name', normalizer="lowercase")
-    mnemonic = fields.KeywordField(attr='mnemonic', normalizer="lowercase")
+    name = fields.TextField(attr='name')
+    _name = fields.KeywordField(attr='name', normalizer='lowercase')
+    mnemonic = fields.TextField(attr='mnemonic')
+    _mnemonic = fields.KeywordField(attr='mnemonic', normalizer='lowercase')
     extras = fields.ObjectField(dynamic=True)
-    user = fields.ListField(fields.KeywordField())
+    user = fields.ListField(fields.TextField())
 
     class Django:
         model = Organization
         fields = [
-            'is_active',
             'company',
             'location',
         ]
 
     @staticmethod
-    def get_boostable_search_attrs():
-        return dict(mnemonic=dict(boost=5, wildcard=True, lower=True), name=dict(boost=4, wildcard=True, lower=True))
+    def get_match_phrase_attrs():
+        return ['name']
+
+    @staticmethod
+    def get_exact_match_attrs():
+        return {
+            'mnemonic': {
+                'boost': 4,
+            },
+            'name': {
+                'boost': 3.5,
+            }
+        }
+
+    @staticmethod
+    def get_wildcard_search_attrs():
+        return {
+            'mnemonic': {
+                'boost': 1,
+                'wildcard': True,
+                'lower': True
+            },
+            'name': {
+                'boost': 0.8,
+                'wildcard': True,
+                'lower': True
+            }
+        }
+
+    @staticmethod
+    def get_fuzzy_search_attrs():
+        return {
+            'name': {
+                'boost': 0.8,
+            }
+        }
 
     @staticmethod
     def prepare_extras(instance):

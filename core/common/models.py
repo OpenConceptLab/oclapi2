@@ -1,32 +1,40 @@
 from celery.result import AsyncResult
+from celery_once import AlreadyQueued
 from django.conf import settings
 from django.contrib.contenttypes.fields import GenericRelation
 from django.contrib.postgres.fields import ArrayField
 from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator
-from django.db import models, IntegrityError
-from django.db.models import Value, Q
+from django.db import models, IntegrityError, transaction
+from django.db.models import Value, Q, Count
 from django.db.models.expressions import CombinedExpression, F
 from django.utils import timezone
 from django.utils.functional import cached_property
 from django_elasticsearch_dsl.registries import registry
 from django_elasticsearch_dsl.signals import RealTimeSignalProcessor
-from pydash import get
+from elasticsearch import TransportError
+from pydash import get, compact
 
 from core.common.tasks import update_collection_active_concepts_count, update_collection_active_mappings_count, \
     delete_s3_objects
 from core.common.utils import reverse_resource, reverse_resource_version, parse_updated_since_param, drop_version, \
-    to_parent_uri, is_canonical_uri, get_export_service
+    to_parent_uri, is_canonical_uri, get_export_service, from_string_to_date, get_truthy_values
 from core.common.utils import to_owner_uri
 from core.settings import DEFAULT_LOCALE
+from .checksums import ChecksumModel
 from .constants import (
     ACCESS_TYPE_CHOICES, DEFAULT_ACCESS_TYPE, NAMESPACE_REGEX,
     ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT, SUPER_ADMIN_USER_ID,
     HEAD, PERSIST_NEW_ERROR_MESSAGE, SOURCE_PARENT_CANNOT_BE_NONE, PARENT_RESOURCE_CANNOT_BE_NONE,
-    CREATOR_CANNOT_BE_NONE, CANNOT_DELETE_ONLY_VERSION, CUSTOM_VALIDATION_SCHEMA_OPENMRS)
+    CREATOR_CANNOT_BE_NONE, CANNOT_DELETE_ONLY_VERSION, OPENMRS_VALIDATION_SCHEMA, VALIDATION_SCHEMAS,
+    DEFAULT_VALIDATION_SCHEMA, ES_REQUEST_TIMEOUT)
+from .exceptions import Http400
 from .fields import URIField
 from .tasks import handle_save, handle_m2m_changed, seed_children_to_new_version, update_validation_schema, \
     update_source_active_concepts_count, update_source_active_mappings_count
+
+
+TRUTHY = get_truthy_values()
 
 
 class BaseModel(models.Model):
@@ -37,11 +45,9 @@ class BaseModel(models.Model):
     class Meta:
         abstract = True
         indexes = [
-            models.Index(fields=['uri']),
             models.Index(fields=['-updated_at']),
             models.Index(fields=['-created_at']),
             models.Index(fields=['is_active']),
-            models.Index(fields=['public_access'])
         ]
 
     id = models.BigAutoField(primary_key=True)
@@ -66,7 +72,7 @@ class BaseModel(models.Model):
     )
     is_active = models.BooleanField(default=True)
     extras = models.JSONField(null=True, blank=True, default=dict)
-    uri = models.TextField(null=True, blank=True, db_index=True)
+    uri = models.TextField(null=True, blank=True)
     _index = True
 
     @property
@@ -178,11 +184,13 @@ class BaseModel(models.Model):
         offset = 0
         limit = batch_size
         while offset < count:
+            print(f"Indexing {offset}-{min([limit, count])}/{count}")
             document().update(queryset.order_by('-id')[offset:limit], parallel=True)
             offset = limit
             limit += batch_size
 
     @staticmethod
+    @transaction.atomic
     def batch_delete(queryset):
         for batch in queryset.iterator(chunk_size=1000):
             batch.delete()
@@ -214,10 +222,7 @@ class BaseResourceModel(BaseModel, CommonLogoModel):
     A base resource may contain sub-resources.
     (An Organization is a base resource, but a Concept is not.)
     """
-    mnemonic = models.CharField(
-        max_length=255, validators=[RegexValidator(regex=NAMESPACE_REGEX)],
-        db_index=True
-    )
+    mnemonic = models.CharField(max_length=255, validators=[RegexValidator(regex=NAMESPACE_REGEX)],)
     mnemonic_attr = 'mnemonic'
 
     class Meta:
@@ -247,9 +252,7 @@ class VersionedModel(BaseResourceModel):
     class Meta:
         abstract = True
         indexes = [
-            models.Index(fields=['version']),
             models.Index(fields=['retired']),
-            models.Index(fields=['is_latest_version']),
         ] + BaseResourceModel.Meta.indexes
 
     @property
@@ -277,6 +280,10 @@ class VersionedModel(BaseResourceModel):
         return self.versions.count()
 
     @property
+    def released_versions_count(self):
+        return self.versions.filter(released=True).count()
+
+    @property
     def sibling_versions(self):
         return self.versions.exclude(id=self.id)
 
@@ -295,7 +302,7 @@ class VersionedModel(BaseResourceModel):
         return self.version == HEAD
 
     def get_head(self):
-        return self.active_versions.filter(version=HEAD).first()
+        return self if self.is_head else self.active_versions.filter(version=HEAD).first()
 
     head = property(get_head)
 
@@ -311,6 +318,9 @@ class VersionedModel(BaseResourceModel):
 
     def get_latest_version(self):
         return self.active_versions.filter(is_latest_version=True).order_by('-created_at').first()
+
+    def get_last_version(self):
+        return self.active_versions.order_by('-created_at').first()
 
     def get_latest_released_version(self):
         return self.released_versions.order_by('-created_at').first()
@@ -329,7 +339,7 @@ class VersionedModel(BaseResourceModel):
         return drop_version(self.uri) + 'versions/'
 
 
-class ConceptContainerModel(VersionedModel):
+class ConceptContainerModel(VersionedModel, ChecksumModel):
     """
     A sub-resource is an object that exists within the scope of its parent resource.
     Its mnemonic is unique within the scope of its parent resource.
@@ -356,10 +366,27 @@ class ConceptContainerModel(VersionedModel):
     meta = models.JSONField(null=True, blank=True)
     active_concepts = models.IntegerField(null=True, blank=True, default=None)
     active_mappings = models.IntegerField(null=True, blank=True, default=None)
+    custom_validation_schema = models.CharField(
+        choices=VALIDATION_SCHEMAS, default=DEFAULT_VALIDATION_SCHEMA, max_length=100
+    )
+
+    CHECKSUM_INCLUSIONS = [
+        'canonical_url',
+        'extras', 'released', 'retired',
+        'default_locale', 'supported_locales',
+        'website', 'custom_validation_schema',
+    ]
 
     class Meta:
         abstract = True
-        indexes = [] + VersionedModel.Meta.indexes
+        indexes = [
+                      models.Index(fields=['version'])
+                  ] + VersionedModel.Meta.indexes
+
+    @property
+    def is_collection(self):
+        from core.collections.models import Collection
+        return self.resource_type == Collection.OBJECT_TYPE
 
     @property
     def should_set_active_concepts(self):
@@ -371,29 +398,35 @@ class ConceptContainerModel(VersionedModel):
 
     @property
     def is_openmrs_schema(self):
-        return self.custom_validation_schema == CUSTOM_VALIDATION_SCHEMA_OPENMRS
+        return self.custom_validation_schema == OPENMRS_VALIDATION_SCHEMA
 
     def update_children_counts(self, sync=False):
         self.update_concepts_count(sync)
         self.update_mappings_count(sync)
 
     def update_mappings_count(self, sync=False):
-        if sync or get(settings, 'TEST_MODE'):
-            self.set_active_mappings()
-            self.save(update_fields=['active_mappings'])
-        elif self.__class__.__name__ == 'Source':
-            update_source_active_mappings_count.apply_async((self.id,), queue='concurrent')
-        elif self.__class__.__name__ == 'Collection':
-            update_collection_active_mappings_count.apply_async((self.id,), queue='concurrent')
+        try:
+            if sync or get(settings, 'TEST_MODE'):
+                self.set_active_mappings()
+                self.save(update_fields=['active_mappings'])
+            elif self.__class__.__name__ == 'Source':
+                update_source_active_mappings_count.apply_async((self.id,), queue='concurrent')
+            elif self.__class__.__name__ == 'Collection':
+                update_collection_active_mappings_count.apply_async((self.id,), queue='concurrent')
+        except AlreadyQueued:
+            pass
 
     def update_concepts_count(self, sync=False):
-        if sync or get(settings, 'TEST_MODE'):
-            self.set_active_concepts()
-            self.save(update_fields=['active_concepts'])
-        elif self.__class__.__name__ == 'Source':
-            update_source_active_concepts_count.apply_async((self.id,), queue='concurrent')
-        elif self.__class__.__name__ == 'Collection':
-            update_collection_active_concepts_count.apply_async((self.id,), queue='concurrent')
+        try:
+            if sync or get(settings, 'TEST_MODE'):
+                self.set_active_concepts()
+                self.save(update_fields=['active_concepts'])
+            elif self.__class__.__name__ == 'Source':
+                update_source_active_concepts_count.apply_async((self.id,), queue='concurrent')
+            elif self.__class__.__name__ == 'Collection':
+                update_collection_active_concepts_count.apply_async((self.id,), queue='concurrent')
+        except AlreadyQueued:
+            pass
 
     @property
     def last_child_update(self):
@@ -403,12 +436,20 @@ class ConceptContainerModel(VersionedModel):
             return max(last_concept_update, last_mapping_update)
         return last_concept_update or last_mapping_update or self.updated_at or timezone.now()
 
+    def get_last_child_update_from_export_url(self, export_url):
+        generic_path = self.get_version_export_path(suffix=None)
+        try:
+            last_child_updated_at = export_url.split(generic_path)[1].split('?')[0].replace('.zip', '')
+            return from_string_to_date(last_child_updated_at.replace('_', ' ')).isoformat()
+        except:  # pylint: disable=bare-except
+            return None
+
     @classmethod
     def get_base_queryset(cls, params):
         username = params.get('user', None)
         org = params.get('org', None)
         version = params.get('version', None)
-        is_latest = params.get('is_latest', None) in [True, 'true']
+        is_latest = params.get('is_latest', None) in TRUTHY
         updated_since = parse_updated_since_param(params)
 
         queryset = cls.objects.filter(is_active=True)
@@ -471,16 +512,16 @@ class ConceptContainerModel(VersionedModel):
         elif self.is_latest_version:
             prev_version = self.prev_version
             if not force and not prev_version:
-                raise ValidationError(dict(detail=CANNOT_DELETE_ONLY_VERSION))
+                raise ValidationError({'detail': CANNOT_DELETE_ONLY_VERSION})
             if prev_version:
                 prev_version.is_latest_version = True
                 prev_version.save()
 
         self.delete_pins()
 
-        generic_export_path = self.generic_export_path(suffix=None)
+        export_path = self.get_version_export_path(suffix=None)
         super().delete(using=using, keep_parents=keep_parents)
-        delete_s3_objects.delay(generic_export_path)
+        delete_s3_objects.delay(export_path)
         self.post_delete_actions()
 
     def post_delete_actions(self):
@@ -494,14 +535,11 @@ class ConceptContainerModel(VersionedModel):
     def get_active_concepts(self):
         return self.get_concepts_queryset().filter(is_active=True, retired=False)
 
-    def get_concepts_queryset(self):
-        return self.concepts_set.filter(id=F('versioned_object_id'))
+    def get_active_mappings(self):
+        return self.get_mappings_queryset().filter(is_active=True, retired=False)
 
-    def get_mappings_queryset(self):
-        if self.is_head:
-            return self.mappings_set.filter(id=F('versioned_object_id'))
-
-        return self.mappings
+    active_concepts_queryset = property(get_active_concepts)
+    active_mappings_queryset = property(get_active_mappings)
 
     def has_parent_edit_access(self, user):
         if user.is_staff:
@@ -544,6 +582,10 @@ class ConceptContainerModel(VersionedModel):
     def should_auto_expand(self):
         return True
 
+    @property
+    def identity_uris(self):
+        return compact([self.uri, self.canonical_url])
+
     @classmethod
     def persist_new(cls, obj, created_by, **kwargs):
         errors = {}
@@ -571,9 +613,8 @@ class ConceptContainerModel(VersionedModel):
         obj.version = HEAD
         try:
             obj.save(**kwargs)
-            obj.update_mappings()
-            if obj.should_auto_expand:
-                obj.cascade_children_to_expansion(index=False)
+            if obj.id:
+                obj.post_create_actions()
             persisted = True
         except IntegrityError as ex:
             errors.update({'__all__': ex.args})
@@ -665,9 +706,11 @@ class ConceptContainerModel(VersionedModel):
             try:
                 validator.validate(concept)
             except ValidationError as validation_error:
-                concept_validation_error = dict(
-                    mnemonic=concept.mnemonic, url=concept.url, errors=validation_error.message_dict
-                )
+                concept_validation_error = {
+                    'mnemonic': concept.mnemonic,
+                    'url': concept.url,
+                    'errors': validation_error.message_dict
+                }
                 failed_concept_validations.append(concept_validation_error)
 
         return failed_concept_validations
@@ -753,23 +796,62 @@ class ConceptContainerModel(VersionedModel):
 
         return False
 
+    def migrate_to_new_export_path(self, move=False):  # needs to be deleted post migration to new export path  # pragma: no cover  # pylint: disable: line-too-long
+        from core.common.services import S3
+        for version in self.versions:
+            S3.rename(version.export_path, version.version_export_path, delete=move)
+
     @cached_property
-    def export_path(self):
+    def export_path(self):  # old export path, needs to be deleted post migration to new export path  # pragma: no cover
         last_update = self.last_child_update.strftime('%Y%m%d%H%M%S')
         return self.generic_export_path(suffix=f"{last_update}.zip")
 
-    def generic_export_path(self, suffix='*'):
+    def generic_export_path(self, suffix='*'):  # old export path, needs to be deleted post migration to new export path  # pragma: no cover  # pylint: disable: line-too-long
         path = f"{self.parent_resource}/{self.mnemonic}_{self.version}."
         if suffix:
             path += suffix
 
         return path
 
+    @cached_property
+    def version_export_path(self):
+        last_update = self.last_child_update.strftime('%Y-%m-%d_%H%M%S')
+        return self.get_version_export_path(suffix=f"{last_update}.zip")
+
+    def get_version_export_path(self, suffix='*'):
+        version = self.version
+        if not version.lower().startswith('v'):
+            version = f"v{version}"
+
+        owner = self.parent
+        owner_mnemonic = owner.mnemonic
+        owner_type = f'{owner.get_url_kwarg()}s'
+        path = f"{owner_type}/{owner_mnemonic}/{owner_mnemonic}_{self.mnemonic}_{version}"
+        expansion = get(self, 'expansion.mnemonic')
+        if expansion:
+            path = f"{path}_{expansion}"
+        path = f'{path}.'
+
+        if suffix:
+            path += suffix
+
+        return path
+
     def get_export_url(self):
-        return get_export_service().url_for(self.export_path)
+        service = get_export_service()
+        if self.is_head:
+            path = self.version_export_path
+        else:
+            path = service.get_last_key_from_path(
+                self.get_version_export_path(suffix=None)
+            ) or self.version_export_path
+        return service.url_for(path)
 
     def has_export(self):
-        return get_export_service().exists(self.export_path)
+        service = get_export_service()
+        if self.is_head:
+            return service.exists(self.version_export_path)
+        return service.has_path(self.get_version_export_path(suffix=None))
 
     def can_view_all_content(self, user):
         if get(user, 'is_anonymous'):
@@ -835,10 +917,129 @@ class ConceptContainerModel(VersionedModel):
         return instance
 
     def clean(self):
+        if not self.custom_validation_schema:
+            self.custom_validation_schema = DEFAULT_VALIDATION_SCHEMA
+
         super().clean()
 
         if self.released and not self.revision_date:
             self.revision_date = timezone.now()
+
+    @property
+    def map_types_count(self):
+        return self.get_active_mappings().aggregate(count=Count('map_type', distinct=True))['count']
+
+    @property
+    def concept_class_count(self):
+        return self.get_active_concepts().aggregate(count=Count('concept_class', distinct=True))['count']
+
+    @property
+    def datatype_count(self):
+        return self.get_active_concepts().aggregate(count=Count('datatype', distinct=True))['count']
+
+    @property
+    def retired_concepts_count(self):
+        return self.get_concepts_queryset().filter(retired=True).count()
+
+    @property
+    def retired_mappings_count(self):
+        return self.get_mappings_queryset().filter(retired=True).count()
+
+    @property
+    def concepts_distribution(self):
+        facets = self.get_concept_facets()
+        return {
+            'active': self.active_concepts,
+            'retired': self.retired_concepts_count,
+            'concept_class': self._to_clean_facets(facets.conceptClass or []),
+            'datatype': self._to_clean_facets(facets.datatype or []),
+            'locale': self._to_clean_facets(facets.locale or []),
+            'name_type': self._to_clean_facets(facets.nameTypes or [])
+        }
+
+    @property
+    def mappings_distribution(self):
+        facets = self.get_mapping_facets()
+
+        return {
+            'active': self.active_mappings,
+            'retired': self.retired_mappings_count,
+            'map_type': self._to_clean_facets(facets.mapType or [])
+        }
+
+    @property
+    def versions_distribution(self):
+        return {
+            'total': self.num_versions,
+            'released': self.released_versions_count
+        }
+
+    def get_concepts_extras_distribution(self):
+        return self.get_distinct_extras_keys(self.get_concepts_queryset(), 'concepts')
+
+    @staticmethod
+    def get_distinct_extras_keys(queryset, resource):
+        return set(queryset.exclude(retired=True).extra(
+            select={'key': f"jsonb_object_keys({resource}.extras)"}).values_list('key', flat=True))
+
+    def get_name_locales_queryset(self):
+        from core.concepts.models import ConceptName
+        return ConceptName.objects.filter(concept__in=self.get_active_concepts())
+
+    @property
+    def concept_names_distribution(self):
+        locales = self.get_name_locales_queryset()
+        locales_total = locales.distinct('locale').count()
+        names_total = locales.distinct('type').count()
+        return {'locales': locales_total, 'names': names_total}
+
+    def get_name_locale_distribution(self):
+        return self._get_distribution(self.get_name_locales_queryset(), 'locale')
+
+    def get_name_type_distribution(self):
+        return self._get_distribution(self.get_name_locales_queryset(), 'type')
+
+    def get_concept_class_distribution(self):
+        return self._get_distribution(self.get_active_concepts(), 'concept_class')
+
+    def get_datatype_distribution(self):
+        return self._get_distribution(self.get_active_concepts(), 'datatype')
+
+    def get_map_type_distribution(self):
+        return self._get_distribution(self.get_active_mappings(), 'map_type')
+
+    @staticmethod
+    def _get_distribution(queryset, field):
+        return list(queryset.values(field).annotate(count=Count('id')).values(field, 'count').order_by('-count'))
+
+    def get_concept_facets(self, filters=None):
+        from core.concepts.search import ConceptFacetedSearch
+        return self._get_resource_facets(ConceptFacetedSearch, filters)
+
+    def get_mapping_facets(self, filters=None):
+        from core.mappings.search import MappingFacetedSearch
+        return self._get_resource_facets(MappingFacetedSearch, filters)
+
+    def _get_resource_facets(self, facet_class, filters=None):
+        search = facet_class('', filters=self._get_resource_facet_filters(filters))
+        search.params(request_timeout=ES_REQUEST_TIMEOUT)
+        try:
+            facets = search.execute().facets
+        except TransportError as ex:  # pragma: no cover
+            raise Http400(detail=get(ex, 'error') or str(ex)) from ex
+
+        return facets
+
+    def _to_clean_facets(self, facets, remove_self=False):
+        _facets = []
+        for facet in facets:
+            _facet = facet[:2]
+            if remove_self:
+                if facet[0] != self.mnemonic:
+                    _facets.append(_facet)
+            else:
+                _facets.append(_facet)
+        return _facets
 
 
 class CelerySignalProcessor(RealTimeSignalProcessor):

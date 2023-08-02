@@ -7,6 +7,7 @@ from django.db import IntegrityError
 from django.db.models import Q
 from django.http import Http404
 from django.shortcuts import get_object_or_404
+from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
 from pydash import get
 from rest_framework import status
@@ -27,13 +28,16 @@ from core.collections.constants import (
     UNKNOWN_REFERENCE_ADDED_TO_COLLECTION_FMT)
 from core.collections.documents import CollectionDocument
 from core.collections.models import Collection, CollectionReference
-from core.collections.search import CollectionSearch
+from core.collections.search import CollectionFacetedSearch
 from core.collections.serializers import (
     CollectionDetailSerializer, CollectionListSerializer,
     CollectionCreateSerializer, CollectionReferenceSerializer, CollectionVersionDetailSerializer,
     CollectionVersionListSerializer, CollectionVersionExportSerializer, CollectionSummaryDetailSerializer,
     CollectionVersionSummaryDetailSerializer, CollectionReferenceDetailSerializer, ExpansionSerializer,
-    ExpansionDetailSerializer, ReferenceExpressionResolveSerializer, CollectionMinimalSerializer)
+    ExpansionDetailSerializer, ReferenceExpressionResolveSerializer, CollectionMinimalSerializer,
+    CollectionSummaryFieldDistributionSerializer, CollectionSummaryVerboseSerializer,
+    CollectionVersionSummaryFieldDistributionSerializer, CollectionVersionSummaryVerboseSerializer,
+    CollectionVersionMinimalSerializer)
 from core.collections.utils import is_version_specified
 from core.common.constants import (
     HEAD, RELEASED_PARAM, PROCESSING_PARAM, OK_MESSAGE,
@@ -51,16 +55,15 @@ from core.common.serializers import TaskSerializer
 from core.common.swagger_parameters import q_param, compress_header, page_param, verbose_param, exact_match_param, \
     include_facets_header, sort_asc_param, sort_desc_param, updated_since_param, include_retired_param, limit_param
 from core.common.tasks import add_references, export_collection, delete_collection, index_expansion_concepts, \
-    index_expansion_mappings, link_references_to_resources, reference_old_to_new_structure, \
-    link_all_references_to_resources, link_expansions_repo_versions
-from core.common.utils import compact_dict_by_values, parse_boolean_query_param
-from core.common.views import BaseAPIView, BaseLogoView, ConceptContainerExtraRetrieveUpdateDestroyView
+    index_expansion_mappings
+from core.common.utils import compact_dict_by_values, parse_boolean_query_param, get_truthy_values
+from core.common.views import BaseAPIView, BaseLogoView, ConceptContainerExtraRetrieveUpdateDestroyView, TaskMixin
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept
-from core.concepts.search import ConceptSearch
+from core.concepts.search import ConceptFacetedSearch
 from core.mappings.documents import MappingDocument
 from core.mappings.models import Mapping
-from core.mappings.search import MappingSearch
+from core.mappings.search import MappingFacetedSearch
 
 logger = logging.getLogger('oclapi')
 
@@ -151,8 +154,8 @@ class CollectionListView(CollectionBaseView, ConceptDictionaryCreateMixin, ListW
     is_searchable = True
     es_fields = Collection.es_fields
     document_model = CollectionDocument
-    facet_class = CollectionSearch
-    default_filters = dict(is_active=True, version=HEAD)
+    facet_class = CollectionFacetedSearch
+    default_filters = {'version': HEAD}
 
     def apply_filters(self, queryset):
         return queryset
@@ -230,7 +233,9 @@ class CollectionLogoView(CollectionBaseView, BaseLogoView):
         return [IsAuthenticated(), CanEditConceptDictionary()]
 
 
-class CollectionRetrieveUpdateDestroyView(CollectionBaseView, ConceptDictionaryUpdateMixin, RetrieveAPIView):
+class CollectionRetrieveUpdateDestroyView(
+    CollectionBaseView, ConceptDictionaryUpdateMixin, RetrieveAPIView, TaskMixin
+):
     serializer_class = CollectionDetailSerializer
 
     def get_object(self, queryset=None):
@@ -249,6 +254,11 @@ class CollectionRetrieveUpdateDestroyView(CollectionBaseView, ConceptDictionaryU
                     version.update_concepts_count()
                 if version.should_set_active_mappings:
                     version.update_mappings_count()
+
+        truthy = get_truthy_values()
+        if self.request.user.is_staff and self.request.query_params.get('migrate_export_path', False) in truthy:  # pragma: no cover  # pylint: disable: line-too-long
+            instance.migrate_to_new_export_path(move=self.request.query_params.get('move', False) in truthy)
+
         return instance
 
     def get_permissions(self):
@@ -259,15 +269,10 @@ class CollectionRetrieveUpdateDestroyView(CollectionBaseView, ConceptDictionaryU
 
     def delete(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         collection = self.get_object()
+        result = self.perform_task(delete_collection, (collection.id, ))
 
-        if not self.is_inline_requested():
-            try:
-                task = delete_collection.delay(collection.id)
-                return Response(dict(task=task.id), status=status.HTTP_202_ACCEPTED)
-            except AlreadyQueued:
-                return Response(dict(detail='Already Queued'), status=status.HTTP_409_CONFLICT)
-
-        result = delete_collection(collection.id)
+        if isinstance(result, Response):
+            return result
 
         if result is True:
             return Response({'detail': DELETE_SUCCESS}, status=status.HTTP_204_NO_CONTENT)
@@ -353,7 +358,7 @@ class CollectionReferenceConceptsView(CollectionReferenceAbstractResourcesView):
     is_searchable = True
     document_model = ConceptDocument
     es_fields = Concept.es_fields
-    facet_class = ConceptSearch
+    facet_class = ConceptFacetedSearch
 
     def get_serializer_class(self):
         from core.concepts.serializers import ConceptVersionDetailSerializer, ConceptVersionListSerializer
@@ -367,7 +372,7 @@ class CollectionReferenceMappingsView(CollectionReferenceAbstractResourcesView):
     is_searchable = True
     document_model = MappingDocument
     es_fields = Mapping.es_fields
-    facet_class = MappingSearch
+    facet_class = MappingFacetedSearch
 
     def get_serializer_class(self):
         from core.mappings.serializers import MappingVersionDetailSerializer, MappingVersionListSerializer
@@ -378,7 +383,8 @@ class CollectionReferenceMappingsView(CollectionReferenceAbstractResourcesView):
 
 
 class CollectionReferencesView(
-        CollectionBaseView, ConceptDictionaryUpdateMixin, RetrieveAPIView, DestroyAPIView, ListWithHeadersMixin
+    CollectionBaseView, ConceptDictionaryUpdateMixin, RetrieveAPIView, DestroyAPIView, ListWithHeadersMixin,
+    TaskMixin
 ):
     def get_serializer_class(self):
         if self.is_verbose():
@@ -443,28 +449,19 @@ class CollectionReferencesView(
         return Response({'message': OK_MESSAGE}, status=status.HTTP_204_NO_CONTENT)
 
     def update(self, request, *args, **kwargs):  # pylint: disable=too-many-locals,unused-argument # Fixme: Sny
-        is_async = self.is_async_requested()
         collection = self.get_object()
-        data = request.data.get('data')
-        cascade_params = request.data.get('cascade', None)
-        is_dict = isinstance(data, dict)
-        concept_expressions = data.get('concepts', []) if is_dict else []
-        mapping_expressions = data.get('mappings', []) if is_dict else []
-        cascade = cascade_params or self.request.query_params.get('cascade', '').lower()
+        cascade = request.data.get('cascade', None) or self.request.query_params.get('cascade', '').lower()
         transform = self.request.query_params.get('transformReferences', '').lower()
+        task_args = (self.request.user.id, request.data.get('data'), collection.id, cascade, transform)
 
-        adding_all = ALL in (mapping_expressions, concept_expressions)
+        result = self.perform_task(add_references, task_args)
+        if isinstance(result, Response):
+            return result
+        added_references_ids, errors = result
 
-        if adding_all or is_async:
-            result = add_references.delay(self.request.user.id, data, collection.id, cascade, transform)
-            return Response(
-                dict(
-                    state=result.state, username=request.user.username, task=result.task_id, queue='default'
-                ) if result else [],
-                status=status.HTTP_202_ACCEPTED
-            )
+        added_references = CollectionReference.objects.filter(
+            id__in=added_references_ids) if added_references_ids else []
 
-        (added_references, errors) = collection.add_expressions(data, request.user, cascade, transform)
         added_expressions = set()
         added_original_expressions = set()
         for reference in added_references:
@@ -484,13 +481,6 @@ class CollectionReferencesView(
             response_item = self.create_response_item(added_expressions, errors, expression)
             if response_item:
                 response.append(response_item)
-
-        if collection.expansion_uri:
-            for ref in added_references:
-                if ref.concepts:
-                    collection.batch_index(ref.concepts, ConceptDocument)
-                if ref.mappings:
-                    collection.batch_index(ref.mappings, MappingDocument)
 
         return Response(response, status=status.HTTP_200_OK)
 
@@ -572,43 +562,6 @@ class CollectionVersionReferencesView(CollectionVersionBaseView, ListWithHeaders
         return self.list(request, *args, **kwargs)
 
 
-class CollectionVersionReferencesLinkView(CollectionVersionBaseView, APIView):  # pragma: no cover
-    serializer_class = CollectionReferenceSerializer
-    permission_classes = (IsAdminUser, )
-
-    def get_queryset(self):
-        query_params = self.request.query_params
-        search_query = query_params.get('q', '')
-        object_version = super().get_queryset().first()
-        if not object_version:
-            raise Http404()
-        return object_version.references.filter(expression__icontains=search_query)
-
-    def put(self, request, *args, **kwargs):  # pylint: disable=unused-argument
-        task = link_references_to_resources.delay(list(self.get_queryset().values_list('id', flat=True)))
-        return Response(dict(task_id=task.id))
-
-
-class CollectionReferencesOldToNewStructureMigrationView(APIView):  # pragma: no cover
-    serializer_class = CollectionReferenceSerializer
-    permission_classes = (IsAdminUser, )
-
-    @staticmethod
-    def post(_):
-        task = reference_old_to_new_structure.delay()
-        return Response(dict(task_id=task.id))
-
-
-class CollectionReferencesLinkResourcesView(APIView):  # pragma: no cover
-    serializer_class = CollectionReferenceSerializer
-    permission_classes = (IsAdminUser, )
-
-    @staticmethod
-    def post(_):
-        task = link_all_references_to_resources.delay()
-        return Response(dict(task_id=task.id))
-
-
 class CollectionVersionListView(CollectionVersionBaseView, CreateAPIView, ListWithHeadersMixin):
     released_filter = None
     processing_filter = None
@@ -619,6 +572,8 @@ class CollectionVersionListView(CollectionVersionBaseView, CreateAPIView, ListWi
             return CollectionVersionDetailSerializer
         if self.request.method == 'POST':
             return CollectionCreateSerializer
+        if self.is_brief():
+            return CollectionVersionMinimalSerializer
 
         return CollectionVersionListSerializer
 
@@ -644,9 +599,10 @@ class CollectionVersionListView(CollectionVersionBaseView, CreateAPIView, ListWi
                     return Response(serializer.data, status=status.HTTP_201_CREATED)
             except IntegrityError as ex:
                 return Response(
-                    dict(
-                        error=str(ex), detail=VERSION_ALREADY_EXISTS.format(version)
-                    ),
+                    {
+                        'error': str(ex),
+                        'detail': VERSION_ALREADY_EXISTS.format(version)
+                    },
                     status=status.HTTP_409_CONFLICT
                 )
 
@@ -808,7 +764,7 @@ class CollectionVersionExpansionView(CollectionVersionExpansionBaseView, Retriev
     def destroy(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         obj = self.get_object()
         if obj.is_default:
-            return Response(dict(erors=['Cannot delete default expansion']), status=status.HTTP_400_BAD_REQUEST)
+            return Response({'errors': ['Cannot delete default expansion']}, status=status.HTTP_400_BAD_REQUEST)
         obj.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
@@ -823,6 +779,7 @@ class CollectionVersionExpansionChildrenView(CollectionVersionExpansionBaseView,
         return expansion
 
     def get(self, request, *args, **kwargs):
+        self.get_queryset()
         return self.list(request, *args, **kwargs)
 
 
@@ -830,7 +787,7 @@ class CollectionVersionExpansionConceptsView(CollectionVersionExpansionChildrenV
     is_searchable = True
     document_model = ConceptDocument
     es_fields = Concept.es_fields
-    facet_class = ConceptSearch
+    facet_class = ConceptFacetedSearch
 
     def get_serializer_class(self):
         from core.concepts.serializers import ConceptDetailSerializer, ConceptListSerializer
@@ -844,7 +801,7 @@ class CollectionVersionExpansionMappingsView(CollectionVersionExpansionChildrenV
     is_searchable = True
     document_model = MappingDocument
     es_fields = Mapping.es_fields
-    facet_class = MappingSearch
+    facet_class = MappingFacetedSearch
 
     def get_serializer_class(self):
         from core.mappings.serializers import MappingDetailSerializer, MappingListSerializer
@@ -861,13 +818,16 @@ class ExpansionResourcesIndexView(CollectionVersionExpansionBaseView):
 
     def post(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         expansion = self.get_object()
-        if self.resource == 'concepts':
-            result = index_expansion_concepts.delay(expansion.id)
-        else:
-            result = index_expansion_mappings.delay(expansion.id)
+        try:
+            if self.resource == 'concepts':
+                result = index_expansion_concepts.delay(expansion.id)
+            else:
+                result = index_expansion_mappings.delay(expansion.id)
+        except AlreadyQueued:
+            return Response({'detail': 'Already Queued'}, status=status.HTTP_409_CONFLICT)
 
         return Response(
-            dict(state=result.state, username=self.request.user.username, task=result.task_id, queue='default'),
+            {'state': result.state, 'username': self.request.user.username, 'task': result.task_id, 'queue': 'default'},
             status=status.HTTP_202_ACCEPTED
         )
 
@@ -884,7 +844,7 @@ class CollectionVersionConceptsView(CollectionBaseView, ListWithHeadersMixin):
     is_searchable = True
     document_model = ConceptDocument
     es_fields = Concept.es_fields
-    facet_class = ConceptSearch
+    facet_class = ConceptFacetedSearch
 
     def get_object(self, queryset=None):
         instance = get_object_or_404(self.get_base_queryset())
@@ -1047,7 +1007,7 @@ class CollectionVersionMappingsView(CollectionBaseView, ListWithHeadersMixin):
     is_searchable = True
     document_model = MappingDocument
     es_fields = Mapping.es_fields
-    facet_class = MappingSearch
+    facet_class = MappingFacetedSearch
 
     def get_object(self, queryset=None):
         instance = get_object_or_404(self.get_base_queryset())
@@ -1175,6 +1135,13 @@ class CollectionSummaryView(CollectionBaseView, RetrieveAPIView, CreateAPIView):
     serializer_class = CollectionSummaryDetailSerializer
     permission_classes = (CanViewConceptDictionary,)
 
+    def get_serializer_class(self):
+        if self.is_verbose():
+            if self.request.query_params.get('distribution'):
+                return CollectionSummaryFieldDistributionSerializer
+            return CollectionSummaryVerboseSerializer
+        return CollectionSummaryDetailSerializer
+
     def get_object(self, queryset=None):
         instance = get_object_or_404(self.get_queryset())
         self.check_object_permissions(self.request, instance)
@@ -1192,6 +1159,13 @@ class CollectionVersionSummaryView(CollectionBaseView, RetrieveAPIView):
     serializer_class = CollectionVersionSummaryDetailSerializer
     permission_classes = (CanViewConceptDictionary,)
 
+    def get_serializer_class(self):
+        if self.is_verbose():
+            if self.request.query_params.get('distribution'):
+                return CollectionVersionSummaryFieldDistributionSerializer
+            return CollectionVersionSummaryVerboseSerializer
+        return CollectionVersionSummaryDetailSerializer
+
     def get_object(self, queryset=None):
         instance = get_object_or_404(self.get_queryset())
         self.check_object_permissions(self.request, instance)
@@ -1208,6 +1182,13 @@ class CollectionVersionSummaryView(CollectionBaseView, RetrieveAPIView):
 class CollectionLatestVersionSummaryView(CollectionVersionBaseView, RetrieveAPIView, UpdateAPIView):
     serializer_class = CollectionVersionSummaryDetailSerializer
     permission_classes = (CanViewConceptDictionary,)
+
+    def get_serializer_class(self):
+        if self.is_verbose():
+            if self.request.query_params.get('distribution'):
+                return CollectionVersionSummaryFieldDistributionSerializer
+            return CollectionVersionSummaryVerboseSerializer
+        return CollectionVersionSummaryDetailSerializer
 
     def get_object(self, queryset=None):
         obj = self.get_queryset().first()
@@ -1254,15 +1235,22 @@ class ReferenceExpressionResolveView(APIView):
 
         return results
 
+    @swagger_auto_schema(
+        responses={
+            200: ReferenceExpressionResolveSerializer(many=True)
+        },
+        request_body=openapi.Schema(
+            type=openapi.TYPE_ARRAY,
+            items=openapi.Schema(
+                type=openapi.TYPE_OBJECT,
+                properties={
+                    'url': openapi.Schema(type=openapi.TYPE_STRING),
+                    'version': openapi.Schema(type=openapi.TYPE_STRING),
+                    'namespace': openapi.Schema(type=openapi.TYPE_STRING),
+                },
+                required=['url', 'version']
+            )
+        ),
+    )
     def post(self, _):
         return Response(self.get_results(), status=status.HTTP_200_OK)
-
-
-# for data back-fill only
-# links all expansions without repo versions but with concepts/mappings
-class ExpansionsLinkToRepoVersionsView(APIView):  # pragma: no cover
-    permission_classes = (IsAdminUser, )
-
-    def put(self, _):
-        task = link_expansions_repo_versions.delay()
-        return Response(dict(task_id=task.id))

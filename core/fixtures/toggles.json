@@ -1,0 +1,22 @@
+[
+  {
+    "pk": 2,
+    "model": "toggles.toggle",
+    "fields": {
+      "is_active": true,
+      "name": "CHECKSUMS_TOGGLE",
+      "dev": true,
+      "qa": true
+    }
+  },
+  {
+    "pk": 3,
+    "model": "toggles.toggle",
+    "fields": {
+      "is_active": true,
+      "name": "LOCALIZATION_TOGGLE",
+      "dev": true,
+      "qa": true
+    }
+  }
+]

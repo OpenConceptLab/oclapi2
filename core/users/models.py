@@ -5,7 +5,6 @@ from django.contrib.auth.models import AbstractUser
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
 from django.db import models
-from django.urls import reverse
 from rest_framework.authtoken.models import Token
 
 from core.common.mixins import SourceContainerMixin
@@ -20,7 +19,10 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
     class Meta:
         db_table = 'user_profiles'
         swappable = 'AUTH_USER_MODEL'
-        indexes = [] + BaseModel.Meta.indexes
+        indexes = [
+                      models.Index(fields=['uri']),
+                      models.Index(fields=['public_access']),
+                  ] + BaseModel.Meta.indexes
 
     OBJECT_TYPE = USER_OBJECT_TYPE
     first_name = models.CharField(max_length=100, blank=True)
@@ -36,7 +38,10 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
     mnemonic_attr = 'username'
 
     es_fields = {
-        'username': {'sortable': True, 'filterable': True, 'exact': True},
+        'username': {'sortable': False, 'filterable': True, 'exact': True},
+        '_username': {'sortable': True, 'filterable': False, 'exact': False},
+        'name': {'sortable': False, 'filterable': True, 'exact': True},
+        '_name': {'sortable': True, 'filterable': False, 'exact': False},
         'date_joined': {'sortable': True, 'default': 'asc', 'filterable': False},
         'company': {'sortable': True, 'filterable': True, 'exact': True},
         'location': {'sortable': True, 'filterable': True, 'exact': True},
@@ -44,6 +49,9 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
         'is_staff': {'sortable': False, 'filterable': False, 'exact': False, 'facet': True},
         'is_admin': {'sortable': False, 'filterable': False, 'exact': False, 'facet': True}
     }
+
+    def calculate_uri(self):
+        return f"/users/{self.username}/"
 
     @staticmethod
     def get_search_document():
@@ -81,7 +89,7 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
 
     @property
     def organizations_url(self):
-        return reverse('userprofile-orgs', kwargs={'user': self.mnemonic})
+        return f"/users/{self.mnemonic}/orgs/"
 
     def update_password(self, password=None, hashed_password=None):
         if not password and not hashed_password:
@@ -92,7 +100,7 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
                 validate_password(password)
                 self.set_password(password)
             except ValidationError as ex:
-                return dict(errors=ex.messages)
+                return {'errors': ex.messages}
         elif hashed_password:
             self.password = hashed_password
 
@@ -127,6 +135,10 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
     @property
     def orgs_count(self):
         return self.organizations.count()
+
+    @property
+    def owned_orgs_count(self):
+        return self.organizations.filter(created_by=self).count()
 
     def send_verification_email(self):
         return send_user_verification_email.delay(self.id)
@@ -165,7 +177,7 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
 
     @property
     def auth_headers(self):
-        return dict(Authorization=f'Token {self.get_token()}')
+        return {'Authorization': f'Token {self.get_token()}'}
 
     def deactivate(self):
         self.is_active = False

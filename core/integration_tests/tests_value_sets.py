@@ -124,7 +124,6 @@ class ValueSetsTest(OCLAPITestCase):
             response = self.post(url, json_file)
             json_response = response.json()
 
-            self.update(json_file, 'compose.include[*].version', '0.2.0')
             self.ignore_paths(json_file, json_response, ['jurisdiction', 'date', 'copyright', 'purpose',
                                                          'identifier', 'meta', 'text', 'revisionDate', 'count',
                                                          'compose.include[*].concept[*].designation',

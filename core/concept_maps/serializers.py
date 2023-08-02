@@ -1,3 +1,4 @@
+import logging
 from collections import OrderedDict
 
 from rest_framework import serializers
@@ -11,9 +12,12 @@ from core.mappings.constants import SAME_AS
 from core.mappings.models import Mapping
 from core.mappings.serializers import MappingDetailSerializer
 from core.orgs.models import Organization
+from core.parameters.serializers import ParametersSerializer
 from core.sources.models import Source
 from core.sources.serializers import SourceCreateOrUpdateSerializer
 from core.users.models import UserProfile
+
+logger = logging.getLogger('oclapi')
 
 
 class ConceptMapGroupField(serializers.Field):
@@ -23,7 +27,7 @@ class ConceptMapGroupField(serializers.Field):
             for element in group.get('element', []):
                 for target in element.get('target', []):
                     map_type = target.get('relationship')
-                    if map_type == 'equivalence':
+                    if map_type == 'equivalent':
                         map_type = SAME_AS
                     mapping = {
                         'from_source_url': IdentifierSerializer.convert_fhir_url_to_ocl_uri(group.get('source'),
@@ -41,7 +45,8 @@ class ConceptMapGroupField(serializers.Field):
     def to_representation(self, value):
         # limit to 1000 mappings by default
         # TODO: support graphQL to go around the limit
-        mappings = value.get_mappings_queryset().order_by('id')[:1000]
+        limit = self.get_limit()
+        mappings = value.get_mappings_queryset().order_by('id')[:limit]
         groups = {}
         for mapping in mappings:
             key = mapping.from_source_url + mapping.to_source_url
@@ -87,6 +92,13 @@ class ConceptMapGroupField(serializers.Field):
             })
         return [*groups.values()]
 
+    def get_limit(self):
+        if self.context.get('has_many', False):
+            limit = 25
+        else:
+            limit = 1000
+        return limit
+
 
 class ConceptMapDetailSerializer(serializers.ModelSerializer):
     resourceType = SerializerMethodField(method_name='get_resource_type')
@@ -106,6 +118,14 @@ class ConceptMapDetailSerializer(serializers.ModelSerializer):
                   'version', 'identifier', 'contact', 'jurisdiction', 'name', 'description', 'publisher', 'purpose',
                   'copyright', 'date', 'experimental', 'group')
 
+    def __new__(cls, *args, **kwargs):
+        if kwargs.get('many', False):
+            context = kwargs.get('context', {})
+            context.update({'has_many': True})
+            kwargs.update({'context': context})
+
+        return super().__new__(cls, *args, **kwargs)
+
     @staticmethod
     def get_resource_type(_):
         return RESOURCE_TYPE
@@ -118,15 +138,18 @@ class ConceptMapDetailSerializer(serializers.ModelSerializer):
         try:
             rep = super().to_representation(instance)
             IdentifierSerializer.include_ocl_identifier(instance.uri, RESOURCE_TYPE, rep)
-        except Exception as error:
-            raise Exception(f'Failed to represent "{instance.uri}" as {RESOURCE_TYPE}') from error
+        except (Exception, ):
+            msg = f'Failed to represent "{instance.uri}" as {RESOURCE_TYPE}'
+            logger.exception(msg)
+            return {
+                'resourceType': 'OperationOutcome',
+                'issue': [{
+                    'severity': 'error',
+                    'details': msg
+                }]
+            }
         # Remove fields with 'None' value
         return OrderedDict([(key, rep[key]) for key in rep if rep[key] is not None])
-
-    def get_ocl_identifier(self):
-        ident = IdentifierSerializer.find_ocl_identifier(self.validated_data['identifier'])
-        ident = IdentifierSerializer.parse_identifier(ident)
-        return ident
 
     def create(self, validated_data):
         mappings = validated_data.pop('mappings', [])
@@ -203,3 +226,27 @@ class ConceptMapDetailSerializer(serializers.ModelSerializer):
         self._errors.update(errors)
 
         return source
+
+
+class ConceptMapParametersSerializer(ParametersSerializer):
+
+    def update(self, instance, validated_data):
+        pass
+
+    def create(self, validated_data):
+        pass
+
+    allowed_input_parameters = {
+            'url': 'valueUri',
+            'conceptMapVersion': 'valueString',
+            'code': 'valueCode',
+            'system': 'valueUri',
+            'version': 'valueString',
+            'source': 'valueUri',
+            'coding': 'valueCoding',
+            'codeableConcept': 'valueCodeableConcept',
+            'target': 'valueUri',
+            'targetsystem': 'valueUri',
+            # TODO: dependency?
+            'reverse': 'valueBoolean'
+        }

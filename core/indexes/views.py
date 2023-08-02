@@ -7,7 +7,7 @@ from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from core.common.swagger_parameters import apps_param, ids_param, resources_body_param, uri_param
+from core.common.swagger_parameters import apps_param, ids_param, resources_body_param, uri_param, filter_param
 from core.common.tasks import rebuild_indexes, populate_indexes, batch_index_resources
 from core.common.utils import get_resource_class_from_resource_name
 
@@ -25,7 +25,12 @@ class BaseESIndexView(APIView):  # pragma: no cover
         result = self.task.delay(apps)
 
         return Response(
-            dict(state=result.state, username=self.request.user.username, task=result.task_id, queue='default'),
+            {
+                'state': result.state,
+                'username': self.request.user.username,
+                'task': result.task_id,
+                'queue': 'default'
+            },
             status=status.HTTP_202_ACCEPTED
         )
 
@@ -42,7 +47,7 @@ class ResourceIndexView(APIView):
     permission_classes = (IsAdminUser,)
     parser_classes = (MultiPartParser,)
 
-    @swagger_auto_schema(manual_parameters=[ids_param, uri_param, resources_body_param])
+    @swagger_auto_schema(manual_parameters=[ids_param, uri_param, filter_param, resources_body_param])
     def post(self, _, resource):
         model = get_resource_class_from_resource_name(resource)
 
@@ -51,6 +56,7 @@ class ResourceIndexView(APIView):
 
         ids = self.request.data.get('ids', None)
         uri = self.request.data.get('uri', None)
+        _filter = self.request.data.get('filter', None)
         update_indexed = self.request.data.get('update_indexed', False)
 
         filters = None
@@ -60,7 +66,9 @@ class ResourceIndexView(APIView):
             if ids:
                 filters = {f"{model.mnemonic_attr}__in": ids}
         elif uri:
-            filters = dict(uri__icontains=uri)
+            filters = {'uri__icontains': uri}
+        elif _filter:
+            filters = _filter
         if not filters:
             return Response(status=status.HTTP_400_BAD_REQUEST)
 

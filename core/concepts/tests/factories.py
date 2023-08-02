@@ -28,7 +28,6 @@ class ConceptFactory(factory.django.DjangoModelFactory):
         model = Concept
 
     mnemonic = Sequence("concept{}".format)  # pylint: disable=consider-using-f-string
-    name = Sequence("concept{}".format)  # pylint: disable=consider-using-f-string
     version = HEAD
     parent = SubFactory(OrganizationSourceFactory)
     concept_class = "Diagnosis"

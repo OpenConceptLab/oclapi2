@@ -2,6 +2,7 @@ import json
 from urllib.parse import quote
 
 from dateutil.relativedelta import relativedelta
+from django.conf import settings
 from django.db.models import Count, F
 from django.db.models.functions import TruncMonth
 from django.utils import timezone
@@ -9,6 +10,7 @@ from pydash import get
 
 from core.collections.models import Collection, CollectionReference
 from core.common.constants import HEAD
+from core.common.utils import get_end_of_month, from_string_to_date
 from core.concepts.models import Concept
 from core.mappings.models import Mapping
 from core.orgs.models import Organization
@@ -17,13 +19,24 @@ from core.users.models import UserProfile
 
 
 class MonthlyUsageReport:
-    def __init__(self, verbose=False, start=None, end=None):
+    def __init__(self, verbose=False, start=None, end=None, current_month_start=None, current_month_end=None):  # pylint: disable=too-many-arguments
         self.verbose = verbose
-        self.start = start
-        self.end = end
+        self.start = from_string_to_date(start)
+        self.end = from_string_to_date(end)
+        self.current_month_start = from_string_to_date(
+            current_month_start or timezone.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        )
+        self.current_month_end = from_string_to_date(
+            current_month_end or get_end_of_month(
+                self.current_month_start).replace(hour=23, minute=59, second=59, microsecond=0)
+        )
         self.resources = []
+        self.current_month_resources = []
         self.result = {}
+        self.current_month_result = {}
+        self.make_current_month_resources()
         self.make_resources()
+        self.make_current_month_resources()
 
     @staticmethod
     def to_chart_url(label, graph_data, chart_type='bar'):
@@ -36,63 +49,107 @@ class MonthlyUsageReport:
             labels.append(key)
             data.append(ele[key])
 
-        config = dict(
-            type=chart_type,
-            data=dict(
-                labels=labels,
-                datasets=[dict(
-                    label=label,
-                    data=data,
-                    backgroundColor=[color_light],
-                    borderColor=[color],
-                    borderWidth=1
-                )]
-            ),
-            options=dict(
-                scales=dict(y=dict(beginAtZero=True))
-            )
-        )
+        config = {
+            'type': chart_type,
+            'data': {
+                'labels': labels,
+                'datasets': [{
+                    'label': label,
+                    'data': data,
+                    'backgroundColor': [color_light],
+                    'borderColor': [color],
+                    'borderWidth': 1
+                }]
+            },
+            'options': {
+                'scales': {
+                    'y': {
+                        'beginAtZero': True
+                    }
+                }
+            }
+        }
         return f'https://quickchart.io/chart?c={quote(json.dumps(config))}'
 
     def make_resources(self):
-        self.resources.append(UserReport(start=self.start, end=self.end, verbose=self.verbose))
-        self.resources.append(OrganizationReport(start=self.start, end=self.end, verbose=self.verbose))
-        self.resources.append(SourceReport(start=self.start, end=self.end, verbose=self.verbose))
-        self.resources.append(CollectionReport(start=self.start, end=self.end, verbose=self.verbose))
+        start = self.start
+        end = self.end
+        self.resources.append(UserReport(start=start, end=end, verbose=self.verbose))
+        self.resources.append(OrganizationReport(start=start, end=end, verbose=self.verbose))
+        self.resources.append(SourceReport(start=start, end=end, verbose=self.verbose))
+        self.resources.append(CollectionReport(start=start, end=end, verbose=self.verbose))
         if self.verbose:
-            self.resources.append(SourceVersionReport(start=self.start, end=self.end, verbose=self.verbose))
-            self.resources.append(CollectionVersionReport(start=self.start, end=self.end, verbose=self.verbose))
-            self.resources.append(CollectionReferenceReport(start=self.start, end=self.end, verbose=self.verbose))
-            self.resources.append(ConceptReport(start=self.start, end=self.end, verbose=self.verbose))
-            self.resources.append(MappingReport(start=self.start, end=self.end, verbose=self.verbose))
+            self.resources.append(SourceVersionReport(start=start, end=end, verbose=self.verbose))
+            self.resources.append(CollectionVersionReport(start=start, end=end, verbose=self.verbose))
+            self.resources.append(CollectionReferenceReport(start=start, end=end, verbose=self.verbose))
+            self.resources.append(ConceptReport(start=start, end=end, verbose=self.verbose))
+            self.resources.append(MappingReport(start=start, end=end, verbose=self.verbose))
+
+    def make_current_month_resources(self):
+        start = self.current_month_start
+        end = self.current_month_end
+        self.current_month_resources.append(UserReport(start=start, end=end, verbose=self.verbose))
+        self.current_month_resources.append(OrganizationReport(start=start, end=end, verbose=self.verbose))
+        self.current_month_resources.append(SourceReport(start=start, end=end, verbose=self.verbose))
+        self.current_month_resources.append(CollectionReport(start=start, end=end, verbose=self.verbose))
+        if self.verbose:
+            self.current_month_resources.append(SourceVersionReport(start=start, end=end, verbose=self.verbose))
+            self.current_month_resources.append(CollectionVersionReport(start=start, end=end, verbose=self.verbose))
+            self.current_month_resources.append(CollectionReferenceReport(start=start, end=end, verbose=self.verbose))
+            self.current_month_resources.append(ConceptReport(start=start, end=end, verbose=self.verbose))
+            self.current_month_resources.append(MappingReport(start=start, end=end, verbose=self.verbose))
 
     def prepare(self):
-        self.result['start'] = self.resources[0].start
-        self.result['end'] = self.resources[0].end
+        self.result['start'] = self.start
+        self.result['end'] = self.end
         for resource in self.resources:
             self.result[resource.resource] = resource.get_monthly_report()
+        for resource in self.current_month_resources:
+            self.current_month_result[resource.resource] = resource.get_monthly_report()
 
     def get_result_for_email(self):
         urls = {}
         for resource in self.resources:
             entity = resource.resource
             stats = [
-                dict(
-                    data=self.result[entity]['created_monthly'],
-                    label=f"{entity.title()} Created Monthly",
-                    key=f"{entity}_url")
+                {
+                    'data': self.result[entity]['created_monthly'],
+                    'label': f"{entity.title()} Created Monthly",
+                    'key': f"{entity}_url"
+                }
             ]
 
             if entity == 'users':
                 stats.append(
-                    dict(
-                        data=self.result[entity]['last_login_monthly'],
-                        label=f"{entity.title()} Joined Monthly",
-                        key=f"{entity}_last_login_monthly_url"),
+                    {
+                        'data': self.result[entity]['last_login_monthly'],
+                        'label': f"{entity.title()} Joined Monthly",
+                        'key': f"{entity}_last_login_monthly_url"
+                    },
                 )
             for stat in stats:
                 urls[stat['key']] = self.to_chart_url(stat['label'], stat['data'])
-        return {**self.result, **urls}
+        return {
+            **self.result,
+            **urls,
+            'current_month': self.format_current_month_result(),
+            'current_month_start': self.current_month_start,
+            'current_month_end': self.current_month_end,
+            'env': settings.ENV
+        }
+
+    def format_current_month_result(self):
+        _result = {}
+
+        def __format(stat):
+            return list(stat[0].values())[0] or 0 if stat else 0
+
+        for resource, stats in self.current_month_result.items():
+            _result[resource] = {
+                **stats,
+                'created_monthly': __format(stats['created_monthly']),
+            }
+        return _result
 
 
 class ResourceReport:
@@ -122,7 +179,7 @@ class ResourceReport:
 
     @staticmethod
     def get_active_filter(active=True):
-        return dict(retired=not active)
+        return {'retired': not active}
 
     def set_date_range(self):
         self.queryset = self.queryset.filter(created_at__gte=self.start, created_at__lte=self.end)
@@ -143,16 +200,17 @@ class ResourceReport:
         return self.queryset.annotate(
             month=TruncMonth(date_attr)
         ).filter(
-            month__gte=self.start, month__lte=self.end
+            month__gte=self.start.strftime('%Y-%m-%d'), month__lte=self.end.strftime('%Y-%m-%d')
         ).values('month').annotate(total=Count(count_by)).values('month', 'total').order_by('-month')
 
     def get_monthly_report(self):
         self.set_total()
         self.set_created_monthly_distribution()
 
-        self.result = dict(
-            total=self.total, created_monthly=self.format_distribution(self.created_monthly_distribution)
-        )
+        self.result = {
+            'total': self.total,
+            'created_monthly': self.format_distribution(self.created_monthly_distribution)
+        }
         if self.resource not in ['collection_references']:
             self.set_active()
             self.set_inactive()
@@ -183,7 +241,7 @@ class UserReport(ResourceReport):
 
     @staticmethod
     def get_active_filter(active=True):
-        return dict(is_active=active)
+        return {'is_active': active}
 
     def set_last_login_monthly_distribution(self):
         self.last_login_monthly_distribution = self.get_distribution('last_login')
@@ -213,7 +271,7 @@ class UserReport(ResourceReport):
                 ]:
                     created = get(user, f"{app}_{model}_related_created_by").count()
                     updated = get(user, f"{app}_{model}_related_updated_by").count()
-                    user_result[app] = dict(created=created, updated=updated)
+                    user_result[app] = {'created': created, 'updated': updated}
 
                 self.result[user.username] = user_result
 
@@ -226,7 +284,7 @@ class OrganizationReport(ResourceReport):
 
     @staticmethod
     def get_active_filter(active=True):
-        return dict(is_active=active)
+        return {'is_active': active}
 
 
 class SourceReport(ResourceReport):

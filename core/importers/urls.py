@@ -31,10 +31,12 @@ urlpatterns = [
         views.BulkImportFileUploadView.as_view(),
         name='bulk-import-detail-file-upload'
     ),
-    re_path(r'^bulk-import/$', views.BulkImportView.as_view(), name='bulk-import'),
+
+    # Everything above is DEPRECATED
+    re_path(r'^bulk-import/$', views.ImportView.as_view(), name='bulk-import'),
     re_path(
         fr"^bulk-import/(?P<import_queue>{NAMESPACE_PATTERN})/$",
-        views.BulkImportView.as_view(),
+        views.ImportView.as_view(),
         name='bulk-import-detail'
     ),
 ]

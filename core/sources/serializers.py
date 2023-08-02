@@ -1,7 +1,7 @@
 import json
 
 from django.core.validators import RegexValidator
-from pydash import get
+from pydash import get, compact
 from rest_framework.fields import CharField, IntegerField, DateTimeField, ChoiceField, JSONField, ListField, \
     BooleanField, SerializerMethodField
 from rest_framework.relations import PrimaryKeyRelatedField
@@ -10,21 +10,37 @@ from rest_framework.serializers import ModelSerializer
 from core.client_configs.serializers import ClientConfigSerializer
 from core.common.constants import DEFAULT_ACCESS_TYPE, NAMESPACE_REGEX, ACCESS_TYPE_CHOICES, HEAD, \
     INCLUDE_SUMMARY, INCLUDE_CLIENT_CONFIGS, INCLUDE_HIERARCHY_ROOT
+from core.common.serializers import AbstractRepoResourcesSerializer, AbstractResourceSerializer
+from core.common.utils import get_truthy_values
 from core.orgs.models import Organization
 from core.settings import DEFAULT_LOCALE
 from core.sources.models import Source
 from core.users.models import UserProfile
 
 
-class SourceMinimalSerializer(ModelSerializer):
+TRUTHY = get_truthy_values()
+
+
+class SourceMinimalSerializer(AbstractResourceSerializer):
     id = CharField(source='mnemonic')
 
     class Meta:
         model = Source
-        fields = ('id', 'url')
+        fields = AbstractResourceSerializer.Meta.fields + ('id', 'url')
 
 
-class SourceListSerializer(ModelSerializer):
+class SourceVersionMinimalSerializer(ModelSerializer):
+    id = CharField(source='version')
+    version_url = CharField(source='uri')
+    type = CharField(source='resource_version_type')
+    short_code = CharField(source='mnemonic')
+
+    class Meta:
+        model = Source
+        fields = ('id', 'version_url', 'type', 'short_code', 'released')
+
+
+class SourceListSerializer(AbstractResourceSerializer):
     type = CharField(source='resource_type')
     short_code = CharField(source='mnemonic')
     owner = CharField(source='parent_resource')
@@ -35,7 +51,7 @@ class SourceListSerializer(ModelSerializer):
 
     class Meta:
         model = Source
-        fields = (
+        fields = AbstractResourceSerializer.Meta.fields + (
             'short_code', 'name', 'url', 'owner', 'owner_type', 'owner_url', 'version', 'created_at', 'id',
             'source_type', 'updated_at', 'canonical_url', 'summary', 'type',
         )
@@ -46,7 +62,7 @@ class SourceListSerializer(ModelSerializer):
         self.query_params = {}
         if params:
             self.query_params = params if isinstance(params, dict) else params.dict()
-        self.include_summary = self.query_params.get(INCLUDE_SUMMARY) in ['true', True]
+        self.include_summary = self.query_params.get(INCLUDE_SUMMARY) in TRUTHY
         try:
             if not self.include_summary:
                 self.fields.pop('summary', None)
@@ -74,14 +90,19 @@ class SourceVersionListSerializer(ModelSerializer):
     version_url = CharField(source='uri')
     url = CharField(source='versioned_object_url')
     previous_version_url = CharField(source='prev_version_uri')
+    checksums = SerializerMethodField()
 
     class Meta:
         model = Source
         fields = (
             'type', 'short_code', 'name', 'url', 'canonical_url', 'owner', 'owner_type', 'owner_url', 'version',
             'created_at', 'id', 'source_type', 'updated_at', 'released', 'retired', 'version_url',
-            'previous_version_url'
+            'previous_version_url', 'checksums'
         )
+
+    @staticmethod
+    def get_checksums(obj):
+        return obj.get_checksums(queue=True)
 
 
 class SourceCreateOrUpdateSerializer(ModelSerializer):
@@ -227,8 +248,53 @@ class SourceSummaryDetailSerializer(SourceSummarySerializer):
     class Meta:
         model = Source
         fields = (
-            *SourceSummarySerializer.Meta.fields, 'id', 'uuid',
+            'id', 'uuid', *SourceSummarySerializer.Meta.fields
         )
+
+
+class AbstractSourceSummaryVerboseSerializer(ModelSerializer):
+    concepts = JSONField(source='concepts_distribution')
+    mappings = JSONField(source='mappings_distribution')
+    versions = JSONField(source='versions_distribution')
+    uuid = CharField(source='id')
+
+    class Meta:
+        model = Source
+        fields = (
+            'id', 'uuid', 'concepts', 'mappings', 'versions', 'default_locale', 'supported_locales'
+        )
+
+
+class AbstractSourceSummaryFieldDistributionSerializer(ModelSerializer):
+    uuid = CharField(source='id')
+    distribution = SerializerMethodField()
+
+    class Meta:
+        model = Source
+        fields = (
+            'id', 'uuid', 'distribution'
+        )
+
+    def get_distribution(self, obj):
+        result = {}
+        fields = compact((get(self.context, 'request.query_params.distribution') or '').split(','))
+        source_names = compact((get(self.context, 'request.query_params.sources') or '').split(','))
+        for field in fields:
+            func = get(obj, f"get_{field}_distribution")
+            if func:
+                kwargs = {
+                    'source_names': source_names
+                } if field in ['to_sources_map_type', 'from_sources_map_type'] else {}
+                result[field] = func(**kwargs)
+        return result
+
+
+class SourceSummaryVerboseSerializer(AbstractSourceSummaryVerboseSerializer):
+    id = CharField(source='mnemonic')
+
+
+class SourceSummaryFieldDistributionSerializer(AbstractSourceSummaryFieldDistributionSerializer):
+    id = CharField(source='mnemonic')
 
 
 class SourceVersionSummarySerializer(ModelSerializer):
@@ -248,7 +314,23 @@ class SourceVersionSummaryDetailSerializer(SourceVersionSummarySerializer):
         )
 
 
-class SourceDetailSerializer(SourceCreateOrUpdateSerializer):
+class SourceVersionSummaryVerboseSerializer(AbstractSourceSummaryVerboseSerializer):
+    id = CharField(source='version')
+
+    def __init__(self, *args, **kwargs):
+        try:
+            self.fields.pop('versions', None)
+        except:  # pylint: disable=bare-except
+            pass
+
+        super().__init__(*args, **kwargs)
+
+
+class SourceVersionSummaryFieldDistributionSerializer(AbstractSourceSummaryFieldDistributionSerializer):
+    id = CharField(source='version')
+
+
+class SourceDetailSerializer(SourceCreateOrUpdateSerializer, AbstractRepoResourcesSerializer):
     type = CharField(source='resource_type')
     uuid = CharField(source='id')
     id = CharField(source='mnemonic')
@@ -265,6 +347,7 @@ class SourceDetailSerializer(SourceCreateOrUpdateSerializer):
     client_configs = SerializerMethodField()
     hierarchy_root = SerializerMethodField()
     hierarchy_root_url = CharField(source='hierarchy_root.url', required=False, allow_blank=True, allow_null=True)
+    checksums = SerializerMethodField()
 
     class Meta:
         model = Source
@@ -281,8 +364,8 @@ class SourceDetailSerializer(SourceCreateOrUpdateSerializer):
             'autoid_concept_mnemonic', 'autoid_concept_external_id',
             'autoid_mapping_mnemonic', 'autoid_mapping_external_id',
             'autoid_concept_mnemonic_start_from', 'autoid_concept_external_id_start_from',
-            'autoid_mapping_mnemonic_start_from', 'autoid_mapping_external_id_start_from',
-        )
+            'autoid_mapping_mnemonic_start_from', 'autoid_mapping_external_id_start_from', 'checksums'
+        ) + AbstractRepoResourcesSerializer.Meta.fields
 
     def __init__(self, *args, **kwargs):
         params = get(kwargs, 'context.request.query_params')
@@ -290,9 +373,9 @@ class SourceDetailSerializer(SourceCreateOrUpdateSerializer):
         self.query_params = {}
         if params:
             self.query_params = params if isinstance(params, dict) else params.dict()
-        self.include_summary = self.query_params.get(INCLUDE_SUMMARY) in ['true', True]
-        self.include_client_configs = self.query_params.get(INCLUDE_CLIENT_CONFIGS) in ['true', True]
-        self.include_hierarchy_root = self.query_params.get(INCLUDE_HIERARCHY_ROOT) in ['true', True]
+        self.include_summary = self.query_params.get(INCLUDE_SUMMARY) in TRUTHY
+        self.include_client_configs = self.query_params.get(INCLUDE_CLIENT_CONFIGS) in TRUTHY
+        self.include_hierarchy_root = self.query_params.get(INCLUDE_HIERARCHY_ROOT) in TRUTHY
 
         try:
             if not self.include_summary:
@@ -331,8 +414,12 @@ class SourceDetailSerializer(SourceCreateOrUpdateSerializer):
         ret.update({"supported_locales": instance.get_supported_locales()})
         return ret
 
+    @staticmethod
+    def get_checksums(obj):
+        return obj.get_checksums(queue=True)
 
-class SourceVersionDetailSerializer(SourceCreateOrUpdateSerializer):
+
+class SourceVersionDetailSerializer(SourceCreateOrUpdateSerializer, AbstractRepoResourcesSerializer):
     type = CharField(source='resource_version_type')
     uuid = CharField(source='id')
     id = CharField(source='version')
@@ -352,6 +439,7 @@ class SourceVersionDetailSerializer(SourceCreateOrUpdateSerializer):
     previous_version_url = CharField(source='prev_version_uri')
     summary = SerializerMethodField()
     hierarchy_root_url = CharField(source='hierarchy_root.url', required=False, allow_blank=True, allow_null=True)
+    checksums = SerializerMethodField()
 
     class Meta:
         model = Source
@@ -365,15 +453,15 @@ class SourceVersionDetailSerializer(SourceCreateOrUpdateSerializer):
             'canonical_url', 'identifier', 'publisher', 'contact', 'jurisdiction', 'purpose', 'copyright',
             'content_type', 'revision_date', 'summary', 'text', 'meta',
             'experimental', 'case_sensitive', 'collection_reference', 'hierarchy_meaning', 'compositional',
-            'version_needed', 'hierarchy_root_url'
-        )
+            'version_needed', 'hierarchy_root_url', 'checksums'
+        ) + AbstractRepoResourcesSerializer.Meta.fields
 
     def __init__(self, *args, **kwargs):
         params = get(kwargs, 'context.request.query_params')
         self.include_summary = False
         if params:
             self.query_params = params.dict()
-            self.include_summary = self.query_params.get(INCLUDE_SUMMARY) in ['true', True]
+            self.include_summary = self.query_params.get(INCLUDE_SUMMARY) in TRUTHY
 
         try:
             if not self.include_summary:
@@ -390,6 +478,10 @@ class SourceVersionDetailSerializer(SourceCreateOrUpdateSerializer):
             summary = SourceVersionSummarySerializer(obj).data
 
         return summary
+
+    @staticmethod
+    def get_checksums(obj):
+        return obj.get_checksums(queue=True)
 
 
 class SourceVersionExportSerializer(SourceVersionDetailSerializer):

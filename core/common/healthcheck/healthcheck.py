@@ -1,8 +1,10 @@
 from celery.app import default_app as celery_app
 from django.conf import settings
-from health_check.backends import BaseHealthCheckBackend
+from django_redis import get_redis_connection
+from health_check.backends import BaseHealthCheckBackend, logger
 from health_check.exceptions import ServiceReturnedUnexpectedResult, ServiceUnavailable
 from pydash import get
+from redis import exceptions
 
 from core.common.utils import flower_get, es_get
 
@@ -16,6 +18,29 @@ class BaseHealthCheck(BaseHealthCheckBackend):
 
     def check_status(self):
         raise NotImplementedError
+
+
+class RedisHealthCheck(BaseHealthCheck):
+
+    def check_status(self):
+        """Check Redis service by pinging the redis instance with a redis connection."""
+        try:
+            # conn is used as a context to release opened resources later
+            with get_redis_connection('default') as conn:
+                conn.ping()  # exceptions may be raised upon ping
+        except ConnectionRefusedError as e:
+            self.add_error(ServiceUnavailable("Unable to connect to Redis: Connection was refused."), e)
+        except exceptions.TimeoutError as e:
+            self.add_error(ServiceUnavailable("Unable to connect to Redis: Timeout."), e)
+        except exceptions.ConnectionError as e:
+            self.add_error(ServiceUnavailable("Unable to connect to Redis: Connection Error"), e)
+        except BaseException as e:
+            self.add_error(ServiceUnavailable("Unknown error"), e)
+        else:
+            logger.debug("Connection established. Redis is healthy.")
+
+    def identifier(self):
+        return "Redis"
 
 
 class FlowerHealthCheck(BaseHealthCheck):

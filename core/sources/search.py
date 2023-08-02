@@ -1,16 +1,17 @@
 from elasticsearch_dsl import TermsFacet
 
 from core.common.constants import FACET_SIZE
-from core.common.search import CommonSearch
+from core.common.search import CustomESFacetedSearch
 from core.sources.models import Source
 
 
-class SourceSearch(CommonSearch):
+class SourceFacetedSearch(CustomESFacetedSearch):
     index = 'sources'
     doc_types = [Source]
     fields = [
         'source_type', 'locale', 'owner', 'owner_type', 'is_active', 'version', 'custom_validation_schema',
-        'hierarchy_meaning',
+        'hierarchy_meaning', 'name', 'canonical_url', 'mnemonic', 'identifier', 'jurisdiction',
+        'publisher', 'content_type', 'extras'
     ]
 
     facets = {

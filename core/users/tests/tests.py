@@ -74,12 +74,22 @@ class UserProfileTest(OCLTestCase):
 
     @patch('core.users.models.UserProfile.source_set')
     def test_public_sources(self, source_set_mock):
-        source_set_mock.exclude = Mock(return_value=Mock(filter=Mock(return_value=Mock(count=Mock(return_value=10)))))
+        source_set_mock.filter = Mock(return_value=Mock(exclude=Mock(return_value=Mock(count=Mock(return_value=10)))))
 
         self.assertEqual(UserProfile().public_sources, 10)
-        source_set_mock.exclude.assert_called_once_with(public_access=ACCESS_TYPE_NONE)
-        source_set_mock.exclude().filter.assert_called_once_with(version=HEAD)
-        source_set_mock.exclude().filter().count.assert_called_once()
+        source_set_mock.filter.assert_called_once_with(version=HEAD)
+        source_set_mock.filter().exclude.assert_called_once_with(public_access=ACCESS_TYPE_NONE)
+        source_set_mock.filter().exclude().count.assert_called_once()
+
+    @patch('core.orgs.models.Organization.collection_set')
+    def test_public_collections(self, collection_set_mock):
+        collection_set_mock.filter = Mock(
+            return_value=Mock(exclude=Mock(return_value=Mock(count=Mock(return_value=10)))))
+
+        self.assertEqual(Organization().public_collections, 10)
+        collection_set_mock.filter.assert_called_once_with(version=HEAD)
+        collection_set_mock.filter().exclude.assert_called_once_with(public_access=ACCESS_TYPE_NONE)
+        collection_set_mock.filter().exclude().count.assert_called_once()
 
     def test_delete(self):
         user = UserProfileFactory()
@@ -130,14 +140,16 @@ class UserProfileTest(OCLTestCase):
 
         self.assertEqual(
             user.update_password(password='newpassword'),
-            dict(errors=['This password is too common.', 'This password is not alphanumeric.'])
+            {'errors': ['This password is too common.', 'This password is not alphanumeric.']}
         )
         self.assertEqual(
             user.update_password(password='short'),
-            dict(errors=[
-                'This password is too short. It must contain at least 8 characters.',
-                'This password is not alphanumeric.'
-            ])
+            {
+                'errors': [
+                    'This password is too short. It must contain at least 8 characters.',
+                    'This password is not alphanumeric.'
+                ]
+            }
         )
 
         user.verification_token = 'some-token'
@@ -258,17 +270,17 @@ class UserProfileTest(OCLTestCase):
 
 
 class TokenAuthenticationViewTest(OCLAPITestCase):
-    def test_login(self):
+    def test_post(self):
         response = self.client.post('/users/login/', {})
 
         self.assertEqual(response.status_code, 400)
 
-        response = self.client.post('/users/login/', dict(username='foo', password='bar'))
+        response = self.client.post('/users/login/', {'username': 'foo', 'password': 'bar'})
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(
             response.data,
-            dict(non_field_errors=["Unable to log in with provided credentials."])
+            {'non_field_errors': ["Unable to log in with provided credentials."]}
         )
 
         user = UserProfileFactory()
@@ -276,12 +288,38 @@ class TokenAuthenticationViewTest(OCLAPITestCase):
         user.save()
         self.assertIsNone(user.last_login)
 
-        response = self.client.post('/users/login/', dict(username=user.username, password='password'))
+        response = self.client.post('/users/login/', {'username': user.username, 'password': 'password'})
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data, dict(token=ANY))
+        self.assertEqual(response.data, {'token': ANY})
         user.refresh_from_db()
         self.assertIsNotNone(user.last_login)
+
+    @patch('core.users.views.AuthService.is_sso_enabled')
+    def test_get_405(self, is_sso_enabled_mock):
+        is_sso_enabled_mock.return_value = False
+
+        response = self.client.get(
+            '/users/login/?client_id=client-id&redirect_uri=http://post-login-url&state=state&nonce=nonce'
+        )
+
+        self.assertEqual(response.status_code, 405)
+
+    @patch('core.users.views.OIDCAuthService.get_login_redirect_url')
+    @patch('core.users.views.AuthService.is_sso_enabled')
+    def test_get_200(self, is_sso_enabled_mock, get_login_url_mock):
+        is_sso_enabled_mock.return_value = True
+        get_login_url_mock.return_value = 'http://login-redirect.com'
+
+        response = self.client.get(
+            '/users/login/?client_id=client-id&redirect_uri=http://post-login-url&state=state&nonce=nonce'
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.headers['Location'], 'http://login-redirect.com')
+        get_login_url_mock.assert_called_once_with(
+            'client-id', 'http://post-login-url', 'state', 'nonce'
+        )
 
 
 class UserLogoViewTest(OCLAPITestCase):
@@ -298,7 +336,7 @@ class UserLogoViewTest(OCLAPITestCase):
 
         response = self.client.post(
             self.user.uri + 'logo/',
-            dict(base64='base64-data'),
+            {'base64': 'base64-data'},
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )

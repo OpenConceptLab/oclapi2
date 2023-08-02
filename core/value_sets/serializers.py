@@ -1,5 +1,8 @@
+import logging
+
 from rest_framework import serializers
-from rest_framework.fields import CharField, DateField, SerializerMethodField, ChoiceField, DateTimeField, JSONField
+from rest_framework.fields import CharField, DateField, SerializerMethodField, ChoiceField, DateTimeField, JSONField, \
+    BooleanField, ListField, URLField
 
 from core.code_systems.serializers import CodeSystemConceptSerializer
 from core.collections.models import Collection, Expansion
@@ -11,6 +14,8 @@ from core.orgs.models import Organization
 from core.parameters.serializers import ParametersSerializer
 from core.users.models import UserProfile
 from core.value_sets.constants import RESOURCE_TYPE
+
+logger = logging.getLogger('oclapi')
 
 
 class FilterValueSetSerializer(ReadSerializerMixin, serializers.Serializer):
@@ -32,73 +37,112 @@ class ValueSetExpansionConceptSerializer(CodeSystemConceptSerializer):
         self.fields.pop('definition')
 
 
-class ComposeValueSetField(serializers.Field):
-    lockedDate = DateField()
+class ValueSetComposeIncludeField(ReadSerializerMixin, serializers.Serializer):
+    system = CharField(required=False)
+    version = CharField(required=False)
+    concept = ValueSetConceptSerializer(many=True, required=False)
+    filter = FilterValueSetSerializer(many=True, required=False)
+    valueSet = ListField(child=URLField(), required=False)
 
     def to_internal_value(self, data):
-        if 'include' in data:
-            references = []
-            for include in data['include']:
-                include.update({'transform': 'resourceversions'})
-                parser = CollectionReferenceParser(expression=include)
-                parser.parse()
-                parser.to_reference_structure()
-                refs = parser.to_objects()
-                for ref in refs:
-                    ref.expression = ref.build_expression()
-                references += refs
-            res = dict(references=references)
+        # Handled by ComposeValueSetField
+        pass
+
+    def to_representation(self, instance):
+        if instance:
+            include = {}
+            if instance[0].system:
+                system = instance[0].system
+                system = IdentifierSerializer.convert_ocl_uri_to_fhir_url(system, 'ValueSet')
+                include.update({'system': system})
+            if instance[0].version:
+                include.update({'version': instance[0].version})
+            for reference in instance:
+                if reference.valueset:
+                    include.update({'valueSet': reference.valueset})
+                    break
+                if reference.filter:
+                    filters = include.get('filter', None)
+                    if not filters:
+                        filters = []
+                        include.update({'filter': filters})
+                    filters.extend(FilterValueSetSerializer(reference.filter, many=True).data)
+                    break
+                if reference.code:
+                    concepts = include.get('concept', None)
+                    if not concepts:
+                        concepts = []
+                        include.update({'concept': concepts})
+                    concepts.append({'code': reference.code, 'display': reference.display})
+
+            return include
+
+        return []
+
+
+class ComposeValueSetField(serializers.Field):
+    lockedDate = DateField(required=False)
+    inactive = BooleanField(required=False)
+    include = ValueSetComposeIncludeField()
+    exclude = ValueSetComposeIncludeField(required=False)
+
+    def to_internal_value(self, data):
+        references = []
+        for include in data.get('include', []):
+            include.update({'transform': 'resourceversions'})
+            references += self.transform_to_ref(include)
+        for exclude in data.get('exclude', []):
+            exclude.update({'transform': 'resourceversions'})
+            exclude.update({'include': False})
+            references += self.transform_to_ref(exclude)
+        if references:
+            res = {'references': references}
             if 'lockedDate' in data:
                 res['locked_date'] = data['lockedDate']
             return res
-
         return {}
 
-    def to_representation(self, value):
-        includes = []
-        inactive = False
-        for reference in value.references.all():
-            for concept in reference.concepts.all():
-                source = concept.sources.exclude(version=HEAD).order_by('created_at').first()
-                if concept.retired:
-                    inactive = True
-                if not source:
-                    # Concept is only in HEAD source
-                    # TODO: find a better solution than omitting
-                    continue
-                matching_include = self.find_or_create_include(includes, source, reference)
-                matching_include['concept'].append(ValueSetConceptSerializer(concept).data)
+    @staticmethod
+    def transform_to_ref(include):
+        parser = CollectionReferenceParser(expression=include)
+        parser.parse()
+        parser.to_reference_structure()
+        refs = parser.to_objects()
+        for ref in refs:
+            ref.expression = ref.build_expression()
+        return refs
 
-        if includes:
-            return dict(
-                lockedDate=self.lockedDate.to_representation(value.locked_date), inactive=inactive, include=includes)
+    def to_representation(self, value):
+        include = []
+        exclude = []
+
+        grouped_references = {}
+        for reference in value.references.all():
+            if reference.reference_type != 'concepts':
+                continue
+            ref_list = grouped_references.get((reference.include, reference.system, reference.version), None)
+            if not ref_list:
+                ref_list = []
+                grouped_references.update({(reference.include, reference.system, reference.version): ref_list})
+            ref_list.append(reference)
+
+        for group, ref_list in grouped_references.items():
+            if group[0]:
+                include.append(ValueSetComposeIncludeField(ref_list).data)
+            else:
+                exclude.append(ValueSetComposeIncludeField(ref_list).data)
+
+        result = {}
+        if include:
+            result.update({'include': include})
+        if exclude:
+            result.update({'exclude': exclude})
+
+        if result:
+            result.update({'lockedDate': self.lockedDate.to_representation(value.locked_date)})
+            return result
 
         return None
-
-    @staticmethod
-    def find_or_create_include(includes, source, reference):
-        matching_include = None
-
-        # TODO: is this use or uri as concept_system correct?
-        concept_system = source.canonical_url if source.canonical_url else \
-            IdentifierSerializer.convert_ocl_uri_to_fhir_url(source.uri, 'ValueSet')
-        concept_system_version = reference.version or source.version
-
-        for include in includes:
-            if include['system'] == concept_system and include['version'] == concept_system_version:
-                matching_include = include
-                break
-        if not matching_include:
-            matching_include = {
-                'system': concept_system,
-                'version': concept_system_version,
-                'concept': [],
-            }
-            if reference.filter:
-                # Include filter in newly added include
-                matching_include['filter'] = FilterValueSetSerializer(reference.filter, many=True).data
-            includes.append(matching_include)
-        return matching_include
 
 
 class ValueSetDetailSerializer(serializers.ModelSerializer):
@@ -144,6 +188,7 @@ class ValueSetDetailSerializer(serializers.ModelSerializer):
 
         collection.id = None  # pylint: disable=invalid-name
         collection.version = collection_version
+        collection.expansion_uri = None
         errors = Collection.persist_new_version(collection, user)
         self._errors.update(errors)
 
@@ -202,8 +247,16 @@ class ValueSetDetailSerializer(serializers.ModelSerializer):
         try:
             rep = super().to_representation(instance)
             IdentifierSerializer.include_ocl_identifier(instance.uri, RESOURCE_TYPE, rep)
-        except Exception as error:
-            raise Exception(f'Failed to represent "{instance.uri}" as {RESOURCE_TYPE}') from error
+        except (Exception, ):
+            msg = f'Failed to represent "{instance.uri}" as {RESOURCE_TYPE}'
+            logger.exception(msg)
+            return {
+                'resourceType': 'OperationOutcome',
+                'issue': [{
+                    'severity': 'error',
+                    'details': msg
+                }]
+            }
         return rep
 
     @staticmethod
@@ -212,23 +265,26 @@ class ValueSetDetailSerializer(serializers.ModelSerializer):
 
     @staticmethod
     def get_meta(obj):
-        return dict(lastUpdated=obj.updated_at)
+        return {'lastUpdated': obj.updated_at}
 
 
 class ValueSetExpansionParametersSerializer(ParametersSerializer):
-    def to_internal_value(self, data):
-        parameters = {}
+    allowed_input_parameters = {
+        'url': 'valueUri',
+        'filter': 'valueString',
+        'date': 'valueDate',
+        'offset': 'valueInteger',
+        'count': 'valueInteger',
+        'activeOnly': 'valueBoolean',
+        'exclude-system': 'valueString',
+        'system-version': 'valueString'
+    }
 
-        for parameter in data.get('parameter'):
-            name = parameter.get('name')
-            value = None
-            match name:
-                case 'filter':
-                    value = parameter.get('valueString')
-            if value:
-                parameters[name] = value
+    def update(self, instance, validated_data):
+        pass
 
-        return {'parameters': parameters}
+    def create(self, validated_data):
+        pass
 
 
 class ValueSetExpansionField(serializers.Field):

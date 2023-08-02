@@ -11,7 +11,6 @@ https://docs.djangoproject.com/en/3.0/ref/settings/
 """
 
 import os
-
 # Build paths inside the project like this: os.path.join(BASE_DIR, ...)
 from datetime import timedelta
 
@@ -40,6 +39,7 @@ ALLOWED_HOSTS = ['*']
 
 CORS_ALLOW_HEADERS = default_headers + (
     'INCLUDEFACETS',
+    'INCLUDESEARCHSTATS',
 )
 
 CORS_EXPOSE_HEADERS = (
@@ -57,6 +57,7 @@ CORS_EXPOSE_HEADERS = (
     'X-OCL-RESPONSE-TIME',
     'X-OCL-REQUEST-URL',
     'X-OCL-REQUEST-METHOD',
+    'X-OCL-API-DEPRECATED',
 )
 
 CORS_ORIGIN_ALLOW_ALL = True
@@ -82,7 +83,6 @@ INSTALLED_APPS = [
     'health_check',  # required
     'health_check.db',  # stock Django health checkers
     # 'health_check.contrib.celery_ping',  # requires celery
-    'health_check.contrib.redis',  # requires Redis broker
     'core.common.apps.CommonConfig',
     'core.users',
     'core.orgs',
@@ -94,6 +94,7 @@ INSTALLED_APPS = [
     'core.pins',
     'core.client_configs',
     'core.tasks',
+    'core.toggles',
 ]
 REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': (
@@ -139,21 +140,22 @@ REDOC_SETTINGS = {
 }
 
 MIDDLEWARE = [
-    'django.middleware.security.SecurityMiddleware',
     'django.middleware.gzip.GZipMiddleware',
-    'django.contrib.sessions.middleware.SessionMiddleware',
+    'cid.middleware.CidMiddleware',
+    'core.middlewares.middlewares.CustomLoggerMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
+    'django.middleware.security.SecurityMiddleware',
+    'django.contrib.sessions.middleware.SessionMiddleware',
     'core.middlewares.middlewares.TokenAuthMiddleWare',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
-    'cid.middleware.CidMiddleware',
-    'core.middlewares.middlewares.CustomLoggerMiddleware',
     'core.middlewares.middlewares.FixMalformedLimitParamMiddleware',
     'core.middlewares.middlewares.ResponseHeadersMiddleware',
     'core.middlewares.middlewares.CurrentUserMiddleware',
+    'core.middlewares.middlewares.FhirMiddleware'
 ]
 
 ROOT_URLCONF = 'core.urls'
@@ -189,11 +191,15 @@ DATABASES = {
     }
 }
 
-ES_HOST = os.environ.get('ES_HOST', 'es')
-ES_PORT = os.environ.get('ES_PORT', '9200')
+ES_HOST = os.environ.get('ES_HOST', 'es')  # Deprecated. Use ES_HOSTS instead.
+ES_PORT = os.environ.get('ES_PORT', '9200')  # Deprecated. Use ES_HOSTS instead.
+ES_HOSTS = os.environ.get('ES_HOSTS', None)
+ES_SCHEME = os.environ.get('ES_SCHEME', 'http')
 ELASTICSEARCH_DSL = {
     'default': {
-        'hosts': [ES_HOST + ':' + ES_PORT]
+        'hosts': ES_HOSTS.split(',') if ES_HOSTS else [ES_HOST + ':' + ES_PORT],
+        'use_ssl': ES_SCHEME == 'https',
+        'verify_certs': ES_SCHEME == 'https',
     },
 }
 
@@ -301,14 +307,29 @@ REDIS_DB = 0
 REDIS_HOST = os.environ.get('REDIS_HOST', 'redis')
 REDIS_URL = f"redis://{REDIS_HOST}:{REDIS_PORT}"
 
+REDIS_SENTINELS = os.environ.get('REDIS_SENTINELS', None)
+REDIS_SENTINELS_MASTER = os.environ.get('REDIS_SENTINELS_MASTER', 'default')
+REDIS_SENTINELS_LIST = []
+
 # django cache
-if ENV and ENV not in ['ci']:
-    CACHES = {
-        'default': {
-            'BACKEND': 'django.core.cache.backends.redis.RedisCache',
-            'LOCATION': REDIS_URL,
-        }
+OPTIONS = {}
+if REDIS_SENTINELS:
+    for REDIS_SENTINEL in REDIS_SENTINELS.split(','):
+        SENTINEL = REDIS_SENTINEL.split(':')
+        REDIS_SENTINELS_LIST.append((SENTINEL[0], int(SENTINEL[1])))
+    OPTIONS.update({
+        'CLIENT_CLASS': 'django_redis.client.SentinelClient',
+        'SENTINELS': REDIS_SENTINELS_LIST,
+        'CONNECTION_POOL_CLASS': 'redis.sentinel.SentinelConnectionPool',
+    })
+
+CACHES = {
+    'default': {
+        'BACKEND': 'django_redis.cache.RedisCache',
+        'LOCATION': REDIS_URL,
+        'OPTIONS': OPTIONS
     }
+}
 
 # Celery
 CELERY_ENABLE_UTC = True
@@ -332,25 +353,44 @@ CELERY_TASK_ROUTES = {
     'core.common.tasks.populate_indexes': {'queue': 'indexing'},
     'core.common.tasks.rebuild_indexes': {'queue': 'indexing'}
 }
-CELERY_RESULT_BACKEND = f'redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}'
-CELERY_RESULT_EXTENDED = True
+
+CELERY_BROKER_TRANSPORT_OPTIONS = {'visibility_timeout': 259200}  # 72 hours, the longest ETA
 CELERY_RESULT_BACKEND_TRANSPORT_OPTIONS = {
     'retry_policy': {
         'timeout': 10.0
     }
 }
+
+if REDIS_SENTINELS:
+    CELERY_RESULT_BACKEND = ''
+    for REDIS_SENTINEL in REDIS_SENTINELS.split(','):
+        CELERY_RESULT_BACKEND = CELERY_RESULT_BACKEND + f'sentinel://{REDIS_SENTINEL}/0;'
+        CELERY_BROKER_TRANSPORT_OPTIONS.update({'master_name': REDIS_SENTINELS_MASTER})
+        CELERY_RESULT_BACKEND_TRANSPORT_OPTIONS.update({'master_name': REDIS_SENTINELS_MASTER})
+else:
+    CELERY_RESULT_BACKEND = f'redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}'
+
+CELERY_RESULT_EXTENDED = True
 CELERY_RESULT_EXPIRES = 259200  # 72 hours
 CELERY_BROKER_URL = CELERY_RESULT_BACKEND
 CELERY_BROKER_POOL_LIMIT = 50  # should be adjusted considering the number of threads
 CELERY_BROKER_CONNECTION_TIMEOUT = 10.0
-CELERY_BROKER_TRANSPORT_OPTIONS = {'visibility_timeout': 259200}  # 72 hours, the lon
 CELERY_ACCEPT_CONTENT = ['application/json']
-CELERY_ONCE = {
-    'backend': 'celery_once.backends.Redis',
-    'settings': {
-        'url': CELERY_RESULT_BACKEND,
+if REDIS_SENTINELS:
+    CELERY_ONCE = {
+        'backend': 'core.common.backends.QueueOnceRedisSentinelBackend',
+        'settings': {
+            'sentinels': REDIS_SENTINELS_LIST,
+            'sentinels_master': REDIS_SENTINELS_MASTER
+        }
     }
-}
+else:
+    CELERY_ONCE = {
+        'backend': 'celery_once.backends.Redis',
+        'settings': {
+            'url': CELERY_RESULT_BACKEND,
+        }
+    }
 CELERYBEAT_SCHEDULE = {
     'healthcheck-every-minute': {
         'task': 'core.common.tasks.beat_healthcheck',
@@ -360,6 +400,11 @@ CELERYBEAT_SCHEDULE = {
         'task': 'core.common.tasks.monthly_usage_report',
         'schedule': crontab(1, 0, day_of_month='1'),
     },
+    'vacuum-and-analyze-db': {
+        'task': 'core.common.tasks.vacuum_and_analyze_db',
+        'schedule': crontab(0, 1),  # Run at 1 am
+    },
+
 }
 CELERYBEAT_HEALTHCHECK_KEY = 'celery_beat_healthcheck'
 ELASTICSEARCH_DSL_PARALLEL = True
@@ -374,6 +419,7 @@ FLOWER_USER = os.environ.get('FLOWER_USER', 'root')
 FLOWER_PASSWORD = os.environ.get('FLOWER_PASSWORD', 'Root123')
 FLOWER_HOST = os.environ.get('FLOWER_HOST', 'flower')
 FLOWER_PORT = os.environ.get('FLOWER_PORT', 5555)
+FHIR_SUBDOMAIN = os.environ.get('FHIR_SUBDOMAIN', None)
 DATA_UPLOAD_MAX_MEMORY_SIZE = 200*1024*1024
 FILE_UPLOAD_MAX_MEMORY_SIZE = 200*1024*1024
 
@@ -395,15 +441,21 @@ if ENV and ENV != 'development':
     # Serving swagger static files (inserted after SecurityMiddleware)
     MIDDLEWARE.insert(1, 'whitenoise.middleware.WhiteNoiseMiddleware')
 
-if not ENV or ENV in ['production']:
-    EMAIL_SUBJECT_PREFIX = '[Openconceptlab.org] '
-else:
-    EMAIL_SUBJECT_PREFIX = f'[Openconceptlab.org] [{ENV.upper()}]'
+EMAIL_SUBJECT_PREFIX = os.environ.get('EMAIL_SUBJECT_PREFIX', None)
+if not EMAIL_SUBJECT_PREFIX:
+    if not ENV or ENV in ['production']:
+        EMAIL_SUBJECT_PREFIX = '[Openconceptlab.org] '
+    else:
+        EMAIL_SUBJECT_PREFIX = f'[Openconceptlab.org] [{ENV.upper()}]'
 
-if not ENV or ENV in ['development', 'ci']:
-    EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
-else:
-    EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_BACKEND = os.environ.get('EMAIL_BACKEND', None)
+if not EMAIL_BACKEND:
+    if not ENV or ENV in ['development', 'ci']:
+        EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+    else:
+        EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+
+WEB_URL = os.environ.get('WEB_URL', None)
 
 VERSION = __version__
 

@@ -10,3 +10,7 @@
   pk: 3
   fields:
     name: hapi_fhir_servers
+- model: "auth.group"
+  pk: 4
+  fields:
+    name: operations_panel

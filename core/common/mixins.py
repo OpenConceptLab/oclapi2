@@ -7,7 +7,7 @@ from django.core.paginator import Paginator
 from django.db.models import Q, F
 from django.http import HttpResponseForbidden, Http404
 from django.shortcuts import get_object_or_404
-from django.urls import resolve, reverse, Resolver404
+from django.urls import resolve, Resolver404
 from django.utils.functional import cached_property
 from pydash import compact, get
 from rest_framework import status
@@ -15,22 +15,28 @@ from rest_framework.mixins import ListModelMixin, CreateModelMixin
 from rest_framework.response import Response
 
 from core.common.constants import HEAD, ACCESS_TYPE_NONE, INCLUDE_FACETS, \
-    LIST_DEFAULT_LIMIT, HTTP_COMPRESS_HEADER, CSV_DEFAULT_LIMIT, FACETS_ONLY, INCLUDE_RETIRED_PARAM
+    LIST_DEFAULT_LIMIT, HTTP_COMPRESS_HEADER, CSV_DEFAULT_LIMIT, FACETS_ONLY, INCLUDE_RETIRED_PARAM,\
+    SEARCH_STATS_ONLY, INCLUDE_SEARCH_STATS
 from core.common.permissions import HasPrivateAccess, HasOwnership, CanViewConceptDictionary, \
     CanViewConceptDictionaryVersion
+from .checksums import ChecksumModel
 from .utils import write_csv_to_s3, get_csv_from_s3, get_query_params_from_url_string, compact_dict_by_values, \
-    to_owner_uri, parse_updated_since_param, get_export_service
+    to_owner_uri, parse_updated_since_param, get_export_service, to_int, get_truthy_values
 
 logger = logging.getLogger('oclapi')
+TRUTHY = get_truthy_values()
 
 
 class CustomPaginator:
-    def __init__(self, request, total_count, queryset, page_size, is_sliced=False):  # pylint: disable=too-many-arguments
+    def __init__(  # pylint: disable=too-many-arguments
+            self, request, total_count, queryset, page_size, is_sliced=False, max_score=None, search_scores=None,
+            highlights=None
+    ):
         self.request = request
         self.queryset = queryset
         self.total = total_count or self.queryset.count()
         self.page_size = int(page_size)
-        self.page_number = int(request.GET.get('page', '1') or '1')
+        self.page_number = to_int(request.GET.get('page', '1'), 1)
         if not is_sliced:
             bottom = (self.page_number - 1) * self.page_size
             top = bottom + self.page_size
@@ -41,6 +47,9 @@ class CustomPaginator:
         self.paginator = Paginator(self.queryset, self.page_size)
         self.page_object = self.paginator.get_page(self.page_number)
         self.page_count = ceil(int(self.total_count) / int(self.page_size))
+        self.max_score = max_score
+        self.search_scores = search_scores or {}
+        self.highlights = highlights or {}
 
     @property
     def current_page_number(self):
@@ -48,7 +57,14 @@ class CustomPaginator:
 
     @property
     def current_page_results(self):
-        return self.page_object.object_list
+        results = self.page_object.object_list
+        if self.search_scores or self.max_score or self.highlights:
+            for result in results:
+                result._score = self.search_scores.get(result.id)  # pylint: disable=protected-access
+                result._highlight = self.highlights.get(result.id)  # pylint: disable=protected-access
+                if result._score and self.max_score:  # pylint: disable=protected-access
+                    result._confidence = f"{round((result._score / self.max_score) * 100, 2)}%"  # pylint: disable=protected-access
+        return results
 
     @cached_property
     def total_count(self):
@@ -83,10 +99,12 @@ class CustomPaginator:
 
     @property
     def headers(self):
-        headers = dict(
-            num_found=self.total_count, num_returned=len(self.current_page_results),
-            pages=self.page_count, page_number=self.page_number
-        )
+        headers = {
+            'num_found': self.total_count,
+            'num_returned': len(self.current_page_results),
+            'pages': self.page_count,
+            'page_number': self.page_number
+        }
         if self.has_next():
             headers['next'] = self.get_next_page_url()
         if self.has_previous():
@@ -96,8 +114,11 @@ class CustomPaginator:
 
 
 class ListWithHeadersMixin(ListModelMixin):
-    default_filters = {'is_active': True}
+    default_filters = {}
     object_list = None
+    _max_score = None
+    _scores = None
+    _highlights = None
     limit = LIST_DEFAULT_LIMIT
     document_model = None
 
@@ -123,7 +144,9 @@ class ListWithHeadersMixin(ListModelMixin):
             return self.get_csv(request)
 
         if self.only_facets():
-            return Response(dict(facets=dict(fields=self.get_facets())))
+            return Response({'facets': {'fields': self.get_facets()}})
+        if self.only_search_stats() and search_term:
+            return Response(self.get_search_stats(get(self, '_source_versions', []), get(self, '_extra_filters', None)))
 
         if self.object_list is None:
             self.object_list = self.filter_queryset()
@@ -146,7 +169,8 @@ class ListWithHeadersMixin(ListModelMixin):
                 self.limit = LIST_DEFAULT_LIMIT
             paginator = CustomPaginator(
                 request=request, queryset=sorted_list, page_size=self.limit, total_count=self.total_count,
-                is_sliced=self.should_perform_es_search()
+                is_sliced=self.should_perform_es_search(), max_score=get(self, '_max_score'),
+                search_scores=get(self, '_scores'), highlights=get(self, '_highlights')
             )
             headers = paginator.headers
             results = paginator.current_page_results
@@ -162,7 +186,15 @@ class ListWithHeadersMixin(ListModelMixin):
     def serialize_list(self, results, paginator=None):
         result_dict = self.get_serializer(results, many=True).data
         if self.should_include_facets():
-            data = dict(results=result_dict, facets=dict(fields=self.get_facets()))
+            data = {
+                'results': result_dict,
+                'facets': {'fields': self.get_facets()}
+            }
+        elif self.should_include_search_stats() and self.should_perform_es_search():
+            data = {
+                'results': result_dict,
+                'search_stats': self.get_search_stats(self._source_versions, self._extra_filters)
+            }
         elif hasattr(self.__class__, 'bundle_response'):
             data = self.bundle_response(result_dict, paginator)
         else:
@@ -170,13 +202,19 @@ class ListWithHeadersMixin(ListModelMixin):
         return data
 
     def should_include_facets(self):
-        return self.request.META.get(INCLUDE_FACETS, False) in ['true', True]
+        return self.request.META.get(INCLUDE_FACETS, False) in TRUTHY
+
+    def should_include_search_stats(self):
+        return self.request.META.get(INCLUDE_SEARCH_STATS, False) in TRUTHY
 
     def only_facets(self):
-        return self.request.query_params.get(FACETS_ONLY, False) in ['true', True]
+        return self.request.query_params.get(FACETS_ONLY, False) in TRUTHY
+
+    def only_search_stats(self):
+        return self.request.query_params.get(SEARCH_STATS_ONLY, False) in TRUTHY
 
     def should_compress(self):
-        return self.request.META.get(HTTP_COMPRESS_HEADER, False) in ['true', True]
+        return self.request.META.get(HTTP_COMPRESS_HEADER, False) in TRUTHY
 
     def get_object_ids(self):
         self.object_list.limit_iter = False
@@ -318,14 +356,15 @@ class ConceptDictionaryCreateMixin(ConceptDictionaryMixin):
         permission = HasOwnership()
         if not permission.has_object_permission(request, self, self.parent_resource):
             return Response(status=status.HTTP_403_FORBIDDEN)
-        supported_locales = request.data.pop('supported_locales', '')
+        data = request.data.copy()
+        supported_locales = data.pop('supported_locales', '')
         if isinstance(supported_locales, str):
             supported_locales = compact(supported_locales.split(','))
 
         data = {
-            'mnemonic': request.data.get('id'),
+            'mnemonic': data.get('id'),
             'supported_locales': supported_locales,
-            'version': HEAD, **request.data, **{self.parent_resource.resource_type.lower(): self.parent_resource.id}
+            'version': HEAD, **data, **{self.parent_resource.resource_type.lower(): self.parent_resource.id}
         }
 
         serializer = self.get_serializer(data=data)
@@ -380,27 +419,78 @@ class ConceptDictionaryUpdateMixin(ConceptDictionaryMixin):
 
 class SourceContainerMixin:
     @property
+    def sources(self):
+        return self.source_set.filter(version=HEAD)
+
+    @property
+    def collections(self):
+        return self.collection_set.filter(version=HEAD)
+
+    @property
+    def all_sources_count(self):
+        return self.sources.count()
+
+    @property
+    def all_collections_count(self):
+        return self.collections.count()
+
+    @property
     def public_sources(self):
-        return self.source_set.exclude(public_access=ACCESS_TYPE_NONE).filter(version=HEAD).count()
+        return self.sources.exclude(public_access=ACCESS_TYPE_NONE).count()
 
     @property
     def public_collections(self):
-        return self.collection_set.exclude(public_access=ACCESS_TYPE_NONE).filter(version=HEAD).count()
+        return self.collections.exclude(public_access=ACCESS_TYPE_NONE).count()
 
     @property
     def sources_url(self):
-        return reverse('source-list', kwargs={self.get_url_kwarg(): self.mnemonic})
+        return self.uri + 'sources/'
 
     @property
     def collections_url(self):
-        return reverse('collection-list', kwargs={self.get_url_kwarg(): self.mnemonic})
+        return self.uri + 'collections/'
 
 
-class SourceChildMixin:
+class SourceChildMixin(ChecksumModel):
+    class Meta:
+        abstract = True
+
+    def get_all_checksums(self):
+        return {
+            **super().get_all_checksums(),
+            'repo_versions': self.source_versions_checksum,
+        }
+
+    def set_source_versions_checksum(self):
+        self.set_specific_checksums('repo_versions', self.source_versions_checksum)
+
+    @property
+    def source_versions_checksum(self):
+        checksums = [version.checksum for version in self.sources.exclude(version=HEAD)]
+        return self.generate_checksum(checksums) if checksums else None
+
+    @staticmethod
+    def is_strictly_equal(instance1, instance2):
+        return instance1.get_checksums() == instance2.get_checksums()
+
+    @staticmethod
+    def is_equal(instance1, instance2):
+        return instance1.get_basic_checksums() == instance2.get_basic_checksums()
+
+    @staticmethod
+    def apply_user_criteria(queryset, user):
+        queryset = queryset.exclude(
+            Q(parent__user_id__isnull=False, public_access=ACCESS_TYPE_NONE) & ~Q(parent__user_id=user.id))
+        queryset = queryset.exclude(
+            Q(parent__organization_id__isnull=False, public_access=ACCESS_TYPE_NONE) &
+            ~Q(parent__organization__members__id=user.id)
+        )
+        return queryset
+
     @staticmethod
     def apply_attribute_based_filters(queryset, params):
-        is_latest = params.get('is_latest', None) in [True, 'true']
-        include_retired = params.get(INCLUDE_RETIRED_PARAM, None) in [True, 'true']
+        is_latest = params.get('is_latest', None) in TRUTHY
+        include_retired = params.get(INCLUDE_RETIRED_PARAM, None) in TRUTHY
         updated_since = parse_updated_since_param(params)
         if is_latest:
             queryset = queryset.filter(is_latest_version=True)
@@ -422,9 +512,8 @@ class SourceChildMixin:
 
     @property
     def versions(self):
-        if self.is_versioned_object:
-            self.versions_set.exclude(id=F('versioned_object_id'))
-        return self.versioned_object.versions_set.exclude(id=F('versioned_object_id'))
+        return self.__class__.objects.filter(
+            versioned_object_id=self.versioned_object_id).exclude(id=F('versioned_object_id'))
 
     @property
     def is_versioned_object(self):
@@ -481,7 +570,7 @@ class SourceChildMixin:
         return self.__update_retire(False, comment or self.WAS_UNRETIRED, user)
 
     def __update_retire(self, retired, comment, user):
-        latest_version = self.get_latest_version()
+        latest_version = self.get_latest_version() or self.get_last_version()
         new_version = latest_version.clone()
         new_version.retired = retired
         new_version.comment = comment
@@ -570,7 +659,7 @@ class SourceChildMixin:
         return criteria
 
     def save(self, force_insert=False, force_update=False, using=None, update_fields=None):
-        result = super().save(force_insert, force_update, using, update_fields)
+        super().save(force_insert, force_update, using, update_fields)
 
         if self.is_latest_version and self._counted is False:
             if self.__class__.__name__ == 'Concept':
@@ -580,8 +669,6 @@ class SourceChildMixin:
 
             self._counted = True
             self.save(update_fields=['_counted'])
-
-        return result
 
     def collection_references_uris(self, collection):
         ids = self.collection_references(collection).values_list('id', flat=True)
@@ -616,12 +703,15 @@ class ConceptContainerExportMixin:
         if version.is_head and not request.user.is_staff:
             return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
 
+        if version.is_exporting:
+            return Response(status=status.HTTP_208_ALREADY_REPORTED)
+
         if version.has_export():
             export_url = version.get_export_url()
 
-            no_redirect = request.query_params.get('noRedirect', False) in ['true', 'True', True]
+            no_redirect = request.query_params.get('noRedirect', False) in TRUTHY
             if no_redirect:
-                return Response(dict(url=export_url), status=status.HTTP_200_OK)
+                return Response({'url': export_url}, status=status.HTTP_200_OK)
 
             response = Response(status=status.HTTP_303_SEE_OTHER)
             response['Location'] = export_url
@@ -630,12 +720,9 @@ class ConceptContainerExportMixin:
             response['Cache-Control'] = 'no-cache, no-store, must-revalidate'
             response['Pragma'] = 'no-cache'
             response['Expires'] = '0'
-            response['Last-Updated'] = version.last_child_update.isoformat()
+            response['Last-Updated'] = version.get_last_child_update_from_export_url(export_url)
             response['Last-Updated-Timezone'] = settings.TIME_ZONE_PLACE
             return response
-
-        if version.is_exporting:
-            return Response(status=status.HTTP_208_ALREADY_REPORTED)
 
         return Response(status=status.HTTP_204_NO_CONTENT)
 
@@ -650,13 +737,13 @@ class ConceptContainerExportMixin:
         if version.is_exporting:
             return Response(status=status.HTTP_208_ALREADY_REPORTED)
 
-        force_export = request.query_params.get('force', False) in ['true', 'True', True]
+        force_export = request.query_params.get('force', False) in TRUTHY
 
         if force_export or not version.has_export():
             status_code = self.handle_export_version()
             return Response(status=status_code)
 
-        no_redirect = request.query_params.get('noRedirect', False) in ['true', 'True', True]
+        no_redirect = request.query_params.get('noRedirect', False) in TRUTHY
         if no_redirect:
             return Response(status=status.HTTP_204_NO_CONTENT)
 
@@ -677,7 +764,7 @@ class ConceptContainerExportMixin:
             return HttpResponseForbidden()
 
         if version.has_export():
-            get_export_service().remove(version.export_path)
+            get_export_service().remove(version.version_export_path)
             return Response(status=status.HTTP_204_NO_CONTENT)
 
         return Response(status=status.HTTP_404_NOT_FOUND)
@@ -695,11 +782,10 @@ class ConceptContainerProcessingMixin:
 
     def get(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         version = self.get_object()
-        is_debug = request.query_params.get('debug', None) in ['true', True]
+        is_debug = request.query_params.get('debug', None) in TRUTHY
 
         if is_debug:
-            return Response(dict(is_processing=version.is_processing,
-                                 process_ids=version._background_process_ids))  # pylint: disable=protected-access
+            return Response({'is_processing': version.is_processing, 'process_ids': version._background_process_ids})  # pylint: disable=protected-access
 
         logger.debug('Processing flag requested for %s version %s', self.resource, version)
 

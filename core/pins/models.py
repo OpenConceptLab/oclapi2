@@ -46,7 +46,7 @@ class Pin(OrderedModel):
 
     def clean(self):
         if not self.user_id and not self.organization_id:
-            raise ValidationError(dict(parent=['Pin needs to be owned by a user or an organization.']))
+            raise ValidationError({'parent': ['Pin needs to be owned by a user or an organization.']})
 
     @property
     def uri(self):

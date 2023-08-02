@@ -21,15 +21,15 @@ from rest_framework import permissions
 
 import core.concepts.views as concept_views
 import core.mappings.views as mapping_views
+import core.reports.views as report_views
 from core import VERSION
 from core.collections.views import ReferenceExpressionResolveView
 from core.common.constants import NAMESPACE_PATTERN
 from core.common.utils import get_api_base_url
-from core.common.views import RootView, FeedbackView, APIVersionView, ChangeLogView, ConceptDuplicateLocalesView, \
-    ConceptDormantLocalesView, ConceptMultipleLatestVersionsView
+from core.common.views import RootView, FeedbackView, APIVersionView, ChangeLogView, ChecksumView, \
+    ConceptMappingLatestVersionDeDupeView
 from core.concepts.views import ConceptsHierarchyAmendAdminView
 from core.importers.views import BulkImportView
-import core.reports.views as report_views
 
 SchemaView = get_schema_view(
     openapi.Info(
@@ -54,15 +54,11 @@ urlpatterns = [
     path('healthcheck/', include('core.common.healthcheck.urls')),
     path('admin/reports/authored/', report_views.AuthoredView.as_view(), name='authored-report'),
     path('admin/reports/monthly-usage/', report_views.MonthlyUsageView.as_view(), name='monthly-usage-report'),
-    path('admin/concepts/locales/duplicate/', ConceptDuplicateLocalesView.as_view(), name='concept-duplicate-locales'),
-    path('admin/concepts/locales/dormant/', ConceptDormantLocalesView.as_view(), name='concept-dormant-locales'),
-    path('admin/concepts/amend-hierarchy/', ConceptsHierarchyAmendAdminView.as_view(), name='concepts-amend-hierarchy'),
     path(
-        'admin/concepts/duplicate-latest-versions/',
-        ConceptMultipleLatestVersionsView.as_view(), name='concepts-duplicate-latest-versions'),
-    path('admin/mappings/debug/', mapping_views.MappingDebugRetrieveDestroyView.as_view(), name='mapping-debug'),
-    path('admin/concepts/debug/<int:id>/', concept_views.ConceptDebugView.as_view(), name='concept-debug'),
-    path('$resolveReference/', ReferenceExpressionResolveView.as_view(), name='reference-$resolve'),
+        'admin/reports/monthly-usage/job/', report_views.MonthlyUsageReportJobView.as_view(), name='monthly-usage-job'),
+    path('admin/concepts/amend-hierarchy/', ConceptsHierarchyAmendAdminView.as_view(), name='concepts-amend-hierarchy'),
+    re_path(r'^\$resolveReference/$', ReferenceExpressionResolveView.as_view(), name='$resolveReference'),
+    re_path(r'^\$checksum/$', ChecksumView.as_view(), name='$checksum'),
     path('users/', include('core.users.urls'), name='users_urls'),
     path('user/', include('core.users.user_urls'), name='current_user_urls'),
     path('orgs/', include('core.orgs.urls'), name='orgs_url'),
@@ -74,6 +70,9 @@ urlpatterns = [
     path('collections/', include('core.collections.urls'), name='collections_urls'),
     path('concepts/', concept_views.ConceptListView.as_view(), name='all_concepts_urls'),
     path('mappings/', mapping_views.MappingListView.as_view(), name='all_mappings_urls'),
+    path(
+        'concepts-mappings-latest-version-dedupe/',
+        ConceptMappingLatestVersionDeDupeView.as_view(), name='concepts-mappings-latest-version-dedupe'),
     path('importers/', include('core.importers.urls'), name='importer_urls'),
     path('indexes/', include('core.indexes.urls'), name='indexes_urls'),
     path('client-configs/', include('core.client_configs.urls'), name='client_config_urls'),
@@ -86,11 +85,12 @@ urlpatterns = [
         name='ocl-locales'
     ),
 
-    # just for ocldev
+    # just for ocldev - DEPRECATED
     re_path(
         f'manage/bulkimport/(?P<import_queue>{NAMESPACE_PATTERN})/',
         BulkImportView.as_view(),
         name='bulk_import_detail_url'
     ),
     path('manage/bulkimport/', BulkImportView.as_view(), name='bulk_import_urls'),
+    path('toggles/', include('core.toggles.urls'), name='toggles'),
 ]

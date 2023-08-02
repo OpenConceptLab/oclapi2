@@ -8,8 +8,11 @@ from core.common.constants import INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_MAPPIN
     CREATE_PARENT_VERSION_QUERY_PARAM, INCLUDE_HIERARCHY_PATH, INCLUDE_PARENT_CONCEPT_URLS, \
     INCLUDE_CHILD_CONCEPT_URLS, HEAD, INCLUDE_SUMMARY, INCLUDE_VERBOSE_REFERENCES, VERBOSE_PARAM
 from core.common.fields import EncodedDecodedCharField
-from core.common.utils import to_parent_uri_from_kwargs
+from core.common.serializers import AbstractResourceSerializer
+from core.common.utils import to_parent_uri_from_kwargs, get_truthy_values
 from core.concepts.models import Concept, ConceptName
+
+TRUTHY = get_truthy_values()
 
 
 class LocalizedNameSerializer(ModelSerializer):
@@ -20,7 +23,7 @@ class LocalizedNameSerializer(ModelSerializer):
     class Meta:
         model = ConceptName
         fields = (
-            'uuid', 'name', 'external_id', 'type', 'locale', 'locale_preferred', 'name_type',
+            'uuid', 'name', 'external_id', 'type', 'locale', 'locale_preferred', 'name_type', 'checksum'
         )
 
     def to_representation(self, instance):
@@ -38,7 +41,7 @@ class LocalizedDescriptionSerializer(ModelSerializer):
     class Meta:
         model = ConceptName
         fields = (
-            'uuid', 'description', 'external_id', 'type', 'locale', 'locale_preferred', 'description_type'
+            'uuid', 'description', 'external_id', 'type', 'locale', 'locale_preferred', 'description_type', 'checksum'
         )
 
     def to_representation(self, instance):
@@ -52,27 +55,32 @@ class ConceptLabelSerializer(ModelSerializer):
     external_id = CharField(required=False)
     locale = CharField(required=True)
     locale_preferred = BooleanField(required=False, default=False)
+    concept_id = IntegerField(write_only=True, required=False)
 
     class Meta:
         model = ConceptName
         fields = (
-            'uuid', 'external_id', 'type', 'locale', 'locale_preferred'
+            'uuid', 'external_id', 'type', 'locale', 'locale_preferred', 'concept_id'
         )
 
     def create(self, validated_data, instance=None):  # pylint: disable=arguments-differ
-        concept_desc = instance if instance else ConceptName()
-        concept_desc.name = validated_data.get('name', concept_desc.name)
-        concept_desc.locale = validated_data.get('locale', concept_desc.locale)
-        concept_desc.locale_preferred = validated_data.get('locale_preferred', concept_desc.locale_preferred)
-        concept_desc.type = validated_data.get('type', concept_desc.type)
-        concept_desc.external_id = validated_data.get('external_id', concept_desc.external_id)
-        concept_desc.save()
-        return concept_desc
+        locale = instance if instance else ConceptName()
+        locale.name = validated_data.get('name', locale.name)
+        locale.locale = validated_data.get('locale', locale.locale)
+        locale.locale_preferred = validated_data.get('locale_preferred', locale.locale_preferred)
+        _type = validated_data.get('type', None)
+        if _type in ['ConceptName', 'ConceptDescription']:
+            _type = validated_data.get('name_type', validated_data.get('description_type', locale.type))
+        locale.type = _type
+        locale.external_id = validated_data.get('external_id', locale.external_id)
+        locale.concept_id = validated_data.get('concept_id', locale.concept_id)
+        locale.save()
+        return locale
 
 
 class ConceptNameSerializer(ConceptLabelSerializer):
     name = CharField(required=True)
-    name_type = CharField(required=False, source='type')
+    name_type = CharField(required=False)
 
     class Meta:
         model = ConceptName
@@ -86,7 +94,7 @@ class ConceptNameSerializer(ConceptLabelSerializer):
 
 class ConceptDescriptionSerializer(ConceptLabelSerializer):
     description = CharField(required=True, source='name')
-    description_type = CharField(required=False, source='type')
+    description_type = CharField(required=False)
 
     class Meta:
         model = ConceptName
@@ -100,7 +108,7 @@ class ConceptDescriptionSerializer(ConceptLabelSerializer):
         return ret
 
 
-class ConceptAbstractSerializer(ModelSerializer):
+class ConceptAbstractSerializer(AbstractResourceSerializer):
     uuid = CharField(source='id', read_only=True)
     mappings = SerializerMethodField()
     parent_concepts = SerializerMethodField()
@@ -114,7 +122,7 @@ class ConceptAbstractSerializer(ModelSerializer):
     class Meta:
         model = Concept
         abstract = True
-        fields = (
+        fields = AbstractResourceSerializer.Meta.fields + (
             'uuid', 'parent_concept_urls', 'child_concept_urls', 'parent_concepts', 'child_concepts', 'hierarchy_path',
             'mappings', 'extras', 'summary', 'references', 'has_children'
         )
@@ -125,18 +133,18 @@ class ConceptAbstractSerializer(ModelSerializer):
         self.view_kwargs = get(kwargs, 'context.view.kwargs', {})
 
         self.query_params = params.dict() if params else {}
-        self.include_indirect_mappings = self.query_params.get(INCLUDE_INVERSE_MAPPINGS_PARAM) in ['true', True]
-        self.include_direct_mappings = self.query_params.get(INCLUDE_MAPPINGS_PARAM) in ['true', True]
-        self.include_parent_concept_urls = self.query_params.get(INCLUDE_PARENT_CONCEPT_URLS) in ['true', True]
-        self.include_child_concept_urls = self.query_params.get(INCLUDE_CHILD_CONCEPT_URLS) in ['true', True]
-        self.include_parent_concepts = self.query_params.get(INCLUDE_PARENT_CONCEPTS) in ['true', True]
-        self.include_child_concepts = self.query_params.get(INCLUDE_CHILD_CONCEPTS) in ['true', True]
-        self.include_hierarchy_path = self.query_params.get(INCLUDE_HIERARCHY_PATH) in ['true', True]
-        self.include_extras = self.query_params.get(INCLUDE_EXTRAS_PARAM) in ['true', True]
-        self.include_summary = self.query_params.get(INCLUDE_SUMMARY) in ['true', True]
-        self.include_verbose_references = self.query_params.get(INCLUDE_VERBOSE_REFERENCES) in ['true', True]
+        self.include_indirect_mappings = self.query_params.get(INCLUDE_INVERSE_MAPPINGS_PARAM) in TRUTHY
+        self.include_direct_mappings = self.query_params.get(INCLUDE_MAPPINGS_PARAM) in TRUTHY
+        self.include_parent_concept_urls = self.query_params.get(INCLUDE_PARENT_CONCEPT_URLS) in TRUTHY
+        self.include_child_concept_urls = self.query_params.get(INCLUDE_CHILD_CONCEPT_URLS) in TRUTHY
+        self.include_parent_concepts = self.query_params.get(INCLUDE_PARENT_CONCEPTS) in TRUTHY
+        self.include_child_concepts = self.query_params.get(INCLUDE_CHILD_CONCEPTS) in TRUTHY
+        self.include_hierarchy_path = self.query_params.get(INCLUDE_HIERARCHY_PATH) in TRUTHY
+        self.include_extras = self.query_params.get(INCLUDE_EXTRAS_PARAM) in TRUTHY
+        self.include_summary = self.query_params.get(INCLUDE_SUMMARY) in TRUTHY
+        self.include_verbose_references = self.query_params.get(INCLUDE_VERBOSE_REFERENCES) in TRUTHY
         if CREATE_PARENT_VERSION_QUERY_PARAM in self.query_params:
-            self.create_parent_version = self.query_params.get(CREATE_PARENT_VERSION_QUERY_PARAM) in ['true', True]
+            self.create_parent_version = self.query_params.get(CREATE_PARENT_VERSION_QUERY_PARAM) in TRUTHY
         else:
             self.create_parent_version = True
 
@@ -161,7 +169,7 @@ class ConceptAbstractSerializer(ModelSerializer):
                 self.fields.pop('summary', None)
             if not get(request, 'instance'):
                 self.fields.pop('references', None)
-            if get(params, 'onlyParentLess') not in ['true', True]:
+            if get(params, 'onlyParentLess') not in TRUTHY:
                 self.fields.pop('has_children', None)
         except:  # pylint: disable=bare-except
             pass
@@ -230,7 +238,7 @@ class ConceptLookupListSerializer(ModelSerializer):
         request = get(kwargs, 'context.request')
         params = get(request, 'query_params')
         self.query_params = params.dict() if params else {}
-        self.is_verbose = self.query_params.get(VERBOSE_PARAM) in ['true', True]
+        self.is_verbose = self.query_params.get(VERBOSE_PARAM) in TRUTHY
         try:
             if not self.is_verbose:
                 self.fields.pop('display_name', None)
@@ -266,18 +274,19 @@ class ConceptVersionListSerializer(ConceptListSerializer):
     previous_version_url = CharField(read_only=True, source='prev_version_uri')
     source_versions = ListField(read_only=True)
     collection_versions = ListField(read_only=True)
+    checksums = SerializerMethodField()
 
     class Meta:
         model = Concept
         fields = ConceptListSerializer.Meta.fields + (
-            'previous_version_url', 'source_versions', 'collection_versions'
+            'previous_version_url', 'source_versions', 'collection_versions', 'checksums'
         )
 
     def __init__(self, *args, **kwargs):
         params = get(kwargs, 'context.request.query_params')
         self.query_params = params.dict() if params else {}
-        self.include_source_versions = self.query_params.get(INCLUDE_SOURCE_VERSIONS) in ['true', True]
-        self.include_collection_versions = self.query_params.get(INCLUDE_COLLECTION_VERSIONS) in ['true', True]
+        self.include_source_versions = self.query_params.get(INCLUDE_SOURCE_VERSIONS) in TRUTHY
+        self.include_collection_versions = self.query_params.get(INCLUDE_COLLECTION_VERSIONS) in TRUTHY
 
         try:
             if not self.include_source_versions:
@@ -288,6 +297,16 @@ class ConceptVersionListSerializer(ConceptListSerializer):
             pass
 
         super().__init__(*args, **kwargs)
+
+    @staticmethod
+    def get_checksums(obj):
+        return obj.get_checksums(queue=True)
+
+
+class ConceptVersionCascadeSerializer(ConceptVersionListSerializer):
+    class Meta:
+        model = Concept
+        fields = tuple(field for field in ConceptVersionListSerializer.Meta.fields if field not in ('uuid', ))
 
 
 class ConceptSummarySerializer(ModelSerializer):
@@ -326,6 +345,12 @@ class ConceptMinimalSerializer(ConceptAbstractSerializer):
         fields = ConceptAbstractSerializer.Meta.fields + ('id', 'type', 'url', 'version_url', 'retired')
 
 
+class ConceptCascadeMinimalSerializer(ConceptMinimalSerializer):
+    class Meta:
+        model = Concept
+        fields = tuple(field for field in ConceptMinimalSerializer.Meta.fields if field not in ('uuid', ))
+
+
 class ConceptMinimalSerializerRecursive(ConceptAbstractSerializer):
     id = EncodedDecodedCharField(source='mnemonic', read_only=True)
     type = CharField(source='resource_type', read_only=True)
@@ -340,6 +365,8 @@ class ConceptMinimalSerializerRecursive(ConceptAbstractSerializer):
     def __init__(self, *args, **kwargs):
         if 'mappings' in self.fields:
             self.fields.pop('mappings', None)
+        if 'uuid' in self.fields:
+            self.fields.pop('uuid', None)
         super().__init__(*args, **kwargs)
 
     def get_entries(self, obj):
@@ -349,7 +376,7 @@ class ConceptMinimalSerializerRecursive(ConceptAbstractSerializer):
                 obj.cascaded_entries['concepts'], many=True, context=self.context).data
 
             from core.mappings.serializers import MappingMinimalSerializer, MappingReverseMinimalSerializer
-            if get(self, 'context.request.query_params.reverse') in ['true', True]:
+            if get(self, 'context.request.query_params.reverse') in TRUTHY:
                 result += MappingReverseMinimalSerializer(obj.cascaded_entries['mappings'], many=True).data
             else:
                 result += MappingMinimalSerializer(obj.cascaded_entries['mappings'], many=True).data
@@ -381,15 +408,16 @@ class ConceptDetailSerializer(ConceptAbstractSerializer):
     url = CharField(required=False, source='versioned_object_url')
     updated_by = DateTimeField(source='updated_by.username', read_only=True)
     created_by = DateTimeField(source='created_by.username', read_only=True)
+    checksums = SerializerMethodField()
 
     class Meta:
         model = Concept
         fields = ConceptAbstractSerializer.Meta.fields + (
             'id', 'external_id', 'concept_class', 'datatype', 'url', 'retired', 'source',
             'owner', 'owner_type', 'owner_url', 'display_name', 'display_locale', 'names', 'descriptions',
-            'created_on', 'updated_on', 'versions_url', 'version', 'extras', 'parent_id', 'name', 'type',
+            'created_on', 'updated_on', 'versions_url', 'version', 'extras', 'parent_id', 'type',
             'update_comment', 'version_url', 'updated_by', 'created_by',
-            'public_can_view', 'versioned_object_id'
+            'public_can_view', 'versioned_object_id', 'checksums'
         )
 
     def create(self, validated_data):
@@ -409,6 +437,10 @@ class ConceptDetailSerializer(ConceptAbstractSerializer):
         if errors:
             self._errors.update(errors)
         return instance
+
+    @staticmethod
+    def get_checksums(obj):
+        return obj.get_checksums(queue=True)
 
 
 class ConceptVersionExportSerializer(ModelSerializer):
@@ -467,6 +499,7 @@ class ConceptVersionDetailSerializer(ModelSerializer):
     source_versions = ListField(read_only=True)
     collection_versions = ListField(read_only=True)
     references = SerializerMethodField()
+    checksums = SerializerMethodField()
 
     def __init__(self, *args, **kwargs):
         request = get(kwargs, 'context.request')
@@ -476,13 +509,13 @@ class ConceptVersionDetailSerializer(ModelSerializer):
         self.include_indirect_mappings = False
         self.include_direct_mappings = False
         self.query_params = params.dict() if params else {}
-        self.include_indirect_mappings = self.query_params.get(INCLUDE_INVERSE_MAPPINGS_PARAM) == 'true'
-        self.include_direct_mappings = self.query_params.get(INCLUDE_MAPPINGS_PARAM) == 'true'
-        self.include_parent_concepts = self.query_params.get(INCLUDE_PARENT_CONCEPTS) in ['true', True]
-        self.include_child_concepts = self.query_params.get(INCLUDE_CHILD_CONCEPTS) in ['true', True]
-        self.include_parent_concept_urls = self.query_params.get(INCLUDE_PARENT_CONCEPT_URLS) in ['true', True]
-        self.include_child_concept_urls = self.query_params.get(INCLUDE_CHILD_CONCEPT_URLS) in ['true', True]
-        self.include_verbose_references = self.query_params.get(INCLUDE_VERBOSE_REFERENCES) in ['true', True]
+        self.include_indirect_mappings = self.query_params.get(INCLUDE_INVERSE_MAPPINGS_PARAM) in TRUTHY
+        self.include_direct_mappings = self.query_params.get(INCLUDE_MAPPINGS_PARAM) in TRUTHY
+        self.include_parent_concepts = self.query_params.get(INCLUDE_PARENT_CONCEPTS) in TRUTHY
+        self.include_child_concepts = self.query_params.get(INCLUDE_CHILD_CONCEPTS) in TRUTHY
+        self.include_parent_concept_urls = self.query_params.get(INCLUDE_PARENT_CONCEPT_URLS) in TRUTHY
+        self.include_child_concept_urls = self.query_params.get(INCLUDE_CHILD_CONCEPT_URLS) in TRUTHY
+        self.include_verbose_references = self.query_params.get(INCLUDE_VERBOSE_REFERENCES) in TRUTHY
 
         try:
             if not self.include_parent_concepts:
@@ -508,8 +541,12 @@ class ConceptVersionDetailSerializer(ModelSerializer):
             'version', 'created_on', 'updated_on', 'version_created_on', 'version_created_by', 'update_comment',
             'is_latest_version', 'locale', 'url', 'owner_type', 'version_url', 'mappings', 'previous_version_url',
             'parent_concepts', 'child_concepts', 'parent_concept_urls', 'child_concept_urls',
-            'source_versions', 'collection_versions', 'versioned_object_id', 'references'
+            'source_versions', 'collection_versions', 'versioned_object_id', 'references', 'checksums'
         )
+
+    @staticmethod
+    def get_checksums(obj):
+        return obj.get_checksums(queue=True)
 
     def get_references(self, obj):
         collection = get(self, 'context.request.instance')
@@ -572,7 +609,7 @@ class ConceptChildrenSerializer(ConceptListSerializer):
         params = get(kwargs, 'context.request.query_params')
 
         self.query_params = params.dict() if params else {}
-        self.include_child_concepts = self.query_params.get(INCLUDE_CHILD_CONCEPTS) in ['true', True]
+        self.include_child_concepts = self.query_params.get(INCLUDE_CHILD_CONCEPTS) in TRUTHY
 
         try:
             if not self.include_child_concepts:
@@ -606,7 +643,7 @@ class ConceptParentsSerializer(ModelSerializer):
         params = get(kwargs, 'context.request.query_params')
 
         self.query_params = params.dict() if params else {}
-        self.include_parent_concepts = self.query_params.get(INCLUDE_PARENT_CONCEPTS) in ['true', True]
+        self.include_parent_concepts = self.query_params.get(INCLUDE_PARENT_CONCEPTS) in TRUTHY
 
         try:
             if not self.include_parent_concepts:

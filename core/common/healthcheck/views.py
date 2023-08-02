@@ -1,11 +1,10 @@
-from health_check.contrib.redis.backends import RedisHealthCheck
 from health_check.db.backends import DatabaseBackend
 from health_check.views import MainView
 
 from core.common.healthcheck.healthcheck import FlowerHealthCheck, CeleryDefaultQueueHealthCheck, \
     CeleryBulkImport0QueueHealthCheck, CeleryBulkImportRootQueueHealthCheck, CeleryBulkImport3QueueHealthCheck, \
     CeleryBulkImport2QueueHealthCheck, CeleryBulkImport1QueueHealthCheck, CeleryConcurrentThreadsHealthCheck, \
-    ESHealthCheck, CeleryIndexingQueueHealthCheck
+    ESHealthCheck, CeleryIndexingQueueHealthCheck, RedisHealthCheck
 
 
 class BaseHealthcheckView(MainView):

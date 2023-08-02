@@ -13,12 +13,16 @@ from core.common.constants import NAMESPACE_REGEX, INCLUDE_SUBSCRIBED_ORGS, INCL
     INCLUDE_AUTH_GROUPS
 from core.users.constants import INVALID_AUTH_GROUP_NAME
 from .models import UserProfile
+from ..common.serializers import AbstractResourceSerializer
+from ..common.utils import get_truthy_values
+
+TRUTHY = get_truthy_values()
 
 
-class UserListSerializer(serializers.ModelSerializer):
+class UserListSerializer(AbstractResourceSerializer):
     class Meta:
         model = UserProfile
-        fields = (
+        fields = AbstractResourceSerializer.Meta.fields + (
             'username', 'name', 'url'
         )
 
@@ -114,7 +118,7 @@ class UserCreateSerializer(serializers.ModelSerializer):
         return user
 
 
-class UserDetailSerializer(serializers.ModelSerializer):
+class UserDetailSerializer(AbstractResourceSerializer):
     type = serializers.CharField(source='resource_type', read_only=True)
     uuid = serializers.CharField(source='id', read_only=True)
     username = serializers.CharField(required=False)
@@ -127,6 +131,9 @@ class UserDetailSerializer(serializers.ModelSerializer):
     location = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     preferred_locale = serializers.CharField(required=False)
     orgs = serializers.IntegerField(read_only=True, source='orgs_count')
+    owned_orgs = serializers.IntegerField(read_only=True, source='owned_orgs_count')
+    sources = serializers.IntegerField(read_only=True, source='all_sources_count')
+    collections = serializers.IntegerField(read_only=True, source='all_collections_count')
     created_on = serializers.DateTimeField(source='created_at', read_only=True)
     updated_on = serializers.DateTimeField(source='updated_at', read_only=True)
     created_by = serializers.CharField(read_only=True)
@@ -138,20 +145,21 @@ class UserDetailSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = UserProfile
-        fields = (
+        fields = AbstractResourceSerializer.Meta.fields + (
             'type', 'uuid', 'username', 'name', 'email', 'company', 'location', 'preferred_locale', 'orgs',
             'public_collections', 'public_sources', 'created_on', 'updated_on', 'created_by', 'updated_by',
             'url', 'organizations_url', 'extras', 'sources_url', 'collections_url', 'website', 'last_login',
             'logo_url', 'subscribed_orgs', 'is_superuser', 'is_staff', 'first_name', 'last_name', 'verified',
-            'verification_token', 'date_joined', 'auth_groups', 'status', 'deactivated_at'
+            'verification_token', 'date_joined', 'auth_groups', 'status', 'deactivated_at',
+            'sources', 'collections', 'owned_orgs'
         )
 
     def __init__(self, *args, **kwargs):
         params = get(kwargs, 'context.request.query_params')
         self.query_params = params.dict() if params else {}
-        self.include_subscribed_orgs = self.query_params.get(INCLUDE_SUBSCRIBED_ORGS) in ['true', True]
-        self.include_verification_token = self.query_params.get(INCLUDE_VERIFICATION_TOKEN) in ['true', True]
-        self.include_auth_groups = self.query_params.get(INCLUDE_AUTH_GROUPS) in ['true', True]
+        self.include_subscribed_orgs = self.query_params.get(INCLUDE_SUBSCRIBED_ORGS) in TRUTHY
+        self.include_verification_token = self.query_params.get(INCLUDE_VERIFICATION_TOKEN) in TRUTHY
+        self.include_auth_groups = self.query_params.get(INCLUDE_AUTH_GROUPS) in TRUTHY
 
         if not self.include_subscribed_orgs:
             self.fields.pop('subscribed_orgs')
@@ -189,7 +197,7 @@ class UserDetailSerializer(serializers.ModelSerializer):
                 if instance.is_valid_auth_group(*auth_groups):
                     instance.groups.set(Group.objects.filter(name__in=auth_groups))
                 else:
-                    self._errors.update(dict(auth_groups=[INVALID_AUTH_GROUP_NAME]))
+                    self._errors.update({'auth_groups': [INVALID_AUTH_GROUP_NAME]})
                     return instance
 
         instance.save()

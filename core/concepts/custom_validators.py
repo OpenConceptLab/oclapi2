@@ -75,7 +75,7 @@ class OpenMRSConceptValidator(BaseConceptValidator):
             concept=concept,
             attribute='locale_preferred',
             error_message=OPENMRS_PREFERRED_NAME_UNIQUE_PER_SOURCE_LOCALE,
-            filters=dict(names__locale_preferred=True)
+            filters={'names__locale_preferred': True}
         )
 
     def fully_specified_name_should_be_unique_for_source_and_locale(self, concept):

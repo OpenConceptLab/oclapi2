@@ -77,11 +77,13 @@ class HasAccessToVersionedObject(BasePermission):
         versioned_object = obj.head
 
         from core.users.models import UserProfile
-        if isinstance(versioned_object.parent, UserProfile) and request.user.id == versioned_object.parent_id:
-            return True
-        if request.user.is_authenticated:
-            return request.user.organizations.filter(id=versioned_object.parent_id).exists()
-        return False
+        is_user_parent = isinstance(versioned_object.parent, UserProfile)
+        is_requesting_user_parent = is_user_parent and request.user.id == versioned_object.parent_id
+
+        return is_requesting_user_parent or (
+                request.user.is_authenticated and request.user.organizations.filter(
+                    id=versioned_object.parent_id).exists()
+        )
 
 
 class CanViewConceptDictionaryVersion(HasAccessToVersionedObject):

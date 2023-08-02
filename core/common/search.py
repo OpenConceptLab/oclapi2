@@ -1,15 +1,21 @@
-from elasticsearch_dsl import FacetedSearch
+import urllib
+
+from django.db.models import Case, When, IntegerField
+from elasticsearch_dsl import FacetedSearch, Q
+from pydash import compact, get
+
+from core.common.utils import is_url_encoded_string
 
 
-class CommonSearch(FacetedSearch):
+class CustomESFacetedSearch(FacetedSearch):
     def __init__(self, query=None, filters={}, sort=(), exact_match=False):  # pylint: disable=dangerous-default-value
         self.exact_match = exact_match
         super().__init__(query=query, filters=filters, sort=sort)
 
     def format_search_str(self, search_str):
         if self.exact_match:
-            return search_str
-        return f"*{search_str}*"
+            return search_str.replace('*', '')
+        return f"{search_str}*".replace('**', '*')
 
     def query(self, search, query):
         if query:
@@ -23,3 +29,246 @@ class CommonSearch(FacetedSearch):
 
     def params(self, **kwargs):
         self._s = self._s.params(**kwargs)
+
+
+class CustomESSearch:
+    def __init__(self, dsl_search):
+        self._dsl_search = dsl_search
+        self.queryset = None
+        self.max_score = None
+        self.scores = {}
+        self.highlights = {}
+        self.score_stats = None
+        self.score_distribution = None
+        self.total = 0
+
+    @staticmethod
+    def get_wildcard_search_string(_str):
+        return f"{_str}*".replace('**', '*')
+
+    @staticmethod
+    def get_search_string(search_str, lower=True, decode=True):
+        if lower:
+            search_str = search_str.lower()
+        if decode:
+            search_str = search_str.replace('**', '*')
+            starts_with_asterisk = search_str.startswith('*')
+            ends_with_asterisk = search_str.endswith('*')
+            if starts_with_asterisk:
+                search_str = search_str[1:]
+            if ends_with_asterisk:
+                search_str = search_str[:-1]
+            search_str = search_str if is_url_encoded_string(search_str) else urllib.parse.quote_plus(search_str)
+            if starts_with_asterisk:
+                search_str = f'*{search_str}'
+            if ends_with_asterisk:
+                search_str = f'{search_str}*'
+
+        return search_str
+
+    @staticmethod
+    def get_fuzzy_match_criterion(search_str, fields, boost_divide_by=10, expansions=5):
+        criterion = None
+        for attr, meta in fields.items():
+            criteria = CustomESSearch.fuzzy_criteria(search_str, attr, meta['boost'] / boost_divide_by, expansions)
+            if criterion is None:
+                criterion = criteria
+            else:
+                criterion |= criteria
+        return criterion
+
+    @staticmethod
+    def get_wildcard_match_criterion(search_str, fields):
+        def get_query(_str):
+            query = None
+            for attr, meta in fields.items():
+                decode = meta['decode'] if 'decode' in meta else True
+                lower = meta['lower'] if 'lower' in meta else True
+                _search_str = CustomESSearch.get_wildcard_search_string(
+                    CustomESSearch.get_search_string(search_str, decode=decode, lower=lower)
+                )
+                criteria = CustomESSearch.get_wildcard_criteria(attr, _search_str, meta['boost'])
+                if query is None:
+                    query = criteria
+                else:
+                    query |= criteria
+            return query
+
+        if not search_str:
+            return get_query(search_str)
+        words = search_str.split()
+        criterion = get_query(words[0])
+        for word in words[1:]:
+            criterion |= get_query(word)
+
+        return criterion
+
+    @staticmethod
+    def get_exact_match_criterion(
+            search_str, match_phrase_fields_list, match_word_fields_map):
+        criterion = None
+        if match_phrase_fields_list:
+            criterion = CustomESSearch.get_match_phrase_criteria(match_phrase_fields_list[0], search_str, 5)
+            for attr in match_phrase_fields_list[1:]:
+                criterion |= CustomESSearch.get_match_phrase_criteria(attr, search_str, 5)
+
+        for field, meta in match_word_fields_map.items():
+            criteria = CustomESSearch.get_match_criteria(field, search_str, meta['boost'])
+            if criterion is None:
+                criterion = criteria
+            criterion |= criteria
+
+        return criterion
+
+    @staticmethod
+    def get_match_phrase_criteria(field, search_str, boost):
+        criteria = CustomESSearch.get_term_match_criteria(field, search_str, boost)
+        if field == 'external_id':
+            return criteria
+        return criteria | CustomESSearch.get_prefix_criteria(
+            field, search_str, boost
+        ) | Q('match_phrase', **{field: {'query': search_str, 'boost': boost}})
+
+    @staticmethod
+    def get_term_match_criteria(field, search_str, boost):
+        return Q('term', **{field: {'value': search_str, 'boost': boost + 100}})
+
+    @staticmethod
+    def get_prefix_criteria(field, search_str, boost):
+        return Q('prefix', **{field: {'value': search_str, 'boost': boost + 95}})
+
+    @staticmethod
+    def get_match_criteria(field, search_str, boost):
+        return Q(
+            'match',
+            **{
+                field: {
+                    'query': search_str,
+                    'boost': boost,
+                    'auto_generate_synonyms_phrase_query': False,
+                    'operator': 'AND'
+                }
+            }
+        )
+
+    @staticmethod
+    def get_wildcard_criteria(field, search_str, boost):
+        return Q("wildcard", **{field: {'value': search_str, 'boost': boost, 'case_insensitive': True}})
+
+    @staticmethod
+    def fuzzy_criteria(search_str, field, boost=0, max_expansions=10):
+        criterion = CustomESSearch.__fuzzy_criteria(boost, field, max_expansions, search_str)
+        words = compact(search_str.split())
+        if len(words) > 1:
+            for word in words:
+                criterion |= CustomESSearch.__fuzzy_criteria(boost, field, max_expansions, word)
+        return criterion
+
+    @staticmethod
+    def __fuzzy_criteria(boost, field, max_expansions, word):
+        return Q(
+            {'fuzzy': {field: {'value': word, 'boost': boost, 'fuzziness': 'AUTO', 'max_expansions': max_expansions}}})
+
+    def apply_aggregation_score_histogram(self):
+        self._dsl_search.aggs.bucket(
+            "distribution", "histogram", script="_score", interval=1, min_doc_count=1)
+
+    def apply_aggregation_score_stats(self):
+        self._dsl_search.aggs.bucket("score", "stats", script="_score")
+
+    def to_queryset(self, keep_order=True):
+        """
+        This method return a django queryset from the an elasticsearch result.
+        It cost a query to the sql db.
+        """
+        s, hits = self.__get_response()
+
+        for result in hits.hits:
+            _id = get(result, '_id')
+            self.scores[int(_id)] = get(result, '_score')
+            highlight = get(result, 'highlight')
+            if highlight:
+                self.highlights[int(_id)] = highlight.to_dict()
+
+        pks = [result.meta.id for result in s]
+
+        qs = self._dsl_search._model.objects.filter(pk__in=pks)  # pylint: disable=protected-access
+
+        if keep_order:
+            preserved_order = Case(
+                *[When(pk=pk, then=pos) for pos, pk in enumerate(pks)],
+                output_field=IntegerField()
+            )
+            qs = qs.order_by(preserved_order)
+        self.queryset = qs
+        self.total = hits.total.value
+
+    def get_aggregations(self, verbose=False, raw=False):
+        s, _ = self.__get_response()
+
+        result = s.aggs.to_dict()
+        if raw:
+            return result
+        self.max_score = result['score']['max']
+        return self._get_score_buckets(
+            self.max_score, result['distribution']['buckets'], verbose)
+
+    @staticmethod
+    def _get_score_buckets(max_score, buckets, verbose=False):
+        high_threshold = max_score * 0.8
+        low_threshold = max_score * 0.5
+
+        def get_confidence(threshold):
+            return round((threshold/max_score) * 100, 2)
+
+        def build_confidence(_bucket):
+            scores = _bucket['scores']
+            if scores:
+                _bucket['confidence'] = f"~{get_confidence(sum(scores) / len(scores))}%"
+            if not verbose:
+                _bucket = {k: v for k, v in _bucket.items() if k in ['name', 'threshold', 'total', 'confidence']}
+            return _bucket
+
+        def build_bucket(name, confidence_threshold, threshold=None, confidence_prefix='>='):
+            threshold = threshold or confidence_threshold
+            return {
+                'name': name,
+                'threshold': round(threshold, 2),
+                'scores': [],
+                'doc_counts': [],
+                'confidence': f"{confidence_prefix}{get_confidence(confidence_threshold)}%",
+                'total': 0
+            }
+
+        def append_to_bucket(_bucket, _score, count):
+            _bucket['scores'].append(_score)
+            _bucket['doc_counts'].append(count)
+            _bucket['total'] += count
+
+        high = build_bucket('high', high_threshold)
+        medium = build_bucket('medium', low_threshold)
+        low = build_bucket('low', low_threshold, 0.01, '<')
+
+        for bucket in buckets:
+            score = bucket['key']
+            doc_count = bucket['doc_count']
+
+            if score >= high_threshold:
+                append_to_bucket(high, score, doc_count)
+            elif score < low_threshold:
+                append_to_bucket(low, score, doc_count)
+            else:
+                append_to_bucket(medium, score, doc_count)
+
+        return [build_confidence(high), build_confidence(medium), build_confidence(low)]
+
+    def __get_response(self):
+        # Do not query again if the es result is already cached
+        if not hasattr(self._dsl_search, '_response'):
+            # We only need the meta fields with the models ids
+            s = self._dsl_search.source(excludes=['*'])
+            s = s.execute()
+            hits = s.hits
+            self.max_score = hits.max_score
+            return s, hits
+        return self._dsl_search, None

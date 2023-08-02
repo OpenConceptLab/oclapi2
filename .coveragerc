@@ -9,6 +9,7 @@ omit =
     core/wsgi.py
     */management/commands/*
     */migrations/*
+    */tests/factories.py
     */documents.py
     core/common/search.py
     core/common/errbit.py

@@ -10,14 +10,14 @@ from django.shortcuts import get_object_or_404
 from drf_yasg.utils import swagger_auto_schema
 from pydash import get
 from rest_framework import status
-from rest_framework.exceptions import PermissionDenied
 from rest_framework.generics import (
     RetrieveAPIView, ListAPIView, UpdateAPIView, CreateAPIView)
 from rest_framework.response import Response
 
+from core.bundles.serializers import BundleSerializer
 from core.client_configs.views import ResourceClientConfigsView
 from core.common.constants import HEAD, RELEASED_PARAM, PROCESSING_PARAM, ACCESS_TYPE_NONE
-from core.common.exceptions import Http405
+from core.common.exceptions import Http405, Http400
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryCreateMixin, ConceptDictionaryUpdateMixin, \
     ConceptContainerExportMixin, ConceptContainerProcessingMixin
 from core.common.permissions import CanViewConceptDictionary, CanEditConceptDictionary, HasAccessToVersionedObject, \
@@ -26,16 +26,19 @@ from core.common.serializers import TaskSerializer
 from core.common.swagger_parameters import q_param, limit_param, sort_desc_param, sort_asc_param, exact_match_param, \
     page_param, verbose_param, include_retired_param, updated_since_param, include_facets_header, compress_header
 from core.common.tasks import export_source, index_source_concepts, index_source_mappings, delete_source
-from core.common.utils import parse_boolean_query_param, compact_dict_by_values
-from core.common.views import BaseAPIView, BaseLogoView, ConceptContainerExtraRetrieveUpdateDestroyView
+from core.common.utils import parse_boolean_query_param, compact_dict_by_values, to_parent_uri, get_truthy_values
+from core.common.views import BaseAPIView, BaseLogoView, ConceptContainerExtraRetrieveUpdateDestroyView, TaskMixin
 from core.sources.constants import DELETE_FAILURE, DELETE_SUCCESS, VERSION_ALREADY_EXISTS
 from core.sources.documents import SourceDocument
+from core.sources.mixins import SummaryMixin
 from core.sources.models import Source
-from core.sources.search import SourceSearch
+from core.sources.search import SourceFacetedSearch
 from core.sources.serializers import (
     SourceDetailSerializer, SourceListSerializer, SourceCreateSerializer, SourceVersionDetailSerializer,
     SourceVersionListSerializer, SourceVersionExportSerializer, SourceSummaryDetailSerializer,
-    SourceVersionSummaryDetailSerializer, SourceMinimalSerializer)
+    SourceVersionSummaryDetailSerializer, SourceMinimalSerializer, SourceSummaryVerboseSerializer,
+    SourceVersionSummaryVerboseSerializer, SourceSummaryFieldDistributionSerializer,
+    SourceVersionSummaryFieldDistributionSerializer, SourceVersionMinimalSerializer)
 
 logger = logging.getLogger('oclapi')
 
@@ -95,8 +98,8 @@ class SourceListView(SourceBaseView, ConceptDictionaryCreateMixin, ListWithHeade
     is_searchable = True
     es_fields = Source.es_fields
     document_model = SourceDocument
-    facet_class = SourceSearch
-    default_filters = dict(is_active=True, version=HEAD)
+    facet_class = SourceFacetedSearch
+    default_filters = {'version': HEAD}
 
     def apply_filters(self, queryset):
         return queryset
@@ -174,7 +177,7 @@ class SourceLogoView(SourceBaseView, BaseLogoView):
         return [CanEditConceptDictionary()]
 
 
-class SourceRetrieveUpdateDestroyView(SourceBaseView, ConceptDictionaryUpdateMixin, RetrieveAPIView):
+class SourceRetrieveUpdateDestroyView(SourceBaseView, ConceptDictionaryUpdateMixin, RetrieveAPIView, TaskMixin):
     serializer_class = SourceDetailSerializer
 
     def get_object(self, queryset=None):
@@ -193,6 +196,11 @@ class SourceRetrieveUpdateDestroyView(SourceBaseView, ConceptDictionaryUpdateMix
                     version.update_concepts_count()
                 if version.should_set_active_mappings:
                     version.update_mappings_count()
+
+        truthy = get_truthy_values()
+        if self.request.user.is_staff and self.request.query_params.get('migrate_export_path', False) in truthy:  # pragma: no cover  # pylint: disable: line-too-long
+            instance.migrate_to_new_export_path(move=self.request.query_params.get('move', False) in truthy)
+
         return instance
 
     def get_permissions(self):
@@ -203,15 +211,10 @@ class SourceRetrieveUpdateDestroyView(SourceBaseView, ConceptDictionaryUpdateMix
 
     def delete(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         source = self.get_object()
+        result = self.perform_task(delete_source, (source.id, ))
 
-        if not self.is_inline_requested():
-            try:
-                task = delete_source.delay(source.id)
-                return Response(dict(task=task.id), status=status.HTTP_202_ACCEPTED)
-            except AlreadyQueued:
-                return Response(dict(detail='Already Queued'), status=status.HTTP_409_CONFLICT)
-
-        result = delete_source(source.id)
+        if isinstance(result, Response):
+            return result
 
         if result is True:
             return Response({'detail': DELETE_SUCCESS}, status=status.HTTP_204_NO_CONTENT)
@@ -229,6 +232,8 @@ class SourceVersionListView(SourceVersionBaseView, CreateAPIView, ListWithHeader
             return SourceVersionDetailSerializer
         if self.request.method == 'POST':
             return SourceCreateSerializer
+        if self.is_brief():
+            return SourceVersionMinimalSerializer
 
         return SourceVersionListSerializer
 
@@ -254,7 +259,10 @@ class SourceVersionListView(SourceVersionBaseView, CreateAPIView, ListWithHeader
                     return Response(serializer.data, status=status.HTTP_201_CREATED)
             except IntegrityError as ex:
                 return Response(
-                    dict(error=str(ex), detail=VERSION_ALREADY_EXISTS.format(version)),
+                    {
+                        'error': str(ex),
+                        'detail': VERSION_ALREADY_EXISTS.format(version)
+                    },
                     status=status.HTTP_409_CONFLICT
                 )
 
@@ -312,10 +320,18 @@ class SourceConceptsIndexView(SourceBaseView):
 
     def post(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         source = self.get_object()
-        result = index_source_concepts.delay(source.id)
+        try:
+            result = index_source_concepts.delay(source.id)
+        except AlreadyQueued:
+            return Response({'detail': 'Already Queued'}, status=status.HTTP_409_CONFLICT)
 
         return Response(
-            dict(state=result.state, username=self.request.user.username, task=result.task_id, queue='default'),
+            {
+                'state': result.state,
+                'username': self.request.user.username,
+                'task': result.task_id,
+                'queue': 'default'
+            },
             status=status.HTTP_202_ACCEPTED
         )
 
@@ -333,12 +349,63 @@ class SourceMappingsIndexView(SourceBaseView):
 
     def post(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         source = self.get_object()
-        result = index_source_mappings.delay(source.id)
+        try:
+            result = index_source_mappings.delay(source.id)
+        except AlreadyQueued:
+            return Response({'detail': 'Already Queued'}, status=status.HTTP_409_CONFLICT)
 
         return Response(
-            dict(state=result.state, username=self.request.user.username, task=result.task_id, queue='default'),
+            {
+                'state': result.state,
+                'username': self.request.user.username,
+                'task': result.task_id,
+                'queue': 'default'
+            },
             status=status.HTTP_202_ACCEPTED
         )
+
+
+class SourceConceptsCloneView(SourceBaseView):
+    serializer_class = BundleSerializer
+
+    def post(self, request, **kwargs):  # pylint: disable=unused-argument, too-many-locals
+        """
+        body:
+            {
+                “expressions”: [“/orgs/CIEL/sources/CIEL/concepts/123/”], (cloneFrom)
+                “parameters”: { ….same as cascade… }
+            }
+        """
+        expressions = request.data.get('expressions')
+        parameters = request.data.get('parameters') or {}
+        if not expressions:
+            raise Http400()
+        instance = self.get_object()
+        results = {}
+        parent_resources = {}
+        is_verbose = self.is_verbose()
+        for expression in expressions:
+            from core.concepts.models import Concept
+            result = {}
+            concept_to_clone = Concept.objects.filter(uri=expression).first()
+            if concept_to_clone:
+                parent_uri = to_parent_uri(expression)
+                if parent_uri not in parent_resources:
+                    parent_resources[parent_uri] = Source.objects.filter(uri=parent_uri).first()
+                parent_resource = parent_resources[parent_uri]
+                from core.bundles.models import Bundle
+                bundle = Bundle.clone(
+                    concept_to_clone, parent_resource, instance, request.user,
+                    self.request.get_full_path(), is_verbose, **parameters
+                )
+                result['status'] = status.HTTP_200_OK
+                result['bundle'] = BundleSerializer(bundle, context={'request': request}).data
+            else:
+                result['status'] = status.HTTP_404_NOT_FOUND
+                result['errors'] = [f'Concept to clone with expression {expression} not found.']
+            results[expression] = result
+
+        return Response(results, status.HTTP_200_OK)
 
 
 class SourceVersionRetrieveUpdateDestroyView(SourceVersionBaseView, RetrieveAPIView, UpdateAPIView):
@@ -452,43 +519,40 @@ class SourceHierarchyView(SourceBaseView, RetrieveAPIView):
         return Response(instance.hierarchy(offset=offset, limit=limit))
 
 
-class SourceSummaryView(SourceBaseView, RetrieveAPIView):
+class SourceSummaryView(SummaryMixin, SourceBaseView, RetrieveAPIView):
     serializer_class = SourceSummaryDetailSerializer
     permission_classes = (CanViewConceptDictionary,)
 
-    def get_object(self, queryset=None):
-        instance = get_object_or_404(self.get_queryset())
-        self.check_object_permissions(self.request, instance)
-        return instance
-
-    def put(self, request, **kwargs):  # pylint: disable=unused-argument
-        instance = self.get_object()
-        if instance.has_edit_access(request.user):
-            instance.update_children_counts()
-            return Response(status=status.HTTP_202_ACCEPTED)
-        raise PermissionDenied()
+    def get_serializer_class(self):
+        if self.is_verbose():
+            if self.request.query_params.get('distribution'):
+                return SourceSummaryFieldDistributionSerializer
+            return SourceSummaryVerboseSerializer
+        return SourceSummaryDetailSerializer
 
 
-class SourceVersionSummaryView(SourceVersionBaseView, RetrieveAPIView):
+class SourceVersionSummaryView(SummaryMixin, SourceVersionBaseView, RetrieveAPIView):
     serializer_class = SourceVersionSummaryDetailSerializer
     permission_classes = (CanViewConceptDictionary,)
 
-    def get_object(self, queryset=None):
-        instance = get_object_or_404(self.get_queryset())
-        self.check_object_permissions(self.request, instance)
-        return instance
-
-    def put(self, request, **kwargs):  # pylint: disable=unused-argument
-        instance = self.get_object()
-        if instance.has_edit_access(request.user):
-            instance.update_children_counts()
-            return Response(status=status.HTTP_202_ACCEPTED)
-        raise PermissionDenied()
+    def get_serializer_class(self):
+        if self.is_verbose():
+            if self.request.query_params.get('distribution'):
+                return SourceVersionSummaryFieldDistributionSerializer
+            return SourceVersionSummaryVerboseSerializer
+        return SourceVersionSummaryDetailSerializer
 
 
 class SourceLatestVersionSummaryView(SourceVersionBaseView, RetrieveAPIView, UpdateAPIView):
     serializer_class = SourceVersionSummaryDetailSerializer
     permission_classes = (CanViewConceptDictionary,)
+
+    def get_serializer_class(self):
+        if self.is_verbose():
+            if self.request.query_params.get('distribution'):
+                return SourceVersionSummaryFieldDistributionSerializer
+            return SourceVersionSummaryVerboseSerializer
+        return SourceVersionSummaryDetailSerializer
 
     def get_object(self, queryset=None):
         obj = self.get_queryset().first()

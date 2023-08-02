@@ -11,10 +11,12 @@ from django.db.models import F
 from ocldev.oclfleximporter import OclFlexImporter
 from pydash import compact, get
 
+from core.celery import app
 from core.collections.models import Collection
 from core.common.constants import HEAD
 from core.common.services import RedisService
-from core.common.tasks import bulk_import_parts_inline, delete_organization, batch_index_resources
+from core.common.tasks import bulk_import_parts_inline, delete_organization, batch_index_resources, \
+    post_import_update_resource_counts
 from core.common.utils import drop_version, is_url_encoded_string, encode_string, to_parent_uri, chunks
 from core.concepts.models import Concept
 from core.mappings.models import Mapping
@@ -32,9 +34,11 @@ class ImportResults:
         self.report = importer.import_results.display_report()
 
     def to_dict(self):
-        return dict(
-            json=self.json, detailed_summary=self.detailed_summary, report=self.report
-        )
+        return {
+            'json': self.json,
+            'detailed_summary': self.detailed_summary,
+            'report': self.report
+        }
 
 
 class BaseImporter:
@@ -250,7 +254,7 @@ class SourceImporter(BaseResourceImporter):
                     return DELETED
                 return PERMISSION_DENIED
             except Exception as ex:
-                return dict(errors=ex.args)
+                return {'errors': ex.args}
 
         return NOT_FOUND
 
@@ -333,7 +337,7 @@ class CollectionImporter(BaseResourceImporter):
                     return DELETED
                 return PERMISSION_DENIED
             except Exception as ex:
-                return dict(errors=ex.args)
+                return {'errors': ex.args}
 
         return NOT_FOUND
 
@@ -368,7 +372,7 @@ class CollectionVersionImporter(BaseResourceImporter):
 
 
 class ConceptImporter(BaseResourceImporter):
-    mandatory_fields = {"id"}
+    mandatory_fields = {"concept_class"}
     allowed_fields = [
         "id", "external_id", "concept_class", "datatype", "names", "descriptions", "retired", "extras",
         "parent_concept_urls", 'update_comment', 'comment'
@@ -398,7 +402,7 @@ class ConceptImporter(BaseResourceImporter):
         ).first()
         super().parse()
         self.data['parent'] = source
-        self.data['name'] = self.data['mnemonic'] = str(self.data.pop('id', ''))
+        self.data['mnemonic'] = str(self.data.pop('id', ''))
         if not is_url_encoded_string(self.data['mnemonic']):
             self.data['mnemonic'] = encode_string(self.data['mnemonic'])
 
@@ -450,7 +454,7 @@ class ConceptImporter(BaseResourceImporter):
                     return DELETED
                 return PERMISSION_DENIED
             except Exception as ex:
-                return dict(errors=ex.args)
+                return {'errors': ex.args}
 
         return NOT_FOUND
 
@@ -459,7 +463,7 @@ class MappingImporter(BaseResourceImporter):
     mandatory_fields = {"map_type", "from_concept_url"}
     allowed_fields = [
         "id", "map_type", "from_concept_url", "to_source_url", "to_concept_url", "to_concept_code",
-        "to_concept_name", "extras", "external_id", "retired", 'update_comment', 'comment'
+        "to_concept_name", "extras", "external_id", "retired", 'update_comment', 'comment', 'sort_weight'
     ]
 
     def __init__(self, data, user, update_if_exists):
@@ -486,7 +490,9 @@ class MappingImporter(BaseResourceImporter):
             'map_type': self.get('map_type'),
         }
         if from_concept_code:
-            filters['from_concept_code'] = Concept.get_mnemonic_variations_for_filter(from_concept_code)
+            filters['from_concept_code'] = [
+                *Concept.get_mnemonic_variations_for_filter(from_concept_code), from_concept_code.replace(' ', '+')
+            ]
 
         versionless_from_concept_url = drop_version(from_concept_url)
         from_concept = Concept.objects.filter(id=F('versioned_object_id'), uri=versionless_from_concept_url).first()
@@ -514,7 +520,8 @@ class MappingImporter(BaseResourceImporter):
             filters['to_source_url'] = to_source_uri
 
         if to_concept_code:
-            filters['to_concept_code__in'] = Concept.get_mnemonic_variations_for_filter(to_concept_code)
+            filters['to_concept_code__in'] = [
+                *Concept.get_mnemonic_variations_for_filter(to_concept_code), to_concept_code.replace(' ', '+')]
 
         self.queryset = Mapping.objects.filter(**filters)
 
@@ -552,7 +559,10 @@ class MappingImporter(BaseResourceImporter):
             return FAILED
         if parent.has_edit_access(self.user):
             if self.version:
-                self.instance = self.get_queryset().first().clone()
+                queryset = self.get_queryset()
+                if queryset.count() > 1:
+                    queryset = queryset.filter(retired=False)
+                self.instance = queryset.first().clone()
                 self.instance._counted = None  # pylint: disable=protected-access
                 self.instance._index = False  # pylint: disable=protected-access
                 errors = Mapping.create_new_version_for(self.instance, self.data, self.user)
@@ -580,7 +590,7 @@ class MappingImporter(BaseResourceImporter):
                     return DELETED
                 return PERMISSION_DENIED
             except Exception as ex:
-                return dict(errors=ex.args)
+                return {'errors': ex.args}
 
         return NOT_FOUND
 
@@ -621,9 +631,9 @@ class ReferenceImporter(BaseResourceImporter):
                         mapping_ids += list(ref.mappings.values_list('id', flat=True))
 
                     if concept_ids:
-                        batch_index_resources.apply_async(('concept', dict(id__in=concept_ids)), queue='indexing')
+                        batch_index_resources.apply_async(('concept', {'id__in': concept_ids}), queue='indexing')
                     if mapping_ids:
-                        batch_index_resources.apply_async(('mapping', dict(id__in=mapping_ids)), queue='indexing')
+                        batch_index_resources.apply_async(('mapping', {'id__in': mapping_ids}), queue='indexing')
 
                 return CREATED
             return PERMISSION_DENIED
@@ -760,11 +770,11 @@ class BulkImportInline(BaseImporter):
         if new_concept_ids:
             for chunk in chunks(list(new_concept_ids), 1000):
                 batch_index_resources.apply_async(
-                    ('concept', dict(versioned_object_id__in=chunk), True), queue='indexing')
+                    ('concept', {'versioned_object_id__in': chunk}, True), queue='indexing')
         if new_mapping_ids:
             for chunk in chunks(list(new_mapping_ids), 1000):
                 batch_index_resources.apply_async(
-                    ('mapping', dict(versioned_object_id__in=chunk), True), queue='indexing')
+                    ('mapping', {'versioned_object_id__in': chunk}, True), queue='indexing')
 
         self.elapsed_seconds = time.time() - self.start_time
 
@@ -781,12 +791,22 @@ class BulkImportInline(BaseImporter):
 
     @property
     def json_result(self):
-        return dict(
-            total=self.total, processed=self.processed, created=self.created, updated=self.updated,
-            invalid=self.invalid, exists=self.exists, failed=self.failed, deleted=self.deleted,
-            not_found=self.not_found, exception=self.exception, permission_denied=self.permission_denied,
-            others=self.others, unknown=self.unknown, elapsed_seconds=self.elapsed_seconds
-        )
+        return {
+            'total': self.total,
+            'processed': self.processed,
+            'created': self.created,
+            'updated': self.updated,
+            'invalid': self.invalid,
+            'exists': self.exists,
+            'failed': self.failed,
+            'deleted': self.deleted,
+            'not_found': self.not_found,
+            'exception': self.exception,
+            'permission_denied': self.permission_denied,
+            'others': self.others,
+            'unknown': self.unknown,
+            'elapsed_seconds': self.elapsed_seconds
+        }
 
     @property
     def report(self):
@@ -795,9 +815,11 @@ class BulkImportInline(BaseImporter):
         }
 
     def make_result(self):
-        self.result = dict(
-            json=self.json_result, detailed_summary=self.detailed_summary, report=self.report
-        )
+        self.result = {
+            'json': self.json_result,
+            'detailed_summary': self.detailed_summary,
+            'report': self.report
+        }
 
 
 class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
@@ -914,12 +936,20 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
         if not self.groups:
             return False
 
-        result = True
+        result = False
 
         try:
-            result = any(grp.completed_count() != len(grp) for grp in self.groups)
+            for grp in self.groups:
+                if result:
+                    return result
+                if grp.ready():  # all tasks in that group are done
+                    result = False
+                else:
+                    workers = list(set(compact([task.worker for task in self.tasks if task.status == 'STARTED'])))
+                    workers_status = app.control.ping(destination=workers)  # check if workers are up
+                    result = len(workers_status) != 0
         except:  # pylint: disable=bare-except
-            pass
+            result = True
 
         return result
 
@@ -942,7 +972,7 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
             f"Processed: {self.get_overall_tasks_progress()}/{self.total} | " \
             f"Time: {self.elapsed_seconds}secs"
 
-        return dict(summary=summary)
+        return {'summary': summary}
 
     def notify_progress(self):
         if self.self_task_id:
@@ -976,11 +1006,7 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
                             self.resource_wise_time[part_type] = 0
                         self.resource_wise_time[part_type] += (time.time() - start_time)
 
-        print("Updating Active Concepts Count...")
-        self.update_concept_counts()
-
-        print("Updating Active Mappings Count...")
-        self.update_mappings_counts()
+        post_import_update_resource_counts.delay()
 
         self.update_elapsed_seconds()
 
@@ -1009,15 +1035,30 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
         if self._json_result:
             return self._json_result
 
-        total_result = dict(
-            total=0, processed=0, created=[], updated=[],
-            invalid=[], exists=[], failed=[], exception=[], deleted=[],
-            others=[], unknown=[], permission_denied=[], elapsed_seconds=self.elapsed_seconds
-        )
+        total_result = {
+            'total': 0,
+            'processed': 0,
+            'created': [],
+            'updated': [],
+            'invalid': [],
+            'exists': [],
+            'failed': [],
+            'exception': [],
+            'deleted': [],
+            'others': [],
+            'unknown': [],
+            'permission_denied': [],
+            'elapsed_seconds': self.elapsed_seconds
+        }
         for task in self.tasks:
-            result = task.result.get('json')
-            for key in total_result:
-                total_result[key] += result.get(key)
+            if task.result:
+                try:
+                    result = task.result.get('json')
+                    for key in total_result:
+                        if result:
+                            total_result[key] += result.get(key)
+                except:  # pylint: disable=bare-except
+                    pass
 
         total_result['start_time'] = self.start_time_formatted
         total_result['elapsed_seconds'] = self.elapsed_seconds
@@ -1036,9 +1077,11 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
         return data
 
     def make_result(self):
-        self.result = dict(
-            json=self.json_result, detailed_summary=self.detailed_summary, report=self.report
-        )
+        self.result = {
+            'json': self.json_result,
+            'detailed_summary': self.detailed_summary,
+            'report': self.report
+        }
 
     def queue_tasks(self, part_list, is_child):
         has_delete_action = not is_child and any(line.get('__action') == 'DELETE' for line in part_list)
@@ -1048,20 +1091,3 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
         group_result = jobs.apply_async(queue='concurrent')
         self.groups.append(group_result)
         self.tasks += group_result.results
-
-    @staticmethod
-    def update_concept_counts():
-        uncounted_concepts = Concept.objects.filter(_counted__isnull=True)
-        sources = Source.objects.filter(id__in=uncounted_concepts.values_list('parent_id', flat=True))
-        for source in sources:
-            source.update_concepts_count(sync=False)
-            uncounted_concepts.filter(parent_id=source.id).update(_counted=True)
-
-    @staticmethod
-    def update_mappings_counts():
-        uncounted_mappings = Mapping.objects.filter(_counted__isnull=True)
-        sources = Source.objects.filter(
-            id__in=uncounted_mappings.values_list('parent_id', flat=True))
-        for source in sources:
-            source.update_mappings_count(sync=False)
-            uncounted_mappings.filter(parent_id=source.id).update(_counted=True)

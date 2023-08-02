@@ -1,10 +1,11 @@
 import time
 
+from celery_once import AlreadyQueued
 from django.conf import settings
 from django.contrib.postgres.fields import ArrayField
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
-from django.db.models import UniqueConstraint, F, QuerySet, Q, Max
+from django.db.models import UniqueConstraint, F, QuerySet, Max
 from django.utils import timezone
 from django.utils.functional import cached_property
 from pydash import get, compact
@@ -19,31 +20,43 @@ from core.collections.translators import CollectionReferenceTranslator
 from core.collections.utils import is_concept, is_mapping
 from core.common.constants import (
     ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT,
-    ES_REQUEST_TIMEOUT, ES_REQUEST_TIMEOUT_ASYNC, HEAD, ALL)
+    ES_REQUEST_TIMEOUT, ES_REQUEST_TIMEOUT_ASYNC, HEAD, ALL, EXCLUDE_WILDCARD_SEARCH_PARAM, EXCLUDE_FUZZY_SEARCH_PARAM,
+    SEARCH_MAP_CODES_PARAM, INCLUDE_SEARCH_META_PARAM)
 from core.common.models import ConceptContainerModel, BaseResourceModel
+from core.common.search import CustomESSearch
 from core.common.tasks import seed_children_to_expansion, batch_index_resources, index_expansion_concepts, \
     index_expansion_mappings
 from core.common.utils import drop_version, to_owner_uri, generate_temp_version, es_id_in, \
-    es_wildcard_search, get_resource_class_from_resource_name, get_exact_search_fields, to_snake_case, \
-    es_exact_search, es_to_pks, batch_qs, split_list_by_condition, decode_string, is_canonical_uri, encode_string
+    get_resource_class_from_resource_name, to_snake_case, \
+    es_to_pks, batch_qs, split_list_by_condition, decode_string, is_canonical_uri, encode_string, \
+    get_truthy_values, get_falsy_values
 from core.concepts.constants import LOCALES_FULLY_SPECIFIED
 from core.concepts.models import Concept
 from core.mappings.models import Mapping
+
+TRUTHY = get_truthy_values()
+FALSEY = get_falsy_values()
 
 
 class Collection(ConceptContainerModel):
     OBJECT_TYPE = COLLECTION_TYPE
     OBJECT_VERSION_TYPE = COLLECTION_VERSION_TYPE
+    CHECKSUM_INCLUSIONS = ConceptContainerModel.CHECKSUM_INCLUSIONS + [
+        'collection_type'
+    ]
+
     es_fields = {
         'collection_type': {'sortable': True, 'filterable': True, 'facet': True, 'exact': True},
-        'mnemonic': {'sortable': True, 'filterable': True, 'exact': True},
-        'name': {'sortable': True, 'filterable': True, 'exact': True},
+        'mnemonic': {'sortable': False, 'filterable': True, 'exact': True},
+        '_mnemonic': {'sortable': True, 'filterable': False, 'exact': False},
+        'name': {'sortable': False, 'filterable': True, 'exact': True},
+        '_name': {'sortable': True, 'filterable': False, 'exact': False},
         'last_update': {'sortable': True, 'filterable': False, 'default': 'desc'},
         'locale': {'sortable': False, 'filterable': True, 'facet': True},
         'owner': {'sortable': True, 'filterable': True, 'facet': True, 'exact': True},
         'owner_type': {'sortable': False, 'filterable': True, 'facet': True},
         'custom_validation_schema': {'sortable': False, 'filterable': True, 'facet': True},
-        'canonical_url': {'sortable': True, 'filterable': True, 'exact': True},
+        'canonical_url': {'sortable': False, 'filterable': True, 'exact': True},
         'experimental': {'sortable': False, 'filterable': False, 'facet': False},
         'external_id': {'sortable': False, 'filterable': True, 'facet': False, 'exact': True},
     }
@@ -62,7 +75,11 @@ class Collection(ConceptContainerModel):
                 condition=models.Q(organization=None),
             )
         ]
-        indexes = [] + ConceptContainerModel.Meta.indexes
+        indexes = [
+                      models.Index(fields=['uri']),
+                      models.Index(name="coll_mnemonic_like", fields=["mnemonic"], opclasses=["text_pattern_ops"]),
+                      models.Index(fields=['public_access']),
+                  ] + ConceptContainerModel.Meta.indexes
 
     collection_type = models.TextField(blank=True)
     preferred_source = models.TextField(blank=True)
@@ -92,7 +109,7 @@ class Collection(ConceptContainerModel):
     def get_base_queryset(cls, params):
         collection = params.pop('collection', None)
         contains_uri = params.pop('contains', None)
-        include_references = params.pop('include_references', None) in [True, 'true']
+        include_references = params.pop('include_references', None) in TRUTHY
         queryset = super().get_base_queryset(params)
         if collection:
             queryset = queryset.filter(cls.get_exact_or_criteria('mnemonic', collection))
@@ -128,6 +145,10 @@ class Collection(ConceptContainerModel):
 
         return self.autoexpand
 
+    def post_create_actions(self):
+        if self.should_auto_expand:
+            self.cascade_children_to_expansion(index=False)
+
     def validate(self, reference):
         if self.should_auto_expand:
             reference.full_clean()
@@ -161,7 +182,7 @@ class Collection(ConceptContainerModel):
         names = concept.names.filter(**{attribute: value})
 
         for name in names:
-            validation_error = dict(names=[error_message])
+            validation_error = {'names': [error_message]}
             # making sure names in the submitted concept meet the same rule
             name_key = name.locale + name.name
             if name_key in matching_names_in_concept:
@@ -175,29 +196,33 @@ class Collection(ConceptContainerModel):
 
     @transaction.atomic
     def add_expressions(
-            self, data, user, cascade=False, transform=False):
+            self, data, user, cascade=False, transform=False, _async=False):
         parser = CollectionReferenceParser(data, transform, cascade, user)
         parser.parse()
         parser.to_reference_structure()
         references = parser.to_objects()
-        return self.add_references(references, user)
+        return self.add_references(references, user, _async)
 
-    def add_references(self, references, user=None):
+    def add_references(self, references, user=None, _async=False):
         errors = {}
         added_references = []
+        total_references = []
         for reference in references:
             reference.expression = reference.build_expression()
+            total_references += reference.generate_references()
+        total_references = CollectionReference.dedupe_by_expression(total_references)
+        for reference in total_references:
             reference.collection = self
             reference.created_by = user
-            for _reference in reference.generate_references():
-                try:
-                    self.validate(_reference)
-                    _reference.save()
-                except Exception as ex:
-                    errors[_reference.expression] = ex.messages if hasattr(ex, 'messages') else ex
-                    continue
-                if _reference.id:
-                    added_references.append(_reference)
+            reference._async = _async  # pylint: disable=protected-access
+            try:
+                self.validate(reference)
+                reference.save()
+            except Exception as ex:
+                errors[reference.expression] = ex.messages if hasattr(ex, 'messages') else ex
+                continue
+            if reference.id:
+                added_references.append(reference)
 
         if self.expansion_uri:
             self.expansion.add_references(added_references)
@@ -272,11 +297,14 @@ class Collection(ConceptContainerModel):
 
     def index_children(self):
         if self.expansion_uri:
+            expansion = self.expansion
+            if not expansion:
+                return
             from core.concepts.documents import ConceptDocument
             from core.mappings.documents import MappingDocument
 
-            self.batch_index(self.expansion.concepts, ConceptDocument)
-            self.batch_index(self.expansion.mappings, MappingDocument)
+            self.batch_index(expansion.concepts, ConceptDocument)
+            self.batch_index(expansion.mappings, MappingDocument)
 
     @property
     def expansion(self):
@@ -308,6 +336,76 @@ class Collection(ConceptContainerModel):
     @property
     def expansions_url(self):
         return self.uri + 'expansions/'
+
+    def get_concepts_queryset(self):
+        expansion = self.expansion
+        return expansion.concepts.filter() if expansion else Concept.objects.none()
+
+    def get_mappings_queryset(self):
+        expansion = self.expansion
+        return expansion.mappings.filter() if expansion else Mapping.objects.none()
+
+    @property
+    def references_distribution(self):
+        return {
+            'include': self.references.filter(include=True).count(),
+            'exclude': self.references.filter(include=False).count(),
+            'concepts': self.references.filter(reference_type=CONCEPT_REFERENCE_TYPE).count(),
+            'mappings': self.references.filter(reference_type=MAPPING_REFERENCE_TYPE).count(),
+            'total': self.active_references,
+        }
+
+    @property
+    def referenced_sources_distribution(self):
+        from core.sources.serializers import SourceVersionMinimalSerializer
+        result = {}
+        for reference in self.references.filter(include=True):
+            version = reference.resolve_system_version
+            if version:
+                _result = get(result, version.uri)
+                if not _result:
+                    _result = {
+                        **SourceVersionMinimalSerializer(version).data,
+                        'distribution': {'include_reference': True, 'concepts': 0, 'mappings': 0, 'references': 0},
+                    }
+                _result['distribution']['concepts'] += reference.concepts.count()
+                _result['distribution']['mappings'] += reference.mappings.count()
+                _result['distribution']['references'] += 1
+                result[version.uri] = _result
+
+        return sorted(result.values(), key=lambda summary: get(summary, 'distribution.references'), reverse=True)
+
+    @property
+    def referenced_collections_distribution(self):
+        from core.collections.serializers import CollectionVersionMinimalSerializer
+        result = {}
+        for reference in self.references.filter(include=True):
+            versions = reference.resolve_valueset_versions
+            for version in versions:
+                if version:
+                    _result = get(result, version.uri)
+                    if not _result:
+                        _result = {
+                            **CollectionVersionMinimalSerializer(version).data,
+                            'distribution': {'include_reference': True, 'concepts': 0, 'mappings': 0, 'references': 0},
+                        }
+                    _result['distribution']['concepts'] += reference.concepts.count()
+                    _result['distribution']['mappings'] += reference.mappings.count()
+                    _result['distribution']['references'] += 1
+                    result[version.uri] = _result
+
+        return sorted(result.values(), key=lambda summary: get(summary, 'distribution.references'), reverse=True)
+
+    def _get_resource_facet_filters(self, filters=None):
+        _filters = {
+            'collection': self.mnemonic,
+            'collection_owner_url': to_owner_uri(self.uri),
+            'expansion': self.expansion.mnemonic,
+            'retired': False,
+            'collection_version': self.version
+        }
+
+        return {**_filters, **(filters or {})}
 
 
 class ReferencedConcept(models.Model):
@@ -441,9 +539,10 @@ class CollectionReference(models.Model):
         return self.calculate_uri(self.collection)
 
     def calculate_uri(self, collection):
+        uri = None
         if collection:
-            return f'{collection.uri}references/{self.id}/'
-        return None
+            uri = f'{collection.uri}references/{self.id}/'
+        return uri
 
     def fetch_concepts(self, refetch=False):
         if not get(self, '_fetched') or refetch:
@@ -509,6 +608,10 @@ class CollectionReference(models.Model):
                 self.expression = mapping.uri
         return queryset
 
+    @staticmethod
+    def dedupe_by_expression(references):
+        return list({reference.expression: reference for reference in references}.values())
+
     def generate_references(self):
         references = []
         if self.should_generate_multiple_references():
@@ -569,53 +672,65 @@ class CollectionReference(models.Model):
             'cascade_levels': 1 if self.cascade == method else get(self.cascade, 'cascade_levels', ALL),
         }
         if is_dict:
-            for attr in ['cascade_mappings', 'cascade_hierarchy', 'reverse', 'max_results']:
+            for attr in ['cascade_mappings', 'cascade_hierarchy', 'reverse', 'max_results', 'include_retired',
+                         'reverse', 'omit_if_exists_in']:
                 if attr in self.cascade:
                     cascade_params[attr] = get(self.cascade, attr)
             map_types = get(self.cascade, 'map_types', None)
             exclude_map_types = get(self.cascade, 'exclude_map_types', None)
             return_map_types = get(self.cascade, 'return_map_types', None)
-            mappings_criteria = Q()
-            if map_types:
-                mappings_criteria &= Q(map_type__in=compact(map_types.split(',')))
-            if exclude_map_types:
-                mappings_criteria &= ~Q(map_type__in=compact(exclude_map_types.split(',')))
-            cascade_params['mappings_criteria'] = mappings_criteria
-            include_mappings = get(self.cascade, 'include_mappings')
-            if include_mappings is False or return_map_types in ['False', 'false', False, '0', 0]:
-                return_map_types_criteria = False
-            elif return_map_types:
-                return_map_types_criteria = Q() if return_map_types == ALL else Q(
-                    map_type__in=compact(return_map_types.split(',')))
-            else:
-                return_map_types_criteria = mappings_criteria
-            cascade_params['return_map_types_criteria'] = return_map_types_criteria
+            cascade_params['map_types'] = map_types
+            cascade_params['exclude_map_types'] = exclude_map_types
+            cascade_params['return_map_types'] = return_map_types
+        if get(self, '_async'):
+            cascade_params['max_results'] = None
         return cascade_params
 
-    def __is_exact_search_filter(self):
+    def has_param_in_filter(self, param, expected_values):
         return bool(next(
             (filter_def for filter_def in self.filter if  # pylint:disable=not-an-iterable
-             filter_def['property'] == 'exact_match' and filter_def['value'] == 'on'),
+             filter_def['property'].lower() == param and filter_def['value'] in expected_values),
             False
         ))
+
+    def _apply_search(self, search, val, document):
+        include_wildcard = self.has_param_in_filter(EXCLUDE_WILDCARD_SEARCH_PARAM.lower(), FALSEY)
+        include_fuzzy = self.has_param_in_filter(EXCLUDE_FUZZY_SEARCH_PARAM.lower(), FALSEY)
+        exclude_search_map_codes = self.has_param_in_filter(SEARCH_MAP_CODES_PARAM.lower(), FALSEY)
+
+        def clean_fields(_fields):
+            if exclude_search_map_codes:
+                return {key: value for key, value in _fields.items() if not key.endswith('map_codes')}
+            return _fields
+
+        search = search.query(CustomESSearch.get_exact_match_criterion(
+            val, document.get_match_phrase_attrs(), clean_fields(document.get_exact_match_attrs())
+        ))
+        if include_wildcard or include_fuzzy:
+            if include_wildcard:
+                search = search.query(
+                    CustomESSearch.get_wildcard_match_criterion(val, clean_fields(document.get_wildcard_search_attrs()))
+                )
+            if include_fuzzy:
+                search = search.query(
+                    CustomESSearch.get_fuzzy_match_criterion(val, document.get_fuzzy_search_attrs(), 10000, 2)
+                )
+        return search
 
     def apply_filters(self, queryset, resource_klass):
         if self.filter:
             pks = []
             document = resource_klass.get_search_document()
             search = document.search()
-            is_exact_search = self.__is_exact_search_filter()
             for filter_def in self.filter:  # pylint: disable=not-an-iterable
-                if to_snake_case(filter_def['property']) == 'exact_match':
+                if to_snake_case(filter_def['property']) == 'exact_match' or filter_def['property'] in [
+                    EXCLUDE_WILDCARD_SEARCH_PARAM, EXCLUDE_FUZZY_SEARCH_PARAM, SEARCH_MAP_CODES_PARAM,
+                    INCLUDE_SEARCH_META_PARAM
+                ]:
                     continue
                 val = filter_def['value']
                 if filter_def['property'] == 'q':
-                    exact_search_fields = get_exact_search_fields(resource_klass)
-                    if is_exact_search:
-                        search = es_exact_search(search, val, exact_search_fields)
-                    else:
-                        name_attr = '_name' if self.is_concept else 'name'
-                        search = es_wildcard_search(search, val, exact_search_fields, name_attr)
+                    self._apply_search(search, val, document)
                 else:
                     search = search.filter("match", **{to_snake_case(filter_def["property"]): filter_def["value"]})
             for _queryset in batch_qs(queryset.order_by('id'), 500):
@@ -677,7 +792,7 @@ class CollectionReference(models.Model):
 
     def clean(self):
         if not self.is_valid_filter():
-            raise ValidationError(dict(filter=['Invalid filter schema.']))
+            raise ValidationError({'filter': ['Invalid filter schema.']})
 
         self.original_expression = str(self.expression)
         if self.transform and self.transform.lower() != TRANSFORM_TO_RESOURCE_VERSIONS:
@@ -719,16 +834,15 @@ class CollectionReference(models.Model):
     def get_allowed_filter_properties(self):
         common = ['q', 'exact_match']
         if self.is_concept:
-            return [*Concept.es_fields.keys(), *common]
-        if self.is_mapping:
-            return [*Mapping.es_fields.keys(), *common]
+            common = [*Concept.es_fields.keys(), *common]
+        elif self.is_mapping:
+            common = [*Mapping.es_fields.keys(), *common]
         return common
 
     def __is_valid_filter_schema(self, filter_def):
         return isinstance(filter_def, dict) and \
                sorted(filter_def.keys()) == sorted(['property', 'op', 'value']) and \
                {type(val) for val in filter_def.values()} == {str} and \
-               filter_def['op'] in self.ALLOWED_FILTER_OPS and \
                to_snake_case(filter_def['property']) in self.get_allowed_filter_properties()
 
     def save(self, force_insert=False, force_update=False, using=None,
@@ -761,16 +875,6 @@ class CollectionReference(models.Model):
         self.fetch_concepts()
         return [*set(self._concepts.values_list('uri', flat=True)), *set(self._mappings.values_list('uri', flat=True))]
 
-    def link_resources(self):
-        collection = self.collection
-        expansion = collection.expansion
-        is_concept_expression = self.is_concept
-        if self.expression and not is_canonical_uri(self.expression) and expansion:
-            if is_concept_expression and not self.concepts.exists():
-                self.concepts.add(*expansion.concepts.filter(uri=self.expression))
-            if not is_concept_expression and not self.mappings.exists():
-                self.mappings.add(*expansion.mappings.filter(uri=self.expression))
-
     @property
     def translation(self):
         return CollectionReferenceTranslator(self).translate()
@@ -798,7 +902,10 @@ def default_expansion_parameters():
 class Expansion(BaseResourceModel):
     class Meta:
         db_table = 'collection_expansions'
-        indexes = [] + BaseResourceModel.Meta.indexes
+        indexes = [
+                      models.Index(fields=['uri']),
+                      models.Index(name="expansion_mnemonic_like", fields=["mnemonic"], opclasses=["text_pattern_ops"])
+                  ] + BaseResourceModel.Meta.indexes
 
     parameters = models.JSONField(default=default_expansion_parameters)
     canonical_url = models.URLField(null=True, blank=True)
@@ -862,14 +969,20 @@ class Expansion(BaseResourceModel):
             if get(settings, 'TEST_MODE', False):
                 index_expansion_concepts(self.id)
             else:
-                index_expansion_concepts.apply_async((self.id, ), queue='indexing')
+                try:
+                    index_expansion_concepts.apply_async((self.id, ), queue='indexing')
+                except AlreadyQueued:
+                    pass
 
     def index_mappings(self):
         if self.mappings.exists():
             if get(settings, 'TEST_MODE', False):
                 index_expansion_mappings(self.id)
             else:
-                index_expansion_mappings.apply_async((self.id, ), queue='indexing')
+                try:
+                    index_expansion_mappings.apply_async((self.id, ), queue='indexing')
+                except AlreadyQueued:
+                    pass
 
     @staticmethod
     def to_ref_list(references):
@@ -895,13 +1008,13 @@ class Expansion(BaseResourceModel):
             concepts = reference.concepts
             if concepts.exists():
                 index_concepts = True
-                filters = dict(id__in=list(concepts.values_list('id', flat=True)))
+                filters = {'id__in': list(concepts.values_list('id', flat=True))}
                 self.concepts.set(self.concepts.exclude(**filters))
                 batch_index_resources.apply_async(('concept', filters), queue='indexing')
             mappings = reference.mappings
             if mappings.exists():
                 index_mappings = True
-                filters = dict(id__in=list(mappings.values_list('id', flat=True)))
+                filters = {'id__in': list(mappings.values_list('id', flat=True))}
                 self.mappings.set(self.mappings.exclude(**filters))
                 batch_index_resources.apply_async(('mapping', filters), queue='indexing')
 
@@ -919,14 +1032,13 @@ class Expansion(BaseResourceModel):
         mappings_filters = None
         if expressions == ALL:
             if self.concepts.exists():
-                concepts_filters = dict(id__in=list(self.concepts.values_list('id', flat=True)))
+                concepts_filters = {'id__in': list(self.concepts.values_list('id', flat=True))}
                 self.concepts.clear()
             if self.mappings.exists():
-                mappings_filters = dict(id__in=list(self.mappings.values_list('id', flat=True)))
+                mappings_filters = {'id__in': list(self.mappings.values_list('id', flat=True))}
                 self.mappings.clear()
         else:
-            concepts_filters = dict(uri__in=expressions)
-            mappings_filters = dict(uri__in=expressions)
+            concepts_filters = mappings_filters = {'uri__in': expressions}
             self.concepts.set(self.concepts.exclude(**concepts_filters))
             self.mappings.set(self.mappings.exclude(**mappings_filters))
 
@@ -934,12 +1046,13 @@ class Expansion(BaseResourceModel):
             batch_index_resources.apply_async(('concept', concepts_filters), queue='indexing')
             batch_index_resources.apply_async(('mapping', mappings_filters), queue='indexing')
 
-    def add_references(self, references, index=True, is_adding_all_references=False, attempt_reevaluate=True):  # pylint: disable=too-many-locals
+    def add_references(self, references, index=True, is_adding_all=False, attempt_reevaluate=True):  # pylint: disable=too-many-locals,too-many-statements
         include_refs, exclude_refs = self.to_ref_list_separated(references)
         resolved_valueset_versions = []
         resolved_system_versions = []
+        _system_version_cache = {}
 
-        if not is_adding_all_references:
+        if not is_adding_all:
             existing_exclude_refs = self.collection_version.references.exclude(
                 include=True).exclude(id__in=[ref.id for ref in exclude_refs])
             if isinstance(exclude_refs, QuerySet):
@@ -947,51 +1060,66 @@ class Expansion(BaseResourceModel):
             else:
                 exclude_refs += [*existing_exclude_refs.all()]
 
-        index_concepts = False
-        index_mappings = False
+        index_concepts = index_mappings = False
+
+        # attempt_reevaluate is False for delete reference(s)
         should_reevaluate = attempt_reevaluate and not self.is_auto_generated
+
         include_system_versions = []
         system_versions = self.parameters.get(ExpansionParameters.INCLUDE_SYSTEM)
         if should_reevaluate and system_versions:
             for system_version in compact(system_versions.split(',')):
-                version = ConceptContainerModel.resolve_reference_expression(system_version.strip())
+                _system = system_version.strip()
+                _cache_key = f"NONE-{_system}-NONE"
+                version = ConceptContainerModel.resolve_reference_expression(_system)
+                _system_version_cache[_cache_key] = version
                 if version.id:
                     include_system_versions.append(version)
 
+        def get_ref_system_version(ref):
+            if ref.system:
+                __cache_key = f"{ref.namespace or 'NONE'}-{ref.system}-{ref.version or 'NONE'}"
+                if __cache_key not in _system_version_cache:
+                    _system_version_cache[__cache_key] = ref.resolve_system_version
+                return _system_version_cache[__cache_key]
+            return None
+
         def get_ref_results(ref):
-            # attempt_reevaluate is False for delete reference(s)
             nonlocal resolved_valueset_versions
             nonlocal resolved_system_versions
             resolved_valueset_versions += ref.resolve_valueset_versions
+            ref_system_versions = []
+            should_use_ref_system_version = True
             for _system_version in include_system_versions:
                 if ref.can_compute_against_system_version(_system_version):
-                    resolved_system_versions.append(_system_version)
+                    ref_system_versions.append(_system_version)
+                    should_use_ref_system_version = False
 
-            resolved_system_versions.append(ref.resolve_system_version)
+            if should_use_ref_system_version:
+                _system_version = get_ref_system_version(ref)
+                if _system_version:
+                    ref_system_versions.append(_system_version)
+            if ref_system_versions:
+                ref_system_versions = list(set(ref_system_versions))
 
             _concepts = Concept.objects.none()
             _mappings = Mapping.objects.none()
 
             if should_reevaluate:
-                for _system_version in resolved_system_versions:
-                    __concepts, __mappings = ref.get_concepts(_system_version)
-                    _concepts = Concept.objects.filter(
-                        id__in=list(
-                            _concepts.union(__concepts).values_list('id', flat=True)
+                for _system_version in ref_system_versions:
+                    if ref.is_mapping:
+                        _mappings = _mappings.union(ref.get_mappings(_system_version))
+                    else:
+                        __concepts, __mappings = ref.get_concepts(_system_version)
+                        _concepts = Concept.objects.filter(
+                            id__in=_concepts.union(__concepts).values_list('id', flat=True)
                         )
-                    )
-                    _mappings = Mapping.objects.filter(
-                        id__in=list(
-                            _mappings.union(
-                                __mappings
-                            ).union(
-                                ref.get_mappings(_system_version)
-                            ).values_list('id', flat=True)
-                        )
-                    )
+                        _mappings = _mappings.union(__mappings)
+                    _mappings = Mapping.objects.filter(id__in=_mappings.values_list('id', flat=True))
             else:
-                _concepts = ref.concepts.all()
-                _mappings = ref.mappings.all()
+                _concepts = ref.concepts.filter()
+                _mappings = ref.mappings.filter()
+            resolved_system_versions += ref_system_versions
             return _concepts, _mappings
 
         for reference in include_refs:
@@ -1174,7 +1302,7 @@ class ExpansionParameter:
 
 class ExpansionActiveParameter(ExpansionParameter):
     before_filter = True
-    default_filters = dict(is_active=True, retired=False)
+    default_filters = {'is_active': True, 'retired': False}
 
     @property
     def filters(self):
@@ -1192,9 +1320,9 @@ class ExpansionTextFilterParameter(ExpansionParameter):
             klass = get_resource_class_from_resource_name('concept' if is_concept_queryset else 'mapping')
             document = klass.get_search_document()
             search = document.search()
-            search = es_wildcard_search(
-                search, self.value, get_exact_search_fields(klass),
-                name_attr='_name' if is_concept_queryset else 'name'
+            search = search.query(
+                CustomESSearch.get_exact_match_criterion(
+                    self.value, document.get_match_phrase_attrs(), document.get_exact_match_attrs())
             )
             for _queryset in batch_qs(queryset.order_by('id'), 500):
                 new_search = es_id_in(search, list(_queryset.values_list('id', flat=True)))
@@ -1214,7 +1342,7 @@ class ExpansionSystemParameter(ExpansionParameter):
             version = None
             if '|' in system:
                 canonical_url, version = system.split('|')
-            filters = dict(canonical_url=canonical_url)
+            filters = {'canonical_url': canonical_url}
             if version:
                 filters['version'] = version
             criterion |= models.Q(**filters)
@@ -1263,9 +1391,9 @@ class ExpansionDateParameter(ExpansionIncludeSystemParameter):
     @staticmethod
     def get_date_filter(date):
         if date.count('-') >= 3 or date.count(":"):
-            return dict(revision_date=date)
+            return {'revision_date': date}
         parts = date.split('-')
-        filters = dict(revision_date__year=parts[0])
+        filters = {'revision_date__year': parts[0]}
         if len(parts) > 1:
             filters['revision_date__month'] = parts[1]
         if len(parts) > 2:

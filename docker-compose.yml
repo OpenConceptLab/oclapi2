@@ -12,10 +12,14 @@ services:
     volumes:
       - postgres-data:/usr/share/postgres/data
   redis:
-    image: redis:6.0.6-alpine
+    image: bitnami/redis:7.0.12
     restart: "always"
+    environment:
+      - ALLOW_EMPTY_PASSWORD=yes
     healthcheck:
       test: "redis-cli ping"
+    volumes:
+      - redis-data:/bitnami/redis/data
   api:
     image: openconceptlab/oclapi2:${ENVIRONMENT-production}
     restart: "always"
@@ -30,8 +34,8 @@ services:
       - DB_HOST=${DB_HOST-db}
       - DB_PORT=${DB_PORT-5432}
       - DB_PASSWORD=${DB_PASSWORD-Postgres123}
-      - ES_HOST=${ES_HOST-es}
-      - ES_PORT=${ES_PORT-9200}
+      - ES_HOSTS=${ES_HOSTS-es:9200}
+      - ES_SCHEME=${ES_SCHEME-http}
       - ENVIRONMENT=${ENVIRONMENT-production}
       - DEBUG=${DEBUG-FALSE}
       - SECRET_KEY
@@ -155,7 +159,7 @@ services:
     healthcheck:
       test: "curl --silent --fail -u $${FLOWER_USER:-root}:$${FLOWER_PASSWORD:-Root123} http://localhost:5555/metrics || exit 1"
   es:
-    image: elasticsearch:7.17.1
+    image: elasticsearch:7.17.10
     environment:
       - discovery.type=single-node
       - bootstrap.memory_lock=true
@@ -169,6 +173,15 @@ services:
     restart: "always"
     healthcheck:
       test: "curl --silent --fail http://localhost:9200/_cluster/health || exit 1"
+
+  kibana:
+    image: kibana:7.17.10
+    ports:
+      - "5601:5601"
+    environment:
+      ELASTICSEARCH_HOSTS: '["http://es:9200"]'
+
 volumes:
   postgres-data:
   es-data:
+  redis-data:

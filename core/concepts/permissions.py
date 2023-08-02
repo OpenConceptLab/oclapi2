@@ -25,3 +25,7 @@ class CanViewParentDictionary(IsAuthenticatedOrReadOnly, CanAccessParentDictiona
 
 class CanEditParentDictionary(IsAuthenticatedOrReadOnly, CanAccessParentDictionary, CanEditConceptDictionary):
     parent_permission_class = CanEditConceptDictionary
+
+
+class CanViewParentDictionaryAsGuest(CanAccessParentDictionary, CanViewConceptDictionary):
+    parent_permission_class = CanViewConceptDictionary

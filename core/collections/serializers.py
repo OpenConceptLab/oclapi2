@@ -9,14 +9,18 @@ from rest_framework.relations import PrimaryKeyRelatedField
 from rest_framework.serializers import ModelSerializer, Serializer
 
 from core.client_configs.serializers import ClientConfigSerializer
-from core.collections.constants import INCLUDE_REFERENCES_PARAM
 from core.collections.models import Collection, CollectionReference, Expansion
 from core.common.constants import HEAD, DEFAULT_ACCESS_TYPE, NAMESPACE_REGEX, ACCESS_TYPE_CHOICES, INCLUDE_SUMMARY, \
     INCLUDE_CLIENT_CONFIGS, INVALID_EXPANSION_URL
+from core.common.serializers import AbstractRepoResourcesSerializer
+from core.common.utils import get_truthy_values
 from core.orgs.models import Organization
 from core.settings import DEFAULT_LOCALE
 from core.sources.serializers import SourceVersionListSerializer
 from core.users.models import UserProfile
+
+
+TRUTHY = get_truthy_values()
 
 
 class CollectionMinimalSerializer(ModelSerializer):
@@ -25,6 +29,22 @@ class CollectionMinimalSerializer(ModelSerializer):
     class Meta:
         model = Collection
         fields = ('id', 'url')
+
+
+class CollectionVersionMinimalSerializer(ModelSerializer):
+    id = CharField(source='version')
+    version_url = CharField(source='uri')
+    type = CharField(source='resource_version_type')
+    short_code = CharField(source='mnemonic')
+    autoexpand = SerializerMethodField()
+
+    class Meta:
+        model = Collection
+        fields = ('id', 'version_url', 'type', 'short_code', 'released', 'autoexpand')
+
+    @staticmethod
+    def get_autoexpand(obj):
+        return obj.should_auto_expand
 
 
 class CollectionListSerializer(ModelSerializer):
@@ -50,7 +70,7 @@ class CollectionListSerializer(ModelSerializer):
         self.query_params = {}
         if params:
             self.query_params = params if isinstance(params, dict) else params.dict()
-        self.include_summary = self.query_params.get(INCLUDE_SUMMARY) in ['true', True]
+        self.include_summary = self.query_params.get(INCLUDE_SUMMARY) in TRUTHY
         try:
             if not self.include_summary:
                 self.fields.pop('summary', None)
@@ -80,14 +100,19 @@ class CollectionVersionListSerializer(ModelSerializer):
     previous_version_url = CharField(source='prev_version_uri')
     autoexpand = BooleanField(source='should_auto_expand')
     expansion_url = CharField(source='expansion_uri', read_only=True)
+    checksums = SerializerMethodField()
 
     class Meta:
         model = Collection
         fields = (
             'type', 'short_code', 'name', 'url', 'canonical_url', 'owner', 'owner_type', 'owner_url', 'version',
             'created_at', 'id', 'collection_type', 'updated_at', 'released', 'retired', 'version_url',
-            'previous_version_url', 'autoexpand', 'expansion_url',
+            'previous_version_url', 'autoexpand', 'expansion_url', 'checksums'
         )
+
+    @staticmethod
+    def get_checksums(obj):
+        return obj.get_checksums(queue=True)
 
 
 class CollectionCreateOrUpdateSerializer(ModelSerializer):
@@ -240,6 +265,67 @@ class CollectionSummaryDetailSerializer(CollectionSummarySerializer):
         )
 
 
+class AbstractCollectionSummaryVerboseSerializer(ModelSerializer):
+    # sources = JSONField(source='referenced_sources_distribution')
+    # collections = JSONField(source='referenced_collections_distribution')
+    concepts = JSONField(source='concepts_distribution')
+    mappings = JSONField(source='mappings_distribution')
+    versions = JSONField(source='versions_distribution')
+    references = JSONField(source='references_distribution')
+    expansions = IntegerField(source='expansions_count')
+    uuid = CharField(source='id')
+
+    class Meta:
+        model = Collection
+        fields = (
+            'id', 'uuid', 'concepts', 'mappings', 'versions', 'references', 'expansions',
+            # 'sources', 'collections'
+        )
+
+
+class AbstractCollectionSummaryFieldDistributionSerializer(ModelSerializer):
+    uuid = CharField(source='id')
+    distribution = SerializerMethodField()
+
+    class Meta:
+        model = Collection
+        fields = (
+            'id', 'uuid', 'distribution'
+        )
+
+    def get_distribution(self, obj):
+        result = {}
+        fields = (get(self.context, 'request.query_params.distribution') or '').split(',')
+        for field in fields:
+            func = get(obj, f"get_{field}_distribution")
+            if func:
+                result[field] = func()
+        return result
+
+
+class CollectionSummaryVerboseSerializer(AbstractCollectionSummaryVerboseSerializer):
+    id = CharField(source='mnemonic')
+
+
+class CollectionVersionSummaryVerboseSerializer(AbstractCollectionSummaryVerboseSerializer):
+    id = CharField(source='version')
+
+    def __init__(self, *args, **kwargs):
+        try:
+            self.fields.pop('versions', None)
+        except:  # pylint: disable=bare-except
+            pass
+        super().__init__(*args, **kwargs)
+
+
+class CollectionSummaryFieldDistributionSerializer(AbstractCollectionSummaryFieldDistributionSerializer):
+    id = CharField(source='mnemonic')
+
+
+class CollectionVersionSummaryFieldDistributionSerializer(AbstractCollectionSummaryFieldDistributionSerializer):
+    id = CharField(source='version')
+
+
 class CollectionVersionSummarySerializer(ModelSerializer):
     expansions = IntegerField(source='expansions_count')
 
@@ -259,7 +345,7 @@ class CollectionVersionSummaryDetailSerializer(CollectionVersionSummarySerialize
         )
 
 
-class CollectionDetailSerializer(CollectionCreateOrUpdateSerializer):
+class CollectionDetailSerializer(CollectionCreateOrUpdateSerializer, AbstractRepoResourcesSerializer):
     type = CharField(source='resource_type')
     uuid = CharField(source='id')
     id = CharField(source='mnemonic')
@@ -272,10 +358,10 @@ class CollectionDetailSerializer(CollectionCreateOrUpdateSerializer):
     supported_locales = ListField(required=False, allow_empty=True)
     created_by = CharField(read_only=True, source='created_by.username')
     updated_by = CharField(read_only=True, source='updated_by.username')
-    references = SerializerMethodField()
     summary = SerializerMethodField()
     client_configs = SerializerMethodField()
     expansion_url = CharField(source='expansion_uri', read_only=True, allow_null=True, allow_blank=True)
+    checksums = SerializerMethodField()
 
     class Meta:
         model = Collection
@@ -286,11 +372,11 @@ class CollectionDetailSerializer(CollectionCreateOrUpdateSerializer):
             'url', 'owner', 'owner_type', 'owner_url',
             'created_on', 'updated_on', 'created_by', 'updated_by', 'extras', 'external_id', 'versions_url',
             'version', 'concepts_url', 'mappings_url', 'expansions_url',
-            'custom_resources_linked_source', 'preferred_source', 'references',
+            'custom_resources_linked_source', 'preferred_source',
             'canonical_url', 'identifier', 'publisher', 'contact', 'jurisdiction', 'purpose', 'copyright', 'meta',
             'immutable', 'revision_date', 'logo_url', 'summary', 'text', 'client_configs',
-            'experimental', 'locked_date', 'autoexpand_head', 'expansion_url'
-        )
+            'experimental', 'locked_date', 'autoexpand_head', 'expansion_url', 'checksums'
+        ) + AbstractRepoResourcesSerializer.Meta.fields
 
     def __init__(self, *args, **kwargs):
         params = get(kwargs, 'context.request.query_params')
@@ -298,8 +384,8 @@ class CollectionDetailSerializer(CollectionCreateOrUpdateSerializer):
         self.query_params = {}
         if params:
             self.query_params = params if isinstance(params, dict) else params.dict()
-        self.include_summary = self.query_params.get(INCLUDE_SUMMARY) in ['true', True]
-        self.include_client_configs = self.query_params.get(INCLUDE_CLIENT_CONFIGS) in ['true', True]
+        self.include_summary = self.query_params.get(INCLUDE_SUMMARY) in TRUTHY
+        self.include_client_configs = self.query_params.get(INCLUDE_CLIENT_CONFIGS) in TRUTHY
 
         try:
             if not self.include_summary:
@@ -325,19 +411,17 @@ class CollectionDetailSerializer(CollectionCreateOrUpdateSerializer):
 
         return None
 
-    def get_references(self, obj):
-        if self.context.get(INCLUDE_REFERENCES_PARAM, False):
-            return CollectionReferenceSerializer(obj.references.all(), many=True).data
-
-        return []
-
     def to_representation(self, instance):  # used to be to_native
         ret = super().to_representation(instance)
         ret.update({"supported_locales": instance.get_supported_locales()})
         return ret
 
+    @staticmethod
+    def get_checksums(obj):
+        return obj.get_checksums(queue=True)
 
-class CollectionVersionDetailSerializer(CollectionCreateOrUpdateSerializer):
+
+class CollectionVersionDetailSerializer(CollectionCreateOrUpdateSerializer, AbstractRepoResourcesSerializer):
     type = CharField(source='resource_version_type')
     uuid = CharField(source='id')
     id = CharField(source='version')
@@ -358,6 +442,7 @@ class CollectionVersionDetailSerializer(CollectionCreateOrUpdateSerializer):
     summary = SerializerMethodField()
     autoexpand = SerializerMethodField()
     expansion_url = CharField(source='expansion_uri', allow_null=True, allow_blank=True)
+    checksums = SerializerMethodField()
 
     class Meta:
         model = Collection
@@ -370,15 +455,15 @@ class CollectionVersionDetailSerializer(CollectionCreateOrUpdateSerializer):
             'version', 'concepts_url', 'mappings_url', 'expansions_url', 'is_processing', 'released', 'retired',
             'canonical_url', 'identifier', 'publisher', 'contact', 'jurisdiction', 'purpose', 'copyright', 'meta',
             'immutable', 'revision_date', 'summary', 'text', 'experimental', 'locked_date',
-            'autoexpand', 'expansion_url'
-        )
+            'autoexpand', 'expansion_url', 'checksums'
+        ) + AbstractRepoResourcesSerializer.Meta.fields
 
     def __init__(self, *args, **kwargs):
         params = get(kwargs, 'context.request.query_params')
         self.include_summary = False
         if params:
             self.query_params = params.dict()
-            self.include_summary = self.query_params.get(INCLUDE_SUMMARY) in ['true', True]
+            self.include_summary = self.query_params.get(INCLUDE_SUMMARY) in TRUTHY
 
         try:
             if not self.include_summary:
@@ -399,6 +484,10 @@ class CollectionVersionDetailSerializer(CollectionCreateOrUpdateSerializer):
     @staticmethod
     def get_autoexpand(obj):
         return obj.should_auto_expand
+
+    @staticmethod
+    def get_checksums(obj):
+        return obj.get_checksums(queue=True)
 
 
 class CollectionReferenceSerializer(ModelSerializer):
@@ -450,7 +539,7 @@ class ExpansionSerializer(ModelSerializer):
         self.include_summary = False
         if params:
             self.query_params = params.dict()
-            self.include_summary = self.query_params.get(INCLUDE_SUMMARY) in ['true', True]
+            self.include_summary = self.query_params.get(INCLUDE_SUMMARY) in TRUTHY
 
         try:
             if not self.include_summary:
@@ -490,7 +579,7 @@ class ExpansionDetailSerializer(ModelSerializer):
         self.include_summary = False
         if params:
             self.query_params = params.dict()
-            self.include_summary = self.query_params.get(INCLUDE_SUMMARY) in ['true', True]
+            self.include_summary = self.query_params.get(INCLUDE_SUMMARY) in TRUTHY
 
         try:
             if not self.include_summary:

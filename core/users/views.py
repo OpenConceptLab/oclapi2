@@ -24,15 +24,19 @@ from core.common.exceptions import Http400
 from core.common.mixins import ListWithHeadersMixin
 from core.common.swagger_parameters import last_login_before_param, last_login_since_param, updated_since_param, \
     date_joined_since_param, date_joined_before_param
-from core.common.utils import parse_updated_since_param, from_string_to_date
+from core.common.utils import parse_updated_since_param, from_string_to_date, get_truthy_values
 from core.common.views import BaseAPIView, BaseLogoView
 from core.orgs.models import Organization
 from core.users.constants import VERIFICATION_TOKEN_MISMATCH, VERIFY_EMAIL_MESSAGE, REACTIVATE_USER_MESSAGE
 from core.users.documents import UserProfileDocument
-from core.users.search import UserProfileSearch
+from core.users.search import UserProfileFacetedSearch
 from core.users.serializers import UserDetailSerializer, UserCreateSerializer, UserListSerializer, UserSummarySerializer
 from .models import UserProfile
+from ..common import ERRBIT_LOGGER
 from ..common.services import AuthService, OIDCAuthService
+
+
+TRUTHY = get_truthy_values()
 
 
 class OCLOIDCAuthenticationCallbackView(OIDCAuthenticationCallbackView):
@@ -51,7 +55,7 @@ class OIDCodeExchangeView(APIView):
         client_secret = request.data.get('client_secret', None)
         if not code or not redirect_uri or not client_id or not client_secret:
             return Response(
-                dict(error='code and redirect_uri are mandatory to exchange for token'),
+                {'error': 'code, redirect_uri, client_id and client_secret are mandatory to exchange for token'},
                 status=status.HTTP_400_BAD_REQUEST
             )
         return Response(
@@ -74,7 +78,7 @@ class SSOMigrateView(APIView):  # pragma: no cover
         password = request.data.get('password')
         if not username or not password:
             return Response(
-                dict(error='keycloak admin username/password are required'),
+                {'error': 'keycloak admin username/password are required'},
                 status=status.HTTP_400_BAD_REQUEST
             )
         user = self.get_object()
@@ -87,7 +91,7 @@ class TokenExchangeView(APIView):
 
     @staticmethod
     def get(request):
-        return Response(dict(token=request.user.get_token()))
+        return Response({'token': request.user.get_token()})
 
 
 class OIDCLogoutView(APIView):
@@ -125,12 +129,12 @@ class TokenAuthenticationView(ObtainAuthToken):
     def post(self, request, *args, **kwargs):
         if AuthService.is_sso_enabled():
             raise Http400(
-                dict(error=["Single Sign On is enabled in this environment. Cannot login via API directly."]))
+                {'error': ["Single Sign On is enabled in this environment. Cannot login via API directly."]})
 
         user = UserProfile.objects.filter(username=request.data.get('username')).first()
 
         if not user or not user.check_password(request.data.get('password')):
-            raise Http400(dict(non_field_errors=["Unable to log in with provided credentials."]))
+            raise Http400({'non_field_errors': ["Unable to log in with provided credentials."]})
 
         if not user.is_active:
             user.verify()
@@ -166,7 +170,7 @@ class UserBaseView(BaseAPIView):
     queryset = UserProfile.objects
     es_fields = UserProfile.es_fields
     document_model = UserProfileDocument
-    facet_class = UserProfileSearch
+    facet_class = UserProfileFacetedSearch
     is_searchable = True
     default_qs_sort_attr = '-date_joined'
     serializer_class = UserDetailSerializer
@@ -201,7 +205,7 @@ class UserListView(UserBaseView,
                    mixins.CreateModelMixin):
 
     def get_serializer_class(self):
-        if self.request.query_params.get('summary') in ['true', True] and self.request.method == 'GET':
+        if self.request.query_params.get('summary') in TRUTHY and self.request.method == 'GET':
             return UserSummarySerializer
         if self.request.method == 'GET' and self.is_verbose():
             return UserDetailSerializer
@@ -274,7 +278,7 @@ class UserSignup(UserBaseView, mixins.CreateModelMixin):
     def perform_create(self, serializer):
         if AuthService.is_sso_enabled():
             raise Http400(
-                dict(error=["Single Sign On is enabled in this environment. Cannot signup via API directly."]))
+                {'error': ["Single Sign On is enabled in this environment. Cannot signup via API directly."]})
         data = self.request.data
         try:
             validate_password(data.get('password'))
@@ -303,7 +307,7 @@ class UserEmailVerificationView(UserBaseView):
         if result is True:
             return Response(status=status.HTTP_200_OK)
 
-        return Response(dict(detail=VERIFICATION_TOKEN_MISMATCH), status=status.HTTP_401_UNAUTHORIZED)
+        return Response({'detail': VERIFICATION_TOKEN_MISMATCH}, status=status.HTTP_401_UNAUTHORIZED)
 
 
 class UserPasswordResetView(UserBaseView):
@@ -330,7 +334,7 @@ class UserPasswordResetView(UserBaseView):
 
         if AuthService.is_sso_enabled():
             raise Http400(
-                dict(error=["Single Sign On is enabled in this environment. Cannot reset password via API directly."]))
+                {'error': ["Single Sign On is enabled in this environment. Cannot reset password via API directly."]})
 
         token = request.data.get('token', None)
         password = request.data.get('new_password', None)
@@ -345,7 +349,7 @@ class UserPasswordResetView(UserBaseView):
         try:
             validate_password(password)
         except ValidationError as ex:
-            return Response(dict(errors=ex.messages), status=status.HTTP_400_BAD_REQUEST)
+            return Response({'errors': ex.messages}, status=status.HTTP_400_BAD_REQUEST)
 
         result = AuthService.get(user=user).update_password(password)
         if get(result, 'errors'):
@@ -356,7 +360,7 @@ class UserPasswordResetView(UserBaseView):
 
 class UserDetailView(UserBaseView, RetrieveAPIView, DestroyAPIView, mixins.UpdateModelMixin):
     def get_serializer_class(self):
-        if self.request.query_params.get('summary') in ['true', True] and self.request.method == 'GET':
+        if self.request.query_params.get('summary') in TRUTHY and self.request.method == 'GET':
             return UserSummarySerializer
 
         return UserDetailSerializer
@@ -403,7 +407,11 @@ class UserDetailView(UserBaseView, RetrieveAPIView, DestroyAPIView, mixins.Updat
         if self.user_is_self:
             return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
         if self.is_hard_delete_requested():
-            obj.delete()
+            try:
+                obj.delete()
+            except Exception as ex:
+                ERRBIT_LOGGER.raise_errbit(f'Cannot delete user because: {str(ex)}')
+                return Response(status=status.HTTP_400_BAD_REQUEST)
         else:
             obj.deactivate()
         return Response(status=status.HTTP_204_NO_CONTENT)
@@ -463,7 +471,7 @@ class UserExtraRetrieveUpdateDestroyView(UserExtrasBaseView, RetrieveUpdateDestr
         if key in extras:
             return Response({key: extras[key]})
 
-        return Response(dict(detail=NOT_FOUND), status=status.HTTP_404_NOT_FOUND)
+        return Response({'detail': NOT_FOUND}, status=status.HTTP_404_NOT_FOUND)
 
     def update(self, request, **kwargs):  # pylint: disable=arguments-differ
         key = kwargs.get('extra')
@@ -486,4 +494,4 @@ class UserExtraRetrieveUpdateDestroyView(UserExtrasBaseView, RetrieveUpdateDestr
             instance.save()
             return Response(status=status.HTTP_204_NO_CONTENT)
 
-        return Response(dict(detail=NOT_FOUND), status=status.HTTP_404_NOT_FOUND)
+        return Response({'detail': NOT_FOUND}, status=status.HTTP_404_NOT_FOUND)

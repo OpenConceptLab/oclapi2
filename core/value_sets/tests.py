@@ -1,4 +1,4 @@
-from core.collections.models import CollectionReference
+from core.collections.models import CollectionReference, Collection
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
 from core.common.tests import OCLAPITestCase
 from core.concepts.documents import ConceptDocument
@@ -7,6 +7,7 @@ from core.orgs.tests.factories import OrganizationFactory
 from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory, UserSourceFactory
 from core.users.tests.factories import UserProfileFactory
+from core.value_sets.serializers import ValueSetDetailSerializer
 
 
 class ValueSetTest(OCLAPITestCase):
@@ -71,7 +72,8 @@ class ValueSetTest(OCLAPITestCase):
         self.assertEqual(
             resource['identifier'][0]['value'], f'/orgs/{self.org.mnemonic}/ValueSet/{self.collection.mnemonic}/')
         self.assertEqual(len(resource['compose']['include']), 1)
-        self.assertEqual(resource['compose']['include'][0]['system'], 'http://some/url')
+        self.assertEqual(resource['compose']['include'][0]['system'],
+                         f'/orgs/{self.org.mnemonic}/ValueSet/{self.org_source_v2.mnemonic}/')
         self.assertEqual(resource['compose']['include'][0]['version'], self.org_source_v2.version)
         self.assertEqual(len(resource['compose']['include'][0]['concept']), 2)
 
@@ -92,7 +94,8 @@ class ValueSetTest(OCLAPITestCase):
         self.assertEqual(
             resource['identifier'][0]['value'], f'/orgs/{self.org.mnemonic}/ValueSet/{self.collection.mnemonic}/')
         self.assertEqual(len(resource['compose']['include']), 1)
-        self.assertEqual(resource['compose']['include'][0]['system'], 'http://some/url')
+        self.assertEqual(resource['compose']['include'][0]['system'],
+                         f'/orgs/{self.org.mnemonic}/ValueSet/{self.org_source_v2.mnemonic}/')
         self.assertEqual(resource['compose']['include'][0]['version'], self.org_source_v2.version)
         self.assertEqual(len(resource['compose']['include'][0]['concept']), 2)
 
@@ -191,7 +194,7 @@ class ValueSetTest(OCLAPITestCase):
         self.assertEqual(len(resource['compose']['include']), 1)
         self.assertEqual(resource['compose']['include'][0]['system'], 'http://some/url')
         self.assertEqual(resource['compose']['include'][0]['version'], self.org_source_v2.version)
-        self.assertEqual(len(resource['compose']['include'][0]['concept']), 1)
+        self.assertIsNone(resource['compose']['include'][0].get('concept'))
 
     def test_create_with_filter_and_concept(self):
         ConceptDocument().update(self.org_source_v2.head.concepts_set.all())
@@ -217,8 +220,7 @@ class ValueSetTest(OCLAPITestCase):
                                     'op': '=',
                                     'value': self.concept_2.mnemonic
                                 }
-                            ],
-                            'concept': [],  # concept/code shouldn't be defined if filters are defined
+                            ]
                         }
                     ]
                 }
@@ -232,11 +234,10 @@ class ValueSetTest(OCLAPITestCase):
         self.assertEqual(len(resource['compose']['include']), 1)
         self.assertEqual(resource['compose']['include'][0]['system'], 'http://some/url')
         self.assertEqual(resource['compose']['include'][0]['version'], self.org_source_v2.version)
-        self.assertEqual(len(resource['compose']['include'][0]['concept']), 1)
-        self.assertEqual(resource['compose']['include'][0]['concept'][0]['code'], self.concept_2.mnemonic)
         self.assertEqual(len(resource['compose']['include'][0]['filter']), 1)
         self.assertEqual(resource['compose']['include'][0]['filter'][0]['property'], 'q')
         self.assertEqual(resource['compose']['include'][0]['filter'][0]['value'], self.concept_2.mnemonic)
+        self.assertIsNone(resource['compose']['include'][0].get('concept'))
 
     def test_can_update_empty(self):
         response = self.client.put(
@@ -299,12 +300,11 @@ class ValueSetTest(OCLAPITestCase):
         resource = response.data
         self.assertEqual(resource['version'], 'v2')
         self.assertEqual(resource['identifier'][0]['value'], f'/orgs/{self.org.mnemonic}/ValueSet/c1/')
-        self.assertEqual(len(resource['compose']['include']), 1)
-        self.assertEqual(resource['compose']['include'][0]['system'], 'http://some/url')
-        self.assertEqual(resource['compose']['include'][0]['version'], self.org_source_v2.version)
-        self.assertEqual(len(resource['compose']['include'][0]['concept']), 2)
-        self.assertEqual(resource['compose']['include'][0]['concept'][0]['code'], self.concept_1.mnemonic)
-        self.assertEqual(resource['compose']['include'][0]['concept'][1]['code'], self.concept_2.mnemonic)
+        self.assertEqual(len(resource['compose']['include']), 2)
+        self.assertEqual(resource['compose']['include'][1]['system'], 'http://some/url')
+        self.assertEqual(resource['compose']['include'][1]['version'], self.org_source_v2.version)
+        self.assertEqual(len(resource['compose']['include'][1]['concept']), 1)
+        self.assertEqual(resource['compose']['include'][1]['concept'][0]['code'], self.concept_2.mnemonic)
 
     def test_validate_code(self):
         self.collection.add_references([
@@ -373,6 +373,37 @@ class ValueSetTest(OCLAPITestCase):
         self.assertEqual(resource['parameter'][0]['name'], 'result')
         self.assertEqual(resource['parameter'][0]['valueBoolean'], True)
 
+    def test_validate_code_globally_via_post(self):
+        self.collection.add_references([
+            CollectionReference(
+                expression=self.concept_1.uri, collection=self.collection, code=self.concept_1.mnemonic,
+                system=self.concept_1.parent.uri, version='v2'
+            ),
+            CollectionReference(
+                expression=self.concept_2.uri, collection=self.collection, code=self.concept_2.mnemonic,
+                system=self.concept_2.parent.uri, version='v2'
+            ),
+        ])
+        self.collection_v1.seed_references()
+
+        response = self.client.post(
+            '/fhir/ValueSet/$validate-code/',
+            data={
+                'resourceType': 'Parameters',
+                'parameter': [
+                    {'name': 'url', 'valueUri': 'http://c1.com'},
+                    {'name': 'system', 'valueUri': 'http://some/url'},
+                    {'name': 'systemVersion', 'valueString': self.org_source_v2.version},
+                    {'name': 'code', 'valueCode': self.concept_1.mnemonic}
+                ]
+            },
+            format='json'
+        )
+
+        resource = response.data
+        self.assertEqual(resource['parameter'][0]['name'], 'result')
+        self.assertEqual(resource['parameter'][0]['valueBoolean'], True)
+
     def test_validate_code_globally_negative(self):
         self.collection.add_references([
             CollectionReference(
@@ -405,6 +436,7 @@ class ValueSetTest(OCLAPITestCase):
                 'id': 'c2',
                 'url': 'http://c2.com',
                 'status': 'draft',
+                'version': '1',
                 'name': 'collection1',
                 'description': 'This is a test collection',
                 'compose': {
@@ -446,5 +478,74 @@ class ValueSetTest(OCLAPITestCase):
         self.assertEqual(resource['resourceType'], 'ValueSet')
         expansion = resource['expansion']
         self.assertIsNotNone(expansion['timestamp'])
+        self.assertIn('/users/' + self.user.mnemonic + '/collections/c2/1/expansions', expansion['identifier'])
         self.assertEqual(len(expansion['contains']), 1)
         self.assertEqual(expansion['contains'][0]['code'], self.concept_1.mnemonic)
+
+    def text_get_expand(self):
+        self.client.post(
+            f'/users/{self.user.mnemonic}/ValueSet/',
+            HTTP_AUTHORIZATION='Token ' + self.user_token,
+            data={
+                'resourceType': 'ValueSet',
+                'id': 'c2',
+                'url': 'http://c2.com',
+                'status': 'draft',
+                'version': '1',
+                'name': 'collection1',
+                'description': 'This is a test collection',
+                'compose': {
+                    'include': [
+                        {
+                            'system': 'http://some/url',
+                            'version': self.org_source_v2.version,
+                            'concept': [
+                                {
+                                    'code': self.concept_1.mnemonic
+                                }
+                            ]
+                        }
+                    ]
+                }
+            },
+            format='json'
+        )
+
+        ConceptDocument().update(self.concept_1.parent.concepts_set.all())
+
+        self.client.post(
+            '/users/' + self.user.mnemonic + '/ValueSet/c2/$expand/',
+            HTTP_AUTHORIZATION='Token ' + self.user_token,
+            data={
+                'resourceType': 'Parameters',
+                'parameter': [
+                    {
+                        'name': 'filter',
+                        'valueString': self.concept_1.mnemonic
+                    }
+                ]
+            },
+            format='json'
+        )
+
+        response = self.client.get(
+            '/users/' + self.user.mnemonic + '/ValueSet/c2/$expand/?filter=' + {self.concept_1.mnemonic},
+            HTTP_AUTHORIZATION='Token ' + self.user_token,
+            format='json'
+        )
+
+        resource = response.data
+
+        self.assertEqual(resource['resourceType'], 'ValueSet')
+        expansion = resource['expansion']
+        self.assertIsNotNone(expansion['timestamp'])
+        self.assertIn('/users/' + self.user.mnemonic + '/collections/c2/1/expansions', expansion['identifier'])
+        self.assertEqual(len(expansion['contains']), 1)
+        self.assertEqual(expansion['contains'][0]['code'], self.concept_1.mnemonic)
+
+    def test_unable_to_represent_as_fhir(self):
+        instance = Collection(id='1', uri='/invalid/uri')
+        serialized = ValueSetDetailSerializer(instance=instance).data
+        self.assertDictEqual(serialized, {
+            'resourceType': 'OperationOutcome',
+            'issue': [{'severity': 'error', 'details': 'Failed to represent "/invalid/uri" as ValueSet'}]})

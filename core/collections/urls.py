@@ -8,21 +8,6 @@ from . import views
 urlpatterns = [
     re_path(r'^$', views.CollectionListView.as_view(), name='collection-list'),
     re_path(
-        'references/old-to-new/',
-        views.CollectionReferencesOldToNewStructureMigrationView.as_view(),
-        name='collection-references-old-to-new'
-    ),
-    re_path(
-        'references/link-resources/',
-        views.CollectionReferencesLinkResourcesView.as_view(),
-        name='collection-references-old-to-new'
-    ),
-    re_path(
-        'expansions/link-repo-versions/',
-        views.ExpansionsLinkToRepoVersionsView.as_view(),
-        name='expansion-link-repo-version'
-    ),
-    re_path(
         fr"^(?P<collection>{NAMESPACE_PATTERN})/$",
         views.CollectionRetrieveUpdateDestroyView.as_view(),
         name='collection-detail'
@@ -273,11 +258,6 @@ urlpatterns = [
         ),
         views.CollectionVersionMappingsView.as_view(),
         name='mapping-list'
-    ),
-    re_path(
-        r'^(?P<collection>{pattern})/(?P<version>{pattern})/references/link/$'.format(pattern=NAMESPACE_PATTERN),
-        views.CollectionVersionReferencesLinkView.as_view(),
-        name='collectionversion-references-link'
     ),
     re_path(
         r'^(?P<collection>{pattern})/(?P<version>{pattern})/references/(?P<reference>{pattern})/$'.format(

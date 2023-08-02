@@ -1,7 +1,7 @@
 from django.core.exceptions import ValidationError
 
 from core.common.constants import (
-    NA, YES, NO, CUSTOM_VALIDATION_SCHEMA_OPENMRS, HEAD, REFERENCE_VALUE_SOURCE_MNEMONICS
+    NA, YES, NO, OPENMRS_VALIDATION_SCHEMA, HEAD, REFERENCE_VALUE_SOURCE_MNEMONICS
 )
 from core.orgs.models import Organization
 from .constants import BASIC_DESCRIPTION_CANNOT_BE_EMPTY, BASIC_NAMES_CANNOT_BE_EMPTY
@@ -21,7 +21,7 @@ class ValidatorSpecifier:
     def __init__(self):
         from core.concepts.custom_validators import OpenMRSConceptValidator
         self.validator_map = {
-            CUSTOM_VALIDATION_SCHEMA_OPENMRS: OpenMRSConceptValidator
+            OPENMRS_VALIDATION_SCHEMA: OpenMRSConceptValidator
         }
         self.reference_values = {}
         self.repo = None

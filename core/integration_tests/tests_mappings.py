@@ -45,27 +45,46 @@ class MappingListViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 0)
 
-        collection.add_expressions(dict(expressions=[mapping.uri]), collection.created_by)
+        collection.add_expressions({'expressions': [mapping.uri]}, collection.created_by)
+
+        response = self.client.get(collection.mappings_url + '?includeReferences=true', format='json')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(len(response.data[0]['references']), 1)
+        self.assertEqual(response.data[0]['references'][0]['expression'], mapping.uri)
+        self.assertEqual(response.data[0]['references'][0]['uri'], collection.references.first().uri)
 
         response = self.client.get(collection.mappings_url, format='json')
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['references'], [collection.references.first().uri])
+
+        response = self.client.get(
+            mapping.parent.mappings_url + '?lookupConcepts=true',
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['from_concept']['id'], mapping.from_concept.mnemonic)
+        self.assertEqual(response.data[0]['to_concept']['id'], mapping.to_concept.mnemonic)
 
     def test_post_400(self):
         source = UserSourceFactory(user=self.user)
 
         response = self.client.post(
             source.mappings_url,
-            dict(foo='bar'),
+            {'foo': 'bar'},
             HTTP_AUTHORIZATION='Token ' + self.token,
         )
         self.assertEqual(response.status_code, 400)
         self.assertEqual(
             response.data,
-            dict(
-                map_type=[ErrorDetail(string='This field is required.', code='required')],
-            )
+            {
+                'map_type': [ErrorDetail(string='This field is required.', code='required')]
+            }
         )
 
     def test_post_201(self):
@@ -75,7 +94,11 @@ class MappingListViewTest(OCLAPITestCase):
 
         response = self.client.post(
             source.mappings_url,
-            dict(map_type='same as', from_concept_url=concept2.uri, to_concept_url=concept1.uri),
+            {
+                'map_type': 'same as',
+                'from_concept_url': concept2.uri,
+                'to_concept_url': concept1.uri
+            },
             HTTP_AUTHORIZATION='Token ' + self.token,
         )
         self.assertEqual(response.status_code, 201)
@@ -83,10 +106,10 @@ class MappingListViewTest(OCLAPITestCase):
         self.assertEqual(response.data['from_concept_code'], concept2.mnemonic)
         self.assertEqual(response.data['to_concept_code'], concept1.mnemonic)
         mapping = source.mappings.first()
-        self.assertEqual(mapping.from_concept, concept2)
-        self.assertEqual(mapping.from_source, concept2.parent)
-        self.assertEqual(mapping.to_concept, concept1)
-        self.assertEqual(mapping.to_source, concept1.parent)
+        self.assertEqual(mapping.from_concept.id, concept2.id)
+        self.assertEqual(mapping.from_source.id, concept2.parent.id)
+        self.assertEqual(mapping.to_concept.id, concept1.id)
+        self.assertEqual(mapping.to_source.id, concept1.parent.id)
         self.assertEqual(mapping.from_source_url, concept2.parent.uri)
         self.assertEqual(mapping.to_source_url, concept1.parent.uri)
         self.assertEqual(mapping.from_source_version, None)
@@ -96,7 +119,11 @@ class MappingListViewTest(OCLAPITestCase):
 
         response = self.client.post(
             source.mappings_url,
-            dict(map_type='same as', from_concept_url=concept2.uri, to_concept_url=concept1.uri),
+            {
+                'map_type': 'same as',
+                'from_concept_url': concept2.uri,
+                'to_concept_url': concept1.uri
+            },
             HTTP_AUTHORIZATION='Token ' + self.token,
         )
         self.assertEqual(response.status_code, 400)
@@ -106,7 +133,7 @@ class MappingListViewTest(OCLAPITestCase):
 
         response = self.client.post(
             source.mappings_url,
-            dict(map_type='same as', from_concept_url=concept2.uri, to_concept_url=concept2.uri),
+            {'map_type': 'same as', 'from_concept_url': concept2.uri, 'to_concept_url': concept2.uri},
             HTTP_AUTHORIZATION='Token ' + self.token,
         )
         self.assertEqual(response.status_code, 201)
@@ -264,7 +291,7 @@ class MappingListViewTest(OCLAPITestCase):
         self.assertIsNone(mapping.to_concept_id)
         self.assertIsNone(mapping.to_source_id)
 
-        concept2 = ConceptFactory(parent=source, sources=[source_v1], names=[ConceptNameFactory()])
+        concept2 = ConceptFactory(parent=source, sources=[source_v1], names=[ConceptNameFactory.build()])
         self.assertIsNotNone(concept2.display_name)
 
         response = self.client.post(
@@ -350,7 +377,8 @@ class MappingListViewTest(OCLAPITestCase):
         self.assertEqual(mapping.to_source, source)
         self.assertIsNone(mapping.to_concept)
 
-        concept = ConceptFactory(parent=source, mnemonic='A73', names=[ConceptNameFactory(name='Malaria Updated')])
+        concept = ConceptFactory(
+            parent=source, mnemonic='A73', names=[ConceptNameFactory.build(name='Malaria Updated')])
         concept.update_mappings()
         mapping.refresh_from_db()
         self.assertEqual(mapping.to_concept_code, 'A73')
@@ -418,7 +446,7 @@ class MappingListViewTest(OCLAPITestCase):
         self.assertEqual(mapping.to_source, to_source)
         self.assertEqual(mapping.to_source_version, 'v11')
 
-        concept = ConceptFactory(parent=to_source, mnemonic='A73', names=[ConceptNameFactory(name='foobar')])
+        concept = ConceptFactory(parent=to_source, mnemonic='A73', names=[ConceptNameFactory.build(name='foobar')])
         concept.update_mappings()
 
         mapping.refresh_from_db()
@@ -437,7 +465,8 @@ class MappingListViewTest(OCLAPITestCase):
         self.assertEqual(mapping.from_source_version, "2.46")
         self.assertEqual(mapping.from_source, from_source)
 
-        concept = ConceptFactory(parent=from_source, mnemonic='32700-7', names=[ConceptNameFactory(name='foobar')])
+        concept = ConceptFactory(
+            parent=from_source, mnemonic='32700-7', names=[ConceptNameFactory.build(name='foobar')])
         concept.update_mappings()
 
         mapping.refresh_from_db()
@@ -582,7 +611,7 @@ class MappingRetrieveUpdateDestroyViewTest(OCLAPITestCase):
 
         response = self.client.put(
             self.mapping.uri,
-            dict(map_type='narrower than'),
+            {'map_type': 'narrower than'},
             HTTP_AUTHORIZATION='Token ' + self.token,
         )
 
@@ -595,19 +624,38 @@ class MappingRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.mapping.refresh_from_db()
         self.assertEqual(self.mapping.map_type, 'narrower than')
 
+    def test_put_200_sort_weight(self):
+        self.assertEqual(self.mapping.versions.count(), 1)
+        self.assertEqual(self.mapping.get_latest_version().sort_weight, None)
+
+        response = self.client.put(
+            self.mapping.uri,
+            {'sort_weight': 1.67983},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['uuid'], str(self.mapping.get_latest_version().id))
+        self.assertEqual(response.data['sort_weight'], 1.67983)
+        self.assertEqual(self.mapping.versions.count(), 2)
+        self.assertEqual(self.mapping.get_latest_version().sort_weight, 1.67983)
+
+        self.mapping.refresh_from_db()
+        self.assertEqual(self.mapping.sort_weight, 1.67983)
+
     def test_put_400(self):
         self.assertEqual(self.mapping.versions.count(), 1)
         self.assertEqual(self.mapping.get_latest_version().map_type, SAME_AS)
 
         response = self.client.put(
             self.mapping.uri,
-            dict(map_type=''),
+            {'map_type': ''},
             HTTP_AUTHORIZATION='Token ' + self.token,
         )
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(
-            response.data, dict(map_type=[ErrorDetail(string='This field may not be blank.', code='blank')])
+            response.data, {'map_type': [ErrorDetail(string='This field may not be blank.', code='blank')]}
         )
         self.assertEqual(self.mapping.versions.count(), 1)
 
@@ -728,7 +776,7 @@ class MappingVersionRetrieveViewTest(OCLAPITestCase):
 class MappingExtrasViewTest(OCLAPITestCase):
     def setUp(self):
         super().setUp()
-        self.extras = dict(foo='bar', tao='ching')
+        self.extras = {'foo': 'bar', 'tao': 'ching'}
         self.concept = MappingFactory(extras=self.extras)
         self.user = UserProfileFactory(organizations=[self.concept.parent.organization])
         self.token = self.user.get_token()
@@ -743,7 +791,7 @@ class MappingExtrasViewTest(OCLAPITestCase):
 class MappingExtraRetrieveUpdateDestroyViewTest(OCLAPITestCase):
     def setUp(self):
         super().setUp()
-        self.extras = dict(foo='bar', tao='ching')
+        self.extras = {'foo': 'bar', 'tao': 'ching'}
         self.mapping = MappingFactory(extras=self.extras)
         self.user = UserProfileFactory(organizations=[self.mapping.parent.organization])
         self.token = self.user.get_token()
@@ -752,7 +800,7 @@ class MappingExtraRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         response = self.client.get(self.mapping.uri + 'extras/foo/', format='json')
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data, dict(foo='bar'))
+        self.assertEqual(response.data, {'foo': 'bar'})
 
     def test_get_404(self):
         response = self.client.get(self.mapping.uri + 'extras/bar/', format='json')
@@ -766,17 +814,17 @@ class MappingExtraRetrieveUpdateDestroyViewTest(OCLAPITestCase):
 
         response = self.client.put(
             self.mapping.uri + 'extras/foo/',
-            dict(foo='foobar'),
+            {'foo': 'foobar'},
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data, dict(foo='foobar'))
+        self.assertEqual(response.data, {'foo': 'foobar'})
         self.assertEqual(self.mapping.versions.count(), 2)
-        self.assertEqual(self.mapping.get_latest_version().extras, dict(foo='foobar', tao='ching'))
+        self.assertEqual(self.mapping.get_latest_version().extras, {'foo': 'foobar', 'tao': 'ching'})
         self.mapping.refresh_from_db()
-        self.assertEqual(self.mapping.extras, dict(foo='foobar', tao='ching'))
+        self.assertEqual(self.mapping.extras, {'foo': 'foobar', 'tao': 'ching'})
 
     def test_put_400(self):
         self.assertEqual(self.mapping.versions.count(), 1)
@@ -785,7 +833,7 @@ class MappingExtraRetrieveUpdateDestroyViewTest(OCLAPITestCase):
 
         response = self.client.put(
             self.mapping.uri + 'extras/foo/',
-            dict(tao='foobar'),
+            {'tao': 'foobar'},
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -810,10 +858,10 @@ class MappingExtraRetrieveUpdateDestroyViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 204)
         self.assertEqual(self.mapping.versions.count(), 2)
-        self.assertEqual(self.mapping.get_latest_version().extras, dict(tao='ching'))
-        self.assertEqual(self.mapping.versions.first().extras, dict(foo='bar', tao='ching'))
+        self.assertEqual(self.mapping.get_latest_version().extras, {'tao': 'ching'})
+        self.assertEqual(self.mapping.versions.first().extras, {'foo': 'bar', 'tao': 'ching'})
         self.mapping.refresh_from_db()
-        self.assertEqual(self.mapping.extras, dict(tao='ching'))
+        self.assertEqual(self.mapping.extras, {'tao': 'ching'})
 
 
 class MappingReactivateViewTest(OCLAPITestCase):

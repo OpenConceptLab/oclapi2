@@ -49,6 +49,13 @@ After modifying model you need to create migration files. Run:
 
 Make sure to commit newly created migration files.
 
+### Indexing in ES:
+- `cd oclapi2/`
+- `docker exec -it oclapi2-api-1 python manage.py search_index --populate -f --parallel` -- for populating all indexes
+- `docker exec -it oclapi2-api-1  python manage.py search_index --rebuild -f --parallel` -- for rebuild (delete and create) all indexes.
+You can also populate/re-index specific indexes, [read more](https://django-elasticsearch-dsl.readthedocs.io/en/latest/management.html)
+
+
 ### Debugging
 
 In order to debug tests or api you can use PDB. Set a breakpoint in code with:
@@ -62,6 +69,16 @@ Run tests with:
 Run api with:
 
 `docker-compose run --rm --service-ports api`
+
+### Importing FHIR resources
+
+In order to import FHIR resources run:
+
+`docker-compose run --no-deps --rm -v $(pwd)/../oclfhir-tests/definitions.json:/fhir api python tools/fhir_import.py -d /fhir -p http://api:8000/orgs/test -t 891b4b17feab99f3ff7e5b5d04ccc5da7aa96da6 -r CodeSystem`
+
+Please note that the 'test' org must exist. For help run:
+
+`docker-compose run --no-deps --rm api python tools/fhir_import.py -h`
 
 ### Release
 

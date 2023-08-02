@@ -1,3 +1,4 @@
+import logging
 from collections import OrderedDict
 
 from rest_framework import serializers
@@ -11,10 +12,23 @@ from core.common.serializers import ReadSerializerMixin, StatusField, Identifier
 from core.concepts.models import Concept, ConceptName
 from core.concepts.serializers import ConceptDetailSerializer
 from core.orgs.models import Organization
+from core.parameters.serializers import ParametersSerializer
 from core.sources.models import Source
 from core.sources.serializers import SourceCreateOrUpdateSerializer
 from core.users.models import UserProfile
 
+logger = logging.getLogger('oclapi')
+
+
+class ValidateCodeParametersSerializer(ParametersSerializer):
+    allowed_input_parameters = {
+        'url': 'valueUri',
+        'code': 'valueCode',
+        'display': 'valueString',
+        'version': 'valueString',
+        'systemVersion': 'valueString',
+        'system': 'valueUri'
+    }
 
 class CodeSystemConceptDesignationUseSerializer(serializers.Field):
     def to_internal_value(self, data):
@@ -135,7 +149,11 @@ class CodeSystemConceptField(serializers.Field):
     def to_representation(self, value):
         # limit to 1000 concepts by default
         # TODO: support graphQL to go around the limit
-        return CodeSystemConceptSerializer(value.concepts.order_by('id')[:1000], many=True).data
+        if self.context.get('has_many', False):
+            limit = 25
+        else:
+            limit = 1000
+        return CodeSystemConceptSerializer(value.concepts.order_by('id')[:limit], many=True).data
 
 
 class CodeSystemDetailSerializer(serializers.ModelSerializer):
@@ -169,6 +187,14 @@ class CodeSystemDetailSerializer(serializers.ModelSerializer):
                   'version', 'identifier', 'contact', 'jurisdiction', 'name', 'description', 'publisher', 'purpose',
                   'copyright', 'revisionDate', 'experimental', 'caseSensitive', 'compositional', 'versionNeeded',
                   'collectionReference', 'hierarchyMeaning', 'concept', 'text')
+
+    def __new__(cls, *args, **kwargs):
+        if kwargs.get('many', False):
+            context = kwargs.get('context', {})
+            context.update({'has_many': True})
+            kwargs.update({'context': context})
+
+        return super().__new__(cls, *args, **kwargs)
 
     @staticmethod
     def get_resource_type(_):
@@ -208,15 +234,18 @@ class CodeSystemDetailSerializer(serializers.ModelSerializer):
         try:
             rep = super().to_representation(instance)
             IdentifierSerializer.include_ocl_identifier(instance.uri, RESOURCE_TYPE, rep)
-        except Exception as error:
-            raise Exception(f'Failed to represent "{instance.uri}" as {RESOURCE_TYPE}') from error
+        except (Exception, ):
+            msg = f'Failed to represent "{instance.uri}" as {RESOURCE_TYPE}'
+            logger.exception(msg)
+            return {
+                'resourceType': 'OperationOutcome',
+                'issue': [{
+                    'severity': 'error',
+                    'details': msg
+                }]
+            }
         # Remove fields with 'None' value
         return OrderedDict([(key, rep[key]) for key in rep if rep[key] is not None])
-
-    def get_ocl_identifier(self):
-        ident = IdentifierSerializer.find_ocl_identifier(self.validated_data['identifier'])
-        ident = IdentifierSerializer.parse_identifier(ident)
-        return ident
 
     def create(self, validated_data):
         concepts = validated_data.pop('concepts', [])

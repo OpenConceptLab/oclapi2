@@ -80,15 +80,15 @@ class ClientConfig(models.Model):
     def validate_home_tabs_config(self):
         tabs = get(self.config, 'tabs')
         if not tabs:
-            self.errors = dict(tabs=[EMPTY_TABS_CONFIG])
+            self.errors = {'tabs': [EMPTY_TABS_CONFIG]}
         elif not isinstance(tabs, list):
-            self.errors = dict(tabs=[NOT_LIST_TABS_CONFIG])
+            self.errors = {'tabs': [NOT_LIST_TABS_CONFIG]}
         elif any(not isinstance(tab, dict) for tab in tabs):
-            self.errors = dict(tabs=[INVALID_TABS_CONFIG])
+            self.errors = {'tabs': [INVALID_TABS_CONFIG]}
         else:
             default_tabs = [tab for tab in tabs if tab.get('default', False)]
             if len(default_tabs) != 1:
-                self.errors = dict(tabs=[ONE_DEFAULT_TAB])
+                self.errors = {'tabs': [ONE_DEFAULT_TAB]}
 
     def validate_sort_attributes(self):
         tabs = get(self.config, 'tabs', [])
@@ -98,11 +98,11 @@ class ClientConfig(models.Model):
             if not sort_asc and not sort_desc:
                 continue
             if sort_asc and sort_desc:
-                self.errors = dict(tabs=[ASC_AND_DESC_SORT])
+                self.errors = {'tabs': [ASC_AND_DESC_SORT]}
                 return
             attr = sort_asc or sort_desc
             if attr not in ['score'] and attr not in self.__get_resource_sortable_fields(get(tab, 'type')):
-                self.errors = dict(tabs=[UNSUPPORTED_SORT_ATTRIBUTE])
+                self.errors = {'tabs': [UNSUPPORTED_SORT_ATTRIBUTE]}
                 return
 
     def __get_resource_sortable_fields(self, tab_type):

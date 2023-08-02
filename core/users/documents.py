@@ -15,24 +15,59 @@ class UserProfileDocument(Document):
 
     last_update = fields.DateField(attr='updated_at')
     date_joined = fields.DateField(attr='created_at')
-    username = fields.KeywordField(attr='username', normalizer='lowercase')
+    username = fields.TextField(attr='username')
+    _username = fields.KeywordField(attr='username', normalizer='lowercase')
     location = fields.KeywordField(attr='location', normalizer='lowercase')
     company = fields.KeywordField(attr='company', normalizer='lowercase')
-    name = fields.KeywordField(attr='name', normalizer='lowercase')
+    _name = fields.KeywordField(attr='name', normalizer='lowercase')
+    name = fields.TextField(attr='name')
     extras = fields.ObjectField(dynamic=True)
     org = fields.ListField(fields.KeywordField())
 
     class Django:
         model = UserProfile
         fields = [
-            'is_active',
             'is_superuser',
             'is_staff',
         ]
 
     @staticmethod
-    def get_boostable_search_attrs():
-        return dict(username=dict(boost=5, lower=True, wildcard=True), name=dict(boost=3, lower=True, wildcard=True))
+    def get_match_phrase_attrs():
+        return ['name']
+
+    @staticmethod
+    def get_exact_match_attrs():
+        return {
+            'username': {
+                'boost': 4,
+            },
+            'name': {
+                'boost': 3.5,
+            }
+        }
+
+    @staticmethod
+    def get_wildcard_search_attrs():
+        return {
+            'username': {
+                'boost': 1,
+                'lower': True,
+                'wildcard': True
+            },
+            'name': {
+                'boost': 0.8,
+                'lower': True,
+                'wildcard': True
+            }
+        }
+
+    @staticmethod
+    def get_fuzzy_search_attrs():
+        return {
+            'name': {
+                'boost': 0.8,
+            }
+        }
 
     @staticmethod
     def prepare_extras(instance):

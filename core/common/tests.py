@@ -1,11 +1,14 @@
 import base64
 import os
 import uuid
-from unittest.mock import patch, Mock, mock_open
+from collections import OrderedDict
+from unittest.mock import patch, Mock, mock_open, ANY
 
 import factory
 
 import boto3
+import django
+import factory
 from botocore.exceptions import ClientError
 from colour_runner.django_runner import ColourRunnerMixin
 from django.conf import settings
@@ -15,6 +18,7 @@ from django.test import TestCase
 from django.test.runner import DiscoverRunner
 from moto import mock_s3
 from requests.auth import HTTPBasicAuth
+from rest_framework.exceptions import ValidationError
 from rest_framework.test import APITestCase
 
 from core.collections.models import CollectionReference
@@ -26,14 +30,18 @@ from core.common.utils import (
     drop_version, is_versioned_uri, separate_version, to_parent_uri, jsonify_safe, es_get,
     get_resource_class_from_resource_name, flatten_dict, is_csv_file, is_url_encoded_string, to_parent_uri_from_kwargs,
     set_current_user, get_current_user, set_request_url, get_request_url, nested_dict_values, chunks, api_get,
-    split_list_by_condition, get_start_of_month, get_end_of_month, get_prev_month)
+    split_list_by_condition, is_zip_file)
 from core.concepts.models import Concept
 from core.orgs.models import Organization
 from core.sources.models import Source
 from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
+from .backends import OCLOIDCAuthenticationBackend
+from .checksums import Checksum
 from .fhir_helpers import translate_fhir_query
-from .services import S3, PostgresQL
+from .serializers import IdentifierSerializer
+from .services import S3, PostgresQL, DjangoAuthService, OIDCAuthService
+from .validators import URIValidator
 from ..code_systems.serializers import CodeSystemDetailSerializer
 
 
@@ -204,6 +212,7 @@ class OCLAPITestCase(APITestCase, BaseTestCase):
     def setUpClass(cls):
         super().setUpClass()
         call_command("loaddata", "core/fixtures/base_entities.yaml")
+        call_command("loaddata", "core/fixtures/toggles.json")
         org = Organization.objects.get(id=1)
         org.members.add(1)
 
@@ -214,6 +223,14 @@ class OCLTestCase(TestCase, BaseTestCase):
         super().setUpClass()
         call_command("loaddata", "core/fixtures/base_entities.yaml")
         call_command("loaddata", "core/fixtures/auth_groups.yaml")
+        call_command("loaddata", "core/fixtures/toggles.json")
+
+    @staticmethod
+    def factory_to_params(factory_klass, **kwargs):
+        return {
+            **factory.build(dict, FACTORY_CLASS=factory_klass),
+            **kwargs
+        }
 
     @staticmethod
     def factory_to_params(factory_klass, **kwargs):
@@ -388,55 +405,133 @@ class S3Test(TestCase):
             'http://oclapi2-dev.s3.amazonaws.com/some/path'
         )
 
+
 class FhirHelpersTest(OCLTestCase):
     def test_language_to_default_locale(self):
         query_fields = list(CodeSystemDetailSerializer.Meta.fields)
         query_params = {'language': 'eng'}
-        query_set = Concept.objects.all()
+        query_set = Source.objects.all()
 
         query_set = translate_fhir_query(query_fields, query_params, query_set)
-        self.assertTrue('"concepts"."default_locale" = eng' in str(query_set.query))
+        self.assertTrue('"sources"."default_locale" = eng' in str(query_set.query))
 
     def test_status_retired(self):
         query_fields = list(CodeSystemDetailSerializer.Meta.fields)
         query_params = {'status': 'retired'}
-        query_set = Concept.objects.all()
+        query_set = Source.objects.all()
 
         query_set = translate_fhir_query(query_fields, query_params, query_set)
-        self.assertTrue('WHERE "concepts"."retired"' in str(query_set.query))
+        self.assertTrue('WHERE "sources"."retired"' in str(query_set.query))
 
     def test_status_active(self):
         query_fields = list(CodeSystemDetailSerializer.Meta.fields)
         query_params = {'status': 'active'}
-        query_set = Concept.objects.all()
+        query_set = Source.objects.all()
 
         query_set = translate_fhir_query(query_fields, query_params, query_set)
-        self.assertTrue('WHERE "concepts"."released"' in str(query_set.query))
+        self.assertTrue('WHERE "sources"."released"' in str(query_set.query))
 
     def test_status_draft(self):
         query_fields = list(CodeSystemDetailSerializer.Meta.fields)
         query_params = {'status': 'draft'}
-        query_set = Concept.objects.all()
+        query_set = Source.objects.all()
 
         query_set = translate_fhir_query(query_fields, query_params, query_set)
-        self.assertTrue('WHERE NOT "concepts"."released"' in str(query_set.query))
+        self.assertTrue('WHERE NOT "sources"."released"' in str(query_set.query))
 
     def test_title_to_full_name(self):
         query_fields = list(CodeSystemDetailSerializer.Meta.fields)
         query_params = {'title': 'some title'}
-        query_set = Concept.objects.all()
+        query_set = Source.objects.all()
 
         query_set = translate_fhir_query(query_fields, query_params, query_set)
-        self.assertTrue('WHERE "concepts"."full_name" = some title' in str(query_set.query))
+        self.assertTrue('WHERE "sources"."full_name" = some title' in str(query_set.query))
 
     def test_other_fields(self):
         query_fields = list(CodeSystemDetailSerializer.Meta.fields)
         query_params = {'version': 'v1', 'id': '2'}
-        query_set = Concept.objects.all()
+        query_set = Source.objects.all()
 
         query_set = translate_fhir_query(query_fields, query_params, query_set)
-        self.assertTrue('"concepts"."version" = v1' in str(query_set.query))
-        self.assertTrue('"concepts"."id" = 2' in str(query_set.query))
+        self.assertTrue('"sources"."version" = v1' in str(query_set.query))
+        self.assertTrue('"sources"."id" = 2' in str(query_set.query))
+
+
+class IdentifierSerializerTest(OCLTestCase):
+    def test_deserialize(self):
+        data = {'system': '/org/OCL/test',
+                'value': '1',
+                'type': {
+                    'text': 'Accession ID',
+                    'coding': [{
+                        'system': 'http://hl7.org/fhir/v2/0203',
+                        'code': 'ACSN',
+                        'display': 'ACSN'
+                    }]
+                }}
+        serializer = IdentifierSerializer(data=data)
+        valid = serializer.is_valid()
+        self.assertTrue(valid, serializer.errors)
+        self.assertDictEqual(serializer.validated_data, OrderedDict([
+            ('system', '/org/OCL/test'),
+            ('value', '1'),
+            ('type', OrderedDict([
+                ('text', 'Accession ID'),
+                ('coding', [OrderedDict([
+                    ('system', 'http://hl7.org/fhir/v2/0203'),
+                    ('code', 'ACSN'),
+                    ('display', 'ACSN')])])]))]))
+
+    def test_include_ocl_identifier(self):
+        rep = {}
+        IdentifierSerializer.include_ocl_identifier('/orgs/OCL/test/1', 'org', rep)
+
+        self.assertDictEqual(rep, {'identifier': [
+            {'system': 'http://localhost:8000',
+             'type': {
+                 'coding': [{
+                     'code': 'ACSN',
+                     'display': 'Accession ID',
+                     'system': 'http://hl7.org/fhir/v2/0203'}],
+                 'text': 'Accession ID'},
+             'value': '/orgs/OCL/test/1/'}]})
+
+    def test_validate_identifier(self):
+        IdentifierSerializer.validate_identifier([
+            {'system': 'http://localhost:8000',
+             'type': {
+                 'coding': [{
+                     'code': 'ACSN',
+                     'display': 'Accession ID',
+                     'system': 'http://hl7.org/fhir/v2/0203'}],
+                 'text': 'Accession ID'},
+             'value': '/orgs/OCL/CodeSystem/1/'}])
+
+    def test_validate_identifier_with_wrong_owner(self):
+        with self.assertRaisesRegex(ValidationError, "Owner type='org' is invalid. It must be 'users' or 'orgs'"):
+            IdentifierSerializer.validate_identifier([
+                {'system': 'http://localhost:8000',
+                 'type': {
+                     'coding': [{
+                         'code': 'ACSN',
+                         'display': 'Accession ID',
+                         'system': 'http://hl7.org/fhir/v2/0203'}],
+                     'text': 'Accession ID'},
+                 'value': '/org/OCL/CodeSystem/1/'}])
+
+    def test_validate_identifier_with_wrong_type(self):
+        with self.assertRaisesRegex(ValidationError, "Resource type='Code' is invalid. "
+                                                     "It must be 'CodeSystem' or 'ValueSet' or 'ConceptMap'"):
+            IdentifierSerializer.validate_identifier([
+                {'system': 'http://localhost:8000',
+                 'type': {
+                     'coding': [{
+                         'code': 'ACSN',
+                         'display': 'Accession ID',
+                         'system': 'http://hl7.org/fhir/v2/0203'}],
+                     'text': 'Accession ID'},
+                 'value': '/orgs/OCL/Code/1/'}])
+
 
 class UtilsTest(OCLTestCase):
     def test_set_and_get_current_user(self):
@@ -449,11 +544,11 @@ class UtilsTest(OCLTestCase):
 
     def test_compact_dict_by_values(self):
         self.assertEqual(compact_dict_by_values({}), {})
-        self.assertEqual(compact_dict_by_values(dict(foo=None)), {})
-        self.assertEqual(compact_dict_by_values(dict(foo=None, bar=None)), {})
-        self.assertEqual(compact_dict_by_values(dict(foo=None, bar=1)), dict(bar=1))
-        self.assertEqual(compact_dict_by_values(dict(foo=2, bar=1)), dict(foo=2, bar=1))
-        self.assertEqual(compact_dict_by_values(dict(foo=2, bar='')), dict(foo=2))
+        self.assertEqual(compact_dict_by_values({'foo': None}), {})
+        self.assertEqual(compact_dict_by_values({'foo': None, 'bar': None}), {})
+        self.assertEqual(compact_dict_by_values({'foo': None, 'bar': 1}), {'bar': 1})
+        self.assertEqual(compact_dict_by_values({'foo': 2, 'bar': 1}), {'foo': 2, 'bar': 1})
+        self.assertEqual(compact_dict_by_values({'foo': 2, 'bar': ''}), {'foo': 2})
 
     def test_to_snake_case(self):
         self.assertEqual(to_snake_case(""), "")
@@ -487,7 +582,7 @@ class UtilsTest(OCLTestCase):
 
         http_get_mock.assert_called_once_with(
             'http://localhost:8000/some-url',
-            headers=dict(Authorization=f'Token {user.get_token()}')
+            headers={'Authorization': f'Token {user.get_token()}'}
         )
 
     @patch('core.common.utils.requests.get')
@@ -526,13 +621,13 @@ class UtilsTest(OCLTestCase):
         task_id = f"{task_uuid}-username~queue"
         self.assertEqual(
             parse_bulk_import_task_id(task_id),
-            dict(uuid=task_uuid + '-', username='username', queue='queue')
+            {'uuid': task_uuid + '-', 'username': 'username', 'queue': 'queue'}
         )
 
         task_id = f"{task_uuid}-username"
         self.assertEqual(
             parse_bulk_import_task_id(task_id),
-            dict(uuid=task_uuid + '-', username='username', queue='default')
+            {'uuid': task_uuid + '-', 'username': 'username', 'queue': 'default'}
         )
 
     def test_drop_version(self):
@@ -701,9 +796,9 @@ class UtilsTest(OCLTestCase):
     def test_jsonify_safe(self):
         self.assertEqual(jsonify_safe(None), None)
         self.assertEqual(jsonify_safe({}), {})
-        self.assertEqual(jsonify_safe(dict(a=1)), dict(a=1))
+        self.assertEqual(jsonify_safe({'a': 1}), {'a': 1})
         self.assertEqual(jsonify_safe('foobar'), 'foobar')
-        self.assertEqual(jsonify_safe('{"foo": "bar"}'), dict(foo='bar'))
+        self.assertEqual(jsonify_safe('{"foo": "bar"}'), {'foo': 'bar'})
 
     def test_get_resource_class_from_resource_name(self):
         self.assertEqual(get_resource_class_from_resource_name('mappings').__name__, 'Mapping')
@@ -717,17 +812,16 @@ class UtilsTest(OCLTestCase):
             self.assertEqual(get_resource_class_from_resource_name(name).__name__, 'UserProfile')
 
     def test_flatten_dict(self):
-        self.assertEqual(flatten_dict(dict(foo='bar')), dict(foo='bar'))
-        self.assertEqual(flatten_dict(dict(foo=1)), dict(foo='1'))
-        self.assertEqual(flatten_dict(dict(foo=1.1)), dict(foo='1.1'))
-        self.assertEqual(flatten_dict(dict(foo=True)), dict(foo='True'))
+        self.assertEqual(flatten_dict({'foo': 'bar'}), {'foo': 'bar'})
+        self.assertEqual(flatten_dict({'foo': 1}), {'foo': '1'})
+        self.assertEqual(flatten_dict({'foo': 1.1}), {'foo': '1.1'})
+        self.assertEqual(flatten_dict({'foo': True}), {'foo': 'True'})
         self.assertEqual(
-            flatten_dict(dict(foo=True, bar=dict(tao=dict(te='ching')))),
-            dict(foo='True', bar__tao__te='ching')
-        )
+            flatten_dict({'foo': True, 'bar': {'tao': {'te': 'ching'}}}),
+            {'foo': 'True', 'bar__tao__te': 'ching'})
         self.assertEqual(
-            flatten_dict(dict(foo=True, bar=dict(tao=dict(te='tao-te-ching')))),
-            dict(foo='True', bar__tao__te='tao_te_ching')
+            flatten_dict({'foo': True, 'bar': {'tao': {'te': 'tao-te-ching'}}}),
+            {'foo': 'True', 'bar__tao__te': 'tao_te_ching'}
         )
         # self.assertEqual(
         #     flatten_dict(
@@ -790,6 +884,30 @@ class UtilsTest(OCLTestCase):
         file_mock.name = 'unknown_file.csv'
         self.assertTrue(is_csv_file(file=file_mock))
 
+    def test_is_zip_file(self):
+        self.assertFalse(is_zip_file(name='foo/bar'))
+        self.assertFalse(is_zip_file(name='foo/bar.csv'))
+        self.assertTrue(is_zip_file(name='foo.zip'))
+        self.assertTrue(is_zip_file(name='foo.csv.zip'))
+        self.assertTrue(is_zip_file(name='foo.json.zip'))
+
+        file_mock = Mock(spec=File)
+
+        file_mock.name = 'unknown_file'
+        self.assertFalse(is_zip_file(file=file_mock))
+
+        file_mock.name = 'unknown_file.json'
+        self.assertFalse(is_zip_file(file=file_mock))
+
+        file_mock.name = 'unknown_file.csv'
+        self.assertFalse(is_zip_file(file=file_mock))
+
+        file_mock.name = 'unknown_file.csv.zip'
+        self.assertTrue(is_zip_file(file=file_mock))
+
+        file_mock.name = 'unknown_file.json.zip'
+        self.assertTrue(is_zip_file(file=file_mock))
+
     def test_is_url_encoded_string(self):
         self.assertTrue(is_url_encoded_string('foo'))
         self.assertFalse(is_url_encoded_string('foo/bar'))
@@ -832,16 +950,16 @@ class UtilsTest(OCLTestCase):
 
     def test_nested_dict_values(self):
         self.assertEqual(list(nested_dict_values({})), [])
-        self.assertEqual(list(nested_dict_values(dict(a=1))), [1])
-        self.assertEqual(list(nested_dict_values(dict(a=1, b='foobar'))), [1, 'foobar'])
+        self.assertEqual(list(nested_dict_values({'a': 1})), [1])
+        self.assertEqual(list(nested_dict_values({'a': 1, 'b': 'foobar'})), [1, 'foobar'])
         self.assertEqual(
-            list(nested_dict_values(dict(a=1, b='foobar', c=dict(a=1, b='foobar')))),
+            list(nested_dict_values({'a': 1, 'b': 'foobar', 'c': {'a': 1, 'b': 'foobar'}})),
             [1, 'foobar', 1, 'foobar']
         )
         self.assertEqual(
             list(
                 nested_dict_values(
-                    dict(a=1, b='foobar', c=dict(a=1, b='foobar', c=dict(d=[dict(a=1), dict(b='foobar')])))
+                    {'a': 1, 'b': 'foobar', 'c': {'a': 1, 'b': 'foobar', 'c': {'d': [{'a': 1}, {'b': 'foobar'}]}}}
                 )
             ),
             [1, 'foobar', 1, 'foobar', [{'a': 1}, {'b': 'foobar'}]]
@@ -898,7 +1016,9 @@ class TaskTest(OCLTestCase):
 
         result = bulk_import_parallel_inline(to_import=content, username='ocladmin', update_if_exists=False)  # pylint: disable=no-value-for-parameter
 
-        self.assertEqual(result, dict(error='Invalid JSON (Expecting property name enclosed in double quotes)'))
+        self.assertEqual(result, {
+            'error': 'Invalid JSON (Expecting property name enclosed in double quotes)'
+        })
         import_run_mock.assert_not_called()
 
     @patch('core.importers.models.BulkImportParallelRunner.run')
@@ -908,7 +1028,9 @@ class TaskTest(OCLTestCase):
 
         result = bulk_import_parallel_inline(to_import=content, username='ocladmin', update_if_exists=False)  # pylint: disable=no-value-for-parameter
 
-        self.assertEqual(result, dict(error='Invalid Input ("type" should be present in each line)'))
+        self.assertEqual(result, {
+            'error': 'Invalid Input ("type" should be present in each line)'
+        })
         import_run_mock.assert_not_called()
 
     @patch('core.importers.models.BulkImportParallelRunner.run')
@@ -923,7 +1045,6 @@ class TaskTest(OCLTestCase):
 
     @patch('core.common.tasks.EmailMessage')
     def test_monthly_usage_report(self, email_message_mock):
-        prev_month = get_prev_month()
         email_message_instance_mock = Mock(send=Mock(return_value=1))
         email_message_mock.return_value = email_message_instance_mock
         res = monthly_usage_report()
@@ -933,10 +1054,7 @@ class TaskTest(OCLTestCase):
 
         self.assertEqual(res, 1)
         call_args = email_message_mock.call_args[1]
-        self.assertTrue(
-            f"Monthly usage report: {get_start_of_month(prev_month)} to {get_end_of_month(prev_month)}"
-            in call_args['subject']
-        )
+        self.assertTrue("Monthly usage report" in call_args['subject'])
         self.assertEqual(call_args['to'], ['reports@openconceptlab.org'])
         self.assertTrue('</html>' in call_args['body'])
         self.assertTrue('concepts' in call_args['body'])
@@ -1011,3 +1129,233 @@ class PostgresQLTest(OCLTestCase):
 
         db_connection_mock.cursor.assert_called_once()
         cursor_context_mock.execute.assert_called_once_with("SELECT last_value from foobar_seq;")
+
+
+class DjangoAuthServiceTest(OCLTestCase):
+    def test_get_token(self):
+        user = UserProfileFactory(username='foobar')
+
+        token = DjangoAuthService(user=user, password='foobar').get_token(True)
+        self.assertEqual(token, False)
+
+        user.set_password('foobar')
+        user.save()
+
+        token = DjangoAuthService(username='foobar', password='foobar').get_token(True)
+        self.assertTrue('Token ' in token)
+        self.assertTrue(len(token), 64)
+
+
+class OIDCAuthServiceTest(OCLTestCase):
+    def test_get_login_redirect_url(self):
+        self.assertEqual(
+            OIDCAuthService.get_login_redirect_url('client-id', 'http://localhost:4000', 'state', 'nonce'),
+            '/realms/ocl/protocol/openid-connect/auth?response_type=code id_token&client_id=client-id&'
+            'state=state&nonce=nonce&redirect_uri=http://localhost:4000'
+        )
+
+    def test_get_logout_redirect_url(self):
+        self.assertEqual(
+            OIDCAuthService.get_logout_redirect_url('id-token-hint', 'http://localhost:4000'),
+            '/realms/ocl/protocol/openid-connect/logout?id_token_hint=id-token-hint&'
+            'post_logout_redirect_uri=http://localhost:4000'
+        )
+
+    @patch('requests.post')
+    def test_exchange_code_for_token(self, post_mock):
+        post_mock.return_value = Mock(json=Mock(return_value={'token': 'token', 'foo': 'bar'}))
+
+        result = OIDCAuthService.exchange_code_for_token(
+            'code', 'http://localhost:4000', 'client-id', 'client-secret'
+        )
+
+        self.assertEqual(result, {'token': 'token', 'foo': 'bar'})
+        post_mock.assert_called_once_with(
+            '/realms/ocl/protocol/openid-connect/token',
+            data={
+                'grant_type': 'authorization_code',
+                'client_id': 'client-id',
+                'client_secret': 'client-secret',
+                'code': 'code',
+                'redirect_uri': 'http://localhost:4000'
+            }
+        )
+
+    @patch('requests.post')
+    def test_get_admin_token(self, post_mock):
+        post_mock.return_value = Mock(json=Mock(return_value={'access_token': 'token', 'foo': 'bar'}))
+
+        result = OIDCAuthService.get_admin_token('username', 'password')
+
+        self.assertEqual(result, 'token')
+        post_mock.assert_called_once_with(
+            '/realms/master/protocol/openid-connect/token',
+            data={
+                'grant_type': 'password',
+                'username': 'username',
+                'password': 'password',
+                'client_id': 'admin-cli'
+            },
+            verify=False
+        )
+
+    @patch('core.common.services.OIDCAuthService.get_admin_token')
+    @patch('requests.post')
+    def test_add_user(self, post_mock, get_admin_token_mock):
+        post_mock.return_value = Mock(status_code=201, json=Mock(return_value={'foo': 'bar'}))
+        get_admin_token_mock.return_value = 'token'
+        user = UserProfileFactory(username='username')
+        user.set_password('password')
+        user.save()
+
+        result = OIDCAuthService.add_user(user, 'username', 'password')
+
+        self.assertEqual(result, True)
+        get_admin_token_mock.assert_called_once_with(username='username', password='password')
+        post_mock.assert_called_once_with(
+            '/admin/realms/ocl/users',
+            json={
+                'enabled': True,
+                'emailVerified': user.verified,
+                'firstName': user.first_name,
+                'lastName': user.last_name,
+                'email': user.email,
+                'username': user.username,
+                'credentials': ANY
+            },
+            verify=False,
+            headers={'Authorization': 'Bearer token'}
+        )
+
+
+class URIValidatorTest(OCLTestCase):
+    validator = URIValidator()
+
+    def test_invalid_value(self):
+        with self.assertRaises(django.core.exceptions.ValidationError):
+            self.validator([])
+
+    def test_valid_http_uri(self):
+        self.validator('https://openconceptlab.org/orgs/OCL/sources')
+
+    def test_valid_custom_scheme_uri(self):
+        self.validator('mailto:admin@openconceptlab.org')
+
+    def test_invalid_uri_with_unsafe_char(self):
+        with self.assertRaises(django.core.exceptions.ValidationError):
+            self.validator("mailto::\nadmin")
+
+    def test_invalid_uri_domain_too_long(self):
+        with self.assertRaises(django.core.exceptions.ValidationError):
+            hostname = "abc"*100
+            self.validator("https://" + hostname)
+
+    def test_invalid_uri_domain_wrong_char(self):
+        with self.assertRaises(django.core.exceptions.ValidationError):
+            self.validator("https://open[test/?test")
+
+    def test_invalid_uri_ipv6(self):
+        with self.assertRaises(django.core.exceptions.ValidationError):
+            self.validator("https://[56FE::2159:5BBC::6594]")
+
+
+class OCLOIDCAuthenticationBackendTest(OCLTestCase):
+    def setUp(self):
+        super().setUp()
+        self.backend = OCLOIDCAuthenticationBackend()
+        self.claim = {
+            'preferred_username': 'batman',
+            'email': 'batman@gotham.com',
+            'given_name': 'Bruce',
+            'family_name': 'Wayne',
+            'email_verified': True,
+            'foo': 'bar'
+        }
+
+    @patch('core.users.models.UserProfile.objects')
+    def test_create_user(self, user_manager_mock):
+        self.backend.create_user(self.claim)
+        user_manager_mock.create_user.assert_called_once_with(
+            'batman',
+            email='batman@gotham.com',
+            first_name='Bruce',
+            last_name='Wayne',
+            verified=True
+        )
+
+    def test_update_user(self):
+        user = Mock()
+
+        self.backend.update_user(user, self.claim)
+
+        self.assertEqual(user.first_name, 'Bruce')
+        self.assertEqual(user.last_name, 'Wayne')
+        self.assertEqual(user.email, 'batman@gotham.com')
+
+        user.save.assert_called_once()
+
+    def test_filter_users_by_claims(self):
+        batman = UserProfileFactory(username='batman')
+        UserProfileFactory(username='superman@not-gotham.com')
+
+        users = self.backend.filter_users_by_claims(self.claim)
+
+        self.assertEqual(users.count(), 1)
+        self.assertEqual(users.first(), batman)
+
+        self.assertEqual(self.backend.filter_users_by_claims({**self.claim, 'preferred_username': None}).count(), 0)
+
+
+class ChecksumTest(OCLTestCase):
+    def test_generate(self):
+        self.assertIsNotNone(Checksum.generate('foo'))
+        self.assertEqual(len(Checksum.generate('foo')), 32)
+        self.assertIsInstance(Checksum.generate('foo'), str)
+
+        # keys order
+        self.assertEqual(
+            Checksum.generate({'foo': 'bar', 'bar': 'foo'}), Checksum.generate({'bar': 'foo', 'foo': 'bar'})
+        )
+        self.assertEqual(
+            Checksum.generate({'a': 1, 'z': 100}), Checksum.generate({'z': 100, 'a': 1})
+        )
+
+        # datatype
+        self.assertNotEqual(Checksum.generate({'a': 1}), Checksum.generate({'a': 1.0}))
+        self.assertEqual(Checksum.generate({'a': 1.1}), Checksum.generate({'a': 1.10}))
+
+        # value order
+        self.assertEqual(Checksum.generate({'a': [1, 2, 3]}), Checksum.generate({'a': [2, 1, 3]}))
+        self.assertEqual(Checksum.generate([1, 2, 3]), Checksum.generate([2, 1, 3]))
+
+
+class ChecksumViewTest(OCLAPITestCase):
+    def setUp(self):
+        self.token = UserProfile.objects.get(username='ocladmin').get_token()
+
+    @patch('core.common.checksums.Checksum.generate')
+    def test_post_400(self, checksum_generate_mock):
+        response = self.client.post(
+            '/$checksum/',
+            data={},
+            HTTP_AUTHORIZATION=f"Token {self.token}",
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 400)
+        checksum_generate_mock.assert_not_called()
+
+    @patch('core.common.checksums.Checksum.generate')
+    def test_post_200(self, checksum_generate_mock):
+        checksum_generate_mock.return_value = 'checksum'
+
+        response = self.client.post(
+            '/$checksum/',
+            data={'foo': 'bar'},
+            HTTP_AUTHORIZATION=f"Token {self.token}",
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, 'checksum')
+        checksum_generate_mock.assert_called_once_with({'foo': 'bar'})

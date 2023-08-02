@@ -3,7 +3,7 @@ from uuid import UUID
 import factory
 from django.core.exceptions import ValidationError
 
-from core.common.constants import HEAD, CUSTOM_VALIDATION_SCHEMA_OPENMRS
+from core.common.constants import HEAD, OPENMRS_VALIDATION_SCHEMA
 from core.common.tests import OCLTestCase
 from core.concepts.tests.factories import ConceptFactory, ConceptNameFactory
 from core.mappings.documents import MappingDocument
@@ -112,7 +112,7 @@ class MappingTest(OCLTestCase):
 
         self.assertEqual(mapping.get_to_concept_name(), 'to-concept-name')
 
-        concept = ConceptFactory(names=[ConceptNameFactory()])
+        concept = ConceptFactory(names=[ConceptNameFactory.build()])
         self.assertIsNotNone(concept.display_name)
 
         mapping = Mapping(to_concept=concept)
@@ -291,7 +291,7 @@ class MappingTest(OCLTestCase):
 
         self.assertEqual(
             Mapping.persist_clone(cloned_mapping),
-            dict(version_created_by='Must specify which user is attempting to create a new mapping version.')
+            {'version_created_by': 'Must specify which user is attempting to create a new mapping version.'}
         )
 
         self.assertEqual(Mapping.persist_clone(cloned_mapping, mapping.created_by), {})
@@ -337,9 +337,9 @@ class OpenMRSMappingValidatorTest(OCLTestCase):
         self.create_lookup_concept_classes()
 
     def test_single_mapping_between_concepts(self):
-        source = OrganizationSourceFactory(version=HEAD, custom_validation_schema=CUSTOM_VALIDATION_SCHEMA_OPENMRS)
-        concept1 = ConceptFactory(parent=source, names=[ConceptNameFactory()])
-        concept2 = ConceptFactory(parent=source, names=[ConceptNameFactory()])
+        source = OrganizationSourceFactory(version=HEAD, custom_validation_schema=OPENMRS_VALIDATION_SCHEMA)
+        concept1 = ConceptFactory(parent=source, names=[ConceptNameFactory.build()])
+        concept2 = ConceptFactory(parent=source, names=[ConceptNameFactory.build()])
         mapping1 = MappingFactory.build(parent=source, to_concept=concept1, from_concept=concept2)
         mapping1.populate_fields_from_relations({})
         mapping1.save()
@@ -359,9 +359,9 @@ class OpenMRSMappingValidatorTest(OCLTestCase):
         mapping3.clean()
 
     def test_invalid_map_type(self):
-        source = OrganizationSourceFactory(version=HEAD, custom_validation_schema=CUSTOM_VALIDATION_SCHEMA_OPENMRS)
-        concept1 = ConceptFactory(parent=source, names=[ConceptNameFactory()])
-        concept2 = ConceptFactory(parent=source, names=[ConceptNameFactory()])
+        source = OrganizationSourceFactory(version=HEAD, custom_validation_schema=OPENMRS_VALIDATION_SCHEMA)
+        concept1 = ConceptFactory(parent=source, names=[ConceptNameFactory.build()])
+        concept2 = ConceptFactory(parent=source, names=[ConceptNameFactory.build()])
 
         mapping = MappingFactory.build(parent=source, to_concept=concept1, from_concept=concept2, map_type='Foo bar')
         mapping.populate_fields_from_relations({})
@@ -376,9 +376,9 @@ class OpenMRSMappingValidatorTest(OCLTestCase):
         mapping.clean()
 
     def test_external_id(self):
-        source = OrganizationSourceFactory(custom_validation_schema=CUSTOM_VALIDATION_SCHEMA_OPENMRS)
-        concept1 = ConceptFactory(parent=source, names=[ConceptNameFactory()])
-        concept2 = ConceptFactory(parent=source, names=[ConceptNameFactory()])
+        source = OrganizationSourceFactory(custom_validation_schema=OPENMRS_VALIDATION_SCHEMA)
+        concept1 = ConceptFactory(parent=source, names=[ConceptNameFactory.build()])
+        concept2 = ConceptFactory(parent=source, names=[ConceptNameFactory.build()])
 
         mapping = MappingFactory.build(
             parent=source, to_concept=concept1, from_concept=concept2, map_type='Q-AND-A', external_id='1'*37)

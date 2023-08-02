@@ -1,9 +1,9 @@
-from django.db.models import F, Q
+from django.db.models import F
 from django.http import QueryDict, Http404
 from drf_yasg.utils import swagger_auto_schema
 from pydash import get
 from rest_framework import status
-from rest_framework.generics import DestroyAPIView, UpdateAPIView, RetrieveAPIView, ListAPIView
+from rest_framework.generics import DestroyAPIView, UpdateAPIView, RetrieveAPIView
 from rest_framework.mixins import CreateModelMixin
 from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
@@ -21,9 +21,9 @@ from core.concepts.permissions import CanEditParentDictionary, CanViewParentDict
 from core.mappings.constants import PARENT_VERSION_NOT_LATEST_CANNOT_UPDATE_MAPPING
 from core.mappings.documents import MappingDocument
 from core.mappings.models import Mapping
-from core.mappings.search import MappingSearch
+from core.mappings.search import MappingFacetedSearch
 from core.mappings.serializers import MappingDetailSerializer, MappingListSerializer, MappingVersionListSerializer, \
-    MappingVersionDetailSerializer
+    MappingVersionDetailSerializer, MappingMinimalSerializer
 
 
 class MappingBaseView(SourceChildCommonBaseView):
@@ -31,7 +31,7 @@ class MappingBaseView(SourceChildCommonBaseView):
     model = Mapping
     queryset = Mapping.objects.filter(is_active=True)
     document_model = MappingDocument
-    facet_class = MappingSearch
+    facet_class = MappingFacetedSearch
     es_fields = Mapping.es_fields
 
     @staticmethod
@@ -52,14 +52,23 @@ class MappingListView(MappingBaseView, ListWithHeadersMixin, CreateModelMixin):
         return [CanViewParentDictionary(), ]
 
     def get_serializer_class(self):
-        if (self.request.method == 'GET' and self.is_verbose()) or self.request.method == 'POST':
+        method = self.request.method
+        is_get = method == 'GET'
+        if is_get and self.is_brief():
+            return MappingMinimalSerializer
+
+        if (is_get and self.is_verbose()) or method == 'POST':
             return MappingDetailSerializer
 
         return MappingListSerializer
 
+    def apply_filters(self, queryset):
+        return queryset
+
     def get_queryset(self):
-        is_latest_version = 'collection' not in self.kwargs and 'version' not in self.kwargs or \
-                            get(self.kwargs, 'version') == HEAD
+        is_latest_version = 'collection' not in self.kwargs and (
+                'version' not in self.kwargs or get(self.kwargs, 'version') == HEAD
+        )
         parent = get(self, 'parent_resource')
         if parent:
             queryset = parent.mappings_set if parent.is_head else parent.mappings
@@ -70,16 +79,14 @@ class MappingListView(MappingBaseView, ListWithHeadersMixin, CreateModelMixin):
         if is_latest_version:
             queryset = queryset.filter(id=F('versioned_object_id'))
 
+        queryset = self.apply_filters(queryset)
+
         if not parent:
             user = self.request.user
             if get(user, 'is_anonymous'):
                 queryset = queryset.exclude(public_access=ACCESS_TYPE_NONE)
             elif not get(user, 'is_staff'):
-                public_queryset = queryset.exclude(public_access=ACCESS_TYPE_NONE)
-                private_queryset = queryset.filter(public_access=ACCESS_TYPE_NONE)
-                private_queryset = private_queryset.filter(
-                    Q(parent__user_id=user.id) | Q(parent__organization__members__id=user.id))
-                queryset = public_queryset.union(private_queryset)
+                queryset = Mapping.apply_user_criteria(queryset, user)
 
         return queryset
 
@@ -103,10 +110,10 @@ class MappingListView(MappingBaseView, ListWithHeadersMixin, CreateModelMixin):
         container_version = self.kwargs.pop('version', HEAD) if __pop else self.kwargs.get('version', HEAD)
         parent_resource = None
         if 'org' in self.kwargs:
-            filters = dict(organization__mnemonic=self.kwargs['org'])
+            filters = {'organization__mnemonic': self.kwargs['org']}
         else:
             username = self.request.user.username if self.user_is_self else self.kwargs.get('user')
-            filters = dict(user__username=username)
+            filters = {'user__username': username}
         if source:
             parent_resource = Source.get_version(source, container_version or HEAD, filters)
         if collection:
@@ -315,22 +322,3 @@ class MappingExtrasView(SourceChildExtrasView, MappingBaseView):
 class MappingExtraRetrieveUpdateDestroyView(SourceChildExtraRetrieveUpdateDestroyView, MappingBaseView):
     serializer_class = MappingVersionDetailSerializer
     model = Mapping
-
-
-class MappingDebugRetrieveDestroyView(ListAPIView):  # pragma: no cover
-    permission_classes = (IsAdminUser, )
-    serializer_class = MappingVersionDetailSerializer
-
-    def get_queryset(self):
-        params = self.request.query_params.dict()
-        if not params:
-            Mapping.objects.none()
-        to_concept_code = params.pop('to_concept_code', None)
-        from_concept_code = params.pop('from_concept_code', None)
-        filters = params
-        if to_concept_code:
-            filters['to_concept_code__icontains'] = to_concept_code
-        if from_concept_code:
-            filters['from_concept_code__icontains'] = from_concept_code
-
-        return Mapping.objects.filter(**filters)

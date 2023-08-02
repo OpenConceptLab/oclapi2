@@ -1,23 +1,27 @@
+import json
 from datetime import datetime
 from json import JSONDecodeError
 
 from billiard.exceptions import WorkerLostError
 from celery.utils.log import get_task_logger
 from celery_once import QueueOnce
+from dateutil.relativedelta import relativedelta
 from django.apps import apps
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.mail import EmailMessage
 from django.core.management import call_command
+from django.db.models import Count
 from django.template.loader import render_to_string
 from django.utils import timezone
 from django_elasticsearch_dsl.registries import registry
 from pydash import get
 
 from core.celery import app
-from core.common.constants import CONFIRM_EMAIL_ADDRESS_MAIL_SUBJECT, PASSWORD_RESET_MAIL_SUBJECT
-from core.common.utils import write_export_file, web_url, get_resource_class_from_resource_name, get_export_service, \
-    get_end_of_month
+from core.common import ERRBIT_LOGGER
+from core.common.constants import CONFIRM_EMAIL_ADDRESS_MAIL_SUBJECT, PASSWORD_RESET_MAIL_SUBJECT, HEAD
+from core.common.utils import write_export_file, web_url, get_resource_class_from_resource_name, get_export_service
+from core.toggles.models import Toggle
 
 logger = get_task_logger(__name__)
 
@@ -53,15 +57,19 @@ def delete_source(source_id):
         return None
 
     try:
-        logger.info('Found source %s.  Beginning purge...', source.mnemonic)
+        logger.info('Found source %s', source.mnemonic)
+        logger.info('Beginning concepts purge...')
         source.batch_delete(source.concepts_set)
+        logger.info('Beginning mappings purge...')
         source.batch_delete(source.mappings_set)
+        logger.info('Beginning versions and self purge...')
         source.delete(force=True)
         logger.info('Delete complete!')
         return True
     except Exception as ex:
         logger.info('Source delete failed for %s with exception %s', source.mnemonic, ex.args)
-        return ex
+        ERRBIT_LOGGER.log(ex)
+        return False
 
 
 @app.task(base=QueueOnce)
@@ -82,7 +90,8 @@ def delete_collection(collection_id):
         return True
     except Exception as ex:
         logger.info('Collection delete failed for %s with exception %s', collection.mnemonic, ex.args)
-        return ex
+        ERRBIT_LOGGER.log(ex)
+        return False
 
 
 @app.task(base=QueueOnce, bind=True)
@@ -123,7 +132,9 @@ def export_collection(self, version_id):
     version.add_processing(self.request.id)
 
     if version.expansion_uri:
-        version.expansion.wait_until_processed()
+        expansion = version.expansion
+        if expansion:
+            expansion.wait_until_processed()
     try:
         logger.info('Found collection version %s.  Beginning export...', version.version)
         write_export_file(
@@ -147,24 +158,20 @@ def add_references(  # pylint: disable=too-many-arguments,too-many-locals
 
     try:
         (added_references, errors) = collection.add_expressions(
-            data, user, cascade, transform_to_resource_version)
+            data, user, cascade, transform_to_resource_version, True)
     finally:
         head.remove_processing(self.request.id)
-
-    for ref in added_references:
-        if ref.concepts.exists():
-            from core.concepts.models import Concept
+    if collection.expansion_uri:
+        for ref in added_references:
             from core.concepts.documents import ConceptDocument
-            Concept.batch_index(ref.concepts, ConceptDocument)
-        if ref.mappings.exists():
-            from core.mappings.models import Mapping
             from core.mappings.documents import MappingDocument
-            Mapping.batch_index(ref.mappings, MappingDocument)
+            collection.batch_index(ref.concepts, ConceptDocument)
+            collection.batch_index(ref.mappings, MappingDocument)
     if errors:
         logger.info('Errors while adding references....')
         logger.info(errors)
 
-    return errors
+    return [reference.id for reference in added_references], errors
 
 
 def __handle_save(instance):
@@ -239,9 +246,9 @@ def bulk_import_parallel_inline(self, to_import, username, update_if_exists, thr
             parallel=threads, self_task_id=self.request.id
         )
     except JSONDecodeError as ex:
-        return dict(error=f"Invalid JSON ({ex.msg})")
+        return {'error': f"Invalid JSON ({ex.msg})"}
     except ValidationError as ex:
-        return dict(error=f"Invalid Input ({ex.message})")
+        return {'error': f"Invalid Input ({ex.message})"}
     return importer.run()
 
 
@@ -330,6 +337,11 @@ def seed_children_to_new_version(self, resource, obj_id, export=True, sync=False
             if is_source:
                 instance.seed_concepts(index=index)
                 instance.seed_mappings(index=index)
+                if Toggle.get('CHECKSUMS_TOGGLE'):
+                    if get(settings, 'TEST_MODE', False):
+                        set_source_children_checksums(instance.id)
+                    else:
+                        set_source_children_checksums.apply_async((instance.id,), queue='indexing')
             elif autoexpand:
                 instance.cascade_children_to_expansion(index=index, sync=sync)
 
@@ -448,55 +460,6 @@ def process_hierarchy_for_new_parent_concept_version(prev_version_id, latest_ver
 
 
 @app.task
-def delete_duplicate_locales(start_from=None):  # pragma: no cover
-    from core.concepts.models import Concept
-    from django.db.models import Count
-    from django.db.models import Q
-    start_from = start_from or 0
-    queryset = Concept.objects.annotate(
-        names_count=Count('names'), desc_count=Count('descriptions')).filter(Q(names_count__gt=1) | Q(desc_count__gt=1))
-    total = queryset.count()
-    batch_size = 1000
-
-    logger.info(f'{total:d} concepts with more than one locales. Getting them in batches of {batch_size:d}...')  # pylint: disable=logging-not-lazy,logging-fstring-interpolation
-
-    for start in range(start_from, total, batch_size):
-        end = min(start + batch_size, total)
-        logger.info('Iterating concepts %d - %d...' % (start + 1, end))  # pylint: disable=logging-not-lazy,consider-using-f-string
-        concepts = queryset.order_by('id')[start:end]
-        for concept in concepts:
-            logger.info('Cleaning up %s', concept.mnemonic)
-            for name in concept.names.all().reverse():
-                if concept.names.filter(
-                        type=name.type, name=name.name, locale=name.locale, locale_preferred=name.locale_preferred,
-                        external_id=name.external_id
-                ).count() > 1:
-                    name.delete()
-            for desc in concept.descriptions.all().reverse():
-                if concept.descriptions.filter(
-                        type=desc.type, name=desc.name, locale=desc.locale, locale_preferred=desc.locale_preferred,
-                        external_id=desc.external_id
-                ).count() > 1:
-                    desc.delete()
-
-
-@app.task
-def delete_dormant_locales():  # pragma: no cover
-    from core.concepts.models import ConceptName
-    queryset = ConceptName.get_dormant_queryset()
-    total = queryset.count()
-    logger.info('%s Dormant locales found. Deleting in batches...' % total)  # pylint: disable=logging-not-lazy,consider-using-f-string
-
-    batch_size = 1000
-    for start in range(0, total, batch_size):
-        end = min(start + batch_size, total)
-        logger.info('Iterating locales %d - %d to delete...' % (start + 1, end))  # pylint: disable=logging-not-lazy,consider-using-f-string
-        ConceptName.objects.filter(id__in=queryset.order_by('id')[start:end].values('id')).delete()
-
-    return 1
-
-
-@app.task
 def delete_concept(concept_id):  # pragma: no cover
     from core.concepts.models import Concept
 
@@ -516,6 +479,8 @@ def delete_concept(concept_id):  # pragma: no cover
 )
 def batch_index_resources(resource, filters, update_indexed=False):
     model = get_resource_class_from_resource_name(resource)
+    if isinstance(filters, str):
+        filters = json.loads(filters)
     if model:
         queryset = model.objects.filter(**filters)
         model.batch_index(queryset, model.get_search_document())
@@ -531,7 +496,7 @@ def batch_index_resources(resource, filters, update_indexed=False):
 
 @app.task(
     ignore_result=True, autoretry_for=(Exception, WorkerLostError, ), retry_kwargs={'max_retries': 2, 'countdown': 2},
-    acks_late=True, reject_on_worker_lost=True
+    acks_late=True, reject_on_worker_lost=True, base=QueueOnce
 )
 def index_expansion_concepts(expansion_id):
     from core.collections.models import Expansion
@@ -543,7 +508,7 @@ def index_expansion_concepts(expansion_id):
 
 @app.task(
     ignore_result=True, autoretry_for=(Exception, WorkerLostError, ), retry_kwargs={'max_retries': 2, 'countdown': 2},
-    acks_late=True, reject_on_worker_lost=True
+    acks_late=True, reject_on_worker_lost=True, base=QueueOnce
 )
 def index_expansion_mappings(expansion_id):
     from core.collections.models import Expansion
@@ -578,7 +543,7 @@ def make_hierarchy(concept_map):  # pragma: no cover
 
 @app.task(
     ignore_result=True, autoretry_for=(Exception, WorkerLostError, ), retry_kwargs={'max_retries': 2, 'countdown': 2},
-    acks_late=True, reject_on_worker_lost=True
+    acks_late=True, reject_on_worker_lost=True, base=QueueOnce
 )
 def index_source_concepts(source_id):
     from core.sources.models import Source
@@ -590,7 +555,7 @@ def index_source_concepts(source_id):
 
 @app.task(
     ignore_result=True, autoretry_for=(Exception, WorkerLostError, ), retry_kwargs={'max_retries': 2, 'countdown': 2},
-    acks_late=True, reject_on_worker_lost=True
+    acks_late=True, reject_on_worker_lost=True, base=QueueOnce
 )
 def index_source_mappings(source_id):
     from core.sources.models import Source
@@ -600,7 +565,7 @@ def index_source_mappings(source_id):
         source.batch_index(source.mappings, MappingDocument)
 
 
-@app.task
+@app.task(base=QueueOnce)
 def update_source_active_concepts_count(source_id):
     from core.sources.models import Source
     source = Source.objects.filter(id=source_id).first()
@@ -611,7 +576,7 @@ def update_source_active_concepts_count(source_id):
             source.save(update_fields=['active_concepts'])
 
 
-@app.task
+@app.task(base=QueueOnce)
 def update_source_active_mappings_count(source_id):
     from core.sources.models import Source
     source = Source.objects.filter(id=source_id).first()
@@ -622,7 +587,7 @@ def update_source_active_mappings_count(source_id):
             source.save(update_fields=['active_mappings'])
 
 
-@app.task
+@app.task(base=QueueOnce)
 def update_collection_active_concepts_count(collection_id):
     from core.collections.models import Collection
     collection = Collection.objects.filter(id=collection_id).first()
@@ -633,7 +598,7 @@ def update_collection_active_concepts_count(collection_id):
             collection.save(update_fields=['active_concepts'])
 
 
-@app.task
+@app.task(base=QueueOnce)
 def update_collection_active_mappings_count(collection_id):
     from core.collections.models import Collection
     collection = Collection.objects.filter(id=collection_id).first()
@@ -651,72 +616,6 @@ def delete_s3_objects(path):
 
 
 @app.task(ignore_result=True)
-def link_references_to_resources(reference_ids):  # pragma: no cover
-    from core.collections.models import CollectionReference
-    for reference in CollectionReference.objects.filter(id__in=reference_ids):
-        logger.info('Linking Reference %s', reference.uri)
-        reference.link_resources()
-
-
-@app.task(ignore_result=True)
-def link_all_references_to_resources():  # pragma: no cover
-    from core.collections.models import CollectionReference
-    queryset = CollectionReference.objects.filter(concepts__isnull=True, mappings__isnull=True)
-    total = queryset.count()
-    logger.info('Need to link %d references', total)
-    count = 1
-    for reference in queryset:
-        logger.info('(%d/%d) Linking Reference %s', count, total, reference.uri)
-        count += 1
-        reference.link_resources()
-
-
-@app.task(ignore_result=True)
-def link_expansions_repo_versions():  # pragma: no cover
-    from core.collections.models import Expansion
-    expansions = Expansion.objects.filter()
-    total = expansions.count()
-    logger.info('Total Expansions %d', total)
-    count = 1
-    for expansion in expansions:
-        if (
-                expansion.concepts.exists() or expansion.mappings.exists()
-        ) and (
-                not expansion.resolved_source_versions.exists() and not expansion.resolved_collection_versions.exists()
-        ):
-            logger.info('(%d/%d) Linking Repo Version %s', count, total, expansion.uri)
-            expansion.link_repo_versions()
-        else:
-            logger.info('(%d/%d) Skipping already Linked %s', count, total, expansion.uri)
-        count += 1
-
-
-@app.task(ignore_result=True)
-def reference_old_to_new_structure():  # pragma: no cover
-    from core.collections.parsers import CollectionReferenceExpressionStringParser
-    from core.collections.models import CollectionReference
-
-    queryset = CollectionReference.objects.filter(expression__isnull=False, system__isnull=True, valueset__isnull=True)
-    total = queryset.count()
-    logger.info('Need to migrate %d references', total)
-    count = 1
-    for reference in queryset:
-        logger.info('(%d/%d) Migrating %s', count, total, reference.uri)
-        count += 1
-        parser = CollectionReferenceExpressionStringParser(expression=reference.expression)
-        parser.parse()
-        ref_struct = parser.to_reference_structure()[0]
-        reference.reference_type = ref_struct['reference_type'] or 'concepts'
-        reference.system = ref_struct['system']
-        reference.version = ref_struct['version']
-        reference.code = ref_struct['code']
-        reference.resource_version = ref_struct['resource_version']
-        reference.valueset = ref_struct['valueset']
-        reference.filter = ref_struct['filter']
-        reference.save()
-
-
-@app.task(ignore_result=True)
 def beat_healthcheck():  # pragma: no cover
     from core.common.services import RedisService
     redis_service = RedisService()
@@ -726,18 +625,149 @@ def beat_healthcheck():  # pragma: no cover
 @app.task(ignore_result=True)
 def monthly_usage_report():  # pragma: no cover
     # runs on first of every month
-    # reports usage of prev month
+    # reports usage of prev month and trend over last 3 months
     from core.reports.models import MonthlyUsageReport
-    now = timezone.now()
-    prev_month = now.replace(month=now.month - 1, day=1).date()
-    report = MonthlyUsageReport(verbose=True, start=prev_month, end=get_end_of_month(prev_month))
+    now = timezone.now().replace(day=1)
+    three_months_from_now = now - relativedelta(months=3)
+    last_month = now - relativedelta(months=1)
+    report = MonthlyUsageReport(
+        verbose=True, start=three_months_from_now, end=now, current_month_end=now, current_month_start=last_month)
     report.prepare()
     html_body = render_to_string('monthly_usage_report_for_mail.html', report.get_result_for_email())
+    FORMAT = '%Y-%m-%d'
+    start = report.start
+    end = report.end
     mail = EmailMessage(
-        subject=f"[{settings.ENV.upper()}] Monthly usage report: {report.start} to {report.end}",
+        subject=f"{settings.ENV.upper()} Monthly usage report: {start.strftime(FORMAT)} to {end.strftime(FORMAT)}",
         body=html_body,
         to=[settings.REPORTS_EMAIL]
     )
     mail.content_subtype = "html"
     res = mail.send()
     return res
+
+
+@app.task(ignore_result=True)
+def vacuum_and_analyze_db():
+    from django.db import connections
+    conn_proxy = connections['default']
+    conn_proxy.cursor()  # init connection field
+    conn = conn_proxy.connection
+    old_isolation_level = conn.isolation_level
+    conn.set_isolation_level(0)
+    conn.cursor().execute('VACUUM ANALYZE')
+    conn.set_isolation_level(old_isolation_level)
+
+
+@app.task(ignore_result=True)
+def post_import_update_resource_counts():
+    from core.sources.models import Source
+    from core.concepts.models import Concept
+    from core.mappings.models import Mapping
+
+    uncounted_concepts = Concept.objects.filter(_counted__isnull=True)
+    sources = Source.objects.filter(id__in=uncounted_concepts.values_list('parent_id', flat=True))
+    for source in sources:
+        source.update_concepts_count(sync=True)
+        try:
+            uncounted_concepts.filter(parent_id=source.id).update(_counted=True)
+        except:  # pylint: disable=bare-except
+            pass
+
+    uncounted_mappings = Mapping.objects.filter(_counted__isnull=True)
+    sources = Source.objects.filter(
+        id__in=uncounted_mappings.values_list('parent_id', flat=True))
+
+    for source in sources:
+        source.update_mappings_count(sync=True)
+        try:
+            uncounted_mappings.filter(parent_id=source.id).update(_counted=True)
+        except:  # pylint: disable=bare-except
+            pass
+
+
+@app.task(ignore_result=True)
+def set_source_children_checksums(source_id):
+    from core.sources.models import Source
+    source = Source.objects.filter(id=source_id).first()
+    if not source:
+        return
+    for concept in source.concepts.filter():
+        concept.set_source_versions_checksum()
+    for mapping in source.mappings.filter():
+        mapping.set_source_versions_checksum()
+
+
+@app.task(ignore_result=True)
+def update_mappings_source(source_id):
+    # Updates mappings where mapping.to_source_url or mapping.from_source_url matches source url or canonical url
+    from core.sources.models import Source
+    source = Source.objects.filter(id=source_id).first()
+    if source:
+        source.update_mappings()
+
+
+@app.task(ignore_result=True)
+def update_mappings_concept(concept_id):
+    # Updates mappings where mapping.to_concept or mapping.from_concepts matches concept's mnemonic and parent
+    from core.concepts.models import Concept
+    concept = Concept.objects.filter(id=concept_id).first()
+    if concept:
+        concept.update_mappings()
+
+
+@app.task(ignore_result=True)
+def calculate_checksums(resource_type, resource_id):
+    model = get_resource_class_from_resource_name(resource_type)
+    if model:
+        is_source_child = model.__class__.__name__ in ('Concept', 'Mapping')
+        instance = model.objects.filter(id=resource_id).first()
+        if instance:
+            instance.set_checksums()
+            if is_source_child:
+                if not instance.is_latest_version:
+                    instance.get_latest_version().set_checksums()
+                if not instance.is_versioned_object:
+                    instance.versioned_object.set_checksums()
+
+
+@app.task(ignore_result=True)
+def fix_concept_latest_versions():  # pragma: no cover
+    from core.sources.models import Source
+    from core.concepts.models import Concept
+    index = []
+    for source in Source.objects.filter(version=HEAD):
+        for info in source.concepts_set.filter(
+                is_latest_version=True
+        ).values(
+            'versioned_object_id'
+        ).annotate(count=Count('versioned_object_id')).filter(count__gt=1).values('versioned_object_id'):
+            versioned_object_id = info['versioned_object_id']
+            concept = Concept.objects.get(id=versioned_object_id)
+            latest = concept.versions.filter(is_latest_version=True).order_by('-id').first()
+            concept.versions.exclude(id=latest.id).update(is_latest_version=False)
+            index.append(versioned_object_id)
+    print("Updated Concept Count: ", len(index))
+    from core.concepts.documents import ConceptDocument
+    Concept.batch_index(Concept.objects.filter(versioned_object_id__in=index), ConceptDocument)
+
+
+@app.task(ignore_result=True)
+def fix_mapping_latest_versions():  # pragma: no cover
+    from core.sources.models import Source
+    from core.mappings.models import Mapping
+    index = []
+    for source in Source.objects.filter(version=HEAD):
+        for info in source.mappings_set.filter(
+                is_latest_version=True
+        ).values(
+            'versioned_object_id'
+        ).annotate(count=Count('versioned_object_id')).filter(count__gt=1).values('versioned_object_id'):
+            versioned_object_id = info['versioned_object_id']
+            mapping = Mapping.objects.get(id=versioned_object_id)
+            latest = mapping.versions.filter(is_latest_version=True).order_by('-id').first()
+            mapping.versions.exclude(id=latest.id).update(is_latest_version=False)
+            index.append(versioned_object_id)
+    print("Updated Mapping Count: ", len(index))
+    from core.mappings.documents import MappingDocument
+    Mapping.batch_index(Mapping.objects.filter(versioned_object_id__in=index), MappingDocument)

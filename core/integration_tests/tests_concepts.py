@@ -1,11 +1,12 @@
-import unittest
 from unittest.mock import patch
 
 from django.conf import settings
 from mock import ANY
 
+from core.bundles.models import Bundle
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
-from core.common.constants import CUSTOM_VALIDATION_SCHEMA_OPENMRS
+from core.common.constants import OPENMRS_VALIDATION_SCHEMA
+from core.common.tasks import rebuild_indexes
 from core.common.tests import OCLAPITestCase
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept
@@ -92,7 +93,6 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
                 'versions_url',
                 'version',
                 'extras',
-                'name',
                 'type',
                 'update_comment',
                 'version_url',
@@ -100,6 +100,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
                 'created_by',
                 'parent_concept_urls',
                 'public_can_view',
+                'checksums',
                 'versioned_object_id',
             ])
         )
@@ -127,8 +128,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.data['display_locale'], 'en')
         self.assertEqual(response.data['versions_url'], concept.uri + 'versions/')
         self.assertEqual(response.data['version'], str(concept.id))
-        self.assertEqual(response.data['extras'], dict(foo='bar'))
-        self.assertEqual(response.data['name'], 'c1')
+        self.assertEqual(response.data['extras'], {'foo': 'bar'})
         self.assertEqual(response.data['type'], 'Concept')
         self.assertEqual(response.data['version_url'], latest_version.uri)
 
@@ -139,7 +139,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
             format='json'
         )
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.data, dict(__all__=['Concept ID must be unique within a source.']))
+        self.assertEqual(response.data, {'__all__': ['Concept ID must be unique within a source.']})
 
     def test_post_400(self):
         concepts_url = f"/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}/concepts/"
@@ -192,7 +192,6 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
                     'versions_url',
                     'version',
                     'extras',
-                    'name',
                     'type',
                     'update_comment',
                     'version_url',
@@ -200,6 +199,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
                     'created_by',
                     'parent_concept_urls',
                     'public_can_view',
+                    'checksums',
                     'versioned_object_id'])
         )
 
@@ -225,7 +225,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.data['display_locale'], 'en')
         self.assertEqual(response.data['versions_url'], concept.uri + 'versions/')
         self.assertEqual(response.data['version'], str(version.id))
-        self.assertEqual(response.data['extras'], dict(foo='bar'))
+        self.assertEqual(response.data['extras'], {'foo': 'bar'})
         self.assertEqual(response.data['type'], 'Concept')
         self.assertEqual(response.data['version_url'], version.uri)
         self.assertTrue(concept.is_versioned_object)
@@ -233,7 +233,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
 
     def test_put_200_openmrs_schema(self):  # pylint: disable=too-many-statements
         self.create_lookup_concept_classes()
-        source = OrganizationSourceFactory(custom_validation_schema=CUSTOM_VALIDATION_SCHEMA_OPENMRS)
+        source = OrganizationSourceFactory(custom_validation_schema=OPENMRS_VALIDATION_SCHEMA)
         name = ConceptNameFactory.build(locale='fr')
         concept = ConceptFactory(parent=source, names=[name])
         self.assertEqual(concept.versions.count(), 1)
@@ -267,7 +267,6 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
                     'versions_url',
                     'version',
                     'extras',
-                    'name',
                     'type',
                     'update_comment',
                     'version_url',
@@ -275,6 +274,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
                     'created_by',
                     'parent_concept_urls',
                     'public_can_view',
+                    'checksums',
                     'versioned_object_id'])
         )
 
@@ -302,7 +302,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.data['display_locale'], 'en')
         self.assertEqual(response.data['versions_url'], concept.uri + 'versions/')
         self.assertEqual(response.data['version'], str(version.id))
-        self.assertEqual(response.data['extras'], dict(foo='bar'))
+        self.assertEqual(response.data['extras'], {'foo': 'bar'})
         self.assertEqual(response.data['type'], 'Concept')
         self.assertEqual(response.data['version_url'], version.uri)
         self.assertTrue(concept.is_versioned_object)
@@ -358,7 +358,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 404)
 
     def test_delete_204(self):
-        names = [ConceptNameFactory()]
+        names = [ConceptNameFactory.build()]
         concept = ConceptFactory(parent=self.source, names=names)
         concepts_url = f"/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}/concepts/{concept.mnemonic}/"
 
@@ -380,7 +380,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         self.assertTrue(latest_version.comment, 'Deleting it')
 
     def test_db_hard_delete_204(self):
-        names = [ConceptNameFactory()]
+        names = [ConceptNameFactory.build()]
         concept = ConceptFactory(parent=self.source, names=names)
         concepts_url = f"/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}/concepts/{concept.mnemonic}/"
 
@@ -396,7 +396,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         self.assertFalse(Concept.objects.filter(mnemonic=concept.mnemonic).exists())
 
     def test_hard_delete_204(self):
-        names = [ConceptNameFactory()]
+        names = [ConceptNameFactory.build()]
         concept = ConceptFactory(parent=self.source, names=names)
         concepts_url = f"/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}/concepts/{concept.mnemonic}/"
 
@@ -413,7 +413,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
 
     @patch('core.concepts.views.delete_concept')
     def test_async_hard_delete_204(self, delete_conceot_task_mock):
-        names = [ConceptNameFactory()]
+        names = [ConceptNameFactory.build()]
         concept = ConceptFactory(parent=self.source, names=names)
         concepts_url = f"/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}/concepts/{concept.mnemonic}/"
 
@@ -440,7 +440,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 404)
 
     def test_delete_400(self):
-        names = [ConceptNameFactory()]
+        names = [ConceptNameFactory.build()]
         concept = ConceptFactory(parent=self.source, names=names, retired=True)
         concepts_url = f"/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}/concepts/{concept.mnemonic}/"
 
@@ -455,8 +455,8 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.data, {'__all__': 'Concept is already retired'})
 
     def test_extras_get_200(self):
-        names = [ConceptNameFactory()]
-        concept = ConceptFactory(parent=self.source, names=names, extras=dict(foo='bar'))
+        names = [ConceptNameFactory.build()]
+        concept = ConceptFactory(parent=self.source, names=names, extras={'foo': 'bar'})
         extras_url = f"/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}" \
             f"/concepts/{concept.mnemonic}/extras/"
 
@@ -467,11 +467,11 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data, dict(foo='bar'))
+        self.assertEqual(response.data, {'foo': 'bar'})
 
     def test_extra_get_200(self):
-        names = [ConceptNameFactory()]
-        concept = ConceptFactory(parent=self.source, names=names, extras=dict(foo='bar', tao='ching'))
+        names = [ConceptNameFactory.build()]
+        concept = ConceptFactory(parent=self.source, names=names, extras={'foo': 'bar', 'tao': 'ching'})
 
         def extra_url(extra):
             return f"/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}" \
@@ -484,7 +484,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data, dict(tao='ching'))
+        self.assertEqual(response.data, {'tao': 'ching'})
 
         response = self.client.get(
             extra_url('foo'),
@@ -493,7 +493,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data, dict(foo='bar'))
+        self.assertEqual(response.data, {'foo': 'bar'})
 
         response = self.client.get(
             extra_url('bar'),
@@ -502,11 +502,11 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 404)
-        self.assertEqual(response.data, dict(detail='Not found.'))
+        self.assertEqual(response.data, {'detail': 'Not found.'})
 
     def test_extra_put_200(self):
-        names = [ConceptNameFactory()]
-        concept = ConceptFactory(parent=self.source, names=names, extras=dict(foo='bar', tao='ching'))
+        names = [ConceptNameFactory.build()]
+        concept = ConceptFactory(parent=self.source, names=names, extras={'foo': 'bar', 'tao': 'ching'})
 
         def extra_url(extra):
             return f"/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}" \
@@ -514,7 +514,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
 
         response = self.client.put(
             extra_url('tao'),
-            dict(tao='te-ching'),
+            {'tao': 'te-ching'},
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -526,12 +526,12 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(concept.versions.count(), 2)
 
         latest_version = concept.versions.order_by('-created_at').first()
-        self.assertEqual(latest_version.extras, dict(foo='bar', tao='te-ching'))
+        self.assertEqual(latest_version.extras, {'foo': 'bar', 'tao': 'te-ching'})
         self.assertEqual(latest_version.comment, 'Updated extras: tao=te-ching.')
 
     def test_extra_put_400(self):
-        names = [ConceptNameFactory()]
-        concept = ConceptFactory(parent=self.source, names=names, extras=dict(foo='bar', tao='ching'))
+        names = [ConceptNameFactory.build()]
+        concept = ConceptFactory(parent=self.source, names=names, extras={'foo': 'bar', 'tao': 'ching'})
 
         def extra_url(extra):
             return f"/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}" \
@@ -539,7 +539,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
 
         response = self.client.put(
             extra_url('tao'),
-            dict(tao=None),
+            {'tao': None},
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -547,11 +547,11 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.data, ['Must specify tao param in body.'])
         concept.refresh_from_db()
-        self.assertEqual(concept.extras, dict(foo='bar', tao='ching'))
+        self.assertEqual(concept.extras, {'foo': 'bar', 'tao': 'ching'})
 
     def test_extra_delete_204(self):
-        names = [ConceptNameFactory()]
-        concept = ConceptFactory(parent=self.source, names=names, extras=dict(foo='bar', tao='ching'))
+        names = [ConceptNameFactory.build()]
+        concept = ConceptFactory(parent=self.source, names=names, extras={'foo': 'bar', 'tao': 'ching'})
         self.assertEqual(concept.versions.count(), 1)
 
         def extra_url(extra):
@@ -571,12 +571,12 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(concept.versions.count(), 2)
 
         latest_version = concept.get_latest_version()
-        self.assertEqual(latest_version.extras, dict(foo='bar'))
+        self.assertEqual(latest_version.extras, {'foo': 'bar'})
         self.assertEqual(latest_version.comment, 'Deleted extra tao.')
 
     def test_extra_delete_404(self):
-        names = [ConceptNameFactory()]
-        concept = ConceptFactory(parent=self.source, names=names, extras=dict(foo='bar', tao='ching'))
+        names = [ConceptNameFactory.build()]
+        concept = ConceptFactory(parent=self.source, names=names, extras={'foo': 'bar', 'tao': 'ching'})
 
         def extra_url(extra):
             return f"/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}" \
@@ -591,7 +591,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 404)
 
     def test_names_get_200(self):
-        name = ConceptNameFactory()
+        name = ConceptNameFactory.build()
         concept = ConceptFactory(parent=self.source, names=[name])
 
         response = self.client.get(
@@ -615,7 +615,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         )
 
     def test_names_post_201(self):
-        name = ConceptNameFactory()
+        name = ConceptNameFactory.build()
         concept = ConceptFactory(parent=self.source, names=[name])
 
         response = self.client.post(
@@ -646,7 +646,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(concept.names.count(), 2)
 
     def test_names_post_400(self):
-        name = ConceptNameFactory()
+        name = ConceptNameFactory.build()
         concept = ConceptFactory(parent=self.source, names=[name])
 
         response = self.client.post(
@@ -663,8 +663,8 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(list(response.data.keys()), ['locale'])
 
     def test_name_delete_204(self):
-        name1 = ConceptNameFactory()
-        name2 = ConceptNameFactory()
+        name1 = ConceptNameFactory.build()
+        name2 = ConceptNameFactory.build()
         concept = ConceptFactory(parent=self.source, names=[name1, name2])
         response = self.client.delete(
             f"/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}"
@@ -708,9 +708,9 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
             sorted(response.data[0].keys()),
             sorted(['uuid', 'id', 'external_id', 'concept_class', 'datatype', 'url', 'retired', 'source',
                     'owner', 'owner_type', 'owner_url', 'display_name', 'display_locale', 'names', 'descriptions',
-                    'created_on', 'updated_on', 'versions_url', 'version', 'extras', 'name', 'type',
+                    'created_on', 'updated_on', 'versions_url', 'version', 'extras', 'type',
                     'update_comment', 'version_url', 'updated_by', 'created_by',
-                    'public_can_view', 'versioned_object_id'])
+                    'public_can_view', 'versioned_object_id', 'checksums'])
         )
 
         response = self.client.get(
@@ -838,7 +838,7 @@ class ConceptVersionRetrieveViewTest(OCLAPITestCase):
 class ConceptExtrasViewTest(OCLAPITestCase):
     def setUp(self):
         super().setUp()
-        self.extras = dict(foo='bar', tao='ching')
+        self.extras = {'foo': 'bar', 'tao': 'ching'}
         self.concept = ConceptFactory(extras=self.extras)
         self.user = UserProfileFactory(organizations=[self.concept.parent.organization])
         self.token = self.user.get_token()
@@ -853,8 +853,8 @@ class ConceptExtrasViewTest(OCLAPITestCase):
 class ConceptExtraRetrieveUpdateDestroyViewTest(OCLAPITestCase):
     def setUp(self):
         super().setUp()
-        self.extras = dict(foo='bar', tao='ching')
-        self.concept = ConceptFactory(extras=self.extras, names=[ConceptNameFactory()])
+        self.extras = {'foo': 'bar', 'tao': 'ching'}
+        self.concept = ConceptFactory(extras=self.extras, names=[ConceptNameFactory.build()])
         self.user = UserProfileFactory(organizations=[self.concept.parent.organization])
         self.token = self.user.get_token()
 
@@ -862,7 +862,7 @@ class ConceptExtraRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         response = self.client.get(self.concept.uri + 'extras/foo/', format='json')
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data, dict(foo='bar'))
+        self.assertEqual(response.data, {'foo': 'bar'})
 
     def test_get_404(self):
         response = self.client.get(self.concept.uri + 'extras/bar/', format='json')
@@ -876,17 +876,17 @@ class ConceptExtraRetrieveUpdateDestroyViewTest(OCLAPITestCase):
 
         response = self.client.put(
             self.concept.uri + 'extras/foo/',
-            dict(foo='foobar'),
+            {'foo': 'foobar'},
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data, dict(foo='foobar'))
+        self.assertEqual(response.data, {'foo': 'foobar'})
         self.assertEqual(self.concept.versions.count(), 2)
-        self.assertEqual(self.concept.get_latest_version().extras, dict(foo='foobar', tao='ching'))
+        self.assertEqual(self.concept.get_latest_version().extras, {'foo': 'foobar', 'tao': 'ching'})
         self.concept.refresh_from_db()
-        self.assertEqual(self.concept.extras, dict(foo='foobar', tao='ching'))
+        self.assertEqual(self.concept.extras, {'foo': 'foobar', 'tao': 'ching'})
 
     def test_put_400(self):
         self.assertEqual(self.concept.versions.count(), 1)
@@ -895,7 +895,7 @@ class ConceptExtraRetrieveUpdateDestroyViewTest(OCLAPITestCase):
 
         response = self.client.put(
             self.concept.uri + 'extras/foo/',
-            dict(tao='foobar'),
+            {'tao': 'foobar'},
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -920,16 +920,16 @@ class ConceptExtraRetrieveUpdateDestroyViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 204)
         self.assertEqual(self.concept.versions.count(), 2)
-        self.assertEqual(self.concept.get_latest_version().extras, dict(tao='ching'))
-        self.assertEqual(self.concept.versions.first().extras, dict(foo='bar', tao='ching'))
+        self.assertEqual(self.concept.get_latest_version().extras, {'tao': 'ching'})
+        self.assertEqual(self.concept.versions.first().extras, {'foo': 'bar', 'tao': 'ching'})
         self.concept.refresh_from_db()
-        self.assertEqual(self.concept.extras, dict(tao='ching'))
+        self.assertEqual(self.concept.extras, {'tao': 'ching'})
 
 
 class ConceptVersionsViewTest(OCLAPITestCase):
     def setUp(self):
         super().setUp()
-        self.concept = ConceptFactory(names=[ConceptNameFactory()])
+        self.concept = ConceptFactory(names=[ConceptNameFactory.build()])
         self.user = UserProfileFactory(organizations=[self.concept.parent.organization])
         self.token = self.user.get_token()
 
@@ -987,7 +987,7 @@ class ConceptVersionsViewTest(OCLAPITestCase):
 class ConceptMappingsViewTest(OCLAPITestCase):
     def setUp(self):
         super().setUp()
-        self.concept = ConceptFactory(names=[ConceptNameFactory()])
+        self.concept = ConceptFactory(names=[ConceptNameFactory.build()])
 
     def test_get_200_for_concept(self):
         mappings_url = self.concept.uri + 'mappings/'
@@ -1252,9 +1252,8 @@ class ConceptCascadeViewTest(OCLAPITestCase):
         entry = response.data['entry']
         self.assertEqual(
             list(entry.keys()),
-            ['uuid', 'id', 'type', 'url', 'version_url', 'terminal', 'entries', 'display_name', 'retired']
+            ['id', 'type', 'url', 'version_url', 'terminal', 'entries', 'display_name', 'retired']
         )
-        self.assertEqual(entry['uuid'], str(concept1.id))
         self.assertEqual(entry['id'], concept1.mnemonic)
         self.assertEqual(entry['type'], 'Concept')
         self.assertEqual(len(entry['entries']), 1)
@@ -1311,9 +1310,8 @@ class ConceptCascadeViewTest(OCLAPITestCase):
         entry = response.data['entry']
         self.assertEqual(
             list(entry.keys()),
-            ['uuid', 'id', 'type', 'url', 'version_url', 'terminal', 'entries', 'display_name', 'retired']
+            ['id', 'type', 'url', 'version_url', 'terminal', 'entries', 'display_name', 'retired']
         )
-        self.assertEqual(entry['uuid'], str(concept2.id))
         self.assertEqual(entry['id'], concept2.mnemonic)
         self.assertEqual(entry['type'], 'Concept')
         self.assertEqual(len(entry['entries']), 1)
@@ -1354,9 +1352,8 @@ class ConceptCascadeViewTest(OCLAPITestCase):
         entry = response.data['entry']
         self.assertEqual(
             list(entry.keys()),
-            ['uuid', 'id', 'type', 'url', 'version_url', 'terminal', 'entries', 'display_name', 'retired']
+            ['id', 'type', 'url', 'version_url', 'terminal', 'entries', 'display_name', 'retired']
         )
-        self.assertEqual(entry['uuid'], str(concept1.id))
         self.assertEqual(entry['id'], concept1.mnemonic)
         self.assertEqual(entry['type'], 'Concept')
         self.assertEqual(len(entry['entries']), 0)
@@ -1370,12 +1367,51 @@ class ConceptCascadeViewTest(OCLAPITestCase):
         entry = response.data['entry']
         self.assertEqual(
             list(entry.keys()),
-            ['uuid', 'id', 'type', 'url', 'version_url', 'terminal', 'entries', 'display_name', 'retired']
+            ['id', 'type', 'url', 'version_url', 'terminal', 'entries', 'display_name', 'retired']
         )
-        self.assertEqual(entry['uuid'], str(concept2.id))
         self.assertEqual(entry['id'], concept2.mnemonic)
         self.assertEqual(entry['type'], 'Concept')
         self.assertEqual(len(entry['entries']), 0)
+
+        # $cascade all forward with omitIfExistsIn
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection)
+        collection.expansion_uri = expansion.uri
+        collection.save()
+        expansion.concepts.add(concept2.get_latest_version())
+        expansion.concepts.add(concept3)
+        expansion.mappings.add(mapping2)
+        expansion.mappings.add(mapping6)
+
+        response = self.client.get(
+            concept1.uri + '$cascade/?omitIfExistsIn=' + collection.uri
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data['entry']), 3)
+        self.assertEqual(
+            sorted([data['url'] for data in response.data['entry']]),
+            sorted([
+                concept1.uri,
+                mapping1.uri,
+                mapping4.uri,
+            ])
+        )
+
+        response = self.client.get(
+            concept1.uri + '$cascade/?view=hierarchy&omitIfExistsIn=' + collection.uri
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['entry']['url'], concept1.uri)
+        self.assertEqual(len(response.data['entry']['entries']), 2)
+        self.assertEqual(
+            sorted([data['url'] for data in response.data['entry']['entries']]),
+            sorted([
+                mapping1.uri,
+                mapping4.uri,
+            ])
+        )
 
     def test_get_200_for_collection_version(self):  # pylint: disable=too-many-locals,too-many-statements
         source1 = OrganizationSourceFactory()
@@ -1570,10 +1606,10 @@ class ConceptListViewTest(OCLAPITestCase):
         self.source = OrganizationSourceFactory(mnemonic='MySource')
         self.source_v1 = OrganizationSourceFactory(version='v1', mnemonic='MySource', organization=self.source.parent)
         self.concept1 = ConceptFactory(
-            mnemonic='MyConcept1', parent=self.source, concept_class='classA', extras=dict(foo='bar')
+            mnemonic='MyConcept1', parent=self.source, concept_class='classA', extras={'foo': 'bar'}
         )
         self.concept2 = ConceptFactory(
-            mnemonic='MyConcept2', parent=self.source, concept_class='classB', extras=dict(bar='foo')
+            mnemonic='MyConcept2', parent=self.source, concept_class='classB', extras={'bar': 'foo'}
         )
         self.source_v1.concepts.add(self.concept2)
         ConceptDocument().update(self.source.concepts.all())  # needed for parallel test execution
@@ -1582,33 +1618,29 @@ class ConceptListViewTest(OCLAPITestCase):
         self.random_user = UserProfileFactory()
 
     def test_search(self):  # pylint: disable=too-many-statements
-        response = self.client.get('/concepts/?q=Concept2')
+        response = self.client.get('/concepts/?q=MyConcept2')
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 1)
         self.assertEqual(response.data[0]['id'], 'MyConcept2')
         self.assertEqual(response.data[0]['uuid'], str(self.concept2.get_latest_version().id))
         self.assertEqual(response.data[0]['versioned_object_id'], self.concept2.id)
 
-        response = self.client.get('/concepts/?q=Concept1')
+        response = self.client.get('/concepts/?q=MyConcept1')
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 1)
         self.assertEqual(response.data[0]['id'], 'MyConcept1')
 
-        response = self.client.get('/concepts/?q=classA&exact_match=on')
+        response = self.client.get('/concepts/?q=MyConcept1&exact_match=on')
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 1)
         self.assertEqual(response.data[0]['id'], 'MyConcept1')
 
-        response = self.client.get('/concepts/?q=Concept1&exact_match=on')
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.data), 0)
-
-        response = self.client.get('/concepts/?q=Concept1&conceptClass=classA')
+        response = self.client.get('/concepts/?q=MyConcept&conceptClass=classA')
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 1)
         self.assertEqual(response.data[0]['id'], 'MyConcept1')
 
-        response = self.client.get('/concepts/?q=Concept1&conceptClass=classB')
+        response = self.client.get('/concepts/?q=MyConcept1&conceptClass=classB')
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 0)
 
@@ -1627,42 +1659,51 @@ class ConceptListViewTest(OCLAPITestCase):
         self.assertEqual(len(response.data), 1)
         self.assertEqual(response.data[0]['id'], 'MyConcept2')
 
-        response = self.client.get(self.source.concepts_url + '?q=MySource&extras.exact.foo=bar')
+        response = self.client.get(
+            self.source.concepts_url + '?q=MyConcept&extras.exact.foo=bar&includeSearchMeta=true')
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 1)
         self.assertEqual(response.data[0]['id'], 'MyConcept1')
-
-        response = self.client.get(
-            self.source.concepts_url + '?q=MySource',
-            HTTP_AUTHORIZATION='Token ' + self.token,
+        self.assertEqual(
+            response.data[0]['search_meta']['search_highlight'],
+            {'extras.foo': ['<em>bar</em>'], 'id': ['<em>MyConcept1</em>']}
         )
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.data), 2)
 
         response = self.client.get(
-            self.source.concepts_url + '?q=MySource&limit=1',
-            HTTP_AUTHORIZATION='Token ' + self.token,
-        )
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.data), 1)
-
-        response = self.client.get(
-            self.source.concepts_url + '?q=My Source',
-            HTTP_AUTHORIZATION='Token ' + self.token,
-        )
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.data), 2)
-
-        response = self.client.get(
-            self.source.uri + 'v1/concepts/?q=MySource&sortAsc=last_update',
+            self.source.uri + 'v1/concepts/?q=MyConcept&sortAsc=last_update',
             HTTP_AUTHORIZATION='Token ' + self.random_user.get_token(),
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 1)
         self.assertEqual(response.data[0]['id'], 'MyConcept2')
 
-    @unittest.skipIf(settings.ENV == 'ci', 'this test fails on CI. Needs concepts index fixing for CI')
+        response = self.client.get(
+            self.source.concepts_url + '?q=MyConcept&searchStatsOnly=true',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data,
+            [
+                {'name': 'high', 'threshold': ANY, 'confidence': ANY, 'total': ANY},
+                {'name': 'medium', 'threshold': ANY, 'confidence': ANY, 'total': 0},
+                {'name': 'low', 'threshold': 0.01, 'confidence': '<50.0%', 'total': 0}
+            ]
+        )
+        self.assertTrue(response.data[0]['total'] >= 2)
+
+        response = self.client.get(
+            self.source.concepts_url + '?q=MyConcept',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 2)
+
     def test_facets(self):
+        if settings.ENV == 'ci':
+            rebuild_indexes(['concepts'])
+        ConceptDocument().update(self.source.concepts_set.all())
+
         response = self.client.get(
             '/concepts/?facetsOnly=true'
         )
@@ -1722,7 +1763,7 @@ class ConceptNameRetrieveUpdateDestroyViewTest(OCLAPITestCase):
 
         response = self.client.put(
             self.url,
-            dict(name='brar'),
+            {'name': 'brar'},
             HTTP_AUTHORIZATION='Token ' + self.token,
 
         )
@@ -1736,7 +1777,7 @@ class ConceptNameRetrieveUpdateDestroyViewTest(OCLAPITestCase):
 
 class ConceptReactivateViewTest(OCLAPITestCase):
     def test_put(self):
-        name = ConceptNameFactory()
+        name = ConceptNameFactory.build()
         concept = ConceptFactory(retired=True, names=[name])
         self.assertTrue(concept.retired)
         self.assertTrue(concept.get_latest_version().retired)
@@ -1851,7 +1892,7 @@ class ConceptSummaryViewTest(OCLAPITestCase):
         parent_concept = ConceptFactory(
             names=[ConceptNameFactory.build(), ConceptNameFactory.build()])
         child_concept = ConceptFactory(
-            names=[ConceptNameFactory(), ConceptNameFactory()],
+            names=[ConceptNameFactory.build(), ConceptNameFactory.build()],
             descriptions=[ConceptDescriptionFactory.build()]
         )
         child_concept.parent_concepts.add(parent_concept)
@@ -1877,3 +1918,70 @@ class ConceptSummaryViewTest(OCLAPITestCase):
         self.assertEqual(response.data['versions'], 1)
         self.assertEqual(response.data['children'], 0)
         self.assertEqual(response.data['parents'], 1)
+
+
+class ConceptCloneViewTest(OCLAPITestCase):
+    def setUp(self):
+        self.user = UserProfileFactory()
+        self.token = self.user.get_token()
+        self.concept = ConceptFactory()
+        self.clone_to_source = OrganizationSourceFactory()
+
+    def test_post_bad_requests(self):
+        response = self.client.post(
+            self.concept.uri + '$clone/',
+            {'foo': 'bar'},
+            HTTP_AUTHORIZATION=f"Token {self.token}",
+            format='json'
+        )
+        self.assertEqual(response.status_code, 400)
+
+        response = self.client.post(
+            self.concept.uri + '$clone/',
+            {'source_uri': 'foobar'},
+            HTTP_AUTHORIZATION=f"Token {self.token}",
+            format='json'
+        )
+        self.assertEqual(response.status_code, 404)
+
+        self.clone_to_source.public_access = 'None'
+        self.clone_to_source.save()
+
+        response = self.client.post(
+            self.concept.uri + '$clone/',
+            {'source_uri': self.clone_to_source.uri},
+            HTTP_AUTHORIZATION=f"Token {self.token}",
+            format='json'
+        )
+        self.assertEqual(response.status_code, 403)
+
+    @patch('core.concepts.views.Bundle.clone')
+    def test_post_success(self, bundle_clone_mock):
+        parameters = {'mapTypes': 'Q-AND-A,CONCEPT-SET'}
+        bundle_clone_mock.return_value = Bundle(
+            root=self.concept, repo_version=self.concept.parent, params=parameters, verbose=False
+        )
+
+        response = self.client.post(
+            self.concept.uri + '$clone/',
+            {'source_uri': self.clone_to_source.uri, 'parameters': parameters},
+            HTTP_AUTHORIZATION=f"Token {self.token}",
+            format='json'
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data,
+            {
+                'resourceType': 'Bundle',
+                'type': 'searchset',
+                'meta': ANY,
+                'total': None,
+                'entry': [],
+                'requested_url': None,
+                'repo_version_url': self.concept.parent.uri + 'HEAD/'
+            }
+        )
+        bundle_clone_mock.assert_called_once_with(
+            self.concept, self.concept.parent, self.clone_to_source, self.user, ANY, False,
+            **parameters
+        )

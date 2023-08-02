@@ -2,7 +2,6 @@ import base64
 import json
 
 import boto3
-import redis
 import requests
 from botocore.client import Config
 from botocore.exceptions import NoCredentialsError, ClientError
@@ -10,13 +9,13 @@ from django.conf import settings
 from django.contrib.auth.backends import ModelBackend
 from django.core.files.base import ContentFile
 from django.db import connection
+from django_redis import get_redis_connection
 from mozilla_django_oidc.contrib.drf import OIDCAuthentication
 from pydash import get
 from rest_framework.authentication import TokenAuthentication
 from rest_framework.authtoken.models import Token
 
 from core.common.backends import OCLOIDCAuthenticationBackend
-from core.settings import REDIS_HOST, REDIS_PORT, REDIS_DB
 
 
 class S3:
@@ -88,13 +87,37 @@ class S3:
         return True
 
     @classmethod
+    def rename(cls, old_key, new_key, delete=False):  # pragma: no cover
+        try:
+            resource = cls.__resource()
+            resource.meta.client.copy(
+                {'Bucket': settings.AWS_STORAGE_BUCKET_NAME, 'Key': old_key}, settings.AWS_STORAGE_BUCKET_NAME, new_key
+            )
+            if delete:
+                cls.delete_objects(old_key)
+        except (ClientError, NoCredentialsError):
+            return False
+
+        return True
+
+    @classmethod
+    def has_path(cls, prefix='/', delimiter='/'):
+        return len(cls.__fetch_keys(prefix, delimiter)) > 0
+
+    @classmethod
+    def get_last_key_from_path(cls, prefix='/', delimiter='/'):
+        keys = cls.__fetch_keys(prefix, delimiter, True)
+        key = sorted(keys, key=lambda k: k.get('LastModified'), reverse=True)[0] if len(keys) > 1 else get(keys, '0')
+        return get(key, 'Key')
+
+    @classmethod
     def delete_objects(cls, path):  # pragma: no cover
         try:
             s3_resource = cls.__resource()
             keys = cls.__fetch_keys(prefix=path)
             if keys:
                 s3_resource.meta.client.delete_objects(
-                    Bucket=settings.AWS_STORAGE_BUCKET_NAME, Delete=dict(Objects=keys)
+                    Bucket=settings.AWS_STORAGE_BUCKET_NAME, Delete={'Objects': keys}
                 )
         except:  # pylint: disable=bare-except
             pass
@@ -176,11 +199,14 @@ class S3:
         return None
 
     @classmethod
-    def __fetch_keys(cls, prefix='/', delimiter='/'):  # pragma: no cover
+    def __fetch_keys(cls, prefix='/', delimiter='/', verbose=False):  # pragma: no cover
         prefix = prefix[1:] if prefix.startswith(delimiter) else prefix
         s3_resource = cls.__resource()
         objects = s3_resource.meta.client.list_objects(Bucket=settings.AWS_STORAGE_BUCKET_NAME, Prefix=prefix)
-        return [{'Key': k} for k in [obj['Key'] for obj in objects.get('Contents', [])]]
+        content = objects.get('Contents', [])
+        if verbose:
+            return content
+        return [{'Key': k} for k in [obj['Key'] for obj in content]]
 
     @classmethod
     def __resource(cls):
@@ -189,7 +215,7 @@ class S3:
 
 class RedisService:  # pragma: no cover
     def __init__(self):
-        self.conn = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB)
+        self.conn = get_redis_connection('default')
 
     def set(self, key, val, **kwargs):
         return self.conn.set(key, val, **kwargs)
@@ -220,6 +246,23 @@ class RedisService:  # pragma: no cover
 
     def get_int(self, key):
         return int(self.conn.get(key).decode('utf-8'))
+
+    def get_pending_tasks(self, queue, include_task_names, exclude_task_names=None):
+        # queue = 'bulk_import_root'
+        # task_name = 'core.common.tasks.bulk_import_parallel_inline'
+        values = self.conn.lrange(queue, 0, -1)
+        tasks = []
+        exclude_task_names = exclude_task_names or []
+        if values:
+            for value in values:
+                val = json.loads(value.decode('utf-8'))
+                headers = val.get('headers')
+                task_name = headers.get('task')
+                if headers.get('id') and task_name in include_task_names and task_name not in exclude_task_names:
+                    tasks.append(
+                        {'task_id': headers['id'], 'task_name': headers['task'], 'state': 'PENDING', 'queue': queue}
+                    )
+        return tasks
 
 
 class PostgresQL:
@@ -339,15 +382,15 @@ class OIDCAuthService(AbstractAuthService):
     def add_user(cls, user, username, password):
         response = requests.post(
             cls.USERS_URL,
-            json=dict(
-                enabled=True,
-                emailVerified=user.verified,
-                firstName=user.first_name,
-                lastName=user.last_name,
-                email=user.email,
-                username=user.username,
-                credentials=[cls.credential_representation_from_hash(hash_=user.password)]
-            ),
+            json={
+                'enabled': True,
+                'emailVerified': user.verified,
+                'firstName': user.first_name,
+                'lastName': user.last_name,
+                'email': user.email,
+                'username': user.username,
+                'credentials': [cls.credential_representation_from_hash(hash_=user.password)]
+            },
             verify=False,
             headers=OIDCAuthService.get_admin_headers(username=username, password=password)
         )
@@ -356,19 +399,16 @@ class OIDCAuthService(AbstractAuthService):
 
         return response.json()
 
-    def get_token(self):
-        return None
-
     @staticmethod
     def get_admin_token(username, password):
         response = requests.post(
             OIDCAuthService.OIDP_ADMIN_TOKEN_URL,
-            data=dict(
-                grant_type='password',
-                username=username,
-                password=password,
-                client_id='admin-cli'
-            ),
+            data={
+                'grant_type': 'password',
+                'username': username,
+                'password': password,
+                'client_id': 'admin-cli'
+            },
             verify=False,
         )
         return response.json().get('access_token')
@@ -377,20 +417,19 @@ class OIDCAuthService(AbstractAuthService):
     def exchange_code_for_token(code, redirect_uri, client_id, client_secret):
         response = requests.post(
             settings.OIDC_OP_TOKEN_ENDPOINT,
-            data=dict(
-                grant_type='authorization_code',
-                client_id=client_id,
-                client_secret=client_secret,
-                code=code,
-                redirect_uri=redirect_uri
-            )
-
+            data={
+                'grant_type': 'authorization_code',
+                'client_id': client_id,
+                'client_secret': client_secret,
+                'code': code,
+                'redirect_uri': redirect_uri
+            }
         )
         return response.json()
 
     @staticmethod
     def get_admin_headers(**kwargs):
-        return dict(Authorization=f'Bearer {OIDCAuthService.get_admin_token(**kwargs)}')
+        return {'Authorization': f'Bearer {OIDCAuthService.get_admin_token(**kwargs)}'}
 
     @staticmethod
     def create_user(_):
@@ -417,5 +456,5 @@ class AuthService:
         authorization_header = request.META.get('HTTP_AUTHORIZATION')
         if authorization_header and authorization_header.startswith('Token '):
             token_key = authorization_header.replace('Token ', '')
-            return len(token_key) == 40 and Token.objects.filter(key=token_key).exists()
+            return Token.objects.filter(key=token_key).exists()
         return False

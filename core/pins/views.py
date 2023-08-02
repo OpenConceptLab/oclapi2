@@ -7,11 +7,15 @@ from rest_framework.permissions import IsAuthenticatedOrReadOnly
 from rest_framework.response import Response
 
 from core.common.constants import MAX_PINS_ALLOWED, INCLUDE_CREATOR_PINS
+from core.common.utils import get_truthy_values
 from core.common.views import BaseAPIView
 from core.orgs.models import Organization
 from core.pins.models import Pin
 from core.pins.serializers import PinSerializer, PinUpdateSerializer
 from core.users.models import UserProfile
+
+
+TRUTHY = get_truthy_values()
 
 
 class PinBaseView(BaseAPIView):
@@ -22,7 +26,7 @@ class PinBaseView(BaseAPIView):
         return queryset
 
     def should_include_creator_pins(self):
-        return self.request.query_params.get(INCLUDE_CREATOR_PINS, None) in ['true', True]
+        return self.request.query_params.get(INCLUDE_CREATOR_PINS, None) in TRUTHY
 
     def get_parent_type(self):
         if self.kwargs.get('user_is_self') or 'user' in self.kwargs:
@@ -42,11 +46,11 @@ class PinBaseView(BaseAPIView):
 
     def get_parent_filter(self):
         if self.kwargs.get('user_is_self'):
-            return dict(user=self.request.user)
+            return {'user': self.request.user}
         if 'user' in self.kwargs:
-            return dict(user__username=self.kwargs['user'])
+            return {'user__username': self.kwargs['user']}
         if 'org' in self.kwargs:
-            return dict(organization__mnemonic=self.kwargs['org'])
+            return {'organization__mnemonic': self.kwargs['org']}
         return None
 
     def get_queryset(self):
@@ -66,7 +70,7 @@ class PinListView(PinBaseView, ListAPIView):
             return Response(status=status.HTTP_404_NOT_FOUND)
         if parent.pins.count() >= MAX_PINS_ALLOWED:
             return Response(
-                dict(error=[f"Can only keep max {MAX_PINS_ALLOWED} items pinned"]),
+                {'error': [f"Can only keep max {MAX_PINS_ALLOWED} items pinned"]},
                 status=status.HTTP_404_NOT_FOUND
             )
 

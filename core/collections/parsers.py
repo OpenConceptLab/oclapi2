@@ -127,22 +127,22 @@ class CollectionReferenceExpandedStructureParser(CollectionReferenceAbstractPars
                 display = None if isinstance(_concept, str) else _concept.get('display', None)
                 resource_version = None if isinstance(_concept, str) else _concept.get('resource_version', None)
                 self.references.append(
-                    dict(
-                        expression=None,
-                        namespace=get(expression, 'namespace'),
-                        system=get(expression, 'system') or get(expression, 'url'),
-                        version=get(expression, 'version'),
-                        reference_type='concepts',
-                        valueset=get(expression, 'valueset') or get(expression, 'valueSet'),
-                        cascade=get(expression, 'cascade') or self.cascade,
-                        filter=get(expression, 'filter'),
-                        code=code,
-                        resource_version=resource_version,
-                        transform=get(expression, 'transform'),
-                        created_by=self.user,
-                        display=display,
-                        include=self.get_include_value(expression)
-                    )
+                    {
+                        'expression': None,
+                        'namespace': get(expression, 'namespace'),
+                        'system': get(expression, 'system') or get(expression, 'url'),
+                        'version': get(expression, 'version'),
+                        'reference_type': 'concepts',
+                        'valueset': get(expression, 'valueset') or get(expression, 'valueSet'),
+                        'cascade': get(expression, 'cascade') or self.cascade,
+                        'filter': get(expression, 'filter'),
+                        'code': code,
+                        'resource_version': resource_version,
+                        'transform': get(expression, 'transform'),
+                        'created_by': self.user,
+                        'display': display,
+                        'include': self.get_include_value(expression)
+                    }
                 )
         if mapping:
             if not isinstance(mapping, list):
@@ -151,40 +151,40 @@ class CollectionReferenceExpandedStructureParser(CollectionReferenceAbstractPars
                 code = _mapping if isinstance(_mapping, str) else _mapping.get('code', None)
                 resource_version = None if isinstance(_mapping, str) else _mapping.get('resource_version', None)
                 self.references.append(
-                    dict(
-                        expression=None,
-                        namespace=get(expression, 'namespace'),
-                        system=get(expression, 'system') or get(expression, 'url'),
-                        version=get(expression, 'version'),
-                        reference_type='mappings',
-                        valueset=get(expression, 'valueset') or get(expression, 'valueSet'),
-                        cascade=get(expression, 'cascade') or self.cascade,
-                        filter=get(expression, 'filter'),
-                        code=code,
-                        resource_version=resource_version,
-                        transform=get(expression, 'transform'),
-                        created_by=self.user,
-                        display=None,
-                        include=self.get_include_value(expression)
-                    )
+                    {
+                        'expression': None,
+                        'namespace': get(expression, 'namespace'),
+                        'system': get(expression, 'system') or get(expression, 'url'),
+                        'version': get(expression, 'version'),
+                        'reference_type': 'mappings',
+                        'valueset': get(expression, 'valueset') or get(expression, 'valueSet'),
+                        'cascade': get(expression, 'cascade') or self.cascade,
+                        'filter': get(expression, 'filter'),
+                        'code': code,
+                        'resource_version': resource_version,
+                        'transform': get(expression, 'transform'),
+                        'created_by': self.user,
+                        'display': None,
+                        'include': self.get_include_value(expression)
+                    }
                 )
         if not concept and not mapping:
-            self.references.append(dict(
-                expression=get(expression, 'expression', None),
-                namespace=get(expression, 'namespace'),
-                system=get(expression, 'system') or get(expression, 'url'),
-                version=get(expression, 'version'),
-                reference_type=get(expression, 'reference_type', 'concepts'),
-                valueset=get(expression, 'valueset') or get(expression, 'valueSet'),
-                cascade=get(expression, 'cascade') or self.cascade,
-                filter=get(expression, 'filter'),
-                code=get(expression, 'code'),
-                resource_version=get(expression, 'resource_version'),
-                transform=get(expression, 'transform'),
-                created_by=self.user,
-                display=get(expression, 'display'),
-                include=self.get_include_value(expression)
-            ))
+            self.references.append({
+                                       'expression': get(expression, 'expression', None),
+                                       'namespace': get(expression, 'namespace'),
+                                       'system': get(expression, 'system') or get(expression, 'url'),
+                                       'version': get(expression, 'version'),
+                                       'reference_type': get(expression, 'reference_type', 'concepts'),
+                                       'valueset': get(expression, 'valueset') or get(expression, 'valueSet'),
+                                       'cascade': get(expression, 'cascade') or self.cascade,
+                                       'filter': get(expression, 'filter'),
+                                       'code': get(expression, 'code'),
+                                       'resource_version': get(expression, 'resource_version'),
+                                       'transform': get(expression, 'transform'),
+                                       'created_by': self.user,
+                                       'display': get(expression, 'display'),
+                                       'include': self.get_include_value(expression)
+                                   })
         return self.references
 
 
@@ -308,11 +308,11 @@ class CollectionReferenceExpressionStringParser(CollectionReferenceAbstractParse
             params = parse.parse_qs(querystring)
             for key, value in params.items():
                 is_single = len(value) <= 1 if isinstance(value, list) else True
-                self.filter.append(dict(
-                    op=CollectionReference.OPERATOR_EQUAL if is_single else CollectionReference.OPERATOR_IN,
-                    property=key,
-                    value=','.join(value)
-                ))
+                self.filter.append({
+                    'op': CollectionReference.OPERATOR_EQUAL if is_single else CollectionReference.OPERATOR_IN,
+                    'property': key,
+                    'value': ','.join(value)
+                })
 
     def set_version(self):
         self.version = get(self.kwargs, 'version')
@@ -346,19 +346,19 @@ class CollectionReferenceExpressionStringParser(CollectionReferenceAbstractParse
             self.set_resource_version()
 
     def to_reference_structure(self):
-        self.references.append(dict(
-            expression=self.expression,
-            reference_type=self.reference_type,
-            cascade=self.cascade,
-            system=self.system,
-            version=self.version,
-            code=self.code,
-            resource_version=self.resource_version,
-            valueset=self.valueset,
-            filter=self.filter,
-            transform=self.transform,
-            created_by=self.user,
-            display=self.display,
-            include=self.include
-        ))
+        self.references.append({
+                                   'expression': self.expression,
+                                   'reference_type': self.reference_type,
+                                   'cascade': self.cascade,
+                                   'system': self.system,
+                                   'version': self.version,
+                                   'code': self.code,
+                                   'resource_version': self.resource_version,
+                                   'valueset': self.valueset,
+                                   'filter': self.filter,
+                                   'transform': self.transform,
+                                   'created_by': self.user,
+                                   'display': self.display,
+                                   'include': self.include
+                               })
         return self.references

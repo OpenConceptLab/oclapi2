@@ -61,11 +61,11 @@ class FHIRBundleSerializer(CommonSerializer):
 
     def get_link(self, _):
         paginator = self.context.get('paginator')
-        links = [dict(relation='self', url=paginator.get_current_page_url())]
+        links = [{'relation': 'self', 'url': paginator.get_current_page_url()}]
         if paginator.has_previous():
-            links.append(dict(relation='prev', url=paginator.get_previous_page_url()))
+            links.append({'relation': 'prev', 'url': paginator.get_previous_page_url()})
         if paginator.has_next():
-            links.append(dict(relation='next', url=paginator.get_next_page_url()))
+            links.append({'relation': 'next', 'url': paginator.get_next_page_url()})
         return BundleLinkSerializer(links, many=True).data
 
 
@@ -79,10 +79,12 @@ class BundleSerializer(serializers.Serializer):  # pylint: disable=abstract-meth
     total = IntegerField(read_only=True)
     entry = JSONField(read_only=True, source='entries')
     requested_url = CharField(read_only=True)
+    repo_version_url = CharField(read_only=True)
 
     class Meta:
         fields = (
-            'resourceType', 'type', 'meta', 'total', 'concepts', 'mappings', 'entry', 'requested_url'
+            'resourceType', 'type', 'meta', 'total', 'concepts', 'mappings', 'entry',
+            'requested_url', 'repo_version_url'
         )
 
     def __init__(self, *args, **kwargs):

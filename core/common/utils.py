@@ -23,6 +23,7 @@ from django.utils import timezone
 from djqscsv import csv_file_for
 from elasticsearch_dsl import Q as es_Q
 from pydash import flatten, compact, get
+from requests import ConnectTimeout
 from requests.auth import HTTPBasicAuth
 from rest_framework.utils import encoders
 
@@ -31,12 +32,12 @@ from core.common.constants import UPDATED_SINCE_PARAM, BULK_IMPORT_QUEUES_COUNT,
 from core.settings import EXPORT_SERVICE
 
 
-def get_latest_dir_in_path(path):  # pragma: no cover
+def get_latest_dir_in_path(path):
     all_sub_dirs = [path + d for d in os.listdir(path) if os.path.isdir(path + d)]
     return max(all_sub_dirs, key=os.path.getmtime)
 
 
-def cd_temp():  # pragma: no cover
+def cd_temp():
     cwd = os.getcwd()
     tmpdir = tempfile.mkdtemp()
     os.chdir(tmpdir)
@@ -54,7 +55,7 @@ def write_csv_to_s3(data, is_owner, **kwargs):  # pragma: no cover
     key = get_downloads_path(is_owner) + zip_file.filename
     get_export_service().upload_file(
         key=key, file_path=os.path.abspath(zip_file.filename), binary=True,
-        metadata=dict(ContentType='application/zip'), headers={'content-type': 'application/zip'}
+        metadata={'ContentType': 'application/zip'}, headers={'content-type': 'application/zip'}
     )
     os.chdir(cwd)
     return get_export_service().url_for(key)
@@ -155,13 +156,15 @@ def parse_updated_since_param(params):
     return from_string_to_date(params.get(UPDATED_SINCE_PARAM))
 
 
-def from_string_to_date(updated_since):  # pragma: no cover
-    if updated_since:
+def from_string_to_date(date_string):  # pylint: disable=inconsistent-return-statements
+    if not isinstance(date_string, str):
+        return date_string
+    if date_string:
         try:
-            return parser.parse(updated_since)
+            return parser.parse(date_string)
         except ValueError:
             pass
-    return None
+        return None
 
 
 def parse_boolean_query_param(request, param, default=None):
@@ -332,13 +335,13 @@ def write_export_file(
     logger.info(file_path)
     logger.info('Done compressing.  Uploading...')
 
-    s3_key = version.export_path
+    s3_key = version.version_export_path
     export_service = get_export_service()
     if version.is_head:
-        export_service.delete_objects(version.generic_export_path(suffix=None))
+        export_service.delete_objects(version.get_version_export_path(suffix=None))
 
     upload_status_code = export_service.upload_file(
-        key=s3_key, file_path=file_path, binary=True, metadata=dict(ContentType='application/zip'),
+        key=s3_key, file_path=file_path, binary=True, metadata={'ContentType': 'application/zip'},
         headers={'content-type': 'application/zip'}
     )
     logger.info(f'Upload response status: {str(upload_status_code)}')
@@ -378,7 +381,7 @@ def parse_bulk_import_task_id(task_id):
     :param task_id:
     :return: dictionary with uuid, username, queue
     """
-    task = dict(uuid=task_id[:37])
+    task = {'uuid': task_id[:37]}
     username = task_id[37:]
     queue_index = username.find('~')
     if queue_index != -1:
@@ -407,14 +410,26 @@ def flower_get(url, **kwargs):
 
 def es_get(url, **kwargs):
     """
-    Returns a flower response from the given endpoint url.
+    Returns an es response from the given endpoint url.
     :param url:
     :return:
     """
-    return requests.get(
-        f'http://{settings.ES_HOST}:{settings.ES_PORT}/{url}',
-        **kwargs
-    )
+    if settings.ES_HOSTS:
+        for es_host in settings.ES_HOSTS.split(','):
+            try:
+                return requests.get(
+                    f'{settings.ES_SCHEME}://{es_host}/{url}',
+                    **kwargs
+                )
+            except ConnectTimeout:
+                continue
+    else:
+        return requests.get(
+            f'{settings.ES_SCHEME}://{settings.ES_HOST}:{settings.ES_PORT}/{url}',
+            **kwargs
+        )
+
+    return None
 
 
 def task_exists(task_id):
@@ -442,22 +457,7 @@ def queue_bulk_import(  # pylint: disable=too-many-arguments
     :param sub_task:
     :return: task
     """
-    task_id = str(uuid.uuid4()) + '-' + username
-
-    if username in ['root', 'ocladmin'] and import_queue != 'concurrent':
-        queue_id = 'bulk_import_root'
-        task_id += '~priority'
-    elif import_queue == 'concurrent':
-        queue_id = import_queue
-        task_id += '~' + import_queue
-    elif import_queue:
-        # assigning to one of 5 queues processed in order
-        queue_id = 'bulk_import_' + str(hash(username + import_queue) % BULK_IMPORT_QUEUES_COUNT)
-        task_id += '~' + import_queue
-    else:
-        # assigning randomly to one of 5 queues processed in order
-        queue_id = 'bulk_import_' + str(random.randrange(0, BULK_IMPORT_QUEUES_COUNT))
-        task_id += '~default'
+    queue_id, task_id = get_queue_task_names(import_queue, username)
 
     if inline:
         if sub_task:
@@ -478,6 +478,28 @@ def queue_bulk_import(  # pylint: disable=too-many-arguments
 
     from core.common.tasks import bulk_import
     return bulk_import.apply_async((to_import, username, update_if_exists), task_id=task_id, queue=queue_id)
+
+
+def get_queue_task_names(import_queue, username):
+    if username in ['root', 'ocladmin'] and import_queue != 'concurrent':
+        queue_id = 'bulk_import_root'
+        task_id = get_user_specific_task_id('priority', username)
+    elif import_queue == 'concurrent':
+        queue_id = import_queue
+        task_id = get_user_specific_task_id(import_queue, username)
+    elif import_queue:
+        # assigning to one of 5 queues processed in order
+        queue_id = 'bulk_import_' + str(hash(username + import_queue) % BULK_IMPORT_QUEUES_COUNT)
+        task_id = get_user_specific_task_id(import_queue, username)
+    else:
+        # assigning randomly to one of 5 queues processed in order
+        queue_id = 'bulk_import_' + str(random.randrange(0, BULK_IMPORT_QUEUES_COUNT))
+        task_id = get_user_specific_task_id('default', username)
+    return queue_id, task_id
+
+
+def get_user_specific_task_id(queue, username):
+    return str(uuid.uuid4()) + '-' + username + '~' + queue
 
 
 def drop_version(expression):
@@ -546,6 +568,9 @@ def jsonify_safe(value):
 
 
 def web_url():
+    url = settings.WEB_URL
+    if url:
+        return url
     env = settings.ENV
     if not env or env in ['development', 'ci']:
         return 'http://localhost:4000'
@@ -638,12 +663,20 @@ def guess_extension(file=None, name=None):
 
 
 def is_csv_file(file=None, name=None):
+    return is_file_extension('csv', file, name)
+
+
+def is_zip_file(file=None, name=None):
+    return is_file_extension('zip', file, name)
+
+
+def is_file_extension(extension, file=None, name=None):
     if not file and not name:
-        return None
+        return False
 
-    extension = guess_extension(file=file, name=name)
+    file_extension = guess_extension(file=file, name=name)
 
-    return extension and extension.endswith('csv')
+    return file_extension and file_extension.endswith(extension)
 
 
 def is_url_encoded_string(string, lower=True):
@@ -752,9 +785,9 @@ def es_id_in(search, ids):
 def get_es_wildcard_search_criterion(search_str, name_attr='name'):
     def get_query(_str):
         return es_Q(
-            "wildcard", id=dict(value=_str, boost=2)
+            "wildcard", id={'value': _str, 'boost': 2}
         ) | es_Q(
-            "wildcard", **{name_attr: dict(value=_str, boost=5)}
+            "wildcard", **{name_attr: {'value': _str, 'boost': 5}}
         ) | es_Q(
             "query_string", query=f"*{_str}*"
         )
@@ -768,41 +801,6 @@ def get_es_wildcard_search_criterion(search_str, name_attr='name'):
         criterion = get_query(search_str)
 
     return criterion
-
-
-def get_es_exact_search_criterion(search_str, fields):
-    def get_query(attr):
-        words = search_str.split(' ')
-        criteria = es_Q('match', **{attr: words[0]})
-        for word in words[1:]:
-            criteria &= es_Q('match', **{attr: word})
-        return criteria
-
-    criterion = get_query(fields.pop())
-    for field in fields:
-        criterion |= get_query(field)
-
-    return criterion
-
-
-def es_wildcard_search(search, search_str, exact_search_fields, name_attr='name'):
-    if not search_str:
-        return search
-
-    return search.query(
-        get_es_wildcard_search_criterion(
-            search_str, name_attr) | get_es_exact_search_criterion(search_str, exact_search_fields))
-
-
-def es_exact_search(search, search_str, exact_search_fields):
-    if not search_str:
-        return search
-
-    return search.query(get_es_exact_search_criterion(search_str, exact_search_fields))
-
-
-def get_exact_search_fields(klass):
-    return [field for field, config in get(klass, 'es_fields', {}).items() if config.get('exact', False)]
 
 
 def es_to_pks(search):
@@ -869,3 +867,26 @@ def get_end_of_month(date=timezone.now().date()):
 
 def get_prev_month(date=timezone.now().date()):
     return date.replace(day=1) - timedelta(days=1)
+
+
+def to_int(value, default_value):
+    try:
+        return int(value) or default_value
+    except (ValueError, TypeError):
+        return default_value
+
+
+def generic_sort(_list):
+    def compare(item):
+        if isinstance(item, (int, float, str, bool)):
+            return item
+        return str(item)
+    return sorted(_list, key=compare)
+
+
+def get_falsy_values():
+    return ['false', False, 'False', 0, '0', 'None', 'null']
+
+
+def get_truthy_values():
+    return ['true', True, 'True', 1, '1']
