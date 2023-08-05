@@ -87,7 +87,7 @@ class S3:
         return True
 
     @classmethod
-    def rename(cls, old_key, new_key, delete=False):  # pragma: no cover
+    def rename(cls, old_key, new_key, delete=False):
         try:
             resource = cls.__resource()
             resource.meta.client.copy(
