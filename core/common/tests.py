@@ -4,8 +4,6 @@ import uuid
 from collections import OrderedDict
 from unittest.mock import patch, Mock, mock_open, ANY
 
-import factory
-
 import boto3
 import django
 import factory
@@ -224,13 +222,6 @@ class OCLTestCase(TestCase, BaseTestCase):
         call_command("loaddata", "core/fixtures/base_entities.yaml")
         call_command("loaddata", "core/fixtures/auth_groups.yaml")
         call_command("loaddata", "core/fixtures/toggles.json")
-
-    @staticmethod
-    def factory_to_params(factory_klass, **kwargs):
-        return {
-            **factory.build(dict, FACTORY_CLASS=factory_klass),
-            **kwargs
-        }
 
     @staticmethod
     def factory_to_params(factory_klass, **kwargs):
