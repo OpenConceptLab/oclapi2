@@ -152,8 +152,6 @@ class ConceptAbstractSerializer(AbstractResourceSerializer):
         is_verbose = self.__class__ == ConceptDetailSerializer
 
         try:
-            if request.user.is_anonymous or not request.user.should_search_released:
-                self.fields.pop('latest_source_version')
             if not self.include_parent_concepts:
                 self.fields.pop('parent_concepts', None)
             if not self.include_child_concepts:

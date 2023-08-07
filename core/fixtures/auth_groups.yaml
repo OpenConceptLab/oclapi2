@@ -14,7 +14,3 @@
   pk: 4
   fields:
     name: operations_panel
-- model: "auth.group"
-  pk: 5
-  fields:
-    name: search_released

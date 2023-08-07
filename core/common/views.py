@@ -728,9 +728,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
     def should_search_latest_released_repo(self):
         return bool(
-            self.is_source_child_document_model() and
-            not self.request.user.is_anonymous and
-            self.request.user.should_search_released
+            self.is_source_child_document_model()
         )
 
     def has_searchable_extras_fields(self):

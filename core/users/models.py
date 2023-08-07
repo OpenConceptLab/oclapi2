@@ -11,7 +11,7 @@ from core.common.mixins import SourceContainerMixin
 from core.common.models import BaseModel, CommonLogoModel
 from core.common.tasks import send_user_verification_email, send_user_reset_password_email
 from core.common.utils import web_url
-from core.users.constants import AUTH_GROUPS, SEARCH_RELEASED_GROUP
+from core.users.constants import AUTH_GROUPS
 from .constants import USER_OBJECT_TYPE
 
 
@@ -174,10 +174,6 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
     @property
     def auth_groups(self):
         return self.groups.values_list('name', flat=True)
-
-    @property
-    def should_search_released(self):
-        return self.is_staff or self.has_auth_group(SEARCH_RELEASED_GROUP)
 
     def has_auth_group(self, group_name):
         return self.groups.filter(name=group_name).exists()
