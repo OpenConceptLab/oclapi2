@@ -102,6 +102,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
                 'public_can_view',
                 'checksums',
                 'versioned_object_id',
+                'latest_source_version'
             ])
         )
 
@@ -200,6 +201,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
                     'parent_concept_urls',
                     'public_can_view',
                     'checksums',
+                    'latest_source_version',
                     'versioned_object_id'])
         )
 
@@ -275,6 +277,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
                     'parent_concept_urls',
                     'public_can_view',
                     'checksums',
+                    'latest_source_version',
                     'versioned_object_id'])
         )
 
@@ -694,7 +697,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
             sorted(response.data[0].keys()),
             sorted(['uuid', 'id', 'external_id', 'concept_class', 'datatype', 'url', 'retired', 'source',
                     'owner', 'owner_type', 'owner_url', 'display_name', 'display_locale', 'version', 'update_comment',
-                    'locale', 'version_created_by', 'version_created_on', 'is_latest_version',
+                    'locale', 'version_created_by', 'version_created_on', 'is_latest_version', 'latest_source_version',
                     'versions_url', 'version_url', 'type', 'versioned_object_id'])
         )
 
@@ -708,7 +711,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
             sorted(response.data[0].keys()),
             sorted(['uuid', 'id', 'external_id', 'concept_class', 'datatype', 'url', 'retired', 'source',
                     'owner', 'owner_type', 'owner_url', 'display_name', 'display_locale', 'names', 'descriptions',
-                    'created_on', 'updated_on', 'versions_url', 'version', 'extras', 'type',
+                    'created_on', 'updated_on', 'versions_url', 'version', 'extras', 'type', 'latest_source_version',
                     'update_comment', 'version_url', 'updated_by', 'created_by',
                     'public_can_view', 'versioned_object_id', 'checksums'])
         )

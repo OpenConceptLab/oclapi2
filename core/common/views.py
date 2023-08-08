@@ -727,9 +727,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         ) or self.should_search_latest_released_repo()
 
     def should_search_latest_released_repo(self):
-        return bool(
-            self.is_source_child_document_model()
-        )
+        return SEARCH_PARAM in self.request.query_params.dict() and self.is_source_child_document_model()
 
     def has_searchable_extras_fields(self):
         return bool(
