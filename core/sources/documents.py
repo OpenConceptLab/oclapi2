@@ -50,7 +50,7 @@ class SourceDocument(Document):
 
     @staticmethod
     def get_match_phrase_attrs():
-        return ['name', 'external_id']
+        return ['name', 'external_id', 'canonical_url']
 
     @staticmethod
     def get_exact_match_attrs():
