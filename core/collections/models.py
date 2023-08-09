@@ -832,7 +832,7 @@ class CollectionReference(models.Model):
         return all(map(self.__is_valid_filter_schema, self.filter))
 
     def get_allowed_filter_properties(self):
-        common = ['q', 'exact_match']
+        common = ['q', 'exact_match', 'exclude_wildcard', 'exclude_fuzzy', 'search_map_codes', 'include_search_meta']
         if self.is_concept:
             common = [*Concept.es_fields.keys(), *common]
         elif self.is_mapping:
