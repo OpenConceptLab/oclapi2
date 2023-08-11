@@ -328,7 +328,7 @@ if REDIS_SENTINELS:
 CACHES = {
     'default': {
         'BACKEND': 'django_redis.cache.RedisCache',
-        'LOCATION': REDIS_URL,
+        'LOCATION': f'redis://{REDIS_SENTINELS_MASTER}/{REDIS_DB}' if REDIS_SENTINELS_MASTER else REDIS_URL,
         'OPTIONS': OPTIONS
     }
 }
