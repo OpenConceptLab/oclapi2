@@ -314,6 +314,8 @@ REDIS_SENTINELS_LIST = []
 # django cache
 OPTIONS = {}
 if REDIS_SENTINELS:
+    DJANGO_REDIS_CONNECTION_FACTORY = 'django_redis.pool.SentinelConnectionFactory'
+
     for REDIS_SENTINEL in REDIS_SENTINELS.split(','):
         SENTINEL = REDIS_SENTINEL.split(':')
         REDIS_SENTINELS_LIST.append((SENTINEL[0], int(SENTINEL[1])))
