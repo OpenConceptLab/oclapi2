@@ -411,7 +411,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                     default_filters[latest_attr] = True
 
             faceted_filters = {to_camel_case(k): v for k, v in self.get_faceted_filters(True).items()}
-            filters = {**default_filters, **self.get_facet_filters_from_kwargs(), **faceted_filters, 'retired': False}
+            filters = {**default_filters, **self.get_kwargs_filters(), **faceted_filters, 'retired': False}
             if not self._should_exclude_retired_from_search_results() or not is_source_child_document_model:
                 filters.pop('retired')
 

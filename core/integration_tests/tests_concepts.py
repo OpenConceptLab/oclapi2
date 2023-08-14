@@ -1738,6 +1738,18 @@ class ConceptListViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(list(response.data.keys()), ['facets'])
 
+        class_b_facet = [x for x in response.data['facets']['fields']['conceptClass'] if x[0] == 'classb'][0]
+        self.assertEqual(class_b_facet[0], 'classb')
+        self.assertTrue(class_b_facet[1] >= 1)
+        self.assertFalse(class_b_facet[2])
+        self.assertEqual([x for x in response.data['facets']['fields']['conceptClass'] if x[0] == 'classa'], [])
+
+        response = self.client.get(
+            self.source.uri + 'HEAD/concepts/?facetsOnly=true'
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(list(response.data.keys()), ['facets'])
+
         class_a_facet = [x for x in response.data['facets']['fields']['conceptClass'] if x[0] == 'classa'][0]
         self.assertEqual(class_a_facet[0], 'classa')
         self.assertTrue(class_a_facet[1] >= 1)
@@ -1747,6 +1759,30 @@ class ConceptListViewTest(OCLAPITestCase):
         self.assertEqual(class_b_facet[0], 'classb')
         self.assertTrue(class_b_facet[1] >= 1)
         self.assertFalse(class_b_facet[2])
+
+        response = self.client.get(
+            self.source.concepts_url + '?facetsOnly=true'
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(list(response.data.keys()), ['facets'])
+
+        class_b_facet = [x for x in response.data['facets']['fields']['conceptClass'] if x[0] == 'classb'][0]
+        self.assertEqual(class_b_facet[0], 'classb')
+        self.assertTrue(class_b_facet[1] >= 1)
+        self.assertFalse(class_b_facet[2])
+        self.assertEqual([x for x in response.data['facets']['fields']['conceptClass'] if x[0] == 'classa'], [])
+
+        response = self.client.get(
+            self.source.uri + 'v1/concepts/?facetsOnly=true'
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(list(response.data.keys()), ['facets'])
+
+        class_b_facet = [x for x in response.data['facets']['fields']['conceptClass'] if x[0] == 'classb'][0]
+        self.assertEqual(class_b_facet[0], 'classb')
+        self.assertTrue(class_b_facet[1] >= 1)
+        self.assertFalse(class_b_facet[2])
+        self.assertEqual([x for x in response.data['facets']['fields']['conceptClass'] if x[0] == 'classa'], [])
 
 
 class ConceptNameRetrieveUpdateDestroyViewTest(OCLAPITestCase):
