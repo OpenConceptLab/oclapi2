@@ -389,7 +389,12 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         return filters
 
     def get_latest_version_filter_field_for_source_child(self):
-        return 'is_in_latest_source_version' if self.should_search_latest_released_repo() else 'is_latest_version'
+        query_latest = self.__should_query_latest_version()
+        if query_latest:
+            return 'is_in_latest_source_version'
+        if self.kwargs.get('version') == HEAD and 'collection' not in self.kwargs:
+            return 'is_latest_version'
+        return None
 
     def get_facets(self):
         facets = {}
@@ -400,8 +405,10 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             is_source_child_document_model = self.is_source_child_document_model()
             default_filters = self.default_filters.copy()
 
-            if is_source_child_document_model and self.__should_query_latest_version():
-                default_filters[self.get_latest_version_filter_field_for_source_child()] = True
+            if is_source_child_document_model:
+                latest_attr = self.get_latest_version_filter_field_for_source_child()
+                if latest_attr:
+                    default_filters[latest_attr] = True
 
             faceted_filters = {to_camel_case(k): v for k, v in self.get_faceted_filters(True).items()}
             filters = {**default_filters, **self.get_facet_filters_from_kwargs(), **faceted_filters, 'retired': False}
@@ -519,8 +526,10 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         default_filters = self.default_filters.copy()
         if self.is_user_document() and self.should_include_inactive():
             default_filters.pop('is_active', None)
-        if self.is_source_child_document_model() and self.__should_query_latest_version():
-            default_filters[self.get_latest_version_filter_field_for_source_child()] = True
+        if self.is_source_child_document_model():
+            latest_attr = self.get_latest_version_filter_field_for_source_child()
+            if latest_attr:
+                default_filters[latest_attr] = True
 
         for field, value in default_filters.items():
             results = results.query("match", **{field: value})
@@ -724,10 +733,11 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                 bool(self.get_search_string()) or
                 self.has_searchable_extras_fields() or
                 bool(self.get_faceted_filters())
-        ) or self.should_search_latest_released_repo()
+        ) or (SEARCH_PARAM in self.request.query_params.dict() and self.should_search_latest_released_repo())
 
     def should_search_latest_released_repo(self):
-        return SEARCH_PARAM in self.request.query_params.dict() and self.is_source_child_document_model()
+        return self.is_source_child_document_model() and (
+                'version' not in self.kwargs and 'collection' not in self.kwargs)
 
     def has_searchable_extras_fields(self):
         return bool(
