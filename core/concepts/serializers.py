@@ -504,6 +504,8 @@ class ConceptVersionDetailSerializer(ModelSerializer):
     collection_versions = ListField(read_only=True)
     references = SerializerMethodField()
     checksums = SerializerMethodField()
+    latest_source_version = CharField(
+        source='latest_source_version.version', allow_null=True, allow_blank=True, read_only=True, required=False)
 
     def __init__(self, *args, **kwargs):
         request = get(kwargs, 'context.request')
@@ -545,7 +547,8 @@ class ConceptVersionDetailSerializer(ModelSerializer):
             'version', 'created_on', 'updated_on', 'version_created_on', 'version_created_by', 'update_comment',
             'is_latest_version', 'locale', 'url', 'owner_type', 'version_url', 'mappings', 'previous_version_url',
             'parent_concepts', 'child_concepts', 'parent_concept_urls', 'child_concept_urls',
-            'source_versions', 'collection_versions', 'versioned_object_id', 'references', 'checksums'
+            'source_versions', 'collection_versions', 'versioned_object_id', 'references', 'checksums',
+            'latest_source_version',
         )
 
     @staticmethod
