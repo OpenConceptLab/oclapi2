@@ -5,7 +5,7 @@ whitenoise==6.5.0 #serving swagger static files
 djangorestframework==3.14.0
 pylint==2.17.4
 pydash==7.0.6
-django-cors-headers==4.1.0
+django-cors-headers==4.2.0
 pyyaml==6.0.1
 colour_runner==0.1.1
 boto3==1.24.28
