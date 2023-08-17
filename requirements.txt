@@ -12,7 +12,7 @@ boto3==1.24.28
 moto==3.1.13
 python-dateutil==2.8.2
 requests==2.31.0
-factory_boy==3.2.1
+factory_boy==3.3.0
 # Celery
 celery[redis]==5.3.1
 celery_once==3.0.1
