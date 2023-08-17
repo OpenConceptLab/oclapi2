@@ -33,7 +33,6 @@ from .fields import URIField
 from .tasks import handle_save, handle_m2m_changed, seed_children_to_new_version, update_validation_schema, \
     update_source_active_concepts_count, update_source_active_mappings_count
 
-
 TRUTHY = get_truthy_values()
 
 
@@ -796,23 +795,6 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
         return False
 
-    def migrate_to_new_export_path(self, move=False):  # needs to be deleted post migration to new export path  # pragma: no cover  # pylint: disable: line-too-long
-        from core.common.services import S3
-        for version in self.versions:
-            S3.rename(version.export_path, version.version_export_path, delete=move)
-
-    @cached_property
-    def export_path(self):  # old export path, needs to be deleted post migration to new export path  # pragma: no cover
-        last_update = self.last_child_update.strftime('%Y%m%d%H%M%S')
-        return self.generic_export_path(suffix=f"{last_update}.zip")
-
-    def generic_export_path(self, suffix='*'):  # old export path, needs to be deleted post migration to new export path  # pragma: no cover  # pylint: disable: line-too-long
-        path = f"{self.parent_resource}/{self.mnemonic}_{self.version}."
-        if suffix:
-            path += suffix
-
-        return path
-
     @cached_property
     def version_export_path(self):
         last_update = self.last_child_update.strftime('%Y-%m-%d_%H%M%S')
@@ -1026,7 +1008,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         try:
             facets = search.execute().facets
         except TransportError as ex:  # pragma: no cover
-            raise Http400(detail='Data too large.') from ex
+            raise Http400(detail=get(ex, 'error') or str(ex)) from ex
 
         return facets
 

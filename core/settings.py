@@ -197,7 +197,9 @@ ES_HOSTS = os.environ.get('ES_HOSTS', None)
 ES_SCHEME = os.environ.get('ES_SCHEME', 'http')
 ELASTICSEARCH_DSL = {
     'default': {
-        'hosts': ES_HOSTS.split(',') if ES_HOSTS else [ES_HOST + ':' + ES_PORT]
+        'hosts': ES_HOSTS.split(',') if ES_HOSTS else [ES_HOST + ':' + ES_PORT],
+        'use_ssl': ES_SCHEME == 'https',
+        'verify_certs': ES_SCHEME == 'https',
     },
 }
 
@@ -303,7 +305,7 @@ API_SUPERUSER_TOKEN = os.environ.get('API_SUPERUSER_TOKEN', '891b4b17feab99f3ff7
 REDIS_PORT = os.environ.get('REDIS_PORT', 6379)
 REDIS_DB = 0
 REDIS_HOST = os.environ.get('REDIS_HOST', 'redis')
-REDIS_URL = f"redis://{REDIS_HOST}:{REDIS_PORT}"
+REDIS_URL = f"redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}"
 
 REDIS_SENTINELS = os.environ.get('REDIS_SENTINELS', None)
 REDIS_SENTINELS_MASTER = os.environ.get('REDIS_SENTINELS_MASTER', 'default')
@@ -312,18 +314,21 @@ REDIS_SENTINELS_LIST = []
 # django cache
 OPTIONS = {}
 if REDIS_SENTINELS:
+    DJANGO_REDIS_CONNECTION_FACTORY = 'django_redis.pool.SentinelConnectionFactory'
+
     for REDIS_SENTINEL in REDIS_SENTINELS.split(','):
         SENTINEL = REDIS_SENTINEL.split(':')
         REDIS_SENTINELS_LIST.append((SENTINEL[0], int(SENTINEL[1])))
     OPTIONS.update({
         'CLIENT_CLASS': 'django_redis.client.SentinelClient',
-        'SENTINELS': REDIS_SENTINELS_LIST
+        'SENTINELS': REDIS_SENTINELS_LIST,
+        'CONNECTION_POOL_CLASS': 'redis.sentinel.SentinelConnectionPool',
     })
 
 CACHES = {
     'default': {
         'BACKEND': 'django_redis.cache.RedisCache',
-        'LOCATION': REDIS_URL,
+        'LOCATION': f'redis://{REDIS_SENTINELS_MASTER}/{REDIS_DB}' if REDIS_SENTINELS_MASTER else REDIS_URL,
         'OPTIONS': OPTIONS
     }
 }
@@ -397,6 +402,11 @@ CELERYBEAT_SCHEDULE = {
         'task': 'core.common.tasks.monthly_usage_report',
         'schedule': crontab(1, 0, day_of_month='1'),
     },
+    'vacuum-and-analyze-db': {
+        'task': 'core.common.tasks.vacuum_and_analyze_db',
+        'schedule': crontab(0, 1),  # Run at 1 am
+    },
+
 }
 CELERYBEAT_HEALTHCHECK_KEY = 'celery_beat_healthcheck'
 ELASTICSEARCH_DSL_PARALLEL = True

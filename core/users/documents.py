@@ -47,7 +47,7 @@ class UserProfileDocument(Document):
         }
 
     @staticmethod
-    def get_boostable_search_attrs():
+    def get_wildcard_search_attrs():
         return {
             'username': {
                 'boost': 1,
@@ -58,6 +58,14 @@ class UserProfileDocument(Document):
                 'boost': 0.8,
                 'lower': True,
                 'wildcard': True
+            }
+        }
+
+    @staticmethod
+    def get_fuzzy_search_attrs():
+        return {
+            'name': {
+                'boost': 0.8,
             }
         }
 

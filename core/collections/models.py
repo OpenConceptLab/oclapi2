@@ -707,11 +707,14 @@ class CollectionReference(models.Model):
             val, document.get_match_phrase_attrs(), clean_fields(document.get_exact_match_attrs())
         ))
         if include_wildcard or include_fuzzy:
-            fields = clean_fields(document.get_boostable_search_attrs())
             if include_wildcard:
-                search = search.query(CustomESSearch.get_wildcard_match_criterion(val, fields))
+                search = search.query(
+                    CustomESSearch.get_wildcard_match_criterion(val, clean_fields(document.get_wildcard_search_attrs()))
+                )
             if include_fuzzy:
-                search = search.query(CustomESSearch.get_fuzzy_match_criterion(val, fields, 10000, 2))
+                search = search.query(
+                    CustomESSearch.get_fuzzy_match_criterion(val, document.get_fuzzy_search_attrs(), 10000, 2)
+                )
         return search
 
     def apply_filters(self, queryset, resource_klass):
@@ -829,7 +832,7 @@ class CollectionReference(models.Model):
         return all(map(self.__is_valid_filter_schema, self.filter))
 
     def get_allowed_filter_properties(self):
-        common = ['q', 'exact_match']
+        common = ['q', 'exact_match', 'exclude_wildcard', 'exclude_fuzzy', 'search_map_codes', 'include_search_meta']
         if self.is_concept:
             common = [*Concept.es_fields.keys(), *common]
         elif self.is_mapping:

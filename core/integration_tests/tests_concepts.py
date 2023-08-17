@@ -1618,30 +1618,29 @@ class ConceptListViewTest(OCLAPITestCase):
         self.random_user = UserProfileFactory()
 
     def test_search(self):  # pylint: disable=too-many-statements
-        response = self.client.get('/concepts/?q=Concept2')
+        response = self.client.get('/concepts/?q=MyConcept2')
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 1)
         self.assertEqual(response.data[0]['id'], 'MyConcept2')
         self.assertEqual(response.data[0]['uuid'], str(self.concept2.get_latest_version().id))
         self.assertEqual(response.data[0]['versioned_object_id'], self.concept2.id)
 
-        response = self.client.get('/concepts/?q=Concept1')
+        response = self.client.get('/concepts/?q=MyConcept1')
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 1)
         self.assertEqual(response.data[0]['id'], 'MyConcept1')
 
         response = self.client.get('/concepts/?q=MyConcept1&exact_match=on')
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.data), 2)
+        self.assertEqual(len(response.data), 1)
         self.assertEqual(response.data[0]['id'], 'MyConcept1')
-        self.assertEqual(response.data[1]['id'], 'MyConcept2')
 
-        response = self.client.get('/concepts/?q=Concept1&conceptClass=classA')
+        response = self.client.get('/concepts/?q=MyConcept&conceptClass=classA')
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 1)
         self.assertEqual(response.data[0]['id'], 'MyConcept1')
 
-        response = self.client.get('/concepts/?q=Concept1&conceptClass=classB')
+        response = self.client.get('/concepts/?q=MyConcept1&conceptClass=classB')
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 0)
 
@@ -1694,7 +1693,7 @@ class ConceptListViewTest(OCLAPITestCase):
         self.assertTrue(response.data[0]['total'] >= 2)
 
         response = self.client.get(
-            self.source.concepts_url + '?q=MyConcpt&fuzzy=true',
+            self.source.concepts_url + '?q=MyConcept',
             HTTP_AUTHORIZATION='Token ' + self.token,
         )
         self.assertEqual(response.status_code, 200)

@@ -87,20 +87,6 @@ class S3:
         return True
 
     @classmethod
-    def rename(cls, old_key, new_key, delete=False):  # pragma: no cover
-        try:
-            resource = cls.__resource()
-            resource.meta.client.copy(
-                {'Bucket': settings.AWS_STORAGE_BUCKET_NAME, 'Key': old_key}, settings.AWS_STORAGE_BUCKET_NAME, new_key
-            )
-            if delete:
-                cls.delete_objects(old_key)
-        except (ClientError, NoCredentialsError):
-            return False
-
-        return True
-
-    @classmethod
     def has_path(cls, prefix='/', delimiter='/'):
         return len(cls.__fetch_keys(prefix, delimiter)) > 0
 
@@ -214,14 +200,15 @@ class S3:
 
 
 class RedisService:  # pragma: no cover
-    def __init__(self):
-        self.conn = get_redis_connection('default')
+    @staticmethod
+    def get_client():
+        return get_redis_connection('default')
 
     def set(self, key, val, **kwargs):
-        return self.conn.set(key, val, **kwargs)
+        return self.get_client().set(key, val, **kwargs)
 
     def set_json(self, key, val):
-        return self.conn.set(key, json.dumps(val))
+        return self.get_client().set(key, json.dumps(val))
 
     def get_formatted(self, key):
         val = self.get(key)
@@ -236,21 +223,21 @@ class RedisService:  # pragma: no cover
         return val
 
     def exists(self, key):
-        return self.conn.exists(key)
+        return self.get_client().exists(key)
 
     def get(self, key):
-        return self.conn.get(key)
+        return self.get_client().get(key)
 
     def keys(self, pattern):
-        return self.conn.keys(pattern)
+        return self.get_client().keys(pattern)
 
     def get_int(self, key):
-        return int(self.conn.get(key).decode('utf-8'))
+        return int(self.get_client().get(key).decode('utf-8'))
 
     def get_pending_tasks(self, queue, include_task_names, exclude_task_names=None):
         # queue = 'bulk_import_root'
         # task_name = 'core.common.tasks.bulk_import_parallel_inline'
-        values = self.conn.lrange(queue, 0, -1)
+        values = self.get_client().lrange(queue, 0, -1)
         tasks = []
         exclude_task_names = exclude_task_names or []
         if values:
