@@ -392,7 +392,9 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         query_latest = self.__should_query_latest_version()
         if query_latest:
             return 'is_in_latest_source_version'
-        if self.kwargs.get('version') == HEAD and 'collection' not in self.kwargs:
+        if not self.is_global_scope() and (
+                self.kwargs.get('version') == HEAD or not self.kwargs.get('version')
+        ) and 'collection' not in self.kwargs:
             return 'is_latest_version'
         return None
 
@@ -510,10 +512,15 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
         return criteria
 
+    def is_global_scope(self):
+        return self.kwargs.get('org', None) is None and self.kwargs.get('user', None) is None
+
     def __should_query_latest_version(self):
         kwargs = {**self.get_faceted_filters(), **self.kwargs}
         collection = kwargs.get('collection', '')
         version = kwargs.get('version', '')
+        if not version and not self.is_global_scope() and not collection:
+            version = HEAD
 
         return (not collection or collection.startswith('!')) and (not version or version.startswith('!'))
 
