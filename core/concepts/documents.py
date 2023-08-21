@@ -49,7 +49,7 @@ class ConceptDocument(Document):
 
     @staticmethod
     def get_match_phrase_attrs():
-        return ['_name', 'external_id']
+        return ['name', 'external_id']
 
     @staticmethod
     def get_exact_match_attrs():
@@ -57,7 +57,7 @@ class ConceptDocument(Document):
             'id': {
                 'boost': 40
             },
-            '_name': {
+            'name': {
                 'boost': 35
             },
             'same_as_map_codes': {
