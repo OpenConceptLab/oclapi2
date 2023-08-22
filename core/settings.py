@@ -356,11 +356,13 @@ CELERY_TASK_ROUTES = {
     'core.common.tasks.rebuild_indexes': {'queue': 'indexing'}
 }
 
-CELERY_BROKER_TRANSPORT_OPTIONS = {'visibility_timeout': 259200}  # 72 hours, the longest ETA
+CELERY_BROKER_TRANSPORT_OPTIONS = {'visibility_timeout': 259200, 'max_retries': 20}  # 72 hours, the longest ETA
 CELERY_RESULT_BACKEND_TRANSPORT_OPTIONS = {
-    'retry_policy': {
-        'timeout': 10.0
-    }
+    'redis_socket_connect_timeout': 5,
+    'redis_socket_timeout': 5,
+    'redis_backend_health_check_interval': 5,
+    'redis_retry_on_timeout': True,
+    'redis_socket_keepalive': True,
 }
 
 if REDIS_SENTINELS:
@@ -376,7 +378,14 @@ CELERY_RESULT_EXTENDED = True
 CELERY_RESULT_EXPIRES = 259200  # 72 hours
 CELERY_BROKER_URL = CELERY_RESULT_BACKEND
 CELERY_BROKER_POOL_LIMIT = 50  # should be adjusted considering the number of threads
-CELERY_BROKER_CONNECTION_TIMEOUT = 10.0
+CELERY_BROKER_CONNECTION_TIMEOUT = 5.0
+CELERY_BROKER_CONNECTION_RETRY = True
+CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
+CELERY_BROKER_CONNECTION_MAX_RETRIES = 20
+CELERY_BROKER_CHANNEL_ERROR_RETRY = True
+CELERY_BROKER_HEARTBEAT = 20
+CELERY_BROKER_HEARTBEAT_CHECKRATE = 2
+
 CELERY_ACCEPT_CONTENT = ['application/json']
 if REDIS_SENTINELS:
     CELERY_ONCE = {
