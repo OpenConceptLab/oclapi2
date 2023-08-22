@@ -202,6 +202,12 @@ ELASTICSEARCH_DSL = {
         'hosts': ES_HOSTS.split(',') if ES_HOSTS else [ES_HOST + ':' + ES_PORT],
         'use_ssl': ES_SCHEME == 'https',
         'verify_certs': ES_SCHEME == 'https',
+        'sniff_on_connection_fail': True,
+        'sniff_on_start': True,
+        'sniffer_timeout': 60,
+        'sniff_timeout': 10,
+        'max_retries': 3,
+        'retry_on_timeout': True
     },
 }
 
