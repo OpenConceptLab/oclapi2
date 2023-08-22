@@ -17,6 +17,8 @@ from datetime import timedelta
 from celery.schedules import crontab
 from corsheaders.defaults import default_headers
 from kombu import Queue, Exchange
+from redis.backoff import ExponentialBackoff
+from redis.retry import Retry
 
 from core import __version__
 
@@ -308,11 +310,20 @@ REDIS_HOST = os.environ.get('REDIS_HOST', 'redis')
 REDIS_URL = f"redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}"
 
 REDIS_SENTINELS = os.environ.get('REDIS_SENTINELS', None)
-REDIS_SENTINELS_MASTER = os.environ.get('REDIS_SENTINELS_MASTER', 'default')
-REDIS_SENTINELS_LIST = []
+if REDIS_SENTINELS:
+    REDIS_SENTINELS_MASTER = os.environ.get('REDIS_SENTINELS_MASTER', 'default')
+    REDIS_SENTINELS_LIST = []
 
 # django cache
-OPTIONS = {}
+OPTIONS = {
+    'SOCKET_CONNECT_TIMEOUT': 5,
+    'SOCKET_TIMEOUT': 5,
+    'CONNECTION_POOL_KWARGS': {
+        'max_connections': 100,
+        'retry': Retry(ExponentialBackoff(cap=10, base=0.5), 10),
+        'health_check_interval': 5
+    }
+}
 if REDIS_SENTINELS:
     DJANGO_REDIS_CONNECTION_FACTORY = 'django_redis.pool.SentinelConnectionFactory'
 
@@ -328,7 +339,7 @@ if REDIS_SENTINELS:
 CACHES = {
     'default': {
         'BACKEND': 'django_redis.cache.RedisCache',
-        'LOCATION': f'redis://{REDIS_SENTINELS_MASTER}/{REDIS_DB}' if REDIS_SENTINELS_MASTER else REDIS_URL,
+        'LOCATION': f'redis://{REDIS_SENTINELS_MASTER}/{REDIS_DB}' if REDIS_SENTINELS else REDIS_URL,
         'OPTIONS': OPTIONS
     }
 }
@@ -367,7 +378,6 @@ CELERY_RESULT_BACKEND_TRANSPORT_OPTIONS = {
     'redis_socket_timeout': 5,
     'redis_backend_health_check_interval': 5,
     'redis_retry_on_timeout': True,
-    'redis_socket_keepalive': True,
 }
 
 if REDIS_SENTINELS:
@@ -401,21 +411,9 @@ CELERY_TASK_PUBLISH_RETRY_POLICY = {
 }
 
 CELERY_ACCEPT_CONTENT = ['application/json']
-if REDIS_SENTINELS:
-    CELERY_ONCE = {
-        'backend': 'core.common.backends.QueueOnceRedisSentinelBackend',
-        'settings': {
-            'sentinels': REDIS_SENTINELS_LIST,
-            'sentinels_master': REDIS_SENTINELS_MASTER
-        }
-    }
-else:
-    CELERY_ONCE = {
-        'backend': 'celery_once.backends.Redis',
-        'settings': {
-            'url': CELERY_RESULT_BACKEND,
-        }
-    }
+CELERY_ONCE = {
+        'backend': 'core.common.backends.QueueOnceRedisBackend',
+}
 CELERYBEAT_SCHEDULE = {
     'healthcheck-every-minute': {
         'task': 'core.common.tasks.beat_healthcheck',
