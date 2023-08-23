@@ -10,4 +10,4 @@ CELERY_WORKER_NAME_WITH_UUID="${CELERY_WORKER_NAME}-${UUID}"
 
 echo "$CELERY_WORKER_NAME_WITH_UUID" > "/temp/celery-worker-$CELERY_WORKER_NAME.tmp"
 
-celery -A core.celery worker -n $CELERY_WORKER_NAME_WITH_UUID --loglevel=INFO "$@" -E --without-heartbeat --without-gossip --without-mingle
+celery -A core worker -n $CELERY_WORKER_NAME_WITH_UUID --loglevel=INFO "$@" -E --without-heartbeat --without-gossip --without-mingle
