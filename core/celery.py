@@ -9,6 +9,7 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "core.settings")
 app = Celery('core')
 app.conf.ONCE = {
     'backend': 'core.common.backends.QueueOnceRedisBackend',
+    'settings': {}
 }
 app.conf.CELERYBEAT_SCHEDULE = {
     'healthcheck-every-minute': {
