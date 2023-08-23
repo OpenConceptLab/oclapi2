@@ -419,6 +419,7 @@ CELERY_TASK_PUBLISH_RETRY_POLICY = {
 CELERY_ACCEPT_CONTENT = ['application/json']
 CELERY_ONCE = {
         'backend': 'core.common.backends.QueueOnceRedisBackend',
+        'settings': {}
 }
 CELERYBEAT_SCHEDULE = {
     'healthcheck-every-minute': {
