@@ -24,6 +24,7 @@ class MappingDocument(Document):
     source = fields.KeywordField(attr='source', normalizer="lowercase")
     retired = fields.KeywordField(attr='retired')
     is_latest_version = fields.KeywordField(attr='is_latest_version')
+    is_in_latest_source_version = fields.KeywordField(attr='is_in_latest_source_version')
     map_type = fields.KeywordField(attr='map_type', normalizer="lowercase")
     from_concept = fields.ListField(fields.TextField())
     to_concept = fields.ListField(fields.TextField())
