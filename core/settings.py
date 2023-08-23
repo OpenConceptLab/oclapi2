@@ -12,9 +12,7 @@ https://docs.djangoproject.com/en/3.0/ref/settings/
 
 import os
 # Build paths inside the project like this: os.path.join(BASE_DIR, ...)
-from datetime import timedelta
 
-from celery.schedules import crontab
 from corsheaders.defaults import default_headers
 from kombu import Queue, Exchange
 from redis.backoff import ExponentialBackoff
