@@ -327,7 +327,7 @@ OPTIONS = {
     'CONNECTION_POOL_KWARGS': {
         'max_connections': 100,
         'retry': Retry(ExponentialBackoff(cap=10, base=0.5), 10),
-        'health_check_interval': 5
+        'health_check_interval': 0  # Handled by Redis TCP keepalive
     }
 }
 if REDIS_SENTINELS:
@@ -382,7 +382,7 @@ CELERY_RESULT_BACKEND_MAX_RETRIES = 10
 CELERY_RESULT_BACKEND_TRANSPORT_OPTIONS = {
     'redis_socket_connect_timeout': 5,
     'redis_socket_timeout': 5,
-    'redis_backend_health_check_interval': 5,
+    'redis_backend_health_check_interval': 0,  # Handled by Redis TCP keepalive
     'redis_retry_on_timeout': True,
 }
 
@@ -398,14 +398,13 @@ else:
 CELERY_RESULT_EXTENDED = True
 CELERY_RESULT_EXPIRES = 259200  # 72 hours
 CELERY_BROKER_URL = CELERY_RESULT_BACKEND
-CELERY_BROKER_POOL_LIMIT = 50  # should be adjusted considering the number of threads
+CELERY_BROKER_POOL_LIMIT = 100  # should be adjusted considering the number of threads
 CELERY_BROKER_CONNECTION_TIMEOUT = 5.0
 CELERY_BROKER_CONNECTION_RETRY = True
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
-CELERY_BROKER_CONNECTION_MAX_RETRIES = 200
+CELERY_BROKER_CONNECTION_MAX_RETRIES = 10
 CELERY_BROKER_CHANNEL_ERROR_RETRY = True
-CELERY_BROKER_HEARTBEAT = 20
-CELERY_BROKER_HEARTBEAT_CHECKRATE = 2
+CELERY_BROKER_HEARTBEAT = None  # Handled by Redis tcp keepalive
 
 CELERY_TASK_PUBLISH_RETRY = True
 CELERY_TASK_PUBLISH_RETRY_POLICY = {
@@ -420,21 +419,6 @@ CELERY_ACCEPT_CONTENT = ['application/json']
 CELERY_ONCE = {
         'backend': 'core.common.backends.QueueOnceRedisBackend',
         'settings': {}
-}
-CELERYBEAT_SCHEDULE = {
-    'healthcheck-every-minute': {
-        'task': 'core.common.tasks.beat_healthcheck',
-        'schedule': timedelta(seconds=60),
-    },
-    'first-of-every-month': {
-        'task': 'core.common.tasks.monthly_usage_report',
-        'schedule': crontab(1, 0, day_of_month='1'),
-    },
-    'vacuum-and-analyze-db': {
-        'task': 'core.common.tasks.vacuum_and_analyze_db',
-        'schedule': crontab(0, 1),  # Run at 1 am
-    },
-
 }
 CELERYBEAT_HEALTHCHECK_KEY = 'celery_beat_healthcheck'
 ELASTICSEARCH_DSL_PARALLEL = True
