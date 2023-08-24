@@ -58,7 +58,7 @@ class ConceptDocument(Document):
                 'boost': 40
             },
             'name': {
-                'boost': 35
+                'boost': 15
             },
             'same_as_map_codes': {
                 'boost': 5.5,
@@ -98,7 +98,7 @@ class ConceptDocument(Document):
     def get_fuzzy_search_attrs():
         return {
             'name': {
-                'boost': 23
+                'boost': 10
             },
             'synonyms': {
                 'boost': 0.3,
