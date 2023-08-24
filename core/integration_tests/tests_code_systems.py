@@ -2,6 +2,8 @@ import json
 import os
 import urllib.parse
 from jsonpath_ng import parse
+from mock.mock import patch, Mock
+
 from core.common.tests import OCLAPITestCase
 from core.orgs.models import Organization
 from core.sources.models import Source
@@ -101,6 +103,8 @@ class CodeSystemsTest(OCLAPITestCase):
                 unique_concepts.append(concept)
         json_file.update({'concept': unique_concepts})
 
+    @patch('core.sources.models.index_source_mappings', Mock())
+    @patch('core.sources.models.index_source_concepts', Mock())
     def test_posting_code_systems(self):
         test_files = ['code_systems_who_core.json', 'code_systems_who_fp.json', 'code_systems_who_sti.json',
                       'code_systems_who_ddcc_category_codes.json']

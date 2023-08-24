@@ -665,6 +665,9 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
         return errors
 
+    def index_resources_for_self_as_latest_released(self):
+        pass
+
     @classmethod
     def persist_changes(cls, obj, updated_by, original_schema, **kwargs):
         errors = {}
