@@ -7,6 +7,11 @@ from django.conf import settings
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "core.settings")
 app = Celery('core')
+app.conf.redis_socket_timeout = 5.0
+app.conf.redis_socket_connect_timeout = 5.0
+app.conf.redis_backend_health_check_interval = 0
+app.conf.redis_retry_on_timeout = True
+
 app.conf.ONCE = {
     'backend': 'core.common.backends.QueueOnceRedisBackend',
     'settings': {}

@@ -325,6 +325,8 @@ OPTIONS = {
     'CONNECTION_POOL_KWARGS': {
         'max_connections': 100,
         'retry': Retry(ExponentialBackoff(cap=10, base=0.5), 10),
+        'socket_connect_timeout': 5,
+        'socket_timeout': 5,
         'health_check_interval': 0  # Handled by Redis TCP keepalive
     }
 }
@@ -371,30 +373,32 @@ CELERY_TASK_ROUTES = {
     'core.common.tasks.rebuild_indexes': {'queue': 'indexing'}
 }
 
-CELERY_BROKER_TRANSPORT_OPTIONS = {'visibility_timeout': 259200, 'max_retries': 20}  # 72 hours, the longest ETA
 CELERY_RESULT_BACKEND_ALWAYS_RETRY = True
 CELERY_RESULT_BACKEND_MAX_SLEEP_BETWEEN_RETRIES_MS = 10000
 CELERY_RESULT_BACKEND_BASE_SLEEP_BETWEEN_RETRIES_MS = 100
 CELERY_RESULT_BACKEND_MAX_RETRIES = 10
+CELERY_RESULT_BACKEND_TRANSPORT_OPTIONS = {}
+CELERY_RESULT_EXTENDED = True
+CELERY_RESULT_EXPIRES = 259200  # 72 hours
 
-CELERY_RESULT_BACKEND_TRANSPORT_OPTIONS = {
-    'redis_socket_connect_timeout': 5,
-    'redis_socket_timeout': 5,
-    'redis_backend_health_check_interval': 0,  # Handled by Redis TCP keepalive
-    'redis_retry_on_timeout': True,
+CELERY_BROKER_TRANSPORT_OPTIONS = {
+    'visibility_timeout': 259200,  # 72 hours, the longest ETA
+    'max_retries': 10,
+    'interval_start': 0,
+    'interval_step': 1,
+    'interval_max': 10
 }
 
 if REDIS_SENTINELS:
     CELERY_RESULT_BACKEND = ''
     for REDIS_SENTINEL in REDIS_SENTINELS.split(','):
-        CELERY_RESULT_BACKEND = CELERY_RESULT_BACKEND + f'sentinel://{REDIS_SENTINEL}/0;'
-        CELERY_BROKER_TRANSPORT_OPTIONS.update({'master_name': REDIS_SENTINELS_MASTER})
-        CELERY_RESULT_BACKEND_TRANSPORT_OPTIONS.update({'master_name': REDIS_SENTINELS_MASTER})
+        CELERY_RESULT_BACKEND = CELERY_RESULT_BACKEND + f'sentinel://{REDIS_SENTINEL}/{REDIS_DB};'
+
+    CELERY_RESULT_BACKEND_TRANSPORT_OPTIONS.update({'master_name': REDIS_SENTINELS_MASTER})
+    CELERY_BROKER_TRANSPORT_OPTIONS.update({'master_name': REDIS_SENTINELS_MASTER})
 else:
     CELERY_RESULT_BACKEND = f'redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}'
 
-CELERY_RESULT_EXTENDED = True
-CELERY_RESULT_EXPIRES = 259200  # 72 hours
 CELERY_BROKER_URL = CELERY_RESULT_BACKEND
 CELERY_BROKER_POOL_LIMIT = 100  # should be adjusted considering the number of threads
 CELERY_BROKER_CONNECTION_TIMEOUT = 5.0
