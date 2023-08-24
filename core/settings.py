@@ -388,14 +388,16 @@ CELERY_RESULT_BACKEND_MAX_RETRIES = 10
 CELERY_RESULT_BACKEND_TRANSPORT_OPTIONS = {
     'retry_policy': {
         'timeout': 5.0,
-    }.update(RETRY_POLICY)
+        **RETRY_POLICY
+    }
 }
 CELERY_RESULT_EXTENDED = True
 CELERY_RESULT_EXPIRES = 259200  # 72 hours
 
 CELERY_BROKER_TRANSPORT_OPTIONS = {
     'visibility_timeout': 259200,  # 72 hours, the longest ETA
-}.update(RETRY_POLICY)
+    **RETRY_POLICY
+}
 
 if REDIS_SENTINELS:
     CELERY_RESULT_BACKEND = ''
@@ -419,7 +421,8 @@ CELERY_BROKER_HEARTBEAT = None  # Handled by Redis tcp keepalive
 CELERY_TASK_PUBLISH_RETRY = True
 CELERY_TASK_PUBLISH_RETRY_POLICY = {
     'retry_errors': None,
-}.update(RETRY_POLICY)
+    **RETRY_POLICY
+}
 
 CELERY_ACCEPT_CONTENT = ['application/json']
 CELERY_ONCE = {
