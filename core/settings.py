@@ -17,6 +17,7 @@ from corsheaders.defaults import default_headers
 from kombu import Queue, Exchange
 from redis.backoff import ExponentialBackoff
 from redis.retry import Retry
+from redis.exceptions import ConnectionError
 
 from core import __version__
 
@@ -325,8 +326,8 @@ OPTIONS = {
     'CONNECTION_POOL_KWARGS': {
         'max_connections': 100,
         'retry': Retry(ExponentialBackoff(cap=10, base=0.5), 10),
-        'socket_connect_timeout': 5,
-        'socket_timeout': 5,
+        'retry_on_error': [ConnectionError],
+        'retry_on_timeout': True,
         'health_check_interval': 0  # Handled by Redis TCP keepalive
     }
 }
@@ -351,6 +352,13 @@ CACHES = {
 }
 
 # Celery
+RETRY_POLICY = {
+    'max_retries': 10,
+    'interval_start': 0,
+    'interval_step': 1,
+    'interval_max': 10
+}
+
 CELERY_ENABLE_UTC = True
 CELERY_TIMEZONE = "UTC"
 CELERY_ALWAYS_EAGER = False
@@ -377,17 +385,17 @@ CELERY_RESULT_BACKEND_ALWAYS_RETRY = True
 CELERY_RESULT_BACKEND_MAX_SLEEP_BETWEEN_RETRIES_MS = 10000
 CELERY_RESULT_BACKEND_BASE_SLEEP_BETWEEN_RETRIES_MS = 100
 CELERY_RESULT_BACKEND_MAX_RETRIES = 10
-CELERY_RESULT_BACKEND_TRANSPORT_OPTIONS = {}
+CELERY_RESULT_BACKEND_TRANSPORT_OPTIONS = {
+    'retry_policy': {
+        'timeout': 5.0,
+    }.update(RETRY_POLICY)
+}
 CELERY_RESULT_EXTENDED = True
 CELERY_RESULT_EXPIRES = 259200  # 72 hours
 
 CELERY_BROKER_TRANSPORT_OPTIONS = {
     'visibility_timeout': 259200,  # 72 hours, the longest ETA
-    'max_retries': 10,
-    'interval_start': 0,
-    'interval_step': 1,
-    'interval_max': 10
-}
+}.update(RETRY_POLICY)
 
 if REDIS_SENTINELS:
     CELERY_RESULT_BACKEND = ''
@@ -410,12 +418,8 @@ CELERY_BROKER_HEARTBEAT = None  # Handled by Redis tcp keepalive
 
 CELERY_TASK_PUBLISH_RETRY = True
 CELERY_TASK_PUBLISH_RETRY_POLICY = {
-    'max_retries': 10,
-    'interval_start': 0,
-    'interval_step': 1,
-    'interval_max': 10,
     'retry_errors': None,
-}
+}.update(RETRY_POLICY)
 
 CELERY_ACCEPT_CONTENT = ['application/json']
 CELERY_ONCE = {
