@@ -309,6 +309,16 @@ API_SUPERUSER_PASSWORD = os.environ.get('API_SUPERUSER_PASSWORD', 'Root123')  # 
 API_SUPERUSER_TOKEN = os.environ.get('API_SUPERUSER_TOKEN', '891b4b17feab99f3ff7e5b5d04ccc5da7aa96da6')
 
 # Redis
+REDIS_CONNECTION_OPTIONS = {
+    'socket_timeout': 5.0,
+    'socket_connect_timeout': 5.0,
+    'max_connections': 100,
+    'retry': Retry(ExponentialBackoff(cap=10, base=0.5), 10),
+    'retry_on_error': [ConnectionError],
+    'retry_on_timeout': True,
+    'health_check_interval': 0  # Handled by Redis TCP keepalive
+}
+
 REDIS_PORT = os.environ.get('REDIS_PORT', 6379)
 REDIS_DB = 0
 REDIS_HOST = os.environ.get('REDIS_HOST', 'redis')
@@ -321,15 +331,7 @@ if REDIS_SENTINELS:
 
 # django cache
 OPTIONS = {
-    'SOCKET_CONNECT_TIMEOUT': 5,
-    'SOCKET_TIMEOUT': 5,
-    'CONNECTION_POOL_KWARGS': {
-        'max_connections': 100,
-        'retry': Retry(ExponentialBackoff(cap=10, base=0.5), 10),
-        'retry_on_error': [ConnectionError],
-        'retry_on_timeout': True,
-        'health_check_interval': 0  # Handled by Redis TCP keepalive
-    }
+    'CONNECTION_POOL_KWARGS': REDIS_CONNECTION_OPTIONS
 }
 if REDIS_SENTINELS:
     DJANGO_REDIS_CONNECTION_FACTORY = 'django_redis.pool.SentinelConnectionFactory'
@@ -402,8 +404,16 @@ if REDIS_SENTINELS:
     for REDIS_SENTINEL in REDIS_SENTINELS.split(','):
         CELERY_RESULT_BACKEND = CELERY_RESULT_BACKEND + f'sentinel://{REDIS_SENTINEL}/{REDIS_DB};'
 
-    CELERY_RESULT_BACKEND_TRANSPORT_OPTIONS.update({'master_name': REDIS_SENTINELS_MASTER})
-    CELERY_BROKER_TRANSPORT_OPTIONS.update({'master_name': REDIS_SENTINELS_MASTER})
+    CELERY_RESULT_BACKEND_TRANSPORT_OPTIONS.update(
+        {
+            'master_name': REDIS_SENTINELS_MASTER,
+            'sentinel_kwargs': REDIS_CONNECTION_OPTIONS
+        })
+    CELERY_BROKER_TRANSPORT_OPTIONS.update(
+        {
+            'master_name': REDIS_SENTINELS_MASTER,
+            'sentinel_kwargs': REDIS_CONNECTION_OPTIONS
+        })
 else:
     CELERY_RESULT_BACKEND = f'redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}'
 
