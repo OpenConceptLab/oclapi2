@@ -1,4 +1,5 @@
 import base64
+import re
 from email.mime.image import MIMEImage
 
 import markdown
@@ -206,8 +207,23 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         return fields
 
     def get_search_string(self, lower=True, decode=True):
-        search_str = self.request.query_params.dict().get(SEARCH_PARAM, '').strip()
+        search_str = self.get_raw_search_string().replace('"', '').replace("'", "")
         return CustomESSearch.get_search_string(search_str, lower=lower, decode=decode)
+
+    def get_raw_search_string(self):
+        return self.request.query_params.dict().get(SEARCH_PARAM, '').strip()
+
+    def get_search_must_haves(self):
+        pattern = r'"([^"]*)"'
+        matches = compact(re.findall(pattern, self.get_raw_search_string()))
+        result = []
+        for match in matches:
+            match = match.strip()
+            if ' ' in match:
+                result += match.split()
+            else:
+                result.append(match)
+        return set(result)
 
     @property
     def is_fuzzy_search(self):
@@ -254,10 +270,10 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             expansions=expansions
         )
 
-    def get_wildcard_search_criterion(self):
+    def get_wildcard_search_criterion(self, search_str=None):
         fields = self.get_wildcard_search_fields()
         return CustomESSearch.get_wildcard_match_criterion(
-            search_str=self.get_search_string(),
+            search_str=search_str or self.get_search_string(),
             fields=fields
         ), fields.keys()
 
@@ -620,6 +636,12 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             criterion |= self.get_fuzzy_search_criterion(boost_divide_by=10000, expansions=2)
 
         results = results.query(criterion)
+        must_have_criterion = None
+        for must_have in self.get_search_must_haves():
+            criteria, _ = self.get_wildcard_search_criterion(f"*{must_have}*")
+            must_have_criterion = criteria if must_have_criterion is None else must_have_criterion & criteria
+        if must_have_criterion is not None:
+            results = results.filter(must_have_criterion)
 
         if extras_fields:
             fields += list(extras_fields.keys())
