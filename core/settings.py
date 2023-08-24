@@ -17,7 +17,7 @@ from corsheaders.defaults import default_headers
 from kombu import Queue, Exchange
 from redis.backoff import ExponentialBackoff
 from redis.retry import Retry
-from redis.exceptions import ConnectionError
+from redis.exceptions import ConnectionError  # pylint: disable=redefined-builtin
 
 from core import __version__
 
