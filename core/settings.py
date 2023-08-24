@@ -313,8 +313,6 @@ REDIS_CONNECTION_OPTIONS = {
     'socket_timeout': 5.0,
     'socket_connect_timeout': 5.0,
     'max_connections': 100,
-    'retry': Retry(ExponentialBackoff(cap=10, base=0.5), 10),
-    'retry_on_error': [ConnectionError],
     'retry_on_timeout': True,
     'health_check_interval': 0  # Handled by Redis TCP keepalive
 }
@@ -331,7 +329,10 @@ if REDIS_SENTINELS:
 
 # django cache
 OPTIONS = {
-    'CONNECTION_POOL_KWARGS': REDIS_CONNECTION_OPTIONS
+    'CONNECTION_POOL_KWARGS': {
+                                  'retry': Retry(ExponentialBackoff(cap=10, base=0.5), 10),
+                                  'retry_on_error': [ConnectionError]
+                              } | REDIS_CONNECTION_OPTIONS
 }
 if REDIS_SENTINELS:
     DJANGO_REDIS_CONNECTION_FACTORY = 'django_redis.pool.SentinelConnectionFactory'
