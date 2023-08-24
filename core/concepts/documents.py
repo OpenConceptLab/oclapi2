@@ -49,7 +49,7 @@ class ConceptDocument(Document):
 
     @staticmethod
     def get_match_phrase_attrs():
-        return ['name', 'external_id']
+        return ['_name', 'external_id']
 
     @staticmethod
     def get_exact_match_attrs():
