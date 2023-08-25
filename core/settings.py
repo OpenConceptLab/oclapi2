@@ -401,7 +401,8 @@ CELERY_BROKER_TRANSPORT_OPTIONS = {
     'visibility_timeout': 259200,  # 72 hours, the longest ETA
     'socket_timeout': 5.0,
     'socket_connect_timeout': 5.0,
-} | RETRY_POLICY
+    'retry_policy': RETRY_POLICY
+}
 
 if REDIS_SENTINELS:
     CELERY_RESULT_BACKEND = ''
