@@ -359,7 +359,10 @@ RETRY_POLICY = {
     'max_retries': 10,
     'interval_start': 0,
     'interval_step': 1,
-    'interval_max': 10
+    'interval_max': 10,
+    'socket_timeout': 5.0,
+    'socket_connect_timeout': 5.0,
+    'timeout': 5.0
 }
 
 CELERY_ENABLE_UTC = True
@@ -389,9 +392,7 @@ CELERY_RESULT_BACKEND_MAX_SLEEP_BETWEEN_RETRIES_MS = 10000
 CELERY_RESULT_BACKEND_BASE_SLEEP_BETWEEN_RETRIES_MS = 100
 CELERY_RESULT_BACKEND_MAX_RETRIES = 10
 CELERY_RESULT_BACKEND_TRANSPORT_OPTIONS = {
-    'retry_policy': {
-        'timeout': 5.0,
-    } | RETRY_POLICY
+    'retry_policy': RETRY_POLICY
 }
 CELERY_RESULT_EXTENDED = True
 CELERY_RESULT_EXPIRES = 259200  # 72 hours
@@ -407,13 +408,11 @@ if REDIS_SENTINELS:
     CELERY_RESULT_BACKEND = CELERY_RESULT_BACKEND[:-1]  # Remove last ';'
     CELERY_RESULT_BACKEND_TRANSPORT_OPTIONS.update(
         {
-            'master_name': REDIS_SENTINELS_MASTER,
-            'sentinel_kwargs': REDIS_CONNECTION_OPTIONS
+            'master_name': REDIS_SENTINELS_MASTER
         })
     CELERY_BROKER_TRANSPORT_OPTIONS.update(
         {
-            'master_name': REDIS_SENTINELS_MASTER,
-            'sentinel_kwargs': REDIS_CONNECTION_OPTIONS
+            'master_name': REDIS_SENTINELS_MASTER
         })
 else:
     CELERY_RESULT_BACKEND = f'redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}'
@@ -425,7 +424,6 @@ CELERY_BROKER_CONNECTION_RETRY = True
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
 CELERY_BROKER_CONNECTION_MAX_RETRIES = 10
 CELERY_BROKER_CHANNEL_ERROR_RETRY = True
-CELERY_BROKER_HEARTBEAT = None  # Handled by Redis tcp keepalive
 
 CELERY_TASK_PUBLISH_RETRY = True
 CELERY_TASK_PUBLISH_RETRY_POLICY = {
