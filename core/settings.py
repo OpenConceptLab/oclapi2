@@ -390,10 +390,9 @@ CELERY_RESULT_BACKEND_MAX_SLEEP_BETWEEN_RETRIES_MS = 10000
 CELERY_RESULT_BACKEND_BASE_SLEEP_BETWEEN_RETRIES_MS = 100
 CELERY_RESULT_BACKEND_MAX_RETRIES = 10
 CELERY_RESULT_BACKEND_TRANSPORT_OPTIONS = {
-    'retry_policy': {
-                        'socket_timeout': 5.0,
-                        'socket_connect_timeout': 5.0,
-                    } | RETRY_POLICY
+    'socket_timeout': 5.0,
+    'socket_connect_timeout': 5.0,
+    'retry_policy': RETRY_POLICY
 }
 CELERY_RESULT_EXTENDED = True
 CELERY_RESULT_EXPIRES = 259200  # 72 hours
