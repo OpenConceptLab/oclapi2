@@ -8,7 +8,8 @@ from core.common.utils import is_url_encoded_string
 
 
 class CustomESFacetedSearch(FacetedSearch):
-    def __init__(self, query=None, filters={}, sort=()):  # pylint: disable=dangerous-default-value
+    def __init__(self, query=None, filters={}, sort=(), _search=None):  # pylint: disable=dangerous-default-value
+        self._search = _search
         super().__init__(query=query, filters=filters, sort=sort)
 
     @staticmethod
@@ -16,6 +17,9 @@ class CustomESFacetedSearch(FacetedSearch):
         return f"{search_str}*".replace('**', '*')
 
     def query(self, search, query):
+        if self._search:
+            from_search = self._search.to_dict()
+            return search.update_from_dict(from_search)
         if query:
             search_str = self.format_search_str(query)
             if self.fields:
