@@ -23,7 +23,7 @@ from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryCreateMixi
 from core.common.permissions import CanViewConceptDictionary, CanEditConceptDictionary, HasAccessToVersionedObject, \
     CanViewConceptDictionaryVersion
 from core.common.serializers import TaskSerializer
-from core.common.swagger_parameters import q_param, limit_param, sort_desc_param, sort_asc_param, exact_match_param, \
+from core.common.swagger_parameters import q_param, limit_param, sort_desc_param, sort_asc_param, \
     page_param, verbose_param, include_retired_param, updated_since_param, include_facets_header, compress_header
 from core.common.tasks import export_source, index_source_concepts, index_source_mappings, delete_source
 from core.common.utils import parse_boolean_query_param, compact_dict_by_values, to_parent_uri
@@ -130,7 +130,7 @@ class SourceListView(SourceBaseView, ConceptDictionaryCreateMixin, ListWithHeade
 
     @swagger_auto_schema(
         manual_parameters=[
-            q_param, limit_param, sort_desc_param, sort_asc_param, exact_match_param, page_param, verbose_param,
+            q_param, limit_param, sort_desc_param, sort_asc_param, page_param, verbose_param,
             include_retired_param, updated_since_param, include_facets_header, compress_header
         ]
     )

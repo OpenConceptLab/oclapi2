@@ -18,7 +18,7 @@ from core.common.constants import (
 from core.common.exceptions import Http400, Http403
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryMixin
 from core.common.swagger_parameters import (
-    q_param, limit_param, sort_desc_param, page_param, exact_match_param, sort_asc_param, verbose_param,
+    q_param, limit_param, sort_desc_param, page_param, sort_asc_param, verbose_param,
     include_facets_header, updated_since_param, include_inverse_mappings_param, include_retired_param,
     compress_header, include_source_versions_param, include_collection_versions_param, cascade_method_param,
     cascade_map_types_param, cascade_exclude_map_types_param, cascade_hierarchy_param, cascade_mappings_param,
@@ -188,7 +188,7 @@ class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
 
     @swagger_auto_schema(
         manual_parameters=[
-            q_param, limit_param, sort_desc_param, sort_asc_param, exact_match_param, page_param, verbose_param,
+            q_param, limit_param, sort_desc_param, sort_asc_param, page_param, verbose_param,
             include_retired_param, include_inverse_mappings_param, updated_since_param,
             include_facets_header, compress_header
         ]

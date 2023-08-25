@@ -52,7 +52,7 @@ from core.common.permissions import (
     CanViewConceptDictionaryVersion
 )
 from core.common.serializers import TaskSerializer
-from core.common.swagger_parameters import q_param, compress_header, page_param, verbose_param, exact_match_param, \
+from core.common.swagger_parameters import q_param, compress_header, page_param, verbose_param, \
     include_facets_header, sort_asc_param, sort_desc_param, updated_since_param, include_retired_param, limit_param
 from core.common.tasks import add_references, export_collection, delete_collection, index_expansion_concepts, \
     index_expansion_mappings
@@ -186,7 +186,7 @@ class CollectionListView(CollectionBaseView, ConceptDictionaryCreateMixin, ListW
 
     @swagger_auto_schema(
         manual_parameters=[
-            q_param, limit_param, sort_desc_param, sort_asc_param, exact_match_param, page_param, verbose_param,
+            q_param, limit_param, sort_desc_param, sort_asc_param, page_param, verbose_param,
             include_retired_param, updated_since_param, include_facets_header, compress_header
         ]
     )

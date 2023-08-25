@@ -12,7 +12,7 @@ from core.common.constants import HEAD, ACCESS_TYPE_NONE
 from core.common.exceptions import Http400
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryMixin
 from core.common.swagger_parameters import (
-    q_param, limit_param, sort_desc_param, page_param, exact_match_param, sort_asc_param, verbose_param,
+    q_param, limit_param, sort_desc_param, page_param, sort_asc_param, verbose_param,
     include_facets_header, updated_since_param, include_retired_param,
     compress_header, include_source_versions_param, include_collection_versions_param)
 from core.common.views import SourceChildCommonBaseView, SourceChildExtrasView, \
@@ -92,7 +92,7 @@ class MappingListView(MappingBaseView, ListWithHeadersMixin, CreateModelMixin):
 
     @swagger_auto_schema(
         manual_parameters=[
-            q_param, limit_param, sort_desc_param, sort_asc_param, exact_match_param, page_param, verbose_param,
+            q_param, limit_param, sort_desc_param, sort_asc_param, page_param, verbose_param,
             include_retired_param, updated_since_param,
             include_facets_header, compress_header
         ]

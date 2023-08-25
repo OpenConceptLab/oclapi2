@@ -57,7 +57,6 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     sort_desc_param = 'sortDesc'
     sort_param = 'sort'
     default_qs_sort_attr = '-updated_at'
-    exact_match = 'exact_match'
     facet_class = None
     total_count = 0
 
@@ -194,9 +193,6 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             return attrs.get('sortable', False)
 
         return False
-
-    def is_exact_match_on(self):
-        return self.request.query_params.dict().get(self.exact_match, None) == 'on'
 
     def clean_fields(self, fields):
         if self.is_concept_document() and self.request.query_params.get(SEARCH_MAP_CODES_PARAM) in get_falsy_values():
@@ -423,7 +419,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
             faceted_search = self.facet_class(  # pylint: disable=not-callable
                 self.get_search_string(lower=False),
-                filters=filters, exact_match=True
+                filters=filters
             )
             faceted_search.params(request_timeout=ES_REQUEST_TIMEOUT)
             try:
