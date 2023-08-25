@@ -359,8 +359,7 @@ RETRY_POLICY = {
     'max_retries': 10,
     'interval_start': 0,
     'interval_step': 1,
-    'interval_max': 10,
-    'timeout': 5.0
+    'interval_max': 10
 }
 
 CELERY_ENABLE_UTC = True
@@ -392,7 +391,9 @@ CELERY_RESULT_BACKEND_MAX_RETRIES = 10
 CELERY_RESULT_BACKEND_TRANSPORT_OPTIONS = {
     'socket_timeout': 5.0,
     'socket_connect_timeout': 5.0,
-    'retry_policy': RETRY_POLICY
+    'retry_policy': {
+        'timeout': 5.0
+    } | RETRY_POLICY
 }
 CELERY_RESULT_EXTENDED = True
 CELERY_RESULT_EXPIRES = 259200  # 72 hours
@@ -401,7 +402,9 @@ CELERY_BROKER_TRANSPORT_OPTIONS = {
     'visibility_timeout': 259200,  # 72 hours, the longest ETA
     'socket_timeout': 5.0,
     'socket_connect_timeout': 5.0,
-    'retry_policy': RETRY_POLICY
+    'retry_policy': {
+        'timeout': 5.0
+    } | RETRY_POLICY
 }
 
 if REDIS_SENTINELS:
