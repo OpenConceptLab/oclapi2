@@ -1043,6 +1043,9 @@ class TaskTest(OCLTestCase):
         email_message_mock.assert_called_once()
         email_message_instance_mock.send.assert_called_once()
         email_message_instance_mock.attach.assert_called_once_with(ANY, ANY, 'text/csv')
+        self.assertTrue('_resource_report_' in email_message_instance_mock.attach.call_args[0][0])
+        self.assertTrue('.csv' in email_message_instance_mock.attach.call_args[0][0])
+        self.assertTrue(b'Resources Created' in email_message_instance_mock.attach.call_args[0][1])
 
         self.assertEqual(res, 1)
         call_args = email_message_mock.call_args[1]
@@ -1050,7 +1053,6 @@ class TaskTest(OCLTestCase):
         self.assertEqual(call_args['to'], ['reports@openconceptlab.org'])
         self.assertTrue('Please find attached resources report of' in call_args['body'])
         self.assertTrue('for the period of' in call_args['body'])
-        self.assertEqual(email_message_instance_mock.content_subtype, 'html')
 
 
 class PostgresQLTest(OCLTestCase):
