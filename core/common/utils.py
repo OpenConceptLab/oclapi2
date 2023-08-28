@@ -890,3 +890,18 @@ def get_falsy_values():
 
 def get_truthy_values():
     return ['true', True, 'True', 1, '1']
+
+
+def get_date_range_label(start_date, end_date):
+    start = from_string_to_date(start_date)
+    end = from_string_to_date(end_date)
+
+    start_month = start.strftime('%B')
+    end_month = end.strftime('%B')
+
+    if start.year == end.year:
+        if start_month == end_month:
+            return f"{start.day:02d} - {end.day:02d} {start_month} {start.year}"
+        return f"{start.day:02d} {start_month} - {end.day:02d} {end_month} {start.year}"
+
+    return f"{start.day:02d} {start_month} {start.year} - {end.day:02d} {end_month} {end.year}"

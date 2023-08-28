@@ -52,9 +52,8 @@ urlpatterns = [
     re_path(r'^redoc/$', SchemaView.with_ui('redoc', cache_timeout=0), name='schema-redoc'),
     path('healthcheck/', include('core.common.healthcheck.urls')),
     path('admin/reports/authored/', report_views.AuthoredView.as_view(), name='authored-report'),
-    path('admin/reports/monthly-usage/', report_views.MonthlyUsageView.as_view(), name='monthly-usage-report'),
     path(
-        'admin/reports/monthly-usage/job/', report_views.MonthlyUsageReportJobView.as_view(), name='monthly-usage-job'),
+        'admin/reports/monthly-usage/job/', report_views.ResourcesReportJobView.as_view(), name='monthly-usage-job'),
     path('admin/concepts/amend-hierarchy/', ConceptsHierarchyAmendAdminView.as_view(), name='concepts-amend-hierarchy'),
     re_path(r'^\$resolveReference/$', ReferenceExpressionResolveView.as_view(), name='$resolveReference'),
     re_path(r'^\$checksum/$', ChecksumView.as_view(), name='$checksum'),

@@ -19,7 +19,9 @@ from pydash import get
 from core.celery import app
 from core.common import ERRBIT_LOGGER
 from core.common.constants import CONFIRM_EMAIL_ADDRESS_MAIL_SUBJECT, PASSWORD_RESET_MAIL_SUBJECT
-from core.common.utils import write_export_file, web_url, get_resource_class_from_resource_name, get_export_service
+from core.common.utils import write_export_file, web_url, get_resource_class_from_resource_name, get_export_service, \
+    get_date_range_label
+from core.reports.models import ResourceUsageReport
 from core.toggles.models import Toggle
 
 logger = get_task_logger(__name__)
@@ -622,28 +624,21 @@ def beat_healthcheck():  # pragma: no cover
 
 
 @app.task(ignore_result=True)
-def monthly_usage_report():  # pragma: no cover
+def resources_report():  # pragma: no cover
     # runs on first of every month
-    # reports usage of prev month and trend over last 3 months
-    from core.reports.models import MonthlyUsageReport
+    # reports usage of prev month
     now = timezone.now().replace(day=1)
-    three_months_from_now = now - relativedelta(months=3)
-    last_month = now - relativedelta(months=1)
-    report = MonthlyUsageReport(
-        verbose=True, start=three_months_from_now, end=now, current_month_end=now, current_month_start=last_month)
-    report.prepare()
-    html_body = render_to_string('monthly_usage_report_for_mail.html', report.get_result_for_email())
-    FORMAT = '%Y-%m-%d'
-    start = report.start
-    end = report.end
+    report = ResourceUsageReport(start_date=now - relativedelta(months=1), end_date=now)
+    buff, file_name = report.generate()
+    date_range_label = get_date_range_label(report.start_date, report.end_date)
+    env = settings.ENV.upper()
     mail = EmailMessage(
-        subject=f"{settings.ENV.upper()} Monthly usage report: {start.strftime(FORMAT)} to {end.strftime(FORMAT)}",
-        body=html_body,
+        subject=f"{env} Monthly Resources Report: {date_range_label}",
+        body=f"Please find attached resources report of {env} for the period of {date_range_label}",
         to=[settings.REPORTS_EMAIL]
     )
-    mail.content_subtype = "html"
-    res = mail.send()
-    return res
+    mail.attach(file_name, buff.getvalue(), 'text/csv')
+    return mail.send()
 
 
 @app.task(ignore_result=True)

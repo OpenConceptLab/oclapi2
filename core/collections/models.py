@@ -460,6 +460,14 @@ class CollectionReference(models.Model):
     mappings = models.ManyToManyField('mappings.Mapping', related_name='references', through=ReferencedMapping)
     collection = models.ForeignKey('collections.Collection', related_name='references', on_delete=models.CASCADE)
 
+    @staticmethod
+    def get_static_references_criteria():
+        return models.Q(
+            models.Q(resource_version__isnull=False) |
+            models.Q(resource_version__isnull=True, transform__isnull=False) |
+            models.Q(resource_version__isnull=True, transform__isnull=True, code__isnull=False, version__isnull=False)
+        )
+
     @property
     def resource_type(self):
         return COLLECTION_REFERENCE_TYPE
