@@ -668,14 +668,14 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     def get_mandatory_words_criteria(self):
         criterion = None
         for must_have in CustomESSearch.get_must_haves(self.get_raw_search_string()):
-            criteria, _ = self.get_wildcard_search_criterion(f"*{must_have}*")
+            criteria, _ = self.get_wildcard_search_criterion(f"{must_have}*")
             criterion = criteria if criterion is None else criterion & criteria
         return criterion
 
     def get_mandatory_exclude_words_criteria(self):
         criterion = None
         for must_not_have in CustomESSearch.get_must_not_haves(self.get_raw_search_string()):
-            criteria, _ = self.get_wildcard_search_criterion(f"*{must_not_have}*")
+            criteria, _ = self.get_wildcard_search_criterion(f"{must_not_have}*")
             criterion = criteria if criterion is None else criterion | criteria
         return criterion
 
