@@ -1,5 +1,4 @@
 import base64
-import re
 from email.mime.image import MIMEImage
 
 import markdown
@@ -210,16 +209,10 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         return self.request.query_params.dict().get(SEARCH_PARAM, '').strip()
 
     def get_search_must_haves(self):
-        pattern = r'"([^"]*)"'
-        matches = compact(re.findall(pattern, self.get_raw_search_string()))
-        result = []
-        for match in matches:
-            match = match.strip()
-            if ' ' in match:
-                result += match.split()
-            else:
-                result.append(match)
-        return set(result)
+        return CustomESSearch.get_must_haves(self.get_raw_search_string())
+
+    def get_search_must_not_haves(self):
+        return CustomESSearch.get_must_not_haves(self.get_raw_search_string())
 
     @property
     def is_fuzzy_search(self):
@@ -619,14 +612,12 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             fields += wildcard_search_fields
         if not exclude_fuzzy:
             criterion |= self.get_fuzzy_search_criterion(boost_divide_by=10000, expansions=2)
-
         results = results.query(criterion)
-        must_have_criterion = None
-        for must_have in self.get_search_must_haves():
-            criteria, _ = self.get_wildcard_search_criterion(f"*{must_have}*")
-            must_have_criterion = criteria if must_have_criterion is None else must_have_criterion & criteria
-        if must_have_criterion is not None:
-            results = results.filter(must_have_criterion)
+
+        must_not_have_criterion = self.get_mandatory_exclude_words_criteria()
+        must_have_criterion = self.get_mandatory_words_criteria()
+        results = results.filter(must_have_criterion) if must_have_criterion is not None else results
+        results = results.filter(~must_not_have_criterion) if must_not_have_criterion is not None else results
 
         if extras_fields:
             fields += list(extras_fields.keys())
@@ -673,6 +664,20 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         if highlight and self.request.query_params.get(INCLUDE_SEARCH_META_PARAM) in get_truthy_values():
             results = results.highlight(*self.clean_fields_for_highlight(fields))
         return results.sort(*self._get_sort_attribute()) if sort else results
+
+    def get_mandatory_words_criteria(self):
+        criterion = None
+        for must_have in CustomESSearch.get_must_haves(self.get_raw_search_string()):
+            criteria, _ = self.get_wildcard_search_criterion(f"*{must_have}*")
+            criterion = criteria if criterion is None else criterion & criteria
+        return criterion
+
+    def get_mandatory_exclude_words_criteria(self):
+        criterion = None
+        for must_not_have in CustomESSearch.get_must_not_haves(self.get_raw_search_string()):
+            criteria, _ = self.get_wildcard_search_criterion(f"*{must_not_have}*")
+            criterion = criteria if criterion is None else criterion | criteria
+        return criterion
 
     @staticmethod
     def clean_fields_for_highlight(fields):

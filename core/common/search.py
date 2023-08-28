@@ -1,3 +1,4 @@
+import re
 import urllib
 
 from django.db.models import Case, When, IntegerField
@@ -34,6 +35,11 @@ class CustomESFacetedSearch(FacetedSearch):
 
 
 class CustomESSearch:
+    MUST_HAVE_PREFIX = '+'
+    MUST_NOT_HAVE_PREFIX = '-'
+    MUST_HAVE_REGEX = fr'\{MUST_HAVE_PREFIX}(\w+)'
+    MUST_NOT_HAVE_REGEX = fr'\{MUST_NOT_HAVE_PREFIX}(\w+)'
+
     def __init__(self, dsl_search):
         self._dsl_search = dsl_search
         self.queryset = None
@@ -43,6 +49,14 @@ class CustomESSearch:
         self.score_stats = None
         self.score_distribution = None
         self.total = 0
+
+    @classmethod
+    def get_must_haves(cls, search_str):
+        return set(re.findall(cls.MUST_HAVE_REGEX, search_str))
+
+    @classmethod
+    def get_must_not_haves(cls, search_str):
+        return set(re.findall(cls.MUST_NOT_HAVE_REGEX, search_str))
 
     @staticmethod
     def get_wildcard_search_string(_str):
