@@ -617,7 +617,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         must_not_have_criterion = self.get_mandatory_exclude_words_criteria()
         must_have_criterion = self.get_mandatory_words_criteria()
         results = results.filter(must_have_criterion) if must_have_criterion is not None else results
-        results = results.filter(~must_not_have_criterion) if must_not_have_criterion is not None else results
+        results = results.filter(~must_not_have_criterion) if must_not_have_criterion is not None else results  # pylint: disable=invalid-unary-operand-type
 
         if extras_fields:
             fields += list(extras_fields.keys())
