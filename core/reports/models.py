@@ -170,8 +170,6 @@ class ResourceUsageReport:
 
                 writer.writerow(blank_row)
 
-        writer.writerow(blank_row)
-
         for resource in resources:
             if resource.grouped and (
                     resource.grouped_queryset.exists() if isinstance(
@@ -182,9 +180,8 @@ class ResourceUsageReport:
                 writer.writerow(to_row(resource.GROUPED_HEADERS))
                 for obj in resource.grouped_queryset:
                     writer.writerow(to_row(resource.to_grouped_stat_csv_row(obj)))
-                writer.writerow(blank_row)
 
-        writer.writerow(blank_row)
+                writer.writerow(blank_row)
 
         writer.writerow(to_row(["Overall Resources"]))
         writer.writerow(to_row(stat_headers))
