@@ -11,6 +11,7 @@ class MappingReport(AbstractReport):
     verbose = False
     grouped = True
     GROUPED_HEADERS = ["Target Source ID", "Count"]
+    retired_criteria = {'retired': True}
 
     @property
     def grouped_queryset(self):
@@ -36,3 +37,4 @@ class MappingVersionReport(AbstractReport):
     queryset = Mapping.objects.exclude(id=F('versioned_object_id')).exclude(is_latest_version=True)
     name = 'Mapping Versions'
     verbose = False
+    retired_criteria = {'retired': True}
