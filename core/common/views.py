@@ -401,7 +401,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                 return facets
             faceted_search = self.facet_class(  # pylint: disable=not-callable
                 self.get_search_string(lower=False),
-                _search=self.__get_search_results(ignore_retired_filter=True, sort=False, highlight=False),
+                _search=self.__get_search_results(ignore_retired_filter=True, sort=False, highlight=False, force=True),
             )
             faceted_search.params(request_timeout=ES_REQUEST_TIMEOUT)
             try:
@@ -502,9 +502,9 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
         return (not collection or collection.startswith('!')) and (not version or version.startswith('!'))
 
-    def __apply_common_search_filters(self, ignore_retired_filter=False):
+    def __apply_common_search_filters(self, ignore_retired_filter=False, force=False):
         results = None
-        if not self.should_perform_es_search():
+        if not force and not self.should_perform_es_search():
             return results
 
         results = self.document_model.search()
@@ -593,8 +593,8 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         criteria &= Q('match', owner_type=source_version.parent.resource_type)
         return criteria
 
-    def __get_search_results(self, ignore_retired_filter=False, sort=True, highlight=True):  # pylint: disable=too-many-branches,too-many-locals,too-many-statements
-        results = self.__apply_common_search_filters(ignore_retired_filter)
+    def __get_search_results(self, ignore_retired_filter=False, sort=True, highlight=True, force=False):  # pylint: disable=too-many-branches,too-many-locals,too-many-statements
+        results = self.__apply_common_search_filters(ignore_retired_filter, force)
         if results is None:
             return results
 
