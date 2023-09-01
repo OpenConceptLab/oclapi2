@@ -609,6 +609,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             new_locale = locale.clone() if isinstance(locale, locale_klass) else locale_klass.build(locale)
             new_locale.concept_id = self.id
             new_locale.save()
+            new_locale.set_checksums()
 
     def remove_locales(self):
         self.names.all().delete()

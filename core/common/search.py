@@ -1,3 +1,4 @@
+import re
 import urllib
 
 from django.db.models import Case, When, IntegerField
@@ -8,16 +9,18 @@ from core.common.utils import is_url_encoded_string
 
 
 class CustomESFacetedSearch(FacetedSearch):
-    def __init__(self, query=None, filters={}, sort=(), exact_match=False):  # pylint: disable=dangerous-default-value
-        self.exact_match = exact_match
+    def __init__(self, query=None, filters={}, sort=(), _search=None):  # pylint: disable=dangerous-default-value
+        self._search = _search
         super().__init__(query=query, filters=filters, sort=sort)
 
-    def format_search_str(self, search_str):
-        if self.exact_match:
-            return search_str.replace('*', '')
+    @staticmethod
+    def format_search_str(search_str):
         return f"{search_str}*".replace('**', '*')
 
     def query(self, search, query):
+        if self._search:
+            from_search = self._search.to_dict()
+            return search.update_from_dict(from_search)
         if query:
             search_str = self.format_search_str(query)
             if self.fields:
@@ -31,6 +34,11 @@ class CustomESFacetedSearch(FacetedSearch):
 
 
 class CustomESSearch:
+    MUST_HAVE_PREFIX = '+'
+    MUST_NOT_HAVE_PREFIX = '-'
+    MUST_HAVE_REGEX = fr'\{MUST_HAVE_PREFIX}(\w+)'
+    MUST_NOT_HAVE_REGEX = fr'\{MUST_NOT_HAVE_PREFIX}(\w+)'
+
     def __init__(self, dsl_search):
         self._dsl_search = dsl_search
         self.queryset = None
@@ -41,9 +49,17 @@ class CustomESSearch:
         self.score_distribution = None
         self.total = 0
 
+    @classmethod
+    def get_must_haves(cls, search_str):
+        return set(re.findall(cls.MUST_HAVE_REGEX, search_str))
+
+    @classmethod
+    def get_must_not_haves(cls, search_str):
+        return set(re.findall(cls.MUST_NOT_HAVE_REGEX, search_str))
+
     @staticmethod
     def get_wildcard_search_string(_str):
-        return f"{_str}*".replace('**', '*')
+        return f"{_str}*".replace(' ', '*').replace('**', '*')
 
     @staticmethod
     def get_search_string(search_str, lower=True, decode=True):
@@ -70,36 +86,23 @@ class CustomESSearch:
         criterion = None
         for attr, meta in fields.items():
             criteria = CustomESSearch.fuzzy_criteria(search_str, attr, meta['boost'] / boost_divide_by, expansions)
-            if criterion is None:
-                criterion = criteria
-            else:
-                criterion |= criteria
+            criterion = criteria if criterion is None else criterion | criteria
         return criterion
 
     @staticmethod
     def get_wildcard_match_criterion(search_str, fields):
-        def get_query(_str):
-            query = None
-            for attr, meta in fields.items():
-                decode = meta['decode'] if 'decode' in meta else True
-                lower = meta['lower'] if 'lower' in meta else True
-                _search_str = CustomESSearch.get_wildcard_search_string(
-                    CustomESSearch.get_search_string(search_str, decode=decode, lower=lower)
-                )
-                criteria = CustomESSearch.get_wildcard_criteria(attr, _search_str, meta['boost'])
-                if query is None:
-                    query = criteria
-                else:
-                    query |= criteria
-            return query
-
-        if not search_str:
-            return get_query(search_str)
-        words = search_str.split()
-        criterion = get_query(words[0])
-        for word in words[1:]:
-            criterion |= get_query(word)
-
+        cls = CustomESSearch
+        criterion = None
+        code_fields = ['id', 'same_as_map_codes', 'other_map_codes']
+        _fields = {k: v for k, v in fields.items() if k not in code_fields} if ' ' in search_str else fields
+        for attr, meta in fields.items():
+            lower = meta['lower'] if 'lower' in meta else True
+            decode = meta['decode'] if 'decode' in meta else True
+            _search_str = cls.get_wildcard_search_string(
+                cls.get_search_string(search_str, decode=decode, lower=lower)
+            )
+            criteria = cls.get_wildcard_criteria(attr, _search_str, meta['boost'])
+            criterion = criteria if criterion is None else criterion | criteria
         return criterion
 
     @staticmethod
@@ -113,10 +116,7 @@ class CustomESSearch:
 
         for field, meta in match_word_fields_map.items():
             criteria = CustomESSearch.get_match_criteria(field, search_str, meta['boost'])
-            if criterion is None:
-                criterion = criteria
-            criterion |= criteria
-
+            criterion = criteria if criterion is None else criterion | criteria
         return criterion
 
     @staticmethod

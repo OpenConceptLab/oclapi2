@@ -1,18 +1,18 @@
-Django==4.2.3
-psycopg2==2.9.6
-gunicorn==20.1.0 #production server
+Django==4.2.4
+psycopg2==2.9.7
+gunicorn==21.2.0 #production server
 whitenoise==6.5.0 #serving swagger static files
 djangorestframework==3.14.0
-pylint==2.17.4
-pydash==7.0.4
-django-cors-headers==4.1.0
+pylint==2.17.5
+pydash==7.0.6
+django-cors-headers==4.2.0
 pyyaml==6.0.1
 colour_runner==0.1.1
 boto3==1.24.28
 moto==3.1.13
 python-dateutil==2.8.2
 requests==2.31.0
-factory_boy==3.2.1
+factory_boy==3.3.0
 # Celery
 celery[redis]==5.3.1
 celery_once==3.0.1
@@ -24,12 +24,12 @@ django-elasticsearch-dsl==7.3
 drf-yasg==1.21.5
 git+https://github.com/snyaggarwal/django-queryset-csv
 git+https://github.com/OpenConceptLab/ocldev
-coverage==7.2.7
+coverage==7.3.0
 tblib==2.0.0
 django-ordered-model==3.7.4
 django-health-check==3.17.0
-markdown==3.4.3
-mock==5.0.2
+markdown==3.4.4
+mock==5.1.0
 django-request-logging==0.7.5
 django-cid==2.3
 django-dirtyfields==1.9.2

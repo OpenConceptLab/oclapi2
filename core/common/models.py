@@ -33,7 +33,6 @@ from .fields import URIField
 from .tasks import handle_save, handle_m2m_changed, seed_children_to_new_version, update_validation_schema, \
     update_source_active_concepts_count, update_source_active_mappings_count
 
-
 TRUTHY = get_truthy_values()
 
 
@@ -821,13 +820,24 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         for version in self.versions:
             S3.rename(version.export_path, version.version_export_path, delete=move)
 
-    @cached_property
-    def export_path(self):  # old export path, needs to be deleted post migration to new export path  # pragma: no cover
-        last_update = self.last_child_update.strftime('%Y%m%d%H%M%S')
-        return self.generic_export_path(suffix=f"{last_update}.zip")
+    def version_export_path(self):
+        last_update = self.last_child_update.strftime('%Y-%m-%d_%H%M%S')
+        return self.get_version_export_path(suffix=f"{last_update}.zip")
 
-    def generic_export_path(self, suffix='*'):  # old export path, needs to be deleted post migration to new export path  # pragma: no cover  # pylint: disable: line-too-long
-        path = f"{self.parent_resource}/{self.mnemonic}_{self.version}."
+    def get_version_export_path(self, suffix='*'):
+        version = self.version
+        if not version.lower().startswith('v'):
+            version = f"v{version}"
+
+        owner = self.parent
+        owner_mnemonic = owner.mnemonic
+        owner_type = f'{owner.get_url_kwarg()}s'
+        path = f"{owner_type}/{owner_mnemonic}/{owner_mnemonic}_{self.mnemonic}_{version}"
+        expansion = get(self, 'expansion.mnemonic')
+        if expansion:
+            path = f"{path}_{expansion}"
+        path = f'{path}.'
+
         if suffix:
             path += suffix
 

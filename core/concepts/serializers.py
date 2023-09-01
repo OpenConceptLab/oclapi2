@@ -12,6 +12,7 @@ from core.common.serializers import AbstractResourceSerializer
 from core.common.utils import to_parent_uri_from_kwargs, get_truthy_values
 from core.concepts.models import Concept, ConceptName
 
+
 TRUTHY = get_truthy_values()
 
 

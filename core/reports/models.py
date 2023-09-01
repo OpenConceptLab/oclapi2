@@ -1,322 +1,199 @@
-import json
-from urllib.parse import quote
+import csv
+import io
+import os
+from datetime import datetime
 
-from dateutil.relativedelta import relativedelta
 from django.conf import settings
-from django.db.models import Count, F
-from django.db.models.functions import TruncMonth
+from django.db.models import QuerySet
 from django.utils import timezone
 from pydash import get
 
-from core.collections.models import Collection, CollectionReference
-from core.common.constants import HEAD
-from core.common.utils import get_end_of_month, from_string_to_date
-from core.concepts.models import Concept
-from core.mappings.models import Mapping
-from core.orgs.models import Organization
-from core.sources.models import Source
-from core.users.models import UserProfile
+from core.common.utils import from_string_to_date, get_date_range_label, cd_temp
 
 
-class MonthlyUsageReport:
-    def __init__(self, verbose=False, start=None, end=None, current_month_start=None, current_month_end=None):  # pylint: disable=too-many-arguments
-        self.verbose = verbose
-        self.start = from_string_to_date(start)
-        self.end = from_string_to_date(end)
-        self.current_month_start = from_string_to_date(
-            current_month_start or timezone.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        )
-        self.current_month_end = from_string_to_date(
-            current_month_end or get_end_of_month(
-                self.current_month_start).replace(hour=23, minute=59, second=59, microsecond=0)
-        )
-        self.resources = []
-        self.current_month_resources = []
-        self.result = {}
-        self.current_month_result = {}
-        self.make_current_month_resources()
-        self.make_resources()
-        self.make_current_month_resources()
-
-    @staticmethod
-    def to_chart_url(label, graph_data, chart_type='bar'):
-        labels = []
-        data = []
-        color = "rgba(51, 115, 170, 1)"
-        color_light = "rgba(51, 115, 170, .2)"
-        for ele in graph_data:
-            key = list(ele.keys())[0]
-            labels.append(key)
-            data.append(ele[key])
-
-        config = {
-            'type': chart_type,
-            'data': {
-                'labels': labels,
-                'datasets': [{
-                    'label': label,
-                    'data': data,
-                    'backgroundColor': [color_light],
-                    'borderColor': [color],
-                    'borderWidth': 1
-                }]
-            },
-            'options': {
-                'scales': {
-                    'y': {
-                        'beginAtZero': True
-                    }
-                }
-            }
-        }
-        return f'https://quickchart.io/chart?c={quote(json.dumps(config))}'
-
-    def make_resources(self):
-        start = self.start
-        end = self.end
-        self.resources.append(UserReport(start=start, end=end, verbose=self.verbose))
-        self.resources.append(OrganizationReport(start=start, end=end, verbose=self.verbose))
-        self.resources.append(SourceReport(start=start, end=end, verbose=self.verbose))
-        self.resources.append(CollectionReport(start=start, end=end, verbose=self.verbose))
-        if self.verbose:
-            self.resources.append(SourceVersionReport(start=start, end=end, verbose=self.verbose))
-            self.resources.append(CollectionVersionReport(start=start, end=end, verbose=self.verbose))
-            self.resources.append(CollectionReferenceReport(start=start, end=end, verbose=self.verbose))
-            self.resources.append(ConceptReport(start=start, end=end, verbose=self.verbose))
-            self.resources.append(MappingReport(start=start, end=end, verbose=self.verbose))
-
-    def make_current_month_resources(self):
-        start = self.current_month_start
-        end = self.current_month_end
-        self.current_month_resources.append(UserReport(start=start, end=end, verbose=self.verbose))
-        self.current_month_resources.append(OrganizationReport(start=start, end=end, verbose=self.verbose))
-        self.current_month_resources.append(SourceReport(start=start, end=end, verbose=self.verbose))
-        self.current_month_resources.append(CollectionReport(start=start, end=end, verbose=self.verbose))
-        if self.verbose:
-            self.current_month_resources.append(SourceVersionReport(start=start, end=end, verbose=self.verbose))
-            self.current_month_resources.append(CollectionVersionReport(start=start, end=end, verbose=self.verbose))
-            self.current_month_resources.append(CollectionReferenceReport(start=start, end=end, verbose=self.verbose))
-            self.current_month_resources.append(ConceptReport(start=start, end=end, verbose=self.verbose))
-            self.current_month_resources.append(MappingReport(start=start, end=end, verbose=self.verbose))
-
-    def prepare(self):
-        self.result['start'] = self.start
-        self.result['end'] = self.end
-        for resource in self.resources:
-            self.result[resource.resource] = resource.get_monthly_report()
-        for resource in self.current_month_resources:
-            self.current_month_result[resource.resource] = resource.get_monthly_report()
-
-    def get_result_for_email(self):
-        urls = {}
-        for resource in self.resources:
-            entity = resource.resource
-            stats = [
-                {
-                    'data': self.result[entity]['created_monthly'],
-                    'label': f"{entity.title()} Created Monthly",
-                    'key': f"{entity}_url"
-                }
-            ]
-
-            if entity == 'users':
-                stats.append(
-                    {
-                        'data': self.result[entity]['last_login_monthly'],
-                        'label': f"{entity.title()} Joined Monthly",
-                        'key': f"{entity}_last_login_monthly_url"
-                    },
-                )
-            for stat in stats:
-                urls[stat['key']] = self.to_chart_url(stat['label'], stat['data'])
-        return {
-            **self.result,
-            **urls,
-            'current_month': self.format_current_month_result(),
-            'current_month_start': self.current_month_start,
-            'current_month_end': self.current_month_end,
-            'env': settings.ENV
-        }
-
-    def format_current_month_result(self):
-        _result = {}
-
-        def __format(stat):
-            return list(stat[0].values())[0] or 0 if stat else 0
-
-        for resource, stats in self.current_month_result.items():
-            _result[resource] = {
-                **stats,
-                'created_monthly': __format(stats['created_monthly']),
-            }
-        return _result
-
-
-class ResourceReport:
+class AbstractReport:
+    stat_fields = ['active', 'retired', 'count']
+    verbose_fields = ['mnemonic', 'name', 'created_by.username', 'created_at']
+    retired_criteria = {'is_active': False}
+    name = 'Abstract Resources'
+    STAT_HEADERS = ["Resource", "Active", "Retired", "Total"]
+    VERBOSE_HEADERS = ["ID", "Name", "Created By", "Created At"]
+    select_related = []
     queryset = None
-    resource = None
-    pk = 'mnemonic'
+    verbose = True
+    stats = True
+    grouped = False
 
-    def __init__(self, start=None, end=None, verbose=False, instance_ids=None):
-        self.verbose = verbose
-        now = timezone.now()
-        self.start = start or (now - relativedelta(months=6)).date()
-        self.end = end or now.date()
-        self.total = 0
-        self.active = 0
-        self.inactive = 0
-        self.instance_ids = instance_ids
-        self.instances = self.get_instances()
-        self.created_monthly_distribution = None
-        self.result = {}
-        self.set_date_range()
+    def __init__(self, start_date=None, end_date=None):
+        self.start_date = from_string_to_date(start_date) if start_date else None
+        self.end_date = from_string_to_date(end_date) if end_date else None
+        self._active = None
+        self._retired = None
+        self._count = None
+        self.build_queryset()
 
-    def get_instances(self):
-        if self.instance_ids:
-            return self.queryset.filter(**{f"{self.pk}__in": self.instance_ids})
+    def get_overall_report_instance(self):
+        return self.__class__()
 
-        return None
+    def build_queryset(self):
+        if self.select_related:
+            self.queryset = self.queryset.select_related(*self.select_related)
+        if self.start_date:
+            self.queryset = self.queryset.filter(created_at__gte=self.start_date)
+        if self.end_date:
+            self.queryset = self.queryset.filter(created_at__lte=self.end_date)
 
-    @staticmethod
-    def get_active_filter(active=True):
-        return {'retired': not active}
+    @property
+    def count(self):
+        if self._count is None:
+            self._count = self.queryset.count()
+        return self._count
 
-    def set_date_range(self):
-        self.queryset = self.queryset.filter(created_at__gte=self.start, created_at__lte=self.end)
+    @property
+    def retired(self):
+        if self._retired is None:
+            self._retired = self.queryset.filter(**self.retired_criteria).count()
+        return self._retired
 
-    def set_total(self):
-        self.total = self.queryset.count()
+    @property
+    def active(self):
+        if self._active is None:
+            self._active = self.count - self.retired
+        return self._active
 
-    def set_active(self):
-        self.active = self.queryset.filter(**self.get_active_filter()).count()
+    @property
+    def date_range(self):
+        return get_date_range_label(self.start_date, self.end_date) if self.start_date and self.end_date else None
 
-    def set_inactive(self):
-        self.inactive = self.queryset.filter(**self.get_active_filter(False)).count()
-
-    def set_created_monthly_distribution(self):
-        self.created_monthly_distribution = self.get_distribution()
-
-    def get_distribution(self, date_attr='created_at', count_by='id'):
-        return self.queryset.annotate(
-            month=TruncMonth(date_attr)
-        ).filter(
-            month__gte=self.start.strftime('%Y-%m-%d'), month__lte=self.end.strftime('%Y-%m-%d')
-        ).values('month').annotate(total=Count(count_by)).values('month', 'total').order_by('-month')
-
-    def get_monthly_report(self):
-        self.set_total()
-        self.set_created_monthly_distribution()
-
-        self.result = {
-            'total': self.total,
-            'created_monthly': self.format_distribution(self.created_monthly_distribution)
-        }
-        if self.resource not in ['collection_references']:
-            self.set_active()
-            self.set_inactive()
-            self.result['active'] = self.active
-            self.result['inactive'] = self.inactive
-        return self.result
+    @property
+    def label(self):
+        date_range = self.date_range
+        report_name = self.name
+        return f"New {report_name}: {date_range}" if date_range else f"New {report_name} - All Time"
 
     @staticmethod
-    def format_distribution(queryset):
-        formatted = []
-        for item in queryset:
-            month = item['month']
-            if month:
-                formatted.append({item['month'].strftime('%b %Y'): item['total']})
+    def to_value(value):
+        if isinstance(value, datetime):
+            return value.strftime('%Y-%m-%d %H:%M:%S')
+        return value
 
-        return formatted
+    def to_csv_row(self, resource):
+        return [self.to_value(get(resource, field)) for field in self.verbose_fields]
 
-
-class UserReport(ResourceReport):
-    queryset = UserProfile.objects
-    raw_queryset = UserProfile.objects
-    resource = 'users'
-    pk = 'username'
-
-    def __init__(self, start=None, end=None, verbose=False, instance_ids=None):
-        super().__init__(start, end, verbose, instance_ids)
-        self.last_login_monthly_distribution = None
-
-    @staticmethod
-    def get_active_filter(active=True):
-        return {'is_active': active}
-
-    def set_last_login_monthly_distribution(self):
-        self.last_login_monthly_distribution = self.get_distribution('last_login')
-
-    def set_date_range(self):
-        pass
-
-    def set_created_at_date_range(self):
-        self.queryset = self.raw_queryset.filter(created_at__gte=self.start, created_at__lte=self.end)
-
-    def set_last_login_date_range(self):
-        self.queryset = self.raw_queryset.filter(last_login__gte=self.start, last_login__lte=self.end)
-
-    def get_monthly_report(self):
-        self.result = super().get_monthly_report()
-        self.set_last_login_monthly_distribution()
-        self.result['last_login_monthly'] = self.format_distribution(self.last_login_monthly_distribution)
-        return self.result
-
-    def get_authoring_report(self):
-        if self.instances is not None:
-            for user in self.instances:
-                user_result = {}
-                for app, model in [
-                        ('concepts', 'concept'), ('mappings', 'mapping'), ('sources', 'source'),
-                        ('collections', 'collection'), ('users', 'userprofile'), ('orgs', 'organization')
-                ]:
-                    created = get(user, f"{app}_{model}_related_created_by").count()
-                    updated = get(user, f"{app}_{model}_related_updated_by").count()
-                    user_result[app] = {'created': created, 'updated': updated}
-
-                self.result[user.username] = user_result
-
-        return self.result
+    def to_stat_csv_row(self):
+        return [self.name, *[get(self, field) for field in self.stat_fields]]
 
 
-class OrganizationReport(ResourceReport):
-    queryset = Organization.objects
-    resource = 'organizations'
+class ResourceUsageReport:
+    def __init__(self, start_date, end_date):
+        self.start_date = start_date
+        self.end_date = end_date
+        self.organization = None
+        self.user = None
+        self.source = None
+        self.source_version = None
+        self.collection = None
+        self.collection_version = None
+        self.reference = None
+        self.expansion = None
+        self.concept = None
+        self.concept_version = None
+        self.mapping = None
+        self.mapping_version = None
 
-    @staticmethod
-    def get_active_filter(active=True):
-        return {'is_active': active}
+    def build(self):
+        from core.orgs.reports import OrganizationReport
+        from core.users.reports import UserReport
+        from core.sources.reports import SourceReport, SourceVersionReport
+        from core.collections.reports import CollectionReport, CollectionVersionReport, ExpansionReport, ReferenceReport
+        from core.concepts.reports import ConceptReport, ConceptVersionReport
+        from core.mappings.reports import MappingReport, MappingVersionReport
 
+        self.organization = OrganizationReport(self.start_date, self.end_date)
+        self.user = UserReport(self.start_date, self.end_date)
+        self.source = SourceReport(self.start_date, self.end_date)
+        self.collection = CollectionReport(self.start_date, self.end_date)
+        self.source_version = SourceVersionReport(self.start_date, self.end_date)
+        self.collection_version = CollectionVersionReport(self.start_date, self.end_date)
+        self.reference = ReferenceReport(self.start_date, self.end_date)
+        self.expansion = ExpansionReport(self.start_date, self.end_date)
+        self.concept = ConceptReport(self.start_date, self.end_date)
+        self.concept_version = ConceptVersionReport(self.start_date, self.end_date)
+        self.mapping = MappingReport(self.start_date, self.end_date)
+        self.mapping_version = MappingVersionReport(self.start_date, self.end_date)
 
-class SourceReport(ResourceReport):
-    queryset = Source.objects.filter(version=HEAD)
-    resource = 'sources'
+    @property
+    def resources(self):
+        return [
+            self.organization,
+            self.user,
+            self.source,
+            self.source_version,
+            self.collection,
+            self.collection_version,
+            self.reference,
+            self.expansion,
+            self.concept,
+            self.concept_version,
+            self.mapping,
+            self.mapping_version
+        ]
 
+    def generate(self, write_to_file=False):  # pylint: disable=too-many-locals
+        self.build()
+        buff = io.StringIO()
+        writer = csv.writer(buff, dialect='excel', delimiter=',')
+        max_columns = 8
+        blank_row = ["", "", "", "", "", "", "", ""]
 
-class CollectionReport(ResourceReport):
-    queryset = Collection.objects.filter(version=HEAD)
-    resource = 'collections'
+        def to_row(values):
+            return [*values, *blank_row[:max_columns - len(values)]]
 
+        date_range_label = get_date_range_label(self.start_date, self.end_date)
+        writer.writerow(
+            to_row([f"Resources Created: {date_range_label}"]))
+        stat_headers = self.organization.STAT_HEADERS
+        writer.writerow(to_row(stat_headers))
+        resources = self.resources
+        for resource in resources:
+            writer.writerow(to_row(resource.to_stat_csv_row()))
 
-class SourceVersionReport(ResourceReport):
-    queryset = Source.objects.exclude(version=HEAD)
-    resource = 'source_versions'
+        writer.writerow(blank_row)
 
+        for resource in resources:
+            if resource.verbose and resource.queryset.exists():
+                writer.writerow(to_row([resource.label]))
+                writer.writerow(to_row(resource.VERBOSE_HEADERS))
+                for obj in resource.queryset.order_by('-created_at'):
+                    writer.writerow(to_row(resource.to_csv_row(obj)))
 
-class CollectionVersionReport(ResourceReport):
-    queryset = Collection.objects.exclude(version=HEAD)
-    resource = 'collection_versions'
+                writer.writerow(blank_row)
 
+        for resource in resources:
+            if resource.grouped and (
+                    resource.grouped_queryset.exists() if isinstance(
+                        resource.grouped_queryset, QuerySet
+                    ) else len(resource.grouped_queryset) > 0
+            ):
+                writer.writerow(to_row([f"{resource.grouped_label}: {date_range_label}"]))
+                writer.writerow(to_row(resource.GROUPED_HEADERS))
+                for obj in resource.grouped_queryset:
+                    writer.writerow(to_row(resource.to_grouped_stat_csv_row(obj)))
 
-class CollectionReferenceReport(ResourceReport):
-    queryset = CollectionReference.objects.filter(collection__version=HEAD)
-    resource = 'collection_references'
+                writer.writerow(blank_row)
 
+        writer.writerow(to_row(["Overall Resources"]))
+        writer.writerow(to_row(stat_headers))
+        for resource in resources:
+            writer.writerow(to_row(resource.get_overall_report_instance().to_stat_csv_row()))
 
-class ConceptReport(ResourceReport):
-    queryset = Concept.objects.filter(id=F('versioned_object_id'))
-    resource = 'concepts'
-
-
-class MappingReport(ResourceReport):
-    queryset = Mapping.objects.filter(id=F('versioned_object_id'))
-    resource = 'mappings'
+        buff2 = io.BytesIO(buff.getvalue().encode())
+        now = timezone.now().strftime("%Y-%m-%d-%H-%M")
+        filename = f'{settings.ENV.lower()}_resource_report_{now}.csv'
+        if write_to_file:
+            cwd = cd_temp()
+            with open(filename, 'wb') as file:
+                file.write(buff2.getvalue())
+            os.chdir(cwd)
+            return file.name
+        return buff2, filename

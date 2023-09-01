@@ -1699,15 +1699,22 @@ class ConceptListViewTest(OCLAPITestCase):
             HTTP_AUTHORIZATION='Token ' + self.token,
         )
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.data), 2)
+        self.assertEqual(
+            response.data,
+            [
+                {'name': 'high', 'threshold': ANY, 'confidence': ANY, 'total': ANY},
+                {'name': 'medium', 'threshold': ANY, 'confidence': ANY, 'total': 0},
+                {'name': 'low', 'threshold': 0.01, 'confidence': '<50.0%', 'total': 0}
+            ]
+        )
+        self.assertTrue(response.data[0]['total'] >= 2)
 
         response = self.client.get(
             self.source.uri + 'v1/concepts/?q=MyConcept',
             HTTP_AUTHORIZATION='Token ' + self.token,
         )
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.data), 1)
-        self.assertEqual(response.data[0]['id'], 'MyConcept2')
+        self.assertEqual(len(response.data), 2)
 
         response = self.client.get(
             self.source.uri + 'HEAD/concepts/?q=MyConcept',

@@ -21,7 +21,7 @@ from rest_framework.test import APITestCase
 
 from core.collections.models import CollectionReference
 from core.common.constants import HEAD
-from core.common.tasks import delete_s3_objects, bulk_import_parallel_inline, monthly_usage_report
+from core.common.tasks import delete_s3_objects, bulk_import_parallel_inline, resources_report
 from core.common.utils import (
     compact_dict_by_values, to_snake_case, flower_get, task_exists, parse_bulk_import_task_id,
     to_camel_case,
@@ -1035,23 +1035,24 @@ class TaskTest(OCLTestCase):
         import_run_mock.assert_called_once()
 
     @patch('core.common.tasks.EmailMessage')
-    def test_monthly_usage_report(self, email_message_mock):
+    def test_resources_report(self, email_message_mock):
         email_message_instance_mock = Mock(send=Mock(return_value=1))
         email_message_mock.return_value = email_message_instance_mock
-        res = monthly_usage_report()
+        res = resources_report()
 
         email_message_mock.assert_called_once()
         email_message_instance_mock.send.assert_called_once()
+        email_message_instance_mock.attach.assert_called_once_with(ANY, ANY, 'text/csv')
+        self.assertTrue('_resource_report_' in email_message_instance_mock.attach.call_args[0][0])
+        self.assertTrue('.csv' in email_message_instance_mock.attach.call_args[0][0])
+        self.assertTrue(b'Resources Created' in email_message_instance_mock.attach.call_args[0][1])
 
         self.assertEqual(res, 1)
         call_args = email_message_mock.call_args[1]
-        self.assertTrue("Monthly usage report" in call_args['subject'])
+        self.assertTrue("Monthly Resources Report" in call_args['subject'])
         self.assertEqual(call_args['to'], ['reports@openconceptlab.org'])
-        self.assertTrue('</html>' in call_args['body'])
-        self.assertTrue('concepts' in call_args['body'])
-        self.assertTrue('sources' in call_args['body'])
-        self.assertTrue('collections' in call_args['body'])
-        self.assertEqual(email_message_instance_mock.content_subtype, 'html')
+        self.assertTrue('Please find attached resources report of' in call_args['body'])
+        self.assertTrue('for the period of' in call_args['body'])
 
 
 class PostgresQLTest(OCLTestCase):

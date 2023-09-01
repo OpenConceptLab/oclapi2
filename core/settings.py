@@ -12,11 +12,12 @@ https://docs.djangoproject.com/en/3.0/ref/settings/
 
 import os
 # Build paths inside the project like this: os.path.join(BASE_DIR, ...)
-from datetime import timedelta
 
-from celery.schedules import crontab
 from corsheaders.defaults import default_headers
 from kombu import Queue, Exchange
+from redis.backoff import ExponentialBackoff
+from redis.retry import Retry
+from redis.exceptions import ConnectionError  # pylint: disable=redefined-builtin
 
 from core import __version__
 
@@ -200,6 +201,12 @@ ELASTICSEARCH_DSL = {
         'hosts': ES_HOSTS.split(',') if ES_HOSTS else [ES_HOST + ':' + ES_PORT],
         'use_ssl': ES_SCHEME == 'https',
         'verify_certs': ES_SCHEME == 'https',
+        'sniff_on_connection_fail': True,
+        'sniff_on_start': True,
+        'sniffer_timeout': 60,
+        'sniff_timeout': 10,
+        'max_retries': 3,
+        'retry_on_timeout': True
     },
 }
 
@@ -302,19 +309,39 @@ API_SUPERUSER_PASSWORD = os.environ.get('API_SUPERUSER_PASSWORD', 'Root123')  # 
 API_SUPERUSER_TOKEN = os.environ.get('API_SUPERUSER_TOKEN', '891b4b17feab99f3ff7e5b5d04ccc5da7aa96da6')
 
 # Redis
+REDIS_CONNECTION_OPTIONS = {
+    'socket_timeout': 5.0,
+    'socket_connect_timeout': 5.0,
+    'max_connections': 100,
+    'retry_on_timeout': True,
+    'health_check_interval': 0  # Handled by Redis TCP keepalive
+}
+
 REDIS_PORT = os.environ.get('REDIS_PORT', 6379)
 REDIS_DB = 0
 REDIS_HOST = os.environ.get('REDIS_HOST', 'redis')
-REDIS_URL = f"redis://{REDIS_HOST}:{REDIS_PORT}"
+REDIS_URL = f"redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}"
+
+REDIS_SENTINELS = os.environ.get('REDIS_SENTINELS', None)
+if REDIS_SENTINELS:
+    REDIS_SENTINELS_MASTER = os.environ.get('REDIS_SENTINELS_MASTER', 'default')
+    REDIS_SENTINELS_LIST = []
 
 REDIS_SENTINELS = os.environ.get('REDIS_SENTINELS', None)
 REDIS_SENTINELS_MASTER = os.environ.get('REDIS_SENTINELS_MASTER', 'default')
 REDIS_SENTINELS_LIST = []
 
 # django cache
-OPTIONS = {}
+OPTIONS = {
+    'CONNECTION_POOL_KWARGS': {
+                                  'retry': Retry(ExponentialBackoff(cap=10, base=0.5), 10),
+                                  'retry_on_error': [ConnectionError]
+                              } | REDIS_CONNECTION_OPTIONS
+}
 if REDIS_SENTINELS:
-    for REDIS_SENTINEL in REDIS_SENTINELS.split(','):
+    DJANGO_REDIS_CONNECTION_FACTORY = 'django_redis.pool.SentinelConnectionFactory'
+
+    for REDIS_SENTINEL in REDIS_SENTINELS.split(';'):
         SENTINEL = REDIS_SENTINEL.split(':')
         REDIS_SENTINELS_LIST.append((SENTINEL[0], int(SENTINEL[1])))
     OPTIONS.update({
@@ -326,12 +353,19 @@ if REDIS_SENTINELS:
 CACHES = {
     'default': {
         'BACKEND': 'django_redis.cache.RedisCache',
-        'LOCATION': REDIS_URL,
+        'LOCATION': f'redis://{REDIS_SENTINELS_MASTER}/{REDIS_DB}' if REDIS_SENTINELS else REDIS_URL,
         'OPTIONS': OPTIONS
     }
 }
 
 # Celery
+RETRY_POLICY = {
+    'max_retries': 10,
+    'interval_start': 0,
+    'interval_step': 1,
+    'interval_max': 10
+}
+
 CELERY_ENABLE_UTC = True
 CELERY_TIMEZONE = "UTC"
 CELERY_ALWAYS_EAGER = False
@@ -354,57 +388,64 @@ CELERY_TASK_ROUTES = {
     'core.common.tasks.rebuild_indexes': {'queue': 'indexing'}
 }
 
-CELERY_BROKER_TRANSPORT_OPTIONS = {'visibility_timeout': 259200}  # 72 hours, the longest ETA
+CELERY_RESULT_BACKEND_ALWAYS_RETRY = True
+CELERY_RESULT_BACKEND_MAX_SLEEP_BETWEEN_RETRIES_MS = 10000
+CELERY_RESULT_BACKEND_BASE_SLEEP_BETWEEN_RETRIES_MS = 100
+CELERY_RESULT_BACKEND_MAX_RETRIES = 10
 CELERY_RESULT_BACKEND_TRANSPORT_OPTIONS = {
+    'socket_timeout': 5.0,
+    'socket_connect_timeout': 5.0,
     'retry_policy': {
-        'timeout': 10.0
-    }
+        'timeout': 5.0
+    } | RETRY_POLICY
+}
+
+CELERY_RESULT_EXTENDED = True
+CELERY_RESULT_EXPIRES = 259200  # 72 hours
+
+CELERY_BROKER_TRANSPORT_OPTIONS = {
+    'visibility_timeout': 259200,  # 72 hours, the longest ETA
+    'socket_timeout': 5.0,
+    'socket_connect_timeout': 5.0,
+    'retry_policy': {
+        'timeout': 5.0
+    } | RETRY_POLICY
 }
 
 if REDIS_SENTINELS:
     CELERY_RESULT_BACKEND = ''
-    for REDIS_SENTINEL in REDIS_SENTINELS.split(','):
-        CELERY_RESULT_BACKEND = CELERY_RESULT_BACKEND + f'sentinel://{REDIS_SENTINEL}/0;'
-        CELERY_BROKER_TRANSPORT_OPTIONS.update({'master_name': REDIS_SENTINELS_MASTER})
-        CELERY_RESULT_BACKEND_TRANSPORT_OPTIONS.update({'master_name': REDIS_SENTINELS_MASTER})
+    for REDIS_SENTINEL in REDIS_SENTINELS.split(';'):
+        CELERY_RESULT_BACKEND = CELERY_RESULT_BACKEND + f'sentinel://{REDIS_SENTINEL}/{REDIS_DB};'
+    CELERY_RESULT_BACKEND = CELERY_RESULT_BACKEND[:-1]  # Remove last ';'
+    CELERY_RESULT_BACKEND_TRANSPORT_OPTIONS.update(
+        {
+            'master_name': REDIS_SENTINELS_MASTER
+        })
+    CELERY_BROKER_TRANSPORT_OPTIONS.update(
+        {
+            'master_name': REDIS_SENTINELS_MASTER
+        })
 else:
     CELERY_RESULT_BACKEND = f'redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}'
 
-CELERY_RESULT_EXTENDED = True
-CELERY_RESULT_EXPIRES = 259200  # 72 hours
 CELERY_BROKER_URL = CELERY_RESULT_BACKEND
-CELERY_BROKER_POOL_LIMIT = 50  # should be adjusted considering the number of threads
-CELERY_BROKER_CONNECTION_TIMEOUT = 10.0
-CELERY_ACCEPT_CONTENT = ['application/json']
-if REDIS_SENTINELS:
-    CELERY_ONCE = {
-        'backend': 'core.common.backends.QueueOnceRedisSentinelBackend',
-        'settings': {
-            'sentinels': REDIS_SENTINELS_LIST,
-            'sentinels_master': REDIS_SENTINELS_MASTER
-        }
-    }
-else:
-    CELERY_ONCE = {
-        'backend': 'celery_once.backends.Redis',
-        'settings': {
-            'url': CELERY_RESULT_BACKEND,
-        }
-    }
-CELERYBEAT_SCHEDULE = {
-    'healthcheck-every-minute': {
-        'task': 'core.common.tasks.beat_healthcheck',
-        'schedule': timedelta(seconds=60),
-    },
-    'first-of-every-month': {
-        'task': 'core.common.tasks.monthly_usage_report',
-        'schedule': crontab(1, 0, day_of_month='1'),
-    },
-    'vacuum-and-analyze-db': {
-        'task': 'core.common.tasks.vacuum_and_analyze_db',
-        'schedule': crontab(0, 1),  # Run at 1 am
-    },
+CELERY_BROKER_POOL_LIMIT = 100  # should be adjusted considering the number of threads
+CELERY_BROKER_CONNECTION_TIMEOUT = 5.0
+CELERY_BROKER_CONNECTION_RETRY = True
+CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
+CELERY_BROKER_CONNECTION_MAX_RETRIES = 10
+CELERY_BROKER_CHANNEL_ERROR_RETRY = True
+CELERY_BROKER_HEARTBEAT = None
 
+CELERY_TASK_PUBLISH_RETRY = True
+CELERY_TASK_PUBLISH_RETRY_POLICY = {
+    'retry_errors': None,
+} | RETRY_POLICY
+
+CELERY_ACCEPT_CONTENT = ['application/json']
+CELERY_ONCE = {
+        'backend': 'core.common.backends.QueueOnceRedisBackend',
+        'settings': {}
 }
 CELERYBEAT_HEALTHCHECK_KEY = 'celery_beat_healthcheck'
 ELASTICSEARCH_DSL_PARALLEL = True
