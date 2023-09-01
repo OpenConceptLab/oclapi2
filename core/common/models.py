@@ -815,34 +815,6 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
         return False
 
-    def migrate_to_new_export_path(self, move=False):  # needs to be deleted post migration to new export path  # pragma: no cover  # pylint: disable: line-too-long
-        from core.common.services import S3
-        for version in self.versions:
-            S3.rename(version.export_path, version.version_export_path, delete=move)
-
-    def version_export_path(self):
-        last_update = self.last_child_update.strftime('%Y-%m-%d_%H%M%S')
-        return self.get_version_export_path(suffix=f"{last_update}.zip")
-
-    def get_version_export_path(self, suffix='*'):
-        version = self.version
-        if not version.lower().startswith('v'):
-            version = f"v{version}"
-
-        owner = self.parent
-        owner_mnemonic = owner.mnemonic
-        owner_type = f'{owner.get_url_kwarg()}s'
-        path = f"{owner_type}/{owner_mnemonic}/{owner_mnemonic}_{self.mnemonic}_{version}"
-        expansion = get(self, 'expansion.mnemonic')
-        if expansion:
-            path = f"{path}_{expansion}"
-        path = f'{path}.'
-
-        if suffix:
-            path += suffix
-
-        return path
-
     @cached_property
     def version_export_path(self):
         last_update = self.last_child_update.strftime('%Y-%m-%d_%H%M%S')

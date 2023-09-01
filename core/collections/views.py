@@ -255,10 +255,6 @@ class CollectionRetrieveUpdateDestroyView(
                 if version.should_set_active_mappings:
                     version.update_mappings_count()
 
-        truthy = get_truthy_values()
-        if self.request.user.is_staff and self.request.query_params.get('migrate_export_path', False) in truthy:  # pragma: no cover  # pylint: disable: line-too-long
-            instance.migrate_to_new_export_path(move=self.request.query_params.get('move', False) in truthy)
-
         return instance
 
     def get_permissions(self):
