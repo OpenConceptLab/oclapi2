@@ -22,7 +22,7 @@ app.conf.CELERYBEAT_SCHEDULE = {
         'schedule': timedelta(seconds=60),
     },
     'first-of-every-month': {
-        'task': 'core.common.tasks.monthly_usage_report',
+        'task': 'core.common.tasks.resources_report',
         'schedule': crontab(1, 0, day_of_month='1'),
     },
     'vacuum-and-analyze-db': {

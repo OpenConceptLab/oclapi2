@@ -1035,7 +1035,7 @@ class TaskTest(OCLTestCase):
         import_run_mock.assert_called_once()
 
     @patch('core.common.tasks.EmailMessage')
-    def test_monthly_usage_report(self, email_message_mock):
+    def test_resources_report(self, email_message_mock):
         email_message_instance_mock = Mock(send=Mock(return_value=1))
         email_message_mock.return_value = email_message_instance_mock
         res = resources_report()
