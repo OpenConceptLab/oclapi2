@@ -14,7 +14,7 @@ python-dateutil==2.8.2
 requests==2.31.0
 factory_boy==3.3.0
 # Celery
-celery[redis]==5.3.1
+celery[redis]==5.3.4
 celery_once==3.0.1
 git+https://github.com/snyaggarwal/flower # use until https://github.com/mher/flower/issues/1231 issue is resolved
 redis==4.6.0
