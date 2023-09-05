@@ -8,7 +8,8 @@ from core.mappings.models import Mapping
 class MappingReport(AbstractReport):
     queryset = Mapping.objects.filter(id=F('versioned_object_id'))
     name = 'Mappings'
-    grouped_label = "New Mappings Grouped by Target Source"
+    limit = 20
+    grouped_label = f"Top {limit} New Mappings Grouped by Target Source"
     verbose = False
     grouped = True
     GROUPED_HEADERS = [
@@ -31,7 +32,7 @@ class MappingReport(AbstractReport):
         )
         count_queryset = queryset.annotate(  # count of mappings by target source
             count=Count('mappings_to__id')
-        ).order_by('-count')[:10].values_list('uri', 'count', 'id')
+        ).order_by('-count')[:self.limit].values_list('uri', 'count', 'id')
         result = []
         for result_set in count_queryset:
             source_id = result_set[2]

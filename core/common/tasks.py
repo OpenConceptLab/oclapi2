@@ -624,11 +624,13 @@ def beat_healthcheck():  # pragma: no cover
 
 
 @app.task(ignore_result=True)
-def resources_report():  # pragma: no cover
+def resources_report(start_date=None, end_date=None):  # pragma: no cover
     # runs on first of every month
     # reports usage of prev month
     now = timezone.now().replace(day=1)
-    report = ResourceUsageReport(start_date=now - relativedelta(months=1), end_date=now)
+    start_date = start_date or now - relativedelta(months=1)
+    end_date = end_date or now
+    report = ResourceUsageReport(start_date=start_date, end_date=end_date)
     buff, file_name = report.generate()
     date_range_label = get_date_range_label(report.start_date, report.end_date)
     env = settings.ENV.upper()
@@ -637,12 +639,7 @@ def resources_report():  # pragma: no cover
         body=f"Please find attached resources report of {env} for the period of {date_range_label}",
         to=[settings.REPORTS_EMAIL]
     )
-    val = buff.getvalue()
-
-    with open(file_name, 'wb') as file:
-        file.write(val)
-
-    mail.attach(file_name, val, 'text/csv')
+    mail.attach(file_name, buff.getvalue(), 'text/csv')
     return mail.send()
 
 

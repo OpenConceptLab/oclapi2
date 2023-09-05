@@ -1,3 +1,5 @@
+from dateutil.relativedelta import relativedelta
+from django.utils import timezone
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
 from pydash import compact
@@ -15,8 +17,27 @@ class ResourcesReportJobView(APIView):  # pragma: no cover
     permission_classes = (IsAdminUser, )
 
     @staticmethod
-    def post(_):
-        task = resources_report.delay()
+    @swagger_auto_schema(
+        operation_description='Mails CSV of OCL resources usage for given period of time',
+        operation_summary='Reports Resources Usage on the env for given period of time',
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            properties={
+                'start_date': openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description='YYYY-MM-DD (default: 1st of last month)',
+                    default=(timezone.now().replace(day=1) - relativedelta(months=1)).strftime('%Y-%m-%d')
+                ),
+                'end_date': openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description='YYYY-MM-DD (default: 1st of current month)',
+                    default=timezone.now().replace(day=1).strftime('%Y-%m-%d')
+                ),
+            }
+        )
+    )
+    def post(request):
+        task = resources_report.delay(request.data.get('start_date'), request.data.get('end_date'))
         return Response(
             {
                 'task': task.id,
