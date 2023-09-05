@@ -10,6 +10,8 @@ class CollectionReport(AbstractReport):
     verbose_fields = [
         'mnemonic',
         'name',
+        'collection_type',
+        'public_access',
         'created_by.username',
         'created_at',
         'parent_resource_type',
@@ -20,6 +22,8 @@ class CollectionReport(AbstractReport):
     VERBOSE_HEADERS = [
         "ID",
         "Name",
+        "Collection Type",
+        "Public Access",
         "Created By",
         "Created At",
         "Owner Type",
@@ -32,26 +36,20 @@ class CollectionReport(AbstractReport):
 class CollectionVersionReport(AbstractReport):
     queryset = Collection.objects.exclude(version=HEAD)
     name = 'Collection Versions'
-    select_related = ['created_by', 'organization', 'user']
+    select_related = ['created_by']
     verbose_fields = [
         'version',
-        'mnemonic',
-        'name',
+        'versioned_object_url',
         'created_by.username',
         'created_at',
-        'parent_resource_type',
-        'parent_resource',
-        'custom_validation_schema'
+        'released'
     ]
     VERBOSE_HEADERS = [
         "Version",
-        "ID",
-        "Name",
+        "Collection URL",
         "Created By",
         "Created At",
-        "Owner Type",
-        "Owner",
-        "Validation Schema"
+        "Released"
     ]
 
 
@@ -67,7 +65,13 @@ class ReferenceReport(AbstractReport):
     grouped_label = "New References"
     verbose = False
     grouped = True
-    GROUPED_HEADERS = ["Resource Type", "Static", "Dynamic", "Total"]
+    GROUPED_HEADERS = [
+        "Resource Type",
+        "Static during Period",
+        "Dynamic during Period",
+        "Subtotal during Period",
+        "Total as of Report Date"
+    ]
 
     @property
     def grouped_queryset(self):
@@ -80,18 +84,23 @@ class ReferenceReport(AbstractReport):
         static_criteria = CollectionReference.get_static_references_criteria()
         total_static_concepts = concepts_queryset.filter(static_criteria).count()
         total_static_mappings = mappings_queryset.filter(static_criteria).count()
+        overall_report = self.get_overall_report_instance()
+        overall_concepts = overall_report.queryset.filter(reference_type='concepts')
+        overall_mappings = overall_report.queryset.filter(reference_type='mappings')
         return [
             [
                 'Concepts',
                 total_static_concepts,
                 total_concepts - total_static_concepts,
-                total_concepts
+                total_concepts,
+                overall_concepts.count()
             ],
             [
                 'Mappings',
                 total_static_mappings,
                 total_mappings - total_static_mappings,
-                total_mappings
+                total_mappings,
+                overall_mappings.count()
             ]
         ]
 

@@ -10,6 +10,8 @@ class SourceReport(AbstractReport):
     verbose_fields = [
         'mnemonic',
         'name',
+        "source_type",
+        "public_access",
         'created_by.username',
         'created_at',
         'parent_resource_type',
@@ -20,6 +22,8 @@ class SourceReport(AbstractReport):
     VERBOSE_HEADERS = [
         "ID",
         "Name",
+        "Source Type",
+        "Public Access",
         "Created By",
         "Created At",
         "Owner Type",
@@ -32,24 +36,18 @@ class SourceReport(AbstractReport):
 class SourceVersionReport(AbstractReport):
     queryset = Source.objects.exclude(version=HEAD)
     name = 'Source Versions'
-    select_related = ['created_by', 'organization', 'user']
+    select_related = ['created_by']
     verbose_fields = [
         'version',
-        'mnemonic',
-        'name',
+        'versioned_object_url',
         'created_by.username',
         'created_at',
-        'parent_resource_type',
-        'parent_resource',
-        'custom_validation_schema'
+        'released'
     ]
     VERBOSE_HEADERS = [
         "Version",
-        "ID",
-        "Name",
+        "Source URL",
         "Created By",
         "Created At",
-        "Owner Type",
-        "Owner",
-        "Validation Schema"
+        "Released"
     ]

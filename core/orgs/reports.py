@@ -6,5 +6,5 @@ class OrganizationReport(AbstractReport):
     queryset = Organization.objects.filter()
     name = 'Organizations'
     select_related = ['created_by']
-    verbose_fields = ['mnemonic', 'name', 'created_by.username', 'created_at']
-    VERBOSE_HEADERS = ["ID", "Name", "Created By", "Created At"]
+    verbose_fields = ['mnemonic', 'name', 'public_access', 'company', 'location', 'created_by.username', 'created_at']
+    VERBOSE_HEADERS = ["ID", "Name", 'Public Access', 'Company', 'Location', "Created By", "Created At"]

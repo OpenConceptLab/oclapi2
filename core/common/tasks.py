@@ -637,7 +637,12 @@ def resources_report():  # pragma: no cover
         body=f"Please find attached resources report of {env} for the period of {date_range_label}",
         to=[settings.REPORTS_EMAIL]
     )
-    mail.attach(file_name, buff.getvalue(), 'text/csv')
+    val = buff.getvalue()
+
+    with open(file_name, 'wb') as file:
+        file.write(val)
+
+    mail.attach(file_name, val, 'text/csv')
     return mail.send()
 
 

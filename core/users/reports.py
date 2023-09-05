@@ -7,8 +7,8 @@ from core.users.models import UserProfile
 class UserReport(AbstractReport):
     queryset = UserProfile.objects.filter()
     name = 'Users'
-    verbose_fields = ['username', 'email', 'name', 'date_joined', 'status']
-    VERBOSE_HEADERS = ["Username", "Email", "Name", "Joined At", "Status"]
+    verbose_fields = ['username', 'email', 'name', 'company', 'location', 'date_joined', 'status']
+    VERBOSE_HEADERS = ["Username", "Email", "Name", "Company", "Location", "Joined At", "Status"]
 
     @classmethod
     def get_authoring_report(cls, usernames):

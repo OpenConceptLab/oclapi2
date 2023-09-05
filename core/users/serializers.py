@@ -88,8 +88,11 @@ class UserCreateSerializer(serializers.ModelSerializer):
             return user
 
         user = UserProfile(
-            username=username, email=validated_data.get('email'), company=validated_data.get('company', None),
-            location=validated_data.get('location', None), extras=validated_data.get('extras', None),
+            username=username,
+            email=validated_data.get('email'),
+            company=validated_data.get('company', None),
+            location=validated_data.get('location', None),
+            extras=validated_data.get('extras', None),
             preferred_locale=validated_data.get('preferred_locale', None),
             first_name=validated_data.get('name', None) or validated_data.get('first_name'),
             last_name=validated_data.get('last_name', '')

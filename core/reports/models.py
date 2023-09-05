@@ -70,7 +70,7 @@ class AbstractReport:
     def label(self):
         date_range = self.date_range
         report_name = self.name
-        return f"New {report_name}: {date_range}" if date_range else f"New {report_name} - All Time"
+        return f"New {report_name} during Period: {date_range}" if date_range else f"New {report_name} - All Time"
 
     @staticmethod
     def to_value(value):
@@ -81,8 +81,11 @@ class AbstractReport:
     def to_csv_row(self, resource):
         return [self.to_value(get(resource, field)) for field in self.verbose_fields]
 
-    def to_stat_csv_row(self):
-        return [self.name, *[get(self, field) for field in self.stat_fields]]
+    def to_stat_csv_row(self, include_name=True):
+        stats = [get(self, field) for field in self.stat_fields]
+        if include_name:
+            return [self.name, *stats]
+        return stats
 
 
 class ResourceUsageReport:
@@ -144,20 +147,32 @@ class ResourceUsageReport:
         self.build()
         buff = io.StringIO()
         writer = csv.writer(buff, dialect='excel', delimiter=',')
-        max_columns = 8
-        blank_row = ["", "", "", "", "", "", "", ""]
+        max_columns = 10
+        blank_row = ["" for _ in range(max_columns)]
 
         def to_row(values):
             return [*values, *blank_row[:max_columns - len(values)]]
 
         date_range_label = get_date_range_label(self.start_date, self.end_date)
-        writer.writerow(
-            to_row([f"Resources Created: {date_range_label}"]))
-        stat_headers = self.organization.STAT_HEADERS
-        writer.writerow(to_row(stat_headers))
+        writer.writerow(to_row(["OCL Usage Report"]))
+        writer.writerow(to_row(["Environment", settings.ENV.lower()]))
+        writer.writerow(to_row(["Reporting Period", date_range_label]))
+        writer.writerow(blank_row)
+        writer.writerow(blank_row)
+        writer.writerow(to_row(['Summary by Resource Type']))
+        writer.writerow(to_row([
+            'Resource',
+            'Active during Period',
+            'Retired during Period',
+            'Subtotal during Period',
+            "Active as of Report Date",
+            "Retired as of Report Date",
+            "Total as of Report Date"
+        ]))
         resources = self.resources
         for resource in resources:
-            writer.writerow(to_row(resource.to_stat_csv_row()))
+            writer.writerow(
+                to_row([*resource.to_stat_csv_row(), *resource.get_overall_report_instance().to_stat_csv_row(False)]))
 
         writer.writerow(blank_row)
 
@@ -182,11 +197,6 @@ class ResourceUsageReport:
                     writer.writerow(to_row(resource.to_grouped_stat_csv_row(obj)))
 
                 writer.writerow(blank_row)
-
-        writer.writerow(to_row(["Overall Resources"]))
-        writer.writerow(to_row(stat_headers))
-        for resource in resources:
-            writer.writerow(to_row(resource.get_overall_report_instance().to_stat_csv_row()))
 
         buff2 = io.BytesIO(buff.getvalue().encode())
         now = timezone.now().strftime("%Y-%m-%d-%H-%M")
