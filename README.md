@@ -74,9 +74,9 @@ Run api with:
 
 In order to import FHIR resources run:
 
-`docker-compose run --no-deps --rm -v $(pwd)/../oclfhir-tests/definitions.json:/fhir api python tools/fhir_import.py -d /fhir -p http://api:8000/orgs/test -t 891b4b17feab99f3ff7e5b5d04ccc5da7aa96da6 -r CodeSystem`
+`docker-compose run --no-deps --rm -v $(pwd)/../oclfhir-tests/definitions.json:/fhir api python tools/fhir_import.py -s /fhir -t http://api:8000/orgs/test -s 891b4b17feab99f3ff7e5b5d04ccc5da7aa96da6 -c http://api:8000/orgs/test -r CodeSystem`
 
-Please note that the 'test' org must exist. For help run:
+For help run:
 
 `docker-compose run --no-deps --rm api python tools/fhir_import.py -h`
 
