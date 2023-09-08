@@ -28,3 +28,10 @@ def translate_fhir_query(fhir_query_fields, query_params, queryset):
             kwargs = {query_field: query_value}
             queryset = queryset.filter(**kwargs)
     return queryset
+
+def delete_empty_fields(obj):
+    for field in list(obj.keys()):
+        if obj[field] is None or obj[field] == {} or obj[field] == []:
+            del obj[field]
+        elif isinstance(obj[field], dict):
+            delete_empty_fields(obj[field])

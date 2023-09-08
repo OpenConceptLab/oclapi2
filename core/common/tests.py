@@ -18,7 +18,7 @@ from mock.mock import call
 from moto import mock_s3
 from requests.auth import HTTPBasicAuth
 from rest_framework.exceptions import ValidationError
-from rest_framework.test import APITestCase
+from rest_framework.test import APITestCase, APITransactionTestCase
 
 from core.collections.models import CollectionReference
 from core.common.constants import HEAD
@@ -205,6 +205,14 @@ class BaseTestCase(SetupTestEnvironment):
             names=[ConceptNameFactory.build(name="English")]
         )
 
+class OCLAPITransactionTestCase(APITransactionTestCase, BaseTestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        call_command("loaddata", "core/fixtures/base_entities.yaml")
+        call_command("loaddata", "core/fixtures/toggles.json")
+        org = Organization.objects.get(id=1)
+        org.members.add(1)
 
 class OCLAPITestCase(APITestCase, BaseTestCase):
     @classmethod

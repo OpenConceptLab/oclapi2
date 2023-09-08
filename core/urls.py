@@ -91,3 +91,6 @@ urlpatterns = [
     path('manage/bulkimport/', BulkImportView.as_view(), name='bulk_import_urls'),
     path('toggles/', include('core.toggles.urls'), name='toggles'),
 ]
+
+handler500 = 'rest_framework.exceptions.server_error'
+handler400 = 'rest_framework.exceptions.bad_request'

@@ -1,14 +1,15 @@
 import logging
 
 from rest_framework import serializers
-from rest_framework.fields import CharField, DateField, SerializerMethodField, ChoiceField, DateTimeField, JSONField, \
+from rest_framework.fields import CharField, DateField, SerializerMethodField, ChoiceField, DateTimeField, \
     BooleanField, ListField, URLField
 
-from core.code_systems.serializers import CodeSystemConceptSerializer
+from core.code_systems.serializers import CodeSystemConceptSerializer, TextField
 from core.collections.models import Collection, Expansion
 from core.collections.parsers import CollectionReferenceParser
 from core.collections.serializers import CollectionCreateOrUpdateSerializer
 from core.common.constants import HEAD
+from core.common.fhir_helpers import delete_empty_fields
 from core.common.serializers import StatusField, IdentifierSerializer, ReadSerializerMixin
 from core.orgs.models import Organization
 from core.parameters.serializers import ParametersSerializer
@@ -155,7 +156,7 @@ class ValueSetDetailSerializer(serializers.ModelSerializer):
     identifier = IdentifierSerializer(many=True, required=False)
     date = DateTimeField(source='revision_date', required=False)
     compose = ComposeValueSetField(source='*', required=False)
-    text = JSONField(required=False)
+    text = TextField(required=False)
 
     class Meta:
         model = Collection
@@ -189,7 +190,8 @@ class ValueSetDetailSerializer(serializers.ModelSerializer):
         collection.id = None  # pylint: disable=invalid-name
         collection.version = collection_version
         collection.expansion_uri = None
-        errors = Collection.persist_new_version(collection, user)
+        # Persist synchronously in order to return complete results in the reponse
+        errors = Collection.persist_new_version(collection, user, sync=True)
         self._errors.update(errors)
 
         return collection
@@ -238,7 +240,8 @@ class ValueSetDetailSerializer(serializers.ModelSerializer):
         collection.released = collection_released
         collection.id = None
         collection.expansion_uri = None
-        errors = Collection.persist_new_version(collection, user)
+        # Persist synchronously in order to include complete results in the response
+        errors = Collection.persist_new_version(collection, user, sync=True)
         self._errors.update(errors)
 
         return collection
@@ -246,6 +249,7 @@ class ValueSetDetailSerializer(serializers.ModelSerializer):
     def to_representation(self, instance):
         try:
             rep = super().to_representation(instance)
+            delete_empty_fields(rep)
             IdentifierSerializer.include_ocl_identifier(instance.uri, RESOURCE_TYPE, rep)
         except (Exception, ):
             msg = f'Failed to represent "{instance.uri}" as {RESOURCE_TYPE}'

@@ -34,7 +34,7 @@ API_INTERNAL_BASE_URL = os.environ.get('API_INTERNAL_BASE_URL', 'http://api:8000
 SECRET_KEY = '=q1%fd62$x!35xzzlc3lix3g!s&!2%-1d@5a=rm!n4lu74&6)p'
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.environ.get('DEBUG') == 'TRUE'
+DEBUG = False #os.environ.get('DEBUG') == 'TRUE'
 
 ALLOWED_HOSTS = ['*']
 

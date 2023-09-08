@@ -36,3 +36,4 @@ django-dirtyfields==1.9.2
 jsonpath-ng==1.5.3
 mozilla-django-oidc==3.0.0
 django-celery-beat==2.5.0
+jsondiff==2.0.0

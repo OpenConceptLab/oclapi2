@@ -1,13 +1,15 @@
+import ast
 import logging
 from collections import OrderedDict
 
 from rest_framework import serializers
 from rest_framework.fields import CharField, BooleanField, IntegerField, SerializerMethodField, ChoiceField, \
-    DateTimeField, JSONField
+    DateTimeField
 
 from core import settings
 from core.code_systems.constants import RESOURCE_TYPE
 from core.common.constants import HEAD
+from core.common.fhir_helpers import delete_empty_fields
 from core.common.serializers import ReadSerializerMixin, StatusField, IdentifierSerializer
 from core.concepts.models import Concept, ConceptName
 from core.concepts.serializers import ConceptDetailSerializer
@@ -128,7 +130,8 @@ class CodeSystemConceptSerializer(ReadSerializerMixin, serializers.Serializer):
                 break
 
         if not found:
-            ret['names'].append({'name': data['display'], 'locale': settings.DEFAULT_LOCALE, 'locale_preferred': True})
+            ret['names'].append({'name': data.get('display', data.get('code', None)), 'locale': settings.DEFAULT_LOCALE,
+                                 'locale_preferred': True})
 
         return ret
 
@@ -155,6 +158,17 @@ class CodeSystemConceptField(serializers.Field):
             limit = 1000
         return CodeSystemConceptSerializer(value.concepts.order_by('id')[:limit], many=True).data
 
+class TextField(ReadSerializerMixin, serializers.Serializer):
+    status = ChoiceField(choices=['generated', 'extensions', 'additional', 'empty'], required=True)
+    div = CharField(required=True)
+
+    def to_internal_value(self, data):
+        validated_data = super().to_internal_value(data)
+        return dict(validated_data)
+
+    def to_representation(self, instance):
+        obj = ast.literal_eval(instance)
+        return super().to_representation(obj)
 
 class CodeSystemDetailSerializer(serializers.ModelSerializer):
     resourceType = SerializerMethodField(method_name='get_resource_type')
@@ -179,7 +193,7 @@ class CodeSystemDetailSerializer(serializers.ModelSerializer):
     collectionReference = CharField(source='collection_reference', required=False)
     hierarchyMeaning = CharField(source='hierarchy_meaning', required=False)
     revisionDate = DateTimeField(source='revision_date', required=False)
-    text = JSONField(required=False)
+    text = TextField(required=False)
 
     class Meta:
         model = Source
@@ -233,6 +247,7 @@ class CodeSystemDetailSerializer(serializers.ModelSerializer):
     def to_representation(self, instance):
         try:
             rep = super().to_representation(instance)
+            delete_empty_fields(rep)
             IdentifierSerializer.include_ocl_identifier(instance.uri, RESOURCE_TYPE, rep)
         except (Exception, ):
             msg = f'Failed to represent "{instance.uri}" as {RESOURCE_TYPE}'
@@ -278,9 +293,9 @@ class CodeSystemDetailSerializer(serializers.ModelSerializer):
         source.version = '0.1' if version == HEAD else version
 
         source.id = None  # pylint: disable=invalid-name
-        errors = Source.persist_new_version(source, user)
+        # Make it synchronous for now so that the list of concepts is included in the response
+        errors = Source.persist_new_version(source, user, sync=True)
         self._errors.update(errors)
-
         return source
 
     def update(self, instance, validated_data):
@@ -323,7 +338,7 @@ class CodeSystemDetailSerializer(serializers.ModelSerializer):
         source.version = source_version
         source.released = source_released
         source.id = None
-        errors = Source.persist_new_version(source, user)
+        # Make it synchronous for now so that the list of concepts is included in the response
+        errors = Source.persist_new_version(source, user, sync=True)
         self._errors.update(errors)
-
         return source
