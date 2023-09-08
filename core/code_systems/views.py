@@ -49,25 +49,25 @@ class CodeSystemListView(SourceListView):
 
 
 class CodeSystemLookupNotFoundError(ValidationError):
-    def __init__(self):
-        super().__init__(detail=
-            {
+    def __init__(self, code: str = None):
+        message = f"Code '{code}' not found" if code else "Code not found"
+        super().__init__(
+            detail={
                 "resourceType": "OperationOutcome",
                 "id": "exception",
                 "text": {
                     "status": "additional",
-                    "div": "<div xmlns=\"http://www.w3.org/1999/xhtml\">Code not found</div>"
+                    "div": f'<div xmlns="http://www.w3.org/1999/xhtml">{message}</div>',
                 },
                 "issue": [
                     {
                         "severity": "error",
                         "code": "not-found",
-                        "details": {
-                            "text": "Code not found"
-                        }
+                        "details": {"text": message},
                     }
-                ]
-            })
+                ],
+            }
+        )
 
 
 class CodeSystemListLookupView(ConceptRetrieveUpdateDestroyView):
@@ -94,6 +94,8 @@ class CodeSystemListLookupView(ConceptRetrieveUpdateDestroyView):
 
                 if source:
                     queryset = queryset.filter(sources=source.first(), mnemonic=code)
+                    if not queryset.exists():
+                        raise CodeSystemLookupNotFoundError(code)
                     return queryset
 
         raise CodeSystemLookupNotFoundError()
