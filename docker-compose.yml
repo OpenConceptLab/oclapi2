@@ -33,6 +33,8 @@ services:
       - REDIS_PORT=${REDIS_PORT-6379}
       - DB_HOST=${DB_HOST-db}
       - DB_PORT=${DB_PORT-5432}
+      - DB_DATABASE=${DB_DATABASE-postgres}
+      - DB_USER=${DB_USER-postgres}
       - DB_PASSWORD=${DB_PASSWORD-Postgres123}
       - ES_HOSTS=${ES_HOSTS-es:9200}
       - ES_SCHEME=${ES_SCHEME-http}
