@@ -1195,7 +1195,7 @@ class SourceSummaryViewTest(OCLAPITestCase):
         self.assertEqual(response.data['active_concepts'], 2)
         self.assertEqual(response.data['active_mappings'], 1)
 
-    def test_get_200_verbose(self):
+    def test_get_200_verbose(self):  # pylint: disable=too-many-statements
         self.source.active_concepts = 2
         self.source.active_mappings = 1
         self.source.save()
