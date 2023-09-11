@@ -27,7 +27,7 @@ from .constants import (
     ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT, SUPER_ADMIN_USER_ID,
     HEAD, PERSIST_NEW_ERROR_MESSAGE, SOURCE_PARENT_CANNOT_BE_NONE, PARENT_RESOURCE_CANNOT_BE_NONE,
     CREATOR_CANNOT_BE_NONE, CANNOT_DELETE_ONLY_VERSION, OPENMRS_VALIDATION_SCHEMA, VALIDATION_SCHEMAS,
-    DEFAULT_VALIDATION_SCHEMA, ES_REQUEST_TIMEOUT)
+    DEFAULT_VALIDATION_SCHEMA, ES_REQUEST_TIMEOUT, UPDATED_BY_USERNAME_PARAM)
 from .exceptions import Http400
 from .fields import URIField
 from .tasks import handle_save, handle_m2m_changed, seed_children_to_new_version, update_validation_schema, \
@@ -450,6 +450,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         version = params.get('version', None)
         is_latest = params.get('is_latest', None) in TRUTHY
         updated_since = parse_updated_since_param(params)
+        updated_by = params.get(UPDATED_BY_USERNAME_PARAM, None)
 
         queryset = cls.objects.filter(is_active=True)
         if username:
@@ -462,6 +463,8 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
             queryset = queryset.filter(is_latest_version=True)
         if updated_since:
             queryset = queryset.filter(updated_at__gte=updated_since)
+        if updated_by:
+            queryset = queryset.filter(updated_by__username=updated_by)
 
         return queryset
 
@@ -936,7 +939,8 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
             'concept_class': self._to_clean_facets(facets.conceptClass or []),
             'datatype': self._to_clean_facets(facets.datatype or []),
             'locale': self._to_clean_facets(facets.locale or []),
-            'name_type': self._to_clean_facets(facets.nameTypes or [])
+            'name_type': self._to_clean_facets(facets.nameTypes or []),
+            'contributors': self._to_clean_facets(facets.updatedBy or [])
         }
 
     @property
@@ -946,7 +950,8 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         return {
             'active': self.active_mappings,
             'retired': self.retired_mappings_count,
-            'map_type': self._to_clean_facets(facets.mapType or [])
+            'map_type': self._to_clean_facets(facets.mapType or []),
+            'contributors': self._to_clean_facets(facets.updatedBy or [])
         }
 
     @property

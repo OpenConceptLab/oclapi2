@@ -15,6 +15,7 @@ class UserProfileDocument(Document):
 
     last_update = fields.DateField(attr='updated_at')
     date_joined = fields.DateField(attr='created_at')
+    updated_by = fields.KeywordField(attr='updated_by.username')
     username = fields.TextField(attr='username')
     _username = fields.KeywordField(attr='username', normalizer='lowercase')
     location = fields.KeywordField(attr='location', normalizer='lowercase')

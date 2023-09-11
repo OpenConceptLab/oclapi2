@@ -264,6 +264,14 @@ class AbstractSourceSummaryVerboseSerializer(ModelSerializer):
             'id', 'uuid', 'concepts', 'mappings', 'versions', 'default_locale', 'supported_locales'
         )
 
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        user = self.context['request'].user
+        if not get(user, 'is_authenticated'):
+            data['concepts'].pop('contributors', None)
+            data['mappings'].pop('contributors', None)
+        return data
+
 
 class AbstractSourceSummaryFieldDistributionSerializer(ModelSerializer):
     uuid = CharField(source='id')

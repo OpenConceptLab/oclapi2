@@ -695,7 +695,8 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
             sorted(['uuid', 'id', 'external_id', 'concept_class', 'datatype', 'url', 'retired', 'source',
                     'owner', 'owner_type', 'owner_url', 'display_name', 'display_locale', 'version', 'update_comment',
                     'locale', 'version_created_by', 'version_created_on', 'is_latest_version',
-                    'versions_url', 'version_url', 'type', 'versioned_object_id'])
+                    'versions_url', 'version_url', 'type', 'versioned_object_id',
+                    'version_updated_on', 'version_updated_by'])
         )
 
         response = self.client.get(

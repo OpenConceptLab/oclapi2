@@ -107,6 +107,8 @@ class MappingListSerializer(AbstractMappingSerializer):
     to_concept_code = EncodedDecodedCharField(required=False)
     from_concept_code = EncodedDecodedCharField(required=False)
     sort_weight = FloatField(required=False, allow_null=True)
+    version_updated_on = DateTimeField(source='updated_at', read_only=True)
+    version_updated_by = DateTimeField(source='updated_by.username', read_only=True)
 
     class Meta:
         model = Mapping
@@ -119,7 +121,8 @@ class MappingListSerializer(AbstractMappingSerializer):
             'url', 'version', 'id', 'versioned_object_id', 'versioned_object_url',
             'is_latest_version', 'update_comment', 'version_url', 'uuid', 'version_created_on',
             'from_source_version', 'to_source_version', 'from_concept_name_resolved',
-            'to_concept_name_resolved', 'type', 'sort_weight'
+            'to_concept_name_resolved', 'type', 'sort_weight',
+            'version_updated_on', 'version_updated_by'
         )
 
 

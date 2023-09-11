@@ -16,6 +16,7 @@ class SourceDocument(Document):
 
     locale = fields.ListField(fields.KeywordField())
     last_update = fields.DateField(attr='updated_at')
+    updated_by = fields.KeywordField(attr='updated_by.username')
     owner = fields.KeywordField(attr='parent_resource', normalizer='lowercase')
     owner_type = fields.KeywordField(attr='parent_resource_type')
     public_can_view = fields.TextField(attr='public_can_view')

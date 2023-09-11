@@ -9,9 +9,9 @@ class MappingFacetedSearch(CustomESFacetedSearch):
     index = 'mappings'
     doc_types = [Mapping]
     fields = [
-        'map_type', 'retired', 'source', 'owner', 'owner_type', 'is_latest_version', 'is_active',
+        'map_type', 'retired', 'source', 'owner', 'owner_type', 'is_latest_version',
         'from_concept_owner', 'to_concept_owner', 'from_concept_owner_type', 'to_concept_owner_type',
-        'from_concept_source', 'to_concept_source', 'collection', 'extras'
+        'from_concept_source', 'to_concept_source', 'collection', 'extras', 'updated_by'
     ]
 
     facets = {
@@ -27,7 +27,7 @@ class MappingFacetedSearch(CustomESFacetedSearch):
         'collection': TermsFacet(field='collection', size=FACET_SIZE),
         'owner': TermsFacet(field='owner', size=FACET_SIZE),
         'ownerType': TermsFacet(field='owner_type'),
-        'is_active': TermsFacet(field='is_active'),
+        'updatedBy': TermsFacet(field='updated_by', size=FACET_SIZE),
         'is_latest_version': TermsFacet(field='is_latest_version'),
         'collection_owner_url': TermsFacet(field='collection_owner_url', size=FACET_SIZE),
         'expansion': TermsFacet(field='expansion', size=FACET_SIZE),

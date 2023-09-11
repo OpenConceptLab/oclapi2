@@ -15,8 +15,8 @@ from rest_framework.mixins import ListModelMixin, CreateModelMixin
 from rest_framework.response import Response
 
 from core.common.constants import HEAD, ACCESS_TYPE_NONE, INCLUDE_FACETS, \
-    LIST_DEFAULT_LIMIT, HTTP_COMPRESS_HEADER, CSV_DEFAULT_LIMIT, FACETS_ONLY, INCLUDE_RETIRED_PARAM,\
-    SEARCH_STATS_ONLY, INCLUDE_SEARCH_STATS
+    LIST_DEFAULT_LIMIT, HTTP_COMPRESS_HEADER, CSV_DEFAULT_LIMIT, FACETS_ONLY, INCLUDE_RETIRED_PARAM, \
+    SEARCH_STATS_ONLY, INCLUDE_SEARCH_STATS, UPDATED_BY_USERNAME_PARAM
 from core.common.permissions import HasPrivateAccess, HasOwnership, CanViewConceptDictionary, \
     CanViewConceptDictionaryVersion
 from .checksums import ChecksumModel
@@ -491,12 +491,15 @@ class SourceChildMixin(ChecksumModel):
         is_latest = params.get('is_latest', None) in TRUTHY
         include_retired = params.get(INCLUDE_RETIRED_PARAM, None) in TRUTHY
         updated_since = parse_updated_since_param(params)
+        updated_by = params.get(UPDATED_BY_USERNAME_PARAM, None)
         if is_latest:
             queryset = queryset.filter(is_latest_version=True)
         if not include_retired and not params.get('concept', None) and not params.get('mapping', None):
             queryset = queryset.filter(retired=False)
         if updated_since:
             queryset = queryset.filter(updated_at__gte=updated_since)
+        if updated_by:
+            queryset = queryset.filter(updated_by__username=updated_by)
 
         return queryset
 

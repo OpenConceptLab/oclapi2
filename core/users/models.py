@@ -43,6 +43,7 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
         'name': {'sortable': False, 'filterable': True, 'exact': True},
         '_name': {'sortable': True, 'filterable': False, 'exact': False},
         'date_joined': {'sortable': True, 'default': 'asc', 'filterable': False},
+        'updated_by': {'sortable': False, 'filterable': False, 'facet': True},
         'company': {'sortable': True, 'filterable': True, 'exact': True},
         'location': {'sortable': True, 'filterable': True, 'exact': True},
         'is_superuser': {'sortable': False, 'filterable': True, 'exact': False, 'facet': True},

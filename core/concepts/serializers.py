@@ -260,6 +260,8 @@ class ConceptListSerializer(ConceptAbstractSerializer):
     url = CharField(required=False, source='versioned_object_url')
     version_created_on = DateTimeField(source='created_at', read_only=True)
     version_created_by = DateTimeField(source='created_by.username', read_only=True)
+    version_updated_on = DateTimeField(source='updated_at', read_only=True)
+    version_updated_by = DateTimeField(source='updated_by.username', read_only=True)
 
     class Meta:
         model = Concept
@@ -267,7 +269,7 @@ class ConceptListSerializer(ConceptAbstractSerializer):
             'uuid', 'id', 'external_id', 'concept_class', 'datatype', 'url', 'retired', 'source',
             'owner', 'owner_type', 'owner_url', 'display_name', 'display_locale', 'version', 'update_comment',
             'locale', 'version_created_by', 'version_created_on', 'mappings', 'is_latest_version', 'versions_url',
-            'version_url', 'extras', 'type', 'versioned_object_id'
+            'version_url', 'extras', 'type', 'versioned_object_id', 'version_updated_on', 'version_updated_by'
         )
 
 
@@ -457,6 +459,8 @@ class ConceptVersionExportSerializer(ModelSerializer):
     updated_on = DateTimeField(source='updated_at', read_only=True)
     version_created_on = DateTimeField(source='created_at')
     version_created_by = CharField(source='created_by')
+    version_updated_on = DateTimeField(source='updated_at')
+    version_updated_by = CharField(source='updated_by')
     locale = CharField(source='iso_639_1_locale')
     url = CharField(source='versioned_object_url', read_only=True)
     previous_version_url = CharField(source='prev_version_uri', read_only=True)
@@ -471,7 +475,7 @@ class ConceptVersionExportSerializer(ModelSerializer):
             'names', 'descriptions', 'extras', 'retired', 'source', 'source_url', 'owner', 'owner_name', 'owner_url',
             'version', 'created_on', 'updated_on', 'version_created_on', 'version_created_by', 'update_comment',
             'is_latest_version', 'locale', 'url', 'owner_type', 'version_url', 'previous_version_url',
-            'parent_concept_urls', 'child_concept_urls',
+            'parent_concept_urls', 'child_concept_urls', 'version_updated_on', 'version_updated_by'
         )
 
 
@@ -488,6 +492,8 @@ class ConceptVersionDetailSerializer(ModelSerializer):
     updated_on = DateTimeField(source='updated_at', read_only=True)
     version_created_on = DateTimeField(source='created_at')
     version_created_by = CharField(source='created_by')
+    version_updated_on = DateTimeField(source='updated_at')
+    version_updated_by = CharField(source='updated_by')
     locale = CharField(source='iso_639_1_locale')
     mappings = SerializerMethodField()
     url = CharField(source='versioned_object_url', read_only=True)
@@ -542,7 +548,8 @@ class ConceptVersionDetailSerializer(ModelSerializer):
             'version', 'created_on', 'updated_on', 'version_created_on', 'version_created_by', 'update_comment',
             'is_latest_version', 'locale', 'url', 'owner_type', 'version_url', 'mappings', 'previous_version_url',
             'parent_concepts', 'child_concepts', 'parent_concept_urls', 'child_concept_urls',
-            'source_versions', 'collection_versions', 'versioned_object_id', 'references', 'checksums'
+            'source_versions', 'collection_versions', 'versioned_object_id', 'references', 'checksums',
+            'version_updated_on', 'version_updated_by'
         )
 
     @staticmethod

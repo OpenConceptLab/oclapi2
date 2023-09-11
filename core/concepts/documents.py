@@ -17,6 +17,7 @@ class ConceptDocument(Document):
     name = fields.TextField()
     _name = fields.KeywordField(attr='display_name', normalizer='lowercase')
     last_update = fields.DateField(attr='updated_at')
+    updated_by = fields.KeywordField(attr='updated_by.username')
     locale = fields.ListField(fields.KeywordField())
     synonyms = fields.ListField(fields.TextField())
     source = fields.KeywordField(attr='parent_resource', normalizer="lowercase")

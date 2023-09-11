@@ -19,7 +19,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from core.common.constants import NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY, LAST_LOGIN_SINCE_PARAM, \
-    LAST_LOGIN_BEFORE_PARAM, DATE_JOINED_SINCE_PARAM, DATE_JOINED_BEFORE_PARAM
+    LAST_LOGIN_BEFORE_PARAM, DATE_JOINED_SINCE_PARAM, DATE_JOINED_BEFORE_PARAM, UPDATED_BY_USERNAME_PARAM
 from core.common.exceptions import Http400
 from core.common.mixins import ListWithHeadersMixin
 from core.common.swagger_parameters import last_login_before_param, last_login_since_param, updated_since_param, \
@@ -177,12 +177,15 @@ class UserBaseView(BaseAPIView):
 
     def get_queryset(self):
         updated_since = parse_updated_since_param(self.request.query_params)
+        updated_by = self.request.query_params.get(UPDATED_BY_USERNAME_PARAM, None)
         last_login_since = self.request.query_params.get(LAST_LOGIN_SINCE_PARAM, None)
         last_login_before = self.request.query_params.get(LAST_LOGIN_BEFORE_PARAM, None)
         date_joined_since = self.request.query_params.get(DATE_JOINED_SINCE_PARAM, None)
         date_joined_before = self.request.query_params.get(DATE_JOINED_BEFORE_PARAM, None)
         if updated_since:
             self.queryset = self.queryset.filter(updated_at__gte=updated_since)
+        if updated_by:
+            self.queryset = self.queryset.filter(updated_by__username=updated_by)
         if last_login_since:
             self.queryset = self.queryset.filter(last_login__gte=from_string_to_date(last_login_since))
         if last_login_before:

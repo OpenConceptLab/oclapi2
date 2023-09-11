@@ -10,7 +10,7 @@ from rest_framework.views import APIView
 
 from core.client_configs.views import ResourceClientConfigsView
 from core.collections.views import CollectionListView
-from core.common.constants import NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY, HEAD
+from core.common.constants import NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY, HEAD, UPDATED_BY_USERNAME_PARAM
 from core.common.mixins import ListWithHeadersMixin
 from core.common.permissions import HasPrivateAccess, CanViewConceptDictionary
 from core.common.swagger_parameters import org_no_members_param
@@ -57,8 +57,11 @@ class OrganizationListView(BaseAPIView,
             self.queryset = Organization.get_by_username(self.request.user.username) | Organization.get_public()
 
         updated_since = parse_updated_since_param(self.request.query_params)
+        updated_by = self.request.query_params.get(UPDATED_BY_USERNAME_PARAM, None)
         if updated_since:
             self.queryset = self.queryset.filter(updated_at__gte=updated_since)
+        if updated_by:
+            self.queryset = self.queryset.filter(updated_by__username=updated_by)
         if no_members:
             self.queryset = self.queryset.annotate(mem_count=Count('members')).filter(mem_count=0)
 

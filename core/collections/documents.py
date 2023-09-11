@@ -15,6 +15,7 @@ class CollectionDocument(Document):
         settings = {'number_of_shards': 1, 'number_of_replicas': 0}
 
     last_update = fields.DateField(attr='updated_at')
+    updated_by = fields.KeywordField(attr='updated_by.username')
     public_can_view = fields.TextField(attr='public_can_view')
     locale = fields.ListField(fields.KeywordField())
     owner = fields.KeywordField(attr='parent_resource', normalizer='lowercase')

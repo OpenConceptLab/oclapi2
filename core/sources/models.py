@@ -31,6 +31,7 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         'name': {'sortable': False, 'filterable': True, 'exact': True},
         '_name': {'sortable': True, 'filterable': False, 'exact': False},
         'last_update': {'sortable': True, 'filterable': False, 'default': 'desc'},
+        'updated_by': {'sortable': False, 'filterable': False, 'facet': True},
         'locale': {'sortable': False, 'filterable': True, 'facet': True},
         'owner': {'sortable': True, 'filterable': True, 'facet': True, 'exact': True},
         'owner_type': {'sortable': False, 'filterable': True, 'facet': True},
@@ -643,7 +644,8 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
             'retired': self.retired_mappings_count,
             'map_type': self._to_clean_facets(facets.mapType or []),
             'to_concept_source': self._to_clean_facets(facets.toConceptSource or [], True),
-            'from_concept_source': self._to_clean_facets(facets.fromConceptSource or [], True)
+            'from_concept_source': self._to_clean_facets(facets.fromConceptSource or [], True),
+            'contributors': self._to_clean_facets(facets.updatedBy or [])
         }
 
     def _get_resource_facet_filters(self, filters=None):
