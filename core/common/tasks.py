@@ -744,11 +744,12 @@ def resource_updated_update_by(klass):
     processed = 0
     queryset = klass.objects.filter(id=F('versioned_object_id'))
     total = queryset.count()
-    for mapping in queryset.iterator(chunk_size=10000):
+    for resource in queryset.iterator(chunk_size=10000):
         processed += 1
         latest_version = klass.objects.filter(
-            versioned_object_id=mapping.versioned_object_id, is_latest_version=True).order_by('-created_at').first()
+            versioned_object_id=resource.versioned_object_id, is_latest_version=True).order_by('-created_at').first()
         if latest_version:
-            mapping.updated_by = latest_version.updated_by
-            mapping.save(update_fields=['updated_by'])
+            resource.updated_by = latest_version.updated_by
+            resource._index = False
+            resource.save(update_fields=['updated_by'])
         print(f"Status: {processed}/{total}")
