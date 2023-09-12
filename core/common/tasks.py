@@ -732,19 +732,22 @@ def concepts_update_updated_by():  # pragma: no cover
     from django.db.models import F, OuterRef
     from django.db.models.functions import Coalesce
     from core.concepts.models import Concept
-    # Find the latest versions for each versioned_object_id
+
     latest_versions = Concept.objects.filter(
         versioned_object_id=OuterRef('versioned_object_id')
     ).filter(is_latest_version=True).order_by('-created_at')
 
-    # Use Subquery to get the latest_version for each concept
-    subquery = latest_versions.values('updated_by')[:1]
-
-    # Update only the concepts where a latest version exists
-    Concept.objects.filter(
+    concept_qs = Concept.objects.filter(
         id=F('versioned_object_id'),
         versioned_object_id__in=latest_versions.values('versioned_object_id')
-    ).update(updated_by=Coalesce(subquery, F('updated_by')))
+    )
+
+    for batch in concept_qs.iterator(batch_size=10000):
+        subquery = latest_versions.filter(
+            versioned_object_id=OuterRef('versioned_object_id')
+        ).values('updated_by')[:1]
+
+        batch.update(updated_by=Coalesce(subquery, F('updated_by')))
 
 
 @app.task(ignore_result=True)
@@ -757,11 +760,14 @@ def mappings_update_updated_by():  # pragma: no cover
         versioned_object_id=OuterRef('versioned_object_id')
     ).filter(is_latest_version=True).order_by('-created_at')
 
-    # Use Subquery to get the latest_version for each concept
-    subquery = latest_versions.values('updated_by')[:1]
-
-    # Update only the concepts where a latest version exists
-    Mapping.objects.filter(
+    mapping_qs = Mapping.objects.filter(
         id=F('versioned_object_id'),
         versioned_object_id__in=latest_versions.values('versioned_object_id')
-    ).update(updated_by=Coalesce(subquery, F('updated_by')))
+    )
+
+    for batch in mapping_qs.iterator(batch_size=10000):
+        subquery = latest_versions.filter(
+            versioned_object_id=OuterRef('versioned_object_id')
+        ).values('updated_by')[:1]
+
+        batch.update(updated_by=Coalesce(subquery, F('updated_by')))
