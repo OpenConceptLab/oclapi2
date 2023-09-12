@@ -729,25 +729,26 @@ def calculate_checksums(resource_type, resource_id):
 
 @app.task(ignore_result=True)
 def concepts_update_updated_by():  # pragma: no cover
-    from django.db.models import F
     from core.concepts.models import Concept
-
-    for concept in Concept.objects.filter(id=F('versioned_object_id')).iterator(chunk_size=1000):
-        latest_version = Concept.objects.filter(
-            versioned_object_id=concept.versioned_object_id, is_latest_version=True).order_by('-created_at').first()
-        if latest_version:
-            concept.updated_by = latest_version.updated_by
-            concept.save(update_fields=['updated_by'])
+    resource_updated_update_by(Concept)
 
 
 @app.task(ignore_result=True)
 def mappings_update_updated_by():  # pragma: no cover
-    from django.db.models import F
     from core.mappings.models import Mapping
+    resource_updated_update_by(Mapping)
 
-    for mapping in Mapping.objects.filter(id=F('versioned_object_id')).iterator(chunk_size=1000):
-        latest_version = Mapping.objects.filter(
+
+def resource_updated_update_by(klass):
+    from django.db.models import F
+    processed = 0
+    queryset = klass.objects.filter(id=F('versioned_object_id'))
+    total = queryset.count()
+    for mapping in queryset.iterator(chunk_size=10000):
+        processed += 1
+        latest_version = klass.objects.filter(
             versioned_object_id=mapping.versioned_object_id, is_latest_version=True).order_by('-created_at').first()
         if latest_version:
             mapping.updated_by = latest_version.updated_by
             mapping.save(update_fields=['updated_by'])
+        print(f"Status: {processed}/{total}")
