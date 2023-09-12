@@ -744,6 +744,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         concept.datatype = self.datatype
         concept.retired = self.retired
         concept.external_id = self.external_id or concept.external_id
+        concept.updated_by_id = self.updated_by_id
         concept.save()
 
     @classmethod

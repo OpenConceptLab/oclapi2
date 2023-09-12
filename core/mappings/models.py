@@ -481,7 +481,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         mapping.from_concept_name = self.from_concept_name
         mapping.from_source_url = self.from_source_url
         mapping.from_source_version = self.from_source_version
-
+        mapping.updated_by_id = self.updated_by_id
         mapping.save()
 
     @classmethod
