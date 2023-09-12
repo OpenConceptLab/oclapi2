@@ -739,7 +739,7 @@ def mappings_update_updated_by():  # pragma: no cover
     resource_updated_update_by(Mapping)
 
 
-def resource_updated_update_by(klass):
+def resource_updated_update_by(klass):  # pragma: no cover
     processed = 0
     queryset = klass.objects.filter(is_latest_version=True)
     total = queryset.count()
