@@ -29,5 +29,5 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.RunPython(update_updated_by)
+        # migrations.RunPython(update_updated_by)
     ]

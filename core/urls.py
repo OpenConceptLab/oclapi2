@@ -68,6 +68,12 @@ urlpatterns = [
     path('collections/', include('core.collections.urls'), name='collections_urls'),
     path('concepts/', concept_views.ConceptListView.as_view(), name='all_concepts_urls'),
     path('mappings/', mapping_views.MappingListView.as_view(), name='all_mappings_urls'),
+    path(
+        'concepts/update-updated-by/', concept_views.ConceptUpdateUpdatedBy.as_view(), name='concept-update-updated-by'
+    ),
+    path(
+        'mappings/update-updated-by/', mapping_views.MappingUpdateUpdatedBy.as_view(), name='mapping-update-updated-by'
+    ),
     path('importers/', include('core.importers.urls'), name='importer_urls'),
     path('indexes/', include('core.indexes.urls'), name='indexes_urls'),
     path('client-configs/', include('core.client_configs.urls'), name='client_config_urls'),

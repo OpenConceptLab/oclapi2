@@ -7,6 +7,7 @@ from rest_framework.generics import DestroyAPIView, UpdateAPIView, RetrieveAPIVi
 from rest_framework.mixins import CreateModelMixin
 from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from core.common.constants import HEAD, ACCESS_TYPE_NONE
 from core.common.exceptions import Http400
@@ -15,6 +16,7 @@ from core.common.swagger_parameters import (
     q_param, limit_param, sort_desc_param, page_param, sort_asc_param, verbose_param,
     include_facets_header, updated_since_param, include_retired_param,
     compress_header, include_source_versions_param, include_collection_versions_param)
+from core.common.tasks import mappings_update_updated_by
 from core.common.views import SourceChildCommonBaseView, SourceChildExtrasView, \
     SourceChildExtraRetrieveUpdateDestroyView
 from core.concepts.permissions import CanEditParentDictionary, CanViewParentDictionary
@@ -40,6 +42,23 @@ class MappingBaseView(SourceChildCommonBaseView):
 
     def get_queryset(self):
         return Mapping.get_base_queryset(self.params)
+
+
+class MappingUpdateUpdatedBy(APIView):  # pragma: no cover
+    permission_classes = (IsAdminUser,)
+
+    @staticmethod
+    def get(request):
+        result = mappings_update_updated_by.delay()
+        return Response(
+            {
+                'state': result.state,
+                'username': request.user.username,
+                'task': result.task_id,
+                'queue': 'default'
+            },
+            status=status.HTTP_202_ACCEPTED
+        )
 
 
 class MappingListView(MappingBaseView, ListWithHeadersMixin, CreateModelMixin):
