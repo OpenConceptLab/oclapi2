@@ -740,16 +740,10 @@ def mappings_update_updated_by():  # pragma: no cover
 
 
 def resource_updated_update_by(klass):
-    from django.db.models import F
     processed = 0
-    queryset = klass.objects.filter(id=F('versioned_object_id'))
+    queryset = klass.objects.filter(is_latest_version=True)
     total = queryset.count()
     for resource in queryset.iterator(chunk_size=10000):
+        klass.objects.filter(id=resource.versioned_object_id).update(updated_by_id=resource.updated_by_id)
         processed += 1
-        latest_version = klass.objects.filter(
-            versioned_object_id=resource.versioned_object_id, is_latest_version=True).order_by('-created_at').first()
-        if latest_version:
-            resource.updated_by = latest_version.updated_by
-            resource._index = False
-            resource.save(update_fields=['updated_by'])
         print(f"Status: {processed}/{total}")
