@@ -729,45 +729,25 @@ def calculate_checksums(resource_type, resource_id):
 
 @app.task(ignore_result=True)
 def concepts_update_updated_by():  # pragma: no cover
-    from django.db.models import F, OuterRef
-    from django.db.models.functions import Coalesce
+    from django.db.models import F
     from core.concepts.models import Concept
 
-    latest_versions = Concept.objects.filter(
-        versioned_object_id=OuterRef('versioned_object_id')
-    ).filter(is_latest_version=True).order_by('-created_at')
-
-    concept_qs = Concept.objects.filter(
-        id=F('versioned_object_id'),
-        versioned_object_id__in=latest_versions.values('versioned_object_id')
-    )
-
-    for batch in concept_qs.iterator(batch_size=10000):
-        subquery = latest_versions.filter(
-            versioned_object_id=OuterRef('versioned_object_id')
-        ).values('updated_by')[:1]
-
-        batch.update(updated_by=Coalesce(subquery, F('updated_by')))
+    for concept in Concept.objects.filter(id=F('versioned_object_id')).iterator(chunk_size=1000):
+        latest_version = Concept.objects.filter(
+            versioned_object_id=concept.versioned_object_id, is_latest_version=True).order_by('-created_at').first()
+        if latest_version:
+            concept.updated_by = latest_version.updated_by
+            concept.save(update_fields=['updated_by'])
 
 
 @app.task(ignore_result=True)
 def mappings_update_updated_by():  # pragma: no cover
-    from django.db.models import F, OuterRef
-    from django.db.models.functions import Coalesce
+    from django.db.models import F
     from core.mappings.models import Mapping
-    # Find the latest versions for each versioned_object_id
-    latest_versions = Mapping.objects.filter(
-        versioned_object_id=OuterRef('versioned_object_id')
-    ).filter(is_latest_version=True).order_by('-created_at')
 
-    mapping_qs = Mapping.objects.filter(
-        id=F('versioned_object_id'),
-        versioned_object_id__in=latest_versions.values('versioned_object_id')
-    )
-
-    for batch in mapping_qs.iterator(batch_size=10000):
-        subquery = latest_versions.filter(
-            versioned_object_id=OuterRef('versioned_object_id')
-        ).values('updated_by')[:1]
-
-        batch.update(updated_by=Coalesce(subquery, F('updated_by')))
+    for mapping in Mapping.objects.filter(id=F('versioned_object_id')).iterator(chunk_size=1000):
+        latest_version = Mapping.objects.filter(
+            versioned_object_id=mapping.versioned_object_id, is_latest_version=True).order_by('-created_at').first()
+        if latest_version:
+            mapping.updated_by = latest_version.updated_by
+            mapping.save(update_fields=['updated_by'])
