@@ -863,24 +863,11 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         return self.__get_mappings_from_relation('mappings_to')
 
     def __get_mappings_from_relation(self, relation_manager, is_latest=False):
+        key = 'from_concept_id__in' if relation_manager == 'mappings_from' else 'to_concept_id__in'
+        filters = {key: list(set(compact([self.id, self.versioned_object_id, get(self.get_latest_version(), 'id')])))}
+
         from core.mappings.models import Mapping
-        mappings = Mapping.objects.filter(parent_id=self.parent_id)
-
-        if relation_manager == 'mappings_from':
-            key = 'from_concept_id__in'
-        else:
-            key = 'to_concept_id__in'
-
-        filters = {key: [self.id]}
-        if self.is_latest_version:
-            filters[key].append(self.versioned_object_id)
-        elif self.is_versioned_object:
-            latest_version = self.get_latest_version()
-            filters[key].append(get(latest_version, 'id'))
-
-        filters[key] = compact(filters[key])
-
-        mappings = mappings.filter(**filters)
+        mappings = Mapping.objects.filter(parent_id=self.parent_id, **filters)
 
         if is_latest:
             return mappings.filter(is_latest_version=True)
