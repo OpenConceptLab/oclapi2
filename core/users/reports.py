@@ -7,6 +7,7 @@ from core.users.models import UserProfile
 class UserReport(AbstractReport):
     queryset = UserProfile.objects.filter()
     name = 'Users'
+    id = 'users'
     verbose_fields = ['username', 'email', 'name', 'company', 'location', 'date_joined', 'status']
     VERBOSE_HEADERS = ["Username", "Email", "Name", "Company", "Location", "Joined At", "Status"]
 

@@ -1,13 +1,13 @@
-from django.db import models
-from django.db.models import F, Count
+from django.db.models import F
 
-from core.reports.models import AbstractReport
 from core.mappings.models import Mapping
+from core.reports.models import AbstractReport
 
 
 class MappingReport(AbstractReport):
     queryset = Mapping.objects.filter(id=F('versioned_object_id'))
     name = 'Mappings'
+    id = 'mappings'
     limit = 20
     grouped_label = f"Top {limit} New Mappings Grouped by Target Source"
     verbose = False
@@ -19,39 +19,25 @@ class MappingReport(AbstractReport):
         "Count of Mappings between Sources",
     ]
     retired_criteria = {'retired': True}
+    note = 'Equivalent of latest mapping version'
 
     @property
     def grouped_queryset(self):
         from core.sources.models import Source
-        queryset = Source.objects.values(
-            'id', 'uri', 'id'
-        ).filter(
-            mappings_to__id=F('mappings_to__versioned_object_id'),
-            mappings_to__created_at__gte=self.start_date,
-            mappings_to__created_at__lte=self.end_date
-        )
-        count_queryset = queryset.annotate(  # count of mappings by target source
-            count=Count('mappings_to__id')
-        ).order_by('-count')[:self.limit].values_list('uri', 'count', 'id')
+        queryset = self.queryset
+        to_source_ids = set(queryset.values_list('to_source_id', flat=True))
         result = []
-        for result_set in count_queryset:
-            source_id = result_set[2]
-            internal_count = Mapping.objects.filter(  # count of mappings where target, from and parent is source_id
-                id=F('versioned_object_id'),
-                created_at__gte=self.start_date,
-                created_at__lte=self.end_date,
-                from_source_id=source_id,
-                to_source_id=source_id,
-                parent_id=source_id
-            ).count()
-            between_sources_count = Mapping.objects.filter(  # count of mappings where target or from is source_id
-                id=F('versioned_object_id'),
-                created_at__gte=self.start_date,
-                created_at__lte=self.end_date,
-            ).filter(
-                models.Q(to_source_id=source_id) | models.Q(from_source_id=source_id)
-            ).exclude(to_source_id=F('from_source_id')).count()
-            result.append([result_set[0], result_set[1], internal_count, between_sources_count])
+        for to_source_id in to_source_ids:
+            source = Source.objects.filter(id=to_source_id).first()
+            if source:
+                count = queryset.filter(to_source_id=to_source_id).count()
+                internal_count = queryset.filter(
+                    to_source_id=to_source_id,
+                    from_source_id=F('from_source_id'),
+                    parent_id=F('parent_id')
+                ).count()
+                between_sources_count = count - internal_count
+                result.append([source.uri, count, internal_count, between_sources_count])
 
         return result
 
@@ -63,5 +49,7 @@ class MappingReport(AbstractReport):
 class MappingVersionReport(AbstractReport):
     queryset = Mapping.objects.exclude(id=F('versioned_object_id')).exclude(is_latest_version=True)
     name = 'Mapping Versions'
+    id = 'mapping_versions'
     verbose = False
     retired_criteria = {'retired': True}
+    note = 'Excludes latest mapping version'

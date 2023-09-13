@@ -6,6 +6,7 @@ from core.reports.models import AbstractReport
 class CollectionReport(AbstractReport):
     queryset = Collection.objects.filter(version=HEAD)
     name = 'Collections'
+    id = 'collections'
     select_related = ['created_by', 'organization', 'user']
     verbose_fields = [
         'mnemonic',
@@ -32,10 +33,15 @@ class CollectionReport(AbstractReport):
         "Validation Schema"
     ]
 
+    @property
+    def retired(self):
+        return self.NA
+
 
 class CollectionVersionReport(AbstractReport):
     queryset = Collection.objects.exclude(version=HEAD)
-    name = 'Collection Versions'
+    name = 'Collection Versions (excluding HEAD)'
+    id = 'collection_versions'
     select_related = ['created_by']
     verbose_fields = [
         'version',
@@ -52,21 +58,31 @@ class CollectionVersionReport(AbstractReport):
         "Released"
     ]
 
+    @property
+    def retired(self):
+        return self.NA
+
 
 class ExpansionReport(AbstractReport):
     queryset = Expansion.objects.filter()
     name = 'Expansions'
+    id = 'expansions'
     verbose = False
+
+    @property
+    def retired(self):
+        return self.NA
 
 
 class ReferenceReport(AbstractReport):
     queryset = CollectionReference.objects.filter()
     name = 'References'
+    id = 'references'
     grouped_label = "New References"
     verbose = False
     grouped = True
     GROUPED_HEADERS = [
-        "Resource Type",
+        "Reference Type",
         "Static during Period",
         "Dynamic during Period",
         "Subtotal during Period",
@@ -74,44 +90,58 @@ class ReferenceReport(AbstractReport):
     ]
 
     @property
+    def retired(self):
+        return self.NA
+
+    def get_cascaded_queryset(self):
+        return self.queryset.exclude(cascade__isnull=True).exclude(cascade__in=['', 'none', False])
+
+    def get_concepts_queryset(self):
+        return self.queryset.filter(reference_type='concepts').exclude(cascade__isnull=False)
+
+    def get_mappings_queryset(self):
+        return self.queryset.filter(reference_type='mappings').exclude(cascade__isnull=False)
+
+    @property
     def grouped_queryset(self):
         if not self.queryset.exists():
             return []
-        concepts_queryset = self.queryset.filter(reference_type='concepts')
-        mappings_queryset = self.queryset.filter(reference_type='mappings')
+        concepts_queryset = self.get_concepts_queryset()
+        mappings_queryset = self.get_mappings_queryset()
         total_concepts = concepts_queryset.count()
         total_mappings = mappings_queryset.count()
         static_criteria = CollectionReference.get_static_references_criteria()
         total_static_concepts = concepts_queryset.filter(static_criteria).count()
         total_static_mappings = mappings_queryset.filter(static_criteria).count()
         overall_report = self.get_overall_report_instance()
-        overall_concepts = overall_report.queryset.filter(reference_type='concepts')
-        overall_mappings = overall_report.queryset.filter(reference_type='mappings')
+        overall_concepts = overall_report.get_concepts_queryset()
+        overall_mappings = overall_report.get_mappings_queryset()
+        cascade_count = self.get_cascaded_queryset().count()
+        overall_cascade_count = overall_report.get_cascaded_queryset().count()
         return [
             [
-                'Concepts',
+                'Concepts only',
                 total_static_concepts,
                 total_concepts - total_static_concepts,
                 total_concepts,
                 overall_concepts.count()
             ],
             [
-                'Mappings',
+                'Mappings only',
                 total_static_mappings,
                 total_mappings - total_static_mappings,
                 total_mappings,
                 overall_mappings.count()
-            ]
+            ],
+            [
+                'Cascade',
+                self.NA,
+                cascade_count,
+                cascade_count,
+                overall_cascade_count
+            ],
         ]
 
     @staticmethod
     def to_grouped_stat_csv_row(obj):
         return [*obj]
-
-    @property
-    def retired(self):
-        return 0
-
-    @property
-    def active(self):
-        return self.count

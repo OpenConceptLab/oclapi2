@@ -17,6 +17,7 @@ class AbstractReport:
     verbose_fields = ['mnemonic', 'name', 'created_by.username', 'created_at']
     retired_criteria = {'is_active': False}
     name = 'Abstract Resources'
+    note = ''
     STAT_HEADERS = ["Resource", "Active", "Retired", "Total"]
     VERBOSE_HEADERS = ["ID", "Name", "Created By", "Created At"]
     select_related = []
@@ -24,6 +25,7 @@ class AbstractReport:
     verbose = True
     stats = True
     grouped = False
+    NA = 'N/A'
 
     def __init__(self, start_date=None, end_date=None):
         self.start_date = from_string_to_date(start_date) if start_date else None
@@ -59,7 +61,7 @@ class AbstractReport:
     @property
     def active(self):
         if self._active is None:
-            self._active = self.count - self.retired
+            self._active = self.count - (0 if self.retired == self.NA else self.retired)
         return self._active
 
     @property
@@ -81,10 +83,12 @@ class AbstractReport:
     def to_csv_row(self, resource):
         return [self.to_value(get(resource, field)) for field in self.verbose_fields]
 
-    def to_stat_csv_row(self, include_name=True):
+    def to_stat_csv_row(self, include_name=True, include_note=False):
         stats = [get(self, field) for field in self.stat_fields]
         if include_name:
-            return [self.name, *stats]
+            stats = [self.name, *stats]
+        if include_note:
+            stats = [*stats, self.note]
         return stats
 
 
@@ -104,6 +108,7 @@ class ResourceUsageReport:
         self.concept_version = None
         self.mapping = None
         self.mapping_version = None
+        self.stats_row = {}
 
     def build(self):
         from core.orgs.reports import OrganizationReport
@@ -143,6 +148,28 @@ class ResourceUsageReport:
             self.mapping_version
         ]
 
+    def get_overall_concept_versions_stats(self):
+        return [
+            'All Concept Versions',
+            *[
+                x + y for x, y in zip(
+                    self.stats_row['concepts'][1:-1],
+                    self.stats_row['concept_versions'][1:-1],
+                )
+            ]
+        ]
+
+    def get_overall_mapping_versions_stats(self):
+        return [
+            'All Mapping Versions',
+            *[
+                x + y for x, y in zip(
+                    self.stats_row['mappings'][1:-1],
+                    self.stats_row['mapping_versions'][1:-1],
+                )
+            ]
+        ]
+
     def generate(self, write_to_file=False):  # pylint: disable=too-many-locals
         self.build()
         buff = io.StringIO()
@@ -157,22 +184,32 @@ class ResourceUsageReport:
         writer.writerow(to_row(["OCL Usage Report"]))
         writer.writerow(to_row(["Environment", settings.ENV.lower()]))
         writer.writerow(to_row(["Reporting Period", date_range_label]))
+
         writer.writerow(blank_row)
-        writer.writerow(blank_row)
+
         writer.writerow(to_row(['Summary by Resource Type']))
         writer.writerow(to_row([
             'Resource',
-            'Active during Period',
+            'Created during Period',
             'Retired during Period',
             'Subtotal during Period',
             "Active as of Report Date",
-            "Retired as of Report Date",
-            "Total as of Report Date"
+            "Retired/Inactive as of Report Date",
+            "Total as of Report Date",
+            "Notes"
         ]))
         resources = self.resources
         for resource in resources:
-            writer.writerow(
-                to_row([*resource.to_stat_csv_row(), *resource.get_overall_report_instance().to_stat_csv_row(False)]))
+            if resource.id == 'mappings':
+                writer.writerow(to_row(self.get_overall_concept_versions_stats()))
+            stats = [
+                *resource.to_stat_csv_row(),
+                *resource.get_overall_report_instance().to_stat_csv_row(False, True)
+            ]
+            writer.writerow(to_row(stats))
+            self.stats_row[resource.id] = stats
+            if resource.id == 'mapping_versions':
+                writer.writerow(to_row(self.get_overall_mapping_versions_stats()))
 
         writer.writerow(blank_row)
 

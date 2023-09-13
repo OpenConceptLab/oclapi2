@@ -6,6 +6,7 @@ from core.sources.models import Source
 class SourceReport(AbstractReport):
     queryset = Source.objects.filter(version=HEAD)
     name = 'Sources'
+    id = 'sources'
     select_related = ['created_by', 'organization', 'user']
     verbose_fields = [
         'mnemonic',
@@ -32,10 +33,15 @@ class SourceReport(AbstractReport):
         "Validation Schema"
     ]
 
+    @property
+    def retired(self):
+        return self.NA
+
 
 class SourceVersionReport(AbstractReport):
     queryset = Source.objects.exclude(version=HEAD)
-    name = 'Source Versions'
+    name = 'Source Versions (excluding HEAD)'
+    id = 'source_versions'
     select_related = ['created_by']
     verbose_fields = [
         'version',
@@ -51,3 +57,7 @@ class SourceVersionReport(AbstractReport):
         "Created At",
         "Released"
     ]
+
+    @property
+    def retired(self):
+        return self.NA
