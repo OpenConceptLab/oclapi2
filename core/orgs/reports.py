@@ -13,4 +13,3 @@ class OrganizationReport(AbstractReport):
     @property
     def retired(self):
         return self.NA
-
