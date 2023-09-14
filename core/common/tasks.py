@@ -740,10 +740,5 @@ def mappings_update_updated_by():  # pragma: no cover
 
 
 def resource_updated_update_by(klass):  # pragma: no cover
-    processed = 0
-    queryset = klass.objects.filter(is_latest_version=True)
-    total = queryset.count()
-    for resource in queryset.iterator(chunk_size=10000):
+    for resource in klass.objects.filter(is_latest_version=True).iterator(chunk_size=1000):
         klass.objects.filter(id=resource.versioned_object_id).update(updated_by_id=resource.updated_by_id)
-        processed += 1
-        print(f"Status: {processed}/{total}")
