@@ -740,5 +740,5 @@ def mappings_update_updated_by():  # pragma: no cover
 
 
 def resource_updated_update_by(klass):  # pragma: no cover
-    for resource in klass.objects.filter(is_latest_version=True).iterator(chunk_size=1000):
+    for resource in klass.objects.filter(is_latest_version=True):
         klass.objects.filter(id=resource.versioned_object_id).update(updated_by_id=resource.updated_by_id)
