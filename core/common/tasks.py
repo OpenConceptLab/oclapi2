@@ -11,6 +11,8 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.mail import EmailMessage
 from django.core.management import call_command
+from django.db.models import OuterRef, F
+from django.db.models.functions import Coalesce
 from django.template.loader import render_to_string
 from django.utils import timezone
 from django_elasticsearch_dsl.registries import registry
@@ -740,5 +742,16 @@ def mappings_update_updated_by():  # pragma: no cover
 
 
 def resource_updated_update_by(klass):  # pragma: no cover
-    for resource in klass.objects.filter(is_latest_version=True):
-        klass.objects.filter(id=resource.versioned_object_id).update(updated_by_id=resource.updated_by_id)
+    # Find the latest versions for each versioned_object_id
+    latest_versions = klass.objects.filter(
+        versioned_object_id=OuterRef('versioned_object_id')
+    ).filter(is_latest_version=True).order_by('-created_at')
+
+    # Use Subquery to get the latest_version for each concept/mapping
+    subquery = latest_versions.values('updated_by')[:1]
+
+    # Update only where the latest version exists
+    klass.objects.filter(
+        id=F('versioned_object_id'),
+        versioned_object_id__in=latest_versions.values('versioned_object_id')
+    ).update(updated_by=Coalesce(subquery, F('updated_by')))
