@@ -40,8 +40,9 @@ class SourceReport(AbstractReport):
 
 class SourceVersionReport(AbstractReport):
     queryset = Source.objects.exclude(version=HEAD)
-    name = 'Source Versions (excluding HEAD)'
+    name = 'Source Versions'
     id = 'source_versions'
+    note = 'Excludes HEAD versions'
     select_related = ['created_by']
     verbose_fields = [
         'version',

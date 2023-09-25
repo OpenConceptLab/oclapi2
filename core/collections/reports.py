@@ -40,8 +40,9 @@ class CollectionReport(AbstractReport):
 
 class CollectionVersionReport(AbstractReport):
     queryset = Collection.objects.exclude(version=HEAD)
-    name = 'Collection Versions (excluding HEAD)'
+    name = 'Collection Versions'
     id = 'collection_versions'
+    note = 'Excludes HEAD versions'
     select_related = ['created_by']
     verbose_fields = [
         'version',
