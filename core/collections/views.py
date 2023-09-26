@@ -423,6 +423,20 @@ class CollectionReferencesView(
     def retrieve(self, request, *args, **kwargs):
         return self.list(request, *args, **kwargs)
 
+    @swagger_auto_schema(request_body=openapi.Schema(
+        type=openapi.TYPE_OBJECT,
+        properties={
+            'expressions': openapi.Schema(
+                type=openapi.TYPE_ARRAY,
+                items=openapi.Items(type=openapi.TYPE_STRING),
+                uniqueItems=True,
+                description='Expressions List from References, or * for ALL'
+            )
+        }
+    ))
+    def delete(self, request, *args, **kwargs):
+        return super().delete(request, *args, **kwargs)
+
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
         expressions = request.data.get("references") or request.data.get("expressions")
