@@ -5,11 +5,13 @@ from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator
 from django.db import models, IntegrityError, transaction
 from django.db.models import Q, F
+from django.db.models.functions import Cast
 from pydash import get
 
 from core.common.constants import NAMESPACE_REGEX, LATEST
 from core.common.mixins import SourceChildMixin
 from core.common.models import VersionedModel
+from core.common.services import PostgresQL
 from core.common.tasks import batch_index_resources
 from core.common.utils import separate_version, to_parent_uri, generate_temp_version, \
     encode_string, is_url_encoded_string
@@ -389,7 +391,16 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
             self.full_clean()
             self.save()
             if self.id:
-                self.mnemonic = parent.mapping_mnemonic_next or str(self.id)
+                next_valid_seq = parent.mapping_mnemonic_next  # returns str of int or None
+                if parent.is_sequential_mappings_mnemonic:
+                    try:
+                        available_next = parent.get_max_mapping_attribute(Cast('mnemonic', models.IntegerField()))
+                        if available_next and available_next >= int(next_valid_seq):
+                            PostgresQL.update_seq(parent.mappings_mnemonic_seq_name, available_next)
+                            next_valid_seq = parent.mapping_mnemonic_next
+                    except:  # pylint: disable=bare-except
+                        pass
+                self.mnemonic = next_valid_seq or str(self.id)
                 self.versioned_object_id = self.id
                 self.version = str(self.id)
                 self.external_id = parent.mapping_external_id_next

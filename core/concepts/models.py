@@ -4,12 +4,14 @@ from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator
 from django.db import models, IntegrityError, transaction
 from django.db.models import F, Q
+from django.db.models.functions import Cast
 from pydash import get, compact
 
 from core.common.checksums import ChecksumModel
 from core.common.constants import ISO_639_1, LATEST, HEAD, ALL
 from core.common.mixins import SourceChildMixin
 from core.common.models import VersionedModel, ConceptContainerModel
+from core.common.services import PostgresQL
 from core.common.tasks import process_hierarchy_for_new_concept, process_hierarchy_for_concept_version, \
     process_hierarchy_for_new_parent_concept_version, update_mappings_concept
 from core.common.utils import generate_temp_version, drop_version, \
@@ -639,7 +641,17 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             self.errors = {}
             self.save()
             if self.id:
-                self.name = self.mnemonic = parent.concept_mnemonic_next or str(self.id)
+                next_valid_seq = parent.concept_mnemonic_next  # returns str of int or None
+                if parent.is_sequential_concepts_mnemonic:
+                    try:
+                        available_next = parent.get_max_concept_attribute(Cast('mnemonic', models.IntegerField()))
+                        if available_next and available_next >= int(next_valid_seq):
+                            PostgresQL.update_seq(parent.concepts_mnemonic_seq_name, available_next)
+                            next_valid_seq = parent.concept_mnemonic_next
+                    except:  # pylint: disable=bare-except
+                        pass
+
+                self.name = self.mnemonic = next_valid_seq or str(self.id)
                 self.external_id = parent.concept_external_id_next
                 self.versioned_object_id = self.id
                 self.version = str(self.id)

@@ -295,6 +295,14 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         return f"{prefix}_concepts_external_id_seq"
 
     @property
+    def is_sequential_concepts_mnemonic(self):
+        return self.autoid_concept_mnemonic == AUTO_ID_SEQUENTIAL
+
+    @property
+    def is_sequential_mappings_mnemonic(self):
+        return self.autoid_mapping_mnemonic == AUTO_ID_SEQUENTIAL
+
+    @property
     def mappings_mnemonic_seq_name(self):
         prefix = self.__get_resource_db_sequence_prefix()
         return f"{prefix}_mappings_mnemonic_seq"
@@ -389,15 +397,19 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         else:
             update_mappings_source.delay(self.id)
 
+    def get_max_concept_attribute(self, attribute):
+        return get(self.get_concepts_queryset().aggregate(max_val=Max(attribute)), 'max_val', None)
+
+    def get_max_mapping_attribute(self, attribute):
+        return get(self.get_mappings_queryset().aggregate(max_val=Max(attribute)), 'max_val', None)
+
     @property
     def last_concept_update(self):
-        queryset = self.concepts_set.filter(id=F('versioned_object_id')) if self.is_head else self.concepts
-        return get(queryset.aggregate(max_updated_at=Max('updated_at')), 'max_updated_at', None)
+        return self.get_max_concept_attribute('updated_at')
 
     @property
     def last_mapping_update(self):
-        queryset = self.mappings_set.filter(id=F('versioned_object_id')) if self.is_head else self.mappings
-        return get(queryset.aggregate(max_updated_at=Max('updated_at')), 'max_updated_at', None)
+        return self.get_max_mapping_attribute('updated_at')
 
     def get_mapped_sources(self):
         """Returns only direct mapped sources"""

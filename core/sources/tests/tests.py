@@ -7,6 +7,7 @@ from core.collections.models import Collection
 from core.collections.tests.factories import OrganizationCollectionFactory
 from core.common.constants import HEAD, ACCESS_TYPE_EDIT, ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW, \
     OPENMRS_VALIDATION_SCHEMA
+from core.common.services import PostgresQL
 from core.common.tasks import index_source_mappings, index_source_concepts
 from core.common.tasks import seed_children_to_new_version
 from core.common.tasks import update_source_active_concepts_count
@@ -940,6 +941,125 @@ class SourceTest(OCLTestCase):
         )
         mappings = source2.get_mappings_queryset()
         self.assertEqual(mappings.count(), 6)
+
+        same_as_mapping = mappings.filter(map_type='SAME-AS', to_concept_code='concept2').first()
+        self.assertEqual(same_as_mapping.to_concept.uri, source1_concept2.uri)
+        new_from_concept = same_as_mapping.from_concept
+        self.assertNotEqual(new_from_concept.mnemonic, source1_concept2.mnemonic)
+        self.assertTrue(new_from_concept.display_name == source1_concept2.display_name == 'concept2')
+
+        q_and_a_mapping = mappings.filter(map_type='Q-AND-A').first()
+        self.assertEqual(q_and_a_mapping.from_concept.uri, new_from_concept.uri)
+        self.assertEqual(q_and_a_mapping.to_concept.uri, source2_concept1.uri)
+
+        narrower_than_mapping = mappings.filter(map_type='NARROWER-THAN').first()
+        self.assertEqual(narrower_than_mapping.from_concept.uri, new_from_concept.uri)
+        self.assertEqual(narrower_than_mapping.to_concept.uri, source2_concept3.uri)
+
+        broader_than_mapping = mappings.filter(map_type='BROADER-THAN').first()
+        self.assertEqual(broader_than_mapping.from_concept.uri, new_from_concept.uri)
+        self.assertEqual(broader_than_mapping.to_concept.uri, source1_concept4.uri)
+
+        added_concepts, added_mappings = source2.clone_with_cascade(
+            concept_to_clone=source1_concept2,
+            user=source1_concept2.created_by,
+            map_types='Q-AND-A,CONCEPT-SET',
+            equivalency_map_types='SAME-AS'
+        )
+
+        self.assertEqual(len(added_concepts), 0)
+        self.assertEqual(len(added_mappings), 0)
+        self.assertEqual(source2.get_active_concepts().count(), 3)
+        self.assertEqual(source2.get_active_mappings().count(), 6)
+
+        result = source1_concept2.cascade(
+            repo_version=source1, omit_if_exists_in=source2.uri, equivalency_map_types='SAME-AS'
+        )
+        self.assertEqual(result['concepts'].count(), 1)
+        self.assertEqual(result['concepts'].first(), source1_concept2)
+        self.assertEqual(result['mappings'].count(), 0)
+
+        result = source1_concept2.cascade_as_hierarchy(
+            repo_version=source1, omit_if_exists_in=source2.uri, equivalency_map_types='SAME-AS'
+        )
+        self.assertEqual(result, source1_concept2)
+        self.assertEqual(result.cascaded_entries['concepts'].count(), 0)
+        self.assertEqual(result.cascaded_entries['mappings'].count(), 0)
+
+    def test_clone_with_cascade_with_autoid_sequence_manual_set(self):  # pylint: disable=too-many-locals,too-many-statements
+        source1 = OrganizationSourceFactory(mnemonic='source1')
+        source1_concept1 = ConceptFactory(
+            mnemonic='concept1', parent=source1, names=[ConceptNameFactory.build(name='concept1')])  # to_concept
+        source1_concept2 = ConceptFactory(
+            mnemonic='concept2', parent=source1, names=[ConceptNameFactory.build(name='concept2')])  # from_concept
+        source1_concept3 = ConceptFactory(
+            mnemonic='concept3', parent=source1, names=[ConceptNameFactory.build(name='concept3')])
+        source1_concept4 = ConceptFactory(
+            mnemonic='concept4', parent=source1, names=[ConceptNameFactory.build(name='concept4')])
+        MappingFactory(
+            from_concept=source1_concept1, to_concept=source1_concept3, parent=source1, map_type='Q-AND-A')
+        MappingFactory(
+            from_concept=source1_concept2, to_concept=source1_concept1, parent=source1, map_type='Q-AND-A')
+        MappingFactory(
+            from_concept=source1_concept2, to_concept=source1_concept3, parent=source1, map_type='NARROWER-THAN')
+        MappingFactory(
+            from_concept=source1_concept2, to_concept=source1_concept4, parent=source1, map_type='BROADER-THAN')
+
+        source2 = OrganizationSourceFactory(
+            mnemonic='source2', autoid_concept_mnemonic='sequential', autoid_mapping_mnemonic='sequential')
+        # same as source1_concept1 -> to_concept
+        source2_concept1 = ConceptFactory(
+            mnemonic='1', parent=source2, names=[ConceptNameFactory.build(name='concept1')])
+        # same as source1_concept3
+        source2_concept3 = ConceptFactory(
+            mnemonic='2', parent=source2, names=[ConceptNameFactory.build(name='concept3')])
+        MappingFactory(
+            mnemonic='1', from_concept=source2_concept1, to_concept=source1_concept1, parent=source2,
+            map_type='SAME-AS')
+        MappingFactory(
+            mnemonic='2', from_concept=source2_concept3, to_concept=source1_concept3, parent=source2,
+            map_type='SAME-AS')
+
+        self.assertEqual(source2.get_active_concepts().count(), 2)
+        self.assertEqual(source2.get_active_mappings().count(), 2)
+        self.assertEqual(PostgresQL.last_value(source2.concepts_mnemonic_seq_name), 1)  # dint update the sequence since the concept mnemonic was never provided  # pylint: disable=line-too-long
+        self.assertEqual(PostgresQL.last_value(source2.mappings_mnemonic_seq_name), 1)  # dint update the sequence since the mapping mnemonic was never provided  # pylint: disable=line-too-long
+        self.assertEqual(
+            list(source2.get_concepts_queryset().order_by('created_at').values_list('mnemonic', flat=True)),
+            ['1', '2']
+        )
+        self.assertEqual(
+            list(source2.get_mappings_queryset().order_by('created_at').values_list('mnemonic', flat=True)),
+            ['1', '2']
+        )
+
+        added_concepts, added_mappings = source2.clone_with_cascade(
+            concept_to_clone=source1_concept2,
+            user=source1_concept2.created_by,
+            map_types='Q-AND-A,CONCEPT-SET',
+            equivalency_map_types='SAME-AS'
+        )
+
+        self.assertEqual(len(added_concepts), 1)
+        self.assertEqual(len(added_mappings), 4)
+        self.assertEqual(source2.get_active_concepts().count(), 3)
+        self.assertEqual(source2.get_active_mappings().count(), 6)
+        source2_concepts = source2.get_concepts_queryset().order_by('created_at')
+        self.assertEqual(
+            list(source2_concepts.values_list('mnemonic', flat=True)),
+            ['1', '2', '3']
+        )
+        self.assertNotEqual(source2_concepts.last().mnemonic, 'concept2')
+        self.assertEqual(
+            [concept.display_name for concept in source2_concepts],
+            ['concept1', 'concept3', 'concept2']
+        )
+        mappings = source2.get_mappings_queryset().order_by('created_at')
+        self.assertEqual(mappings.count(), 6)
+        self.assertEqual(
+            list(mappings.values_list('mnemonic', flat=True)),
+            ['1', '2', '3', '4', '5', '6']
+        )
 
         same_as_mapping = mappings.filter(map_type='SAME-AS', to_concept_code='concept2').first()
         self.assertEqual(same_as_mapping.to_concept.uri, source1_concept2.uri)
