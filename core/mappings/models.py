@@ -5,7 +5,6 @@ from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator
 from django.db import models, IntegrityError, transaction
 from django.db.models import Q, F
-from django.db.models.functions import Cast
 from pydash import get
 
 from core.common.constants import NAMESPACE_REGEX, LATEST
@@ -394,7 +393,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
                 next_valid_seq = parent.mapping_mnemonic_next  # returns str of int or None
                 if parent.is_sequential_mappings_mnemonic:
                     try:
-                        available_next = parent.get_max_mapping_attribute(Cast('mnemonic', models.IntegerField()))
+                        available_next = int(parent.get_max_mapping_mnemonic())
                         if available_next and available_next >= int(next_valid_seq):
                             PostgresQL.update_seq(parent.mappings_mnemonic_seq_name, available_next)
                             next_valid_seq = parent.mapping_mnemonic_next

@@ -4,7 +4,6 @@ from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator
 from django.db import models, IntegrityError, transaction
 from django.db.models import F, Q
-from django.db.models.functions import Cast
 from pydash import get, compact
 
 from core.common.checksums import ChecksumModel
@@ -644,7 +643,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                 next_valid_seq = parent.concept_mnemonic_next  # returns str of int or None
                 if parent.is_sequential_concepts_mnemonic:
                     try:
-                        available_next = parent.get_max_concept_attribute(Cast('mnemonic', models.IntegerField()))
+                        available_next = int(parent.get_max_concept_mnemonic())
                         if available_next and available_next >= int(next_valid_seq):
                             PostgresQL.update_seq(parent.concepts_mnemonic_seq_name, available_next)
                             next_valid_seq = parent.concept_mnemonic_next

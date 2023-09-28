@@ -1012,7 +1012,7 @@ class SourceTest(OCLTestCase):
             mnemonic='1', parent=source2, names=[ConceptNameFactory.build(name='concept1')])
         # same as source1_concept3
         source2_concept3 = ConceptFactory(
-            mnemonic='2', parent=source2, names=[ConceptNameFactory.build(name='concept3')])
+            mnemonic='concept3', parent=source2, names=[ConceptNameFactory.build(name='concept3')])
         MappingFactory(
             mnemonic='1', from_concept=source2_concept1, to_concept=source1_concept1, parent=source2,
             map_type='SAME-AS')
@@ -1026,7 +1026,7 @@ class SourceTest(OCLTestCase):
         self.assertEqual(PostgresQL.last_value(source2.mappings_mnemonic_seq_name), 1)  # dint update the sequence since the mapping mnemonic was never provided  # pylint: disable=line-too-long
         self.assertEqual(
             list(source2.get_concepts_queryset().order_by('created_at').values_list('mnemonic', flat=True)),
-            ['1', '2']
+            ['1', 'concept3']
         )
         self.assertEqual(
             list(source2.get_mappings_queryset().order_by('created_at').values_list('mnemonic', flat=True)),
@@ -1047,7 +1047,7 @@ class SourceTest(OCLTestCase):
         source2_concepts = source2.get_concepts_queryset().order_by('created_at')
         self.assertEqual(
             list(source2_concepts.values_list('mnemonic', flat=True)),
-            ['1', '2', '3']
+            ['1', 'concept3', '2']
         )
         self.assertNotEqual(source2_concepts.last().mnemonic, 'concept2')
         self.assertEqual(

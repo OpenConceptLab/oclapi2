@@ -403,6 +403,16 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
     def get_max_mapping_attribute(self, attribute):
         return get(self.get_mappings_queryset().aggregate(max_val=Max(attribute)), 'max_val', None)
 
+    def get_max_concept_mnemonic(self):
+        return self.get_max_mnemonic_for_resource(self.get_concepts_queryset())
+
+    def get_max_mapping_mnemonic(self):
+        return self.get_max_mnemonic_for_resource(self.get_mappings_queryset())
+
+    @staticmethod
+    def get_max_mnemonic_for_resource(queryset):
+        return get(queryset.filter(mnemonic__regex=r'^\d+$').aggregate(max_val=Max('mnemonic')), 'max_val', None)
+
     @property
     def last_concept_update(self):
         return self.get_max_concept_attribute('updated_at')
