@@ -697,13 +697,22 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             concept.set_locales(names, ConceptName)
             concept.set_locales(descriptions, ConceptDescription)
 
-            parent_resource = concept.parent
+            parent = concept.parent
             if startswith_temp_version(concept.mnemonic):
-                concept.name = concept.mnemonic = parent_resource.concept_mnemonic_next or str(concept.id)
+                next_valid_seq = parent.concept_mnemonic_next  # returns str of int or None
+                if parent.is_sequential_concepts_mnemonic:
+                    try:
+                        available_next = int(parent.get_max_concept_mnemonic())
+                        if available_next and available_next >= int(next_valid_seq):
+                            PostgresQL.update_seq(parent.concepts_mnemonic_seq_name, available_next)
+                            next_valid_seq = parent.concept_mnemonic_next
+                    except:  # pylint: disable=bare-except
+                        pass
+                concept.name = concept.mnemonic = next_valid_seq or str(concept.id)
             if not concept.external_id:
-                concept.external_id = parent_resource.concept_external_id_next
+                concept.external_id = parent.concept_external_id_next
             concept.is_latest_version = not create_initial_version
-            concept.public_access = parent_resource.public_access
+            concept.public_access = parent.public_access
             concept.save()
             concept.full_clean()
 
@@ -713,9 +722,9 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                 if initial_version.id:
                     initial_version.set_locales(names, ConceptName)
                     initial_version.set_locales(descriptions, ConceptDescription)
-                    initial_version.sources.set([parent_resource])
+                    initial_version.sources.set([parent])
 
-            concept.sources.set([parent_resource])
+            concept.sources.set([parent])
             if get(settings, 'TEST_MODE', False):
                 update_mappings_concept(concept.id)
             else:
@@ -731,7 +740,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                         queue='concurrent'
                     )
             if create_initial_version and concept._counted is True:
-                parent_resource.update_concepts_count()
+                parent.update_concepts_count()
             concept.set_checksums()
         except ValidationError as ex:
             if concept.id:

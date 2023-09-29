@@ -450,7 +450,16 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
             mapping.is_latest_version = False
             parent = mapping.parent
             if mapping.mnemonic == temp_version:
-                mapping.mnemonic = parent.mapping_mnemonic_next or str(mapping.id)
+                next_valid_seq = parent.mapping_mnemonic_next  # returns str of int or None
+                if parent.is_sequential_mappings_mnemonic:
+                    try:
+                        available_next = int(parent.get_max_mapping_mnemonic())
+                        if available_next and available_next >= int(next_valid_seq):
+                            PostgresQL.update_seq(parent.mappings_mnemonic_seq_name, available_next)
+                            next_valid_seq = parent.mapping_mnemonic_next
+                    except:  # pylint: disable=bare-except
+                        pass
+                mapping.mnemonic = next_valid_seq or str(mapping.id)
             if not mapping.external_id:
                 mapping.external_id = parent.mapping_external_id_next
             mapping.public_access = parent.public_access
