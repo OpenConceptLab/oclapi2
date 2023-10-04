@@ -88,6 +88,8 @@ def delete_collection(collection_id):
 
     try:
         logger.info('Found collection %s.  Beginning purge...', collection.mnemonic)
+        collection.references.all().delete()
+        collection.expansions.all().delete()
         collection.delete(force=True)
         logger.info('Delete complete!')
         return True

@@ -656,7 +656,7 @@ class CollectionLatestVersionRetrieveUpdateView(CollectionVersionBaseView, Retri
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
-class CollectionVersionRetrieveUpdateDestroyView(CollectionBaseView, RetrieveAPIView, UpdateAPIView):
+class CollectionVersionRetrieveUpdateDestroyView(CollectionBaseView, RetrieveAPIView, UpdateAPIView, TaskMixin):
     serializer_class = CollectionVersionDetailSerializer
 
     def get_permissions(self):
@@ -690,14 +690,15 @@ class CollectionVersionRetrieveUpdateDestroyView(CollectionBaseView, RetrieveAPI
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     def delete(self, _, **kwargs):  # pylint: disable=unused-argument
-        instance = self.get_object()
+        result = self.perform_task(delete_collection, (self.get_object().id,))
 
-        try:
-            instance.delete()
-        except ValidationError as ex:
-            return Response(ex.message_dict, status=status.HTTP_400_BAD_REQUEST)
+        if isinstance(result, Response):
+            return result
 
-        return Response(status=status.HTTP_204_NO_CONTENT)
+        if result is True:
+            return Response({'detail': DELETE_SUCCESS}, status=status.HTTP_204_NO_CONTENT)
+
+        return Response({'detail': get(result, 'messages', [DELETE_FAILURE])}, status=status.HTTP_400_BAD_REQUEST)
 
 
 class CollectionVersionExpansionsView(CollectionBaseView, ListWithHeadersMixin, CreateAPIView):
