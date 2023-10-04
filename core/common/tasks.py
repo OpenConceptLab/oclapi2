@@ -486,7 +486,7 @@ def batch_index_resources(resource, filters, update_indexed=False):
     model = get_resource_class_from_resource_name(resource)
     if isinstance(filters, str):
         filters = json.loads(filters)
-    if model:
+    if model and filters is not None:
         queryset = model.objects.filter(**filters)
         model.batch_index(queryset, model.get_search_document())
 
