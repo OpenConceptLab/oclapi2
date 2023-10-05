@@ -700,17 +700,14 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             parent = concept.parent
             if startswith_temp_version(concept.mnemonic):
                 next_valid_seq = parent.concept_mnemonic_next  # returns str of int or None
-                print("***Initial Next ID**", next_valid_seq)
                 if parent.is_sequential_concepts_mnemonic:
                     try:
                         available_next = int(parent.get_max_concept_mnemonic())
-                        print("***Existing Max ID**", available_next)
                         if available_next and available_next >= int(next_valid_seq):
                             PostgresQL.update_seq(parent.concepts_mnemonic_seq_name, available_next)
                             next_valid_seq = parent.concept_mnemonic_next
                     except:  # pylint: disable=bare-except
                         pass
-                print("***Calculated Next ID**", next_valid_seq)
                 concept.name = concept.mnemonic = next_valid_seq or str(concept.id)
             if not concept.external_id:
                 concept.external_id = parent.concept_external_id_next
