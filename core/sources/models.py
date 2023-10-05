@@ -5,6 +5,7 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import UniqueConstraint, F, Max, Count
+from django.db.models.functions import Cast
 from pydash import get
 
 from core.common.constants import HEAD
@@ -411,7 +412,14 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
 
     @staticmethod
     def get_max_mnemonic_for_resource(queryset):
-        return get(queryset.filter(mnemonic__regex=r'^\d+$').aggregate(max_val=Max('mnemonic')), 'max_val', None)
+        return get(
+            queryset.filter(
+                mnemonic__regex=r'^\d+$'
+            ).annotate(
+                mnemonic_int=Cast('mnemonic', models.IntegerField())
+            ).aggregate(
+                max_val=Max('mnemonic_int')), 'max_val', None
+        )
 
     @property
     def last_concept_update(self):
