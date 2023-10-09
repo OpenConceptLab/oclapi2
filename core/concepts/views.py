@@ -24,7 +24,7 @@ from core.common.swagger_parameters import (
     cascade_map_types_param, cascade_exclude_map_types_param, cascade_hierarchy_param, cascade_mappings_param,
     cascade_levels_param, cascade_direction_param, cascade_view_hierarchy, return_map_types_param,
     omit_if_exists_in_param, equivalency_map_types_param)
-from core.common.tasks import delete_concept, make_hierarchy, concepts_update_updated_by
+from core.common.tasks import delete_concept, make_hierarchy
 from core.common.utils import to_parent_uri_from_kwargs, generate_temp_version, get_truthy_values
 from core.common.views import SourceChildCommonBaseView, SourceChildExtrasView, \
     SourceChildExtraRetrieveUpdateDestroyView, BaseAPIView
@@ -39,7 +39,6 @@ from core.concepts.serializers import (
     ConceptVersionListSerializer, ConceptSummarySerializer, ConceptMinimalSerializer,
     ConceptChildrenSerializer, ConceptParentsSerializer, ConceptLookupListSerializer)
 from core.mappings.serializers import MappingListSerializer
-
 
 TRUTHY = get_truthy_values()
 
@@ -124,23 +123,6 @@ class ConceptDefaultLocalesView(ListAPIView, BaseAPIView):  # pragma: no cover
             return queryset
 
         raise Http404()
-
-
-class ConceptUpdateUpdatedBy(APIView):  # pragma: no cover
-    permission_classes = (IsAdminUser,)
-
-    @staticmethod
-    def get(request):
-        result = concepts_update_updated_by.delay()
-        return Response(
-            {
-                'state': result.state,
-                'username': request.user.username,
-                'task': result.task_id,
-                'queue': 'default'
-            },
-            status=status.HTTP_202_ACCEPTED
-        )
 
 
 class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
