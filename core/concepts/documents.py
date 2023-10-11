@@ -1,5 +1,6 @@
 from django_elasticsearch_dsl import Document, fields
 from django_elasticsearch_dsl.registries import registry
+from elasticsearch_dsl import MetaField
 
 from core.common.utils import jsonify_safe, flatten_dict
 from core.concepts.models import Concept
@@ -11,13 +12,16 @@ class ConceptDocument(Document):
         name = 'concepts'
         settings = {'number_of_shards': 1, 'number_of_replicas': 0}
 
+    class Meta:
+        dynamic = MetaField('strict')
+
     id = fields.TextField(attr='mnemonic')
-    id_lowercase = fields.KeywordField(attr='mnemonic', normalizer="lowercase", dynamic='strict')
+    id_lowercase = fields.KeywordField(attr='mnemonic', normalizer="lowercase")
     numeric_id = fields.LongField()
     name = fields.TextField()
     _name = fields.KeywordField(attr='display_name', normalizer='lowercase')
     last_update = fields.DateField(attr='updated_at')
-    updated_by = fields.KeywordField(attr='updated_by.username', dynamic='strict')
+    updated_by = fields.KeywordField(attr='updated_by.username')
     locale = fields.ListField(fields.KeywordField())
     synonyms = fields.ListField(fields.TextField())
     source = fields.KeywordField(attr='parent_resource', normalizer="lowercase")
