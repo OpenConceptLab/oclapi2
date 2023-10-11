@@ -12,12 +12,12 @@ class ConceptDocument(Document):
         settings = {'number_of_shards': 1, 'number_of_replicas': 0}
 
     id = fields.TextField(attr='mnemonic')
-    id_lowercase = fields.KeywordField(attr='mnemonic', normalizer="lowercase")
+    id_lowercase = fields.KeywordField(attr='mnemonic', normalizer="lowercase", dynamic='strict')
     numeric_id = fields.LongField()
     name = fields.TextField()
     _name = fields.KeywordField(attr='display_name', normalizer='lowercase')
     last_update = fields.DateField(attr='updated_at')
-    updated_by = fields.KeywordField(attr='updated_by.username')
+    updated_by = fields.KeywordField(attr='updated_by.username', dynamic='strict')
     locale = fields.ListField(fields.KeywordField())
     synonyms = fields.ListField(fields.TextField())
     source = fields.KeywordField(attr='parent_resource', normalizer="lowercase")

@@ -19,7 +19,7 @@ class MappingDocument(Document):
         ]
 
     last_update = fields.DateField(attr='updated_at')
-    updated_by = fields.KeywordField(attr='updated_by.username')
+    updated_by = fields.KeywordField(attr='updated_by.username', dynamic='strict')
     owner = fields.KeywordField(attr='owner_name', normalizer="lowercase")
     owner_type = fields.KeywordField(attr='owner_type')
     source = fields.KeywordField(attr='source', normalizer="lowercase")
