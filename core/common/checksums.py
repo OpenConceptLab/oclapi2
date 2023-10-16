@@ -110,7 +110,7 @@ class ChecksumModel(models.Model):
 
     @staticmethod
     def generate_checksum(data):
-        return Checksum.generate(data)
+        return Checksum.generate(ChecksumModel._cleanup(data))
 
     @staticmethod
     def generate_queryset_checksum(queryset, standard=False):
@@ -129,6 +129,19 @@ class ChecksumModel(models.Model):
     def _calculate_smart_checksum(self):
         fields = self.get_smart_checksum_fields()
         return self.generate_checksum(fields) if fields else None
+
+    @staticmethod
+    def _cleanup(fields):
+        if isinstance(fields, dict):
+            new_fields = {}
+            for key, value in new_fields.items():
+                if value is None:
+                    continue
+                if key in ['is_active', 'retired'] and not value:
+                    continue
+                new_fields[key] = value
+            return new_fields
+        return fields
 
     def _calculate_checksums(self):
         return self.get_all_checksums()
