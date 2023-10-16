@@ -454,19 +454,7 @@ class SourceChildMixin(ChecksumModel):
     class Meta:
         abstract = True
 
-    def get_all_checksums(self):
-        return {
-            **super().get_all_checksums(),
-            'repo_versions': self.source_versions_checksum,
-        }
-
-    def set_source_versions_checksum(self):
-        self.set_specific_checksums('repo_versions', self.source_versions_checksum)
-
-    @property
-    def source_versions_checksum(self):
-        checksums = [version.checksum for version in self.sources.exclude(version=HEAD)]
-        return self.generate_checksum(checksums) if checksums else None
+    CHECKSUM_TYPES = {'standard', 'smart'}
 
     @staticmethod
     def is_strictly_equal(instance1, instance2):
@@ -474,7 +462,7 @@ class SourceChildMixin(ChecksumModel):
 
     @staticmethod
     def is_equal(instance1, instance2):
-        return instance1.get_basic_checksums() == instance2.get_basic_checksums()
+        return instance1.get_standard_checksums() == instance2.get_standard_checksums()
 
     @staticmethod
     def apply_user_criteria(queryset, user):

@@ -18,20 +18,20 @@ class ChecksumModel(models.Model):
 
     CHECKSUM_EXCLUSIONS = []
     CHECKSUM_INCLUSIONS = []
-    CHECKSUM_TYPES = {'meta'}
-    BASIC_CHECKSUM_TYPES = {'meta'}
-    METADATA_CHECKSUM_KEY = 'meta'
-    ALL_CHECKSUM_KEY = 'all'
+    STANDARD_CHECKSUM_KEY = 'standard'
+    SMART_CHECKSUM_KEY = 'smart'
+    CHECKSUM_TYPES = {STANDARD_CHECKSUM_KEY}
+    STANDARD_CHECKSUM_TYPES = {STANDARD_CHECKSUM_KEY}
 
-    def get_checksums(self, basic=False, queue=False):
+    def get_checksums(self, standard=False, queue=False):
         if Toggle.get('CHECKSUMS_TOGGLE'):
-            if self.checksums and self.has_checksums(basic):
+            if self.checksums and self.has_checksums(standard):
                 return self.checksums
             if queue:
                 self.queue_checksum_calculation()
                 return self.checksums or {}
-            if basic:
-                self.set_basic_checksums()
+            if standard:
+                self.set_standard_checksums()
             else:
                 self.set_checksums()
 
@@ -51,69 +51,87 @@ class ChecksumModel(models.Model):
         self.checksums[checksum_type] = checksum
         self.save(update_fields=['checksums'])
 
-    def has_checksums(self, basic=False):
-        return self.has_basic_checksums() if basic else self.has_all_checksums()
+    def has_checksums(self, standard=False):
+        return self.has_standard_checksums() if standard else self.has_all_checksums()
 
     def has_all_checksums(self):
         return set(self.checksums.keys()) - set(self.CHECKSUM_TYPES) == set()
 
-    def has_basic_checksums(self):
-        return set(self.checksums.keys()) - set(self.BASIC_CHECKSUM_TYPES) == set()
+    def has_standard_checksums(self):
+        return set(self.checksums.keys()) - set(self.STANDARD_CHECKSUM_TYPES) == set()
 
     def set_checksums(self):
         if Toggle.get('CHECKSUMS_TOGGLE'):
             self.checksums = self._calculate_checksums()
             self.save(update_fields=['checksums'])
 
-    def set_basic_checksums(self):
+    def set_standard_checksums(self):
         if Toggle.get('CHECKSUMS_TOGGLE'):
-            self.checksums = self.get_basic_checksums()
+            self.checksums = self.get_standard_checksums()
             self.save(update_fields=['checksums'])
 
     @property
     def checksum(self):
-        """Returns the checksum of the model instance or metadata only checksum."""
+        """Returns the checksum of the model instance or standard only checksum."""
         if Toggle.get('CHECKSUMS_TOGGLE'):
-            if get(self, f'checksums.{self.METADATA_CHECKSUM_KEY}'):
-                return self.checksums[self.METADATA_CHECKSUM_KEY]
+            if get(self, f'checksums.{self.STANDARD_CHECKSUM_KEY}'):
+                return self.checksums[self.STANDARD_CHECKSUM_KEY]
             self.get_checksums()
 
-            return self.checksums.get(self.METADATA_CHECKSUM_KEY)
+            return self.checksums.get(self.STANDARD_CHECKSUM_KEY)
         return None
 
     def get_checksum_fields(self):
         return {field: getattr(self, field) for field in self.CHECKSUM_INCLUSIONS}
 
-    def get_basic_checksums(self):
+    def get_standard_checksum_fields(self):
+        return self.get_checksum_fields()
+
+    def get_smart_checksum_fields(self):
+        return {}
+
+    def get_standard_checksums(self):
         if Toggle.get('CHECKSUMS_TOGGLE'):
-            return {self.METADATA_CHECKSUM_KEY: self._calculate_meta_checksum()}
+            checksums = {}
+            if self.STANDARD_CHECKSUM_KEY:
+                checksums[self.STANDARD_CHECKSUM_KEY] = self._calculate_standard_checksum()
+            return checksums
         return None
 
     def get_all_checksums(self):
-        return self.get_basic_checksums()
+        if Toggle.get('CHECKSUMS_TOGGLE'):
+            checksums = {}
+            if self.STANDARD_CHECKSUM_KEY:
+                checksums[self.STANDARD_CHECKSUM_KEY] = self._calculate_standard_checksum()
+            if self.SMART_CHECKSUM_KEY:
+                checksums[self.SMART_CHECKSUM_KEY] = self._calculate_smart_checksum()
+            return checksums
+        return None
 
     @staticmethod
     def generate_checksum(data):
         return Checksum.generate(data)
 
     @staticmethod
-    def generate_queryset_checksum(queryset, basic=False):
+    def generate_queryset_checksum(queryset, standard=False):
         _checksums = []
         for instance in queryset:
-            instance.get_checksums(basic)
+            instance.get_checksums(standard)
             _checksums.append(instance.checksum)
         if len(_checksums) == 1:
             return _checksums[0]
         return ChecksumModel.generate_checksum(_checksums)
 
-    def _calculate_meta_checksum(self):
-        return self.generate_checksum(self.get_checksum_fields())
+    def _calculate_standard_checksum(self):
+        fields = self.get_standard_checksum_fields()
+        return None if fields is None else self.generate_checksum(fields)
+
+    def _calculate_smart_checksum(self):
+        fields = self.get_smart_checksum_fields()
+        return self.generate_checksum(fields) if fields else None
 
     def _calculate_checksums(self):
-        _checksums = self.get_all_checksums()
-        if len(_checksums.keys()) > 1:
-            _checksums[self.ALL_CHECKSUM_KEY] = self.generate_checksum(list(_checksums.values()))
-        return _checksums
+        return self.get_all_checksums()
 
 
 class Checksum:

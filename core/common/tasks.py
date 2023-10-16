@@ -22,7 +22,6 @@ from core.common.constants import CONFIRM_EMAIL_ADDRESS_MAIL_SUBJECT, PASSWORD_R
 from core.common.utils import write_export_file, web_url, get_resource_class_from_resource_name, get_export_service, \
     get_date_range_label
 from core.reports.models import ResourceUsageReport
-from core.toggles.models import Toggle
 
 logger = get_task_logger(__name__)
 
@@ -340,11 +339,6 @@ def seed_children_to_new_version(self, resource, obj_id, export=True, sync=False
             if is_source:
                 instance.seed_concepts(index=index)
                 instance.seed_mappings(index=index)
-                if Toggle.get('CHECKSUMS_TOGGLE'):
-                    if get(settings, 'TEST_MODE', False):
-                        set_source_children_checksums(instance.id)
-                    else:
-                        set_source_children_checksums.apply_async((instance.id,), queue='indexing')
             elif autoexpand:
                 instance.cascade_children_to_expansion(index=index, sync=sync)
 
@@ -682,18 +676,6 @@ def post_import_update_resource_counts():
             uncounted_mappings.filter(parent_id=source.id).update(_counted=True)
         except:  # pylint: disable=bare-except
             pass
-
-
-@app.task(ignore_result=True)
-def set_source_children_checksums(source_id):
-    from core.sources.models import Source
-    source = Source.objects.filter(id=source_id).first()
-    if not source:
-        return
-    for concept in source.concepts.filter():
-        concept.set_source_versions_checksum()
-    for mapping in source.mappings.filter():
-        mapping.set_source_versions_checksum()
 
 
 @app.task(ignore_result=True)

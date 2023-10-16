@@ -103,9 +103,6 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         'from_concept_code', 'from_concept_name',
         'to_concept_code', 'to_concept_name'
     ]
-    CHECKSUM_TYPES = {
-        'meta', 'repo_versions', 'all'
-    }
 
     es_fields = {
         'id': {'sortable': False, 'filterable': True, 'exact': True},
@@ -133,6 +130,19 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         'to_concept_owner_type': {'sortable': False, 'filterable': True, 'facet': True},
         'external_id': {'sortable': False, 'filterable': True, 'facet': False, 'exact': True},
     }
+
+    def get_standard_checksum_fields(self):
+        return {
+            'extras': self.extras,
+            'map_type': self.map_type,
+            'from_concept_code': self.from_concept_code,
+            'to_concept_code': self.to_concept_code,
+            'from_concept_name': self.from_concept_name,
+            'to_concept_name': self.to_concept_name
+        }
+
+    def get_smart_checksum_fields(self):
+        return {**self.get_standard_checksum_fields(), 'retired': self.retired}
 
     @staticmethod
     def get_search_document():
@@ -410,7 +420,6 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
                 self.sources.set([parent])
                 self.set_checksums()
                 if self.from_concept_id:
-                    self.from_concept.set_mappings_checksum()
                     self.index_from_concept()
         except ValidationError as ex:
             self.errors.update(ex.message_dict)
@@ -468,8 +477,6 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
             initial_version.sources.set([parent])
             mapping.sources.set([parent])
             mapping.set_checksums()
-            if mapping.from_concept_id:
-                mapping.from_concept.set_mappings_checksum()
             if mapping._counted is True:
                 parent.update_mappings_count()
                 mapping.index_from_concept()
@@ -536,8 +543,6 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
                     obj.sources.set([parent])
                     obj.set_checksums()
                     obj.versioned_object.set_checksums()
-                    if obj.from_concept_id:
-                        obj.from_concept.set_mappings_checksum()
                     persisted = True
                     cls.resume_indexing()
 

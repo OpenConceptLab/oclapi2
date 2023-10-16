@@ -1284,87 +1284,37 @@ class ConceptTest(OCLTestCase):
     @patch('core.common.checksums.Checksum.generate')
     def test_checksum(self, checksum_generate_mock):
         checksum_generate_mock.side_effect = [
-            'meta-checksum', 'names-checksum', 'descriptions-checksum', 'mappings-checksum', 'all-checksum'
+            'standard-checksum', 'smart-checksum'
         ]
         concept = ConceptFactory()
 
         self.assertEqual(concept.checksums, {})
-        self.assertEqual(concept.checksum, 'meta-checksum')
+        self.assertEqual(concept.checksum, 'standard-checksum')
         self.assertEqual(
             concept.checksums,
             {
-                'meta': 'meta-checksum',
-                'names': 'names-checksum',
-                'descriptions': 'descriptions-checksum',
-                'mappings': 'mappings-checksum',
-                'repo_versions': None,
-                'all': 'all-checksum'
+                'standard': 'standard-checksum',
+                'smart': 'smart-checksum',
             }
         )
         checksum_generate_mock.assert_called()
 
-    @patch('core.common.checksums.Checksum.generate')
-    def test_mappings_checksum(self, checksum_generate_mock):
-        checksum_generate_mock.return_value = 'checksum'
-        parent = OrganizationSourceFactory()
-        concept = ConceptFactory(parent=parent)
-        MappingFactory(from_concept=concept, parent=parent, checksums={'meta': 'm1-checksum'})
-        MappingFactory(from_concept=concept, parent=parent, checksums={'meta': 'm2-checksum'})
-        MappingFactory(from_concept=concept, parent=parent, checksums={'meta': 'm3-checksum'}, retired=True)
-
-        self.assertEqual(concept.mappings_checksum, 'checksum')
-        checksum_generate_mock.assert_called_once()
-        self.assertCountEqual(checksum_generate_mock.call_args[0][0], ['m1-checksum', 'm2-checksum'])
-
-    @patch('core.common.checksums.Checksum.generate')
-    def test_names_checksum(self, checksum_generate_mock):
-        checksum_generate_mock.return_value = 'checksum'
-        concept = ConceptFactory()
-        ConceptNameFactory(concept=concept, checksums={'meta': 'n1-checksum'})
-        ConceptNameFactory(concept=concept, checksums={'meta': 'n2-checksum'})
-
-        self.assertEqual(concept.names_checksum, 'checksum')
-
-        checksum_generate_mock.assert_called_once_with(['n1-checksum', 'n2-checksum'])
-
-    @patch('core.common.checksums.Checksum.generate')
-    def test_descriptions_checksum(self, checksum_generate_mock):
-        checksum_generate_mock.return_value = 'checksum'
-        concept = ConceptFactory()
-        ConceptDescriptionFactory(concept=concept, checksums={'meta': 'd1-checksum'})
-        ConceptDescriptionFactory(concept=concept, checksums={'meta': 'd2-checksum'})
-
-        self.assertEqual(concept.descriptions_checksum, 'checksum')
-
-        checksum_generate_mock.assert_called_once_with(['d1-checksum', 'd2-checksum'])
-
     def test_get_checksums(self):
         parent = OrganizationSourceFactory()
         concept = ConceptFactory(parent=parent)
-        description = ConceptDescriptionFactory(concept=concept)
-        name = ConceptNameFactory(concept=concept)
-        mapping = MappingFactory(from_concept=concept, parent=parent)
+        ConceptDescriptionFactory(concept=concept)
+        ConceptNameFactory(concept=concept)
+        MappingFactory(from_concept=concept, parent=parent)
 
         checksums = concept.get_checksums()
         concept.refresh_from_db()
-        description.refresh_from_db()
-        name.refresh_from_db()
-        mapping.refresh_from_db()
 
         self.assertEqual(
             checksums,
-            {'meta': ANY, 'names': ANY, 'descriptions': ANY, 'mappings': ANY, 'repo_versions': ANY, 'all': ANY}
+            {'standard': ANY, 'smart': ANY}
         )
-        self.assertTrue(checksums['meta'] == concept.checksums['meta'] == concept.checksum)
-        self.assertTrue(checksums['names'] == concept.names_checksum)
-        self.assertTrue(checksums['descriptions'] == concept.descriptions_checksum)
-        self.assertTrue(checksums['mappings'] == concept.mappings_checksum)
-        self.assertTrue(checksums['repo_versions'] == concept.source_versions_checksum)
-        self.assertTrue(checksums['all'] == concept.checksums['all'])
-
-        self.assertEqual(name.checksums, {'meta': ANY})
-        self.assertEqual(description.checksums, {'meta': ANY})
-        self.assertEqual(mapping.checksums, {'meta': ANY})
+        self.assertTrue(checksums['standard'] == concept.checksums['standard'] == concept.checksum)
+        self.assertTrue(checksums['smart'] == concept.checksums['smart'])
 
 
 class OpenMRSConceptValidatorTest(OCLTestCase):

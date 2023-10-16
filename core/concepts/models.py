@@ -20,7 +20,6 @@ from core.concepts.constants import CONCEPT_TYPE, LOCALES_FULLY_SPECIFIED, LOCAL
     PERSIST_CLONE_ERROR, PERSIST_CLONE_SPECIFY_USER_ERROR, ALREADY_EXISTS, CONCEPT_REGEX, MAX_LOCALES_LIMIT, \
     MAX_NAMES_LIMIT, MAX_DESCRIPTIONS_LIMIT
 from core.concepts.mixins import ConceptValidationMixin
-from core.toggles.models import Toggle
 
 
 class AbstractLocalizedText(ChecksumModel):
@@ -36,6 +35,7 @@ class AbstractLocalizedText(ChecksumModel):
     created_at = models.DateTimeField(auto_now_add=True)
 
     CHECKSUM_INCLUSIONS = ['locale', 'locale_preferred']
+    SMART_CHECKSUM_KEY = None
 
     def to_dict(self):
         return {
@@ -221,10 +221,6 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     CHECKSUM_INCLUSIONS = [
         'extras', 'concept_class', 'datatype', 'retired'
     ]
-    CHECKSUM_TYPES = {
-        'meta', 'names', 'descriptions', 'mappings', 'repo_versions', 'all'
-    }
-    BASIC_CHECKSUM_TYPES = {'meta', 'names', 'descriptions'}
 
     # $cascade as hierarchy attributes
     cascaded_entries = None
@@ -257,29 +253,21 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         'other_map_codes': {'sortable': False, 'filterable': True, 'facet': False, 'exact': True},
     }
 
-    def get_basic_checksums(self):
+    def get_standard_checksum_fields(self):
         return {
-            **super().get_basic_checksums(),
-            'names': self.names_checksum,
-            'descriptions': self.descriptions_checksum,
-            'mappings': self.mappings_checksum
+            'extras': self.extras,
+            'concept_class': self.concept_class,
+            'datatype': self.datatype,
+            'names': [name.get_checksum_fields() for name in self.names.filter()],
         }
 
-    def set_mappings_checksum(self):
-        if Toggle.get('CHECKSUMS_TOGGLE'):
-            self.set_specific_checksums('mappings', self.mappings_checksum)
-
-    @property
-    def mappings_checksum(self):
-        return self.generate_queryset_checksum(self.get_unidirectional_mappings().filter(retired=False), True)
-
-    @property
-    def names_checksum(self):
-        return self.generate_queryset_checksum(self.names.filter())
-
-    @property
-    def descriptions_checksum(self):
-        return self.generate_queryset_checksum(self.descriptions.filter())
+    def get_smart_checksum_fields(self):
+        return {
+            'concept_class': self.concept_class,
+            'datatype': self.datatype,
+            'retired': self.retired,
+            'names': [name.get_checksum_fields() for name in self.names.filter() if name.is_fully_specified],
+        }
 
     @staticmethod
     def get_search_document():
@@ -932,8 +920,6 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         Mapping.objects.filter(
             from_concept_code=self.mnemonic, from_source_url__in=parent_uris, from_concept__isnull=True
         ).update(from_concept=self)
-
-        self.set_mappings_checksum()
 
     @property
     def parent_concept_urls(self):
