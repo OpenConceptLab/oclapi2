@@ -63,6 +63,7 @@ from core.concepts.search import ConceptFacetedSearch
 from core.mappings.documents import MappingDocument
 from core.mappings.models import Mapping
 from core.mappings.search import MappingFacetedSearch
+from core.toggles.models import Toggle
 
 logger = logging.getLogger('oclapi')
 
@@ -253,6 +254,12 @@ class CollectionRetrieveUpdateDestroyView(
                     version.update_concepts_count()
                 if version.should_set_active_mappings:
                     version.update_mappings_count()
+
+        if Toggle.get('CHECKSUMS_TOGGLE'):
+            instance.get_checksums()
+            for version in instance.versions:
+                version.get_checksums()
+
         return instance
 
     def get_permissions(self):
