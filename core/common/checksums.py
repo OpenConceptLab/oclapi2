@@ -134,7 +134,7 @@ class ChecksumModel(models.Model):
     def _cleanup(fields):
         if isinstance(fields, dict):
             new_fields = {}
-            for key, value in new_fields.items():
+            for key, value in fields.items():
                 if value is None:
                     continue
                 if key in ['is_active', 'retired'] and not value:
