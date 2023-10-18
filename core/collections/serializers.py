@@ -100,7 +100,6 @@ class CollectionVersionListSerializer(ModelSerializer):
     previous_version_url = CharField(source='prev_version_uri')
     autoexpand = BooleanField(source='should_auto_expand')
     expansion_url = CharField(source='expansion_uri', read_only=True)
-    checksums = SerializerMethodField()
 
     class Meta:
         model = Collection
@@ -109,10 +108,6 @@ class CollectionVersionListSerializer(ModelSerializer):
             'created_at', 'id', 'collection_type', 'updated_at', 'released', 'retired', 'version_url',
             'previous_version_url', 'autoexpand', 'expansion_url', 'checksums'
         )
-
-    @staticmethod
-    def get_checksums(obj):
-        return obj.get_checksums(queue=True)
 
 
 class CollectionCreateOrUpdateSerializer(ModelSerializer):
@@ -358,7 +353,6 @@ class CollectionDetailSerializer(CollectionCreateOrUpdateSerializer, AbstractRep
     summary = SerializerMethodField()
     client_configs = SerializerMethodField()
     expansion_url = CharField(source='expansion_uri', read_only=True, allow_null=True, allow_blank=True)
-    checksums = SerializerMethodField()
 
     class Meta:
         model = Collection
@@ -413,10 +407,6 @@ class CollectionDetailSerializer(CollectionCreateOrUpdateSerializer, AbstractRep
         ret.update({"supported_locales": instance.get_supported_locales()})
         return ret
 
-    @staticmethod
-    def get_checksums(obj):
-        return obj.get_checksums(queue=True)
-
 
 class CollectionVersionDetailSerializer(CollectionCreateOrUpdateSerializer, AbstractRepoResourcesSerializer):
     type = CharField(source='resource_version_type')
@@ -439,7 +429,6 @@ class CollectionVersionDetailSerializer(CollectionCreateOrUpdateSerializer, Abst
     summary = SerializerMethodField()
     autoexpand = SerializerMethodField()
     expansion_url = CharField(source='expansion_uri', allow_null=True, allow_blank=True)
-    checksums = SerializerMethodField()
 
     class Meta:
         model = Collection
@@ -481,10 +470,6 @@ class CollectionVersionDetailSerializer(CollectionCreateOrUpdateSerializer, Abst
     @staticmethod
     def get_autoexpand(obj):
         return obj.should_auto_expand
-
-    @staticmethod
-    def get_checksums(obj):
-        return obj.get_checksums(queue=True)
 
 
 class CollectionReferenceSerializer(ModelSerializer):

@@ -90,7 +90,6 @@ class SourceVersionListSerializer(ModelSerializer):
     version_url = CharField(source='uri')
     url = CharField(source='versioned_object_url')
     previous_version_url = CharField(source='prev_version_uri')
-    checksums = SerializerMethodField()
 
     class Meta:
         model = Source
@@ -99,10 +98,6 @@ class SourceVersionListSerializer(ModelSerializer):
             'created_at', 'id', 'source_type', 'updated_at', 'released', 'retired', 'version_url',
             'previous_version_url', 'checksums'
         )
-
-    @staticmethod
-    def get_checksums(obj):
-        return obj.get_checksums(queue=True)
 
 
 class SourceCreateOrUpdateSerializer(ModelSerializer):
@@ -355,7 +350,6 @@ class SourceDetailSerializer(SourceCreateOrUpdateSerializer, AbstractRepoResourc
     client_configs = SerializerMethodField()
     hierarchy_root = SerializerMethodField()
     hierarchy_root_url = CharField(source='hierarchy_root.url', required=False, allow_blank=True, allow_null=True)
-    checksums = SerializerMethodField()
 
     class Meta:
         model = Source
@@ -422,10 +416,6 @@ class SourceDetailSerializer(SourceCreateOrUpdateSerializer, AbstractRepoResourc
         ret.update({"supported_locales": instance.get_supported_locales()})
         return ret
 
-    @staticmethod
-    def get_checksums(obj):
-        return obj.get_checksums(queue=True)
-
 
 class SourceVersionDetailSerializer(SourceCreateOrUpdateSerializer, AbstractRepoResourcesSerializer):
     type = CharField(source='resource_version_type')
@@ -447,7 +437,6 @@ class SourceVersionDetailSerializer(SourceCreateOrUpdateSerializer, AbstractRepo
     previous_version_url = CharField(source='prev_version_uri')
     summary = SerializerMethodField()
     hierarchy_root_url = CharField(source='hierarchy_root.url', required=False, allow_blank=True, allow_null=True)
-    checksums = SerializerMethodField()
 
     class Meta:
         model = Source
@@ -486,10 +475,6 @@ class SourceVersionDetailSerializer(SourceCreateOrUpdateSerializer, AbstractRepo
             summary = SourceVersionSummarySerializer(obj).data
 
         return summary
-
-    @staticmethod
-    def get_checksums(obj):
-        return obj.get_checksums(queue=True)
 
 
 class SourceVersionExportSerializer(SourceVersionDetailSerializer):

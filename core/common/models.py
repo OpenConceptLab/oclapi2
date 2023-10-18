@@ -647,6 +647,9 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         obj.update_version_data(head)
         obj.save(**kwargs)
 
+        if obj.id:
+            obj.get_checksums(recalculate=True)
+
         is_test_mode = get(settings, 'TEST_MODE', False)
         if is_test_mode or sync:
             seed_children_to_new_version(obj.resource_type.lower(), obj.id, not is_test_mode, sync)

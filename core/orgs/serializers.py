@@ -67,6 +67,8 @@ class OrganizationCreateSerializer(serializers.ModelSerializer):
         organization = self.prepare_object(validated_data)
         if not self._errors:
             organization.save()
+            if organization.id:
+                organization.set_checksums()
         return organization
 
 
@@ -129,6 +131,8 @@ class OrganizationDetailSerializer(AbstractResourceSerializer):
         instance.text = validated_data.get('text', None)
         instance.updated_by = request_user
         instance.save()
+        if instance.id:
+            instance.set_checksums()
         return instance
 
 

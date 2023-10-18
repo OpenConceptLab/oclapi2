@@ -517,6 +517,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         mapping.from_source_version = self.from_source_version
         mapping.updated_by_id = self.updated_by_id
         mapping.save()
+        mapping.set_checksums()
 
     @classmethod
     def persist_clone(cls, obj, user=None, **kwargs):  # pylint: disable=too-many-statements

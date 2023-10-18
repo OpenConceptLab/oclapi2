@@ -210,6 +210,7 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
         self.deactivated_at = datetime.now()
         self.__delete_token()
         self.save()
+        self.set_checksums()
 
     def verify(self):
         self.is_active = True
@@ -229,3 +230,4 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
         self.deactivated_at = None
         self.is_active = True
         self.save()
+        self.set_checksums()

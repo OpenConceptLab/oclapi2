@@ -115,6 +115,7 @@ class UserCreateSerializer(serializers.ModelSerializer):
                 user.verification_token = uuid.uuid4()
 
         user.save()
+        user.set_checksums()
         user.token = user.get_token()
         user.send_verification_email()
 
@@ -204,4 +205,6 @@ class UserDetailSerializer(AbstractResourceSerializer):
                     return instance
 
         instance.save()
+        if instance.id:
+            instance.set_checksums()
         return instance

@@ -754,6 +754,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         concept.external_id = self.external_id or concept.external_id
         concept.updated_by_id = self.updated_by_id
         concept.save()
+        concept.set_checksums()
 
     @classmethod
     def persist_clone(

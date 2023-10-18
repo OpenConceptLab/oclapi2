@@ -486,6 +486,7 @@ class UserExtraRetrieveUpdateDestroyView(UserExtrasBaseView, RetrieveUpdateDestr
         instance.extras = get(instance, 'extras', {})
         instance.extras[key] = value
         instance.save()
+        instance.set_checksums()
         return Response({key: value})
 
     def delete(self, request, *args, **kwargs):
@@ -495,6 +496,7 @@ class UserExtraRetrieveUpdateDestroyView(UserExtrasBaseView, RetrieveUpdateDestr
         if key in instance.extras:
             del instance.extras[key]
             instance.save()
+            instance.set_checksums()
             return Response(status=status.HTTP_204_NO_CONTENT)
 
         return Response({'detail': NOT_FOUND}, status=status.HTTP_404_NOT_FOUND)

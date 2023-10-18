@@ -277,7 +277,6 @@ class ConceptVersionListSerializer(ConceptListSerializer):
     previous_version_url = CharField(read_only=True, source='prev_version_uri')
     source_versions = ListField(read_only=True)
     collection_versions = ListField(read_only=True)
-    checksums = SerializerMethodField()
 
     class Meta:
         model = Concept
@@ -300,10 +299,6 @@ class ConceptVersionListSerializer(ConceptListSerializer):
             pass
 
         super().__init__(*args, **kwargs)
-
-    @staticmethod
-    def get_checksums(obj):
-        return obj.get_checksums(queue=True)
 
 
 class ConceptVersionCascadeSerializer(ConceptVersionListSerializer):
@@ -411,7 +406,6 @@ class ConceptDetailSerializer(ConceptAbstractSerializer):
     url = CharField(required=False, source='versioned_object_url')
     updated_by = DateTimeField(source='updated_by.username', read_only=True)
     created_by = DateTimeField(source='created_by.username', read_only=True)
-    checksums = SerializerMethodField()
 
     class Meta:
         model = Concept
@@ -440,10 +434,6 @@ class ConceptDetailSerializer(ConceptAbstractSerializer):
         if errors:
             self._errors.update(errors)
         return instance
-
-    @staticmethod
-    def get_checksums(obj):
-        return obj.get_checksums(queue=True)
 
 
 class ConceptVersionExportSerializer(ModelSerializer):
@@ -506,7 +496,6 @@ class ConceptVersionDetailSerializer(ModelSerializer):
     source_versions = ListField(read_only=True)
     collection_versions = ListField(read_only=True)
     references = SerializerMethodField()
-    checksums = SerializerMethodField()
 
     def __init__(self, *args, **kwargs):
         request = get(kwargs, 'context.request')
@@ -551,10 +540,6 @@ class ConceptVersionDetailSerializer(ModelSerializer):
             'source_versions', 'collection_versions', 'versioned_object_id', 'references', 'checksums',
             'version_updated_on', 'version_updated_by'
         )
-
-    @staticmethod
-    def get_checksums(obj):
-        return obj.get_checksums(queue=True)
 
     def get_references(self, obj):
         collection = get(self, 'context.request.instance')

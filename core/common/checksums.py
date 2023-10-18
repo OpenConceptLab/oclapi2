@@ -20,8 +20,6 @@ class ChecksumModel(models.Model):
     CHECKSUM_INCLUSIONS = []
     STANDARD_CHECKSUM_KEY = 'standard'
     SMART_CHECKSUM_KEY = 'smart'
-    CHECKSUM_TYPES = {STANDARD_CHECKSUM_KEY}
-    STANDARD_CHECKSUM_TYPES = {STANDARD_CHECKSUM_KEY}
 
     def get_checksums(self, standard=False, queue=False, recalculate=False):
         if Toggle.get('CHECKSUMS_TOGGLE'):
@@ -52,13 +50,20 @@ class ChecksumModel(models.Model):
         self.save(update_fields=['checksums'])
 
     def has_checksums(self, standard=False):
-        return self.has_standard_checksums() if standard else self.has_all_checksums()
+        return self.has_standard_checksum() if standard else self.has_all_checksums()
 
     def has_all_checksums(self):
-        return set(self.checksums.keys()) - set(self.CHECKSUM_TYPES) == set()
+        return self.has_standard_checksum() and self.has_smart_checksum()
 
-    def has_standard_checksums(self):
-        return set(self.checksums.keys()) - set(self.STANDARD_CHECKSUM_TYPES) == set()
+    def has_standard_checksum(self):
+        if self.STANDARD_CHECKSUM_KEY:
+            return self.STANDARD_CHECKSUM_KEY in self.checksums
+        return True
+
+    def has_smart_checksum(self):
+        if self.SMART_CHECKSUM_KEY:
+            return self.SMART_CHECKSUM_KEY in self.checksums
+        return True
 
     def set_checksums(self):
         if Toggle.get('CHECKSUMS_TOGGLE'):
@@ -68,6 +73,11 @@ class ChecksumModel(models.Model):
     def set_standard_checksums(self):
         if Toggle.get('CHECKSUMS_TOGGLE'):
             self.checksums = self.get_standard_checksums()
+            self.save(update_fields=['checksums'])
+
+    def set_smart_checksums(self):
+        if Toggle.get('CHECKSUMS_TOGGLE'):
+            self.checksums = self.get_smart_checksums()
             self.save(update_fields=['checksums'])
 
     @property
@@ -92,9 +102,17 @@ class ChecksumModel(models.Model):
 
     def get_standard_checksums(self):
         if Toggle.get('CHECKSUMS_TOGGLE'):
-            checksums = {}
+            checksums = self.checksums or {}
             if self.STANDARD_CHECKSUM_KEY:
                 checksums[self.STANDARD_CHECKSUM_KEY] = self._calculate_standard_checksum()
+            return checksums
+        return None
+
+    def get_smart_checksums(self):
+        if Toggle.get('CHECKSUMS_TOGGLE'):
+            checksums = self.checksums or {}
+            if self.SMART_CHECKSUM_KEY:
+                checksums[self.SMART_CHECKSUM_KEY] = self._calculate_smart_checksum()
             return checksums
         return None
 

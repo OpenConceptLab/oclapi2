@@ -40,19 +40,23 @@ class OCLOIDCAuthenticationBackend(OIDCAuthenticationBackend):
         #     'email': 'inactive@user.com'
         # }
         from core.users.models import UserProfile
-        return UserProfile.objects.create_user(
+        user = UserProfile.objects.create_user(
             claims.get('preferred_username'),
             email=claims.get('email'),
             first_name=claims.get('given_name'),
             last_name=claims.get('family_name'),
             verified=claims.get('email_verified')
         )
+        if user.id:
+            user.set_checksums()
+        return user
 
     def update_user(self, user, claims):
         user.first_name = claims.get('given_name') or user.first_name
         user.last_name = claims.get('family_name') or user.last_name
         user.email = claims.get('email') or user.email
         user.save()
+        user.set_checksums()
         return user
 
     def filter_users_by_claims(self, claims):

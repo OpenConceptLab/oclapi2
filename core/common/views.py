@@ -982,6 +982,7 @@ class ConceptContainerExtraRetrieveUpdateDestroyView(RetrieveUpdateDestroyAPIVie
         instance.extras[key] = value
         instance.comment = f'Updated extras: {key}={value}.'
         instance.save()
+        instance.set_checksums()
         return Response({key: value})
 
     def delete(self, request, *args, **kwargs):
@@ -992,6 +993,7 @@ class ConceptContainerExtraRetrieveUpdateDestroyView(RetrieveUpdateDestroyAPIVie
             del instance.extras[key]
             instance.comment = f'Deleted extra {key}.'
             instance.save()
+            instance.set_checksums()
             return Response(status=status.HTTP_204_NO_CONTENT)
 
         return Response({'detail': NOT_FOUND}, status=status.HTTP_404_NOT_FOUND)

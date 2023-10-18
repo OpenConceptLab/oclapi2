@@ -410,6 +410,7 @@ class ConceptDictionaryUpdateMixin(ConceptDictionaryMixin):
         if serializer.is_valid():
             self.object = serializer.save(**save_kwargs)
             if serializer.is_valid():
+                self.object.get_checksums(recalculate=True)
                 serializer = self.get_detail_serializer(self.object)
                 return Response(serializer.data, status=success_status_code)
 
@@ -453,8 +454,6 @@ class SourceContainerMixin:
 class SourceChildMixin(ChecksumModel):
     class Meta:
         abstract = True
-
-    CHECKSUM_TYPES = {'standard', 'smart'}
 
     @staticmethod
     def is_strictly_equal(instance1, instance2):
