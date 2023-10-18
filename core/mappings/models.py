@@ -133,16 +133,23 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
 
     def get_standard_checksum_fields(self):
         return {
-            'extras': self.extras,
             'map_type': self.map_type,
             'from_concept_code': self.from_concept_code,
             'to_concept_code': self.to_concept_code,
             'from_concept_name': self.from_concept_name,
-            'to_concept_name': self.to_concept_name
+            'to_concept_name': self.to_concept_name,
+            'extras': self.extras,
         }
 
     def get_smart_checksum_fields(self):
-        return {**self.get_standard_checksum_fields(), 'retired': self.retired}
+        return {
+            'map_type': self.map_type,
+            'from_concept_code': self.from_concept_code,
+            'to_concept_code': self.to_concept_code,
+            'from_concept_name': self.from_concept_name,
+            'to_concept_name': self.to_concept_name,
+            'retired': self.retired
+        }
 
     @staticmethod
     def get_search_document():

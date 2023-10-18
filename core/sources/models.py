@@ -91,24 +91,24 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
 
     def get_standard_checksum_fields(self):
         return {
-            'website': self.website,
-            'supported_locales': self.supported_locales,
-            'extras': self.extras,
             'source_type': self.source_type,
             'canonical_url': self.canonical_url,
-            'default_locale': self.default_locale,
             'custom_validation_schema': self.custom_validation_schema,
-            'hierarchy_meaning': self.hierarchy_meaning
+            'default_locale': self.default_locale,
+            'supported_locales': self.supported_locales,
+            'website': self.website,
+            'hierarchy_meaning': self.hierarchy_meaning,
+            'extras': self.extras,
         }
 
     def get_smart_checksum_fields(self):
         return {
-            'released': self.released,
-            'retired': self.retired,
             'source_type': self.source_type,
             'canonical_url': self.canonical_url,
-            'default_locale': self.default_locale,
             'custom_validation_schema': self.custom_validation_schema,
+            'default_locale': self.default_locale,
+            'released': self.released,
+            'retired': self.retired,
         }
 
     @property

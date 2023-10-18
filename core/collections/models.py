@@ -93,23 +93,23 @@ class Collection(ConceptContainerModel):
 
     def get_standard_checksum_fields(self):
         return {
-            'website': self.website,
-            'supported_locales': self.supported_locales,
-            'extras': self.extras,
             'collection_type': self.collection_type,
             'canonical_url': self.canonical_url,
+            'custom_validation_schema': self.custom_validation_schema,
             'default_locale': self.default_locale,
-            'custom_validation_schema': self.custom_validation_schema
+            'supported_locales': self.supported_locales,
+            'website': self.website,
+            'extras': self.extras,
         }
 
     def get_smart_checksum_fields(self):
         return {
-            'released': self.released,
-            'retired': self.retired,
             'collection_type': self.collection_type,
             'canonical_url': self.canonical_url,
-            'default_locale': self.default_locale,
             'custom_validation_schema': self.custom_validation_schema,
+            'default_locale': self.default_locale,
+            'released': self.released,
+            'retired': self.retired,
         }
 
     def set_active_concepts(self):

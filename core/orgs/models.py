@@ -3,13 +3,14 @@ from django.core.validators import RegexValidator
 from django.db import models, transaction
 
 from core.client_configs.models import ClientConfig
+from core.common.checksums import ChecksumModel
 from core.common.constants import NAMESPACE_REGEX, ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT
 from core.common.mixins import SourceContainerMixin
 from core.common.models import BaseResourceModel
 from core.orgs.constants import ORG_OBJECT_TYPE
 
 
-class Organization(BaseResourceModel, SourceContainerMixin):
+class Organization(BaseResourceModel, SourceContainerMixin, ChecksumModel):
     class Meta:
         db_table = 'organizations'
         indexes = [
@@ -39,6 +40,24 @@ class Organization(BaseResourceModel, SourceContainerMixin):
     client_configs = GenericRelation(ClientConfig, object_id_field='resource_id', content_type_field='resource_type')
     text = models.TextField(null=True, blank=True)  # for about description (markup)
     overview = models.JSONField(default=dict)
+
+    def get_standard_checksum_fields(self):
+        return {
+            'name': self.name,
+            'company': self.company,
+            'location': self.location,
+            'website': self.website,
+            'extras': self.extras,
+        }
+
+    def get_smart_checksum_fields(self):
+        return {
+            'name': self.name,
+            'company': self.company,
+            'location': self.location,
+            'website': self.website,
+            'is_active': self.is_active
+        }
 
     def calculate_uri(self):
         return f"/orgs/{self.mnemonic}/"

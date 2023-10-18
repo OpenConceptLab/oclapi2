@@ -255,18 +255,18 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
     def get_standard_checksum_fields(self):
         return {
-            'extras': self.extras,
             'concept_class': self.concept_class,
             'datatype': self.datatype,
             'names': [name.get_checksum_fields() for name in self.names.filter()],
+            'extras': self.extras,
         }
 
     def get_smart_checksum_fields(self):
         return {
             'concept_class': self.concept_class,
             'datatype': self.datatype,
-            'retired': self.retired,
             'names': [name.get_checksum_fields() for name in self.names.filter() if name.is_fully_specified],
+            'retired': self.retired,
         }
 
     @staticmethod

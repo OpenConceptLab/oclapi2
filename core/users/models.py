@@ -13,9 +13,10 @@ from core.common.tasks import send_user_verification_email, send_user_reset_pass
 from core.common.utils import web_url
 from core.users.constants import AUTH_GROUPS
 from .constants import USER_OBJECT_TYPE
+from ..common.checksums import ChecksumModel
 
 
-class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin):
+class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin, ChecksumModel):
     class Meta:
         db_table = 'user_profiles'
         swappable = 'AUTH_USER_MODEL'
@@ -50,6 +51,28 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
         'is_staff': {'sortable': False, 'filterable': False, 'exact': False, 'facet': True},
         'is_admin': {'sortable': False, 'filterable': False, 'exact': False, 'facet': True}
     }
+
+    def get_standard_checksum_fields(self):
+        return {
+            'first_name': self.first_name,
+            'last_name': self.last_name,
+            'username': self.username,
+            'company': self.company,
+            'location': self.location,
+            'website': self.website,
+            'preferred_locale': self.preferred_locale,
+            'extras': self.extras,
+        }
+
+    def get_smart_checksum_fields(self):
+        return {
+            'first_name': self.first_name,
+            'last_name': self.last_name,
+            'username': self.username,
+            'company': self.company,
+            'location': self.location,
+            'is_active': self.is_active
+        }
 
     def calculate_uri(self):
         return f"/users/{self.username}/"
