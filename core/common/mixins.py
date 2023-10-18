@@ -16,10 +16,10 @@ from rest_framework.response import Response
 
 from core.common.constants import HEAD, ACCESS_TYPE_NONE, INCLUDE_FACETS, \
     LIST_DEFAULT_LIMIT, HTTP_COMPRESS_HEADER, CSV_DEFAULT_LIMIT, FACETS_ONLY, INCLUDE_RETIRED_PARAM, \
-    SEARCH_STATS_ONLY, INCLUDE_SEARCH_STATS, UPDATED_BY_USERNAME_PARAM
+    SEARCH_STATS_ONLY, INCLUDE_SEARCH_STATS, UPDATED_BY_USERNAME_PARAM, CHECKSUM_STANDARD_HEADER, CHECKSUM_SMART_HEADER
 from core.common.permissions import HasPrivateAccess, HasOwnership, CanViewConceptDictionary, \
     CanViewConceptDictionaryVersion
-from .checksums import ChecksumModel
+from .checksums import ChecksumModel, Checksum
 from .utils import write_csv_to_s3, get_csv_from_s3, get_query_params_from_url_string, compact_dict_by_values, \
     to_owner_uri, parse_updated_since_param, get_export_service, to_int, get_truthy_values
 
@@ -109,8 +109,23 @@ class CustomPaginator:
             headers['next'] = self.get_next_page_url()
         if self.has_previous():
             headers['previous'] = self.get_previous_page_url()
-
+        standard, smart = self.checksums
+        if standard is not None:
+            headers[CHECKSUM_STANDARD_HEADER] = standard
+        if smart is not None:
+            headers[CHECKSUM_SMART_HEADER] = smart
         return headers
+
+    @property
+    def checksums(self):
+        standard, smart = [], []
+        if get(self.current_page_results, '0.checksums.standard'):
+            for result in self.current_page_results:
+                standard.append(get(result.checksums, 'standard'))
+                smart.append(get(result.checksums, 'smart'))
+        standard = compact(standard)
+        smart = compact(smart)
+        return Checksum.generate(standard) if standard else None, Checksum.generate(smart) if smart else None
 
 
 class ListWithHeadersMixin(ListModelMixin):

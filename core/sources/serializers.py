@@ -48,12 +48,13 @@ class SourceListSerializer(AbstractResourceSerializer):
     owner_url = CharField(source='parent_url')
     id = CharField(source='mnemonic')
     summary = SerializerMethodField()
+    checksums = SerializerMethodField()
 
     class Meta:
         model = Source
         fields = AbstractResourceSerializer.Meta.fields + (
             'short_code', 'name', 'url', 'owner', 'owner_type', 'owner_url', 'version', 'created_at', 'id',
-            'source_type', 'updated_at', 'canonical_url', 'summary', 'type',
+            'source_type', 'updated_at', 'canonical_url', 'summary', 'type', 'checksums'
         )
 
     def __init__(self, *args, **kwargs):
@@ -79,6 +80,10 @@ class SourceListSerializer(AbstractResourceSerializer):
 
         return summary
 
+    @staticmethod
+    def get_checksums(obj):
+        return obj.get_all_checksums()
+
 
 class SourceVersionListSerializer(ModelSerializer):
     type = CharField(source='resource_version_type')
@@ -90,6 +95,7 @@ class SourceVersionListSerializer(ModelSerializer):
     version_url = CharField(source='uri')
     url = CharField(source='versioned_object_url')
     previous_version_url = CharField(source='prev_version_uri')
+    checksums = SerializerMethodField()
 
     class Meta:
         model = Source
@@ -98,6 +104,10 @@ class SourceVersionListSerializer(ModelSerializer):
             'created_at', 'id', 'source_type', 'updated_at', 'released', 'retired', 'version_url',
             'previous_version_url', 'checksums'
         )
+
+    @staticmethod
+    def get_checksums(obj):
+        return obj.get_all_checksums()
 
 
 class SourceCreateOrUpdateSerializer(ModelSerializer):

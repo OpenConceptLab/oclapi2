@@ -55,13 +55,14 @@ class CollectionListSerializer(ModelSerializer):
     owner_url = CharField(source='parent_url')
     id = CharField(source='mnemonic')
     summary = SerializerMethodField()
+    checksums = SerializerMethodField()
 
     class Meta:
         model = Collection
         fields = (
             'short_code', 'name', 'url', 'owner', 'owner_type', 'owner_url', 'version', 'created_at', 'id',
             'collection_type', 'updated_at', 'canonical_url', 'autoexpand_head',
-            'summary', 'type',
+            'summary', 'type', 'checksums'
         )
 
     def __init__(self, *args, **kwargs):
@@ -87,6 +88,10 @@ class CollectionListSerializer(ModelSerializer):
 
         return summary
 
+    @staticmethod
+    def get_checksums(obj):
+        return obj.get_all_checksums()
+
 
 class CollectionVersionListSerializer(ModelSerializer):
     type = CharField(source='resource_version_type')
@@ -100,6 +105,7 @@ class CollectionVersionListSerializer(ModelSerializer):
     previous_version_url = CharField(source='prev_version_uri')
     autoexpand = BooleanField(source='should_auto_expand')
     expansion_url = CharField(source='expansion_uri', read_only=True)
+    checksums = SerializerMethodField()
 
     class Meta:
         model = Collection
@@ -108,6 +114,10 @@ class CollectionVersionListSerializer(ModelSerializer):
             'created_at', 'id', 'collection_type', 'updated_at', 'released', 'retired', 'version_url',
             'previous_version_url', 'autoexpand', 'expansion_url', 'checksums'
         )
+
+    @staticmethod
+    def get_checksums(obj):
+        return obj.get_all_checksums()
 
 
 class CollectionCreateOrUpdateSerializer(ModelSerializer):

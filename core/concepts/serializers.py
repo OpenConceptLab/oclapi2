@@ -262,6 +262,7 @@ class ConceptListSerializer(ConceptAbstractSerializer):
     version_created_by = DateTimeField(source='created_by.username', read_only=True)
     version_updated_on = DateTimeField(source='updated_at', read_only=True)
     version_updated_by = DateTimeField(source='updated_by.username', read_only=True)
+    checksums = SerializerMethodField()
 
     class Meta:
         model = Concept
@@ -269,8 +270,13 @@ class ConceptListSerializer(ConceptAbstractSerializer):
             'uuid', 'id', 'external_id', 'concept_class', 'datatype', 'url', 'retired', 'source',
             'owner', 'owner_type', 'owner_url', 'display_name', 'display_locale', 'version', 'update_comment',
             'locale', 'version_created_by', 'version_created_on', 'mappings', 'is_latest_version', 'versions_url',
-            'version_url', 'extras', 'type', 'versioned_object_id', 'version_updated_on', 'version_updated_by'
+            'version_url', 'extras', 'type', 'versioned_object_id', 'version_updated_on', 'version_updated_by',
+            'checksums'
         )
+
+    @staticmethod
+    def get_checksums(obj):
+        return obj.get_checksums()
 
 
 class ConceptVersionListSerializer(ConceptListSerializer):
@@ -281,7 +287,7 @@ class ConceptVersionListSerializer(ConceptListSerializer):
     class Meta:
         model = Concept
         fields = ConceptListSerializer.Meta.fields + (
-            'previous_version_url', 'source_versions', 'collection_versions', 'checksums'
+            'previous_version_url', 'source_versions', 'collection_versions'
         )
 
     def __init__(self, *args, **kwargs):
