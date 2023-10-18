@@ -1,5 +1,5 @@
-import json
 import hashlib
+import json
 from uuid import UUID
 
 from django.conf import settings
@@ -162,8 +162,7 @@ class Checksum:
         if isinstance(obj, list) and len(obj) == 1:
             obj = obj[0]
         if isinstance(obj, list):
-            return f"[{','.join(map(cls._serialize, generic_sort(obj)))}]"
-
+            return json.dumps(hash(tuple(set(obj))))
         if isinstance(obj, dict):
             keys = generic_sort(obj.keys())
             acc = f"{{{json.dumps(keys)}"
