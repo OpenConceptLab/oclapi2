@@ -23,9 +23,9 @@ class ChecksumModel(models.Model):
     CHECKSUM_TYPES = {STANDARD_CHECKSUM_KEY}
     STANDARD_CHECKSUM_TYPES = {STANDARD_CHECKSUM_KEY}
 
-    def get_checksums(self, standard=False, queue=False):
+    def get_checksums(self, standard=False, queue=False, recalculate=False):
         if Toggle.get('CHECKSUMS_TOGGLE'):
-            if self.checksums and self.has_checksums(standard):
+            if not recalculate and self.checksums and self.has_checksums(standard):
                 return self.checksums
             if queue:
                 self.queue_checksum_calculation()
@@ -162,7 +162,7 @@ class Checksum:
         if isinstance(obj, list) and len(obj) == 1:
             obj = obj[0]
         if isinstance(obj, list):
-            return json.dumps(hash(tuple(set(obj))))
+            return f"[{','.join(map(cls._serialize, generic_sort(obj)))}]"
         if isinstance(obj, dict):
             keys = generic_sort(obj.keys())
             acc = f"{{{json.dumps(keys)}"

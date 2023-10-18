@@ -1321,6 +1321,20 @@ class ChecksumTest(OCLTestCase):
         self.assertEqual(Checksum.generate({'a': [1, 2, 3]}), Checksum.generate({'a': [2, 1, 3]}))
         self.assertEqual(
             Checksum.generate({'a': {'b': [1, 2, 3], 'c': 'd'}}), Checksum.generate({'a': {'c': 'd', 'b': [3, 1, 2]}}))
+        self.assertEqual(
+            Checksum.generate(
+                [
+                    {'foo': 'bar', 'bar': 'foo'},
+                    {'1': '2',}
+                ]
+            ),
+            Checksum.generate(
+                [
+                    {'1': '2',},
+                    {'foo': 'bar', 'bar': 'foo'}
+                ]
+            )
+        )
         self.assertNotEqual(
             Checksum.generate({'a': {'b': [1, 2, 3], 'c': 'd'}}), Checksum.generate({'a': {'c': [1, 2, 3], 'b': 'd'}}))
 
