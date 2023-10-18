@@ -1335,6 +1335,7 @@ class ChecksumTest(OCLTestCase):
                 ]
             )
         )
+        self.assertIsNotNone(Checksum.generate(uuid.uuid4()))
         self.assertNotEqual(
             Checksum.generate({'a': {'b': [1, 2, 3], 'c': 'd'}}), Checksum.generate({'a': {'c': [1, 2, 3], 'b': 'd'}}))
 
