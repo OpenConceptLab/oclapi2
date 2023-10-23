@@ -125,7 +125,9 @@ class CustomPaginator:
                 smart.append(get(result.checksums, 'smart'))
         standard = compact(standard)
         smart = compact(smart)
-        return Checksum.generate(standard) if standard else None, Checksum.generate(smart) if smart else None
+        standard = Checksum.generate(standard) if len(standard) > 1 else get(standard, '0')
+        smart = Checksum.generate(smart) if len(smart) > 1 else get(smart, '0')
+        return standard, smart
 
 
 class ListWithHeadersMixin(ListModelMixin):
@@ -473,10 +475,6 @@ class SourceChildMixin(ChecksumModel):
     @staticmethod
     def is_strictly_equal(instance1, instance2):
         return instance1.get_checksums() == instance2.get_checksums()
-
-    @staticmethod
-    def is_equal(instance1, instance2):
-        return instance1.get_standard_checksums() == instance2.get_standard_checksums()
 
     @staticmethod
     def apply_user_criteria(queryset, user):

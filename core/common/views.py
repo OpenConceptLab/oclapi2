@@ -12,7 +12,7 @@ from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
 from elasticsearch import RequestError, TransportError
 from elasticsearch_dsl import Q
-from pydash import get, compact
+from pydash import get, compact, flatten
 from rest_framework import response, generics, status
 from rest_framework.generics import ListAPIView, RetrieveUpdateDestroyAPIView
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -20,7 +20,6 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from core import __version__
-from core.common.checksums import Checksum
 from core.common.constants import SEARCH_PARAM, LIST_DEFAULT_LIMIT, CSV_DEFAULT_LIMIT, \
     LIMIT_PARAM, NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY, INCLUDE_RETIRED_PARAM, VERBOSE_PARAM, HEAD, LATEST, \
     BRIEF_PARAM, ES_REQUEST_TIMEOUT, INCLUDE_INACTIVE, FHIR_LIMIT_PARAM, RAW_PARAM, SEARCH_MAP_CODES_PARAM, \
@@ -29,8 +28,9 @@ from core.common.exceptions import Http400
 from core.common.mixins import PathWalkerMixin
 from core.common.search import CustomESSearch
 from core.common.serializers import RootSerializer
+from core.common.swagger_parameters import all_resource_query_param
 from core.common.utils import compact_dict_by_values, to_snake_case, parse_updated_since_param, \
-    to_int, get_user_specific_task_id, get_falsy_values, get_truthy_values
+    to_int, get_user_specific_task_id, get_falsy_values, get_truthy_values, get_resource_class_from_resource_name
 from core.concepts.permissions import CanViewParentDictionary, CanEditParentDictionary
 from core.orgs.constants import ORG_OBJECT_TYPE
 from core.tasks.constants import TASK_NOT_COMPLETED
@@ -999,22 +999,50 @@ class ConceptContainerExtraRetrieveUpdateDestroyView(RetrieveUpdateDestroyAPIVie
         return Response({'detail': NOT_FOUND}, status=status.HTTP_404_NOT_FOUND)
 
 
-class ChecksumView(APIView):
+class AbstractChecksumView(APIView):
     permission_classes = (IsAuthenticated,)
+    smart = False
 
     @swagger_auto_schema(
-        request_body=openapi.Schema(type=openapi.TYPE_OBJECT),
+        manual_parameters=[all_resource_query_param],
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            description='Data to generate checksum',
+        ),
         responses={
             200: openapi.Response(
-                'MD5 checksum of the request body',
+                'MD5 checksum of the request body for a resource',
                 openapi.Schema(type=openapi.TYPE_STRING),
             )
         },
     )
     def post(self, request):
-        if not request.data:
-            return Response({'error': 'Request body is required'}, status=status.HTTP_400_BAD_REQUEST)
-        return Response(Checksum.generate(request.data))
+        resource = request.query_params.get('resource')
+        data = request.data
+        if not resource or not data:
+            return Response({'error': 'resource and data are both required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        klass = get_resource_class_from_resource_name(resource)
+
+        if not klass:
+            return Response({'error': 'Invalid resource.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        method = 'get_smart_checksum_fields_for_resource' if self.smart else 'get_standard_checksum_fields_for_resource'
+        func = get(klass, method)
+
+        if not func:
+            return Response(
+                {'error': 'Checksums for this resource is not yet implemented.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(klass.generate_checksum_from_many([func(_data) for _data in flatten([data])]))
+
+
+class StandardChecksumView(AbstractChecksumView):
+    smart = False
+
+
+class SmartChecksumView(AbstractChecksumView):
+    smart = True
 
 
 class TaskMixin:

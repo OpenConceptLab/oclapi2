@@ -21,20 +21,18 @@ class ChecksumModel(models.Model):
     STANDARD_CHECKSUM_KEY = 'standard'
     SMART_CHECKSUM_KEY = 'smart'
 
-    def get_checksums(self, standard=False, queue=False, recalculate=False):
+    def get_checksums(self, queue=False, recalculate=False):
+        _checksums = None
         if Toggle.get('CHECKSUMS_TOGGLE'):
-            if not recalculate and self.checksums and self.has_checksums(standard):
-                return self.checksums
-            if queue:
+            if not recalculate and self.checksums and self.has_all_checksums():
+                _checksums = self.checksums
+            elif queue:
                 self.queue_checksum_calculation()
-                return self.checksums or {}
-            if standard:
-                self.set_standard_checksums()
+                _checksums = self.checksums or {}
             else:
                 self.set_checksums()
-
-            return self.checksums
-        return None
+                _checksums = self.checksums
+        return _checksums
 
     def queue_checksum_calculation(self):
         from core.common.tasks import calculate_checksums
@@ -43,14 +41,6 @@ class ChecksumModel(models.Model):
             self.refresh_from_db()
         else:
             calculate_checksums.delay(self.__class__.__name__, self.id)
-
-    def set_specific_checksums(self, checksum_type, checksum):
-        self.checksums = self.checksums or {}
-        self.checksums[checksum_type] = checksum
-        self.save(update_fields=['checksums'])
-
-    def has_checksums(self, standard=False):
-        return self.has_standard_checksum() if standard else self.has_all_checksums()
 
     def has_all_checksums(self):
         return self.has_standard_checksum() and self.has_smart_checksum()
@@ -66,21 +56,17 @@ class ChecksumModel(models.Model):
             self.checksums = self._calculate_checksums()
             self.save(update_fields=['checksums'])
 
-    def set_standard_checksums(self):
-        if Toggle.get('CHECKSUMS_TOGGLE'):
-            self.checksums = self.get_standard_checksums()
-            self.save(update_fields=['checksums'])
-
     @property
     def checksum(self):
         """Returns the checksum of the model instance or standard only checksum."""
+        _checksum = None
         if Toggle.get('CHECKSUMS_TOGGLE'):
             if get(self, f'checksums.{self.STANDARD_CHECKSUM_KEY}'):
-                return self.checksums[self.STANDARD_CHECKSUM_KEY]
-            self.get_checksums()
-
-            return self.checksums.get(self.STANDARD_CHECKSUM_KEY)
-        return None
+                _checksum = self.checksums[self.STANDARD_CHECKSUM_KEY]
+            else:
+                self.get_checksums()
+                _checksum = self.checksums.get(self.STANDARD_CHECKSUM_KEY)
+        return _checksum
 
     def get_checksum_fields(self):
         return {field: getattr(self, field) for field in self.CHECKSUM_INCLUSIONS}
@@ -91,27 +77,30 @@ class ChecksumModel(models.Model):
     def get_smart_checksum_fields(self):
         return {}
 
-    def get_standard_checksums(self):
-        if Toggle.get('CHECKSUMS_TOGGLE'):
-            checksums = self.checksums or {}
-            if self.STANDARD_CHECKSUM_KEY:
-                checksums[self.STANDARD_CHECKSUM_KEY] = self._calculate_standard_checksum()
-            return checksums
-        return None
-
     def get_all_checksums(self):
+        checksums = None
         if Toggle.get('CHECKSUMS_TOGGLE'):
             checksums = {}
             if self.STANDARD_CHECKSUM_KEY:
                 checksums[self.STANDARD_CHECKSUM_KEY] = self._calculate_standard_checksum()
             if self.SMART_CHECKSUM_KEY:
                 checksums[self.SMART_CHECKSUM_KEY] = self._calculate_smart_checksum()
-            return checksums
-        return None
+        return checksums
 
     @staticmethod
     def generate_checksum(data):
         return Checksum.generate(ChecksumModel._cleanup(data))
+
+    @staticmethod
+    def generate_checksum_from_many(data):
+        checksums = [
+            Checksum.generate(ChecksumModel._cleanup(_data)) for _data in data
+        ] if isinstance(data, list) else [
+            Checksum.generate(ChecksumModel._cleanup(data))
+        ]
+        if len(checksums) == 1:
+            return checksums[0]
+        return Checksum.generate(checksums)
 
     def _calculate_standard_checksum(self):
         fields = self.get_standard_checksum_fields()
@@ -123,16 +112,18 @@ class ChecksumModel(models.Model):
 
     @staticmethod
     def _cleanup(fields):
+        result = fields
         if isinstance(fields, dict):
-            new_fields = {}
+            result = {}
             for key, value in fields.items():
                 if value is None:
                     continue
                 if key in ['is_active', 'retired'] and not value:
                     continue
-                new_fields[key] = value
-            return new_fields
-        return fields
+                if key in ['extras'] and not value:
+                    continue
+                result[key] = value
+        return result
 
     def _calculate_checksums(self):
         return self.get_all_checksums()

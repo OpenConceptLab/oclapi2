@@ -5,6 +5,7 @@ from django.contrib.auth.models import AbstractUser
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
 from django.db import models
+from pydash import get
 from rest_framework.authtoken.models import Token
 
 from core.common.mixins import SourceContainerMixin
@@ -52,26 +53,39 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
         'is_admin': {'sortable': False, 'filterable': False, 'exact': False, 'facet': True}
     }
 
+    STANDARD_CHECKSUM_INCLUSIONS = [
+        'first_name', 'last_name', 'username', 'company', 'location', 'website', 'preferred_locale', 'extras']
+    SMART_CHECKSUM_INCLUSIONS = [
+        'first_name', 'last_name', 'username', 'company', 'location', 'website', 'is_active']
+
     def get_standard_checksum_fields(self):
-        return {
-            'first_name': self.first_name,
-            'last_name': self.last_name,
-            'username': self.username,
-            'company': self.company,
-            'location': self.location,
-            'website': self.website,
-            'preferred_locale': self.preferred_locale,
-            'extras': self.extras,
-        }
+        return self.get_standard_checksum_fields_for_resource(self)
 
     def get_smart_checksum_fields(self):
+        return self.get_smart_checksum_fields_for_resource(self)
+
+    @staticmethod
+    def get_standard_checksum_fields_for_resource(data):
         return {
-            'first_name': self.first_name,
-            'last_name': self.last_name,
-            'username': self.username,
-            'company': self.company,
-            'location': self.location,
-            'is_active': self.is_active
+            'first_name': get(data, 'first_name'),
+            'last_name': get(data, 'last_name'),
+            'username': get(data, 'username'),
+            'company': get(data, 'company'),
+            'location': get(data, 'location'),
+            'website': get(data, 'website'),
+            'preferred_locale': get(data, 'preferred_locale'),
+            'extras': get(data, 'extras')
+        }
+
+    @staticmethod
+    def get_smart_checksum_fields_for_resource(data):
+        return {
+            'first_name': get(data, 'first_name'),
+            'last_name': get(data, 'last_name'),
+            'username': get(data, 'username'),
+            'company': get(data, 'company'),
+            'location': get(data, 'location'),
+            'is_active': get(data, 'is_active')
         }
 
     def calculate_uri(self):

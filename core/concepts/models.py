@@ -69,13 +69,21 @@ class AbstractLocalizedText(ChecksumModel):
 
     @property
     def is_fully_specified(self):
-        return self.type in LOCALES_FULLY_SPECIFIED or self.is_fully_specified_after_clean
+        return self.is_fully_specified_type(self.type)
+
+    @staticmethod
+    def is_fully_specified_type(_type):
+        return _type in LOCALES_FULLY_SPECIFIED or AbstractLocalizedText.is_fully_specified_type_after_clean(_type)
 
     @property
     def is_fully_specified_after_clean(self):  # needed for OpenMRS schema content created from TermBrowser
-        if not self.type:
+        return self.is_fully_specified_type_after_clean(self.type)
+
+    @staticmethod
+    def is_fully_specified_type_after_clean(_type):
+        if not _type:
             return False
-        _type = self.type.replace(' ', '').replace('-', '').replace('_', '').lower()
+        _type = _type.replace(' ', '').replace('-', '').replace('_', '').lower()
         return _type == 'fullyspecified'
 
     @property
@@ -254,19 +262,37 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     }
 
     def get_standard_checksum_fields(self):
-        return {
-            'concept_class': self.concept_class,
-            'datatype': self.datatype,
-            'names': [name.get_checksum_fields() for name in self.names.filter()],
-            'extras': self.extras,
-        }
+        return self.get_standard_checksum_fields_for_resource(self)
 
     def get_smart_checksum_fields(self):
+        return self.get_smart_checksum_fields_for_resource(self)
+
+    @staticmethod
+    def get_standard_checksum_fields_for_resource(data):
+        names = data.names.filter() if isinstance(data, Concept) else get(data, 'names', [])
         return {
-            'concept_class': self.concept_class,
-            'datatype': self.datatype,
-            'names': [name.get_checksum_fields() for name in self.names.filter() if name.is_fully_specified],
-            'retired': self.retired,
+            'concept_class': get(data, 'concept_class'),
+            'datatype': get(data, 'datatype'),
+            'names': [
+                {
+                    field: get(name, field) for field in ConceptName.CHECKSUM_INCLUSIONS
+                } for name in names
+            ],
+            'extras': get(data, 'extras'),
+        }
+
+    @staticmethod
+    def get_smart_checksum_fields_for_resource(data):
+        names = data.names.filter() if isinstance(data, Concept) else get(data, 'names', [])
+        return {
+            'concept_class': get(data, 'concept_class'),
+            'datatype': get(data, 'datatype'),
+            'names': [
+                {
+                    field: get(name, field) for field in ConceptName.CHECKSUM_INCLUSIONS
+                } for name in names if ConceptName.is_fully_specified_type(get(name, 'name_type'))
+            ],
+            'retired': get(data, 'retired'),
         }
 
     @staticmethod

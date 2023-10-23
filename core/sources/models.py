@@ -90,25 +90,33 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
     OBJECT_VERSION_TYPE = SOURCE_VERSION_TYPE
 
     def get_standard_checksum_fields(self):
-        return {
-            'source_type': self.source_type,
-            'canonical_url': self.canonical_url,
-            'custom_validation_schema': self.custom_validation_schema,
-            'default_locale': self.default_locale,
-            'supported_locales': self.supported_locales,
-            'website': self.website,
-            'hierarchy_meaning': self.hierarchy_meaning,
-            'extras': self.extras,
-        }
+        return self.get_standard_checksum_fields_for_resource(self)
 
     def get_smart_checksum_fields(self):
+        return self.get_smart_checksum_fields_for_resource(self)
+
+    @staticmethod
+    def get_standard_checksum_fields_for_resource(data):
         return {
-            'source_type': self.source_type,
-            'canonical_url': self.canonical_url,
-            'custom_validation_schema': self.custom_validation_schema,
-            'default_locale': self.default_locale,
-            'released': self.released,
-            'retired': self.retired,
+            'source_type': get(data, 'source_type'),
+            'canonical_url': get(data, 'canonical_url'),
+            'custom_validation_schema': get(data, 'custom_validation_schema'),
+            'default_locale': get(data, 'default_locale'),
+            'supported_locales': get(data, 'supported_locales'),
+            'website': get(data, 'website'),
+            'hierarchy_meaning': get(data, 'hierarchy_meaning'),
+            'extras': get(data, 'extras'),
+        }
+
+    @staticmethod
+    def get_smart_checksum_fields_for_resource(data):
+        return {
+            'source_type': get(data, 'source_type'),
+            'canonical_url': get(data, 'canonical_url'),
+            'custom_validation_schema': get(data, 'custom_validation_schema'),
+            'default_locale': get(data, 'default_locale'),
+            'released': get(data, 'released'),
+            'retired': get(data, 'retired'),
         }
 
     @property

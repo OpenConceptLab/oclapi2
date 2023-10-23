@@ -132,23 +132,31 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
     }
 
     def get_standard_checksum_fields(self):
-        return {
-            'map_type': self.map_type,
-            'from_concept_code': self.from_concept_code,
-            'to_concept_code': self.to_concept_code,
-            'from_concept_name': self.from_concept_name,
-            'to_concept_name': self.to_concept_name,
-            'extras': self.extras,
-        }
+        return self.get_standard_checksum_fields_for_resource(self)
 
     def get_smart_checksum_fields(self):
+        return self.get_smart_checksum_fields_for_resource(self)
+
+    @staticmethod
+    def get_standard_checksum_fields_for_resource(data):
         return {
-            'map_type': self.map_type,
-            'from_concept_code': self.from_concept_code,
-            'to_concept_code': self.to_concept_code,
-            'from_concept_name': self.from_concept_name,
-            'to_concept_name': self.to_concept_name,
-            'retired': self.retired
+            'map_type': get(data, 'map_type'),
+            'from_concept_code': get(data, 'from_concept_code'),
+            'to_concept_code': get(data, 'to_concept_code'),
+            'from_concept_name': get(data, 'from_concept_name'),
+            'to_concept_name': get(data, 'to_concept_name'),
+            'extras': get(data, 'extras'),
+        }
+
+    @staticmethod
+    def get_smart_checksum_fields_for_resource(data):
+        return {
+            'map_type': get(data, 'map_type'),
+            'from_concept_code': get(data, 'from_concept_code'),
+            'to_concept_code': get(data, 'to_concept_code'),
+            'from_concept_name': get(data, 'from_concept_name'),
+            'to_concept_name': get(data, 'to_concept_name'),
+            'retired': get(data, 'retired')
         }
 
     @staticmethod

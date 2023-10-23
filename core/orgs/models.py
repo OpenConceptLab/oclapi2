@@ -1,6 +1,7 @@
 from django.contrib.contenttypes.fields import GenericRelation
 from django.core.validators import RegexValidator
 from django.db import models, transaction
+from pydash import get
 
 from core.client_configs.models import ClientConfig
 from core.common.checksums import ChecksumModel
@@ -42,21 +43,29 @@ class Organization(BaseResourceModel, SourceContainerMixin, ChecksumModel):
     overview = models.JSONField(default=dict)
 
     def get_standard_checksum_fields(self):
-        return {
-            'name': self.name,
-            'company': self.company,
-            'location': self.location,
-            'website': self.website,
-            'extras': self.extras,
-        }
+        return self.get_standard_checksum_fields_for_resource(self)
 
     def get_smart_checksum_fields(self):
+        return self.get_smart_checksum_fields_for_resource(self)
+
+    @staticmethod
+    def get_standard_checksum_fields_for_resource(data):
         return {
-            'name': self.name,
-            'company': self.company,
-            'location': self.location,
-            'website': self.website,
-            'is_active': self.is_active
+            'name': get(data, 'name'),
+            'company': get(data, 'company'),
+            'location': get(data, 'location'),
+            'website': get(data, 'website'),
+            'extras': get(data, 'extras'),
+        }
+
+    @staticmethod
+    def get_smart_checksum_fields_for_resource(data):
+        return {
+            'name': get(data, 'name'),
+            'company': get(data, 'company'),
+            'location': get(data, 'location'),
+            'website': get(data, 'website'),
+            'is_active': get(data, 'is_active')
         }
 
     def calculate_uri(self):

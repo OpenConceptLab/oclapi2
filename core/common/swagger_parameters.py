@@ -114,6 +114,15 @@ resources_body_param = openapi.Parameter(
     'resource', openapi.IN_PATH, type=openapi.TYPE_STRING,
     enum=['mappings', 'concepts', 'sources', 'orgs', 'users', 'collections']
 )
+all_resource_query_param = openapi.Parameter(
+    'resource',
+    openapi.IN_QUERY,
+    description="Resource type to generate checksum",
+    type=openapi.TYPE_STRING,
+    default='concept_version',
+    enum=['concept_version', 'mapping_version', 'source_version', 'collection_version', 'org', 'user'],
+    required=True
+)
 parallel_threads_param = openapi.Parameter(
     'parallel', openapi.IN_FORM, description="Parallel threads count (default: 5, max: 10)", type=openapi.TYPE_INTEGER
 )

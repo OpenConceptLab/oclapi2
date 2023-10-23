@@ -586,24 +586,30 @@ def get_resource_class_from_resource_name(resource):  # pylint: disable=too-many
         return resource
 
     name = resource.lower()
-    if name in ['concepts', 'concept']:
+    if 'concept' in name:
         from core.concepts.models import Concept
         return Concept
-    if name in ['mappings', 'mapping']:
+    if 'mapping' in name:
         from core.mappings.models import Mapping
         return Mapping
-    if name in ['users', 'user', 'user_profiles', 'user_profile', 'userprofiles', 'userprofile']:
+    if 'user' in name:
         from core.users.models import UserProfile
         return UserProfile
-    if name in ['orgs', 'org', 'organizations', 'organization']:
+    if 'org' in name:
         from core.orgs.models import Organization
         return Organization
-    if name in ['sources', 'source']:
+    if 'source' in name:
         from core.sources.models import Source
         return Source
-    if name in ['collections', 'collection']:
+    if 'collection' in name and 'reference' not in name and 'expansion' not in name:
         from core.collections.models import Collection
         return Collection
+    if 'reference' in name:
+        from core.collections.models import CollectionReference
+        return CollectionReference
+    if 'expansion' in name:
+        from core.collections.models import Expansion
+        return Expansion
 
     return None
 
