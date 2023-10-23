@@ -722,7 +722,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
             sorted(response.data[0].keys()),
-            sorted(['uuid', 'id', 'url', 'version_url', 'type', 'retired'])
+            sorted(['uuid', 'id', 'url', 'version_url', 'type', 'retired', 'checksums'])
         )
 
     def test_get_200_with_mappings(self):
@@ -1251,9 +1251,9 @@ class ConceptCascadeViewTest(OCLAPITestCase):
         self.assertEqual(response.data['resourceType'], 'Bundle')
 
         entry = response.data['entry']
-        self.assertEqual(
+        self.assertCountEqual(
             list(entry.keys()),
-            ['id', 'type', 'url', 'version_url', 'terminal', 'entries', 'display_name', 'retired']
+            ['id', 'type', 'url', 'version_url', 'terminal', 'entries', 'display_name', 'retired', 'checksums']
         )
         self.assertEqual(entry['id'], concept1.mnemonic)
         self.assertEqual(entry['type'], 'Concept')
@@ -1309,9 +1309,9 @@ class ConceptCascadeViewTest(OCLAPITestCase):
         self.assertEqual(response.data['resourceType'], 'Bundle')
 
         entry = response.data['entry']
-        self.assertEqual(
+        self.assertCountEqual(
             list(entry.keys()),
-            ['id', 'type', 'url', 'version_url', 'terminal', 'entries', 'display_name', 'retired']
+            ['id', 'type', 'url', 'version_url', 'terminal', 'entries', 'display_name', 'retired', 'checksums']
         )
         self.assertEqual(entry['id'], concept2.mnemonic)
         self.assertEqual(entry['type'], 'Concept')
@@ -1351,9 +1351,9 @@ class ConceptCascadeViewTest(OCLAPITestCase):
         self.assertEqual(response.data['resourceType'], 'Bundle')
 
         entry = response.data['entry']
-        self.assertEqual(
+        self.assertCountEqual(
             list(entry.keys()),
-            ['id', 'type', 'url', 'version_url', 'terminal', 'entries', 'display_name', 'retired']
+            ['id', 'type', 'url', 'version_url', 'terminal', 'entries', 'display_name', 'retired', 'checksums']
         )
         self.assertEqual(entry['id'], concept1.mnemonic)
         self.assertEqual(entry['type'], 'Concept')
@@ -1366,9 +1366,9 @@ class ConceptCascadeViewTest(OCLAPITestCase):
         self.assertEqual(response.data['resourceType'], 'Bundle')
 
         entry = response.data['entry']
-        self.assertEqual(
+        self.assertCountEqual(
             list(entry.keys()),
-            ['id', 'type', 'url', 'version_url', 'terminal', 'entries', 'display_name', 'retired']
+            ['id', 'type', 'url', 'version_url', 'terminal', 'entries', 'display_name', 'retired', 'checksums']
         )
         self.assertEqual(entry['id'], concept2.mnemonic)
         self.assertEqual(entry['type'], 'Concept')
