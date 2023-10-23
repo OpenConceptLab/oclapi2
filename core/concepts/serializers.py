@@ -463,6 +463,7 @@ class ConceptVersionExportSerializer(ModelSerializer):
     update_comment = CharField(source='comment', required=False, allow_null=True, allow_blank=True)
     parent_concept_urls = ListField(read_only=True)
     child_concept_urls = ListField(read_only=True)
+    checksums = SerializerMethodField()
 
     class Meta:
         model = Concept
@@ -471,8 +472,12 @@ class ConceptVersionExportSerializer(ModelSerializer):
             'names', 'descriptions', 'extras', 'retired', 'source', 'source_url', 'owner', 'owner_name', 'owner_url',
             'version', 'created_on', 'updated_on', 'version_created_on', 'version_created_by', 'update_comment',
             'is_latest_version', 'locale', 'url', 'owner_type', 'version_url', 'previous_version_url',
-            'parent_concept_urls', 'child_concept_urls', 'version_updated_on', 'version_updated_by'
+            'parent_concept_urls', 'child_concept_urls', 'version_updated_on', 'version_updated_by', 'checksums'
         )
+
+    @staticmethod
+    def get_checksums(obj):
+        return obj.get_checksums()
 
 
 class ConceptVersionDetailSerializer(ModelSerializer):
