@@ -1046,13 +1046,13 @@ class Expansion(BaseResourceModel):
             concepts = reference.concepts
             if concepts.exists():
                 index_concepts = True
-                filters = {'id__in': list(concepts.values_list('id', flat=True))}
+                filters = {'versioned_object_id__in': list(concepts.values_list('versioned_object_id', flat=True))}
                 self.concepts.set(self.concepts.exclude(**filters))
                 batch_index_resources.apply_async(('concept', filters), queue='indexing')
             mappings = reference.mappings
             if mappings.exists():
                 index_mappings = True
-                filters = {'id__in': list(mappings.values_list('id', flat=True))}
+                filters = {'versioned_object_id__in': list(mappings.values_list('versioned_object_id', flat=True))}
                 self.mappings.set(self.mappings.exclude(**filters))
                 batch_index_resources.apply_async(('mapping', filters), queue='indexing')
 
