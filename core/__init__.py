@@ -5,6 +5,6 @@ from .celery import app as celery_app
 __all__ = ('celery_app',)
 
 API_VERSION = '2.3.52'
-API_BUILD = 'dev'
+API_BUILD = 'ab08e964'
 VERSION = API_VERSION + '-' + API_BUILD
 __version__ = VERSION
