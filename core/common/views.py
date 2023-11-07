@@ -144,7 +144,10 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         return response.Response(status=status.HTTP_204_NO_CONTENT)
 
     def get_host_url(self):
-        return self.request.META['wsgi.url_scheme'] + '://' + self.request.get_host()
+        scheme = self.request.META['wsgi.url_scheme']
+        if settings.ENV != 'development':
+            scheme += 's'
+        return scheme + '://' + self.request.get_host()
 
     def filter_queryset(self, queryset=None):
         if self.is_searchable and self.should_perform_es_search():
