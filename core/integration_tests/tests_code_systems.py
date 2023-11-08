@@ -59,8 +59,6 @@ class CodeSystemsTest(OCLAPITestCase):
             {'code': 'conceptclass', 'value': 'Misc'},
             {'code': 'datatype', 'value': 'N/A'}
         ])
-        if 'jurisdiction' not in json_file:
-            self.update(json_file, 'jurisdiction', {})
         self.update(json_file, 'language', 'en')
         self.update(json_file, 'property', [
             {
