@@ -71,6 +71,7 @@ urlpatterns = [
         views.UserExtraRetrieveUpdateDestroyView.as_view(),
         name='user-extra'
     ),
+    re_path(r'^(?P<user>' + NAMESPACE_PATTERN + ')/repos/', include('core.repos.urls')),
     re_path(r'^(?P<user>' + NAMESPACE_PATTERN + ')/sources/', include('core.sources.urls')),
     #TODO: require FHIR subdomain
     re_path(r'^(?P<user>' + NAMESPACE_PATTERN + ')/CodeSystem/', include('core.code_systems.urls'),

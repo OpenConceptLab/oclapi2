@@ -40,8 +40,9 @@ class CustomESSearch:
     MUST_HAVE_REGEX = fr'\{MUST_HAVE_PREFIX}(\w+)'
     MUST_NOT_HAVE_REGEX = fr'\{MUST_NOT_HAVE_PREFIX}(\w+)'
 
-    def __init__(self, dsl_search):
+    def __init__(self, dsl_search, document=None):
         self._dsl_search = dsl_search
+        self.document = document
         self.queryset = None
         self.max_score = None
         self.scores = {}
@@ -189,17 +190,23 @@ class CustomESSearch:
             highlight = get(result, 'highlight')
             if highlight:
                 self.highlights[int(_id)] = highlight.to_dict()
-
-        pks = [result.meta.id for result in s]
-
-        qs = self._dsl_search._model.objects.filter(pk__in=pks)  # pylint: disable=protected-access
-
-        if keep_order:
-            preserved_order = Case(
-                *[When(pk=pk, then=pos) for pos, pk in enumerate(pks)],
-                output_field=IntegerField()
-            )
-            qs = qs.order_by(preserved_order)
+        if self.document and self.document.__name__ == 'RepoDocument':
+            from core.sources.models import Source
+            from core.collections.models import Collection
+            qs = compact([
+                (Source if result.meta.index == 'sources' else Collection).objects.filter(
+                    id=result.meta.id
+                ).first() for result in s
+            ])
+        else:
+            pks = [result.meta.id for result in s]
+            qs = self._dsl_search._model.objects.filter(pk__in=pks)  # pylint: disable=protected-access
+            if keep_order:
+                preserved_order = Case(
+                    *[When(pk=pk, then=pos) for pos, pk in enumerate(pks)],
+                    output_field=IntegerField()
+                )
+                qs = qs.order_by(preserved_order)
         self.queryset = qs
         self.total = hits.total.value
 

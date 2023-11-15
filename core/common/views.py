@@ -50,6 +50,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     pk_field = 'mnemonic'
     user_is_self = False
     is_searchable = False
+    is_only_searchable = False
     limit = LIST_DEFAULT_LIMIT
     default_filters = {}
     sort_asc_param = 'sortAsc'
@@ -505,7 +506,8 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         if not force and not self.should_perform_es_search():
             return results
 
-        results = self.document_model.search()
+        search_kwargs = {'index': self.document_model.indexes} if get(self.document_model, 'indexes') else {}
+        results = self.document_model.search(**search_kwargs)
         default_filters = self.default_filters.copy()
         if self.is_user_document() and self.should_include_inactive():
             default_filters.pop('is_active', None)
@@ -702,7 +704,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         end = start + self.limit
         try:
             search_results = search_results.params(request_timeout=ES_REQUEST_TIMEOUT)
-            es_search = CustomESSearch(search_results[start:end])
+            es_search = CustomESSearch(search_results[start:end], self.document_model)
             es_search.to_queryset()
             self.total_count = es_search.total - offset
             return es_search.queryset, es_search.scores, es_search.max_score, es_search.highlights
@@ -730,7 +732,9 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         ).get_aggregations(self.is_verbose(), self.is_raw())
 
     def should_perform_es_search(self):
-        return bool(self.get_search_string()) or self.has_searchable_extras_fields() or bool(self.get_faceted_filters())
+        return self.is_only_searchable or bool(
+            self.get_search_string()
+        ) or self.has_searchable_extras_fields() or bool(self.get_faceted_filters())
 
     def has_searchable_extras_fields(self):
         return bool(

@@ -41,5 +41,6 @@ urlpatterns = [
     ),
     re_path(r'^sources/', include('core.sources.urls'), extra_kwargs),
     re_path(r'^collections/', include('core.collections.urls'), extra_kwargs),
+    re_path(r'^repos/', include('core.repos.urls'), extra_kwargs),
     re_path(r'^pins/', include('core.pins.urls'), extra_kwargs)
 ]

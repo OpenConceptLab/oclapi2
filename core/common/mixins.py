@@ -4,7 +4,7 @@ from urllib import parse
 
 from django.conf import settings
 from django.core.paginator import Paginator
-from django.db.models import Q, F
+from django.db.models import Q, F, QuerySet
 from django.http import HttpResponseForbidden, Http404
 from django.shortcuts import get_object_or_404
 from django.urls import resolve, Resolver404
@@ -34,7 +34,8 @@ class CustomPaginator:
     ):
         self.request = request
         self.queryset = queryset
-        self.total = total_count or self.queryset.count()
+        self.total = total_count or (
+            self.queryset.count() if isinstance(self.queryset, QuerySet) else len(self.queryset))
         self.page_size = int(page_size)
         self.page_number = to_int(request.GET.get('page', '1'), 1)
         if not is_sliced:
@@ -43,7 +44,8 @@ class CustomPaginator:
             if top >= self.total:
                 top = self.total
             self.queryset = self.queryset[bottom:top]
-        self.queryset.count = None
+        if isinstance(self.queryset, QuerySet):
+            self.queryset.count = None
         self.paginator = Paginator(self.queryset, self.page_size)
         self.page_object = self.paginator.get_page(self.page_number)
         self.page_count = ceil(int(self.total_count) / int(self.page_size))
