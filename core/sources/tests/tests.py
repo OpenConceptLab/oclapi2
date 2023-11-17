@@ -759,9 +759,8 @@ class SourceTest(OCLTestCase):
         self.assertEqual(resolved_version.canonical_url, None)
         self.assertFalse(resolved_version.is_fqdn)
 
-    @patch('core.mappings.documents.MappingDocument.update')
-    @patch('core.concepts.documents.ConceptDocument.update')
-    def test_index_children(self, concept_document_update, mapping_document_update):
+    @patch('core.sources.models.Source.batch_index')
+    def test_index_children(self, batch_index_mock):
         source = OrganizationSourceFactory()
         concept1 = ConceptFactory(parent=source)
         concept2 = ConceptFactory(parent=source)
@@ -769,8 +768,7 @@ class SourceTest(OCLTestCase):
 
         source.index_children()
 
-        concept_document_update.assert_called_once_with(ANY, parallel=True)
-        mapping_document_update.assert_called_once_with(ANY, parallel=True)
+        self.assertEqual(batch_index_mock.call_count, 2)
 
     def test_autoid_start_from_validate_non_negative(self):
         for field in [
