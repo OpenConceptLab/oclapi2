@@ -3,7 +3,7 @@ from django.urls import re_path, include, path
 from core.common.constants import NAMESPACE_PATTERN
 from core.orgs import views as org_views
 from . import views
-from ..repos.views import ReposListView, OrganizationRepoListView
+from ..repos.views import OrganizationRepoListView
 
 urlpatterns = [
     re_path(r'^$', views.UserListView.as_view(), name='userprofile-list'),

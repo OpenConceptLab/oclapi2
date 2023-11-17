@@ -5,7 +5,6 @@ from core.orgs import views as orgs_views
 from core.repos.views import OrganizationRepoListView
 from core.users import views
 
-
 extra_kwargs = {'user_is_self': True}
 
 # shortcuts for the currently logged-in user
