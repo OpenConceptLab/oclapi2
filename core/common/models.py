@@ -178,8 +178,9 @@ class BaseModel(models.Model):
 
     @staticmethod
     def batch_index(queryset, document):
-        for batch in queryset.order_by('-id').iterator(chunk_size=500):
-            document().update(batch, parallel=True)
+        if not get(settings, 'TEST_MODE'):
+            for batch in queryset.iterator(chunk_size=500):
+                document().update(batch, parallel=True)
 
     @staticmethod
     @transaction.atomic
