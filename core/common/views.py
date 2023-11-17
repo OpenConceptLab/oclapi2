@@ -647,7 +647,9 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                 kwargs_filters['user'] = username
         else:
             kwargs_filters = self.get_kwargs_filters()
-            if self.get_view_name() in ['Organization Collection List', 'Organization Source List']:
+            if self.get_view_name() in [
+                'Organization Collection List', 'Organization Source List', 'Organization Repo List'
+            ]:
                 kwargs_filters['ownerType'] = 'Organization'
                 kwargs_filters['owner'] = list(
                     user.organizations.values_list('mnemonic', flat=True)) or ['UNKNOWN-ORG-DUMMY']

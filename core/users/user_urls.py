@@ -2,6 +2,7 @@ from django.urls import re_path, include
 
 from core.common.constants import NAMESPACE_PATTERN
 from core.orgs import views as orgs_views
+from core.repos.views import OrganizationRepoListView
 from core.users import views
 
 
@@ -32,6 +33,11 @@ urlpatterns = [
         orgs_views.OrganizationCollectionListView.as_view(),
         extra_kwargs,
         name='user-organization-collection-list'
+    ),
+    re_path(
+        r'^orgs/repos/$',
+        OrganizationRepoListView.as_view(),
+        name='user-organization-repo-list',
     ),
     re_path(
         fr"^extras/(?P<extra>{NAMESPACE_PATTERN})/$",

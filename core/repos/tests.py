@@ -1,11 +1,12 @@
 from core.collections.documents import CollectionDocument
 from core.collections.models import Collection
-from core.collections.tests.factories import OrganizationCollectionFactory
+from core.collections.tests.factories import OrganizationCollectionFactory, UserCollectionFactory
 from core.common.tests import OCLAPITestCase
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.documents import SourceDocument
 from core.sources.models import Source
-from core.sources.tests.factories import OrganizationSourceFactory
+from core.sources.tests.factories import OrganizationSourceFactory, UserSourceFactory
+from core.users.tests.factories import UserProfileFactory
 
 
 class ReposListViewTest(OCLAPITestCase):
@@ -65,3 +66,72 @@ class ReposListViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 1)
+
+
+class UserOrganizationRepoListViewTest(OCLAPITestCase):
+    def test_get(self):
+        CollectionDocument._index.delete()  # pylint: disable=protected-access
+        SourceDocument._index.delete()  # pylint: disable=protected-access
+        CollectionDocument.init()
+        SourceDocument.init()
+
+        user = UserProfileFactory(username='batman')
+        token = user.get_token()
+        org1 = OrganizationFactory(mnemonic='gotham')
+        org2 = OrganizationFactory(mnemonic='wayne-enterprise')
+        org1.members.add(user)
+        org2.members.add(user)
+        coll1 = OrganizationCollectionFactory(mnemonic='city', organization=org1)
+        coll2 = OrganizationCollectionFactory(mnemonic='corporate', organization=org2)
+        coll3 = UserCollectionFactory(mnemonic='bat-cave', user=user)
+        source1 = OrganizationSourceFactory(mnemonic='city', organization=org1)
+        source2 = OrganizationSourceFactory(mnemonic='corporate', organization=org2)
+        source3 = UserSourceFactory(mnemonic='bat-cave', user=user)
+
+        CollectionDocument().update([coll1, coll2, coll3])
+        SourceDocument().update([source1, source2, source3])
+
+        response = self.client.get(
+            '/users/batman/orgs/repos/',
+            HTTP_AUTHORIZATION=f'Token {token}'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 4)
+        self.assertEqual(
+            sorted([data['url'] for data in response.data]),
+            sorted(['/orgs/wayne-enterprise/collections/corporate/', '/orgs/gotham/collections/city/',
+                    '/orgs/wayne-enterprise/sources/corporate/', '/orgs/gotham/sources/city/'])
+        )
+
+        response = self.client.get(
+            '/users/batman/orgs/repos/?q=city',
+            HTTP_AUTHORIZATION=f'Token {token}'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 2)
+        self.assertEqual(
+            sorted([data['url'] for data in response.data]),
+            sorted(['/orgs/gotham/collections/city/', '/orgs/gotham/sources/city/'])
+        )
+
+        response = self.client.get(
+            '/user/orgs/repos/?q=city',
+            HTTP_AUTHORIZATION=f'Token {token}'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 2)
+        self.assertEqual(
+            sorted([data['url'] for data in response.data]),
+            sorted(['/orgs/gotham/collections/city/', '/orgs/gotham/sources/city/'])
+        )
+
+        response = self.client.get(
+            '/user/orgs/repos/?q=batman',
+            HTTP_AUTHORIZATION=f'Token {token}'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 0)
