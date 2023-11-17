@@ -178,15 +178,8 @@ class BaseModel(models.Model):
 
     @staticmethod
     def batch_index(queryset, document):
-        count = queryset.count()
-        batch_size = 1000
-        offset = 0
-        limit = batch_size
-        while offset < count:
-            print(f"Indexing {offset}-{min([limit, count])}/{count}")
-            document().update(queryset.order_by('-id')[offset:limit], parallel=True)
-            offset = limit
-            limit += batch_size
+        for batch in queryset.order_by('-id').iterator(chunk_size=500):
+            document().update(batch, parallel=True)
 
     @staticmethod
     @transaction.atomic
