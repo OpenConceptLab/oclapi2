@@ -177,10 +177,13 @@ class BaseModel(models.Model):
         return criteria
 
     @staticmethod
-    def batch_index(queryset, document):
+    def batch_index(queryset, document, single_batch=False):
         if not get(settings, 'TEST_MODE'):
-            for batch in queryset.iterator(chunk_size=500):
-                document().update(batch, parallel=True)
+            if single_batch:
+                document().update(queryset, parallel=True)
+            else:
+                for batch in queryset.iterator(chunk_size=500):
+                    document().update(batch, parallel=True)
 
     @staticmethod
     @transaction.atomic
