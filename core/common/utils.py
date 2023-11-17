@@ -911,3 +911,9 @@ def get_date_range_label(start_date, end_date):
         return f"{start.day:02d} {start_month} - {end.day:02d} {end_month} {start.year}"
 
     return f"{start.day:02d} {start_month} {start.year} - {end.day:02d} {end_month} {end.year}"
+
+
+def format_url_for_search(url):
+    if url:
+        return url.replace('/', '_').replace(':', '_')
+    return url

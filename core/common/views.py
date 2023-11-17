@@ -23,14 +23,16 @@ from core import __version__
 from core.common.constants import SEARCH_PARAM, LIST_DEFAULT_LIMIT, CSV_DEFAULT_LIMIT, \
     LIMIT_PARAM, NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY, INCLUDE_RETIRED_PARAM, VERBOSE_PARAM, HEAD, LATEST, \
     BRIEF_PARAM, ES_REQUEST_TIMEOUT, INCLUDE_INACTIVE, FHIR_LIMIT_PARAM, RAW_PARAM, SEARCH_MAP_CODES_PARAM, \
-    INCLUDE_SEARCH_META_PARAM, EXCLUDE_FUZZY_SEARCH_PARAM, EXCLUDE_WILDCARD_SEARCH_PARAM, UPDATED_BY_USERNAME_PARAM
+    INCLUDE_SEARCH_META_PARAM, EXCLUDE_FUZZY_SEARCH_PARAM, EXCLUDE_WILDCARD_SEARCH_PARAM, UPDATED_BY_USERNAME_PARAM, \
+    CANONICAL_URL_REQUEST_PARAM
 from core.common.exceptions import Http400
 from core.common.mixins import PathWalkerMixin
 from core.common.search import CustomESSearch
 from core.common.serializers import RootSerializer
 from core.common.swagger_parameters import all_resource_query_param
 from core.common.utils import compact_dict_by_values, to_snake_case, parse_updated_since_param, \
-    to_int, get_user_specific_task_id, get_falsy_values, get_truthy_values, get_resource_class_from_resource_name
+    to_int, get_user_specific_task_id, get_falsy_values, get_truthy_values, get_resource_class_from_resource_name, \
+    format_url_for_search
 from core.concepts.permissions import CanViewParentDictionary, CanEditParentDictionary
 from core.orgs.constants import ORG_OBJECT_TYPE
 from core.tasks.constants import TASK_NOT_COMPLETED
@@ -464,6 +466,10 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         from core.sources.documents import SourceDocument
         return self.document_model in [SourceDocument, CollectionDocument]
 
+    def is_repo_document_model(self):
+        from core.repos.documents import RepoDocument
+        return self.document_model == RepoDocument
+
     def is_user_scope(self):
         org = self.kwargs.get('org', None)
         user = self.kwargs.get('user', None)
@@ -517,6 +523,11 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             results = results.query("terms", updated_by=compact(updated_by.split(',')))
         if self.is_source_child_document_model() and self.__should_query_latest_version():
             default_filters['is_latest_version'] = True
+        if self.is_canonical_specified():
+            results = results.query(
+                'match_phrase',
+                _canonical_url=format_url_for_search(self.request.query_params.get(CANONICAL_URL_REQUEST_PARAM))
+            )
 
         for field, value in default_filters.items():
             results = results.query("match", **{field: value})
@@ -536,6 +547,11 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         if faceted_criterion:
             results = results.query(faceted_criterion)
         return results
+
+    def is_canonical_specified(self):
+        return (
+                       self.is_concept_container_document_model() or self.is_repo_document_model()
+               ) and self.request.query_params.get(CANONICAL_URL_REQUEST_PARAM, None)
 
     def __get_fuzzy_search_results(
             self, source_versions=None, other_filters=None, sort=True

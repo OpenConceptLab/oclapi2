@@ -6,7 +6,7 @@ from core.common.constants import RELEASED_PARAM, VERBOSE_PARAM, INCLUDE_RETIRED
     LAST_LOGIN_BEFORE_PARAM, LAST_LOGIN_SINCE_PARAM, DATE_JOINED_SINCE_PARAM, DATE_JOINED_BEFORE_PARAM, \
     CASCADE_HIERARCHY_PARAM, CASCADE_METHOD_PARAM, MAP_TYPES_PARAM, EXCLUDE_MAP_TYPES_PARAM, CASCADE_MAPPINGS_PARAM, \
     INCLUDE_MAPPINGS_PARAM, CASCADE_LEVELS_PARAM, CASCADE_DIRECTION_PARAM, ALL, RETURN_MAP_TYPES, OMIT_IF_EXISTS_IN, \
-    EQUIVALENCY_MAP_TYPES
+    EQUIVALENCY_MAP_TYPES, CANONICAL_URL_REQUEST_PARAM
 # HEADERS
 from core.orgs.constants import NO_MEMBERS
 
@@ -57,6 +57,9 @@ include_collection_versions_param = openapi.Parameter(
 )
 updated_since_param = openapi.Parameter(
     UPDATED_SINCE_PARAM, openapi.IN_QUERY, description="format: YYYY-MM-DD HH:MM:SS", type=openapi.TYPE_STRING,
+)
+canonical_url_param = openapi.Parameter(
+    CANONICAL_URL_REQUEST_PARAM, openapi.IN_QUERY, type=openapi.TYPE_STRING,
 )
 
 released_param = openapi.Parameter(

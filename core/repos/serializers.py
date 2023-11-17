@@ -10,10 +10,9 @@ class RepoListSerializer(serializers.Serializer):  # pylint: disable=abstract-me
     def to_representation(self, instance):
         return self.get_data(instance)
 
-    @staticmethod
-    def get_data(item):
+    def get_data(self, item):
         if isinstance(item, Source):
-            return SourceListSerializer(item).data
+            return SourceListSerializer(item, context=self.context).data
         if isinstance(item, Collection):
-            return CollectionListSerializer(item).data
+            return CollectionListSerializer(item, context=self.context).data
         return None

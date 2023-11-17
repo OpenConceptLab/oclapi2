@@ -122,3 +122,4 @@ OMIT_IF_EXISTS_IN = 'omitIfExistsIn'
 INCLUDE_SELF = 'includeSelf'
 FACET_SIZE = 20
 ALL = '*'
+CANONICAL_URL_REQUEST_PARAM = 'canonicalUrl'

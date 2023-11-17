@@ -4,7 +4,7 @@ from django_elasticsearch_dsl import Document, fields
 from django_elasticsearch_dsl.registries import registry
 from pydash import get
 
-from core.common.utils import jsonify_safe, flatten_dict
+from core.common.utils import jsonify_safe, flatten_dict, format_url_for_search
 from core.sources.models import Source
 
 
@@ -25,6 +25,7 @@ class SourceDocument(Document):
     name = fields.TextField(attr='name')
     _name = fields.KeywordField(attr='name', normalizer='lowercase')
     canonical_url = fields.TextField(attr='canonical_url')
+    _canonical_url = fields.TextField()
     mnemonic = fields.TextField(attr='mnemonic')
     _mnemonic = fields.KeywordField(attr='mnemonic', normalizer='lowercase')
     extras = fields.ObjectField(dynamic=True)
@@ -147,3 +148,7 @@ class SourceDocument(Document):
         if hierarchy_meaning:
             return hierarchy_meaning.lower()
         return 'None'
+
+    @staticmethod
+    def prepare__canonical_url(instance):
+        return format_url_for_search(instance.canonical_url)
