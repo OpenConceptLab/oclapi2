@@ -233,13 +233,13 @@ def __run_search_index_command(command, app_names=None):
         call_command('search_index', command, '-f', '--parallel')
 
 
-@app.task(base=QueueOnce)
+@app.task(base=QueueOnce, retry_kwargs={'max_retries': 0})
 def bulk_import(to_import, username, update_if_exists):
     from core.importers.models import BulkImport
     return BulkImport(content=to_import, username=username, update_if_exists=update_if_exists).run()
 
 
-@app.task(base=QueueOnce, bind=True)
+@app.task(base=QueueOnce, bind=True, retry_kwargs={'max_retries': 0})
 def bulk_import_parallel_inline(self, to_import, username, update_if_exists, threads=5):
     from core.importers.models import BulkImportParallelRunner
     try:
@@ -254,13 +254,13 @@ def bulk_import_parallel_inline(self, to_import, username, update_if_exists, thr
     return importer.run()
 
 
-@app.task(base=QueueOnce)
+@app.task(base=QueueOnce, retry_kwargs={'max_retries': 0})
 def bulk_import_inline(to_import, username, update_if_exists):
     from core.importers.models import BulkImportInline
     return BulkImportInline(content=to_import, username=username, update_if_exists=update_if_exists).run()
 
 
-@app.task(bind=True)
+@app.task(bind=True, retry_kwargs={'max_retries': 0})
 def bulk_import_parts_inline(self, input_list, username, update_if_exists):
     from core.importers.models import BulkImportInline
     return BulkImportInline(
