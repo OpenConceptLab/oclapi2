@@ -358,13 +358,6 @@ CACHES = {
 }
 
 # Celery
-RETRY_POLICY = {
-    'max_retries': 10,
-    'interval_start': 0,
-    'interval_step': 1,
-    'interval_max': 10
-}
-
 CELERY_ENABLE_UTC = True
 CELERY_TIMEZONE = "UTC"
 CELERY_ALWAYS_EAGER = False
@@ -396,7 +389,7 @@ CELERY_RESULT_BACKEND_TRANSPORT_OPTIONS = {
     'socket_connect_timeout': 5.0,
     'retry_policy': {
         'timeout': 5.0
-    } | RETRY_POLICY
+    }
 }
 CELERY_RESULT_EXTENDED = True
 CELERY_RESULT_EXPIRES = 259200  # 72 hours
@@ -407,7 +400,7 @@ CELERY_BROKER_TRANSPORT_OPTIONS = {
     'socket_connect_timeout': 5.0,
     'retry_policy': {
         'timeout': 5.0
-    } | RETRY_POLICY
+    }
 }
 
 if REDIS_SENTINELS:
@@ -438,7 +431,7 @@ CELERY_BROKER_HEARTBEAT = None
 CELERY_TASK_PUBLISH_RETRY = True
 CELERY_TASK_PUBLISH_RETRY_POLICY = {
     'retry_errors': None,
-} | RETRY_POLICY
+}
 
 CELERY_ACCEPT_CONTENT = ['application/json']
 CELERY_ONCE = {
