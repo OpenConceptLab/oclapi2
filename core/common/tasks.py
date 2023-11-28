@@ -721,13 +721,14 @@ def delete_duplicate_concept_versions(source_mnemonic, source_filters=None, conc
     deleted = 0
     for concept in source.concepts_set.exclude(id=F('versioned_object_id')).exclude(
             is_latest_version=True).filter(**concept_filters).iterator(chunk_size=100):
+        logger.info('Checking concept %s', concept.uri)
         source_versions = concept.sources
         count = source_versions.count()
         if not concept.comment and count == 0 or (count == 1 and source_versions.first().version == 'HEAD'):
             if not concept.references.exists() and not concept.expansion_set.exists():
                 if not concept.mappings_from.exists() and not concept.mappings_to.exists():
-                    print(f"***Deleting: {concept.uri}***")
+                    logger.info('Deleting %s', concept.uri)
                     concept.delete()
                     deleted += 1
 
-    print("***DELETED***", deleted)
+    logger.info("DELETED %d", deleted)
