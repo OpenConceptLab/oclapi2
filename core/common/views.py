@@ -15,7 +15,7 @@ from elasticsearch_dsl import Q
 from pydash import get, compact, flatten
 from rest_framework import response, generics, status
 from rest_framework.generics import ListAPIView, RetrieveUpdateDestroyAPIView
-from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated, IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -1089,8 +1089,8 @@ class TaskMixin:
             status=status.HTTP_202_ACCEPTED
         )
 
-    def perform_task(self, task_func, task_args, queue='default'):
-        is_async = self.is_async_requested()
+    def perform_task(self, task_func, task_args, queue='default', is_default_async=False):
+        is_async = is_default_async or self.is_async_requested()
         if self.is_inline_requested() or (get(settings, 'TEST_MODE', False) and not is_async):
             result = task_func(*task_args)
         else:
@@ -1107,4 +1107,23 @@ class TaskMixin:
             if result == TASK_NOT_COMPLETED:
                 return self.task_response(task, queue)
 
+        return result
+
+
+class ConceptDuplicateDeleteView(BaseAPIView, TaskMixin):  # pragma: no-cover
+    permission_classes = (IsAdminUser, )
+
+    def post(self, _):
+        source_mnemonic = self.request.data.get('source_mnemonic', None)
+        source_filters = self.request.data.get('source_filters', None) or {}
+        concept_filters = self.request.data.get('concept_filters', None) or {}
+        if not source_mnemonic:
+            raise Http400(detail='source_mnemonic is required.')
+
+        from core.common.tasks import delete_duplicate_concept_versions
+        result = self.perform_task(
+            task_func=delete_duplicate_concept_versions,
+            task_args=(source_mnemonic, source_filters, concept_filters),
+            is_default_async=True
+        )
         return result

@@ -27,7 +27,7 @@ from core.collections.views import ReferenceExpressionResolveView
 from core.common.constants import NAMESPACE_PATTERN
 from core.common.utils import get_api_base_url
 from core.common.views import RootView, FeedbackView, APIVersionView, ChangeLogView, StandardChecksumView, \
-    SmartChecksumView
+    SmartChecksumView, ConceptDuplicateDeleteView
 from core.concepts.views import ConceptsHierarchyAmendAdminView
 from core.importers.views import BulkImportView
 
@@ -91,6 +91,9 @@ urlpatterns = [
     ),
     path('manage/bulkimport/', BulkImportView.as_view(), name='bulk_import_urls'),
     path('toggles/', include('core.toggles.urls'), name='toggles'),
+    path(
+        'concepts-duplicate-versions-delete/',
+        ConceptDuplicateDeleteView.as_view(), name='concepts-duplicate-versions-delete'),
 ]
 
 handler500 = 'rest_framework.exceptions.server_error'
