@@ -45,7 +45,9 @@ class OCLOIDCAuthenticationBackend(OIDCAuthenticationBackend):
             email=claims.get('email'),
             first_name=claims.get('given_name'),
             last_name=claims.get('family_name'),
-            verified=claims.get('email_verified')
+            verified=claims.get('email_verified'),
+            company=claims.get('company', None),
+            location=claims.get('location', None)
         )
         if user.id:
             user.set_checksums()
@@ -55,6 +57,8 @@ class OCLOIDCAuthenticationBackend(OIDCAuthenticationBackend):
         user.first_name = claims.get('given_name') or user.first_name
         user.last_name = claims.get('family_name') or user.last_name
         user.email = claims.get('email') or user.email
+        user.company = claims.get('company', None) or user.company
+        user.location = claims.get('location', None) or user.location
         user.save()
         user.set_checksums()
         return user
