@@ -1281,7 +1281,9 @@ class OCLOIDCAuthenticationBackendTest(OCLTestCase):
             email='batman@gotham.com',
             first_name='Bruce',
             last_name='Wayne',
-            verified=True
+            verified=True,
+            company=None,
+            location=None
         )
 
     def test_update_user(self):
