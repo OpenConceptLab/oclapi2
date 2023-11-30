@@ -267,6 +267,19 @@ class UserSignup(UserBaseView, mixins.CreateModelMixin):
     serializer_class = UserCreateSerializer
     permission_classes = (AllowAny, )
 
+    @staticmethod
+    def get(request):
+        if AuthService.is_sso_enabled():
+            return redirect(
+                OIDCAuthService.get_registration_redirect_url(
+                    request.query_params.get('client_id'),
+                    request.query_params.get('redirect_uri'),
+                    request.query_params.get('state'),
+                    request.query_params.get('nonce'),
+                )
+            )
+        return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
+
     def post(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         serializer = self.get_serializer(data={**request.data, 'verified': False})
         serializer.is_valid(raise_exception=True)

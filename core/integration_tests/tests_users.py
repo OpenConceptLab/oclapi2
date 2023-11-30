@@ -105,6 +105,32 @@ class UserSignupVerificationViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data, {'token': created_user.get_token()})
 
+    @patch('core.users.views.AuthService.is_sso_enabled')
+    def test_get_405(self, is_sso_enabled_mock):
+        is_sso_enabled_mock.return_value = False
+
+        response = self.client.get(
+            '/users/signup/?client_id=client-id&redirect_uri=http://post-login-url&state=state&nonce=nonce'
+        )
+
+        self.assertEqual(response.status_code, 405)
+
+    @patch('core.users.views.OIDCAuthService.get_registration_redirect_url')
+    @patch('core.users.views.AuthService.is_sso_enabled')
+    def test_get_200(self, is_sso_enabled_mock, get_registration_url_mock):
+        is_sso_enabled_mock.return_value = True
+        get_registration_url_mock.return_value = 'http://registration-redirect.com'
+
+        response = self.client.get(
+            '/users/signup/?client_id=client-id&redirect_uri=http://post-registration-url&state=state&nonce=nonce'
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.headers['Location'], 'http://registration-redirect.com')
+        get_registration_url_mock.assert_called_once_with(
+            'client-id', 'http://post-registration-url', 'state', 'nonce'
+        )
+
 
 class UserPasswordResetViewTest(OCLAPITestCase):
     @patch('core.users.models.UserProfile.send_reset_password_email')
