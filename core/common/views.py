@@ -1111,6 +1111,7 @@ class TaskMixin:
 
 
 class ConceptDuplicateDeleteView(BaseAPIView, TaskMixin):  # pragma: no-cover
+    swagger_schema = None
     permission_classes = (IsAdminUser, )
 
     def post(self, _):
