@@ -106,13 +106,24 @@ def ignore_json_paths(json_input, json_response, paths):
         update_json(json_input, path, None)
         update_json(json_response, path, None)
 
+def ignore_json_paths_if_not_in_input(json_input, json_response, paths):
+    for path in paths:
+        jsonpath_expr = parse(path)
+        if not jsonpath_expr.find(json_input):
+            update_json(json_input, path, None)
+            update_json(json_response, path, None)
+
 
 def validate_jsons(json_file, json_response):
     adjust_to_ocl_format(json_file)
 
     ignore_json_paths(json_file, json_response, ['date', 'identifier', 'meta',
-                                                 'revisionDate', 'count', 'concept[*].definition',
-                                                 'concept[*].designation', 'concept[*].display', 'property[*].uri'])
+                                                 'revisionDate'])
+
+    ignore_json_paths_if_not_in_input(json_file, json_response, ['count', 'concept[*].definition', 'concept[*].id',
+                                                                 'concept[*].designation', 'concept[*].display',
+                                                                 'property[*].uri'])
+
     diff = jsondiff.diff(json_file, json_response, syntax='explicit', marshal=True)
     if diff:
         diff = json.dumps(diff, indent=4)
