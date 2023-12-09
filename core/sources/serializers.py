@@ -375,6 +375,7 @@ class SourceDetailSerializer(SourceCreateOrUpdateSerializer, AbstractRepoResourc
             'experimental', 'case_sensitive', 'collection_reference', 'hierarchy_meaning', 'compositional',
             'version_needed', 'hierarchy_root_url', 'hierarchy_root', 'meta',
             'autoid_concept_mnemonic', 'autoid_concept_external_id',
+            'autoid_concept_name_external_id', 'autoid_concept_description_external_id',
             'autoid_mapping_mnemonic', 'autoid_mapping_external_id',
             'autoid_concept_mnemonic_start_from', 'autoid_concept_external_id_start_from',
             'autoid_mapping_mnemonic_start_from', 'autoid_mapping_external_id_start_from', 'checksums'
