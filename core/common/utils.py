@@ -917,3 +917,7 @@ def format_url_for_search(url):
     if url:
         return url.replace('/', '_').replace(':', '_')
     return url
+
+
+def clean_term(term):
+    return term.lower().replace(' ', '').replace('-', '').replace('_', '')

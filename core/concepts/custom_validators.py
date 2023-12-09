@@ -2,6 +2,7 @@ from django.core.exceptions import ValidationError
 from pydash import get
 
 from core.common.constants import LOOKUP_CONCEPT_CLASSES
+from core.common.utils import clean_term
 from core.concepts.constants import (
     OPENMRS_MUST_HAVE_EXACTLY_ONE_PREFERRED_NAME,
     OPENMRS_AT_LEAST_ONE_FULLY_SPECIFIED_NAME, OPENMRS_PREFERRED_NAME_UNIQUE_PER_SOURCE_LOCALE,
@@ -178,7 +179,8 @@ class OpenMRSConceptValidator(BaseConceptValidator):
             return
 
         for name in names:
-            if name.type in [FULLY_SPECIFIED, SHORT, INDEX_TERM] or name.is_fully_specified_after_clean:
+            name_type = clean_term(name.type or '')
+            if name_type in [clean_term(FULLY_SPECIFIED), clean_term(SHORT), clean_term(INDEX_TERM)]:
                 continue
 
             if (name.type or 'None') in self.reference_values['NameTypes']:
