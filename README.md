@@ -70,6 +70,13 @@ Run api with:
 
 `docker-compose run --rm --service-ports api`
 
+#### Profiler
+##### We use [django-silk](https://github.com/jazzband/django-silk) as our profiler #####
+###### Skip to step 3 if not first time
+1. `docker-compose run --rm api python manage.py migrate`
+2. `docker-compose run --rm api python manage.py collectstatic`
+3. Go to http://localhost:8000/silk/
+
 ### Importing FHIR resources
 
 In order to import FHIR resources run:
