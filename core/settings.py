@@ -526,6 +526,6 @@ OIDC_CALLBACK_CLASS = 'core.users.views.OCLOIDCAuthenticationCallbackView'
 # Profiler Django Silk
 if ENV == 'development':
     INSTALLED_APPS = [*INSTALLED_APPS, 'silk']
-    MIDDLEWARE = [*MIDDLEWARE, "silk.middleware.SilkyMiddleware"]
-    SILKY_PYTHON_PROFILER = True
-    SILKY_PYTHON_PROFILER_RESULT_PATH = '/code/core/'
+    # MIDDLEWARE = [*MIDDLEWARE, "silk.middleware.SilkyMiddleware"]
+    # SILKY_PYTHON_PROFILER = True
+    # SILKY_PYTHON_PROFILER_RESULT_PATH = '/code/core/'
