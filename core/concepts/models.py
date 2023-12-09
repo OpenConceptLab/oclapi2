@@ -620,9 +620,13 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     def set_locales(self, locales, locale_klass):
         if not self.id:
             return  # pragma: no cover
+        is_name = locale_klass == ConceptName
         for locale in locales:
             new_locale = locale.clone() if isinstance(locale, locale_klass) else locale_klass.build(locale)
             new_locale.concept_id = self.id
+            if not new_locale.external_id:
+                new_locale.external_id = self.parent.concept_name_external_id_next if is_name \
+                    else self.parent.concept_description_external_id_next
             new_locale.save()
             new_locale.set_checksums()
 

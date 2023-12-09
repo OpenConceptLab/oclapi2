@@ -280,9 +280,66 @@ class ConceptTest(OCLTestCase):
         self.assertIsNotNone(concept2.id)
         self.assertTrue(len(concept2.mnemonic), 36)
         self.assertTrue(len(concept2.external_id), 36)
+        self.assertIsNone(concept2.names.first().external_id)
 
         self.assertNotEqual(concept1.mnemonic, concept2.mnemonic)
         self.assertNotEqual(concept1.external_id, concept2.external_id)
+
+    def test_persist_new_with_locale_autoid_uuid(self):
+        source = OrganizationSourceFactory(
+            version=HEAD, autoid_concept_mnemonic='uuid', autoid_concept_external_id='uuid',
+            autoid_concept_name_external_id='uuid', autoid_concept_description_external_id='uuid'
+        )
+        concept1 = Concept.persist_new({
+            **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'parent': source, 'mnemonic': None,
+            'names': [ConceptNameFactory.build(locale='en', name='English', locale_preferred=True)],
+            'descriptions': [ConceptDescriptionFactory.build(locale='en', name='English', locale_preferred=True)]
+        })
+
+        self.assertEqual(concept1.errors, {})
+        self.assertIsNotNone(concept1.id)
+        self.assertTrue(len(concept1.mnemonic), 36)
+        self.assertTrue(len(concept1.external_id), 36)
+        self.assertTrue(len(concept1.names.first().external_id), 36)
+        self.assertTrue(len(concept1.descriptions.first().external_id), 36)
+
+        concept2 = Concept.persist_new({
+            **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'parent': source, 'mnemonic': None,
+            'names': [
+                ConceptNameFactory.build(locale='en', name='English', locale_preferred=True, external_id=None)
+            ],
+            'descriptions': [
+                ConceptDescriptionFactory.build(locale='en', name='English', locale_preferred=True, external_id=None)
+            ]
+        })
+
+        self.assertEqual(concept2.errors, {})
+        self.assertIsNotNone(concept2.id)
+        self.assertTrue(len(concept2.mnemonic), 36)
+        self.assertTrue(len(concept2.external_id), 36)
+        self.assertTrue(len(concept2.names.first().external_id), 36)
+        self.assertTrue(len(concept2.descriptions.first().external_id), 36)
+
+        self.assertNotEqual(concept1.mnemonic, concept2.mnemonic)
+        self.assertNotEqual(concept1.external_id, concept2.external_id)
+        self.assertNotEqual(concept1.names.first().external_id, concept2.names.first().external_id)
+        self.assertNotEqual(concept1.descriptions.first().external_id, concept2.descriptions.first().external_id)
+
+        concept3 = Concept.persist_new({
+            **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'parent': source, 'mnemonic': None,
+            'names': [
+                ConceptNameFactory.build(
+                    locale='en', name='English', locale_preferred=True, external_id='name-ext-id')
+            ],
+            'descriptions': [
+                ConceptDescriptionFactory.build(
+                    locale='en', name='English', locale_preferred=True, external_id='desc-ext-id')
+            ]
+        })
+
+        self.assertEqual(concept3.errors, {})
+        self.assertTrue(concept3.names.first().external_id, 'name-ext-id')
+        self.assertTrue(concept3.descriptions.first().external_id, 'desc-ext-id')
 
     def test_hierarchy_one_parent_child(self):
         parent_concept = ConceptFactory(

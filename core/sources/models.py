@@ -15,7 +15,7 @@ from core.common.tasks import update_mappings_source
 from core.common.validators import validate_non_negative
 from core.concepts.models import ConceptName, Concept
 from core.sources.constants import SOURCE_TYPE, SOURCE_VERSION_TYPE, HIERARCHY_ROOT_MUST_BELONG_TO_SAME_SOURCE, \
-    HIERARCHY_MEANINGS, AUTO_ID_CHOICES, AUTO_ID_SEQUENTIAL, AUTO_ID_UUID
+    HIERARCHY_MEANINGS, AUTO_ID_CHOICES, AUTO_ID_SEQUENTIAL, AUTO_ID_UUID, LOCALE_EXTERNAL_AUTO_ID_CHOICES
 
 
 class Source(DirtyFieldsMixin, ConceptContainerModel):
@@ -85,6 +85,10 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         default=DEFAULT_AUTO_ID_START_FROM, validators=[validate_non_negative])
     autoid_mapping_external_id_start_from = models.IntegerField(
         default=DEFAULT_AUTO_ID_START_FROM, validators=[validate_non_negative])
+    autoid_concept_name_external_id = models.CharField(
+        null=True, blank=True, choices=LOCALE_EXTERNAL_AUTO_ID_CHOICES, max_length=10)
+    autoid_concept_description_external_id = models.CharField(
+        null=True, blank=True, choices=LOCALE_EXTERNAL_AUTO_ID_CHOICES, max_length=10)
 
     OBJECT_TYPE = SOURCE_TYPE
     OBJECT_VERSION_TYPE = SOURCE_VERSION_TYPE
@@ -142,6 +146,14 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
     @property
     def concept_external_id_next(self):
         return self.get_resource_next_attr_id(self.autoid_concept_external_id, self.concepts_external_id_seq_name)
+
+    @property
+    def concept_name_external_id_next(self):
+        return self.get_resource_next_attr_id(self.autoid_concept_name_external_id, None)
+
+    @property
+    def concept_description_external_id_next(self):
+        return self.get_resource_next_attr_id(self.autoid_concept_description_external_id, None)
 
     @property
     def mapping_mnemonic_next(self):
