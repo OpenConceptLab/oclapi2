@@ -522,3 +522,10 @@ OIDC_RP_SCOPES = 'openid profile email'
 OIDC_STORE_ACCESS_TOKEN = True
 OIDC_CREATE_USER = True
 OIDC_CALLBACK_CLASS = 'core.users.views.OCLOIDCAuthenticationCallbackView'
+
+# Profiler Django Silk
+if ENV == 'development':
+    INSTALLED_APPS = [*INSTALLED_APPS, 'silk']
+    MIDDLEWARE = [*MIDDLEWARE, "silk.middleware.SilkyMiddleware"]
+    SILKY_PYTHON_PROFILER = True
+    SILKY_PYTHON_PROFILER_RESULT_PATH = '/code/core/'

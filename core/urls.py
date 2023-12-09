@@ -30,6 +30,7 @@ from core.common.views import RootView, FeedbackView, APIVersionView, ChangeLogV
     SmartChecksumView, ConceptDuplicateDeleteView
 from core.concepts.views import ConceptsHierarchyAmendAdminView
 from core.importers.views import BulkImportView
+from core.settings import ENV
 
 SchemaView = get_schema_view(
     openapi.Info(
@@ -95,6 +96,13 @@ urlpatterns = [
         'concepts-duplicate-versions-delete/',
         ConceptDuplicateDeleteView.as_view(), name='concepts-duplicate-versions-delete'),
 ]
+
+if ENV == 'development':
+    urlpatterns = [
+        path("silk/", include("silk.urls", namespace="silk")),
+        *urlpatterns
+    ]
+
 
 handler500 = 'rest_framework.exceptions.server_error'
 handler400 = 'rest_framework.exceptions.bad_request'
