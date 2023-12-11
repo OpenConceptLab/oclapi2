@@ -6,6 +6,7 @@ from celery_once import AlreadyQueued
 from django.conf import settings
 from django.db import transaction
 from mock import patch, Mock, ANY, PropertyMock
+from mock.mock import call
 from rest_framework.exceptions import ErrorDetail
 
 from core.bundles.models import Bundle
@@ -404,6 +405,64 @@ class SourceVersionListViewTest(OCLAPITestCase):
         self.assertEqual(response.data['version'], 'v1')
         self.assertEqual(self.source.versions.count(), 2)
 
+    @patch('core.sources.models.index_source_mappings')
+    @patch('core.sources.models.index_source_concepts')
+    def test_new_first_released_version_should_index_children(
+            self, index_source_concepts_task_mock, index_source_mappings_task_mock
+    ):
+        response = self.client.post(
+            f'/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}/versions/',
+            {
+                'id': 'v1',
+                'description': 'Version 1',
+                'released': True
+            },
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data['version'], 'v1')
+        self.assertEqual(self.source.versions.count(), 2)
+        version = self.source.get_latest_released_version()
+        self.assertEqual(version.version, 'v1')
+        self.assertEqual(version.released, True)
+        self.assertEqual(version.get_prev_released_version(), None)
+        index_source_concepts_task_mock.delay.assert_called_once_with(version.id)
+        index_source_mappings_task_mock.delay.assert_called_once_with(version.id)
+
+    @patch('core.sources.models.index_source_mappings')
+    @patch('core.sources.models.index_source_concepts')
+    def test_new_second_released_version_should_index_children_of_new_and_prev_released_version(
+            self, index_source_concepts_task_mock, index_source_mappings_task_mock
+    ):
+        source_v1 = OrganizationSourceFactory(
+            organization=self.organization, mnemonic=self.source.mnemonic, version='v1', released=True
+        )
+        response = self.client.post(
+            f'/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}/versions/',
+            {
+                'id': 'v2',
+                'description': 'Version 2',
+                'released': True
+            },
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data['version'], 'v2')
+        self.assertEqual(self.source.versions.count(), 3)
+        version = self.source.get_latest_released_version()
+        self.assertNotEqual(version.id, source_v1.id)
+        self.assertEqual(version.version, 'v2')
+        self.assertEqual(version.released, True)
+        self.assertEqual(version.get_prev_released_version().id, source_v1.id)
+        self.assertEqual(index_source_concepts_task_mock.delay.call_count, 2)
+        self.assertEqual(index_source_mappings_task_mock.delay.call_count, 2)
+        self.assertEqual(index_source_concepts_task_mock.delay.mock_calls, [call(source_v1.id), call(version.id)])
+        self.assertEqual(index_source_mappings_task_mock.delay.mock_calls, [call(source_v1.id), call(version.id)])
+
     def test_post_409(self):
         OrganizationSourceFactory(version='v1', organization=self.organization, mnemonic=self.source.mnemonic)
         with transaction.atomic():
@@ -654,6 +713,154 @@ class SourceVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 204)
         self.assertEqual(self.source.versions.count(), 1)
         self.assertFalse(self.source.versions.filter(version='v2').exists())
+
+    @patch('core.sources.models.index_source_mappings')
+    @patch('core.sources.models.index_source_concepts')
+    def test_version_updated_to_released_should_index_children(
+            self, index_source_concepts_task_mock, index_source_mappings_task_mock
+    ):
+        self.assertFalse(self.source_v1.released)
+        self.assertEqual(self.source.get_latest_released_version(), None)
+
+        response = self.client.put(
+            self.source_v1.uri,
+            {'released': True, 'description': 'Updated to released'},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['version'], 'v1')
+        self.assertEqual(self.source.versions.count(), 2)
+        version = self.source.get_latest_released_version()
+        self.assertEqual(version.id, self.source_v1.id)
+        self.assertTrue(version.is_latest_released)
+        index_source_concepts_task_mock.delay.assert_called_once_with(version.id)
+        index_source_mappings_task_mock.delay.assert_called_once_with(version.id)
+
+    @patch('core.sources.models.index_source_mappings')
+    @patch('core.sources.models.index_source_concepts')
+    def test_released_version_updated_to_released_again_should_not_reindex_children(
+            self, index_source_concepts_task_mock, index_source_mappings_task_mock
+    ):
+        self.source_v1.released = True
+        self.source_v1.save()
+
+        response = self.client.put(
+            self.source_v1.uri,
+            {'released': True, 'description': 'random update'},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['version'], 'v1')
+        self.assertEqual(self.source.versions.count(), 2)
+        version = self.source.get_latest_released_version()
+        self.assertEqual(version.id, self.source_v1.id)
+        self.assertTrue(version.is_latest_released)
+        index_source_concepts_task_mock.delay.assert_not_called()
+        index_source_mappings_task_mock.delay.assert_not_called()
+
+    @patch('core.sources.models.index_source_mappings')
+    @patch('core.sources.models.index_source_concepts')
+    def test_released_version_updated_to_unreleased_should_reindex_children(
+            self, index_source_concepts_task_mock, index_source_mappings_task_mock
+    ):
+        self.source_v1.released = True
+        self.source_v1.save()
+
+        response = self.client.put(
+            self.source_v1.uri,
+            {'released': False, 'description': 'Marked unreleased'},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['version'], 'v1')
+        self.assertEqual(self.source.versions.count(), 2)
+        self.assertEqual(self.source.get_latest_released_version(), None)
+        self.source_v1.refresh_from_db()
+        self.assertFalse(self.source_v1.released)
+        index_source_concepts_task_mock.delay.assert_called_once_with(self.source_v1.id)
+        index_source_mappings_task_mock.delay.assert_called_once_with(self.source_v1.id)
+
+    @patch('core.sources.models.index_source_mappings')
+    @patch('core.sources.models.index_source_concepts')
+    def test_released_version_updated_to_unreleased_should_reindex_children_of_this_and_prev_released_version(
+            self, index_source_concepts_task_mock, index_source_mappings_task_mock
+    ):
+        self.source_v1.released = True
+        self.source_v1.save()
+
+        source_v2 = OrganizationSourceFactory(
+            mnemonic=self.source.mnemonic, organization=self.organization, version='v2', released=True
+        )
+        self.assertTrue(source_v2.is_latest_released)
+        self.assertFalse(self.source_v1.is_latest_released)
+
+        response = self.client.put(
+            source_v2.uri,
+            {'released': False, 'description': 'Marked unreleased'},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['version'], 'v2')
+        self.assertEqual(self.source.versions.count(), 3)
+        self.assertEqual(self.source.get_latest_released_version().version, 'v1')
+        source_v2.refresh_from_db()
+        self.source_v1.refresh_from_db()
+        self.assertTrue(self.source_v1.released)
+        self.assertTrue(self.source_v1.is_latest_released)
+        self.assertFalse(source_v2.released)
+        self.assertFalse(source_v2.is_latest_released)
+        self.assertEqual(index_source_concepts_task_mock.delay.call_count, 2)
+        self.assertEqual(index_source_mappings_task_mock.delay.call_count, 2)
+        self.assertEqual(
+            index_source_concepts_task_mock.delay.mock_calls, [call(source_v2.id), call(self.source_v1.id)])
+        self.assertEqual(
+            index_source_mappings_task_mock.delay.mock_calls, [call(source_v2.id), call(self.source_v1.id)])
+
+    @patch('core.sources.models.index_source_mappings')
+    @patch('core.sources.models.index_source_concepts')
+    def test_unreleased_version_updated_to_released_should_reindex_children_of_this_and_prev_released_version(
+            self, index_source_concepts_task_mock, index_source_mappings_task_mock
+    ):
+        self.source_v1.released = True
+        self.source_v1.save()
+
+        source_v2 = OrganizationSourceFactory(
+            mnemonic=self.source.mnemonic, organization=self.organization, version='v2', released=False
+        )
+        self.assertFalse(source_v2.is_latest_released)
+        self.assertTrue(self.source_v1.is_latest_released)
+
+        response = self.client.put(
+            source_v2.uri,
+            {'released': True, 'description': 'Marked released'},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['version'], 'v2')
+        self.assertEqual(self.source.versions.count(), 3)
+        self.assertEqual(self.source.get_latest_released_version().version, 'v2')
+        source_v2.refresh_from_db()
+        self.source_v1.refresh_from_db()
+        self.assertTrue(self.source_v1.released)
+        self.assertFalse(self.source_v1.is_latest_released)
+        self.assertTrue(source_v2.released)
+        self.assertTrue(source_v2.is_latest_released)
+        self.assertEqual(index_source_concepts_task_mock.delay.call_count, 2)
+        self.assertEqual(index_source_mappings_task_mock.delay.call_count, 2)
+        self.assertEqual(
+            index_source_concepts_task_mock.delay.mock_calls, [call(self.source_v1.id), call(source_v2.id)])
+        self.assertEqual(
+            index_source_mappings_task_mock.delay.mock_calls, [call(self.source_v1.id), call(source_v2.id)])
 
 
 class SourceExtraRetrieveUpdateDestroyViewTest(OCLAPITestCase):

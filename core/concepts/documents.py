@@ -38,6 +38,7 @@ class ConceptDocument(Document):
     concept_class = fields.KeywordField(attr='concept_class', normalizer="lowercase")
     retired = fields.KeywordField(attr='retired')
     is_latest_version = fields.KeywordField(attr='is_latest_version')
+    is_in_latest_source_version = fields.KeywordField(attr='is_in_latest_source_version')
     extras = fields.ObjectField(dynamic=True)
     created_by = fields.KeywordField(attr='created_by.username')
     name_types = fields.ListField(fields.KeywordField())

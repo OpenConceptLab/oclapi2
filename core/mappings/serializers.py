@@ -115,6 +115,8 @@ class MappingListSerializer(AbstractMappingSerializer):
     sort_weight = FloatField(required=False, allow_null=True)
     version_updated_on = DateTimeField(source='updated_at', read_only=True)
     version_updated_by = DateTimeField(source='updated_by.username', read_only=True)
+    latest_source_version = CharField(
+        source='latest_source_version.version', allow_null=True, allow_blank=True, read_only=True, required=False)
 
     class Meta:
         model = Mapping
@@ -128,7 +130,7 @@ class MappingListSerializer(AbstractMappingSerializer):
             'is_latest_version', 'update_comment', 'version_url', 'uuid', 'version_created_on',
             'from_source_version', 'to_source_version', 'from_concept_name_resolved',
             'to_concept_name_resolved', 'type', 'sort_weight',
-            'version_updated_on', 'version_updated_by'
+            'version_updated_on', 'version_updated_by', 'latest_source_version'
         )
 
 
@@ -229,12 +231,14 @@ class MappingDetailSerializer(MappingListSerializer):
     to_source = SourceDetailSerializer()
     created_on = DateTimeField(source='created_at', read_only=True)
     updated_on = DateTimeField(source='updated_at', read_only=True)
+    latest_source_version = CharField(
+        source='latest_source_version.version', allow_null=True, allow_blank=True, read_only=True, required=False)
 
     class Meta:
         model = Mapping
         fields = MappingListSerializer.Meta.fields + (
             'type', 'uuid', 'extras', 'created_on', 'updated_on', 'created_by',
-            'updated_by', 'parent_id', 'public_can_view'
+            'updated_by', 'parent_id', 'public_can_view', 'latest_source_version'
         )
 
     def create(self, validated_data):

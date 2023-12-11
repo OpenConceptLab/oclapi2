@@ -321,6 +321,13 @@ class VersionedModel(BaseResourceModel):
     def get_latest_released_version(self):
         return self.released_versions.order_by('-created_at').first()
 
+    def get_prev_released_version(self):
+        return self.released_versions.exclude(id=self.id).order_by('-created_at').first()
+
+    @property
+    def is_latest_released(self):
+        return self.released and self.id == self.get_latest_released_version().id
+
     @classmethod
     def find_latest_released_version_by(cls, filters):
         return cls.objects.filter(**filters, released=True).order_by('-created_at').first()
@@ -655,8 +662,13 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
         if obj.id:
             obj.sibling_versions.update(is_latest_version=False)
+            if obj.released:
+                obj.index_resources_for_self_as_latest_released()
 
         return errors
+
+    def index_resources_for_self_as_latest_released(self):
+        pass
 
     @classmethod
     def persist_changes(cls, obj, updated_by, original_schema, **kwargs):
@@ -666,6 +678,8 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
             errors['parent'] = SOURCE_PARENT_CANNOT_BE_NONE
 
         queue_schema_update_task = obj.is_validation_necessary()
+        is_source = cls.__name__ == 'Source'
+        should_reindex_resources = is_source and obj.released != cls.objects.filter(id=obj.id).first().released
 
         try:
             obj.full_clean()
@@ -686,6 +700,12 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
             if queue_schema_update_task:
                 update_validation_schema.delay(obj.app_name, obj.id, target_schema)
+            if should_reindex_resources:
+                if obj.released:
+                    obj.index_resources_for_self_as_latest_released()
+                else:
+                    obj.index_resources_for_self_as_unreleased()
+
         except IntegrityError as ex:
             errors.update({'__all__': ex.args})
 

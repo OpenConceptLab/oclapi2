@@ -474,6 +474,35 @@ class SourceChildMixin(ChecksumModel):
     class Meta:
         abstract = True
 
+    @property
+    def is_in_latest_source_version(self):
+        version = self._cached_latest_source_version
+        return self.sources.filter(version=version.version).exists() if version else False
+
+    @property
+    def latest_source_version(self):
+        if self.is_in_latest_source_version:
+            return self._cached_latest_source_version
+        return None
+
+    @cached_property
+    def _cached_latest_source_version(self):
+        return self.parent.get_latest_released_version()
+
+    def get_all_checksums(self):
+        return {
+            **super().get_all_checksums(),
+            'repo_versions': self.source_versions_checksum,
+        }
+
+    def set_source_versions_checksum(self):
+        self.set_specific_checksums('repo_versions', self.source_versions_checksum)
+
+    @property
+    def source_versions_checksum(self):
+        checksums = [version.checksum for version in self.sources.exclude(version=HEAD)]
+        return self.generate_checksum(checksums) if checksums else None
+
     @staticmethod
     def is_strictly_equal(instance1, instance2):
         return instance1.get_checksums() == instance2.get_checksums()

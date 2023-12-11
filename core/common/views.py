@@ -389,9 +389,19 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                 filters['collection_url'] = f"{filters['collection_owner_url']}collections/{self.kwargs['collection']}/"
                 if is_version_specified and self.kwargs['version'] != HEAD:
                     filters['collection_url'] += f"{self.kwargs['version']}/"
-            if is_source_specified and not is_version_specified:
+            if is_source_specified and not is_version_specified and not self.should_search_latest_released_repo():
                 filters['source_version'] = HEAD
         return filters
+
+    def get_latest_version_filter_field_for_source_child(self):
+        query_latest = self.__should_query_latest_version()
+        if query_latest:
+            return 'is_in_latest_source_version'
+        if not self.is_global_scope() and (
+                self.kwargs.get('version') == HEAD or not self.kwargs.get('version')
+        ) and 'collection' not in self.kwargs:
+            return 'is_latest_version'
+        return None
 
     def get_facets(self):
         facets = {}
@@ -399,6 +409,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         if self.facet_class:
             if self.is_user_document():
                 return facets
+
             faceted_search = self.facet_class(  # pylint: disable=not-callable
                 self.get_search_string(lower=False),
                 _search=self.__get_search_results(ignore_retired_filter=True, sort=False, highlight=False, force=True),
@@ -500,10 +511,15 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
         return criteria
 
+    def is_global_scope(self):
+        return self.kwargs.get('org', None) is None and self.kwargs.get('user', None) is None
+
     def __should_query_latest_version(self):
         kwargs = {**self.get_faceted_filters(), **self.kwargs}
         collection = kwargs.get('collection', '')
         version = kwargs.get('version', '')
+        if not version and not self.is_global_scope() and not collection:
+            version = HEAD
 
         return (not collection or collection.startswith('!')) and (not version or version.startswith('!'))
 
@@ -521,13 +537,15 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         updated_by = self.request.query_params.get(UPDATED_BY_USERNAME_PARAM, None)
         if updated_by:
             results = results.query("terms", updated_by=compact(updated_by.split(',')))
-        if self.is_source_child_document_model() and self.__should_query_latest_version():
-            default_filters['is_latest_version'] = True
         if self.is_canonical_specified():
             results = results.query(
                 'match_phrase',
                 _canonical_url=format_url_for_search(self.request.query_params.get(CANONICAL_URL_REQUEST_PARAM))
             )
+        if self.is_source_child_document_model():
+            latest_attr = self.get_latest_version_filter_field_for_source_child()
+            if latest_attr:
+                default_filters[latest_attr] = True
 
         for field, value in default_filters.items():
             results = results.query("match", **{field: value})
@@ -750,9 +768,16 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         ).get_aggregations(self.is_verbose(), self.is_raw())
 
     def should_perform_es_search(self):
-        return self.is_only_searchable or bool(
-            self.get_search_string()
-        ) or self.has_searchable_extras_fields() or bool(self.get_faceted_filters())
+        return (
+                self.is_only_searchable or
+                bool(self.get_search_string()) or
+                self.has_searchable_extras_fields() or
+                bool(self.get_faceted_filters())
+        ) or (SEARCH_PARAM in self.request.query_params.dict() and self.should_search_latest_released_repo())
+
+    def should_search_latest_released_repo(self):
+        return self.is_source_child_document_model() and (
+                'version' not in self.kwargs and 'collection' not in self.kwargs)
 
     def has_searchable_extras_fields(self):
         return bool(

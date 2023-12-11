@@ -28,6 +28,7 @@ class MappingFacetedSearch(CustomESFacetedSearch):
         'owner': TermsFacet(field='owner', size=FACET_SIZE),
         'ownerType': TermsFacet(field='owner_type'),
         'updatedBy': TermsFacet(field='updated_by', size=FACET_SIZE),
+        'is_in_latest_source_version': TermsFacet(field='is_in_latest_source_version'),
         'is_latest_version': TermsFacet(field='is_latest_version'),
         'collection_owner_url': TermsFacet(field='collection_owner_url', size=FACET_SIZE),
         'expansion': TermsFacet(field='expansion', size=FACET_SIZE),

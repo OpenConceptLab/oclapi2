@@ -213,6 +213,9 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
     def auth_groups(self):
         return self.groups.values_list('name', flat=True)
 
+    def has_auth_group(self, group_name):
+        return self.groups.filter(name=group_name).exists()
+
     @property
     def auth_headers(self):
         return {'Authorization': f'Token {self.get_token()}'}

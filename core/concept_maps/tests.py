@@ -1,5 +1,6 @@
 from collections import OrderedDict
 
+from mock.mock import patch, Mock
 from rest_framework.test import APIClient
 
 from core.common.tests import OCLTestCase
@@ -148,6 +149,8 @@ class ConceptMapTest(OCLTestCase):
         self.assertEqual(response.data['id'], self.org_source.mnemonic)
         self.assertEqual(response.data['version'], 'v2')
 
+    @patch('core.sources.models.index_source_mappings', Mock())
+    @patch('core.sources.models.index_source_concepts', Mock())
     def test_post_concept_map_without_mappings(self):
         response = self.client.post(
             f'/users/{self.user.mnemonic}/ConceptMap/',

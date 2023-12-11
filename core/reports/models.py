@@ -6,7 +6,6 @@ from datetime import datetime
 from django.conf import settings
 from django.db.models import QuerySet
 from django.utils import timezone
-
 from pydash import get
 
 from core.common.utils import from_string_to_date, get_date_range_label, cd_temp

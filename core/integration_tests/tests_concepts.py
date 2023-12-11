@@ -102,6 +102,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
                 'public_can_view',
                 'checksums',
                 'versioned_object_id',
+                'latest_source_version'
             ])
         )
 
@@ -200,6 +201,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
                     'parent_concept_urls',
                     'public_can_view',
                     'checksums',
+                    'latest_source_version',
                     'versioned_object_id'])
         )
 
@@ -275,6 +277,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
                     'parent_concept_urls',
                     'public_can_view',
                     'checksums',
+                    'latest_source_version',
                     'versioned_object_id'])
         )
 
@@ -694,7 +697,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
             sorted(response.data[0].keys()),
             sorted(['uuid', 'id', 'external_id', 'concept_class', 'datatype', 'url', 'retired', 'source',
                     'owner', 'owner_type', 'owner_url', 'display_name', 'display_locale', 'version', 'update_comment',
-                    'locale', 'version_created_by', 'version_created_on', 'is_latest_version',
+                    'locale', 'version_created_by', 'version_created_on', 'is_latest_version', 'latest_source_version',
                     'versions_url', 'version_url', 'type', 'versioned_object_id',
                     'version_updated_on', 'version_updated_by', 'checksums'])
         )
@@ -709,7 +712,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
             sorted(response.data[0].keys()),
             sorted(['uuid', 'id', 'external_id', 'concept_class', 'datatype', 'url', 'retired', 'source',
                     'owner', 'owner_type', 'owner_url', 'display_name', 'display_locale', 'names', 'descriptions',
-                    'created_on', 'updated_on', 'versions_url', 'version', 'extras', 'type',
+                    'created_on', 'updated_on', 'versions_url', 'version', 'extras', 'type', 'latest_source_version',
                     'update_comment', 'version_url', 'updated_by', 'created_by',
                     'public_can_view', 'versioned_object_id', 'checksums'])
         )
@@ -1605,21 +1608,26 @@ class ConceptListViewTest(OCLAPITestCase):
     def setUp(self):
         super().setUp()
         self.source = OrganizationSourceFactory(mnemonic='MySource')
-        self.source_v1 = OrganizationSourceFactory(version='v1', mnemonic='MySource', organization=self.source.parent)
+        self.source_v1 = OrganizationSourceFactory(
+            version='v1', mnemonic='MySource', organization=self.source.parent,
+            released=True
+        )
         self.concept1 = ConceptFactory(
             mnemonic='MyConcept1', parent=self.source, concept_class='classA', extras={'foo': 'bar'}
         )
         self.concept2 = ConceptFactory(
             mnemonic='MyConcept2', parent=self.source, concept_class='classB', extras={'bar': 'foo'}
         )
-        self.source_v1.concepts.add(self.concept2)
-        ConceptDocument().update(self.source.concepts.all())  # needed for parallel test execution
+        self.source.concepts.add(self.concept1.get_latest_version())
+        self.source.concepts.add(self.concept2.get_latest_version())
+        self.source_v1.concepts.add(self.concept2.get_latest_version())
+        ConceptDocument().update(self.source.concepts_set.all())  # needed for parallel test execution
         self.user = UserProfile.objects.filter(is_superuser=True).first()
         self.token = self.user.get_token()
         self.random_user = UserProfileFactory()
 
     def test_search(self):  # pylint: disable=too-many-statements
-        response = self.client.get('/concepts/?q=MyConcept2')
+        response = self.client.get('/concepts/?q=MyConcept')
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 1)
         self.assertEqual(response.data[0]['id'], 'MyConcept2')
@@ -1628,32 +1636,26 @@ class ConceptListViewTest(OCLAPITestCase):
 
         response = self.client.get('/concepts/?q=MyConcept1')
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.data), 1)
-        self.assertEqual(response.data[0]['id'], 'MyConcept1')
-
-        response = self.client.get('/concepts/?q=MyConcept1&exact_match=on')
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.data), 1)
-        self.assertEqual(response.data[0]['id'], 'MyConcept1')
+        self.assertEqual(len(response.data), 0)
 
         response = self.client.get('/concepts/?q=MyConcept&conceptClass=classA')
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.data), 1)
-        self.assertEqual(response.data[0]['id'], 'MyConcept1')
-
-        response = self.client.get('/concepts/?q=MyConcept1&conceptClass=classB')
-        self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 0)
+
+        response = self.client.get('/concepts/?q=MyConcept2&conceptClass=classB')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['id'], 'MyConcept2')
+        self.assertEqual(response.data[0]['uuid'], str(self.concept2.get_latest_version().id))
+        self.assertEqual(response.data[0]['versioned_object_id'], self.concept2.id)
 
         response = self.client.get('/concepts/?conceptClass=classA')
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.data), 1)
-        self.assertEqual(response.data[0]['id'], 'MyConcept1')
+        self.assertEqual(len(response.data), 0)
 
         response = self.client.get('/concepts/?extras.foo=bar')
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.data), 1)
-        self.assertEqual(response.data[0]['id'], 'MyConcept1')
+        self.assertEqual(len(response.data), 0)
 
         response = self.client.get('/concepts/?extras.exists=bar')
         self.assertEqual(response.status_code, 200)
@@ -1661,13 +1663,13 @@ class ConceptListViewTest(OCLAPITestCase):
         self.assertEqual(response.data[0]['id'], 'MyConcept2')
 
         response = self.client.get(
-            self.source.concepts_url + '?q=MyConcept&extras.exact.foo=bar&includeSearchMeta=true')
+            self.source.concepts_url + '?q=MyConcept&extras.exact.bar=foo&includeSearchMeta=true')
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 1)
-        self.assertEqual(response.data[0]['id'], 'MyConcept1')
+        self.assertEqual(response.data[0]['id'], 'MyConcept2')
         self.assertEqual(
             response.data[0]['search_meta']['search_highlight'],
-            {'extras.foo': ['<em>bar</em>'], 'id': ['<em>MyConcept1</em>']}
+            {'extras.bar': ['<em>foo</em>'], 'id': ['<em>MyConcept2</em>']}
         )
 
         response = self.client.get(
@@ -1691,14 +1693,32 @@ class ConceptListViewTest(OCLAPITestCase):
                 {'name': 'low', 'threshold': 0.01, 'confidence': '<50.0%', 'total': 0}
             ]
         )
-        self.assertTrue(response.data[0]['total'] >= 2)
+        self.assertTrue(response.data[0]['total'] >= 1)
 
         response = self.client.get(
-            self.source.concepts_url + '?q=MyConcept',
+            self.source.concepts_url + '?q=MyConcept',  # assumes HEAD
             HTTP_AUTHORIZATION='Token ' + self.token,
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 2)
+        self.assertEqual(response.data[0]['id'], 'MyConcept1')
+        self.assertEqual(response.data[1]['id'], 'MyConcept2')
+
+        response = self.client.get(
+            self.source.uri + 'HEAD/concepts/?q=MyConcept',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 2)
+        self.assertEqual(response.data[0]['id'], 'MyConcept1')
+        self.assertEqual(response.data[1]['id'], 'MyConcept2')
+
+        response = self.client.get(
+            self.source.uri + 'v1/concepts/?q=MyConcept',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
 
     def test_facets(self):
         if settings.ENV == 'ci':
@@ -1707,6 +1727,18 @@ class ConceptListViewTest(OCLAPITestCase):
 
         response = self.client.get(
             '/concepts/?facetsOnly=true'
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(list(response.data.keys()), ['facets'])
+
+        class_b_facet = [x for x in response.data['facets']['fields']['conceptClass'] if x[0] == 'classb'][0]
+        self.assertEqual(class_b_facet[0], 'classb')
+        self.assertTrue(class_b_facet[1] >= 1)
+        self.assertFalse(class_b_facet[2])
+        self.assertEqual([x for x in response.data['facets']['fields']['conceptClass'] if x[0] == 'classa'], [])
+
+        response = self.client.get(
+            self.source.uri + 'HEAD/concepts/?facetsOnly=true'
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(list(response.data.keys()), ['facets'])
@@ -1720,6 +1752,33 @@ class ConceptListViewTest(OCLAPITestCase):
         self.assertEqual(class_b_facet[0], 'classb')
         self.assertTrue(class_b_facet[1] >= 1)
         self.assertFalse(class_b_facet[2])
+
+        response = self.client.get(
+            self.source.concepts_url + '?facetsOnly=true'  # assumes HEAD
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(list(response.data.keys()), ['facets'])
+
+        class_b_facet = [x for x in response.data['facets']['fields']['conceptClass'] if x[0] == 'classb'][0]
+        class_a_facet = [x for x in response.data['facets']['fields']['conceptClass'] if x[0] == 'classa'][0]
+        self.assertEqual(class_b_facet[0], 'classb')
+        self.assertTrue(class_b_facet[1] >= 1)
+        self.assertFalse(class_b_facet[2])
+        self.assertEqual(class_a_facet[0], 'classa')
+        self.assertTrue(class_a_facet[1] >= 1)
+        self.assertFalse(class_a_facet[2])
+
+        response = self.client.get(
+            self.source.uri + 'v1/concepts/?facetsOnly=true'
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(list(response.data.keys()), ['facets'])
+
+        class_b_facet = [x for x in response.data['facets']['fields']['conceptClass'] if x[0] == 'classb'][0]
+        self.assertEqual(class_b_facet[0], 'classb')
+        self.assertTrue(class_b_facet[1] >= 1)
+        self.assertFalse(class_b_facet[2])
+        self.assertEqual([x for x in response.data['facets']['fields']['conceptClass'] if x[0] == 'classa'], [])
 
 
 class ConceptNameRetrieveUpdateDestroyViewTest(OCLAPITestCase):

@@ -4,6 +4,20 @@ from django.contrib.auth.backends import ModelBackend
 from django_redis import get_redis_connection
 from mozilla_django_oidc.auth import OIDCAuthenticationBackend
 from pydash import get
+from redis import Sentinel
+
+
+class QueueOnceRedisSentinelBackend(Redis):
+    def __init__(self, backend_settings):
+        # pylint: disable=super-init-not-called
+        self._sentinel = Sentinel(backend_settings['sentinels'])
+        self._sentinel_master = backend_settings['sentinels_master']
+        self.blocking_timeout = backend_settings.get("blocking_timeout", 1)
+        self.blocking = backend_settings.get("blocking", False)
+
+    @property
+    def redis(self):
+        return self._sentinel.master_for(self._sentinel_master)
 
 
 class QueueOnceRedisBackend(Redis):
