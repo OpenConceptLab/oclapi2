@@ -16,7 +16,8 @@ from rest_framework.response import Response
 
 from core.common.constants import HEAD, ACCESS_TYPE_NONE, INCLUDE_FACETS, \
     LIST_DEFAULT_LIMIT, HTTP_COMPRESS_HEADER, CSV_DEFAULT_LIMIT, FACETS_ONLY, INCLUDE_RETIRED_PARAM, \
-    SEARCH_STATS_ONLY, INCLUDE_SEARCH_STATS, UPDATED_BY_USERNAME_PARAM, CHECKSUM_STANDARD_HEADER, CHECKSUM_SMART_HEADER
+    SEARCH_STATS_ONLY, INCLUDE_SEARCH_STATS, UPDATED_BY_USERNAME_PARAM, CHECKSUM_STANDARD_HEADER, \
+    CHECKSUM_SMART_HEADER, SEARCH_LATEST_REPO_VERSION
 from core.common.permissions import HasPrivateAccess, HasOwnership, CanViewConceptDictionary, \
     CanViewConceptDictionaryVersion
 from .checksums import ChecksumModel, Checksum
@@ -221,6 +222,9 @@ class ListWithHeadersMixin(ListModelMixin):
 
     def should_include_facets(self):
         return self.request.META.get(INCLUDE_FACETS, False) in TRUTHY
+
+    def is_latest_repo_search_header_present(self):
+        return self.request.META.get(SEARCH_LATEST_REPO_VERSION, False) in TRUTHY
 
     def should_include_search_stats(self):
         return self.request.META.get(INCLUDE_SEARCH_STATS, False) in TRUTHY
@@ -488,20 +492,6 @@ class SourceChildMixin(ChecksumModel):
     @cached_property
     def _cached_latest_source_version(self):
         return self.parent.get_latest_released_version()
-
-    def get_all_checksums(self):
-        return {
-            **super().get_all_checksums(),
-            'repo_versions': self.source_versions_checksum,
-        }
-
-    def set_source_versions_checksum(self):
-        self.set_specific_checksums('repo_versions', self.source_versions_checksum)
-
-    @property
-    def source_versions_checksum(self):
-        checksums = [version.checksum for version in self.sources.exclude(version=HEAD)]
-        return self.generate_checksum(checksums) if checksums else None
 
     @staticmethod
     def is_strictly_equal(instance1, instance2):

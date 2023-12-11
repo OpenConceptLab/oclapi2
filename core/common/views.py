@@ -389,14 +389,14 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                 filters['collection_url'] = f"{filters['collection_owner_url']}collections/{self.kwargs['collection']}/"
                 if is_version_specified and self.kwargs['version'] != HEAD:
                     filters['collection_url'] += f"{self.kwargs['version']}/"
-            if is_source_specified and not is_version_specified and not self.should_search_latest_released_repo():
+            if is_source_specified and not is_version_specified and not self.should_search_latest_repo():
                 filters['source_version'] = HEAD
         return filters
 
     def get_latest_version_filter_field_for_source_child(self):
         query_latest = self.__should_query_latest_version()
         if query_latest:
-            return 'is_in_latest_source_version'
+            return 'is_in_latest_source_version' if self.should_search_latest_repo() else 'is_latest_version'
         if not self.is_global_scope() and (
                 self.kwargs.get('version') == HEAD or not self.kwargs.get('version')
         ) and 'collection' not in self.kwargs:
@@ -422,6 +422,8 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                 raise Http400(detail=get(ex, 'info') or get(ex, 'error') or str(ex)) from ex
         if not get(self.request.user, 'is_authenticated'):
             facets.pop('updatedBy', None)
+        if self.should_search_latest_repo() and self.is_source_child_document_model() and 'source_version' in facets:
+            facets['source_version'] = [facet for facet in facets['source_version'] if facet[0] != 'HEAD']
         return facets
 
     def get_extras_searchable_fields_from_query_params(self):
@@ -470,7 +472,10 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     def is_source_child_document_model(self):
         from core.concepts.documents import ConceptDocument
         from core.mappings.documents import MappingDocument
-        return self.document_model in [ConceptDocument, MappingDocument]
+        from core.concepts.search import ConceptFacetedSearch
+        from core.mappings.search import MappingFacetedSearch
+        return self.document_model in [
+            ConceptDocument, MappingDocument] or self.facet_class in [ConceptFacetedSearch, MappingFacetedSearch]
 
     def is_concept_container_document_model(self):
         from core.collections.documents import CollectionDocument
@@ -773,11 +778,12 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                 bool(self.get_search_string()) or
                 self.has_searchable_extras_fields() or
                 bool(self.get_faceted_filters())
-        ) or (SEARCH_PARAM in self.request.query_params.dict() and self.should_search_latest_released_repo())
+        ) or (SEARCH_PARAM in self.request.query_params.dict() and self.should_search_latest_repo())
 
-    def should_search_latest_released_repo(self):
+    def should_search_latest_repo(self):
         return self.is_source_child_document_model() and (
-                'version' not in self.kwargs and 'collection' not in self.kwargs)
+                'version' not in self.kwargs and 'collection' not in self.kwargs
+        ) and self.is_latest_repo_search_header_present()
 
     def has_searchable_extras_fields(self):
         return bool(
