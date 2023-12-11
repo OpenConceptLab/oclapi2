@@ -13,6 +13,9 @@ from core.orgs.constants import NO_MEMBERS
 include_facets_header = openapi.Parameter(
     'INCLUDEFACETS', openapi.IN_HEADER, type=openapi.TYPE_BOOLEAN, default=False
 )
+search_from_latest_repo_header = openapi.Parameter(
+    'INCLUDESEARCHLATEST', openapi.IN_HEADER, type=openapi.TYPE_BOOLEAN, default=False
+)
 # HEADERS
 compress_header = openapi.Parameter(
     'COMPRESS', openapi.IN_HEADER, type=openapi.TYPE_BOOLEAN, default=False
