@@ -424,8 +424,12 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             facets.pop('updatedBy', None)
         if self.should_search_latest_repo() and self.is_source_child_document_model() and 'source_version' in facets:
             facets['source_version'] = [facet for facet in facets['source_version'] if facet[0] != 'HEAD']
-        if 'source' not in self.kwargs and 'source_version' in facets:
-            facets.pop('source_version')
+        is_global_scope = ('org' not in self.kwargs and 'user' not in self.kwargs and not self.user_is_self)
+        if is_global_scope:
+            facets.pop('source_version', None)
+            facets.pop('collection_version', None)
+            facets.pop('expansion', None)
+            facets.pop('collection_owner_url', None)
         return facets
 
     def get_extras_searchable_fields_from_query_params(self):
