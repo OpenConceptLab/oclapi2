@@ -179,7 +179,7 @@ class BaseModel(models.Model):
     @staticmethod
     def batch_index(queryset, document, single_batch=False):
         if not get(settings, 'TEST_MODE'):
-            if single_batch:
+            if single_batch or not get(settings, 'DB_CURSOR_ON', True):
                 document().update(queryset, parallel=True)
             else:
                 for batch in queryset.iterator(chunk_size=500):
@@ -188,8 +188,11 @@ class BaseModel(models.Model):
     @staticmethod
     @transaction.atomic
     def batch_delete(queryset):
-        for batch in queryset.iterator(chunk_size=1000):
-            batch.delete()
+        if get(settings, 'DB_CURSOR_ON', True):
+            for batch in queryset.iterator(chunk_size=1000):
+                batch.delete()
+        else:
+            queryset.delete()
 
 
 class CommonLogoModel(models.Model):
