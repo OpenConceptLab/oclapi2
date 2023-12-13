@@ -196,7 +196,7 @@ DATABASES = {
     }
 }
 
-DB_CURSOR_ON = os.environ.get('DB_CURSOR_ON', True)
+DB_CURSOR_ON = os.environ.get('DB_CURSOR_ON', 'true').lower() == 'true'
 
 ES_HOST = os.environ.get('ES_HOST', 'es')  # Deprecated. Use ES_HOSTS instead.
 ES_PORT = os.environ.get('ES_PORT', '9200')  # Deprecated. Use ES_HOSTS instead.
