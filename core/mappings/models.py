@@ -4,7 +4,7 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator
 from django.db import models, IntegrityError, transaction
-from django.db.models import Q, F
+from django.db.models import Q, F, Max
 from pydash import get
 
 from core.common.constants import NAMESPACE_REGEX, LATEST
@@ -45,6 +45,11 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
                                    condition=(Q(is_active=True) & Q(retired=False))),
                       models.Index(name="mappings_map_type_like", fields=["map_type"], opclasses=["text_pattern_ops"]),
                       models.Index(fields=['uri']),
+                      models.Index(
+                          name='mappings_sort_weight_next',
+                          fields=['from_concept_id', 'sort_weight', 'parent_id', 'map_type'],
+                          condition=Q(sort_weight__isnull=False, id=F('versioned_object_id'), retired=False)
+                      ),
                   ] + VersionedModel.Meta.indexes
     parent = models.ForeignKey('sources.Source', related_name='mappings_set', on_delete=models.CASCADE)
     map_type = models.TextField()
@@ -448,6 +453,18 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
             ) if get(settings, 'TEST_MODE', False) else batch_index_resources.delay(
                 'concepts', {'versioned_object_id': self.from_concept.versioned_object_id}
             )
+
+    def get_next_sort_weight(self):
+        if not self.sort_weight and self.from_concept_id and self.map_type:
+            max_sort_weight = self.from_concept.get_unidirectional_mappings().filter(
+                map_type=self.map_type, retired=False
+            ).aggregate(
+                max_sort_weight=Max('sort_weight')
+            )['max_sort_weight']
+            if max_sort_weight is not None:
+                max_sort_weight += 1
+            return max_sort_weight
+        return None
 
     @classmethod
     def persist_new(cls, data, user):

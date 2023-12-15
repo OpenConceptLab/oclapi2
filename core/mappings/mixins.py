@@ -36,5 +36,6 @@ class MappingValidationMixin:
             if self.parent.is_openmrs_schema:
                 custom_validator = OpenMRSMappingValidator(self)
                 custom_validator.validate()
+            self.sort_weight = self.get_next_sort_weight() if self.sort_weight is None else self.sort_weight
         except Source.DoesNotExist as ex:
             raise ValidationError("There's no Source") from ex
