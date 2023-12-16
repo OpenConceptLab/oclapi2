@@ -430,6 +430,8 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             facets.pop('collection_version', None)
             facets.pop('expansion', None)
             facets.pop('collection_owner_url', None)
+        facets.pop('is_in_latest_source_version', None)
+        facets.pop('is_latest_version', None)
         return facets
 
     def get_extras_searchable_fields_from_query_params(self):
