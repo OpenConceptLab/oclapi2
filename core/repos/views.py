@@ -7,6 +7,7 @@ from core.common.swagger_parameters import q_param, limit_param, sort_desc_param
     include_retired_param, updated_since_param, compress_header, canonical_url_param
 from core.common.views import BaseAPIView
 from core.repos.documents import RepoDocument
+from core.repos.search import RepoFacetedSearch
 from core.repos.serializers import RepoListSerializer
 
 es_fields = {
@@ -100,6 +101,7 @@ es_fields = {
 class ReposListView(BaseAPIView, ListWithHeadersMixin):
     serializer_class = RepoListSerializer
     document_model = RepoDocument
+    facet_class = RepoFacetedSearch
     default_filters = {'version': HEAD}
     es_fields = es_fields
     is_searchable = True
