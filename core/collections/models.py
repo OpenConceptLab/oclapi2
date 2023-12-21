@@ -216,12 +216,14 @@ class Collection(ConceptContainerModel):
             # making sure names in the submitted concept meet the same rule
             name_key = name.locale + name.name
             if name_key in matching_names_in_concept:
+                print("***NAME_KEY that dint match**", name_key)
                 raise ValidationError(validation_error)
 
             matching_names_in_concept[name_key] = True
-            if other_concepts_in_collection.filter(
-                    names__name=name.name, names__locale=name.locale, **{f"names__{attribute}": value}
-            ).exists():
+            other = other_concepts_in_collection.filter(
+                names__name=name.name, names__locale=name.locale, **{f"names__{attribute}": value})
+            if other.exists():
+                print(f"***Conflicting Name {name_key} of Expansion**", list(other.values_list('uri', flat=True)))
                 raise ValidationError(validation_error)
 
     @transaction.atomic
