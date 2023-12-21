@@ -19,9 +19,6 @@ class MappingDocument(Document):
             'external_id'
         ]
 
-    class Meta:
-        dynamic = MetaField('strict')
-
     last_update = fields.DateField(attr='updated_at')
     updated_by = fields.KeywordField(attr='updated_by.username')
     owner = fields.KeywordField(attr='owner_name', normalizer="lowercase")

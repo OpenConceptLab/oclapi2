@@ -12,9 +12,6 @@ class ConceptDocument(Document):
         name = 'concepts'
         settings = {'number_of_shards': 1, 'number_of_replicas': 0}
 
-    class Meta:
-        dynamic = MetaField('strict')
-
     id = fields.TextField(attr='mnemonic')
     id_lowercase = fields.KeywordField(attr='mnemonic', normalizer="lowercase")
     numeric_id = fields.LongField()
