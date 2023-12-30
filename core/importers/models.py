@@ -854,7 +854,7 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
         for line in self.input_list:
             data = line if isinstance(line, dict) else json.loads(line)
             data_type = data.get('type', None)
-            if not data_type:
+            if not data_type or data_type.lower() not in ['organization', 'source', 'collection']:
                 continue
             if data_type not in self.resource_distribution:
                 self.resource_distribution[data_type] = []
@@ -862,9 +862,9 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
 
     def make_parts(self):
         prev_line = None
-        orgs = self.resource_distribution.get('Organization', None)
-        sources = self.resource_distribution.get('Source', None)
-        collections = self.resource_distribution.get('Collection', None)
+        orgs = self.resource_distribution.pop('Organization', None)
+        sources = self.resource_distribution.pop('Source', None)
+        collections = self.resource_distribution.pop('Collection', None)
         if orgs:
             self.parts = deque([orgs])
         if sources:
