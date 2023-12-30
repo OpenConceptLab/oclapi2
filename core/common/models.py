@@ -179,11 +179,12 @@ class BaseModel(models.Model):
     @staticmethod
     def batch_index(queryset, document, single_batch=False):
         if not get(settings, 'TEST_MODE'):
+            doc = document()
             if single_batch or not get(settings, 'DB_CURSOR_ON', True):
-                document().update(queryset.all(), parallel=True)
+                doc.update(queryset.all(), parallel=True)
             else:
                 for batch in queryset.iterator(chunk_size=500):
-                    document().update(batch, parallel=True)
+                    doc.update(batch, parallel=True)
 
     @staticmethod
     @transaction.atomic
