@@ -1,6 +1,6 @@
 from django_elasticsearch_dsl import Document, fields
 from django_elasticsearch_dsl.registries import registry
-from elasticsearch_dsl import MetaField
+from pydash import compact
 
 from core.common.utils import jsonify_safe, flatten_dict
 from core.concepts.models import Concept
@@ -16,7 +16,7 @@ class ConceptDocument(Document):
     id_lowercase = fields.KeywordField(attr='mnemonic', normalizer="lowercase")
     numeric_id = fields.LongField()
     name = fields.TextField()
-    _name = fields.KeywordField(attr='display_name', normalizer='lowercase')
+    _name = fields.KeywordField()
     last_update = fields.DateField(attr='updated_at')
     updated_by = fields.KeywordField(attr='updated_by.username')
     locale = fields.ListField(fields.KeywordField())
@@ -118,35 +118,8 @@ class ConceptDocument(Document):
             return 0
 
     @staticmethod
-    def prepare_name(instance):
-        try:
-            name = instance.display_name
-            if name:
-                name = name.replace('-', '_')
-            return name
-        except:  # pylint: disable=bare-except
-            return ''
-
-    @staticmethod
     def prepare_locale(instance):
-        return list(set(instance.names.filter(locale__isnull=False).values_list('locale', flat=True)))
-
-    @staticmethod
-    def prepare_same_as_map_codes(instance):
-        same_as_mappings = instance.get_unidirectional_mappings().filter(
-            map_type__istartswith='same', to_concept_code__isnull=False)
-        return [code.lower() for code in set(same_as_mappings.values_list('to_concept_code', flat=True))]
-
-    @staticmethod
-    def prepare_other_map_codes(instance):
-        other_mappings = instance.get_unidirectional_mappings().exclude(
-            map_type__istartswith='same').filter(to_concept_code__isnull=False)
-        return [code.lower() for code in set(other_mappings.values_list('to_concept_code', flat=True))]
-
-    @staticmethod
-    def prepare_synonyms(instance):
-        names = instance.names.exclude(name=instance.display_name)
-        return list(set(names.filter(name__isnull=False).values_list('name', flat=True)))
+        return compact(set(instance.names.values_list('locale', flat=True)))
 
     @staticmethod
     def prepare_source_version(instance):
@@ -185,12 +158,37 @@ class ConceptDocument(Document):
 
     @staticmethod
     def prepare_name_types(instance):
-        return list(
-            set(instance.names.filter(type__isnull=False).values_list('type', flat=True))
-        )
+        return compact(set(instance.names.values_list('type', flat=True)))
 
     @staticmethod
     def prepare_description_types(instance):
-        return list(
-            set(instance.descriptions.filter(type__isnull=False).values_list('type', flat=True))
-        )
+        return compact(set(instance.descriptions.values_list('type', flat=True)))
+
+    def prepare(self, instance):
+        data = super().prepare(instance)
+
+        same_as_mapped_codes, other_mapped_codes = self.get_mapped_codes(instance)
+        data['same_as_map_codes'] = same_as_mapped_codes
+        data['other_map_codes'] = other_mapped_codes
+
+        name = instance.display_name or ''
+        data['_name'] = name.lower()
+        data['name'] = name.replace('-', '_')
+        data['synonyms'] = compact(set(instance.names.exclude(name=name).values_list('name', flat=True)))
+
+        return data
+
+    @staticmethod
+    def get_mapped_codes(instance):
+        mappings = instance.get_unidirectional_mappings()
+        same_as_mapped_codes = []
+        other_mapped_codes = []
+        for value in mappings.values('map_type', 'to_concept_code'):
+            to_concept_code = value['to_concept_code']
+            map_type = value['map_type']
+            if to_concept_code and map_type:
+                if map_type.lower().startswith('same'):
+                    same_as_mapped_codes.append(to_concept_code)
+                else:
+                    other_mapped_codes.append(to_concept_code)
+        return same_as_mapped_codes, other_mapped_codes

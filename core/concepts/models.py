@@ -141,6 +141,11 @@ class ConceptName(AbstractLocalizedText):
                       models.Index(fields=['locale']),
                       models.Index(fields=['created_at']),
                       models.Index(fields=['type']),
+                      models.Index(
+                          name='preferred_locale',
+                          fields=['concept', 'locale_preferred', 'locale', '-created_at'],
+                          condition=Q(locale_preferred=True)
+                      ),
                   ]
 
     @property
@@ -191,6 +196,11 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                                    condition=(Q(is_active=True) & Q(retired=False) & Q(id=F('versioned_object_id')))),
                       models.Index(name='concepts_parent_active', fields=['parent_id', 'id', 'retired'],
                                    condition=(Q(retired=False, id=F('versioned_object_id')))),
+                      models.Index(
+                          name='concepts_latest',
+                          fields=['versioned_object_id', '-created_at'],
+                          condition=(Q(is_active=True, is_latest_version=True) & ~Q(id=F('versioned_object_id')))
+                      ),
                       models.Index(fields=['uri']),
                       models.Index(fields=['version']),
                   ] + VersionedModel.Meta.indexes

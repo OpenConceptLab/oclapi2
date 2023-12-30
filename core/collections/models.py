@@ -80,6 +80,16 @@ class Collection(ConceptContainerModel):
                       models.Index(fields=['uri']),
                       models.Index(name="coll_mnemonic_like", fields=["mnemonic"], opclasses=["text_pattern_ops"]),
                       models.Index(fields=['public_access']),
+                      models.Index(
+                          name='coll_org_released',
+                          fields=['mnemonic', 'organization', '-created_at'],
+                          condition=(models.Q(user__isnull=True, is_active=True, released=True))
+                      ),
+                      models.Index(
+                          name='coll_user_released',
+                          fields=['mnemonic', 'user', '-created_at'],
+                          condition=(models.Q(organization__isnull=True, is_active=True, released=True))
+                      ),
                   ] + ConceptContainerModel.Meta.indexes
 
     collection_type = models.TextField(blank=True)

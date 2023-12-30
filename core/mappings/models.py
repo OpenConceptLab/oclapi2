@@ -50,6 +50,16 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
                           fields=['from_concept_id', 'sort_weight', 'parent_id', 'map_type'],
                           condition=Q(sort_weight__isnull=False, id=F('versioned_object_id'), retired=False)
                       ),
+                      models.Index(
+                          name='mappings_latest',
+                          fields=['versioned_object_id', '-created_at'],
+                          condition=(Q(is_active=True, is_latest_version=True) & ~Q(id=F('versioned_object_id')))
+                      ),
+                      models.Index(
+                          name='direct_mappings',
+                          fields=['from_concept', 'parent_id'],
+                          condition=(Q(id=F('versioned_object_id')))
+                      ),
                   ] + VersionedModel.Meta.indexes
     parent = models.ForeignKey('sources.Source', related_name='mappings_set', on_delete=models.CASCADE)
     map_type = models.TextField()

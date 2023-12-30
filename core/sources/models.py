@@ -58,8 +58,17 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
             )
         ]
         indexes = [
-                      models.Index(fields=['uri']),
-                      models.Index(fields=['public_access'])
+                      models.Index(fields=['uri']), models.Index(fields=['public_access']),
+                      models.Index(
+                          name='source_org_released',
+                          fields=['mnemonic', 'organization', '-created_at'],
+                          condition=(models.Q(user__isnull=True, is_active=True, released=True))
+                      ),
+                      models.Index(
+                          name='source_user_released',
+                          fields=['mnemonic', 'user', '-created_at'],
+                          condition=(models.Q(organization__isnull=True, is_active=True, released=True))
+                      ),
                   ] + ConceptContainerModel.Meta.indexes
         # + index on UPPER(mnemonic) in custom migration 0022
 
