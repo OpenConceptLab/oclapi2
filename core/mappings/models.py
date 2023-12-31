@@ -516,6 +516,8 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
             mapping.public_access = parent.public_access
             mapping.save()
             initial_version = cls.create_initial_version(mapping)
+            if initial_version.id and not mapping._index:
+                mapping.latest_version_id = initial_version.id
             initial_version.sources.set([parent])
             mapping.sources.set([parent])
             mapping.set_checksums()
@@ -578,6 +580,8 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
                     obj.save()
                     obj.update_versioned_object()
                     if prev_latest_version:
+                        if not obj._index:  # pylint: disable=protected-access
+                            obj.prev_latest_version_id = prev_latest_version.id
                         prev_latest_version.is_latest_version = False
                         prev_latest_version._index = obj._index  # pylint: disable=protected-access
                         prev_latest_version.save(update_fields=['is_latest_version', '_index'])

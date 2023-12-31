@@ -751,14 +751,28 @@ class BulkImportInline(BaseImporter):
                 concept_importer = ConceptImporter(item, self.user, self.update_if_exists)
                 _result = concept_importer.delete() if action == 'delete' else concept_importer.run()
                 if get(concept_importer.instance, 'id'):
-                    new_concept_ids.add(concept_importer.instance.versioned_object_id)
+                    new_concept_ids.update(set(compact(
+                        [
+                            concept_importer.instance.versioned_object_id,
+                            get(concept_importer.instance, 'prev_latest_version_id'),
+                            get(concept_importer.instance, 'latest_version_id'),
+                            concept_importer.instance.id,
+                        ]
+                    )))
                 self.handle_item_import_result(_result, original_item)
                 continue
             if item_type == 'mapping':
                 mapping_importer = MappingImporter(item, self.user, self.update_if_exists)
                 _result = mapping_importer.delete() if action == 'delete' else mapping_importer.run()
                 if get(mapping_importer.instance, 'id'):
-                    new_mapping_ids.add(mapping_importer.instance.versioned_object_id)
+                    new_mapping_ids.update(set(compact(
+                        [
+                            mapping_importer.instance.versioned_object_id,
+                            get(mapping_importer.instance, 'prev_latest_version_id'),
+                            get(mapping_importer.instance, 'latest_version_id'),
+                            mapping_importer.instance.id,
+                        ]
+                    )))
                 self.handle_item_import_result(_result, original_item)
                 continue
             if item_type == 'reference':
@@ -768,13 +782,13 @@ class BulkImportInline(BaseImporter):
                 continue
 
         if new_concept_ids:
-            for chunk in chunks(list(new_concept_ids), 1000):
+            for chunk in chunks(list(set(new_concept_ids)), 1000):
                 batch_index_resources.apply_async(
-                    ('concept', {'versioned_object_id__in': chunk}, True), queue='indexing')
+                    ('concept', {'id__in': chunk}, True), queue='indexing')
         if new_mapping_ids:
-            for chunk in chunks(list(new_mapping_ids), 1000):
+            for chunk in chunks(list(set(new_mapping_ids)), 1000):
                 batch_index_resources.apply_async(
-                    ('mapping', {'versioned_object_id__in': chunk}, True), queue='indexing')
+                    ('mapping', {'id__in': chunk}, True), queue='indexing')
 
         self.elapsed_seconds = time.time() - self.start_time
 

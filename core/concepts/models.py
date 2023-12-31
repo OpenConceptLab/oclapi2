@@ -749,6 +749,8 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             if create_initial_version:
                 initial_version = cls.create_initial_version(concept)
                 if initial_version.id:
+                    if not concept._index:
+                        concept.latest_version_id = initial_version.id
                     initial_version.set_locales(names, ConceptName)
                     initial_version.set_locales(descriptions, ConceptDescription)
                     initial_version.sources.set([parent])
@@ -831,6 +833,8 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                     obj.clean()  # clean here to validate locales that can only be saved after obj is saved
                     obj.update_versioned_object()
                     if prev_latest_version:
+                        if not obj._index:  # pylint: disable=protected-access
+                            obj.prev_latest_version_id = prev_latest_version.id
                         prev_latest_version._index = obj._index  # pylint: disable=protected-access
                         prev_latest_version.is_latest_version = False
                         prev_latest_version.save(update_fields=['is_latest_version', '_index'])
