@@ -782,11 +782,11 @@ class BulkImportInline(BaseImporter):
                 continue
 
         if new_concept_ids:
-            for chunk in chunks(list(set(new_concept_ids)), 1000):
+            for chunk in chunks(list(set(new_concept_ids)), 5000):
                 batch_index_resources.apply_async(
                     ('concept', {'id__in': chunk}, True), queue='indexing')
         if new_mapping_ids:
-            for chunk in chunks(list(set(new_mapping_ids)), 1000):
+            for chunk in chunks(list(set(new_mapping_ids)), 5000):
                 batch_index_resources.apply_async(
                     ('mapping', {'id__in': chunk}, True), queue='indexing')
 
