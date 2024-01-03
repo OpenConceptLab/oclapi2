@@ -443,7 +443,6 @@ class BulkImportInlineTest(OCLTestCase):
             sorted([mapping.id, mapping.get_latest_version().id])
         )
 
-
         self.assertEqual(importer.processed, 1)
         self.assertEqual(len(importer.created), 1)
         self.assertEqual(importer.failed, [])
@@ -831,13 +830,13 @@ class BulkImportParallelRunnerTest(OCLTestCase):
         self.assertEqual(len(importer.parts[4]), 22)
         self.assertEqual(len(importer.parts[5]), 2)
         self.assertEqual(len(importer.parts[6]), 12)
-        self.assertEqual([l['type'] for l in importer.parts[0]], ['Organization', 'Organization'])
-        self.assertEqual([l['type'] for l in importer.parts[1]], ['Source', 'Source'])
-        self.assertEqual([l['type'] for l in importer.parts[2]], ['Source Version'])
-        self.assertEqual(list({l['type'] for l in importer.parts[3]}), ['Concept'])
-        self.assertEqual(list({l['type'] for l in importer.parts[4]}), ['Mapping'])
-        self.assertEqual([l['type'] for l in importer.parts[5]], ['Source Version', 'Source Version'])
-        self.assertEqual(list({l['type'] for l in importer.parts[6]}), ['Concept'])
+        self.assertEqual([part['type'] for part in importer.parts[0]], ['Organization', 'Organization'])
+        self.assertEqual([part['type'] for part in importer.parts[1]], ['Source', 'Source'])
+        self.assertEqual([part['type'] for part in importer.parts[2]], ['Source Version'])
+        self.assertEqual(list({part['type'] for part in importer.parts[3]}), ['Concept'])
+        self.assertEqual(list({part['type'] for part in importer.parts[4]}), ['Mapping'])
+        self.assertEqual([part['type'] for part in importer.parts[5]], ['Source Version', 'Source Version'])
+        self.assertEqual(list({part['type'] for part in importer.parts[6]}), ['Concept'])
 
     @patch('core.importers.models.app.control')
     @patch('core.importers.models.RedisService')
