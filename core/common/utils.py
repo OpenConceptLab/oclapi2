@@ -414,18 +414,22 @@ def es_get(url, **kwargs):
     :param url:
     :return:
     """
+    auth = None
+    if settings.ES_USER and settings.ES_PASSWORD:
+        auth = HTTPBasicAuth(settings.ES_USER, settings.ES_PASSWORD)
+
     if settings.ES_HOSTS:
         for es_host in settings.ES_HOSTS.split(','):
             try:
                 return requests.get(
-                    f'{settings.ES_SCHEME}://{es_host}/{url}',
+                    f'{settings.ES_SCHEME}://{es_host}/{url}', auth=auth,
                     **kwargs
                 )
             except ConnectTimeout:
                 continue
     else:
         return requests.get(
-            f'{settings.ES_SCHEME}://{settings.ES_HOST}:{settings.ES_PORT}/{url}',
+            f'{settings.ES_SCHEME}://{settings.ES_HOST}:{settings.ES_PORT}/{url}', auth=auth,
             **kwargs
         )
 

@@ -189,7 +189,7 @@ DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
         'NAME': os.environ.get('DB', 'postgres'),
-        'USER': 'postgres',
+        'USER': os.environ.get('DB_USER', 'postgres'),
         'PASSWORD': os.environ.get('DB_PASSWORD', 'Postgres123'),
         'HOST': os.environ.get('DB_HOST', 'db'),
         'PORT': os.environ.get('DB_PORT', 5432),
@@ -202,9 +202,16 @@ ES_HOST = os.environ.get('ES_HOST', 'es')  # Deprecated. Use ES_HOSTS instead.
 ES_PORT = os.environ.get('ES_PORT', '9200')  # Deprecated. Use ES_HOSTS instead.
 ES_HOSTS = os.environ.get('ES_HOSTS', None)
 ES_SCHEME = os.environ.get('ES_SCHEME', 'http')
+ES_USER = os.environ.get('ES_USER', None)
+ES_PASSWORD = os.environ.get('ES_PASSWORD', None)
+http_auth = None
+if ES_USER and ES_PASSWORD:
+    http_auth = (ES_USER, ES_PASSWORD)
+
 ELASTICSEARCH_DSL = {
     'default': {
         'hosts': ES_HOSTS.split(',') if ES_HOSTS else [ES_HOST + ':' + ES_PORT],
+        'http_auth': http_auth,
         'use_ssl': ES_SCHEME == 'https',
         'verify_certs': ES_SCHEME == 'https',
         'sniff_on_connection_fail': True,
@@ -327,6 +334,7 @@ REDIS_PORT = os.environ.get('REDIS_PORT', 6379)
 REDIS_DB = 0
 REDIS_HOST = os.environ.get('REDIS_HOST', 'redis')
 REDIS_URL = f"redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}"
+REDIS_PASSWORD = os.environ.get('REDIS_PASSWORD', None)
 
 REDIS_SENTINELS = os.environ.get('REDIS_SENTINELS', None)
 if REDIS_SENTINELS:
@@ -339,6 +347,7 @@ REDIS_SENTINELS_LIST = []
 
 # django cache
 OPTIONS = {
+    'PASSWORD': REDIS_PASSWORD,
     'CONNECTION_POOL_KWARGS': {
                                   'retry': Retry(ExponentialBackoff(cap=10, base=0.5), 10),
                                   'retry_on_error': [ConnectionError]
@@ -424,8 +433,17 @@ if REDIS_SENTINELS:
         {
             'master_name': REDIS_SENTINELS_MASTER
         })
+    if REDIS_PASSWORD:
+        CELERY_BROKER_TRANSPORT_OPTIONS.update(
+            {
+                'sentinel_kwargs': { 'password': REDIS_PASSWORD }
+            }
+        )
 else:
-    CELERY_RESULT_BACKEND = f'redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}'
+    if REDIS_PASSWORD:
+        CELERY_RESULT_BACKEND = f'redis://:{REDIS_PASSWORD}@{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}'
+    else:
+        CELERY_RESULT_BACKEND = f'redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}'
 
 CELERY_BROKER_URL = CELERY_RESULT_BACKEND
 CELERY_BROKER_POOL_LIMIT = 100  # should be adjusted considering the number of threads
