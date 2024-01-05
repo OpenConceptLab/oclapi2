@@ -591,7 +591,7 @@ class UtilsTest(OCLTestCase):
 
         self.assertEqual(es_get('some-url', timeout=1), 'dummy-response')
 
-        http_get_mock.assert_called_once_with('http://es:9200/some-url', timeout=1)
+        http_get_mock.assert_called_once_with('http://es:9200/some-url', auth=None, timeout=1)
 
     @patch('core.common.utils.flower_get')
     def test_task_exists(self, flower_get_mock):
