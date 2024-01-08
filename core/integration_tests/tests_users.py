@@ -115,7 +115,7 @@ class UserSignupVerificationViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 405)
 
-    @patch('core.users.views.OIDCAuthService.get_registration_redirect_url')
+    @patch('core.users.views.OpenIDAuthService.get_registration_redirect_url')
     @patch('core.users.views.AuthService.is_sso_enabled')
     def test_get_200(self, is_sso_enabled_mock, get_registration_url_mock):
         is_sso_enabled_mock.return_value = True
@@ -942,7 +942,7 @@ class UserExtraRetrieveUpdateDestroyViewTest(OCLAPITestCase):
 
 
 class OIDCodeExchangeViewTest(OCLAPITestCase):
-    @patch('core.users.views.OIDCAuthService')
+    @patch('core.users.views.OpenIDAuthService')
     def test_post_200(self, service_mock):
         service_mock.exchange_code_for_token = Mock(return_value='response')
         response = self.client.post(
@@ -1027,7 +1027,7 @@ class OIDCLogoutViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 405)
 
-    @patch('core.users.views.OIDCAuthService.get_logout_redirect_url')
+    @patch('core.users.views.OpenIDAuthService.get_logout_redirect_url')
     @patch('core.users.views.AuthService.is_sso_enabled')
     def test_get_200(self, is_sso_enabled_mock, get_logout_url_mock):
         is_sso_enabled_mock.return_value = True

@@ -7,7 +7,6 @@ from core.collections.models import Collection
 from core.collections.tests.factories import OrganizationCollectionFactory
 from core.common.constants import HEAD, ACCESS_TYPE_EDIT, ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW, \
     OPENMRS_VALIDATION_SCHEMA
-from core.common.services import PostgresQL
 from core.common.tasks import index_source_mappings, index_source_concepts
 from core.common.tasks import seed_children_to_new_version
 from core.common.tasks import update_source_active_concepts_count
@@ -20,6 +19,7 @@ from core.concepts.tests.factories import ConceptFactory, ConceptNameFactory
 from core.mappings.documents import MappingDocument
 from core.mappings.tests.factories import MappingFactory
 from core.orgs.tests.factories import OrganizationFactory
+from core.services.storages.postgres import PostgresQL
 from core.sources.documents import SourceDocument
 from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory, UserSourceFactory
@@ -784,7 +784,7 @@ class SourceTest(OCLTestCase):
         ]:
             Source(**{field: 1}, mnemonic='foo', version='HEAD', name='foo').full_clean()
 
-    @patch('core.common.services.PostgresQL.create_seq')
+    @patch('core.services.storages.postgres.PostgresQL.create_seq')
     def test_autoid_field_changes(self, create_seq):
         org = OrganizationFactory(mnemonic='org')
         source = OrganizationSourceFactory(mnemonic='sequence', organization=org)

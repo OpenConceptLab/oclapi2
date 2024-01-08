@@ -615,7 +615,7 @@ def delete_s3_objects(path):
 
 @app.task(ignore_result=True)
 def beat_healthcheck():  # pragma: no cover
-    from core.common.services import RedisService
+    from core.services.storages.redis import RedisService
     redis_service = RedisService()
     redis_service.set(settings.CELERYBEAT_HEALTHCHECK_KEY, str(datetime.now()), ex=120)
 

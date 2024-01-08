@@ -305,7 +305,7 @@ class TokenAuthenticationViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 405)
 
-    @patch('core.users.views.OIDCAuthService.get_login_redirect_url')
+    @patch('core.users.views.OpenIDAuthService.get_login_redirect_url')
     @patch('core.users.views.AuthService.is_sso_enabled')
     def test_get_200(self, is_sso_enabled_mock, get_login_url_mock):
         is_sso_enabled_mock.return_value = True
@@ -328,7 +328,7 @@ class UserLogoViewTest(OCLAPITestCase):
         self.user = UserProfileFactory(username='username1')
         self.token = self.user.get_token()
 
-    @patch('core.common.services.S3.upload_base64')
+    @patch('core.services.storages.cloud.aws.S3.upload_base64')
     def test_post_200(self, upload_base64_mock):
         upload_base64_mock.return_value = 'users/username1/logo.png'
         self.assertIsNone(self.user.logo_url)

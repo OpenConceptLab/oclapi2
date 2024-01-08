@@ -3,8 +3,7 @@ import sys
 from django.conf import settings
 from django.core.management import BaseCommand
 
-from core.common.services import RedisService
-from core.users.models import UserProfile
+from core.services.storages.redis import RedisService
 
 
 class Command(BaseCommand):

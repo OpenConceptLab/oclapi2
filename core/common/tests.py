@@ -1,21 +1,17 @@
-import base64
 import os
 import uuid
 from collections import OrderedDict
-from unittest.mock import patch, Mock, mock_open, ANY
+from unittest.mock import patch, Mock, ANY
 
-import boto3
 import django
 import factory
-from botocore.exceptions import ClientError
 from colour_runner.django_runner import ColourRunnerMixin
 from django.conf import settings
-from django.core.files.base import ContentFile, File
+from django.core.files.base import File
 from django.core.management import call_command
 from django.test import TestCase
 from django.test.runner import DiscoverRunner
 from mock.mock import call
-from moto import mock_s3
 from requests.auth import HTTPBasicAuth
 from rest_framework.exceptions import ValidationError
 from rest_framework.test import APITestCase, APITransactionTestCase
@@ -39,7 +35,6 @@ from .backends import OCLOIDCAuthenticationBackend
 from .checksums import Checksum
 from .fhir_helpers import translate_fhir_query
 from .serializers import IdentifierSerializer
-from .services import S3, PostgresQL, DjangoAuthService, OIDCAuthService
 from .validators import URIValidator
 from ..code_systems.serializers import CodeSystemDetailSerializer
 
@@ -205,6 +200,7 @@ class BaseTestCase(SetupTestEnvironment):
             names=[ConceptNameFactory.build(name="English")]
         )
 
+
 class OCLAPITransactionTestCase(APITransactionTestCase, BaseTestCase):
     @classmethod
     def setUpClass(cls):
@@ -213,6 +209,7 @@ class OCLAPITransactionTestCase(APITransactionTestCase, BaseTestCase):
         call_command("loaddata", "core/fixtures/toggles.json")
         org = Organization.objects.get(id=1)
         org.members.add(1)
+
 
 class OCLAPITestCase(APITestCase, BaseTestCase):
     @classmethod
@@ -238,181 +235,6 @@ class OCLTestCase(TestCase, BaseTestCase):
             **factory.build(dict, FACTORY_CLASS=factory_klass),
             **kwargs
         }
-
-
-class S3Test(TestCase):
-    @mock_s3
-    def test_upload(self):
-        _conn = boto3.resource('s3', region_name='us-east-1')
-        _conn.create_bucket(Bucket='oclapi2-dev')
-
-        S3()._upload('some/path', 'content')  # pylint: disable=protected-access
-
-        self.assertEqual(
-            _conn.Object(
-                'oclapi2-dev',
-                'some/path'
-            ).get()['Body'].read().decode("utf-8"),
-            'content'
-        )
-
-    @mock_s3
-    def test_exists(self):
-        _conn = boto3.resource('s3', region_name='us-east-1')
-        _conn.create_bucket(Bucket='oclapi2-dev')
-        s3 = S3()
-        self.assertFalse(s3.exists('some/path'))
-
-        s3._upload('some/path', 'content')  # pylint: disable=protected-access
-
-        self.assertTrue(s3.exists('some/path'))
-
-    def test_upload_public(self):
-        conn_mock = Mock(upload_fileobj=Mock(return_value='success'))
-
-        s3 = S3()
-        s3._S3__get_connection = Mock(return_value=conn_mock)  # pylint: disable=protected-access
-        self.assertEqual(s3._upload_public('some/path', 'content'), 'success')  # pylint: disable=protected-access
-
-        conn_mock.upload_fileobj.assert_called_once_with(
-            'content',
-            'oclapi2-dev',
-            'some/path',
-            ExtraArgs={'ACL': 'public-read'},
-        )
-
-    def test_upload_file(self):
-        with patch("builtins.open", mock_open(read_data="file-content")) as mock_file:
-            s3 = S3()
-            s3._upload = Mock(return_value=200)  # pylint: disable=protected-access
-            file_path = "path/to/file.ext"
-            res = s3.upload_file(key=file_path, headers={'header1': 'val1'})
-            self.assertEqual(res, 200)
-            s3._upload.assert_called_once_with(file_path, 'file-content', {'header1': 'val1'}, None)  # pylint: disable=protected-access
-            mock_file.assert_called_once_with(file_path, 'r')
-
-    def test_upload_base64(self):
-        file_content = base64.b64encode(b'file-content')
-        s3 = S3()
-        s3_upload_mock = Mock()
-        s3._upload = s3_upload_mock  # pylint: disable=protected-access
-        uploaded_file_name_with_ext = s3.upload_base64(
-            doc_base64='extension/ext;base64,' + file_content.decode(),
-            file_name='some-file-name',
-        )
-
-        self.assertEqual(
-            uploaded_file_name_with_ext,
-            'some-file-name.ext'
-        )
-        mock_calls = s3_upload_mock.mock_calls
-        self.assertEqual(len(mock_calls), 1)
-        self.assertEqual(
-            mock_calls[0][1][0],
-            'some-file-name.ext'
-        )
-        self.assertTrue(
-            isinstance(mock_calls[0][1][1], ContentFile)
-        )
-
-    def test_upload_base64_public(self):
-        file_content = base64.b64encode(b'file-content')
-        s3 = S3()
-        s3_upload_mock = Mock()
-        s3._upload_public = s3_upload_mock  # pylint: disable=protected-access
-        uploaded_file_name_with_ext = s3.upload_base64(
-            doc_base64='extension/ext;base64,' + file_content.decode(),
-            file_name='some-file-name',
-            public_read=True,
-        )
-
-        self.assertEqual(
-            uploaded_file_name_with_ext,
-            'some-file-name.ext'
-        )
-        mock_calls = s3_upload_mock.mock_calls
-        self.assertEqual(len(mock_calls), 1)
-        self.assertEqual(
-            mock_calls[0][1][0],
-            'some-file-name.ext'
-        )
-        self.assertTrue(
-            isinstance(mock_calls[0][1][1], ContentFile)
-        )
-
-    def test_upload_base64_no_ext(self):
-        s3_upload_mock = Mock()
-        s3 = S3()
-        s3._upload = s3_upload_mock  # pylint: disable=protected-access
-        file_content = base64.b64encode(b'file-content')
-        uploaded_file_name_with_ext = s3.upload_base64(
-            doc_base64='extension/ext;base64,' + file_content.decode(),
-            file_name='some-file-name',
-            append_extension=False,
-        )
-
-        self.assertEqual(
-            uploaded_file_name_with_ext,
-            'some-file-name.jpg'
-        )
-        mock_calls = s3_upload_mock.mock_calls
-        self.assertEqual(len(mock_calls), 1)
-        self.assertEqual(
-            mock_calls[0][1][0],
-            'some-file-name.jpg'
-        )
-        self.assertTrue(
-            isinstance(mock_calls[0][1][1], ContentFile)
-        )
-
-    @mock_s3
-    def test_remove(self):
-        conn = boto3.resource('s3', region_name='us-east-1')
-        conn.create_bucket(Bucket='oclapi2-dev')
-
-        s3 = S3()
-        s3._upload('some/path', 'content')  # pylint: disable=protected-access
-
-        self.assertEqual(
-            conn.Object(
-                'oclapi2-dev',
-                'some/path'
-            ).get()['Body'].read().decode("utf-8"),
-            'content'
-        )
-
-        s3.remove(key='some/path')
-
-        with self.assertRaises(ClientError):
-            conn.Object('oclapi2-dev', 'some/path').get()
-
-    @mock_s3
-    def test_url_for(self):
-        _conn = boto3.resource('s3', region_name='us-east-1')
-        _conn.create_bucket(Bucket='oclapi2-dev')
-
-        s3 = S3()
-        s3._upload('some/path', 'content')  # pylint: disable=protected-access
-        _url = s3.url_for('some/path')
-
-        self.assertTrue(
-            'https://oclapi2-dev.s3.amazonaws.com/some/path' in _url
-        )
-        self.assertTrue(
-            '&X-Amz-Credential=' in _url
-        )
-        self.assertTrue(
-            '&X-Amz-Signature=' in _url
-        )
-        self.assertTrue(
-            'X-Amz-Expires=' in _url
-        )
-
-    def test_public_url_for(self):
-        self.assertEqual(
-            S3().public_url_for('some/path').replace('https://', 'http://'),
-            'http://oclapi2-dev.s3.amazonaws.com/some/path'
-        )
 
 
 class FhirHelpersTest(OCLTestCase):
@@ -1071,171 +893,6 @@ class TaskTest(OCLTestCase):
         self.assertEqual(call_args['to'], ['reports@openconceptlab.org'])
         self.assertTrue('Please find attached resources report of' in call_args['body'])
         self.assertTrue('for the period of' in call_args['body'])
-
-
-class PostgresQLTest(OCLTestCase):
-    @patch('core.common.services.connection')
-    def test_create_seq(self, db_connection_mock):
-        cursor_context_mock = Mock(execute=Mock())
-        cursor_mock = Mock()
-        cursor_mock.__enter__ = Mock(return_value=cursor_context_mock)
-        cursor_mock.__exit__ = Mock(return_value=None)
-        db_connection_mock.cursor = Mock(return_value=cursor_mock)
-
-        self.assertEqual(PostgresQL.create_seq('foobar_seq', 'sources.uri', 1, 100), None)
-
-        db_connection_mock.cursor.assert_called_once()
-        cursor_context_mock.execute.assert_called_once_with(
-            'CREATE SEQUENCE IF NOT EXISTS foobar_seq MINVALUE 1 START 100 OWNED BY sources.uri;')
-
-    @patch('core.common.services.connection')
-    def test_update_seq(self, db_connection_mock):
-        cursor_context_mock = Mock(execute=Mock())
-        cursor_mock = Mock()
-        cursor_mock.__enter__ = Mock(return_value=cursor_context_mock)
-        cursor_mock.__exit__ = Mock(return_value=None)
-        db_connection_mock.cursor = Mock(return_value=cursor_mock)
-
-        self.assertEqual(PostgresQL.update_seq('foobar_seq', 1567), None)
-
-        db_connection_mock.cursor.assert_called_once()
-        cursor_context_mock.execute.assert_called_once_with("SELECT setval('foobar_seq', 1567, true);")
-
-    @patch('core.common.services.connection')
-    def test_drop_seq(self, db_connection_mock):
-        cursor_context_mock = Mock(execute=Mock())
-        cursor_mock = Mock()
-        cursor_mock.__enter__ = Mock(return_value=cursor_context_mock)
-        cursor_mock.__exit__ = Mock(return_value=None)
-        db_connection_mock.cursor = Mock(return_value=cursor_mock)
-
-        self.assertEqual(PostgresQL.drop_seq('foobar_seq'), None)
-
-        db_connection_mock.cursor.assert_called_once()
-        cursor_context_mock.execute.assert_called_once_with("DROP SEQUENCE IF EXISTS foobar_seq;")
-
-    @patch('core.common.services.connection')
-    def test_next_value(self, db_connection_mock):
-        cursor_context_mock = Mock(execute=Mock(), fetchone=Mock(return_value=[1568]))
-        cursor_mock = Mock()
-        cursor_mock.__enter__ = Mock(return_value=cursor_context_mock)
-        cursor_mock.__exit__ = Mock(return_value=None)
-        db_connection_mock.cursor = Mock(return_value=cursor_mock)
-
-        self.assertEqual(PostgresQL.next_value('foobar_seq'), 1568)
-
-        db_connection_mock.cursor.assert_called_once()
-        cursor_context_mock.execute.assert_called_once_with("SELECT nextval('foobar_seq');")
-
-    @patch('core.common.services.connection')
-    def test_last_value(self, db_connection_mock):
-        cursor_context_mock = Mock(execute=Mock(), fetchone=Mock(return_value=[1567]))
-        cursor_mock = Mock()
-        cursor_mock.__enter__ = Mock(return_value=cursor_context_mock)
-        cursor_mock.__exit__ = Mock(return_value=None)
-        db_connection_mock.cursor = Mock(return_value=cursor_mock)
-
-        self.assertEqual(PostgresQL.last_value('foobar_seq'), 1567)
-
-        db_connection_mock.cursor.assert_called_once()
-        cursor_context_mock.execute.assert_called_once_with("SELECT last_value from foobar_seq;")
-
-
-class DjangoAuthServiceTest(OCLTestCase):
-    def test_get_token(self):
-        user = UserProfileFactory(username='foobar')
-
-        token = DjangoAuthService(user=user, password='foobar').get_token(True)
-        self.assertEqual(token, False)
-
-        user.set_password('foobar')
-        user.save()
-
-        token = DjangoAuthService(username='foobar', password='foobar').get_token(True)
-        self.assertTrue('Token ' in token)
-        self.assertTrue(len(token), 64)
-
-
-class OIDCAuthServiceTest(OCLTestCase):
-    def test_get_login_redirect_url(self):
-        self.assertEqual(
-            OIDCAuthService.get_login_redirect_url('client-id', 'http://localhost:4000', 'state', 'nonce'),
-            '/realms/ocl/protocol/openid-connect/auth?response_type=code id_token&client_id=client-id&'
-            'state=state&nonce=nonce&redirect_uri=http://localhost:4000'
-        )
-
-    def test_get_logout_redirect_url(self):
-        self.assertEqual(
-            OIDCAuthService.get_logout_redirect_url('id-token-hint', 'http://localhost:4000'),
-            '/realms/ocl/protocol/openid-connect/logout?id_token_hint=id-token-hint&'
-            'post_logout_redirect_uri=http://localhost:4000'
-        )
-
-    @patch('requests.post')
-    def test_exchange_code_for_token(self, post_mock):
-        post_mock.return_value = Mock(json=Mock(return_value={'token': 'token', 'foo': 'bar'}))
-
-        result = OIDCAuthService.exchange_code_for_token(
-            'code', 'http://localhost:4000', 'client-id', 'client-secret'
-        )
-
-        self.assertEqual(result, {'token': 'token', 'foo': 'bar'})
-        post_mock.assert_called_once_with(
-            '/realms/ocl/protocol/openid-connect/token',
-            data={
-                'grant_type': 'authorization_code',
-                'client_id': 'client-id',
-                'client_secret': 'client-secret',
-                'code': 'code',
-                'redirect_uri': 'http://localhost:4000'
-            }
-        )
-
-    @patch('requests.post')
-    def test_get_admin_token(self, post_mock):
-        post_mock.return_value = Mock(json=Mock(return_value={'access_token': 'token', 'foo': 'bar'}))
-
-        result = OIDCAuthService.get_admin_token('username', 'password')
-
-        self.assertEqual(result, 'token')
-        post_mock.assert_called_once_with(
-            '/realms/master/protocol/openid-connect/token',
-            data={
-                'grant_type': 'password',
-                'username': 'username',
-                'password': 'password',
-                'client_id': 'admin-cli'
-            },
-            verify=False
-        )
-
-    @patch('core.common.services.OIDCAuthService.get_admin_token')
-    @patch('requests.post')
-    def test_add_user(self, post_mock, get_admin_token_mock):
-        post_mock.return_value = Mock(status_code=201, json=Mock(return_value={'foo': 'bar'}))
-        get_admin_token_mock.return_value = 'token'
-        user = UserProfileFactory(username='username')
-        user.set_password('password')
-        user.save()
-
-        result = OIDCAuthService.add_user(user, 'username', 'password')
-
-        self.assertEqual(result, True)
-        get_admin_token_mock.assert_called_once_with(username='username', password='password')
-        post_mock.assert_called_once_with(
-            '/admin/realms/ocl/users',
-            json={
-                'enabled': True,
-                'emailVerified': user.verified,
-                'firstName': user.first_name,
-                'lastName': user.last_name,
-                'email': user.email,
-                'username': user.username,
-                'credentials': ANY
-            },
-            verify=False,
-            headers={'Authorization': 'Bearer token'}
-        )
 
 
 class URIValidatorTest(OCLTestCase):

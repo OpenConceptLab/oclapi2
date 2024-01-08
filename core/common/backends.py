@@ -99,7 +99,7 @@ class OCLAuthenticationBackend(ModelBackend):
         if get(self, '_authentication_backend'):
             return get(self, '_authentication_backend')
 
-        from core.common.services import AuthService
+        from core.services.auth.core import AuthService
         if AuthService.is_valid_django_token(request) or get(settings, 'TEST_MODE', False):
             klass = ModelBackend
         else:

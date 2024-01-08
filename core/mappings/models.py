@@ -10,7 +10,6 @@ from pydash import get
 from core.common.constants import NAMESPACE_REGEX, LATEST
 from core.common.mixins import SourceChildMixin
 from core.common.models import VersionedModel
-from core.common.services import PostgresQL
 from core.common.tasks import batch_index_resources
 from core.common.utils import separate_version, to_parent_uri, generate_temp_version, \
     encode_string, is_url_encoded_string
@@ -18,6 +17,7 @@ from core.mappings.constants import MAPPING_TYPE, MAPPING_IS_ALREADY_RETIRED, MA
     MAPPING_IS_ALREADY_NOT_RETIRED, MAPPING_WAS_UNRETIRED, PERSIST_CLONE_ERROR, PERSIST_CLONE_SPECIFY_USER_ERROR, \
     ALREADY_EXISTS
 from core.mappings.mixins import MappingValidationMixin
+from core.services.storages.postgres import PostgresQL
 
 
 class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):

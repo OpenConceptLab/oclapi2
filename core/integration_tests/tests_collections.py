@@ -1481,7 +1481,7 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 404)
 
-    @patch('core.common.services.S3.exists')
+    @patch('core.services.storages.cloud.aws.S3.exists')
     def test_get_204_head(self, s3_exists_mock):
         s3_exists_mock.return_value = False
 
@@ -1494,7 +1494,7 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 204)
         s3_exists_mock.assert_called_once_with(f"users/username/username_coll_vHEAD.{self.HEAD_updated_at}.zip")
 
-    @patch('core.common.services.S3.has_path')
+    @patch('core.services.storages.cloud.aws.S3.has_path')
     def test_get_204_for_version(self, s3_has_path_mock):
         s3_has_path_mock.return_value = False
 
@@ -1507,9 +1507,9 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 204)
         s3_has_path_mock.assert_called_once_with("users/username/username_coll_v1.")
 
-    @patch('core.common.services.S3.url_for')
-    @patch('core.common.services.S3.get_last_key_from_path')
-    @patch('core.common.services.S3.has_path')
+    @patch('core.services.storages.cloud.aws.S3.url_for')
+    @patch('core.services.storages.cloud.aws.S3.get_last_key_from_path')
+    @patch('core.services.storages.cloud.aws.S3.has_path')
     def test_get_303_version(self, s3_has_path_mock, s3_get_last_key_from_path_mock, s3_url_for_mock):
         s3_has_path_mock.return_value = True
         s3_url = f"https://s3/users/username/username_coll_v1.{self.v1_updated_at}.zip"
@@ -1531,8 +1531,8 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
         s3_get_last_key_from_path_mock.assert_called_once_with("users/username/username_coll_v1.")
         s3_url_for_mock.assert_called_once_with(f"users/username/username_coll_v1.{self.v1_updated_at}.zip")
 
-    @patch('core.common.services.S3.url_for')
-    @patch('core.common.services.S3.exists')
+    @patch('core.services.storages.cloud.aws.S3.url_for')
+    @patch('core.services.storages.cloud.aws.S3.exists')
     def test_get_303_head(self, s3_exists_mock, s3_url_for_mock):
         s3_exists_mock.return_value = True
         s3_url = f"https://s3/users/username/username_coll_vHEAD.{self.HEAD_updated_at}.zip"
@@ -1570,7 +1570,7 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 405)
 
-    @patch('core.common.services.S3.exists')
+    @patch('core.services.storages.cloud.aws.S3.exists')
     def test_post_303_head(self, s3_exists_mock):
         s3_exists_mock.return_value = True
         response = self.client.post(
@@ -1583,7 +1583,7 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
         self.assertEqual(response['URL'], self.collection.uri + 'export/')
         s3_exists_mock.assert_called_once_with(f"users/username/username_coll_vHEAD.{self.HEAD_updated_at}.zip")
 
-    @patch('core.common.services.S3.has_path')
+    @patch('core.services.storages.cloud.aws.S3.has_path')
     def test_post_303_version(self, s3_has_path_mock):
         s3_has_path_mock.return_value = True
         response = self.client.post(
@@ -1597,7 +1597,7 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
         s3_has_path_mock.assert_called_once_with("users/username/username_coll_v1.")
 
     @patch('core.collections.views.export_collection')
-    @patch('core.common.services.S3.exists')
+    @patch('core.services.storages.cloud.aws.S3.exists')
     def test_post_202_head(self, s3_exists_mock, export_collection_mock):
         s3_exists_mock.return_value = False
         response = self.client.post(
@@ -1611,7 +1611,7 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
         export_collection_mock.delay.assert_called_once_with(self.collection.id)
 
     @patch('core.collections.views.export_collection')
-    @patch('core.common.services.S3.has_path')
+    @patch('core.services.storages.cloud.aws.S3.has_path')
     def test_post_202_version(self, s3_has_path_mock, export_collection_mock):
         s3_has_path_mock.return_value = False
         response = self.client.post(
@@ -1625,7 +1625,7 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
         export_collection_mock.delay.assert_called_once_with(self.collection_v1.id)
 
     @patch('core.collections.views.export_collection')
-    @patch('core.common.services.S3.exists')
+    @patch('core.services.storages.cloud.aws.S3.exists')
     def test_post_409_head(self, s3_exists_mock, export_collection_mock):
         s3_exists_mock.return_value = False
         export_collection_mock.delay.side_effect = AlreadyQueued('already-queued')
@@ -1640,7 +1640,7 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
         export_collection_mock.delay.assert_called_once_with(self.collection.id)
 
     @patch('core.collections.views.export_collection')
-    @patch('core.common.services.S3.has_path')
+    @patch('core.services.storages.cloud.aws.S3.has_path')
     def test_post_409_version(self, s3_has_path_mock, export_collection_mock):
         s3_has_path_mock.return_value = False
         export_collection_mock.delay.side_effect = AlreadyQueued('already-queued')
@@ -2021,7 +2021,7 @@ class CollectionLogoViewTest(OCLAPITestCase):
         self.token = self.user.get_token()
         self.collection = UserCollectionFactory(mnemonic='coll1', user=self.user)
 
-    @patch('core.common.services.S3.upload_base64')
+    @patch('core.services.storages.cloud.aws.S3.upload_base64')
     def test_post_200(self, upload_base64_mock):
         upload_base64_mock.return_value = 'users/username/collections/coll1/logo.png'
         self.assertIsNone(self.collection.logo_url)

@@ -10,10 +10,10 @@ from pydash import get
 
 from core.common.constants import HEAD
 from core.common.models import ConceptContainerModel
-from core.common.services import PostgresQL
 from core.common.tasks import update_mappings_source, index_source_concepts, index_source_mappings
 from core.common.validators import validate_non_negative
 from core.concepts.models import ConceptName, Concept
+from core.services.storages.postgres import PostgresQL
 from core.sources.constants import SOURCE_TYPE, SOURCE_VERSION_TYPE, HIERARCHY_ROOT_MUST_BELONG_TO_SAME_SOURCE, \
     HIERARCHY_MEANINGS, AUTO_ID_CHOICES, AUTO_ID_SEQUENTIAL, AUTO_ID_UUID, LOCALE_EXTERNAL_AUTO_ID_CHOICES
 

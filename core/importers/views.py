@@ -16,7 +16,7 @@ from rest_framework.views import APIView
 
 from core.celery import app
 from core.common.constants import DEPRECATED_API_HEADER
-from core.common.services import RedisService
+from core.services.storages.redis import RedisService
 from core.common.swagger_parameters import update_if_exists_param, task_param, result_param, username_param, \
     file_upload_param, file_url_param, parallel_threads_param, verbose_param
 from core.common.utils import parse_bulk_import_task_id, task_exists, flower_get, queue_bulk_import, \

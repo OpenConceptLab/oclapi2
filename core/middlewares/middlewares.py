@@ -6,8 +6,8 @@ from request_logging.middleware import LoggingMiddleware
 
 from core.common.constants import VERSION_HEADER, REQUEST_USER_HEADER, RESPONSE_TIME_HEADER, REQUEST_URL_HEADER, \
     REQUEST_METHOD_HEADER
-from core.common.services import AuthService
 from core.common.utils import set_current_user, set_request_url
+from core.services.auth.core import AuthService
 
 request_logger = logging.getLogger('request_logger')
 MAX_BODY_LENGTH = 50000

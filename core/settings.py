@@ -522,7 +522,7 @@ ERRBIT_URL = os.environ.get('ERRBIT_URL', 'http://errbit:8080')
 ERRBIT_KEY = os.environ.get('ERRBIT_KEY', 'errbit-key')
 
 # Repo Export Upload/download
-EXPORT_SERVICE = os.environ.get('EXPORT_SERVICE', 'core.common.services.S3')
+EXPORT_SERVICE = os.environ.get('EXPORT_SERVICE', 'core.services.storages.cloud.aws.S3')
 
 # Locales Repository URI
 # can either be /orgs/OCL/sources/Locales/ (old-style, ISO-639-2)

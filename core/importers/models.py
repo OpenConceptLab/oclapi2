@@ -14,7 +14,7 @@ from pydash import compact, get
 from core.celery import app
 from core.collections.models import Collection
 from core.common.constants import HEAD
-from core.common.services import RedisService
+from core.services.storages.redis import RedisService
 from core.common.tasks import bulk_import_parts_inline, delete_organization, batch_index_resources, \
     post_import_update_resource_counts
 from core.common.utils import drop_version, is_url_encoded_string, encode_string, to_parent_uri, chunks

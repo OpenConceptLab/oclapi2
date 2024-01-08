@@ -958,7 +958,7 @@ class SourceVersionExportViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 404)
 
-    @patch('core.common.services.S3.exists')
+    @patch('core.services.storages.cloud.aws.S3.exists')
     def test_get_204_head(self, s3_exists_mock):
         s3_exists_mock.return_value = False
 
@@ -971,7 +971,7 @@ class SourceVersionExportViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 204)
         s3_exists_mock.assert_called_once_with(f"users/username/username_source1_vHEAD.{self.v1_updated_at}.zip")
 
-    @patch('core.common.services.S3.has_path')
+    @patch('core.services.storages.cloud.aws.S3.has_path')
     def test_get_204_version(self, s3_has_path_mock):
         s3_has_path_mock.return_value = False
 
@@ -984,9 +984,9 @@ class SourceVersionExportViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 204)
         s3_has_path_mock.assert_called_once_with("users/username/username_source1_v1.")
 
-    @patch('core.common.services.S3.url_for')
-    @patch('core.common.services.S3.get_last_key_from_path')
-    @patch('core.common.services.S3.has_path')
+    @patch('core.services.storages.cloud.aws.S3.url_for')
+    @patch('core.services.storages.cloud.aws.S3.get_last_key_from_path')
+    @patch('core.services.storages.cloud.aws.S3.has_path')
     def test_get_303_version(self, s3_has_path_mock, s3_get_last_key_from_path_mock, s3_url_for_mock):
         s3_has_path_mock.return_value = True
         s3_url = f'https://s3/users/username/username_source1_v1.{self.v1_updated_at}.zip'
@@ -1007,8 +1007,8 @@ class SourceVersionExportViewTest(OCLAPITestCase):
         s3_has_path_mock.assert_called_once_with("users/username/username_source1_v1.")
         s3_url_for_mock.assert_called_once_with(f"users/username/username_source1_v1.{self.v1_updated_at}.zip")
 
-    @patch('core.common.services.S3.url_for')
-    @patch('core.common.services.S3.exists')
+    @patch('core.services.storages.cloud.aws.S3.url_for')
+    @patch('core.services.storages.cloud.aws.S3.exists')
     def test_get_303_head(self, s3_exists_mock, s3_url_for_mock):
         s3_url = f'https://s3/users/username/username_source1_vHEAD.{self.HEAD_updated_at}.zip'
         s3_url_for_mock.return_value = s3_url
@@ -1028,8 +1028,8 @@ class SourceVersionExportViewTest(OCLAPITestCase):
         s3_exists_mock.assert_called_once_with(f"users/username/username_source1_vHEAD.{self.HEAD_updated_at}.zip")
         s3_url_for_mock.assert_called_once_with(f"users/username/username_source1_vHEAD.{self.HEAD_updated_at}.zip")
 
-    @patch('core.common.services.S3.url_for')
-    @patch('core.common.services.S3.exists')
+    @patch('core.services.storages.cloud.aws.S3.url_for')
+    @patch('core.services.storages.cloud.aws.S3.exists')
     def test_get_200_head(self, s3_exists_mock, s3_url_for_mock):
         s3_url = f'https://s3/username/source1_vHEAD.{self.HEAD_updated_at}.zip'
         s3_url_for_mock.return_value = s3_url
@@ -1046,9 +1046,9 @@ class SourceVersionExportViewTest(OCLAPITestCase):
         s3_exists_mock.assert_called_once_with(f"users/username/username_source1_vHEAD.{self.HEAD_updated_at}.zip")
         s3_url_for_mock.assert_called_once_with(f"users/username/username_source1_vHEAD.{self.HEAD_updated_at}.zip")
 
-    @patch('core.common.services.S3.url_for')
-    @patch('core.common.services.S3.get_last_key_from_path')
-    @patch('core.common.services.S3.has_path')
+    @patch('core.services.storages.cloud.aws.S3.url_for')
+    @patch('core.services.storages.cloud.aws.S3.get_last_key_from_path')
+    @patch('core.services.storages.cloud.aws.S3.has_path')
     def test_get_200_version(self, s3_has_path_mock, s3_get_last_key_from_path_mock, s3_url_for_mock):
         s3_url = f'https://s3/users/username/username_source1_v1.{self.v1_updated_at}.zip'
         s3_url_for_mock.return_value = s3_url
@@ -1068,7 +1068,7 @@ class SourceVersionExportViewTest(OCLAPITestCase):
         s3_url_for_mock.assert_called_once_with(f"users/username/username_source1_v1.{self.v1_updated_at}.zip")
 
     @patch('core.sources.models.Source.is_exporting', new_callable=PropertyMock)
-    @patch('core.common.services.S3.exists')
+    @patch('core.services.storages.cloud.aws.S3.exists')
     def test_get_208_HEAD(self, s3_exists_mock, is_exporting_mock):
         is_exporting_mock.return_value = True
 
@@ -1082,7 +1082,7 @@ class SourceVersionExportViewTest(OCLAPITestCase):
         s3_exists_mock.assert_not_called()
 
     @patch('core.sources.models.Source.is_exporting', new_callable=PropertyMock)
-    @patch('core.common.services.S3.has_path')
+    @patch('core.services.storages.cloud.aws.S3.has_path')
     def test_get_208_version(self, s3_has_path_mock, is_exporting_mock):
         is_exporting_mock.return_value = True
 
@@ -1113,7 +1113,7 @@ class SourceVersionExportViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 405)
 
-    @patch('core.common.services.S3.exists')
+    @patch('core.services.storages.cloud.aws.S3.exists')
     def test_post_303_head(self, s3_exists_mock):
         s3_exists_mock.return_value = True
         response = self.client.post(
@@ -1126,7 +1126,7 @@ class SourceVersionExportViewTest(OCLAPITestCase):
         self.assertEqual(response['URL'], self.source.uri + 'export/')
         s3_exists_mock.assert_called_once_with(f"users/username/username_source1_vHEAD.{self.HEAD_updated_at}.zip")
 
-    @patch('core.common.services.S3.has_path')
+    @patch('core.services.storages.cloud.aws.S3.has_path')
     def test_post_303_version(self, s3_has_path_mock):
         s3_has_path_mock.return_value = True
         response = self.client.post(
@@ -1140,7 +1140,7 @@ class SourceVersionExportViewTest(OCLAPITestCase):
         s3_has_path_mock.assert_called_once_with("users/username/username_source1_v1.")
 
     @patch('core.sources.views.export_source')
-    @patch('core.common.services.S3.exists')
+    @patch('core.services.storages.cloud.aws.S3.exists')
     def test_post_202_head(self, s3_exists_mock, export_source_mock):
         s3_exists_mock.return_value = False
         response = self.client.post(
@@ -1154,7 +1154,7 @@ class SourceVersionExportViewTest(OCLAPITestCase):
         export_source_mock.delay.assert_called_once_with(self.source.id)
 
     @patch('core.sources.views.export_source')
-    @patch('core.common.services.S3.has_path')
+    @patch('core.services.storages.cloud.aws.S3.has_path')
     def test_post_202_version(self, s3_has_path_mock, export_source_mock):
         s3_has_path_mock.return_value = False
         response = self.client.post(
@@ -1168,7 +1168,7 @@ class SourceVersionExportViewTest(OCLAPITestCase):
         export_source_mock.delay.assert_called_once_with(self.source_v1.id)
 
     @patch('core.sources.views.export_source')
-    @patch('core.common.services.S3.exists')
+    @patch('core.services.storages.cloud.aws.S3.exists')
     def test_post_409_head(self, s3_exists_mock, export_source_mock):
         s3_exists_mock.return_value = False
         export_source_mock.delay.side_effect = AlreadyQueued('already-queued')
@@ -1183,7 +1183,7 @@ class SourceVersionExportViewTest(OCLAPITestCase):
         export_source_mock.delay.assert_called_once_with(self.source.id)
 
     @patch('core.sources.views.export_source')
-    @patch('core.common.services.S3.has_path')
+    @patch('core.services.storages.cloud.aws.S3.has_path')
     def test_post_409_version(self, s3_has_path_mock, export_source_mock):
         s3_has_path_mock.return_value = False
         export_source_mock.delay.side_effect = AlreadyQueued('already-queued')
@@ -1230,7 +1230,7 @@ class SourceVersionExportViewTest(OCLAPITestCase):
 
     @patch('core.sources.models.Source.version_export_path', new_callable=PropertyMock)
     @patch('core.sources.models.Source.has_export')
-    @patch('core.common.services.S3.remove')
+    @patch('core.services.storages.cloud.aws.S3.remove')
     def test_delete_204(self, s3_remove_mock, has_export_mock, export_path_mock):
         has_export_mock.return_value = True
         export_path_mock.return_value = 'v1/export/path'
@@ -1302,7 +1302,7 @@ class SourceLogoViewTest(OCLAPITestCase):
         self.token = self.user.get_token()
         self.source = UserSourceFactory(mnemonic='source1', user=self.user)
 
-    @patch('core.common.services.S3.upload_base64')
+    @patch('core.services.storages.cloud.aws.S3.upload_base64')
     def test_post_200(self, upload_base64_mock):
         upload_base64_mock.return_value = 'users/username/sources/source1/logo.png'
         self.assertIsNone(self.source.logo_url)
