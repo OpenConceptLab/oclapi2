@@ -863,7 +863,7 @@ def get_export_service():
     parts = EXPORT_SERVICE.split('.')
     klass = parts[-1]
     mod = __import__('.'.join(parts[0:-1]), fromlist=[klass])
-    return getattr(mod, klass)
+    return getattr(mod, klass)()
 
 
 def get_start_of_month(date=timezone.now().date()):

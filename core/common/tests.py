@@ -246,7 +246,7 @@ class S3Test(TestCase):
         _conn = boto3.resource('s3', region_name='us-east-1')
         _conn.create_bucket(Bucket='oclapi2-dev')
 
-        S3._upload('some/path', 'content')  # pylint: disable=protected-access
+        S3()._upload('some/path', 'content')  # pylint: disable=protected-access
 
         self.assertEqual(
             _conn.Object(
@@ -260,20 +260,19 @@ class S3Test(TestCase):
     def test_exists(self):
         _conn = boto3.resource('s3', region_name='us-east-1')
         _conn.create_bucket(Bucket='oclapi2-dev')
+        s3 = S3()
+        self.assertFalse(s3.exists('some/path'))
 
-        self.assertFalse(S3.exists('some/path'))
+        s3._upload('some/path', 'content')  # pylint: disable=protected-access
 
-        S3._upload('some/path', 'content')  # pylint: disable=protected-access
+        self.assertTrue(s3.exists('some/path'))
 
-        self.assertTrue(S3.exists('some/path'))
+    def test_upload_public(self):
+        conn_mock = Mock(upload_fileobj=Mock(return_value='success'))
 
-    @patch('core.common.services.S3._conn')
-    def test_upload_public(self, client_mock):
-        conn_mock = Mock()
-        conn_mock.upload_fileobj = Mock(return_value='success')
-        client_mock.return_value = conn_mock
-
-        self.assertEqual(S3._upload_public('some/path', 'content'), 'success')  # pylint: disable=protected-access
+        s3 = S3()
+        s3._S3__get_connection = Mock(return_value=conn_mock)  # pylint: disable=protected-access
+        self.assertEqual(s3._upload_public('some/path', 'content'), 'success')  # pylint: disable=protected-access
 
         conn_mock.upload_fileobj.assert_called_once_with(
             'content',
@@ -284,17 +283,20 @@ class S3Test(TestCase):
 
     def test_upload_file(self):
         with patch("builtins.open", mock_open(read_data="file-content")) as mock_file:
-            S3._upload = Mock(return_value=200)  # pylint: disable=protected-access
+            s3 = S3()
+            s3._upload = Mock(return_value=200)  # pylint: disable=protected-access
             file_path = "path/to/file.ext"
-            res = S3.upload_file(key=file_path, headers={'header1': 'val1'})
+            res = s3.upload_file(key=file_path, headers={'header1': 'val1'})
             self.assertEqual(res, 200)
-            S3._upload.assert_called_once_with(file_path, 'file-content', {'header1': 'val1'}, None)  # pylint: disable=protected-access
+            s3._upload.assert_called_once_with(file_path, 'file-content', {'header1': 'val1'}, None)  # pylint: disable=protected-access
             mock_file.assert_called_once_with(file_path, 'r')
 
-    @patch('core.common.services.S3._upload')
-    def test_upload_base64(self, s3_upload_mock):
+    def test_upload_base64(self):
         file_content = base64.b64encode(b'file-content')
-        uploaded_file_name_with_ext = S3.upload_base64(
+        s3 = S3()
+        s3_upload_mock = Mock()
+        s3._upload = s3_upload_mock  # pylint: disable=protected-access
+        uploaded_file_name_with_ext = s3.upload_base64(
             doc_base64='extension/ext;base64,' + file_content.decode(),
             file_name='some-file-name',
         )
@@ -313,10 +315,12 @@ class S3Test(TestCase):
             isinstance(mock_calls[0][1][1], ContentFile)
         )
 
-    @patch('core.common.services.S3._upload_public')
-    def test_upload_base64_public(self, s3_upload_mock):
+    def test_upload_base64_public(self):
         file_content = base64.b64encode(b'file-content')
-        uploaded_file_name_with_ext = S3.upload_base64(
+        s3 = S3()
+        s3_upload_mock = Mock()
+        s3._upload_public = s3_upload_mock  # pylint: disable=protected-access
+        uploaded_file_name_with_ext = s3.upload_base64(
             doc_base64='extension/ext;base64,' + file_content.decode(),
             file_name='some-file-name',
             public_read=True,
@@ -336,10 +340,12 @@ class S3Test(TestCase):
             isinstance(mock_calls[0][1][1], ContentFile)
         )
 
-    @patch('core.common.services.S3._upload')
-    def test_upload_base64_no_ext(self, s3_upload_mock):
+    def test_upload_base64_no_ext(self):
+        s3_upload_mock = Mock()
+        s3 = S3()
+        s3._upload = s3_upload_mock  # pylint: disable=protected-access
         file_content = base64.b64encode(b'file-content')
-        uploaded_file_name_with_ext = S3.upload_base64(
+        uploaded_file_name_with_ext = s3.upload_base64(
             doc_base64='extension/ext;base64,' + file_content.decode(),
             file_name='some-file-name',
             append_extension=False,
@@ -364,7 +370,9 @@ class S3Test(TestCase):
         conn = boto3.resource('s3', region_name='us-east-1')
         conn.create_bucket(Bucket='oclapi2-dev')
 
-        S3._upload('some/path', 'content')  # pylint: disable=protected-access
+        s3 = S3()
+        s3._upload('some/path', 'content')  # pylint: disable=protected-access
+
         self.assertEqual(
             conn.Object(
                 'oclapi2-dev',
@@ -373,7 +381,7 @@ class S3Test(TestCase):
             'content'
         )
 
-        S3.remove(key='some/path')
+        s3.remove(key='some/path')
 
         with self.assertRaises(ClientError):
             conn.Object('oclapi2-dev', 'some/path').get()
@@ -383,8 +391,9 @@ class S3Test(TestCase):
         _conn = boto3.resource('s3', region_name='us-east-1')
         _conn.create_bucket(Bucket='oclapi2-dev')
 
-        S3._upload('some/path', 'content')  # pylint: disable=protected-access
-        _url = S3.url_for('some/path')
+        s3 = S3()
+        s3._upload('some/path', 'content')  # pylint: disable=protected-access
+        _url = s3.url_for('some/path')
 
         self.assertTrue(
             'https://oclapi2-dev.s3.amazonaws.com/some/path' in _url
@@ -401,7 +410,7 @@ class S3Test(TestCase):
 
     def test_public_url_for(self):
         self.assertEqual(
-            S3.public_url_for('some/path').replace('https://', 'http://'),
+            S3().public_url_for('some/path').replace('https://', 'http://'),
             'http://oclapi2-dev.s3.amazonaws.com/some/path'
         )
 

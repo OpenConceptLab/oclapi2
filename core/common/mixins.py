@@ -721,7 +721,7 @@ class ConceptContainerExportMixin:
     def get(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         version = self.get_object()
         logger.debug(
-            'Export requested for %s version %s - Requesting AWS-S3 key', self.entity.lower(), version.version
+            'Export requested for %s version %s', self.entity.lower(), version.version
         )
         if version.is_head and not request.user.is_staff:
             return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)

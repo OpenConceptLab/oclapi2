@@ -18,25 +18,81 @@ from rest_framework.authtoken.models import Token
 from core.common.backends import OCLOIDCAuthenticationBackend
 
 
-class S3:
+class CloudStorageServiceInterface:
+    """
+    Interface for storage services
+    """
+
+    def __init__(self):
+        pass
+
+    def upload_file(self, key, file_path=None, headers=None, binary=False, metadata=None):  # pylint: disable=too-many-arguments
+        """
+        Uploads binary file object to key given file_path
+        """
+
+    def upload_base64(self, doc_base64, file_name, append_extension=True, public_read=False, headers=None):  # pylint: disable=too-many-arguments
+        """
+        Uploads base64 file content to file_name
+        """
+
+    def url_for(self, file_path):
+        """
+        Returns signed url for file_path
+        """
+
+    def public_url_for(self, file_path):
+        """
+        Returns public (or unsigned) url for file_path
+        """
+
+    def exists(self, key):
+        """
+        Checks if key (object) exists
+        """
+
+    def has_path(self, prefix='/', delimiter='/'):
+        """
+        Checks if path exists
+        """
+
+    def get_last_key_from_path(self, prefix='/', delimiter='/'):
+        """
+        Returns last key from path
+        """
+
+    def delete_objects(self, path):
+        """
+        Deletes all objects in path
+        """
+
+    def remove(self, key):
+        """
+        Removes object
+        """
+
+
+class S3(CloudStorageServiceInterface):
     """
     Configured from settings.EXPORT_SERVICE
     """
     GET = 'get_object'
     PUT = 'put_object'
 
-    @classmethod
+    def __init__(self):
+        super().__init__()
+        self.conn = self.__get_connection()
+
     def upload_file(
-            cls, key, file_path=None, headers=None, binary=False, metadata=None
+            self, key, file_path=None, headers=None, binary=False, metadata=None
     ):  # pylint: disable=too-many-arguments
         """Uploads file object"""
         read_directive = 'rb' if binary else 'r'
         file_path = file_path if file_path else key
-        return cls._upload(key, open(file_path, read_directive).read(), headers, metadata)
+        return self._upload(key, open(file_path, read_directive).read(), headers, metadata)
 
-    @classmethod
     def upload_base64(  # pylint: disable=too-many-arguments,inconsistent-return-statements
-            cls, doc_base64, file_name, append_extension=True, public_read=False, headers=None
+            self, doc_base64, file_name, append_extension=True, public_read=False, headers=None
     ):
         """Uploads via base64 content with file name"""
         _format = None
@@ -60,59 +116,49 @@ class S3:
 
         doc_data = ContentFile(base64.b64decode(_doc_string))
         if public_read:
-            cls._upload_public(file_name_with_ext, doc_data)
+            self._upload_public(file_name_with_ext, doc_data)
         else:
-            cls._upload(file_name_with_ext, doc_data, headers)
+            self._upload(file_name_with_ext, doc_data, headers)
 
         return file_name_with_ext
 
-    @classmethod
-    def url_for(cls, file_path):
-        return cls._generate_signed_url(cls.GET, file_path) if file_path else None
+    def url_for(self, file_path):
+        return self._generate_signed_url(self.GET, file_path) if file_path else None
 
-    @classmethod
-    def public_url_for(cls, file_path):
+    def public_url_for(self, file_path):
         url = f"http://{settings.AWS_STORAGE_BUCKET_NAME}.s3.amazonaws.com/{file_path}"
         if settings.ENV != 'development':
             url = url.replace('http://', 'https://')
         return url
 
-    @classmethod
-    def exists(cls, key):
+    def exists(self, key):
         try:
-            cls.__resource().meta.client.head_object(Key=key, Bucket=settings.AWS_STORAGE_BUCKET_NAME)
+            self.__resource().meta.client.head_object(Key=key, Bucket=settings.AWS_STORAGE_BUCKET_NAME)
         except (ClientError, NoCredentialsError):
             return False
 
         return True
 
-    @classmethod
-    def has_path(cls, prefix='/', delimiter='/'):
-        return len(cls.__fetch_keys(prefix, delimiter)) > 0
+    def has_path(self, prefix='/', delimiter='/'):
+        return len(self.__fetch_keys(prefix, delimiter)) > 0
 
-    @classmethod
-    def get_last_key_from_path(cls, prefix='/', delimiter='/'):
-        keys = cls.__fetch_keys(prefix, delimiter, True)
+    def get_last_key_from_path(self, prefix='/', delimiter='/'):
+        keys = self.__fetch_keys(prefix, delimiter, True)
         key = sorted(keys, key=lambda k: k.get('LastModified'), reverse=True)[0] if len(keys) > 1 else get(keys, '0')
         return get(key, 'Key')
 
-    @classmethod
-    def delete_objects(cls, path):  # pragma: no cover
+    def delete_objects(self, path):  # pragma: no cover
         try:
-            s3_resource = cls.__resource()
-            keys = cls.__fetch_keys(prefix=path)
+            keys = self.__fetch_keys(prefix=path)
             if keys:
-                s3_resource.meta.client.delete_objects(
-                    Bucket=settings.AWS_STORAGE_BUCKET_NAME, Delete={'Objects': keys}
-                )
+                self.__resource().meta.client.delete_objects(
+                    Bucket=settings.AWS_STORAGE_BUCKET_NAME, Delete={'Objects': keys})
         except:  # pylint: disable=bare-except
             pass
 
-    @classmethod
-    def remove(cls, key):
+    def remove(self, key):
         try:
-            _conn = cls._conn()
-            return _conn.delete_object(
+            return self.__get_connection().delete_object(
                 Bucket=settings.AWS_STORAGE_BUCKET_NAME,
                 Key=key
             )
@@ -121,45 +167,27 @@ class S3:
 
         return None
 
-    @staticmethod
-    def _conn():
-        session = S3._session()
-
-        return session.client(
-            's3',
-            config=Config(region_name=settings.AWS_REGION_NAME, signature_version='s3v4')
-        )
-
-    @staticmethod
-    def _session():
-        return boto3.Session(
-            aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
-            aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
-        )
-
-    @classmethod
-    def _generate_signed_url(cls, accessor, key, metadata=None):
+    # private
+    def _generate_signed_url(self, accessor, key, metadata=None):
         params = {
             'Bucket': settings.AWS_STORAGE_BUCKET_NAME,
             'Key': key,
             **(metadata or {})
         }
         try:
-            _conn = cls._conn()
-            return _conn.generate_presigned_url(
+            return self.__get_connection().generate_presigned_url(
                 accessor,
                 Params=params,
-                ExpiresIn=60*60*24*7,  # a week
+                ExpiresIn=60 * 60 * 24 * 7,  # a week
             )
         except NoCredentialsError:  # pragma: no cover
             pass
 
         return None
 
-    @classmethod
-    def _upload(cls, file_path, file_content, headers=None, metadata=None):
+    def _upload(self, file_path, file_content, headers=None, metadata=None):
         """Uploads via file content with file_path as path + name"""
-        url = cls._generate_signed_url(cls.PUT, file_path, metadata)
+        url = self._generate_signed_url(self.PUT, file_path, metadata)
         result = None
         if url:
             res = requests.put(
@@ -169,34 +197,49 @@ class S3:
 
         return result
 
-    @classmethod
-    def _upload_public(cls, file_path, file_content):
+    def _upload_public(self, file_path, file_content):
         try:
-            client = cls._conn()
-            return client.upload_fileobj(
+            return self.__get_connection().upload_fileobj(
                 file_content,
                 settings.AWS_STORAGE_BUCKET_NAME,
                 file_path,
-                ExtraArgs={'ACL': 'public-read'},
+                ExtraArgs={
+                    'ACL': 'public-read'
+                },
             )
         except NoCredentialsError:  # pragma: no cover
             pass
 
         return None
 
-    @classmethod
-    def __fetch_keys(cls, prefix='/', delimiter='/', verbose=False):  # pragma: no cover
+    # protected
+    def __fetch_keys(self, prefix='/', delimiter='/', verbose=False):  # pragma: no cover
         prefix = prefix[1:] if prefix.startswith(delimiter) else prefix
-        s3_resource = cls.__resource()
+        s3_resource = self.__resource()
         objects = s3_resource.meta.client.list_objects(Bucket=settings.AWS_STORAGE_BUCKET_NAME, Prefix=prefix)
         content = objects.get('Contents', [])
         if verbose:
             return content
         return [{'Key': k} for k in [obj['Key'] for obj in content]]
 
-    @classmethod
-    def __resource(cls):
-        return cls._session().resource('s3')
+    def __resource(self):
+        return self.__session().resource('s3')
+
+    def __get_connection(self):
+        session = self.__session()
+
+        return session.client(
+            's3',
+            config=Config(region_name=settings.AWS_REGION_NAME, signature_version='s3v4')
+        )
+
+    @staticmethod
+    def __session():
+        return boto3.Session(
+            aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+            aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+            region_name=settings.AWS_REGION_NAME
+        )
 
 
 class RedisService:  # pragma: no cover
