@@ -65,6 +65,7 @@ urlpatterns = [
     path('orgs/', include('core.orgs.urls'), name='orgs_url'),
     path('sources/', include('core.sources.urls'), name='sources_url'),
     path('repos/', include('core.repos.urls'), name='repos_url'),
+    path('url-registry/', include('core.url_registry.urls'), name='url_registry_url'),
     #TODO: require FHIR subdomain
     path('fhir/CodeSystem/', include('core.code_systems.urls'), name='code_systems_urls'),
     path('fhir/ValueSet/', include('core.value_sets.urls'), name='value_sets_urls'),

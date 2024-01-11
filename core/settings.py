@@ -100,6 +100,7 @@ INSTALLED_APPS = [
     'core.tasks',
     'core.toggles',
     'core.repos',
+    'core.url_registry',
 ]
 REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': (

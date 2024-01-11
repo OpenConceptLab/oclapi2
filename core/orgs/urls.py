@@ -51,6 +51,9 @@ urlpatterns = [
         views.OrganizationMemberView.as_view(),
         name='organization-member-detail'
     ),
+    re_path(
+        r'^(?P<org>' + NAMESPACE_PATTERN + ')/url-registry/', include('core.url_registry.urls'),
+        name='org-url-registry-urls'),
     re_path(r'^(?P<org>' + NAMESPACE_PATTERN + ')/repos/', include('core.repos.urls'), name='org-repos-urls'),
     re_path(r'^(?P<org>' + NAMESPACE_PATTERN + ')/sources/', include('core.sources.urls')),
     re_path(r'^(?P<org>' + NAMESPACE_PATTERN + ')/CodeSystem/', include('core.code_systems.urls'),
