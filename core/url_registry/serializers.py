@@ -28,7 +28,7 @@ class URLRegistryDetailSerializer(URLRegistryBaseSerializer):
 
         url_registry = URLRegistry(
             name=validated_data.get('name'),
-            namespace=validated_data.get('namespace'),
+            namespace=validated_data.get('namespace') or None,
             url=validated_data.get('url'),
             created_by=user,
             updated_by=user,

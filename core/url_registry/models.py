@@ -55,6 +55,9 @@ class URLRegistry(BaseModel):
             self.user = UserProfile.objects.filter(uri=self.namespace).first()
 
     def clean(self):
+        self.clean_namespace()
+
+    def clean_namespace(self):
         owner = self.owner
         if owner:
             self.namespace = owner.uri
@@ -72,13 +75,14 @@ class URLRegistry(BaseModel):
         return self.organization or self.user
 
     def is_uniq(self):
+        self.clean_namespace()
         return not self.get_active_entries().filter(url=self.url).exists()
 
     def get_active_entries(self):
         queryset = URLRegistry.objects.filter(is_active=True)
 
         if self.organization:
-            queryset = queryset.filter(organization_id=self.organization)
+            queryset = queryset.filter(organization=self.organization)
         elif self.user:
             queryset = queryset.filter(user=self.user)
         else:
