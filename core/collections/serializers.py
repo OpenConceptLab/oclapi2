@@ -12,7 +12,7 @@ from core.client_configs.serializers import ClientConfigSerializer
 from core.collections.models import Collection, CollectionReference, Expansion
 from core.common.constants import HEAD, DEFAULT_ACCESS_TYPE, NAMESPACE_REGEX, ACCESS_TYPE_CHOICES, INCLUDE_SUMMARY, \
     INCLUDE_CLIENT_CONFIGS, INVALID_EXPANSION_URL
-from core.common.serializers import AbstractRepoResourcesSerializer
+from core.common.serializers import AbstractRepoResourcesSerializer, AbstractResourceSerializer
 from core.common.utils import get_truthy_values
 from core.orgs.models import Organization
 from core.settings import DEFAULT_LOCALE
@@ -23,12 +23,12 @@ from core.users.models import UserProfile
 TRUTHY = get_truthy_values()
 
 
-class CollectionMinimalSerializer(ModelSerializer):
+class CollectionMinimalSerializer(AbstractResourceSerializer):
     id = CharField(source='mnemonic')
 
     class Meta:
         model = Collection
-        fields = ('id', 'url')
+        fields = AbstractResourceSerializer.Meta.fields + ('id', 'url')
 
 
 class CollectionVersionMinimalSerializer(ModelSerializer):
@@ -47,7 +47,7 @@ class CollectionVersionMinimalSerializer(ModelSerializer):
         return obj.should_auto_expand
 
 
-class CollectionListSerializer(ModelSerializer):
+class CollectionListSerializer(AbstractResourceSerializer):
     type = CharField(source='resource_type')
     short_code = CharField(source='mnemonic')
     owner = CharField(source='parent_resource')
@@ -59,7 +59,7 @@ class CollectionListSerializer(ModelSerializer):
 
     class Meta:
         model = Collection
-        fields = (
+        fields = AbstractResourceSerializer.Meta.fields + (
             'short_code', 'name', 'url', 'owner', 'owner_type', 'owner_url', 'version', 'created_at', 'id',
             'collection_type', 'updated_at', 'canonical_url', 'autoexpand_head',
             'summary', 'type', 'checksums'
