@@ -1,6 +1,6 @@
 from django.http import Http404
 from drf_yasg.utils import swagger_auto_schema
-from rest_framework.generics import CreateAPIView
+from rest_framework.generics import CreateAPIView, RetrieveUpdateDestroyAPIView, get_object_or_404
 from rest_framework.permissions import IsAuthenticatedOrReadOnly
 
 from core.common.mixins import ListWithHeadersMixin
@@ -11,16 +11,12 @@ from core.url_registry.models import URLRegistry
 from core.url_registry.serializers import URLRegistryDetailSerializer
 
 
-class URLRegistriesView(BaseAPIView, ListWithHeadersMixin, CreateAPIView):
+class URLRegistryBaseView(BaseAPIView):
     permission_classes = (IsAuthenticatedOrReadOnly,)
     serializer_class = URLRegistryDetailSerializer
     queryset = URLRegistry.objects.filter(is_active=True)
     parent_resource = None
     parent_resource_type = None
-
-    document_model = URLRegistryDocument
-    es_fields = URLRegistry.es_fields
-    is_searchable = True
 
     def set_parent_resource(self):
         from core.orgs.models import Organization
@@ -52,6 +48,12 @@ class URLRegistriesView(BaseAPIView, ListWithHeadersMixin, CreateAPIView):
 
         return queryset
 
+
+class URLRegistriesView(URLRegistryBaseView, ListWithHeadersMixin, CreateAPIView):
+    document_model = URLRegistryDocument
+    es_fields = URLRegistry.es_fields
+    is_searchable = True
+
     @swagger_auto_schema(
         manual_parameters=[
             q_param, limit_param, sort_desc_param, sort_asc_param, page_param,
@@ -77,3 +79,11 @@ class UserOrgURLRegistriesView(URLRegistriesView):
             raise Http404()
 
         return self.queryset.filter(organization__members__username=self.parent_resource.username)
+
+
+class URLRegistryView(URLRegistryBaseView, RetrieveUpdateDestroyAPIView):
+    def get_object(self, queryset=None):
+        queryset = self.get_queryset()
+        instance = get_object_or_404(queryset.filter(id=self.kwargs['id']))
+        self.check_object_permissions(self.request, instance)
+        return instance

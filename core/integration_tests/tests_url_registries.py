@@ -300,3 +300,32 @@ class URLRegistriesViewTest(OCLAPITestCase):
         self.assertEqual(len(response.data), 1)
         self.assertEqual(response.data[0]['name'], 'org')
         self.assertEqual(response.data[0]['id'], org_registry.id)
+
+
+class URLRegistryViewTest(OCLAPITestCase):
+    def test_get(self):
+        global_registry = GlobalURLRegistryFactory(name='global')
+        org_registry = OrganizationURLRegistryFactory(name='org')
+        user_registry = UserURLRegistryFactory(name='user')
+
+        response = self.client.get(f'/url-registry/{global_registry.id}/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['name'], 'global')
+        self.assertEqual(response.data['url'], global_registry.url)
+
+        response = self.client.get(f'/url-registry/{org_registry.id}/')
+
+        self.assertEqual(response.status_code, 404)
+
+        response = self.client.get(f'{org_registry.organization.uri}url-registry/{org_registry.id}/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['name'], 'org')
+        self.assertEqual(response.data['url'], org_registry.url)
+
+        response = self.client.get(f'{user_registry.user.uri}url-registry/{user_registry.id}/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['name'], 'user')
+        self.assertEqual(response.data['url'], user_registry.url)
