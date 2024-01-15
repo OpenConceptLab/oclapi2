@@ -17,4 +17,4 @@ class URLRegistryTest(OCLTestCase):
         user = UserProfile()
         self.assertEqual(URLRegistry().owner_type, None)
         self.assertEqual(URLRegistry(organization=org).owner_type, 'Organization')
-        self.assertEqual(URLRegistry(user=user).owner, 'User')
+        self.assertEqual(URLRegistry(user=user).owner_type, 'User')

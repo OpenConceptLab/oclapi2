@@ -9,7 +9,7 @@ class URLRegistryBaseSerializer(ModelSerializer):
 
     class Meta:
         model = URLRegistry
-        fields = ['id', 'name', 'url', 'namespace', 'owner', 'owner_type', 'type']
+        fields = ['id', 'name', 'url', 'namespace', 'owner', 'owner_type']
 
     def to_representation(self, instance):
         data = super().to_representation(instance)
