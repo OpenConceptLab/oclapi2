@@ -6,7 +6,9 @@
       "is_active": true,
       "name": "CHECKSUMS_TOGGLE",
       "dev": true,
-      "qa": true
+      "qa": true,
+      "staging": true,
+      "production": true
     }
   },
   {
