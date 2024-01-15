@@ -25,7 +25,6 @@ class URLRegistriesViewTest(OCLAPITestCase):
         self.assertTrue(
             URLRegistry.objects.filter(
                 is_active=True, organization__isnull=True, user__isnull=True, url='https://foo.bar.com',
-                namespace__isnull=True
             ).exists()
         )
         self.assertEqual(URLRegistry.objects.count(), 1)
@@ -83,10 +82,35 @@ class URLRegistriesViewTest(OCLAPITestCase):
         self.assertTrue(
             URLRegistry.objects.filter(
                 is_active=True, organization__isnull=True, user__isnull=True, url='https://foo.bar.1.com',
-                namespace__isnull=True
             ).exists()
         )
         self.assertEqual(URLRegistry.objects.count(), 2)
+
+        response = self.client.post(
+            '/url-registry/',
+            {
+                'name': 'GlobalRegistry',
+                'namespace': user.uri,
+                'url': 'https://foo.bar.2.com',
+            },
+            HTTP_AUTHORIZATION=f"Token {user.get_token()}",
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertIsNotNone(response.data['id'])
+        self.assertEqual(response.data['namespace'], user.uri)
+        self.assertFalse(
+            URLRegistry.objects.filter(
+                is_active=True, user=user, url='https://foo.bar.2.com'
+            ).exists()
+        )
+        self.assertTrue(
+            URLRegistry.objects.filter(
+                is_active=True, user__isnull=True, url='https://foo.bar.2.com', namespace=user.uri
+            ).exists()
+        )
+        self.assertEqual(URLRegistry.objects.count(), 3)
 
     def test_post_org_registry(self):
         org = OrganizationFactory()
@@ -95,7 +119,7 @@ class URLRegistriesViewTest(OCLAPITestCase):
             org.uri + 'url-registry/',
             {
                 'name': 'GlobalRegistry',
-                'namespace': 'Foobar',  # will be set correctly
+                'namespace': 'Foobar',
                 'url': 'https://foo.bar.com',
             },
             HTTP_AUTHORIZATION=f"Token {user.get_token()}",
@@ -104,7 +128,7 @@ class URLRegistriesViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 201)
         self.assertIsNotNone(response.data['id'])
-        self.assertEqual(response.data['namespace'], org.uri)
+        self.assertEqual(response.data['namespace'], 'Foobar')
         self.assertTrue(
             URLRegistry.objects.filter(
                 is_active=True, organization=org, url='https://foo.bar.com'
@@ -142,7 +166,7 @@ class URLRegistriesViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 201)
         self.assertIsNotNone(response.data['id'])
-        self.assertEqual(response.data['namespace'], org.uri)
+        self.assertEqual(response.data['namespace'], None)
         self.assertTrue(
             URLRegistry.objects.filter(
                 is_active=True, organization=org, url='https://foo.bar.1.com'
@@ -150,34 +174,13 @@ class URLRegistriesViewTest(OCLAPITestCase):
         )
         self.assertEqual(URLRegistry.objects.count(), 2)
 
-        response = self.client.post(
-            '/url-registry/',
-            {
-                'name': 'GlobalRegistry',
-                'namespace': org.uri,
-                'url': 'https://foo.bar.2.com',
-            },
-            HTTP_AUTHORIZATION=f"Token {user.get_token()}",
-            format='json',
-        )
-
-        self.assertEqual(response.status_code, 201)
-        self.assertIsNotNone(response.data['id'])
-        self.assertEqual(response.data['namespace'], org.uri)
-        self.assertTrue(
-            URLRegistry.objects.filter(
-                is_active=True, organization=org, url='https://foo.bar.2.com'
-            ).exists()
-        )
-        self.assertEqual(URLRegistry.objects.count(), 3)
-
     def test_post_user_registry(self):
         user = UserProfileFactory()
         response = self.client.post(
             user.uri + 'url-registry/',
             {
                 'name': 'GlobalRegistry',
-                'namespace': 'Foobar',  # will be set correctly
+                'namespace': 'Foobar',
                 'url': 'https://foo.bar.com',
             },
             HTTP_AUTHORIZATION=f"Token {user.get_token()}",
@@ -186,7 +189,7 @@ class URLRegistriesViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 201)
         self.assertIsNotNone(response.data['id'])
-        self.assertEqual(response.data['namespace'], user.uri)
+        self.assertEqual(response.data['namespace'], 'Foobar')
         self.assertTrue(
             URLRegistry.objects.filter(
                 is_active=True, user=user, url='https://foo.bar.com'
@@ -224,34 +227,13 @@ class URLRegistriesViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 201)
         self.assertIsNotNone(response.data['id'])
-        self.assertEqual(response.data['namespace'], user.uri)
+        self.assertEqual(response.data['namespace'], None)
         self.assertTrue(
             URLRegistry.objects.filter(
                 is_active=True, user=user, url='https://foo.bar.1.com'
             ).exists()
         )
         self.assertEqual(URLRegistry.objects.count(), 2)
-
-        response = self.client.post(
-            '/url-registry/',
-            {
-                'name': 'GlobalRegistry',
-                'namespace': user.uri,
-                'url': 'https://foo.bar.2.com',
-            },
-            HTTP_AUTHORIZATION=f"Token {user.get_token()}",
-            format='json',
-        )
-
-        self.assertEqual(response.status_code, 201)
-        self.assertIsNotNone(response.data['id'])
-        self.assertEqual(response.data['namespace'], user.uri)
-        self.assertTrue(
-            URLRegistry.objects.filter(
-                is_active=True, user=user, url='https://foo.bar.2.com'
-            ).exists()
-        )
-        self.assertEqual(URLRegistry.objects.count(), 3)
 
     def test_get(self):
         global_registry = GlobalURLRegistryFactory(name='global')

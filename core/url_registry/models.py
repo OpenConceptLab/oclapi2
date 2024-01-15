@@ -1,4 +1,5 @@
 from django.db import models
+from pydash import get
 
 from core.common.models import BaseModel
 
@@ -17,6 +18,7 @@ class URLRegistry(BaseModel):
     )
     public_access = None
     uri = None
+    OBJECT_TYPE = 'URLRegistry'
 
     es_fields = {
         'name': {'sortable': False, 'filterable': True, 'exact': True},
@@ -41,30 +43,10 @@ class URLRegistry(BaseModel):
                 fields=('organization', 'url'), name='org_url_unique'
             ),
             models.UniqueConstraint(
-                condition=models.Q(is_active=True, namespace__isnull=True),
+                condition=models.Q(is_active=True, organization__isnull=True, user__isnull=True),
                 fields=('url',), name='global_url_unique'
             ),
         ]
-
-    def _set_owner_from_uri(self):
-        if '/orgs/' in self.namespace:
-            from core.orgs.models import Organization
-            self.organization = Organization.objects.filter(uri=self.namespace).first()
-        elif '/users/' in self.namespace:
-            from core.users.models import UserProfile
-            self.user = UserProfile.objects.filter(uri=self.namespace).first()
-
-    def clean(self):
-        self.clean_namespace()
-
-    def clean_namespace(self):
-        owner = self.owner
-        if owner:
-            self.namespace = owner.uri
-        if not owner and self.namespace:
-            self._set_owner_from_uri()
-            if not self.owner:
-                self.namespace = None
 
     def save(self, *args, **kwargs):
         self.clean()
@@ -74,8 +56,11 @@ class URLRegistry(BaseModel):
     def owner(self):
         return self.organization or self.user
 
+    @property
+    def owner_type(self):
+        return get(self.owner, 'resource_type') or None
+
     def is_uniq(self):
-        self.clean_namespace()
         return not self.get_active_entries().filter(url=self.url).exists()
 
     def get_active_entries(self):
@@ -86,6 +71,6 @@ class URLRegistry(BaseModel):
         elif self.user:
             queryset = queryset.filter(user=self.user)
         else:
-            queryset = queryset.filter(namespace__isnull=True)
+            queryset = queryset.filter(organization__isnull=True, user__isnull=True)
 
         return queryset
