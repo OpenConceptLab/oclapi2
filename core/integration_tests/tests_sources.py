@@ -1268,8 +1268,19 @@ class ExportSourceTaskTest(OCLAPITestCase):
         exported_data = json.loads(zipped_file.read('export.json').decode('utf-8'))
 
         self.assertEqual(
-            exported_data, {**SourceVersionExportSerializer(source_v1).data, 'concepts': ANY, 'mappings': ANY}
+            exported_data,
+            {
+                **SourceVersionExportSerializer(source_v1).data,
+                'concepts': ANY,
+                'mappings': ANY,
+                'export_time': ANY
+            }
         )
+
+        time_taken = exported_data['export_time']
+        self.assertTrue('secs' in time_taken)
+        time_taken = float(time_taken.replace('secs', ''))
+        self.assertTrue(time_taken > 2)
 
         exported_concepts = exported_data['concepts']
         expected_concepts = ConceptVersionExportSerializer([concept2, concept1], many=True).data

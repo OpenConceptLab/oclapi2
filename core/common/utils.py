@@ -6,6 +6,7 @@ import os
 import random
 import shutil
 import tempfile
+import time
 import uuid
 import zipfile
 from collections import OrderedDict
@@ -194,7 +195,7 @@ def get_class(kls):
 
 
 def write_export_file(
-        version, resource_type, resource_serializer_type, logger
+        version, resource_type, resource_serializer_type, logger, start_time
 ):  # pylint: disable=too-many-statements,too-many-locals,too-many-branches
     from core.concepts.models import Concept
     from core.mappings.models import Mapping
@@ -326,7 +327,8 @@ def write_export_file(
         logger.info(f'{resource_name} has no mappings to serialize.')
 
     with open('export.json', 'a') as out:
-        out.write(']}')
+        end_time = str(round((time.time() - start_time) + 2, 2)) + 'secs'
+        out.write('], "export_time": ' + json.dumps(end_time, cls=encoders.JSONEncoder) + '}')
 
     with zipfile.ZipFile('export.zip', 'w', zipfile.ZIP_DEFLATED) as _zip:
         _zip.write('export.json')

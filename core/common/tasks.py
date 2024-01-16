@@ -1,4 +1,5 @@
 import json
+import time
 from datetime import datetime
 from json import JSONDecodeError
 
@@ -99,6 +100,7 @@ def delete_collection(collection_id):
 
 @app.task(base=QueueOnce, bind=True)
 def export_source(self, version_id):
+    start_time = time.time()
     from core.sources.models import Source
     logger.info('Finding source version...')
 
@@ -113,7 +115,12 @@ def export_source(self, version_id):
     version.add_processing(self.request.id)
     try:
         logger.info('Found source version %s.  Beginning export...', version.version)
-        write_export_file(version, 'source', 'core.sources.serializers.SourceVersionExportSerializer', logger)
+        write_export_file(
+            version,
+            'source', 'core.sources.serializers.SourceVersionExportSerializer',
+            logger,
+            start_time
+        )
         logger.info('Export complete!')
     finally:
         version.remove_processing(self.request.id)
@@ -121,6 +128,7 @@ def export_source(self, version_id):
 
 @app.task(base=QueueOnce, bind=True)
 def export_collection(self, version_id):
+    start_time = time.time()
     from core.collections.models import Collection
     logger.info('Finding collection version...')
 
@@ -141,7 +149,10 @@ def export_collection(self, version_id):
     try:
         logger.info('Found collection version %s.  Beginning export...', version.version)
         write_export_file(
-            version, 'collection', 'core.collections.serializers.CollectionVersionExportSerializer', logger
+            version,
+            'collection', 'core.collections.serializers.CollectionVersionExportSerializer',
+            logger,
+            start_time
         )
         logger.info('Export complete!')
     finally:
