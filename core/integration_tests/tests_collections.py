@@ -1782,8 +1782,19 @@ class ExportCollectionTaskTest(OCLAPITestCase):
 
         self.assertEqual(
             exported_data,
-            {**CollectionVersionExportSerializer(collection).data, 'concepts': ANY, 'mappings': ANY, 'references': ANY}
+            {
+                **CollectionVersionExportSerializer(collection).data,
+                'concepts': ANY,
+                'mappings': ANY,
+                'references': ANY,
+                'export_time': ANY
+            }
         )
+
+        time_taken = exported_data['export_time']
+        self.assertTrue('secs' in time_taken)
+        time_taken = float(time_taken.replace('secs', ''))
+        self.assertTrue(time_taken > 2)
 
         exported_concepts = exported_data['concepts']
         expected_concepts = ConceptVersionExportSerializer(
