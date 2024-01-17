@@ -593,3 +593,21 @@ class SourceMappedSourcesListView(SourceListView):
 
     def post(self, request, **kwargs):
         raise Http405()
+
+
+class SourceVersionComparisonView(BaseAPIView):  # pragma: no cover
+    permission_classes = (CanViewConceptDictionaryVersion,)
+
+    def get_objects(self):
+        data = self.request.data
+        version1_uri = data.get('version1')
+        version2_uri = data.get('version2')
+        version1 = get_object_or_404(Source.objects.filter(uri=version1_uri))
+        version2 = get_object_or_404(Source.objects.filter(uri=version2_uri))
+        self.check_object_permissions(self.request, version1)
+        self.check_object_permissions(self.request, version2)
+        return version1, version2
+
+    def post(self, _):
+        version1, version2 = self.get_objects()
+        return Response(Source.compare(version1, version2, self.is_verbose()))

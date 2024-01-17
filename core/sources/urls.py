@@ -6,6 +6,7 @@ from . import views
 
 urlpatterns = [
     path('', views.SourceListView.as_view(), name='source-list'),
+    path('compare/', views.SourceVersionComparisonView.as_view(), name='source-version-compare'),
     re_path(
         fr"^(?P<source>{NAMESPACE_PATTERN})/$",
         views.SourceRetrieveUpdateDestroyView.as_view(),
