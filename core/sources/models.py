@@ -777,7 +777,7 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         return {**_filters, **(filters or {})}
 
     @staticmethod
-    def compare(version1, version2, verbose=False):  # pylint: disable:too-many-locals  # pragma: no cover
+    def compare(version1, version2, verbose=False):  # pylint: disable=too-many-locals  # pragma: no cover
         def get_concepts_map(version):
             queryset = version.get_concepts_queryset().only('mnemonic', 'checksums')
             return {concept.mnemonic: {'checksums': concept.checksums} for concept in queryset}
