@@ -107,7 +107,7 @@ class URLRegistryLookupView(URLRegistryBaseView):
 
         repo = URLRegistry.lookup(url, self.parent_resource)
         data = None
-        if repo:
+        if repo and repo.id:
             data = RepoListSerializer(repo).data
 
         return Response(data)
