@@ -17,6 +17,7 @@ class URLRegistryBaseView(BaseAPIView):
     queryset = URLRegistry.objects.filter(is_active=True)
     parent_resource = None
     parent_resource_type = None
+    default_filters = {'is_active': True}
 
     def set_parent_resource(self):
         from core.orgs.models import Organization
@@ -71,7 +72,7 @@ class URLRegistriesView(URLRegistryBaseView, ListWithHeadersMixin, CreateAPIView
         serializer.is_valid(raise_exception=True)
 
 
-class UserOrgURLRegistriesView(URLRegistriesView):
+class OrganizationURLRegistryListView(URLRegistriesView):
     def get_queryset(self):
         self.set_parent_resource()
 

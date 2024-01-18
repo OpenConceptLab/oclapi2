@@ -57,6 +57,11 @@ class URLRegistry(BaseModel):
         return self.organization or self.user
 
     @property
+    def owner_url(self):
+        owner = self.owner
+        return get(owner, 'uri') or '/'
+
+    @property
     def owner_type(self):
         return get(self.owner, 'resource_type') or None
 

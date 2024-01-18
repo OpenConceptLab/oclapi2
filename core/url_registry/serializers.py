@@ -5,11 +5,11 @@ from core.url_registry.models import URLRegistry
 
 
 class URLRegistryBaseSerializer(ModelSerializer):
-    owner = CharField(read_only=True, source='owner.mnemonic')
+    owner = CharField(read_only=True, source='owner.mnemonic', allow_null=True)
 
     class Meta:
         model = URLRegistry
-        fields = ['id', 'name', 'url', 'namespace', 'owner', 'owner_type']
+        fields = ['id', 'name', 'url', 'namespace', 'owner', 'owner_type', 'owner_url']
 
     def to_representation(self, instance):
         data = super().to_representation(instance)

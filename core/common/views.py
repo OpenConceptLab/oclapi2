@@ -692,6 +692,8 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         is_authenticated = user.is_authenticated
         username = user.username
 
+        is_members_view = self.get_view_name() in ['Organization Collection List', 'Organization Source List',
+                                                   'Organization Repo List', 'Organization Url Registry List']
         if self.is_owner_document_model():
             kwargs_filters = self.kwargs.copy()
             if self.user_is_self and is_authenticated:
@@ -699,15 +701,29 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                 kwargs_filters['user'] = username
         else:
             kwargs_filters = self.get_kwargs_filters()
-            if self.get_view_name() in [
-                'Organization Collection List', 'Organization Source List', 'Organization Repo List'
-            ]:
+            if is_members_view:
                 kwargs_filters['ownerType'] = 'Organization'
                 kwargs_filters['owner'] = list(
                     user.organizations.values_list('mnemonic', flat=True)) or ['UNKNOWN-ORG-DUMMY']
             elif self.user_is_self and is_authenticated:
                 kwargs_filters['ownerType'] = 'User'
                 kwargs_filters['owner'] = username
+
+        if self.is_url_registry_document() and not is_members_view:
+            kwargs_filters = self.kwargs.copy()
+            if self.user_is_self and is_authenticated:
+                kwargs_filters.pop('user_is_self', None)
+                kwargs_filters['ownerType'] = 'User'
+                kwargs_filters['owner'] = username
+            elif not kwargs_filters:
+                kwargs_filters['ownerUrl'] = '/'
+            else:
+                if 'org' in kwargs_filters:
+                    kwargs_filters['ownerType'] = 'Organization'
+                    kwargs_filters['owner'] = kwargs_filters.pop('org')
+                elif 'user' in kwargs_filters:
+                    kwargs_filters['ownerType'] = 'User'
+                    kwargs_filters['owner'] = kwargs_filters.pop('user')
 
         for key, value in kwargs_filters.items():
             attr = to_snake_case(key)

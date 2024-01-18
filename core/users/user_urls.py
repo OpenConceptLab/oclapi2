@@ -3,7 +3,7 @@ from django.urls import re_path, include
 from core.common.constants import NAMESPACE_PATTERN
 from core.orgs import views as orgs_views
 from core.repos.views import OrganizationRepoListView
-from core.url_registry.views import UserOrgURLRegistriesView
+from core.url_registry.views import OrganizationURLRegistryListView
 from core.users import views
 
 extra_kwargs = {'user_is_self': True}
@@ -42,7 +42,7 @@ urlpatterns = [
     ),
     re_path(
         r'^orgs/url-registry/$',
-        UserOrgURLRegistriesView.as_view(),
+        OrganizationURLRegistryListView.as_view(),
         extra_kwargs,
         name='user-organization-url-registry-list',
     ),

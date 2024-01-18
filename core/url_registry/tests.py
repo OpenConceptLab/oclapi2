@@ -18,3 +18,10 @@ class URLRegistryTest(OCLTestCase):
         self.assertEqual(URLRegistry().owner_type, None)
         self.assertEqual(URLRegistry(organization=org).owner_type, 'Organization')
         self.assertEqual(URLRegistry(user=user).owner_type, 'User')
+
+    def test_owner_url(self):
+        org = Organization(uri='/orgs/foo/')
+        user = UserProfile(uri='/users/foo/')
+        self.assertEqual(URLRegistry().owner_url, '/')
+        self.assertEqual(URLRegistry(organization=org).owner_url, '/orgs/foo/')
+        self.assertEqual(URLRegistry(user=user).owner_url, '/users/foo/')

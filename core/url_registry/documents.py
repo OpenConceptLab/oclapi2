@@ -22,9 +22,13 @@ class URLRegistryDocument(Document):
     extras = fields.ObjectField(dynamic=True)
     last_update = fields.DateField(attr='updated_at')
     updated_by = fields.KeywordField(attr='updated_by.username')
+    owner = fields.KeywordField(attr='owner.mnemonic', normalizer='lowercase')
+    owner_type = fields.KeywordField(attr='owner_type')
+    owner_url = fields.KeywordField(attr='owner_url')
 
     class Django:
         model = URLRegistry
+        fields = ['is_active']
 
     @staticmethod
     def get_match_phrase_attrs():

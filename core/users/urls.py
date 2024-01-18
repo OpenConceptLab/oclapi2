@@ -4,7 +4,7 @@ from core.common.constants import NAMESPACE_PATTERN
 from core.orgs import views as org_views
 from . import views
 from ..repos.views import OrganizationRepoListView
-from ..url_registry.views import UserOrgURLRegistriesView
+from ..url_registry.views import OrganizationURLRegistryListView
 
 urlpatterns = [
     re_path(r'^$', views.UserListView.as_view(), name='userprofile-list'),
@@ -75,7 +75,7 @@ urlpatterns = [
     ),
     re_path(
         r'^(?P<user>' + NAMESPACE_PATTERN + ')/orgs/url-registry/$',
-        UserOrgURLRegistriesView.as_view(),
+        OrganizationURLRegistryListView.as_view(),
         name='userprofile-organization-url-registry-list',
     ),
     re_path(
