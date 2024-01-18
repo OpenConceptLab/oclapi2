@@ -2,10 +2,14 @@ from django.http import Http404
 from drf_yasg.utils import swagger_auto_schema
 from rest_framework.generics import CreateAPIView, RetrieveUpdateDestroyAPIView, get_object_or_404
 from rest_framework.permissions import IsAuthenticatedOrReadOnly
+from rest_framework.response import Response
 
+from core.common.exceptions import Http400
 from core.common.mixins import ListWithHeadersMixin
-from core.common.swagger_parameters import q_param, limit_param, sort_desc_param, sort_asc_param, page_param
+from core.common.swagger_parameters import q_param, limit_param, sort_desc_param, sort_asc_param, page_param, \
+    url_registry_url_lookup_param
 from core.common.views import BaseAPIView
+from core.repos.serializers import RepoListSerializer
 from core.url_registry.documents import URLRegistryDocument
 from core.url_registry.models import URLRegistry
 from core.url_registry.serializers import URLRegistryDetailSerializer
@@ -88,3 +92,22 @@ class URLRegistryView(URLRegistryBaseView, RetrieveUpdateDestroyAPIView):
         instance = get_object_or_404(queryset.filter(id=self.kwargs['id']))
         self.check_object_permissions(self.request, instance)
         return instance
+
+
+class URLRegistryLookupView(URLRegistryBaseView):
+    serializer_class = RepoListSerializer
+
+    @swagger_auto_schema(manual_parameters=[url_registry_url_lookup_param])
+    def get(self, request, *args, **kwargs):  # pylint: disable=unused-argument
+        self.set_parent_resource()
+        url = request.query_params.get('url')
+
+        if not url:
+            raise Http400('url is required in query params')
+
+        repo = URLRegistry.lookup(url, self.parent_resource)
+        data = None
+        if repo:
+            data = RepoListSerializer(repo).data
+
+        return Response(data)

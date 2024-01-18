@@ -1,7 +1,7 @@
 from django.db import models
 from pydash import get
 
-from core.common.models import BaseModel
+from core.common.models import BaseModel, ConceptContainerModel
 
 
 class URLRegistry(BaseModel):
@@ -10,11 +10,11 @@ class URLRegistry(BaseModel):
     namespace = models.CharField(max_length=300, null=True, blank=True)
     organization = models.ForeignKey(
         'orgs.Organization', on_delete=models.CASCADE, null=True, blank=True,
-        related_name='url_registries'
+        related_name='url_registry_entries'
     )
     user = models.ForeignKey(
         'users.UserProfile', on_delete=models.CASCADE, null=True, blank=True,
-        related_name='url_registries'
+        related_name='url_registry_entries'
     )
     public_access = None
     uri = None
@@ -65,17 +65,33 @@ class URLRegistry(BaseModel):
     def owner_type(self):
         return get(self.owner, 'resource_type') or None
 
+    @property
+    def active_entries(self):
+        return URLRegistry.get_active_entries(self.owner)
+
     def is_uniq(self):
-        return not self.get_active_entries().filter(url=self.url).exists()
+        return not self.active_entries.filter(url=self.url).exists()
 
-    def get_active_entries(self):
-        queryset = URLRegistry.objects.filter(is_active=True)
+    @classmethod
+    def get_active_entries(cls, owner):
+        queryset = owner.url_registry_entries if owner else cls.get_global_entries()
+        return queryset.filter(is_active=True)
 
-        if self.organization:
-            queryset = queryset.filter(organization=self.organization)
-        elif self.user:
-            queryset = queryset.filter(user=self.user)
-        else:
-            queryset = queryset.filter(organization__isnull=True, user__isnull=True)
+    @classmethod
+    def get_global_entries(cls):
+        return cls.objects.filter(organization__isnull=True, user__isnull=True)
 
-        return queryset
+    @classmethod
+    def get_active_global_entries(cls):
+        return cls.get_global_entries().filter(is_active=True)
+
+    @classmethod
+    def lookup(cls, url, owner=None):
+        owner_entries = cls.get_active_entries(owner) if owner else cls.objects.none()
+        entry = owner_entries.filter(url=url).first()
+        if not entry:
+            entry = cls.get_active_global_entries().filter(url=url).first()
+        if entry:
+            return ConceptContainerModel.resolve_reference_expression(url=entry.url, namespace=entry.namespace)
+
+        return None
