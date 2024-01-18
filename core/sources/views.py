@@ -597,6 +597,7 @@ class SourceMappedSourcesListView(SourceListView):
 
 class SourceVersionComparisonView(BaseAPIView):  # pragma: no cover
     permission_classes = (CanViewConceptDictionaryVersion,)
+    swagger_schema = None
 
     def get_objects(self):
         data = self.request.data
