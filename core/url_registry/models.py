@@ -18,7 +18,7 @@ class URLRegistry(BaseModel):
     )
     public_access = None
     uri = None
-    OBJECT_TYPE = 'URLRegistry'
+    OBJECT_TYPE = 'URLRegistryEntry'
 
     es_fields = {
         'name': {'sortable': False, 'filterable': True, 'exact': True},
