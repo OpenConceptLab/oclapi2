@@ -87,10 +87,8 @@ class URLRegistry(BaseModel):
 
     @classmethod
     def lookup(cls, url, owner=None):
-        owner_entries = cls.get_active_entries(owner) if owner else cls.objects.none()
-        entry = owner_entries.filter(url=url).first()
-        if not entry:
-            entry = cls.get_active_global_entries().filter(url=url).first()
+        entries = owner.url_registry_entries.filter(is_active=True) if owner else cls.get_active_global_entries()
+        entry = entries.filter(url=url).first()
         if entry:
             return ConceptContainerModel.resolve_reference_expression(url=entry.url, namespace=entry.namespace)
 

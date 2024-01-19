@@ -64,8 +64,6 @@ updated_since_param = openapi.Parameter(
 canonical_url_param = openapi.Parameter(
     CANONICAL_URL_REQUEST_PARAM, openapi.IN_QUERY, type=openapi.TYPE_STRING,
 )
-url_registry_url_lookup_param = openapi.Parameter(
-    'url', openapi.IN_QUERY, description="repo url", type=openapi.TYPE_STRING, required=True)
 
 released_param = openapi.Parameter(
     RELEASED_PARAM, openapi.IN_QUERY, type=openapi.TYPE_BOOLEAN, default=False,

@@ -46,6 +46,7 @@ class URLRegistryTest(OCLTestCase):
         UserURLRegistryFactory(url='https://foo2.com', user=user, namespace='user2')
         GlobalURLRegistryFactory(url='https://foo.com', namespace='global1')
         GlobalURLRegistryFactory(url='https://foo1.com', namespace='global2')
+        GlobalURLRegistryFactory(url='https://foo3.com', namespace='global3')
 
         self.assertEqual(URLRegistry.lookup('https://foo.com', org), 'something')
         resolve_mock.assert_called_with(url='https://foo.com', namespace='org1')
@@ -66,13 +67,25 @@ class URLRegistryTest(OCLTestCase):
         self.assertEqual(URLRegistry.lookup('https://foo1.com', org), 'something')
         resolve_mock.assert_called_with(url='https://foo1.com', namespace='org2')
 
+        self.assertEqual(URLRegistry.lookup('https://foo3.com', org), None)
+
+        self.assertEqual(URLRegistry.lookup('https://foo3.com', user), None)
+        self.assertEqual(URLRegistry.lookup('https://foo3.com'), 'something')
+        resolve_mock.assert_called_with(url='https://foo3.com', namespace='global3')
+
 
 class URLRegistryLookupViewTest(OCLAPITestCase):
     @patch('core.url_registry.views.URLRegistry.lookup')
-    def test_get(self, lookup_mock):
+    def test_post(self, lookup_mock):
         source = OrganizationSourceFactory()
+        token = source.created_by.get_token()
         lookup_mock.return_value = source
-        response = self.client.get('/url-registry/$lookup/')
+
+        response = self.client.post(
+            '/url-registry/$lookup/',
+            {'url': ''},
+            HTTP_AUTHORIZATION=f'Token {token}'
+        )
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(
@@ -80,21 +93,32 @@ class URLRegistryLookupViewTest(OCLAPITestCase):
             {'detail': ErrorDetail(string='url is required in query params', code='bad_request')}
         )
 
-        response = self.client.get('/url-registry/$lookup/?url=https://foo.com')
+        response = self.client.post(
+            '/url-registry/$lookup/',
+            {'url': 'https://foo.com'},
+            HTTP_AUTHORIZATION=f'Token {token}'
+        )
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data, RepoListSerializer(source).data)
         lookup_mock.assert_called_with('https://foo.com', None)
 
         lookup_mock.return_value = None
-        response = self.client.get('/url-registry/$lookup/?url=https://foo.com')
+        response = self.client.post(
+            '/url-registry/$lookup/',
+            {'url': 'https://foo.com'},
+            HTTP_AUTHORIZATION=f'Token {token}'
+        )
 
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data, None)
+        self.assertEqual(response.status_code, 404)
         lookup_mock.assert_called_with('https://foo.com', None)
 
         lookup_mock.return_value = source
-        response = self.client.get(source.organization.uri + 'url-registry/$lookup/?url=https://foo.com')
+        response = self.client.post(
+            source.organization.uri + 'url-registry/$lookup/',
+            {'url': 'https://foo.com'},
+            HTTP_AUTHORIZATION=f'Token {token}'
+        )
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data, RepoListSerializer(source).data)

@@ -1,4 +1,5 @@
 from django.http import Http404
+from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
 from rest_framework.generics import CreateAPIView, RetrieveUpdateDestroyAPIView, get_object_or_404
 from rest_framework.permissions import IsAuthenticatedOrReadOnly
@@ -6,8 +7,7 @@ from rest_framework.response import Response
 
 from core.common.exceptions import Http400
 from core.common.mixins import ListWithHeadersMixin
-from core.common.swagger_parameters import q_param, limit_param, sort_desc_param, sort_asc_param, page_param, \
-    url_registry_url_lookup_param
+from core.common.swagger_parameters import q_param, limit_param, sort_desc_param, sort_asc_param, page_param
 from core.common.views import BaseAPIView
 from core.repos.serializers import RepoListSerializer
 from core.url_registry.documents import URLRegistryDocument
@@ -97,17 +97,24 @@ class URLRegistryView(URLRegistryBaseView, RetrieveUpdateDestroyAPIView):
 class URLRegistryLookupView(URLRegistryBaseView):
     serializer_class = RepoListSerializer
 
-    @swagger_auto_schema(manual_parameters=[url_registry_url_lookup_param])
-    def get(self, request, *args, **kwargs):  # pylint: disable=unused-argument
+    @swagger_auto_schema(
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            properties={
+                'url': openapi.Schema(type=openapi.TYPE_STRING, description='Canonical URL to lookup', default='')
+            }
+        )
+    )
+    def post(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         self.set_parent_resource()
-        url = request.query_params.get('url')
+        url = request.data.get('url')
 
         if not url:
             raise Http400('url is required in query params')
 
         repo = URLRegistry.lookup(url, self.parent_resource)
-        data = None
-        if repo and repo.id:
-            data = RepoListSerializer(repo).data
 
-        return Response(data)
+        if repo and repo.id:
+            return Response(RepoListSerializer(repo).data)
+
+        raise Http404()
