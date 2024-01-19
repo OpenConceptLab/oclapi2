@@ -777,71 +777,13 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         return {**_filters, **(filters or {})}
 
     @staticmethod
-    def compare(version1, version2, verbose=False):  # pylint: disable=too-many-locals  # pragma: no cover
-        def get_concepts_map(version):
-            queryset = version.get_concepts_queryset().only('mnemonic', 'checksums')
-            return {concept.mnemonic: {'checksums': concept.checksums} for concept in queryset}
-
-        version1_concepts = get_concepts_map(version1)
-        version2_concepts = get_concepts_map(version2)
-
-        v1_concepts_set = set(version1_concepts.keys())
-        v2_concepts_set = set(version2_concepts.keys())
-        v1_new = {key: version1_concepts[key] for key in v1_concepts_set - v2_concepts_set}
-        v1_deleted = {key: version2_concepts[key] for key in v2_concepts_set - v1_concepts_set}
-
-        common = {key: version1_concepts[key] for key in v1_concepts_set & v2_concepts_set}
-        same = {}
-        changed = {}
-        same_standard = {}
-        same_smart = {}
-        changed_smart = {}
-        changed_standard = {}
-        for key, info in common.items():
-            if version1_concepts[key]['checksums'] == version2_concepts[key]['checksums']:
-                same[key] = info
-                same_smart[key] = info
-                same_standard[key] = info
-            elif version1_concepts[key]['checksums']['smart'] == version2_concepts[key]['checksums']['smart']:
-                same_smart[key] = info
-                changed_standard[key] = info
-            elif version1_concepts[key]['checksums']['standard'] == version2_concepts[key]['checksums']['standard']:
-                same_standard[key] = info
-                changed_smart[key] = info
-            else:
-                changed[key] = info
-
-        denominator = max(len(version1_concepts), len(version2_concepts))
-
-        def get_struct(percentage, values, is_verbose=False):
-            struct = {'percentage': round(percentage * 100, 2), 'total': len(values or [])}
-            if is_verbose and values:
-                struct['concepts'] = list(values.keys())
-            return struct
-
-        comparison = {
-            'new': get_struct(len(v1_new) / denominator, v1_new, verbose),
-            'removed': get_struct(len(v1_deleted) / denominator, v1_deleted, True),
-            'same': get_struct(len(same) / denominator, same, verbose),
-            'changed': get_struct(len(changed) / denominator, changed, True),
-            'standard': {
-                'same': get_struct(len(same_standard) / denominator, same_standard, verbose),
-                'changed': get_struct(len(changed_standard) / denominator, changed_standard, True),
-            },
-            'smart': {
-                'same': get_struct(len(same_smart) / denominator, same_smart, verbose),
-                'changed': get_struct(len(changed_smart) / denominator, changed_smart, True),
-            }
-        }
-        return comparison
-
-
-def pretty_print_dict(d, indent=0):  # pragma: no cover
-    res = ""
-    for k, v in d.items():
-        res += "\t"*indent + str(k) + "\n"
-        if isinstance(v, dict):
-            res += pretty_print_dict(v, indent+1)
-        else:
-            res += "\t"*(indent+1) + str(v) + "\n"
-    return res
+    def compare(version1, version2, verbose=False):  # pragma: no cover
+        from core.common.checksums import ChecksumDiff
+        diff = ChecksumDiff(
+            resources1=version1.get_concepts_queryset().only('mnemonic', 'checksums'),
+            resources2=version2.get_concepts_queryset().only('mnemonic', 'checksums'),
+            verbose=verbose
+        )
+        diff.process()
+        diff.print()
+        return diff.result

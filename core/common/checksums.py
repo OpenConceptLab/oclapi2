@@ -154,3 +154,146 @@ class Checksum:
         if isinstance(obj, UUID):
             return json.dumps(str(obj))
         return json.dumps(obj)
+
+
+class ChecksumDiff:  # pragma: no cover
+    def __init__(self, resources1, resources2, identity='mnemonic', verbose=False):
+        self.resources1 = resources1
+        self.resources2 = resources2
+        self.identity = identity
+        self.verbose = verbose
+        self.same = {}
+        self.same_smart = {}
+        self.same_standard = {}
+        self.changed = {}
+        self.changed_smart = {}
+        self.changed_standard = {}
+        self.result = {}
+        self._resources1_map = None
+        self._resources2_map = None
+        self._resources1_set = None
+        self._resources2_set = None
+
+    def get_resources_map(self, resources):
+        return {
+            get(resource, self.identity): {
+                'checksums': resource.checksums
+            } for resource in resources
+        }
+
+    @property
+    def resources1_map(self):
+        if self._resources1_map is not None:
+            return self._resources1_map
+        self._resources1_map = self.get_resources_map(self.resources1)
+        return self._resources1_map
+
+    @property
+    def resources2_map(self):
+        if self._resources2_map is not None:
+            return self._resources2_map
+        self._resources2_map = self.get_resources_map(self.resources2)
+        return self._resources2_map
+
+    @property
+    def resources1_set(self):
+        if self._resources1_set is not None:
+            return self._resources1_set
+        self._resources1_set = set(self.resources1_map.keys())
+        return self._resources1_set
+
+    @property
+    def resources2_set(self):
+        if self._resources2_set is not None:
+            return self._resources2_set
+        self._resources2_set = set(self.resources2_map.keys())
+        return self._resources2_set
+
+    @property
+    def new(self):
+        return {key: self.resources1_map[key] for key in self.resources1_set - self.resources2_set}
+
+    @property
+    def deleted(self):
+        return {key: self.resources2_map[key] for key in self.resources2_set - self.resources1_set}
+
+    @property
+    def common(self):
+        return {key: self.resources1_map[key] for key in self.resources1_set & self.resources2_set}
+
+    def populate_diff_from_common(self):
+        common = self.common
+        resources1_map = self.resources1_map
+        resources2_map = self.resources2_map
+
+        for key, info in common.items():
+            if resources1_map[key]['checksums'] == resources2_map[key]['checksums']:
+                self.same[key] = info
+                self.same_smart[key] = info
+                self.same_standard[key] = info
+            elif resources1_map[key]['checksums']['smart'] == resources2_map[key]['checksums']['smart']:
+                self.same_smart[key] = info
+                self.changed_standard[key] = info
+            elif resources1_map[key]['checksums']['standard'] == resources2_map[key]['checksums']['standard']:
+                self.same_standard[key] = info
+                self.changed_smart[key] = info
+            else:
+                self.changed[key] = info
+
+    @property
+    def denominator(self):
+        return max(len(self.resources1_set), len(self.resources2_set))
+
+    def get_struct(self, percentage, values, is_verbose=False):
+        struct = {
+            'percentage': round(percentage * 100, 2),
+            'total': len(values or [])
+        }
+        if is_verbose and values:
+            struct[self.identity] = list(values.keys())
+
+        return struct
+
+    def prepare(self):
+        denominator = self.denominator
+        new = self.new
+        deleted = self.deleted
+
+        self.result = {
+            'new': self.get_struct(len(new) / denominator, new, self.verbose),
+            'removed': self.get_struct(len(deleted) / denominator, deleted, True),
+            'same': self.get_struct(len(self.same) / denominator, self.same, self.verbose),
+            'changed': self.get_struct(len(self.changed) / denominator, self.changed, True),
+            'standard': {
+                'same': self.get_struct(len(self.same_standard) / denominator, self.same_standard, self.verbose),
+                'changed': self.get_struct(len(self.changed_standard) / denominator, self.changed_standard, True),
+            },
+            'smart': {
+                'same': self.get_struct(len(self.same_smart) / denominator, self.same_smart, self.verbose),
+                'changed': self.get_struct(len(self.changed_smart) / denominator, self.changed_smart, True),
+            }
+        }
+
+    def process(self, refresh=False):
+        if refresh:
+            self.result = {}
+        if self.result:
+            return self.result
+
+        self.populate_diff_from_common()
+        self.prepare()
+
+        return self.result
+
+    def pretty_print_dict(self, d, indent=0):  # pragma: no cover
+        res = ""
+        for k, v in d.items():
+            res += "\t" * indent + str(k) + "\n"
+            if isinstance(v, dict):
+                res += self.pretty_print_dict(v, indent + 1)
+            else:
+                res += "\t" * (indent + 1) + str(v) + "\n"
+        return res
+
+    def print(self):
+        print(self.pretty_print_dict(self.result))
