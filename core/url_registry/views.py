@@ -83,9 +83,6 @@ class OrganizationURLRegistryListView(URLRegistriesView):
     def get_queryset(self):
         self.set_parent_resource()
 
-        if not self.parent_resource:
-            raise Http404()
-
         return self.queryset.filter(organization__members__username=self.parent_resource.username)
 
 
