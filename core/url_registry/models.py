@@ -2,7 +2,7 @@ from django.db import models
 from pydash import get
 
 from core.common.fields import URIField
-from core.common.models import BaseModel, ConceptContainerModel
+from core.common.models import BaseModel
 
 
 class URLRegistry(BaseModel):
@@ -87,10 +87,16 @@ class URLRegistry(BaseModel):
         return cls.get_global_entries().filter(is_active=True)
 
     @classmethod
-    def lookup(cls, url, owner=None):
-        entry = cls.get_entry(url, owner)
-        if entry:
-            return ConceptContainerModel.resolve_reference_expression(url=entry.url, namespace=entry.namespace)
+    def lookup(cls, url, registry_owner=None):
+        entry = cls.get_entry(url, registry_owner)
+        if entry and entry.namespace:
+            from core.common.mixins import SourceContainerMixin
+            if registry_owner and entry.namespace == registry_owner.uri:
+                namespace_owner = registry_owner
+            else:
+                namespace_owner = SourceContainerMixin.get_object_from_namespace(entry.namespace)
+            if namespace_owner:
+                return namespace_owner.find_repo_by_canonical_url(entry.url)
 
         return None
 

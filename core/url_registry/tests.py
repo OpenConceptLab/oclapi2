@@ -5,7 +5,7 @@ from core.common.tests import OCLTestCase, OCLAPITestCase
 from core.orgs.models import Organization
 from core.orgs.tests.factories import OrganizationFactory
 from core.repos.serializers import RepoListSerializer
-from core.sources.tests.factories import OrganizationSourceFactory
+from core.sources.tests.factories import OrganizationSourceFactory, UserSourceFactory
 from core.url_registry.factories import OrganizationURLRegistryFactory, UserURLRegistryFactory, GlobalURLRegistryFactory
 from core.url_registry.models import URLRegistry
 from core.users.models import UserProfile
@@ -34,44 +34,43 @@ class URLRegistryTest(OCLTestCase):
         self.assertEqual(URLRegistry(organization=org).owner_url, '/orgs/foo/')
         self.assertEqual(URLRegistry(user=user).owner_url, '/users/foo/')
 
-    @patch('core.common.models.ConceptContainerModel.resolve_reference_expression')
-    def test_lookup(self, resolve_mock):
-        resolve_mock.return_value = 'something'
-
+    def test_lookup(self):
         org = OrganizationFactory()
         user = UserProfileFactory()
-        OrganizationURLRegistryFactory(url='https://foo.com', namespace='org1', organization=org)
-        OrganizationURLRegistryFactory(url='https://foo1.com', namespace='org2', organization=org)
-        UserURLRegistryFactory(url='https://foo.com', user=user, namespace='user1')
-        UserURLRegistryFactory(url='https://foo2.com', user=user, namespace='user2')
-        GlobalURLRegistryFactory(url='https://foo.com', namespace='global1')
-        GlobalURLRegistryFactory(url='https://foo1.com', namespace='global2')
-        GlobalURLRegistryFactory(url='https://foo3.com', namespace='global3')
+        source1 = OrganizationSourceFactory(organization=org, canonical_url='https://foo.com')
+        source2 = OrganizationSourceFactory(organization=org, canonical_url='https://foo1.com')
+        source3 = UserSourceFactory(user=user, canonical_url='https://foo2.com')
+        source4 = OrganizationSourceFactory(canonical_url='https://foo3.com')
 
-        self.assertEqual(URLRegistry.lookup('https://foo.com', org), 'something')
-        resolve_mock.assert_called_with(url='https://foo.com', namespace='org1')
+        OrganizationURLRegistryFactory(url='https://foo.com', namespace=org.uri, organization=org)
+        OrganizationURLRegistryFactory(url='https://foo1.com', namespace=org.uri, organization=org)
+        OrganizationURLRegistryFactory(url='https://foo2.com', namespace=None, organization=org)
 
-        self.assertEqual(URLRegistry.lookup('https://foo.com'), 'something')
-        resolve_mock.assert_called_with(url='https://foo.com', namespace='global1')
+        UserURLRegistryFactory(url='https://foo.com', user=user, namespace=org.uri)
+        UserURLRegistryFactory(url='https://foo2.com', user=user, namespace=user.uri)
+        UserURLRegistryFactory(url='https://foo3.com', user=user, namespace=source4.parent_url)
+
+        GlobalURLRegistryFactory(url='https://foo.com', namespace=org.uri)
+        GlobalURLRegistryFactory(url='https://foo1.com', namespace=org.uri)
+        GlobalURLRegistryFactory(url='https://foo3.com', namespace=None)
+
+        self.assertEqual(URLRegistry.lookup('https://foo.com', org), source1)
+        self.assertEqual(URLRegistry.lookup('https://foo.com'), source1)
+
+        self.assertEqual(URLRegistry.lookup('https://foo1.com'), source2)
+        self.assertEqual(URLRegistry.lookup('https://foo1.com', org), source2)
 
         self.assertEqual(URLRegistry.lookup('https://foo2.com', org), None)
-
-        self.assertEqual(URLRegistry.lookup('https://foo2.com', user), 'something')
-        resolve_mock.assert_called_with(url='https://foo2.com', namespace='user2')
-
+        self.assertEqual(URLRegistry.lookup('https://foo2.com', user), source3)
         self.assertEqual(URLRegistry.lookup('https://foo2.com'), None)
 
-        self.assertEqual(URLRegistry.lookup('https://foo1.com'), 'something')
-        resolve_mock.assert_called_with(url='https://foo1.com', namespace='global2')
-
-        self.assertEqual(URLRegistry.lookup('https://foo1.com', org), 'something')
-        resolve_mock.assert_called_with(url='https://foo1.com', namespace='org2')
-
         self.assertEqual(URLRegistry.lookup('https://foo3.com', org), None)
+        self.assertEqual(URLRegistry.lookup('https://foo3.com', user), source4)
+        self.assertEqual(URLRegistry.lookup('https://foo3.com'), None)
 
-        self.assertEqual(URLRegistry.lookup('https://foo3.com', user), None)
-        self.assertEqual(URLRegistry.lookup('https://foo3.com'), 'something')
-        resolve_mock.assert_called_with(url='https://foo3.com', namespace='global3')
+        self.assertEqual(URLRegistry.lookup('https://foo4.com'), None)
+        self.assertEqual(URLRegistry.lookup('https://foo4.com', org), None)
+        self.assertEqual(URLRegistry.lookup('https://foo4.com', user), None)
 
 
 class URLRegistryLookupViewTest(OCLAPITestCase):
