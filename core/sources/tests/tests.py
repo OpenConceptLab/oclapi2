@@ -23,6 +23,7 @@ from core.services.storages.postgres import PostgresQL
 from core.sources.documents import SourceDocument
 from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory, UserSourceFactory
+from core.url_registry.factories import OrganizationURLRegistryFactory, GlobalURLRegistryFactory
 from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
 
@@ -714,6 +715,13 @@ class SourceTest(OCLTestCase):
 
         resolved_version = Source.resolve_reference_expression(
             'https://source.org.com', version="v3.0")
+        self.assertEqual(resolved_version.id, None)
+        self.assertTrue(isinstance(resolved_version, Source))
+        self.assertEqual(resolved_version.resolution_url, 'https://source.org.com')
+        self.assertTrue(resolved_version.is_fqdn)
+
+        resolved_version = Source.resolve_reference_expression(
+            'https://source.org.com', version="v3.0", namespace='/orgs/org/')
         self.assertEqual(resolved_version.id, 4)
         self.assertTrue(isinstance(resolved_version, Source))
         self.assertEqual(resolved_version.version, 'v3.0')
@@ -721,6 +729,9 @@ class SourceTest(OCLTestCase):
         self.assertTrue(resolved_version.is_fqdn)
 
         resolved_version = Source.resolve_reference_expression('https://source.org.com')
+        self.assertEqual(resolved_version.id, None)
+
+        resolved_version = Source.resolve_reference_expression('https://source.org.com', namespace='/orgs/org/')
         self.assertEqual(resolved_version.id, 3)
         self.assertTrue(isinstance(resolved_version, Source))
         self.assertEqual(resolved_version.version, 'v2.0')
@@ -758,6 +769,106 @@ class SourceTest(OCLTestCase):
         self.assertEqual(resolved_version.version, 'HEAD')
         self.assertEqual(resolved_version.canonical_url, None)
         self.assertFalse(resolved_version.is_fqdn)
+
+    def test_resolve_reference_expression_with_canonical_url(self):
+        org1 = OrganizationFactory(mnemonic='org1')
+        org2 = OrganizationFactory(mnemonic='org2')
+        OrganizationURLRegistryFactory(organization=org1, url='https://source1.com', namespace=org1.uri)
+        OrganizationURLRegistryFactory(organization=org1, url='https://source2.com', namespace=org1.uri)
+        OrganizationURLRegistryFactory(organization=org1, url='https://source3.com')
+        OrganizationURLRegistryFactory(organization=org1, url='https://unknown1.com', namespace=org2.uri)
+        OrganizationURLRegistryFactory(organization=org1, url='https://source6.com', namespace=org1.uri)
+        GlobalURLRegistryFactory(url='https://source1.com', namespace=org1.uri)
+        GlobalURLRegistryFactory(url='https://source2.com', namespace=org1.uri)
+        GlobalURLRegistryFactory(url='https://source3.com')
+        GlobalURLRegistryFactory(url='https://source4.com', namespace=org2.uri)
+        GlobalURLRegistryFactory(url='https://source6.com', namespace=org2.uri)
+        GlobalURLRegistryFactory(url='https://unknown2.com', namespace=org2.uri)
+        source1 = OrganizationSourceFactory(organization=org1, canonical_url='https://source1.com')
+        source2 = OrganizationSourceFactory(organization=org1, canonical_url='https://source2.com')
+        source3 = OrganizationSourceFactory(organization=org2, canonical_url='https://source3.com')
+        source4 = OrganizationSourceFactory(organization=org2, canonical_url='https://source4.com')
+        source5 = OrganizationSourceFactory(organization=org2, canonical_url='https://source5.com')
+        source6 = OrganizationSourceFactory(organization=org2, canonical_url='https://source6.com')
+
+        # should hit owner's url registry
+        self.assertEqual(
+            Source.resolve_reference_expression('https://source1.com', '/orgs/org1/').id,
+            source1.id
+        )
+
+        # should hit global url registry
+        self.assertEqual(
+            Source.resolve_reference_expression('https://source1.com', None).id,
+            source1.id
+        )
+
+        # should hit global url registry
+        self.assertEqual(
+            Source.resolve_reference_expression('https://source1.com', '/').id,
+            source1.id
+        )
+
+        # should hit org2 registry and then org2 repos and then global url registry
+        self.assertEqual(
+            Source.resolve_reference_expression('https://source1.com', '/orgs/org2/').id,
+            source1.id
+        )
+
+        # should hit org2 registry and then org2 repos
+        self.assertEqual(
+            Source.resolve_reference_expression('https://source4.com', '/orgs/org2/').id,
+            source4.id
+        )
+
+        # should hit org1 registry and then org1 repos and then global url registry
+        self.assertEqual(
+            Source.resolve_reference_expression('https://source4.com', '/orgs/org1/').id,
+            source4.id
+        )
+
+        # should hit org2 registry and then org2 repos
+        self.assertEqual(
+            Source.resolve_reference_expression('https://source5.com', '/orgs/org2/').id,
+            source5.id
+        )
+
+        # should hit org1 registry and then org1 repos and then global registry
+        self.assertEqual(
+            Source.resolve_reference_expression('https://source2.com', '/orgs/org1/').id,
+            source2.id
+        )
+
+        # should hit org1 registry and then org1 repos and then global registry
+        self.assertIsNone(Source.resolve_reference_expression('https://source3.com', '/orgs/org1/').id)
+
+        # should hit org2 registry and then org2 repos
+        self.assertEqual(
+            Source.resolve_reference_expression('https://source3.com', '/orgs/org2/').id,
+            source3.id
+        )
+
+        # should hit org2 registry and then org2 repos
+        self.assertEqual(
+            Source.resolve_reference_expression('https://source6.com', '/orgs/org2/').id,
+            source6.id
+        )
+
+        # should hit global registry
+        self.assertEqual(
+            Source.resolve_reference_expression('https://source6.com', '/').id,
+            source6.id
+        )
+
+        # should hit org1 registry only
+        self.assertIsNone(Source.resolve_reference_expression('https://source6.com', '/orgs/org1/').id)
+
+        self.assertIsNone(Source.resolve_reference_expression('https://source5.com', '/').id)
+        self.assertIsNone(Source.resolve_reference_expression('https://source5.com', '/orgs/org1/').id)
+        self.assertIsNone(Source.resolve_reference_expression('https://source5.com', 'foobar').id)
+        self.assertIsNone(Source.resolve_reference_expression('https://unknown1.com', '/orgs/org2/').id)
+        self.assertIsNone(Source.resolve_reference_expression('https://unknown1.com', '/orgs/org1/').id)
+        self.assertIsNone(Source.resolve_reference_expression('https://unknown1.com', '/').id)
 
     @patch('core.sources.models.Source.batch_index')
     def test_index_children(self, batch_index_mock):

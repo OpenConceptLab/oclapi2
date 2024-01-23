@@ -30,6 +30,7 @@ from .constants import (
     DEFAULT_VALIDATION_SCHEMA, ES_REQUEST_TIMEOUT, UPDATED_BY_USERNAME_PARAM)
 from .exceptions import Http400
 from .fields import URIField
+from .mixins import SourceContainerMixin
 from .tasks import handle_save, handle_m2m_changed, seed_children_to_new_version, update_validation_schema, \
     update_source_active_concepts_count, update_source_active_mappings_count
 
@@ -883,47 +884,94 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
             instance = cls.resolve_reference_expression(url, namespace, version)
         return instance
 
-    @staticmethod
-    def resolve_reference_expression(url, namespace=None, version=None):
-        lookup_url = url
-        if '|' in lookup_url:
-            lookup_url, version = lookup_url.split('|')
+    @classmethod
+    def resolve_reference_expression(cls, url, namespace=None, version=None):
+        """
+        resolves to repository version according to this process:
 
-        lookup_url = lookup_url.split('?')[0]
+        1. If canonical URL provided:
+            - Owner's URL Registry: If namespace is set in the request (and not global) and an owner-specific
+            canonical URL registry is defined for the namespace, attempt to resolve with the
+            namespace-specific canonical URL registry:
+                -- If the canonical URL is defined in the owner's registry, return the matching repo/repo version
+                from the namespace specified in the registry entry or return 404 not found
+                -- If no matching entry in the registry, then continue
+            - Repos in the namespace: If namespace is set in the request (and not global), attempt to resolve the
+             canonical URL with the repos defined in the namespace:
+                -- If the canonical URL matches a repo/repo version in the namespace, then return the repo/repo version
+                -- If unresolved, then continue
+            - Global URL Registry: If namespace is undefined or explicitly set to global in the request, or if URL
+             did not match an entry in the owner-specific registry and did not match a repo in the namespace, attempt
+             to resolve the canonical URL with the Global Canonical URL Registry:
+                -- If the canonical URL is defined in the global registry, return the matching repo/repo version from
+                 the namespace specified in the registry entry or return 404 not found
+                -- If no matching entry in the global registry, then return 404 not found (even if the canonical URL
+                is defined somewhere else in OCL)
+        2. Else if relative URL provided:
+            - Return the repository directly using the relative URL, or return 404 if not found
+        """
 
-        is_fqdn = is_canonical_uri(lookup_url) or is_canonical_uri(url)
+        resolution_url, version, is_canonical = cls.__get_resolution_url(url, version)
 
+        instance = None
+        is_global_namespace = not namespace or namespace == '/'
         criteria = models.Q(is_active=True, retired=False)
-        if is_fqdn:
-            resolution_url = lookup_url
-            criteria &= models.Q(canonical_url=resolution_url)
-            if namespace:
-                criteria &= models.Q(models.Q(user__uri=namespace) | models.Q(organization__uri=namespace))
+
+        from core.url_registry.models import URLRegistry
+        if is_canonical:
+            url_registry_entry = None
+            owner = None
+            if not is_global_namespace:
+                owner = SourceContainerMixin.get_object_from_namespace(namespace)
+                if owner:
+                    url_registry_entry = owner.url_registry_entries.filter(is_active=True, url=resolution_url).first()
+                    if not url_registry_entry:
+                        instance = owner.find_repo_by_canonical_url(resolution_url)
+
+            if is_global_namespace or (not url_registry_entry and not instance):
+                url_registry_entry = URLRegistry.get_active_global_entries().filter(url=resolution_url).first()
+
+            if not owner and url_registry_entry and url_registry_entry.namespace:
+                owner = SourceContainerMixin.get_object_from_namespace(url_registry_entry.namespace)
+
+            if instance or not url_registry_entry or not url_registry_entry.namespace or not owner:
+                return cls.resolve_repo(instance, version, is_canonical, resolution_url)
+
+            criteria &= models.Q(
+                canonical_url=resolution_url, **{f"{owner.resource_type.lower()}__uri": url_registry_entry.namespace})
         else:
-            resolution_url = to_parent_uri(lookup_url)
             criteria &= models.Q(uri=resolution_url)
 
+        from core.repos.models import Repository
+        return cls.resolve_repo(Repository.get(criteria), version, is_canonical, resolution_url)
+
+    @classmethod
+    def resolve_repo(cls, instance, version, is_canonical, resolution_url):
         from core.sources.models import Source
-        instance = Source.objects.filter(criteria).first()
-        if not instance:
-            from core.collections.models import Collection
-            instance = Collection.objects.filter(criteria).first()
 
         if instance:
             if version:
                 instance = instance.versions.filter(version=version).first()
             elif instance.is_head:
                 instance = instance.get_latest_released_version() or instance
-
-        if not instance:
+        else:
             instance = Source()
 
-        instance.is_fqdn = is_fqdn
+        instance.is_fqdn = is_canonical
         instance.resolution_url = resolution_url
-        if is_fqdn and instance.id and not instance.canonical_url:
+        if is_canonical and instance.id and not instance.canonical_url:
             instance.canonical_url = resolution_url
-
         return instance
+
+    @staticmethod
+    def __get_resolution_url(url, version):
+        lookup_url = url
+        if '|' in lookup_url:
+            lookup_url, version = lookup_url.split('|')
+        lookup_url = lookup_url.split('?')[0]
+        is_canonical = is_canonical_uri(lookup_url) or is_canonical_uri(url)
+        resolution_url = lookup_url if is_canonical else to_parent_uri(lookup_url)
+        return resolution_url, version, is_canonical
 
     def clean(self):
         if not self.custom_validation_schema:

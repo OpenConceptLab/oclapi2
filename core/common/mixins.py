@@ -441,6 +441,29 @@ class ConceptDictionaryUpdateMixin(ConceptDictionaryMixin):
 
 
 class SourceContainerMixin:
+    def find_repo_by_canonical_url(self, canonical_url):
+        repo = self.source_set.filter(canonical_url=canonical_url).first()
+        if not repo:
+            repo = self.collection_set.filter(canonical_url=canonical_url).first()
+        return repo
+
+    @staticmethod
+    def get_object_from_namespace(namespace):
+        if not namespace or namespace == '/':
+            return None
+
+        klass = None
+        if '/orgs/' in namespace:
+            from core.orgs.models import Organization
+            klass = Organization
+        elif '/users/' in namespace:
+            from core.users.models import UserProfile
+            klass = UserProfile
+        if klass:
+            return klass.objects.filter(uri=namespace).first()
+
+        return None
+
     @property
     def sources(self):
         return self.source_set.filter(version=HEAD)

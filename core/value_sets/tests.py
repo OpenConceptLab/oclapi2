@@ -444,6 +444,7 @@ class ValueSetTest(OCLAPITestCase):
                         {
                             'system': 'http://some/url',
                             'version': self.org_source_v2.version,
+                            'namespace': self.org.uri,
                             'concept': [
                                 {
                                     'code': self.concept_1.mnemonic

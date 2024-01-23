@@ -11,8 +11,9 @@ class RepoListSerializer(serializers.Serializer):  # pylint: disable=abstract-me
         return self.get_data(instance)
 
     def get_data(self, item):
+        repo = None
         if isinstance(item, Source):
-            return SourceListSerializer(item, context=self.context).data
-        if isinstance(item, Collection):
-            return CollectionListSerializer(item, context=self.context).data
-        return None
+            repo = SourceListSerializer(item, context=self.context).data
+        elif isinstance(item, Collection):
+            repo = CollectionListSerializer(item, context=self.context).data
+        return repo

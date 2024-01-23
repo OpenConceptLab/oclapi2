@@ -1,11 +1,12 @@
 from django.db import models
 from pydash import get
 
+from core.common.fields import URIField
 from core.common.models import BaseModel, ConceptContainerModel
 
 
 class URLRegistry(BaseModel):
-    url = models.URLField()
+    url = URIField()
     name = models.TextField(null=True, blank=True)
     namespace = models.CharField(max_length=300, null=True, blank=True)
     organization = models.ForeignKey(
@@ -87,9 +88,13 @@ class URLRegistry(BaseModel):
 
     @classmethod
     def lookup(cls, url, owner=None):
-        entries = owner.url_registry_entries.filter(is_active=True) if owner else cls.get_active_global_entries()
-        entry = entries.filter(url=url).first()
+        entry = cls.get_entry(url, owner)
         if entry:
             return ConceptContainerModel.resolve_reference_expression(url=entry.url, namespace=entry.namespace)
 
         return None
+
+    @classmethod
+    def get_entry(cls, url, owner=None):
+        entries = owner.url_registry_entries.filter(is_active=True) if owner else cls.get_active_global_entries()
+        return entries.filter(url=url).first()
