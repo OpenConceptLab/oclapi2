@@ -37,6 +37,9 @@ class URLRegistryBaseView(BaseAPIView):
             self.parent_resource = UserProfile.objects.filter(username=user).first()
             self.parent_resource_type = 'user'
 
+        if (org or user) and not self.parent_resource:
+            raise Http404()
+
         self.kwargs['parent_resource'] = self.parent_resource
         self.kwargs['parent_resource_type'] = self.parent_resource_type
 

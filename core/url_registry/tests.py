@@ -122,3 +122,11 @@ class URLRegistryLookupViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data, RepoListSerializer(source).data)
         lookup_mock.assert_called_with('https://foo.com', source.organization)
+
+        response = self.client.post(
+            '/orgs/Foo/url-registry/$lookup/',
+            {'url': 'https://foo.com'},
+            HTTP_AUTHORIZATION=f'Token {token}'
+        )
+
+        self.assertEqual(response.status_code, 404)
