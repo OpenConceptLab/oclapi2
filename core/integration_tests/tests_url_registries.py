@@ -283,6 +283,12 @@ class URLRegistriesViewTest(OCLAPITestCase):
         self.assertEqual(response.data[0]['name'], 'org')
         self.assertEqual(response.data[0]['id'], org_registry.id)
 
+        response = self.client.get(
+            '/users/foobar/orgs/url-registry/',
+            HTTP_AUTHORIZATION=f"Token {user_registry.user.get_token()}",
+        )
+        self.assertEqual(response.status_code, 404)
+
 
 class URLRegistryViewTest(OCLAPITestCase):
     def test_get(self):

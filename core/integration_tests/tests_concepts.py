@@ -1417,6 +1417,21 @@ class ConceptCascadeViewTest(OCLAPITestCase):
             ])
         )
 
+        response = self.client.get(
+            concept1.uri + '$cascade/?includeSelf=false&includeRetired=true&omitIfExistsIn=' + collection.uri
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data['entry']), 3)
+        self.assertEqual(
+            sorted([data['url'] for data in response.data['entry']]),
+            sorted([
+                concept1.uri,
+                mapping1.uri,
+                mapping4.uri,
+            ])
+        )
+
     def test_get_200_for_collection_version(self):  # pylint: disable=too-many-locals,too-many-statements
         source1 = OrganizationSourceFactory()
         source2 = OrganizationSourceFactory()
