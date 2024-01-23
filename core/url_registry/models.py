@@ -86,17 +86,23 @@ class URLRegistry(BaseModel):
     def get_active_global_entries(cls):
         return cls.get_global_entries().filter(is_active=True)
 
+    @property
+    def namespace_owner(self):
+        from core.common.mixins import SourceContainerMixin
+        return SourceContainerMixin.get_object_from_namespace(self.namespace)
+
     @classmethod
     def lookup(cls, url, registry_owner=None):
         entry = cls.get_entry(url, registry_owner)
-        if entry and entry.namespace:
-            from core.common.mixins import SourceContainerMixin
-            if registry_owner and entry.namespace == registry_owner.uri:
-                namespace_owner = registry_owner
-            else:
-                namespace_owner = SourceContainerMixin.get_object_from_namespace(entry.namespace)
-            if namespace_owner:
-                return namespace_owner.find_repo_by_canonical_url(entry.url)
+        if entry:
+            return entry.lookup_repo()
+
+        return None
+
+    def lookup_repo(self):
+        namespace_owner = self.namespace_owner
+        if namespace_owner:
+            return namespace_owner.find_repo_by_canonical_url(self.url)
 
         return None
 

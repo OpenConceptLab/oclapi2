@@ -932,7 +932,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
                 url_registry_entry = URLRegistry.get_active_global_entries().filter(url=resolution_url).first()
 
             if not owner and url_registry_entry and url_registry_entry.namespace:
-                owner = SourceContainerMixin.get_object_from_namespace(url_registry_entry.namespace)
+                owner = url_registry_entry.namespace_owner
 
             if instance or not url_registry_entry or not url_registry_entry.namespace or not owner:
                 return cls.resolve_repo(instance, version, is_canonical, resolution_url)
