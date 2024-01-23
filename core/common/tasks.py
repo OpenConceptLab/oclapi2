@@ -12,7 +12,6 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.mail import EmailMessage
 from django.core.management import call_command
-from django.db.models import F
 from django.template.loader import render_to_string
 from django.utils import timezone
 from django_elasticsearch_dsl.registries import registry
@@ -721,25 +720,3 @@ def calculate_checksums(resource_type, resource_id):
                     instance.get_latest_version().set_checksums()
                 if not instance.is_versioned_object:
                     instance.versioned_object.set_checksums()
-
-
-@app.task(ignore_result=True, retry_kwargs={'max_retries': 0})
-def delete_duplicate_concept_versions(source_mnemonic, source_filters=None, concept_filters=None):  # pragma: no cover
-    source_filters = source_filters or {}
-    concept_filters = concept_filters or {}
-    from core.sources.models import Source
-    source = Source.objects.filter(version='HEAD', mnemonic=source_mnemonic).filter(**source_filters).first()
-    deleted = 0
-    for concept in source.concepts_set.exclude(id=F('versioned_object_id')).exclude(
-            is_latest_version=True).filter(**concept_filters).iterator(chunk_size=100):
-        logger.info('Checking concept %s', concept.uri)
-        source_versions = concept.sources
-        count = source_versions.count()
-        if not concept.comment and count == 0 or (count == 1 and source_versions.first().version == 'HEAD'):
-            if not concept.references.exists() and not concept.expansion_set.exists():
-                if not concept.mappings_from.exists() and not concept.mappings_to.exists():
-                    logger.info('Deleting %s', concept.uri)
-                    concept.delete()
-                    deleted += 1
-
-    logger.info("DELETED %d", deleted)
