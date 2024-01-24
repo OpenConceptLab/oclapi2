@@ -1,13 +1,19 @@
 import base64
-from unittest.mock import Mock, patch, mock_open
+import os
+from datetime import timedelta
+from unittest.mock import Mock, patch, mock_open, ANY
 
 import boto3
+from azure.storage.blob import BlobPrefix
 from botocore.exceptions import ClientError
 from django.core.files.base import ContentFile
 from django.test import TestCase
+from django.utils import timezone
+from mock.mock import call
 from moto import mock_s3
 
 from core.services.storages.cloud.aws import S3
+from core.services.storages.cloud.azure import BlobStorage
 
 
 class S3Test(TestCase):
@@ -183,3 +189,202 @@ class S3Test(TestCase):
             S3().public_url_for('some/path').replace('https://', 'http://'),
             'http://oclapi2-dev.s3.amazonaws.com/some/path'
         )
+
+
+class BlobStorageTest(TestCase):
+    @patch('core.services.storages.cloud.azure.BlobServiceClient')
+    def test_client(self, blob_service_client):
+        container_mock = Mock(get_container_client=Mock(return_value='container-client'))
+        blob_service_client.from_connection_string = Mock(return_value=container_mock)
+        blob_storage = BlobStorage()
+        self.assertEqual(blob_storage.client, 'container-client')
+        blob_service_client.from_connection_string.assert_called_once_with(conn_str='conn-str')
+        container_mock.get_container_client.assert_called_once_with('ocl-test-exports')
+
+    @patch('core.services.storages.cloud.azure.BlobServiceClient')
+    def test_upload_file(self, blob_service_client):
+        client_mock = Mock(upload_blob=Mock(return_value='success'), url='https://some-url')
+        container_client_mock = Mock(get_blob_client=Mock(return_value=client_mock))
+        container_mock = Mock(get_container_client=Mock(return_value=container_client_mock))
+        blob_service_client.from_connection_string = Mock(return_value=container_mock)
+        blob_storage = BlobStorage()
+
+        file_path = os.path.join(os.path.dirname(__file__), '../../../', 'samples/sample_ocldev.json')
+
+        result = blob_storage.upload_file(
+            'foo/bar/foo.json', file_path, {'content-type': 'application/zip'}, True
+        )
+
+        self.assertEqual(result, 'https://some-url')
+        container_client_mock.get_blob_client.assert_called_once_with(blob='foo/bar/foo.json')
+        client_mock.upload_blob.assert_called_once_with(
+            data=open(file_path, 'rb').read(), content_settings=ANY, overwrite=True)
+        self.assertEqual(
+            dict(client_mock.upload_blob.call_args[1]['content_settings']),
+            {
+                'content_type': 'application/octet-stream',
+                'content_encoding': 'zip',
+                'content_language': None,
+                'content_md5': None,
+                'content_disposition': None,
+                'cache_control': None
+            }
+        )
+
+    @patch('core.services.storages.cloud.azure.BlobServiceClient')
+    def test_upload_base64(self, blob_service_client):
+        client_mock = Mock(upload_blob=Mock(return_value='success'), url='https://some-url')
+        container_client_mock = Mock(get_blob_client=Mock(return_value=client_mock))
+        container_mock = Mock(get_container_client=Mock(return_value=container_client_mock))
+        blob_service_client.from_connection_string = Mock(return_value=container_mock)
+        blob_storage = BlobStorage()
+
+        file_content = base64.b64encode(b'file-content')
+
+        uploaded_file_name_with_ext = blob_storage.upload_base64(
+            doc_base64='extension/ext;base64,' + file_content.decode(),
+            file_name='some-file-name',
+        )
+
+        self.assertEqual(uploaded_file_name_with_ext, 'some-file-name.ext')
+        container_client_mock.get_blob_client.assert_called_once_with(blob='some-file-name.ext')
+        client_mock.upload_blob.assert_called_once_with(data=ANY, content_settings=ANY, overwrite=True)
+        self.assertEqual(
+            dict(client_mock.upload_blob.call_args[1]['content_settings']),
+            {
+                'content_type': 'application/octet-stream',
+                'content_encoding': None,
+                'content_language': None,
+                'content_md5': None,
+                'content_disposition': None,
+                'cache_control': None
+            }
+        )
+
+    @patch('core.services.storages.cloud.azure.BlobServiceClient', Mock())
+    def test_public_url_for(self):
+        blob_storage = BlobStorage()
+
+        self.assertEqual(
+            blob_storage.public_url_for('some/path/file.json'),
+            'https://ocltestaccount.blob.core.windows.net/ocl-test-exports/some/path/file.json'
+        )
+
+        self.assertEqual(
+            blob_storage.public_url_for('file.zip'),
+            'https://ocltestaccount.blob.core.windows.net/ocl-test-exports/file.zip'
+        )
+
+    @patch('core.services.storages.cloud.azure.BlobServiceClient', Mock())
+    def test_url_for(self):
+        blob_storage = BlobStorage()
+
+        self.assertEqual(
+            blob_storage.url_for('some/path/file.json'),
+            'https://ocltestaccount.blob.core.windows.net/ocl-test-exports/some/path/file.json'
+        )
+
+        self.assertEqual(
+            blob_storage.url_for('file.zip'),
+            'https://ocltestaccount.blob.core.windows.net/ocl-test-exports/file.zip'
+        )
+
+    @patch('core.services.storages.cloud.azure.BlobServiceClient')
+    def test_exists(self, blob_service_client):
+        client_mock = Mock()
+        client_mock.get_blob_properties.side_effect = [{'name': 'blah', 'last_modified': 'blah'}, Exception()]
+        container_client_mock = Mock(get_blob_client=Mock(return_value=client_mock))
+        container_mock = Mock(get_container_client=Mock(return_value=container_client_mock))
+        blob_service_client.from_connection_string = Mock(return_value=container_mock)
+
+        blob_storage = BlobStorage()
+
+        self.assertTrue(blob_storage.exists('some/path/file.zip'))
+        self.assertFalse(blob_storage.exists('foo.json'))
+        self.assertEqual(container_client_mock.get_blob_client.call_count, 2)
+        self.assertEqual(
+            container_client_mock.get_blob_client.mock_calls[0],
+            call(blob='some/path/file.zip')
+        )
+        self.assertEqual(
+            container_client_mock.get_blob_client.mock_calls[1],
+            call(blob='foo.json')
+        )
+        self.assertEqual(client_mock.get_blob_properties.call_count, 2)
+
+    @patch('core.services.storages.cloud.azure.BlobServiceClient')
+    def test_has_path(self, blob_service_client):
+        blob1 = Mock()
+        blob1.name = 'foo/bar/foobar.json'
+        blob2 = Mock()
+        blob2.name = 'foobar.json'
+        blobs_mock = [blob1, blob2, BlobPrefix(name='bar/foobar.json')]
+        container_client_mock = Mock(walk_blobs=Mock(return_value=blobs_mock))
+        container_mock = Mock(get_container_client=Mock(return_value=container_client_mock))
+        blob_service_client.from_connection_string = Mock(return_value=container_mock)
+
+        blob_storage = BlobStorage()
+
+        self.assertTrue(blob_storage.has_path('foo/bar/'))
+        self.assertTrue(blob_storage.has_path('foo/bar'))
+        self.assertFalse(blob_storage.has_path('bar/'))
+
+        self.assertEqual(container_client_mock.walk_blobs.call_count, 3)
+        self.assertEqual(
+            container_client_mock.walk_blobs.mock_calls[0], call(name_starts_with='foo/bar', delimiter='/'))
+        self.assertEqual(
+            container_client_mock.walk_blobs.mock_calls[1], call(name_starts_with='foo/bar', delimiter='/'))
+        self.assertEqual(
+            container_client_mock.walk_blobs.mock_calls[2], call(name_starts_with='bar', delimiter='/'))
+
+    @patch('core.services.storages.cloud.azure.BlobServiceClient')
+    def test_get_last_key_from_path(self, blob_service_client):
+        now = timezone.now()
+        blob1 = Mock(last_modified=now)
+        blob1.name = 'foo/bar/foobar.json'
+        blob2 = Mock(last_modified=now - timedelta(days=1))
+        blob2.name = 'foo/bar/foobar1.json'
+        blobs_mock = [blob1, blob2, BlobPrefix(name='foo/bar/foobar.json')]
+        container_client_mock = Mock(walk_blobs=Mock(return_value=blobs_mock))
+        container_mock = Mock(get_container_client=Mock(return_value=container_client_mock))
+        blob_service_client.from_connection_string = Mock(return_value=container_mock)
+
+        self.assertEqual(BlobStorage().get_last_key_from_path('foo/bar/'), 'foo/bar/foobar.json')
+        container_client_mock.walk_blobs.assert_called_once_with(name_starts_with='foo/bar/', delimiter='')
+
+    @patch('core.services.storages.cloud.azure.BlobServiceClient')
+    def test_delete_objects(self, blob_service_client):
+        blob1 = Mock()
+        blob1.name = 'foo/bar/foobar.json'
+        blob2 = Mock()
+        blob2.name = 'foo/bar/foobar1.json'
+        blobs_mock = [blob1, blob2, BlobPrefix(name='foo/bar/foobar2.json')]
+        client_mock = Mock(delete_blob=Mock())
+        container_client_mock = Mock(
+            walk_blobs=Mock(return_value=blobs_mock), get_blob_client=Mock(return_value=client_mock))
+        container_mock = Mock(get_container_client=Mock(return_value=container_client_mock))
+        blob_service_client.from_connection_string = Mock(return_value=container_mock)
+
+        self.assertEqual(BlobStorage().delete_objects('foo/bar/'), 2)
+        container_client_mock.walk_blobs.assert_called_once_with(name_starts_with='foo/bar/', delimiter='')
+        self.assertEqual(container_client_mock.get_blob_client.call_count, 2)
+        self.assertEqual(container_client_mock.get_blob_client.mock_calls[0], call(blob='foo/bar/foobar.json'))
+        self.assertEqual(container_client_mock.get_blob_client.mock_calls[1], call(blob='foo/bar/foobar1.json'))
+        self.assertEqual(client_mock.delete_blob.call_count, 2)
+
+    @patch('core.services.storages.cloud.azure.BlobServiceClient')
+    def test_remove(self, blob_service_client):
+        blob1 = Mock()
+        blob1.name = 'foo/bar/foobar.json'
+        blob2 = Mock()
+        blob2.name = 'foo/bar/foobar1.json'
+        client_mock = Mock(delete_blob=Mock())
+        container_client_mock = Mock(
+            get_blob_client=Mock(return_value=client_mock))
+        container_mock = Mock(get_container_client=Mock(return_value=container_client_mock))
+        blob_service_client.from_connection_string = Mock(return_value=container_mock)
+
+        BlobStorage().remove('foo/bar/foobar.json')
+
+        container_client_mock.get_blob_client.assert_called_once_with(blob='foo/bar/foobar.json')
+        client_mock.delete_blob.assert_called_once()

@@ -38,3 +38,5 @@ mozilla-django-oidc==3.0.0
 django-celery-beat==2.5.0
 jsondiff==2.0.0
 django-silk==5.0.4
+azure-storage-blob==12.19.0
+azure-identity==1.15.0

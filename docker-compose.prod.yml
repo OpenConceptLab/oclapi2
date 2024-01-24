@@ -47,6 +47,9 @@ services:
       - AWS_REGION_NAME
       - ERRBIT_URL
       - ERRBIT_KEY
+      - AZURE_STORAGE_ACCOUNT_NAME
+      - AZURE_STORAGE_CONTAINER_NAME
+      - AZURE_STORAGE_CONNECTION_STRING
     healthcheck:
       test: "curl --silent --fail http://localhost:8000/version/ || exit 1"
   celery:
