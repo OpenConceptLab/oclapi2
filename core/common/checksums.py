@@ -260,7 +260,7 @@ class ChecksumDiff:  # pragma: no cover
         deleted = self.deleted
 
         self.result = {
-            'new': self.get_struct(len(new) / denominator, new, self.verbose),
+            'new': self.get_struct(len(new) / denominator, new, True),
             'removed': self.get_struct(len(deleted) / denominator, deleted, True),
             'same': self.get_struct(len(self.same) / denominator, self.same, self.verbose),
             'changed': self.get_struct(len(self.changed) / denominator, self.changed, True),
