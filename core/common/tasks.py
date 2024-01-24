@@ -711,7 +711,7 @@ def update_mappings_concept(concept_id):
 def calculate_checksums(resource_type, resource_id):
     model = get_resource_class_from_resource_name(resource_type)
     if model:
-        is_source_child = model.__class__.__name__ in ('Concept', 'Mapping')
+        is_source_child = model.__name__ in ('Concept', 'Mapping')
         instance = model.objects.filter(id=resource_id).first()
         if instance:
             instance.set_checksums()

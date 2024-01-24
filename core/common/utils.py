@@ -22,7 +22,6 @@ from django.conf import settings
 from django.urls import NoReverseMatch, reverse, get_resolver
 from django.utils import timezone
 from djqscsv import csv_file_for
-from elasticsearch_dsl import Q as es_Q
 from pydash import flatten, compact, get
 from requests import ConnectTimeout
 from requests.auth import HTTPBasicAuth
@@ -264,8 +263,6 @@ def write_export_file(
             batch_queryset = concepts_qs.order_by('-concept_id')[start:end]
 
         logger.info('Done serializing concepts.')
-    else:
-        logger.info(f'{resource_name} has no concepts to serialize.')
 
     if is_collection:
         references_qs = version.references
@@ -290,8 +287,6 @@ def write_export_file(
                     if end != total_references:
                         out.write(', ')
             logger.info('Done serializing references.')
-        else:
-            logger.info(f'{resource_name} has no references to serialize.')
 
     with open('export.json', 'a') as out:
         out.write('], "mappings": [')
@@ -323,8 +318,6 @@ def write_export_file(
             batch_queryset = mappings_qs.order_by('-mapping_id')[start:end]
 
         logger.info('Done serializing mappings.')
-    else:
-        logger.info(f'{resource_name} has no mappings to serialize.')
 
     with open('export.json', 'a') as out:
         end_time = str(round((time.time() - start_time) + 2, 2)) + 'secs'
@@ -360,10 +353,6 @@ def write_export_file(
 
 def get_api_base_url():
     return settings.API_BASE_URL
-
-
-def get_api_internal_base_url():
-    return settings.API_INTERNAL_BASE_URL
 
 
 def to_snake_case(string):
@@ -621,12 +610,14 @@ def get_resource_class_from_resource_name(resource):  # pylint: disable=too-many
 
 
 def get_content_type_from_resource_name(resource):
+    content_type = None
+
     model = get_resource_class_from_resource_name(resource)
     if model:
         from django.contrib.contenttypes.models import ContentType
-        return ContentType.objects.get_for_model(model)
+        content_type = ContentType.objects.get_for_model(model)
 
-    return None
+    return content_type
 
 
 def flatten_dict(dikt, parent_key='', sep='__'):
@@ -663,14 +654,14 @@ def get_celery_once_lock_key(name, args):
 
 
 def guess_extension(file=None, name=None):
-    if not file and not name:
-        return None
-    if file:
-        name = file.name
-    _, extension = os.path.splitext(name)
+    extension = None
+    if file or name:
+        if file:
+            name = file.name
+        _, extension = os.path.splitext(name)
 
-    if not extension:
-        extension = mimetypes.guess_extension(name)
+        if not extension:
+            extension = mimetypes.guess_extension(name)
     return extension
 
 
@@ -766,14 +757,6 @@ def get_request_url():
     return request_url
 
 
-def named_tuple_fetchall(cursor):
-    """Return all rows from a cursor as a namedtuple"""
-    from collections import namedtuple
-    desc = cursor.description
-    nt_result = namedtuple('Result', [col[0] for col in desc])
-    return [nt_result(*row) for row in cursor.fetchall()]
-
-
 def nested_dict_values(_dict):
     for value in _dict.values():
         if isinstance(value, dict):
@@ -792,27 +775,6 @@ def es_id_in(search, ids):
     if ids:
         return search.query("terms", _id=ids)
     return search
-
-
-def get_es_wildcard_search_criterion(search_str, name_attr='name'):
-    def get_query(_str):
-        return es_Q(
-            "wildcard", id={'value': _str, 'boost': 2}
-        ) | es_Q(
-            "wildcard", **{name_attr: {'value': _str, 'boost': 5}}
-        ) | es_Q(
-            "query_string", query=f"*{_str}*"
-        )
-
-    if search_str:
-        words = search_str.split()
-        criterion = get_query(words[0])
-        for word in words[1:]:
-            criterion |= get_query(word)
-    else:
-        criterion = get_query(search_str)
-
-    return criterion
 
 
 def es_to_pks(search):
