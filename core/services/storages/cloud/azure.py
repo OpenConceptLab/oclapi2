@@ -66,12 +66,13 @@ class BlobStorage(CloudStorageServiceInterface):
 
         return None
 
-    def upload_file(
-            self, key, file_path=None, headers=None, binary=False, metadata=None
-    ):  # pylint: disable=too-many-arguments
-        read_directive = 'rb' if binary else 'r'
-        file_path = file_path if file_path else key
-        return self._upload(key, open(file_path, read_directive).read(), headers or metadata)
+    def upload_file(self, key, file_path=None, headers=None, binary=False, metadata=None):  # pylint: disable=too-many-arguments
+        return self._upload(
+            blob_name=key,
+            file_path=file_path or key,
+            read_directive='rb' if binary else 'r',
+            metadata=headers or metadata
+        )
 
     def upload_base64(  # pylint: disable=too-many-arguments,inconsistent-return-statements
             self, doc_base64, file_name, append_extension=True, public_read=False, headers=None
@@ -95,11 +96,17 @@ class BlobStorage(CloudStorageServiceInterface):
                 file_name += '.jpg'
             file_name_with_ext = file_name
 
-        self._upload(file_name_with_ext, ContentFile(base64.b64decode(_doc_string)), headers)
+        self._upload(
+            blob_name=file_name_with_ext,
+            file_content=ContentFile(base64.b64decode(_doc_string)),
+            metadata=headers
+        )
 
         return file_name_with_ext
 
-    def _upload(self, blob_name, file_content, metadata=None):
+    def _upload(self, blob_name, file_content=None, file_path=None, read_directive=None, metadata=None):  # pylint: disable=too-many-arguments
+        if not file_path and not file_content:
+            return None
         try:
             content_settings = ContentSettings(content_type='application/octet-stream')
             content_type = get(metadata, 'content-type') or get(metadata, 'ContentType')
@@ -107,7 +114,11 @@ class BlobStorage(CloudStorageServiceInterface):
                 content_settings.content_encoding = content_type.split('application/')[1]
 
             blob_client = self.__get_blob_client(blob_name)
-            blob_client.upload_blob(data=file_content, content_settings=content_settings, overwrite=True)
+            if file_content:
+                self.__upload_content(blob_client, content_settings, file_content)
+            else:
+                with open(file_path, read_directive or 'r') as data:
+                    self.__upload_content(blob_client, content_settings, data)
 
             return blob_client.url
         except:  # pylint: disable=bare-except
@@ -120,6 +131,10 @@ class BlobStorage(CloudStorageServiceInterface):
 
     def _remove(self, blob_name):
         return self.__get_blob_client(blob_name).delete_blob()
+
+    @staticmethod
+    def __upload_content(blob_client, content_settings, file_content):
+        blob_client.upload_blob(data=file_content, content_settings=content_settings, overwrite=True)
 
     def __get_blob_client(self, blob_name):
         return self.client.get_blob_client(blob=blob_name)

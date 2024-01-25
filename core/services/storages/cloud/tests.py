@@ -1,4 +1,5 @@
 import base64
+import io
 import os
 from datetime import timedelta
 from unittest.mock import Mock, patch, mock_open, ANY
@@ -218,7 +219,8 @@ class BlobStorageTest(TestCase):
         self.assertEqual(result, 'https://some-url')
         container_client_mock.get_blob_client.assert_called_once_with(blob='foo/bar/foo.json')
         client_mock.upload_blob.assert_called_once_with(
-            data=open(file_path, 'rb').read(), content_settings=ANY, overwrite=True)
+            data=ANY, content_settings=ANY, overwrite=True)
+        self.assertTrue(isinstance(client_mock.upload_blob.call_args[1]['data'], io.BufferedReader))
         self.assertEqual(
             dict(client_mock.upload_blob.call_args[1]['content_settings']),
             {
