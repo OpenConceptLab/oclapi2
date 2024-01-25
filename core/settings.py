@@ -314,10 +314,21 @@ STATICFILES_STORAGE = 'whitenoise.storage.CompressedStaticFilesStorage'
 AUTH_USER_MODEL = 'users.UserProfile'
 TEST_RUNNER = 'core.common.tests.CustomTestRunner'
 DEFAULT_LOCALE = os.environ.get('DEFAULT_LOCALE', 'en')
+
+# AWS storage settings
 AWS_ACCESS_KEY_ID = os.environ.get('AWS_ACCESS_KEY_ID', '')
 AWS_SECRET_ACCESS_KEY = os.environ.get('AWS_SECRET_ACCESS_KEY', '')
 AWS_STORAGE_BUCKET_NAME = os.environ.get('AWS_STORAGE_BUCKET_NAME', 'oclapi2-dev')
 AWS_REGION_NAME = os.environ.get('AWS_REGION_NAME', 'us-east-2')
+
+# Azure storage settings
+AZURE_STORAGE_ACCOUNT_NAME = os.environ.get('AZURE_STORAGE_ACCOUNT_NAME', 'ocltestaccount')
+AZURE_STORAGE_CONTAINER_NAME = os.environ.get('AZURE_STORAGE_CONTAINER_NAME', 'ocl-test-exports')
+AZURE_STORAGE_CONNECTION_STRING = os.environ.get('AZURE_STORAGE_CONNECTION_STRING', 'conn-str')
+
+# Repo Export Upload/download
+EXPORT_SERVICE = os.environ.get('EXPORT_SERVICE', 'core.services.storages.cloud.aws.S3')
+
 DISABLE_VALIDATION = os.environ.get('DISABLE_VALIDATION', False)
 API_SUPERUSER_PASSWORD = os.environ.get('API_SUPERUSER_PASSWORD', 'Root123')  # password for ocladmin superuser
 API_SUPERUSER_TOKEN = os.environ.get('API_SUPERUSER_TOKEN', '891b4b17feab99f3ff7e5b5d04ccc5da7aa96da6')
@@ -521,9 +532,6 @@ VERSION = __version__
 # Errbit
 ERRBIT_URL = os.environ.get('ERRBIT_URL', 'http://errbit:8080')
 ERRBIT_KEY = os.environ.get('ERRBIT_KEY', 'errbit-key')
-
-# Repo Export Upload/download
-EXPORT_SERVICE = os.environ.get('EXPORT_SERVICE', 'core.services.storages.cloud.aws.S3')
 
 # Locales Repository URI
 # can either be /orgs/OCL/sources/Locales/ (old-style, ISO-639-2)
