@@ -14,6 +14,7 @@ import os
 # Build paths inside the project like this: os.path.join(BASE_DIR, ...)
 
 from corsheaders.defaults import default_headers
+from elasticsearch import RequestsHttpConnection
 from kombu import Queue, Exchange
 from redis.backoff import ExponentialBackoff
 from redis.retry import Retry
@@ -221,7 +222,8 @@ ELASTICSEARCH_DSL = {
         'sniffer_timeout': 60,
         'sniff_timeout': 10,
         'max_retries': 3,
-        'retry_on_timeout': True
+        'retry_on_timeout': True,
+        'connection_class': RequestsHttpConnection # Needed for verify_certs=False to work
     },
 }
 
