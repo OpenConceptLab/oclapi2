@@ -203,7 +203,7 @@ ES_HOST = os.environ.get('ES_HOST', 'es')  # Deprecated. Use ES_HOSTS instead.
 ES_PORT = os.environ.get('ES_PORT', '9200')  # Deprecated. Use ES_HOSTS instead.
 ES_HOSTS = os.environ.get('ES_HOSTS', None)
 ES_SCHEME = os.environ.get('ES_SCHEME', 'http')
-ES_VERIFY_CERTS = os.environ.get('ES_VERIFY_CERTS', ES_SCHEME == 'https')
+ES_VERIFY_CERTS = os.environ.get('ES_VERIFY_CERTS', str(ES_SCHEME == 'https'))
 ES_USER = os.environ.get('ES_USER', None)
 ES_PASSWORD = os.environ.get('ES_PASSWORD', None)
 http_auth = None
@@ -215,7 +215,7 @@ ELASTICSEARCH_DSL = {
         'hosts': ES_HOSTS.split(',') if ES_HOSTS else [ES_HOST + ':' + ES_PORT],
         'http_auth': http_auth,
         'use_ssl': ES_SCHEME == 'https',
-        'verify_certs': ES_VERIFY_CERTS,
+        'verify_certs': ES_VERIFY_CERTS.lower() == 'true',
         'sniff_on_connection_fail': True,
         'sniff_on_start': True,
         'sniffer_timeout': 60,
