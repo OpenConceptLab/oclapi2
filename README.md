@@ -14,6 +14,20 @@ The new and improved OCL terminology service v2
 3. Go to http://localhost:8000/swagger/ to benefit.
 4. Go to http://localhost:8080 for keyCloak.
 
+### Configuration
+#### Authentication
+OCL API supports authentication using 2 methods. One is Django Auth (integrated into API) and the other is SSO using external service supporting OpenID such as Keycloak, Active Directory, etc.
+
+In order to setup SSO using OpenID one needs to provide the following environment variables:
+```
+OIDC_SERVER_URL=${OIDC_SERVER_URL-http://localhost:8080}
+OIDC_SERVER_INTERNAL_URL=${OIDC_SERVER_INTERNAL_URL-http://host.docker.internal:8080} # only for dev env
+OIDC_REALM=${OIDC_REALM-ocl}
+```
+API supports the OpenID implicit flow.
+
+If `OIDC_SERVER_URL` and `OIDC_REALM` are not provided then the Django Auth is enabled by default.
+
 #### Run Checks
 (use the `docker exec` command in a service started with `docker-compose up -d`)
 1. Pylint (pep8):
