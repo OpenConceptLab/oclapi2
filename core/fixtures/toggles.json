@@ -20,5 +20,15 @@
       "dev": true,
       "qa": true
     }
+  },
+  {
+    "pk": 4,
+    "model": "toggles.toggle",
+    "fields": {
+      "is_active": true,
+      "name": "URL_REGISTRY_IN_RESOLVE_REFERENCE_TOGGLE",
+      "dev": true,
+      "qa": true
+    }
   }
 ]

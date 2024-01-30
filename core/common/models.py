@@ -33,6 +33,7 @@ from .fields import URIField
 from .mixins import SourceContainerMixin
 from .tasks import handle_save, handle_m2m_changed, seed_children_to_new_version, update_validation_schema, \
     update_source_active_concepts_count, update_source_active_mappings_count
+from ..toggles.models import Toggle
 
 TRUTHY = get_truthy_values()
 
@@ -912,33 +913,40 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         """
 
         resolution_url, version, is_canonical = cls.__get_resolution_url(url, version)
-
         instance = None
         is_global_namespace = not namespace or namespace == '/'
         criteria = models.Q(is_active=True, retired=False)
 
         from core.url_registry.models import URLRegistry
         if is_canonical:
-            url_registry_entry = None
-            owner = None
-            if not is_global_namespace:
-                owner = SourceContainerMixin.get_object_from_namespace(namespace)
-                if owner:
-                    url_registry_entry = owner.url_registry_entries.filter(is_active=True, url=resolution_url).first()
-                    if not url_registry_entry:
-                        instance = owner.find_repo_by_canonical_url(resolution_url)
+            if Toggle.get('URL_REGISTRY_IN_RESOLVE_REFERENCE_TOGGLE'):
+                url_registry_entry = None
+                owner = None
+                if not is_global_namespace:
+                    owner = SourceContainerMixin.get_object_from_namespace(namespace)
+                    if owner:
+                        url_registry_entry = owner.url_registry_entries.filter(
+                            is_active=True, url=resolution_url).first()
+                        if not url_registry_entry:
+                            instance = owner.find_repo_by_canonical_url(resolution_url)
 
-            if is_global_namespace or (not url_registry_entry and not instance):
-                url_registry_entry = URLRegistry.get_active_global_entries().filter(url=resolution_url).first()
+                if is_global_namespace or (not url_registry_entry and not instance):
+                    url_registry_entry = URLRegistry.get_active_global_entries().filter(url=resolution_url).first()
 
-            if not owner and url_registry_entry and url_registry_entry.namespace:
-                owner = url_registry_entry.namespace_owner
+                if not owner and url_registry_entry and url_registry_entry.namespace:
+                    owner = url_registry_entry.namespace_owner
 
-            if instance or not url_registry_entry or not url_registry_entry.namespace or not owner:
-                return cls.resolve_repo(instance, version, is_canonical, resolution_url)
+                if instance or not url_registry_entry or not url_registry_entry.namespace or not owner:
+                    return cls.resolve_repo(instance, version, is_canonical, resolution_url)
 
-            criteria &= models.Q(
-                canonical_url=resolution_url, **{f"{owner.resource_type.lower()}__uri": url_registry_entry.namespace})
+                criteria &= models.Q(
+                    canonical_url=resolution_url, **{
+                        f"{owner.resource_type.lower()}__uri": url_registry_entry.namespace
+                    })
+            else:
+                criteria &= models.Q(canonical_url=resolution_url)
+                if namespace:
+                    criteria &= models.Q(models.Q(user__uri=namespace) | models.Q(organization__uri=namespace))
         else:
             criteria &= models.Q(uri=resolution_url)
 
