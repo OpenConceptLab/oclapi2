@@ -802,7 +802,7 @@ class ConceptTest(OCLTestCase):
         self.assertEqual(concept_version.mnemonic, concept.mnemonic)
         self.assertFalse(concept_version.released)
 
-    def test_persist_clone(self):
+    def test_save_as_new_version(self):
         es_description = ConceptDescriptionFactory.build(locale='es', name='Not English')
         en_description = ConceptDescriptionFactory.build(locale='en', name='English')
         en_name = ConceptNameFactory.build(locale='en', name='English')
@@ -822,12 +822,7 @@ class ConceptTest(OCLTestCase):
         source_version0.concepts.add(concept)
         cloned_concept = Concept.version_for_concept(concept, 'v1', source_head)
 
-        self.assertEqual(
-            Concept.persist_clone(cloned_concept),
-            {'version_created_by': 'Must specify which user is attempting to create a new concept version.'}
-        )
-
-        self.assertEqual(Concept.persist_clone(cloned_concept, concept.created_by), {})
+        self.assertEqual(cloned_concept.save_as_new_version(concept.created_by), {})
 
         persisted_concept = Concept.objects.filter(
             mnemonic=cloned_concept.mnemonic, version=cloned_concept.version
@@ -851,7 +846,7 @@ class ConceptTest(OCLTestCase):
             **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'c1', 'parent': source,
             'names': [ConceptNameFactory.build(locale='en', name='English', locale_preferred=True)]
         })
-        Concept.persist_clone(concept.clone(), concept.created_by)
+        concept.clone().save_as_new_version(concept.created_by)
         concept_v1 = Concept.objects.order_by('-created_at').first()
         concept.refresh_from_db()
 
@@ -883,7 +878,7 @@ class ConceptTest(OCLTestCase):
             **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'c1', 'parent': source, 'retired': True,
             'names': [ConceptNameFactory.build(locale='en', name='English', locale_preferred=True)]
         })
-        Concept.persist_clone(concept.clone(), concept.created_by)
+        concept.clone().save_as_new_version(concept.created_by)
         concept_v1 = Concept.objects.order_by('-created_at').first()
         concept.refresh_from_db()
 
@@ -1191,7 +1186,7 @@ class ConceptTest(OCLTestCase):
             version='v2', mnemonic=source.mnemonic, organization=source.organization)
 
         cloned_concept = Concept.version_for_concept(concept, 'v1', source)
-        Concept.persist_clone(cloned_concept, concept.created_by)
+        cloned_concept.save_as_new_version(concept.created_by)
 
         self.assertEqual(concept.versions.count(), 2)
 
@@ -1231,7 +1226,7 @@ class ConceptTest(OCLTestCase):
         OrganizationSourceFactory(
             version='v2', mnemonic=source.mnemonic, organization=source.organization)
         cloned_concept = Concept.version_for_concept(concept, 'v1', source)
-        Concept.persist_clone(cloned_concept, concept.created_by)
+        cloned_concept.save_as_new_version(concept.created_by)
         self.assertEqual(concept.versions.count(), 2)
 
         concept_v1 = concept.get_latest_version()

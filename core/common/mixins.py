@@ -3,7 +3,9 @@ from math import ceil
 from urllib import parse
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
+from django.db import transaction
 from django.db.models import Q, F, QuerySet
 from django.http import HttpResponseForbidden, Http404
 from django.shortcuts import get_object_or_404
@@ -22,7 +24,8 @@ from core.common.permissions import HasPrivateAccess, HasOwnership, CanViewConce
     CanViewConceptDictionaryVersion
 from .checksums import ChecksumModel, Checksum
 from .utils import write_csv_to_s3, get_csv_from_s3, get_query_params_from_url_string, compact_dict_by_values, \
-    to_owner_uri, parse_updated_since_param, get_export_service, to_int, get_truthy_values
+    to_owner_uri, parse_updated_since_param, get_export_service, to_int, get_truthy_values, generate_temp_version
+from ..concepts.constants import PERSIST_CLONE_ERROR
 
 logger = logging.getLogger('oclapi')
 TRUTHY = get_truthy_values()
@@ -620,7 +623,7 @@ class SourceChildMixin(ChecksumModel):
         new_version = latest_version.clone()
         new_version.retired = retired
         new_version.comment = comment
-        return self.__class__.persist_clone(new_version, user)
+        return new_version.save_as_new_version(user)
 
     @classmethod
     def from_uri_queryset(cls, uri):  # soon to be deleted
@@ -723,7 +726,7 @@ class SourceChildMixin(ChecksumModel):
     def collection_references(self, collection):
         return self.references.filter(collection=collection)
 
-    def __update_latest_version(self, index, is_latest_version, parent, remove_parent=False, add_parent=False):
+    def __update_latest_version(self, index, is_latest_version, parent, remove_parent=False, add_parent=False):  # pylint: disable=too-many-arguments
         self._index = index  # pylint: disable=protected-access
         self.is_latest_version = is_latest_version
         self.save(update_fields=['is_latest_version', '_index'])
@@ -740,6 +743,68 @@ class SourceChildMixin(ChecksumModel):
     def mark_latest_version(self, index=True, parent=None):
         parent = parent or self.parent
         self.__update_latest_version(index, True, parent, False, True)
+
+    @staticmethod
+    def validate_locales_limit(names, descriptions):
+        pass
+
+    def _process_prev_latest_version_children(self, prev_latest, add_prev_version_children):
+        pass
+
+    def _process_latest_version_hierarchy(self, prev_latest, parent_concept_uris=None, create_parent_version=True):
+        pass
+
+    def _index_on_new_version_creation(self, prev_latest):
+        if self._index:
+            if prev_latest:
+                prev_latest.index()
+            self.index()
+
+    def remove_locales(self):
+        pass
+
+    def save_as_new_version(self, user, **kwargs):
+        cls = self.__class__
+        create_parent_version = kwargs.pop('create_parent_version', True)
+        parent_concept_uris = kwargs.pop('parent_concept_uris', None)
+        add_prev_version_children = kwargs.pop('add_prev_version_children', True)
+        errors = {}
+        self.created_by = self.updated_by = user
+        self.version = self.version or generate_temp_version()
+        parent = self.parent
+        persisted = False
+        prev_latest = self.versions.exclude(id=self.id).filter(is_latest_version=True).first()
+        try:
+            with transaction.atomic():
+                self.validate_locales_limit(get(self, 'cloned_names'), get(self, 'cloned_descriptions'))
+                cls.pause_indexing()
+                self.is_latest_version = True
+                self.save(**kwargs)
+
+                if self.id:
+                    self.post_version_create(parent)
+                    if prev_latest:
+                        if not self._index:
+                            self.prev_latest_version_id = prev_latest.id
+                        prev_latest.unmark_latest_version(self._index, parent)
+                        self._process_prev_latest_version_children(prev_latest, add_prev_version_children)
+                    persisted = True
+                    cls.resume_indexing()
+                    self._process_latest_version_hierarchy(prev_latest, parent_concept_uris, create_parent_version)
+                transaction.on_commit(lambda: self._index_on_new_version_creation(prev_latest))
+        except ValidationError as err:
+            errors.update(err.message_dict)
+        finally:
+            cls.resume_indexing()
+            if not persisted:
+                if prev_latest:
+                    prev_latest.mark_latest_version(True, parent)
+                if self.id:
+                    self.remove_locales()
+                    self.delete()
+                errors['non_field_errors'] = [PERSIST_CLONE_ERROR]
+
+        return errors
 
 
 class ConceptContainerExportMixin:

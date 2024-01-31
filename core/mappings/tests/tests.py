@@ -278,7 +278,7 @@ class MappingTest(OCLTestCase):
         self.assertNotEqual(mapping2.mnemonic, mapping1.mnemonic)
         self.assertNotEqual(mapping2.external_id, mapping1.external_id)
 
-    def test_persist_clone(self):
+    def test_save_as_new_version(self):
         source_head = OrganizationSourceFactory(version=HEAD)
         OrganizationSourceFactory(
             version='v0', mnemonic=source_head.mnemonic, organization=source_head.organization
@@ -289,12 +289,7 @@ class MappingTest(OCLTestCase):
         mapping = MappingFactory(parent=source_head)
         cloned_mapping = mapping.clone(mapping.created_by)
 
-        self.assertEqual(
-            Mapping.persist_clone(cloned_mapping),
-            {'version_created_by': 'Must specify which user is attempting to create a new mapping version.'}
-        )
-
-        self.assertEqual(Mapping.persist_clone(cloned_mapping, mapping.created_by), {})
+        self.assertEqual(cloned_mapping.save_as_new_version(mapping.created_by), {})
 
         persisted_mapping = Mapping.objects.filter(
             id=cloned_mapping.id, version=cloned_mapping.version

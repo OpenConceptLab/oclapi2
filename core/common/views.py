@@ -913,7 +913,7 @@ class SourceChildExtraRetrieveUpdateDestroyView(SourceChildExtrasBaseView, Retri
         new_version = self.get_object().clone()
         new_version.extras[key] = value
         new_version.comment = f'Updated extras: {key}={value}.'
-        errors = self.model.persist_clone(new_version, request.user)
+        errors = new_version.save_as_new_version(request.user)
         if errors:
             return Response(errors, status=status.HTTP_400_BAD_REQUEST)
         return Response({key: value})
@@ -924,7 +924,7 @@ class SourceChildExtraRetrieveUpdateDestroyView(SourceChildExtrasBaseView, Retri
         if key in new_version.extras:
             del new_version.extras[key]
             new_version.comment = f'Deleted extra {key}.'
-            errors = self.model.persist_clone(new_version, request.user)
+            errors = new_version.save_as_new_version(request.user)
             if errors:
                 return Response(errors, status=status.HTTP_400_BAD_REQUEST)
             return Response(status=status.HTTP_204_NO_CONTENT)

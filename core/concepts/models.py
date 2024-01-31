@@ -2,7 +2,7 @@ from django.conf import settings
 from django.contrib.postgres.indexes import HashIndex
 from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator
-from django.db import models, IntegrityError, transaction
+from django.db import models, IntegrityError
 from django.db.models import F, Q
 from pydash import get, compact
 
@@ -16,7 +16,7 @@ from core.common.utils import generate_temp_version, drop_version, \
     encode_string, decode_string, startswith_temp_version, is_versioned_uri
 from core.concepts.constants import CONCEPT_TYPE, LOCALES_FULLY_SPECIFIED, LOCALES_SHORT, LOCALES_SEARCH_INDEX_TERM, \
     CONCEPT_WAS_RETIRED, CONCEPT_IS_ALREADY_RETIRED, CONCEPT_IS_ALREADY_NOT_RETIRED, CONCEPT_WAS_UNRETIRED, \
-    PERSIST_CLONE_ERROR, PERSIST_CLONE_SPECIFY_USER_ERROR, ALREADY_EXISTS, CONCEPT_REGEX, MAX_LOCALES_LIMIT, \
+    ALREADY_EXISTS, CONCEPT_REGEX, MAX_LOCALES_LIMIT, \
     MAX_NAMES_LIMIT, MAX_DESCRIPTIONS_LIMIT
 from core.concepts.mixins import ConceptValidationMixin
 from core.services.storages.postgres import PostgresQL
@@ -577,7 +577,12 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         if not parent_concept_uris and has_parent_concept_uris_attr:
             parent_concept_uris = []
 
-        return cls.persist_clone(instance, user, create_parent_version, parent_concept_uris, add_prev_version_children)
+        return instance.save_as_new_version(
+            user=user,
+            create_parent_version=create_parent_version,
+            parent_concept_uris=parent_concept_uris,
+            add_prev_version_children=add_prev_version_children
+        )
 
     def set_parent_concepts_from_uris(self, create_parent_version=True):
         parent_concepts = get(self, '_parent_concepts', None)
@@ -812,70 +817,21 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             self.sources.set([parent])
             self.set_checksums()
 
-    @classmethod
-    def persist_clone(   # pylint: disable=too-many-arguments,too-many-branches
-            cls, obj, user=None, create_parent_version=True, parent_concept_uris=None, add_prev_version_children=True,
-            **kwargs
-    ):
-        errors = {}
-        if not user:
-            errors['version_created_by'] = PERSIST_CLONE_SPECIFY_USER_ERROR
-            return errors
-        obj.created_by = obj.updated_by = user
-        obj.version = obj.version or generate_temp_version()
-        parent = obj.parent
-        persisted = False
-        prev_latest = obj.versions.exclude(id=obj.id).filter(is_latest_version=True).first()
-        try:
-            with transaction.atomic():
-                cls.validate_locales_limit(obj.cloned_names, obj.cloned_descriptions)
-                cls.pause_indexing()
-                obj.is_latest_version = True
-                obj.save(**kwargs)
-                if obj.id:
-                    obj.post_version_create(parent)
-                    if prev_latest:
-                        if not obj._index:  # pylint: disable=protected-access
-                            obj.prev_latest_version_id = prev_latest.id
-                        prev_latest.unmark_latest_version(obj._index, parent)  # pylint: disable=protected-access
+    def _process_prev_latest_version_hierarchy(self, prev_latest, add_prev_version_children=True):
+        if add_prev_version_children:
+            task = process_hierarchy_for_new_parent_concept_version
+            if get(settings, 'TEST_MODE', False):
+                task(prev_latest.id, self.id)
+            else:
+                task.apply_async((prev_latest.id, self.id), queue='concurrent')
 
-                        if add_prev_version_children:
-                            if get(settings, 'TEST_MODE', False):
-                                process_hierarchy_for_new_parent_concept_version(prev_latest.id, obj.id)
-                            else:
-                                process_hierarchy_for_new_parent_concept_version.apply_async(
-                                    (prev_latest.id, obj.id), queue='concurrent')
-                    persisted = True
-                    cls.resume_indexing()
-                    if get(settings, 'TEST_MODE', False):
-                        process_hierarchy_for_concept_version(
-                            obj.id, get(prev_latest, 'id'), parent_concept_uris, create_parent_version)
-                    else:
-                        process_hierarchy_for_concept_version.apply_async(
-                            (obj.id, get(prev_latest, 'id'), parent_concept_uris, create_parent_version),
-                            queue='concurrent'
-                        )
-                    def index_all():
-                        if obj._index:  # pylint: disable=protected-access
-                            if prev_latest:
-                                prev_latest.index()
-                            obj.index()
-
-                    transaction.on_commit(index_all)
-        except ValidationError as err:
-            if get(err, 'error_dict'):
-                errors.update(err.message_dict)
-        finally:
-            cls.resume_indexing()
-            if not persisted:
-                if prev_latest:
-                    prev_latest.mark_latest_version(True, parent)
-                if obj.id:
-                    obj.remove_locales()
-                    obj.delete()
-                errors['non_field_errors'] = [PERSIST_CLONE_ERROR]
-
-        return errors
+    def _process_latest_version_hierarchy(self, prev_latest, parent_concept_uris=None, create_parent_version=True):
+        task = process_hierarchy_for_concept_version
+        if get(settings, 'TEST_MODE', False):
+            task(self.id, get(prev_latest, 'id'), parent_concept_uris, create_parent_version)
+        else:
+            task.apply_async(
+                (self.id, get(prev_latest, 'id'), parent_concept_uris, create_parent_version), queue='concurrent')
 
     @staticmethod
     def validate_locales_limit(names, descriptions):

@@ -3,7 +3,7 @@ import uuid
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator
-from django.db import models, IntegrityError, transaction
+from django.db import models, IntegrityError
 from django.db.models import Q, F, Max
 from pydash import get
 
@@ -14,8 +14,7 @@ from core.common.tasks import batch_index_resources
 from core.common.utils import separate_version, to_parent_uri, generate_temp_version, \
     encode_string, is_url_encoded_string
 from core.mappings.constants import MAPPING_TYPE, MAPPING_IS_ALREADY_RETIRED, MAPPING_WAS_RETIRED, \
-    MAPPING_IS_ALREADY_NOT_RETIRED, MAPPING_WAS_UNRETIRED, PERSIST_CLONE_ERROR, PERSIST_CLONE_SPECIFY_USER_ERROR, \
-    ALREADY_EXISTS
+    MAPPING_IS_ALREADY_NOT_RETIRED, MAPPING_WAS_UNRETIRED, ALREADY_EXISTS
 from core.mappings.mixins import MappingValidationMixin
 from core.services.storages.postgres import PostgresQL
 
@@ -412,7 +411,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         instance.map_type = data.get('map_type', instance.map_type)
         instance.sort_weight = data.get('sort_weight', instance.sort_weight)
 
-        return cls.persist_clone(instance, user)
+        return instance.save_as_new_version(user)
 
     def save_cloned(self):
         try:
@@ -557,50 +556,10 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
             self.sources.set([parent])
             self.set_checksums()
 
-    @classmethod
-    def persist_clone(cls, obj, user=None, **kwargs):
-        errors = {}
-        if not user:
-            errors['version_created_by'] = PERSIST_CLONE_SPECIFY_USER_ERROR
-            return errors
-        obj.version = obj.version or generate_temp_version()
-        obj.created_by = obj.updated_by = user
-        parent = obj.parent
-        persisted = False
-        prev_latest = obj.versions.exclude(id=obj.id).filter(is_latest_version=True).first()
-        try:
-            with transaction.atomic():
-                cls.pause_indexing()
-                obj.is_latest_version = True
-                obj.save(**kwargs)
-                if obj.id:
-                    obj.post_version_create()
-                    if prev_latest:
-                        if not obj._index:  # pylint: disable=protected-access
-                            obj.prev_latest_version_id = prev_latest.id
-                        prev_latest.unmark_latest_version(obj._index, parent)  # pylint: disable=protected-access
-                    persisted = True
-                    cls.resume_indexing()
-                    def index_all():
-                        if obj._index:  # pylint: disable=protected-access
-                            if prev_latest:
-                                prev_latest.index()
-                            obj.index()
-                            obj.index_from_concept()
-
-                    transaction.on_commit(index_all)
-        except ValidationError as err:
-            errors.update(err.message_dict)
-        finally:
-            cls.resume_indexing()
-            if not persisted:
-                if prev_latest:
-                    prev_latest.mark_latest_version(True, parent)
-                if obj.id:
-                    obj.delete()
-                errors['non_field_errors'] = [PERSIST_CLONE_ERROR]
-
-        return errors
+    def _index_on_new_version_creation(self, prev_latest):
+        if self._index:
+            super()._index_on_new_version_creation(prev_latest)
+            self.index_from_concept()
 
     @classmethod
     def get_base_queryset(cls, params):  # pylint: disable=too-many-branches,too-many-locals,too-many-statements
