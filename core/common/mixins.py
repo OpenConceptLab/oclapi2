@@ -723,6 +723,24 @@ class SourceChildMixin(ChecksumModel):
     def collection_references(self, collection):
         return self.references.filter(collection=collection)
 
+    def __update_latest_version(self, index, is_latest_version, parent, remove_parent=False, add_parent=False):
+        self._index = index  # pylint: disable=protected-access
+        self.is_latest_version = is_latest_version
+        self.save(update_fields=['is_latest_version', '_index'])
+        if parent:
+            if remove_parent:
+                self.sources.remove(parent)
+            if add_parent:
+                self.sources.add(parent)
+
+    def unmark_latest_version(self, index=True, parent=None):
+        parent = parent or self.parent
+        self.__update_latest_version(index, False, parent, True, False)
+
+    def mark_latest_version(self, index=True, parent=None):
+        parent = parent or self.parent
+        self.__update_latest_version(index, True, parent, False, True)
+
 
 class ConceptContainerExportMixin:
     permission_classes = (CanViewConceptDictionaryVersion, )

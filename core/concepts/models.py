@@ -799,73 +799,66 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         concept.save()
         concept.set_checksums()
 
+    def post_version_create(self, parent):
+        if self.id:
+            self.version = str(self.id)
+            self.save()
+            self.set_locales(self.cloned_names, ConceptName)
+            self.set_locales(self.cloned_descriptions, ConceptDescription)
+            self.cloned_names = []
+            self.cloned_descriptions = []
+            self.clean()  # clean here to validate locales that can only be saved after obj is saved
+            self.update_versioned_object()
+            self.sources.set([parent])
+            self.set_checksums()
+
     @classmethod
-    def persist_clone(
+    def persist_clone(   # pylint: disable=too-many-arguments,too-many-branches
             cls, obj, user=None, create_parent_version=True, parent_concept_uris=None, add_prev_version_children=True,
             **kwargs
-    ):  # pylint: disable=too-many-statements,too-many-branches,too-many-arguments
+    ):
         errors = {}
         if not user:
             errors['version_created_by'] = PERSIST_CLONE_SPECIFY_USER_ERROR
             return errors
-        obj.created_by = user
-        obj.updated_by = user
+        obj.created_by = obj.updated_by = user
         obj.version = obj.version or generate_temp_version()
         parent = obj.parent
         persisted = False
-        versioned_object = obj.versioned_object
-        prev_latest_version = versioned_object.versions.exclude(id=obj.id).filter(is_latest_version=True).first()
+        prev_latest = obj.versions.exclude(id=obj.id).filter(is_latest_version=True).first()
         try:
             with transaction.atomic():
                 cls.validate_locales_limit(obj.cloned_names, obj.cloned_descriptions)
-
                 cls.pause_indexing()
-
                 obj.is_latest_version = True
                 obj.save(**kwargs)
                 if obj.id:
-                    obj.version = str(obj.id)
-                    obj.save()
-                    obj.set_locales(obj.cloned_names, ConceptName)
-                    obj.set_locales(obj.cloned_descriptions, ConceptDescription)
-                    obj.cloned_names = []
-                    obj.cloned_descriptions = []
-                    obj.clean()  # clean here to validate locales that can only be saved after obj is saved
-                    obj.update_versioned_object()
-                    if prev_latest_version:
+                    obj.post_version_create(parent)
+                    if prev_latest:
                         if not obj._index:  # pylint: disable=protected-access
-                            obj.prev_latest_version_id = prev_latest_version.id
-                        prev_latest_version._index = obj._index  # pylint: disable=protected-access
-                        prev_latest_version.is_latest_version = False
-                        prev_latest_version.save(update_fields=['is_latest_version', '_index'])
-                        prev_latest_version.sources.remove(parent)
+                            obj.prev_latest_version_id = prev_latest.id
+                        prev_latest.unmark_latest_version(obj._index, parent)  # pylint: disable=protected-access
+
                         if add_prev_version_children:
                             if get(settings, 'TEST_MODE', False):
-                                process_hierarchy_for_new_parent_concept_version(prev_latest_version.id, obj.id)
+                                process_hierarchy_for_new_parent_concept_version(prev_latest.id, obj.id)
                             else:
                                 process_hierarchy_for_new_parent_concept_version.apply_async(
-                                    (prev_latest_version.id, obj.id),
-                                    queue='concurrent'
-                                )
-
-                    obj.sources.set([parent])
-                    obj.set_checksums()
-                    versioned_object.set_checksums()
+                                    (prev_latest.id, obj.id), queue='concurrent')
                     persisted = True
                     cls.resume_indexing()
                     if get(settings, 'TEST_MODE', False):
                         process_hierarchy_for_concept_version(
-                            obj.id, get(prev_latest_version, 'id'), parent_concept_uris, create_parent_version)
+                            obj.id, get(prev_latest, 'id'), parent_concept_uris, create_parent_version)
                     else:
                         process_hierarchy_for_concept_version.apply_async(
-                            (obj.id, get(prev_latest_version, 'id'), parent_concept_uris, create_parent_version),
+                            (obj.id, get(prev_latest, 'id'), parent_concept_uris, create_parent_version),
                             queue='concurrent'
                         )
-
                     def index_all():
                         if obj._index:  # pylint: disable=protected-access
-                            if prev_latest_version:
-                                prev_latest_version.index()
+                            if prev_latest:
+                                prev_latest.index()
                             obj.index()
 
                     transaction.on_commit(index_all)
@@ -875,11 +868,8 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         finally:
             cls.resume_indexing()
             if not persisted:
-                if prev_latest_version:
-                    prev_latest_version._index = True  # pylint: disable=protected-access
-                    prev_latest_version.is_latest_version = True
-                    prev_latest_version.save(update_fields=['is_latest_version', '_index'])
-                    prev_latest_version.sources.add(parent)
+                if prev_latest:
+                    prev_latest.mark_latest_version(True, parent)
                 if obj.id:
                     obj.remove_locales()
                     obj.delete()
