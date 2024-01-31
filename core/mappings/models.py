@@ -549,61 +549,54 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         mapping.save()
         mapping.set_checksums()
 
+    def post_version_create(self, parent):
+        if self.id:
+            self.version = str(self.id)
+            self.save()
+            self.update_versioned_object()
+            self.sources.set([parent])
+            self.set_checksums()
+
     @classmethod
-    def persist_clone(cls, obj, user=None, **kwargs):  # pylint: disable=too-many-statements
+    def persist_clone(cls, obj, user=None, **kwargs):
         errors = {}
         if not user:
             errors['version_created_by'] = PERSIST_CLONE_SPECIFY_USER_ERROR
             return errors
         obj.version = obj.version or generate_temp_version()
-        obj.created_by = user
-        obj.updated_by = user
+        obj.created_by = obj.updated_by = user
         parent = obj.parent
         persisted = False
-        prev_latest_version = cls.objects.filter(
-            versioned_object_id=obj.versioned_object_id, is_latest_version=True).first()
+        prev_latest = obj.versions.exclude(id=obj.id).filter(is_latest_version=True).first()
         try:
             with transaction.atomic():
                 cls.pause_indexing()
-
                 obj.is_latest_version = True
                 obj.save(**kwargs)
                 if obj.id:
-                    obj.version = str(obj.id)
-                    obj.save()
-                    obj.update_versioned_object()
-                    if prev_latest_version:
+                    obj.post_version_create()
+                    if prev_latest:
                         if not obj._index:  # pylint: disable=protected-access
-                            obj.prev_latest_version_id = prev_latest_version.id
-                        prev_latest_version.is_latest_version = False
-                        prev_latest_version._index = obj._index  # pylint: disable=protected-access
-                        prev_latest_version.save(update_fields=['is_latest_version', '_index'])
-                        prev_latest_version.sources.remove(parent)
-
-                    obj.sources.set([parent])
-                    obj.set_checksums()
-                    obj.versioned_object.set_checksums()
+                            obj.prev_latest_version_id = prev_latest.id
+                        prev_latest.unmark_latest_version(obj._index, parent)  # pylint: disable=protected-access
                     persisted = True
                     cls.resume_indexing()
-
                     def index_all():
                         if obj._index:  # pylint: disable=protected-access
-                            if prev_latest_version:
-                                prev_latest_version.index()
+                            if prev_latest:
+                                prev_latest.index()
                             obj.index()
                             obj.index_from_concept()
+
                     transaction.on_commit(index_all)
         except ValidationError as err:
             errors.update(err.message_dict)
         finally:
             cls.resume_indexing()
             if not persisted:
+                if prev_latest:
+                    prev_latest.mark_latest_version(True, parent)
                 if obj.id:
-                    if prev_latest_version:
-                        prev_latest_version._index = True  # pylint: disable=protected-access
-                        prev_latest_version.is_latest_version = True
-                        prev_latest_version.save(update_fields=['is_latest_version', '_index'])
-                        prev_latest_version.sources.add(parent)
                     obj.delete()
                 errors['non_field_errors'] = [PERSIST_CLONE_ERROR]
 
