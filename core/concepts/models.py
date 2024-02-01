@@ -96,7 +96,7 @@ class AbstractLocalizedText(ChecksumModel):
 
 
 class ConceptDescription(AbstractLocalizedText):
-    CHECKSUM_INCLUSIONS = AbstractLocalizedText.CHECKSUM_INCLUSIONS + ['description', 'description_type']
+    CHECKSUM_INCLUSIONS = AbstractLocalizedText.CHECKSUM_INCLUSIONS + ['locale', 'description', 'description_type']
 
     concept = models.ForeignKey('concepts.Concept', on_delete=models.CASCADE, related_name='descriptions')
 
@@ -279,31 +279,44 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         return self.get_smart_checksum_fields_for_resource(self)
 
     @staticmethod
+    def _locales_for_checksums(data, relation, fields, predicate_func):
+        locales = get(data, relation).filter() if isinstance(data, Concept) else get(data, relation, [])
+        return [{field: get(locale, field) for field in fields} for locale in locales if predicate_func(locale)]
+
+    @staticmethod
     def get_standard_checksum_fields_for_resource(data):
-        names = data.names.filter() if isinstance(data, Concept) else get(data, 'names', [])
         return {
             'concept_class': get(data, 'concept_class'),
             'datatype': get(data, 'datatype'),
-            'names': [
-                {
-                    field: get(name, field) for field in ConceptName.CHECKSUM_INCLUSIONS
-                } for name in names
-            ],
+            'retired': get(data, 'retired'),
+            'external_id': get(data, 'external_id'),
             'extras': get(data, 'extras'),
+            'names': Concept._locales_for_checksums(
+                data,
+                'names',
+                ConceptName.CHECKSUM_INCLUSIONS,
+                lambda _: True
+            ),
+            'descriptions': Concept._locales_for_checksums(
+                data,
+                'descriptions',
+                ConceptDescription.CHECKSUM_INCLUSIONS,
+                lambda _: True
+            ),
         }
 
     @staticmethod
     def get_smart_checksum_fields_for_resource(data):
-        names = data.names.filter() if isinstance(data, Concept) else get(data, 'names', [])
         return {
             'concept_class': get(data, 'concept_class'),
             'datatype': get(data, 'datatype'),
-            'names': [
-                {
-                    field: get(name, field) for field in ConceptName.CHECKSUM_INCLUSIONS
-                } for name in names if ConceptName.is_fully_specified_type(get(name, 'name_type'))
-            ],
             'retired': get(data, 'retired'),
+            'names': Concept._locales_for_checksums(
+                data,
+                'names',
+                ConceptName.CHECKSUM_INCLUSIONS,
+                lambda locale: ConceptName.is_fully_specified_type(get(locale, 'name_type'))
+            ),
         }
 
     @staticmethod

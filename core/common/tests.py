@@ -1205,7 +1205,7 @@ class ChecksumViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data, 'checksum')
-        checksum_generate_mock.assert_called_once_with({'concept_class': 'foobar', 'names': []})
+        checksum_generate_mock.assert_called_once_with({'concept_class': 'foobar', 'names': [], 'descriptions': []})
 
     @patch('core.common.checksums.Checksum.generate')
     def test_post_200_mapping_standard(self, checksum_generate_mock):
@@ -1224,6 +1224,7 @@ class ChecksumViewTest(OCLAPITestCase):
                     'from_concept_name': 'fooName',
                     'to_concept_name': 'barName',
                     'retired': False,
+                    'external_id': 'EX123',
                     'extras': {
                         'foo': 'bar'
                     }
@@ -1259,7 +1260,8 @@ class ChecksumViewTest(OCLAPITestCase):
                     'to_concept_code': 'bar',
                     'from_concept_name': 'fooName',
                     'to_concept_name': 'barName',
-                    'extras': {'foo': 'bar'}
+                    'extras': {'foo': 'bar'},
+                    'external_id': 'EX123'
                 }),
                 call({
                     'map_type': 'foobarbara',
@@ -1267,7 +1269,8 @@ class ChecksumViewTest(OCLAPITestCase):
                     'to_concept_code': 'barbara',
                     'from_concept_name': 'foobaraName',
                     'to_concept_name': 'barbaraName',
-                    'extras': {'foo': 'barbara'}
+                    'extras': {'foo': 'barbara'},
+                    'retired': True
                 }),
                 call(['checksum1', 'checksum2'])
             ]

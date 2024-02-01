@@ -154,12 +154,9 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
     @staticmethod
     def get_standard_checksum_fields_for_resource(data):
         return {
-            'map_type': get(data, 'map_type'),
-            'from_concept_code': get(data, 'from_concept_code'),
-            'to_concept_code': get(data, 'to_concept_code'),
-            'from_concept_name': get(data, 'from_concept_name'),
-            'to_concept_name': get(data, 'to_concept_name'),
+            **Mapping.get_smart_checksum_fields_for_resource(data),
             'extras': get(data, 'extras'),
+            'external_id': get(data, 'external_id'),
         }
 
     @staticmethod
