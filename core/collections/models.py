@@ -442,7 +442,7 @@ class Collection(ConceptContainerModel):
         _filters = {
             'collection': self.mnemonic,
             'collection_owner_url': to_owner_uri(self.uri),
-            'expansion': self.expansion.mnemonic,
+            'expansion': self.expansion.mnemonic if self.expansion_uri else '_NON_EXISTING_EXPANSION_',
             'retired': False,
             'collection_version': self.version
         }
