@@ -124,3 +124,4 @@ INCLUDE_SELF = 'includeSelf'
 FACET_SIZE = 20
 ALL = '*'
 CANONICAL_URL_REQUEST_PARAM = 'canonicalUrl'
+SAME_STANDARD_CHECKSUM_ERROR = 'No changes detected. Standard checksum is same as last version.'

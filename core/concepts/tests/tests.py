@@ -821,6 +821,7 @@ class ConceptTest(OCLTestCase):
         )
         source_version0.concepts.add(concept)
         cloned_concept = Concept.version_for_concept(concept, 'v1', source_head)
+        cloned_concept.datatype = 'foobar'
 
         self.assertEqual(cloned_concept.save_as_new_version(concept.created_by), {})
 
@@ -846,7 +847,9 @@ class ConceptTest(OCLTestCase):
             **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'c1', 'parent': source,
             'names': [ConceptNameFactory.build(locale='en', name='English', locale_preferred=True)]
         })
-        concept.clone().save_as_new_version(concept.created_by)
+        concept_v1 = concept.clone()
+        concept_v1.datatype = 'foobar'
+        concept_v1.save_as_new_version(concept.created_by)
         concept_v1 = Concept.objects.order_by('-created_at').first()
         concept.refresh_from_db()
 
@@ -878,7 +881,9 @@ class ConceptTest(OCLTestCase):
             **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'c1', 'parent': source, 'retired': True,
             'names': [ConceptNameFactory.build(locale='en', name='English', locale_preferred=True)]
         })
-        concept.clone().save_as_new_version(concept.created_by)
+        concept_v1 = concept.clone()
+        concept_v1.datatype = 'foobar'
+        concept_v1.save_as_new_version(concept.created_by)
         concept_v1 = Concept.objects.order_by('-created_at').first()
         concept.refresh_from_db()
 
@@ -1186,6 +1191,7 @@ class ConceptTest(OCLTestCase):
             version='v2', mnemonic=source.mnemonic, organization=source.organization)
 
         cloned_concept = Concept.version_for_concept(concept, 'v1', source)
+        cloned_concept.datatype = 'foobar'
         cloned_concept.save_as_new_version(concept.created_by)
 
         self.assertEqual(concept.versions.count(), 2)
@@ -1226,6 +1232,7 @@ class ConceptTest(OCLTestCase):
         OrganizationSourceFactory(
             version='v2', mnemonic=source.mnemonic, organization=source.organization)
         cloned_concept = Concept.version_for_concept(concept, 'v1', source)
+        cloned_concept.datatype = 'foobar'
         cloned_concept.save_as_new_version(concept.created_by)
         self.assertEqual(concept.versions.count(), 2)
 

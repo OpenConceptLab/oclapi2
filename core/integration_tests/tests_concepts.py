@@ -233,6 +233,21 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         self.assertTrue(concept.is_versioned_object)
         self.assertEqual(concept.datatype, "None")
 
+        response = self.client.put(
+            concepts_url,
+            {**self.concept_payload, 'datatype': 'None', 'update_comment': 'Updated Nothing'},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.data,
+            {
+                'non_field_errors': ['An error occurred while saving new version.'],
+                '__all__': ['No changes detected. Standard checksum is same as last version.']
+            }
+        )
+
     def test_put_200_openmrs_schema(self):  # pylint: disable=too-many-statements
         self.create_lookup_concept_classes()
         source = OrganizationSourceFactory(custom_validation_schema=OPENMRS_VALIDATION_SCHEMA)

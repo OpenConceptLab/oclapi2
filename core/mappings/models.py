@@ -155,8 +155,8 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
     def get_standard_checksum_fields_for_resource(data):
         return {
             **Mapping.get_smart_checksum_fields_for_resource(data),
-            'extras': get(data, 'extras'),
-            'external_id': get(data, 'external_id'),
+            'extras': get(data, 'extras') or None,
+            'external_id': get(data, 'external_id') or None,
         }
 
     @staticmethod
@@ -545,13 +545,12 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         mapping.save()
         mapping.set_checksums()
 
-    def post_version_create(self, parent):
+    def post_version_create(self, parent, _):
         if self.id:
             self.version = str(self.id)
             self.save()
             self.update_versioned_object()
             self.sources.set([parent])
-            self.set_checksums()
 
     def _index_on_new_version_creation(self, prev_latest):
         if self._index:

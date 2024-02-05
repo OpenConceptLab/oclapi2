@@ -596,24 +596,25 @@ class ConceptLabelListCreateView(ConceptBaseView, ListWithHeadersMixin, ListCrea
         return getattr(instance, self.parent_list_attribute).all()
 
     def create(self, request, **_):  # pylint: disable=arguments-differ
-        name = request.data.get('name', None) or request.data.get('description', None)
+        name = request.data.get('name', None)
+        description = request.data.get('description', None)
+        locale = name or description
         serializer = self.get_serializer(data=request.data.copy())
-        if name and serializer.is_valid():
-            new_version = self.get_object().clone()
-            new_version.comment = f'Added to {self.parent_list_attribute}: {name}.'
-            errors = new_version.save_as_new_version(request.user)
-            if new_version.id:
-                serializer = self.get_serializer(data={**request.data, 'concept_id': new_version.id})
-                if serializer.is_valid():
-                    serializer.save()
-                    locale = serializer.instance
-                    if locale.id:
-                        versioned_object_locale = locale.clone()
-                        versioned_object_locale.concept_id = new_version.versioned_object_id
-                        versioned_object_locale.save()
-
-            if errors:
-                return Response(errors, status=status.HTTP_400_BAD_REQUEST)
+        if locale and serializer.is_valid():
+            serializer = self.get_serializer(data=request.data)
+            if serializer.is_valid():
+                new_version = self.get_object().clone()
+                new_version.comment = f'Added to {self.parent_list_attribute}: {locale}.'
+                if name:
+                    new_version.cloned_names = [*new_version.cloned_names, request.data]
+                elif description:
+                    new_version.cloned_descriptions = [*new_version.cloned_descriptions, request.data]
+                errors = new_version.save_as_new_version(request.user)
+                if errors:
+                    return Response(errors, status=status.HTTP_400_BAD_REQUEST)
+                locales = new_version.names if name else new_version.descriptions
+                instance = locales.order_by('-id').first()
+                serializer = self.get_serializer(instance)
             headers = self.get_success_headers(serializer.data)
             return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)

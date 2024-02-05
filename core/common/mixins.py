@@ -19,13 +19,14 @@ from rest_framework.response import Response
 from core.common.constants import HEAD, ACCESS_TYPE_NONE, INCLUDE_FACETS, \
     LIST_DEFAULT_LIMIT, HTTP_COMPRESS_HEADER, CSV_DEFAULT_LIMIT, FACETS_ONLY, INCLUDE_RETIRED_PARAM, \
     SEARCH_STATS_ONLY, INCLUDE_SEARCH_STATS, UPDATED_BY_USERNAME_PARAM, CHECKSUM_STANDARD_HEADER, \
-    CHECKSUM_SMART_HEADER, SEARCH_LATEST_REPO_VERSION
+    CHECKSUM_SMART_HEADER, SEARCH_LATEST_REPO_VERSION, SAME_STANDARD_CHECKSUM_ERROR
 from core.common.permissions import HasPrivateAccess, HasOwnership, CanViewConceptDictionary, \
     CanViewConceptDictionaryVersion
 from .checksums import ChecksumModel, Checksum
 from .utils import write_csv_to_s3, get_csv_from_s3, get_query_params_from_url_string, compact_dict_by_values, \
     to_owner_uri, parse_updated_since_param, get_export_service, to_int, get_truthy_values, generate_temp_version
 from ..concepts.constants import PERSIST_CLONE_ERROR
+from ..toggles.models import Toggle
 
 logger = logging.getLogger('oclapi')
 TRUTHY = get_truthy_values()
@@ -748,7 +749,7 @@ class SourceChildMixin(ChecksumModel):
     def validate_locales_limit(names, descriptions):
         pass
 
-    def _process_prev_latest_version_children(self, prev_latest, add_prev_version_children):
+    def _process_prev_latest_version_hierarchy(self, prev_latest, add_prev_version_children):
         pass
 
     def _process_latest_version_hierarchy(self, prev_latest, parent_concept_uris=None, create_parent_version=True):
@@ -763,17 +764,19 @@ class SourceChildMixin(ChecksumModel):
     def remove_locales(self):
         pass
 
-    def save_as_new_version(self, user, **kwargs):
+    def save_as_new_version(self, user, **kwargs):  # pylint: disable=too-many-branches,too-many-statements
         cls = self.__class__
         create_parent_version = kwargs.pop('create_parent_version', True)
         parent_concept_uris = kwargs.pop('parent_concept_uris', None)
         add_prev_version_children = kwargs.pop('add_prev_version_children', True)
+        _hierarchy_processing = kwargs.pop('_hierarchy_processing', False)
         errors = {}
         self.created_by = self.updated_by = user
         self.version = self.version or generate_temp_version()
         parent = self.parent
         persisted = False
         prev_latest = self.versions.exclude(id=self.id).filter(is_latest_version=True).first()
+        is_concept = self.__class__.__name__ == 'Concept'
         try:
             with transaction.atomic():
                 self.validate_locales_limit(get(self, 'cloned_names'), get(self, 'cloned_descriptions'))
@@ -782,15 +785,35 @@ class SourceChildMixin(ChecksumModel):
                 self.save(**kwargs)
 
                 if self.id:
-                    self.post_version_create(parent)
+                    self.post_version_create(parent, parent_concept_uris)
+                    if not prev_latest or _hierarchy_processing:
+                        self.set_checksums()
+                    should_process_hierarchy = bool(parent_concept_uris)
                     if prev_latest:
+                        if not _hierarchy_processing:
+                            if is_concept:
+                                self._unsaved_child_concept_uris = prev_latest.child_concept_urls
+                            self.set_checksums()
+                        if Toggle.get(
+                                'PREVENT_DUPLICATE_VERSION_TOGGLE'
+                        ) and Toggle.get(
+                            'CHECKSUMS_TOGGLE'
+                        ) and not _hierarchy_processing and self.checksums.get(
+                            'standard'
+                        ) == prev_latest.get_checksums(recalculate=True).get('standard'):
+                            raise ValidationError({'__all__': [SAME_STANDARD_CHECKSUM_ERROR]})
                         if not self._index:
                             self.prev_latest_version_id = prev_latest.id
                         prev_latest.unmark_latest_version(self._index, parent)
-                        self._process_prev_latest_version_children(prev_latest, add_prev_version_children)
+                        should_process_hierarchy = should_process_hierarchy or bool(
+                            is_concept and prev_latest.parent_concept_urls)
+                        if should_process_hierarchy:
+                            self._process_prev_latest_version_hierarchy(prev_latest, add_prev_version_children)
+                    if should_process_hierarchy:
+                        self._process_latest_version_hierarchy(prev_latest, parent_concept_uris, create_parent_version)
                     persisted = True
                     cls.resume_indexing()
-                    self._process_latest_version_hierarchy(prev_latest, parent_concept_uris, create_parent_version)
+
                 transaction.on_commit(lambda: self._index_on_new_version_creation(prev_latest))
         except ValidationError as err:
             errors.update(err.message_dict)

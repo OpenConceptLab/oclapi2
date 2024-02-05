@@ -288,7 +288,7 @@ class MappingTest(OCLTestCase):
 
         mapping = MappingFactory(parent=source_head)
         cloned_mapping = mapping.clone(mapping.created_by)
-
+        cloned_mapping.extras = {'foo': 'bar'}
         self.assertEqual(cloned_mapping.save_as_new_version(mapping.created_by), {})
 
         persisted_mapping = Mapping.objects.filter(

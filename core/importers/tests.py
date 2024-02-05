@@ -541,8 +541,8 @@ class BulkImportInlineTest(OCLTestCase):
         self.assertEqual(importer.processed, 9)
         self.assertEqual(len(importer.created), 2)
         self.assertEqual(len(importer.exists), 3)
-        self.assertEqual(len(importer.updated), 4)
-        self.assertEqual(len(importer.failed), 0)
+        self.assertEqual(len(importer.updated), 0)
+        self.assertEqual(len(importer.failed), 4)  # due to same concept checksum
         self.assertEqual(len(importer.invalid), 0)
         self.assertEqual(len(importer.others), 0)
         self.assertEqual(len(importer.permission_denied), 0)
@@ -568,9 +568,9 @@ class BulkImportInlineTest(OCLTestCase):
         self.assertEqual(importer.processed, 64)
         self.assertEqual(len(importer.created), 49)
         self.assertEqual(len(importer.exists), 3)
-        self.assertEqual(len(importer.updated), 12)
+        self.assertEqual(len(importer.updated), 1)  # last 11 rows are duplicate rows
+        self.assertEqual(len(importer.failed), 11)
         self.assertEqual(len(importer.deleted), 0)
-        self.assertEqual(len(importer.failed), 0)
         self.assertEqual(len(importer.invalid), 0)
         self.assertEqual(len(importer.others), 0)
         self.assertEqual(len(importer.permission_denied), 0)

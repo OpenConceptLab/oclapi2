@@ -289,8 +289,8 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             'concept_class': get(data, 'concept_class'),
             'datatype': get(data, 'datatype'),
             'retired': get(data, 'retired'),
-            'external_id': get(data, 'external_id'),
-            'extras': get(data, 'extras'),
+            'external_id': get(data, 'external_id') or None,
+            'extras': get(data, 'extras') or None,
             'names': Concept._locales_for_checksums(
                 data,
                 'names',
@@ -303,6 +303,12 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                 ConceptDescription.CHECKSUM_INCLUSIONS,
                 lambda _: True
             ),
+            'parent_concept_urls': get(
+                data, '_unsaved_parent_concept_uris', []
+            ) or get(data, 'parent_concept_urls', []),
+            'child_concept_urls': get(
+                data, '_unsaved_child_concept_uris', []
+            ) or get(data, 'child_concept_urls', []),
         }
 
     @staticmethod
@@ -569,6 +575,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     @classmethod
     def create_new_version_for(
             cls, instance, data, user, create_parent_version=True, add_prev_version_children=True,
+            _hierarchy_processing=False
     ):  # pylint: disable=too-many-arguments
         instance.id = None  # Clear id so it is persisted as a new object
         instance.version = data.get('version', None)
@@ -594,11 +601,12 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             user=user,
             create_parent_version=create_parent_version,
             parent_concept_uris=parent_concept_uris,
-            add_prev_version_children=add_prev_version_children
+            add_prev_version_children=add_prev_version_children,
+            _hierarchy_processing=_hierarchy_processing
         )
 
     def set_parent_concepts_from_uris(self, create_parent_version=True):
-        parent_concepts = get(self, '_parent_concepts', None)
+        parent_concepts = get(self, '_parent_concepts', [])
         if create_parent_version:
             for parent in parent_concepts:
                 current_latest_version = parent.get_latest_version()
@@ -611,7 +619,8 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                         'parent_concept_urls': parent.parent_concept_urls
                     },
                     self.created_by,
-                    create_parent_version=False
+                    create_parent_version=False,
+                    _hierarchy_processing=True
                 )
                 new_latest_version = parent.get_latest_version()
                 for uri in current_latest_version.child_concept_urls:
@@ -638,7 +647,8 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                     },
                     concept.created_by,
                     create_parent_version=False,
-                    add_prev_version_children=False
+                    add_prev_version_children=False,
+                    _hierarchy_processing=True
                 )
                 new_latest_version = concept.get_latest_version()
                 for uri in current_latest_version.child_concept_urls:
@@ -817,7 +827,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         concept.save()
         concept.set_checksums()
 
-    def post_version_create(self, parent):
+    def post_version_create(self, parent, parent_concept_uris):
         if self.id:
             self.version = str(self.id)
             self.save()
@@ -828,7 +838,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             self.clean()  # clean here to validate locales that can only be saved after obj is saved
             self.update_versioned_object()
             self.sources.set([parent])
-            self.set_checksums()
+            self._unsaved_parent_concept_uris = parent_concept_uris
 
     def _process_prev_latest_version_hierarchy(self, prev_latest, add_prev_version_children=True):
         if add_prev_version_children:

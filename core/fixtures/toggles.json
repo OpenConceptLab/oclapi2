@@ -30,5 +30,15 @@
       "dev": true,
       "qa": true
     }
+  },
+  {
+    "pk": 4,
+    "model": "toggles.toggle",
+    "fields": {
+      "is_active": true,
+      "name": "PREVENT_DUPLICATE_VERSION_TOGGLE",
+      "dev": true,
+      "qa": true
+    }
   }
 ]

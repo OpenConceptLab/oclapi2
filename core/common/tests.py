@@ -1205,7 +1205,15 @@ class ChecksumViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data, 'checksum')
-        checksum_generate_mock.assert_called_once_with({'concept_class': 'foobar', 'names': [], 'descriptions': []})
+        checksum_generate_mock.assert_called_once_with(
+            {
+                'concept_class': 'foobar',
+                'names': [],
+                'descriptions': [],
+                'child_concept_urls': [],
+                'parent_concept_urls': []
+            }
+        )
 
     @patch('core.common.checksums.Checksum.generate')
     def test_post_200_mapping_standard(self, checksum_generate_mock):
