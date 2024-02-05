@@ -962,7 +962,8 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
                 instance = instance.versions.filter(version=version).first()
             elif instance.is_head:
                 instance = instance.get_latest_released_version() or instance
-        else:
+
+        if not instance:
             instance = Source()
 
         instance.is_fqdn = is_canonical
