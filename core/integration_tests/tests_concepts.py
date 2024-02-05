@@ -243,7 +243,6 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(
             response.data,
             {
-                'non_field_errors': ['An error occurred while saving new version.'],
                 '__all__': ['No changes detected. Standard checksum is same as last version.']
             }
         )

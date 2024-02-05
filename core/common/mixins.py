@@ -825,7 +825,8 @@ class SourceChildMixin(ChecksumModel):
                 if self.id:
                     self.remove_locales()
                     self.delete()
-                errors['non_field_errors'] = [PERSIST_CLONE_ERROR]
+                if not errors:
+                    errors['non_field_errors'] = [PERSIST_CLONE_ERROR]
 
         return errors
 
