@@ -469,6 +469,10 @@ class SourceContainerMixin:
         return None
 
     @property
+    def bookmarks_count(self):
+        return self.pins.count()
+
+    @property
     def sources(self):
         return self.source_set.filter(version=HEAD)
 
