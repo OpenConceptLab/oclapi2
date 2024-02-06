@@ -203,6 +203,11 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                       ),
                       models.Index(fields=['uri']),
                       models.Index(fields=['version']),
+                      models.Index(
+                          name='repo_version_concepts',
+                          fields=['id'],
+                          condition=Q(is_active=True, retired=False)
+                      )
                   ] + VersionedModel.Meta.indexes
 
     external_id = models.TextField(null=True, blank=True)

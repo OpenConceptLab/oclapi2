@@ -59,6 +59,11 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
                           fields=['from_concept', 'parent_id'],
                           condition=(Q(id=F('versioned_object_id')))
                       ),
+                      models.Index(
+                          name='repo_version_mappings',
+                          fields=['id'],
+                          condition=Q(is_active=True, retired=False)
+                      ),
                   ] + VersionedModel.Meta.indexes
     parent = models.ForeignKey('sources.Source', related_name='mappings_set', on_delete=models.CASCADE)
     map_type = models.TextField()
