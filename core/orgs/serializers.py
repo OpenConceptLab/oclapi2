@@ -19,7 +19,7 @@ class OrganizationListSerializer(AbstractResourceSerializer):
 
     class Meta:
         model = Organization
-        fields = AbstractResourceSerializer.Meta.fields + ('id', 'name', 'url', 'type')
+        fields = AbstractResourceSerializer.Meta.fields + ('id', 'name', 'url', 'type', 'logo_url')
 
 
 class OrganizationCreateSerializer(serializers.ModelSerializer):
