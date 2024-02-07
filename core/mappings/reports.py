@@ -38,8 +38,7 @@ class MappingReport(AbstractReport):
                 ).count()
                 between_sources_count = count - internal_count
                 result.append([source.uri, count, internal_count, between_sources_count])
-
-        return sorted(result, lambda x: x[1], reverse=True)
+        return sorted(result, key=lambda x: x[1], reverse=True)
 
     @staticmethod
     def to_grouped_stat_csv_row(obj):
