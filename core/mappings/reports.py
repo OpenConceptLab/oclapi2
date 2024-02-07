@@ -33,13 +33,13 @@ class MappingReport(AbstractReport):
                 count = queryset.filter(to_source_id=to_source_id).count()
                 internal_count = queryset.filter(
                     to_source_id=to_source_id,
-                    from_source_id=F('from_source_id'),
-                    parent_id=F('parent_id')
+                    from_source_id=to_source_id,
+                    parent_id=to_source_id
                 ).count()
                 between_sources_count = count - internal_count
                 result.append([source.uri, count, internal_count, between_sources_count])
 
-        return result
+        return sorted(result, lambda x: x[1], reverse=True)
 
     @staticmethod
     def to_grouped_stat_csv_row(obj):
