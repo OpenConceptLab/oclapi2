@@ -205,7 +205,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                       models.Index(fields=['version']),
                       models.Index(
                           name='repo_version_concepts',
-                          fields=['id'],
+                          fields=['id', '-updated_at'],
                           condition=Q(is_active=True, retired=False)
                       )
                   ] + VersionedModel.Meta.indexes

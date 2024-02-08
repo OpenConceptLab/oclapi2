@@ -61,7 +61,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
                       ),
                       models.Index(
                           name='repo_version_mappings',
-                          fields=['id'],
+                          fields=['id', '-updated_at'],
                           condition=Q(is_active=True, retired=False)
                       ),
                   ] + VersionedModel.Meta.indexes
