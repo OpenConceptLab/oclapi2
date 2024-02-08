@@ -881,6 +881,7 @@ class CollectionVersionConceptsView(CollectionBaseView, ListWithHeadersMixin):
         return queryset
 
     def get(self, request, *args, **kwargs):
+        self.get_object()  # to set instance on request for references
         return self.list(request, *args, **kwargs)
 
 
@@ -1045,6 +1046,7 @@ class CollectionVersionMappingsView(CollectionBaseView, ListWithHeadersMixin):
         return queryset
 
     def get(self, request, *args, **kwargs):
+        self.get_object()  # to set instance on request for references
         return self.list(request, *args, **kwargs)
 
 
