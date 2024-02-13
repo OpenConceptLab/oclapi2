@@ -607,6 +607,7 @@ class CollectionReference(models.Model):
     def get_concepts(self, system_version=None):
         system_version = system_version or self.resolve_system_version
         queryset = self.get_resource_queryset_from_system_and_valueset('concepts', system_version)
+        valueset_versions = self.resolve_valueset_versions
         mapping_queryset = Mapping.objects.none()
         if queryset is None:
             return Concept.objects.none(), mapping_queryset
@@ -616,7 +617,7 @@ class CollectionReference(models.Model):
             if self.resource_version:
                 queryset = queryset.filter(version=self.resource_version)
         if self.cascade:
-            cascade_params = self.get_concept_cascade_params(system_version)
+            cascade_params = self.get_concept_cascade_params(system_version or valueset_versions[0])
             for concept in queryset:
                 result = concept.cascade(**cascade_params)
                 queryset = Concept.objects.filter(
