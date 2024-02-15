@@ -23,7 +23,7 @@ class UserListSerializer(AbstractResourceSerializer):
     class Meta:
         model = UserProfile
         fields = AbstractResourceSerializer.Meta.fields + (
-            'username', 'name', 'url'
+            'username', 'name', 'url', 'logo_url'
         )
 
 
