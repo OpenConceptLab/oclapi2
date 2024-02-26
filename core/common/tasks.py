@@ -720,3 +720,12 @@ def calculate_checksums(resource_type, resource_id):
                     instance.get_latest_version().set_checksums()
                 if not instance.is_versioned_object:
                     instance.versioned_object.set_checksums()
+
+
+@app.task(ignore_result=True)
+def readd_references_to_expansion_on_references_removal(expansion_id, reference_ids):
+    from core.collections.models import Expansion, CollectionReference
+    expansion = Expansion.objects.filter(id=expansion_id).first()
+    if expansion:
+        references = CollectionReference.objects.filter(id__in=reference_ids)
+        expansion.add_references(references, True, True, False)

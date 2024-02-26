@@ -25,7 +25,7 @@ from core.common.constants import (
 from core.common.models import ConceptContainerModel, BaseResourceModel
 from core.common.search import CustomESSearch
 from core.common.tasks import seed_children_to_expansion, batch_index_resources, index_expansion_concepts, \
-    index_expansion_mappings
+    index_expansion_mappings, readd_references_to_expansion_on_references_removal
 from core.common.utils import drop_version, to_owner_uri, generate_temp_version, es_id_in, \
     get_resource_class_from_resource_name, to_snake_case, \
     es_to_pks, batch_qs, split_list_by_condition, decode_string, is_canonical_uri, encode_string, \
@@ -1055,15 +1055,18 @@ class Expansion(BaseResourceModel):
 
         index_concepts = False
         index_mappings = False
+        any_ref_with_resources = False
         for reference in refs:
             concepts = reference.concepts
             if concepts.exists():
+                any_ref_with_resources = True
                 index_concepts = True
                 filters = {'versioned_object_id__in': list(concepts.values_list('versioned_object_id', flat=True))}
                 self.concepts.set(self.concepts.exclude(**filters))
                 batch_index_resources.apply_async(('concept', filters), queue='indexing')
             mappings = reference.mappings
             if mappings.exists():
+                any_ref_with_resources = True
                 index_mappings = True
                 filters = {'versioned_object_id__in': list(mappings.values_list('versioned_object_id', flat=True))}
                 self.mappings.set(self.mappings.exclude(**filters))
@@ -1074,9 +1077,14 @@ class Expansion(BaseResourceModel):
         if index_mappings:
             self.index_mappings()
 
-        references_to_readd = self.collection_version.references.exclude(
-            id__in=[ref.id for ref in self.to_ref_list(references)])
-        self.add_references(references_to_readd, True, True, False)
+        if any_ref_with_resources:
+            reference_ids_to_readd = self.collection_version.references.exclude(
+                id__in=[ref.id for ref in self.to_ref_list(references)]).values_list('id', flat=True)
+            readd_task = readd_references_to_expansion_on_references_removal
+            if get(settings, 'TEST_MODE', False):
+                readd_task.apply_async((self.id, reference_ids_to_readd), queue='default')
+            else:
+                readd_task(self.id, reference_ids_to_readd)
 
     def delete_expressions(self, expressions):  # Deprecated: Old way, must use delete_references instead
         concepts_filters = None
