@@ -723,9 +723,9 @@ def calculate_checksums(resource_type, resource_id):
 
 
 @app.task(ignore_result=True)
-def readd_references_to_expansion_on_references_removal(expansion_id, reference_ids):
-    from core.collections.models import Expansion, CollectionReference
+def readd_references_to_expansion_on_references_removal(expansion_id, removed_reference_ids):
+    from core.collections.models import Expansion
     expansion = Expansion.objects.filter(id=expansion_id).first()
-    if expansion:
-        references = CollectionReference.objects.filter(id__in=reference_ids)
-        expansion.add_references(references, True, True, False)
+    if expansion and removed_reference_ids:
+        reference_to_readd = expansion.collection_version.references.exclude(id__in=removed_reference_ids)
+        expansion.add_references(reference_to_readd, True, True, False)

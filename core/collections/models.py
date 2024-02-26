@@ -1078,13 +1078,12 @@ class Expansion(BaseResourceModel):
             self.index_mappings()
 
         if any_ref_with_resources:
-            reference_ids_to_readd = self.collection_version.references.exclude(
-                id__in=[ref.id for ref in self.to_ref_list(references)]).values_list('id', flat=True)
+            removed_reference_ids = [ref.id for ref in self.to_ref_list(references)]
             readd_task = readd_references_to_expansion_on_references_removal
             if get(settings, 'TEST_MODE', False):
-                readd_task.apply_async((self.id, reference_ids_to_readd), queue='default')
+                readd_task(self.id, removed_reference_ids)
             else:
-                readd_task(self.id, reference_ids_to_readd)
+                readd_task.apply_async((self.id, removed_reference_ids), queue='default')
 
     def delete_expressions(self, expressions):  # Deprecated: Old way, must use delete_references instead
         concepts_filters = None
