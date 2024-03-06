@@ -280,7 +280,8 @@ class BulkImportInlineTest(OCLTestCase):
             Concept.objects.filter(mnemonic='Food', id=F('versioned_object_id')).first().versions.count(), 1
         )
         self.assertTrue(Concept.objects.filter(mnemonic='Food', is_latest_version=True).exists())
-        batch_index_resources_mock.apply_async.assert_called_with(('concept', {'id__in': ANY}, True), queue='indexing')
+        batch_index_resources_mock.apply_async.assert_called_with(
+            ('concept', {'id__in': ANY}, True), queue='indexing', permanent=False)
         self.assertEqual(
             sorted(batch_index_resources_mock.apply_async.mock_calls[0][1][0][1]['id__in']),
             sorted([concept.id, concept.get_latest_version().id])
@@ -454,7 +455,8 @@ class BulkImportInlineTest(OCLTestCase):
             Mapping.objects.filter(map_type='Has Child', id=F('versioned_object_id')).first().versions.count(), 1
         )
         self.assertTrue(Mapping.objects.filter(map_type='Has Child', is_latest_version=True).exists())
-        batch_index_resources_mock.apply_async.assert_called_with(('mapping', {'id__in': ANY}, True), queue='indexing')
+        batch_index_resources_mock.apply_async.assert_called_with(
+            ('mapping', {'id__in': ANY}, True), queue='indexing', permanent=False)
         self.assertEqual(
             sorted(batch_index_resources_mock.apply_async.mock_calls[0][1][0][1]['id__in']),
             sorted([mapping.id, mapping.get_latest_version().id])
@@ -1053,13 +1055,13 @@ class BulkImportViewTest(OCLAPITestCase):
         task_id3 = f"{str(uuid.uuid4())}-foobar~pending"
         Task(
             queue='priority', id=task_id1,
-            name='core.common.tasks.bulk_import', created_by=self.superuser, state='SUCCESS').save()
+            name='core.common.tasks.bulk_import_parallel_inline', created_by=self.superuser, state='SUCCESS').save()
         Task(
             queue='normal', id=task_id2,
-            name='core.common.tasks.bulk_import', created_by=random_user, state='FAILED').save()
+            name='core.common.tasks.bulk_import_parallel_inline', created_by=random_user, state='FAILED').save()
         Task(
             queue='pending', id=task_id3,
-            name='core.common.tasks.bulk_import', created_by=random_user, state='PENDING').save()
+            name='core.common.tasks.bulk_import_parallel_inline', created_by=random_user, state='PENDING').save()
 
         response = self.client.get(
             '/importers/bulk-import/?username=ocladmin&verbose=true',
@@ -1073,14 +1075,15 @@ class BulkImportViewTest(OCLAPITestCase):
             [{
                  'id': task_id1,
                  'state': 'SUCCESS',
-                 'name': 'core.common.tasks.bulk_import',
+                 'name': 'core.common.tasks.bulk_import_parallel_inline',
                  'queue': 'priority',
                  'username': 'ocladmin',
                  'created_at': ANY,
                  'started_at': None,
                  'finished_at': None,
                  'runtime': None,
-                 'summary': None
+                 'summary': None,
+                 'children': []
              }]
         )
 
@@ -1092,30 +1095,32 @@ class BulkImportViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
-            [dict(d) for d in response.data],
-            [{
+            sorted([dict(d) for d in response.data], key=lambda x: x['id']),
+            sorted([{
                 'id': task_id2,
                 'state': 'FAILED',
-                'name': 'core.common.tasks.bulk_import',
+                'name': 'core.common.tasks.bulk_import_parallel_inline',
                 'queue': 'normal',
                 'username': 'foobar',
                 'created_at': ANY,
                 'started_at': None,
                 'finished_at': None,
                 'runtime': None,
-                'summary': None
+                'summary': None,
+                'children': []
             }, {
                 'id': task_id3,
                 'state': 'PENDING',
-                'name': 'core.common.tasks.bulk_import',
+                'name': 'core.common.tasks.bulk_import_parallel_inline',
                 'queue': 'pending',
                 'username': 'foobar',
                 'created_at': ANY,
                 'started_at': None,
                 'finished_at': None,
                 'runtime': None,
-                'summary': None
-            }]
+                'summary': None,
+                'children': []
+            }], key= lambda x: x['id'])
         )
 
         response = self.client.get(
@@ -1130,14 +1135,15 @@ class BulkImportViewTest(OCLAPITestCase):
             [{
                 'id': task_id1,
                 'state': 'SUCCESS',
-                'name': 'core.common.tasks.bulk_import',
+                'name': 'core.common.tasks.bulk_import_parallel_inline',
                 'queue': 'priority',
                 'username': 'ocladmin',
                 'created_at': ANY,
                 'started_at': None,
                 'finished_at': None,
                 'runtime': None,
-                'summary': None
+                'summary': None,
+                'children': []
             }]
         )
 
@@ -1164,7 +1170,7 @@ class BulkImportViewTest(OCLAPITestCase):
 
         Task(
             id=task_id, created_by=foobar_user, queue='normal', state='PENDING',
-            name='core.common.tasks.bulk_import').save()
+            name='core.common.tasks.bulk_import_parallel_inline').save()
         response = self.client.get(
             f'/importers/bulk-import/?task={task_id}',
             HTTP_AUTHORIZATION='Token ' + foobar_user.get_token(),
@@ -1176,14 +1182,15 @@ class BulkImportViewTest(OCLAPITestCase):
             response.data, {
                 'id': task_id,
                 'state': 'PENDING',
-                'name': 'core.common.tasks.bulk_import',
+                'name': 'core.common.tasks.bulk_import_parallel_inline',
                 'queue': 'normal',
                 'username': 'foobar',
                 'created_at': ANY,
                 'started_at': None,
                 'finished_at': None,
                 'runtime': None,
-                'summary': None
+                'summary': None,
+                'children': []
             })
 
     def test_post_400(self):
@@ -1246,7 +1253,8 @@ class BulkImportViewTest(OCLAPITestCase):
                 'started_at': None,
                 'finished_at': None,
                 'runtime': None,
-                'summary': None
+                'summary': None,
+                'children': []
             }
         )
         self.assertTrue(DEPRECATED_API_HEADER not in response)
@@ -1278,7 +1286,8 @@ class BulkImportViewTest(OCLAPITestCase):
                 'started_at': None,
                 'finished_at': None,
                 'runtime': None,
-                'summary': None
+                'summary': None,
+                'children': []
             }
         )
         self.assertEqual(bulk_import_mock.apply_async.call_count, 2)
@@ -1307,7 +1316,8 @@ class BulkImportViewTest(OCLAPITestCase):
                 'started_at': None,
                 'finished_at': None,
                 'runtime': None,
-                'summary': None
+                'summary': None,
+                'children': []
             }
         )
         self.assertEqual(bulk_import_mock.apply_async.call_count, 3)
@@ -1380,7 +1390,8 @@ class BulkImportViewTest(OCLAPITestCase):
                 'started_at': None,
                 'finished_at': None,
                 'runtime': None,
-                'summary': None
+                'summary': None,
+                'children': []
             })
         self.assertTrue(DEPRECATED_API_HEADER in response)
         self.assertEqual(response[DEPRECATED_API_HEADER], 'True')
@@ -1411,7 +1422,8 @@ class BulkImportViewTest(OCLAPITestCase):
                 'started_at': None,
                 'finished_at': None,
                 'runtime': None,
-                'summary': None
+                'summary': None,
+                'children': []
             })
         self.assertEqual(bulk_import_mock.apply_async.call_count, 1)
         self.assertEqual(bulk_import_mock.apply_async.call_args[0], (('{"key": "value"}', 'ocladmin', True),))

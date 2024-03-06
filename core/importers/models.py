@@ -1107,5 +1107,5 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
         group_result = jobs.apply_async(queue='concurrent')
         self.groups.append(group_result)
         self.tasks += group_result.results
-        self.task.children += list(set([task.task_id for task in self.tasks]))
+        self.task.children += list({task.task_id for task in self.tasks})
         self.task.save()
