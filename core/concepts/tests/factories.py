@@ -79,6 +79,7 @@ class ConceptFactory(factory.django.DjangoModelFactory):
                 for locale in extracted:
                     locale.concept = self
                     locale.save()
+            sync_latest_version(self)
 
 
 class ConceptNameFactory(factory.django.DjangoModelFactory):

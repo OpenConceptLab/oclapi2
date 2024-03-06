@@ -178,7 +178,7 @@ class ConceptMapTest(OCLTestCase):
         self.assertEqual(response.status_code, 201)
         self.assertEqual(response.data['id'], 'test')
         self.assertEqual(response.data['version'], '1.0')
-        self.assertEqual(response.data['group'], [])
+        self.assertFalse('group' in response.data)
 
         # check if HEAD persisted
         sources = Source.objects.filter(mnemonic='test', version='HEAD', user=self.user)

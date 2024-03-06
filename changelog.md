@@ -1,3 +1,79 @@
+##### 2.3.50 - Sat Oct 7 00:24:12 2023 +0000
+- Revert "OpenConceptLab/ocl_issues#1664 | added logs for concept next valid ID"
+- [OpenConceptLab/ocl_issues#1664](https://github.com/OpenConceptLab/ocl_issues/issues/1664) | casting mnemonic to int
+- [OpenConceptLab/ocl_issues#1664](https://github.com/OpenConceptLab/ocl_issues/issues/1664) | added logs for concept next valid ID
+- pylint | remove unused import
+- Fixing batch index processing when filters are None
+- Fixing collection/verison hard delete failure | should delete references and expansions first
+- [OpenConceptLab/ocl_issues#1672](https://github.com/OpenConceptLab/ocl_issues/issues/1672) | remove duplicate lookup values
+- [OpenConceptLab/ocl_issues#1664](https://github.com/OpenConceptLab/ocl_issues/issues/1664) | mapping/concept create to verify parent autoid seq next valiud id
+- [OpenConceptLab/ocl_issues#1659](https://github.com/OpenConceptLab/ocl_issues/issues/1659) | Mapping initial version to have the right updated_by:
+- [OpenConceptLab/ocl_issues#1664](https://github.com/OpenConceptLab/ocl_issues/issues/1664) | clone process to verify auto id seq after excluding non-number IDs
+- [OpenConceptLab/ocl_issues#1664](https://github.com/OpenConceptLab/ocl_issues/issues/1664) | clone process to verify auto id for concept/mapping
+- [OpenConceptLab/ocl_issues#1670](https://github.com/OpenConceptLab/ocl_issues/issues/1670) | swagger request body for references delete
+- [OpenConceptLab/ocl_issues#1659](https://github.com/OpenConceptLab/ocl_issues/issues/1659) | using outer ref for mapping update by update
+- [OpenConceptLab/ocl_issues#1633](https://github.com/OpenConceptLab/ocl_issues/issues/1633) | updated lables/notes
+- [OpenConceptLab/ocl_issues#1659](https://github.com/OpenConceptLab/ocl_issues/issues/1659) | not using iterator | connection pool doesn't like it.
+- [OpenConceptLab/ocl_issues#1659](https://github.com/OpenConceptLab/ocl_issues/issues/1659) | reduced chunk size
+- [OpenConceptLab/ocl_issues#1633](https://github.com/OpenConceptLab/ocl_issues/issues/1633) | removed newline
+- [OpenConceptLab/ocl_issues#1633](https://github.com/OpenConceptLab/ocl_issues/issues/1633) | Updated/Refactored Resources usage report
+- [OpenConceptLab/ocl_issues#1659](https://github.com/OpenConceptLab/ocl_issues/issues/1659) | fixing mappings API for concepts
+- [OpenConceptLab/ocl_issues#1659](https://github.com/OpenConceptLab/ocl_issues/issues/1659) | ignoring coverage
+- [OpenConceptLab/ocl_issues#1659](https://github.com/OpenConceptLab/ocl_issues/issues/1659) | refactoring queryset for better lookup
+- [OpenConceptLab/ocl_issues#1659](https://github.com/OpenConceptLab/ocl_issues/issues/1659) | renaming var and not indexing
+- [OpenConceptLab/ocl_issues#1659](https://github.com/OpenConceptLab/ocl_issues/issues/1659) | using iterator and chunks for migration
+- [OpenConceptLab/ocl_issues#1659](https://github.com/OpenConceptLab/ocl_issues/issues/1659) | refactoring tasks
+- [OpenConceptLab/ocl_issues#1659](https://github.com/OpenConceptLab/ocl_issues/issues/1659) | refactoring tasks to be more efficient
+- [OpenConceptLab/ocl_issues#1659](https://github.com/OpenConceptLab/ocl_issues/issues/1659) | Concept/Mapping updated_by migration via API/task
+- [OpenConceptLab/ocl_issues#1659](https://github.com/OpenConceptLab/ocl_issues/issues/1659) | Concept/Mapping migration to update updated by
+- [OpenConceptLab/ocl_issues#1659](https://github.com/OpenConceptLab/ocl_issues/issues/1659) | Concept/Mapping version create should updated updated by on versioned object
+- [OpenConceptLab/ocl_issues#1659](https://github.com/OpenConceptLab/ocl_issues/issues/1659) | fixing pylint
+- [OpenConceptLab/ocl_issues#1659](https://github.com/OpenConceptLab/ocl_issues/issues/1659) | added updated by in indexes | Repo summary to have contributors | Facets to have updated by filters
+- [OpenConceptLab/ocl_issues#1415](https://github.com/OpenConceptLab/ocl_issues/issues/1415) Implement automated import scripts for FHIR HL7 content
+- Merge pull request #581 from IanMinash/codesystemlookup-fix
+- Switch body to OperationOutcome for empty queryset
+##### 2.3.49 - Tue Sep 5 07:38:46 2023 +0000
+- [OpenConceptLab/ocl_issues#1633](https://github.com/OpenConceptLab/ocl_issues/issues/1633) | fixing test
+- [OpenConceptLab/ocl_issues#1633](https://github.com/OpenConceptLab/ocl_issues/issues/1633) | Resource usage reports | updated swagger | can add custom dates
+- [OpenConceptLab/ocl_issues#1633](https://github.com/OpenConceptLab/ocl_issues/issues/1633) | Resource usage reports | feedbacks and refactoring
+##### 2.3.48 - Fri Sep 1 04:01:08 2023 +0000
+- [OpenConceptLab/ocl_issues#1656](https://github.com/OpenConceptLab/ocl_issues/issues/1656) | fixing facets when no search criteria is given
+- [OpenConceptLab/ocl_issues#1633](https://github.com/OpenConceptLab/ocl_issues/issues/1633) | correcting name of task
+##### 2.3.47 - Wed Aug 30 10:08:57 2023 +0000
+- [OpenConceptLab/ocl_issues#1633](https://github.com/OpenConceptLab/ocl_issues/issues/1633) | correcting concept/mapping retired criteria
+##### 2.3.46 - Wed Aug 30 07:25:28 2023 +0000
+- [OpenConceptLab/ocl_issues#1633](https://github.com/OpenConceptLab/ocl_issues/issues/1633) | correcting blank rows | removed duplicates
+- [OpenConceptLab/ocl_issues#1633](https://github.com/OpenConceptLab/ocl_issues/issues/1633) | added blank row
+##### 2.3.45 - Tue Aug 29 03:42:58 2023 +0000
+- [OpenConceptLab/ocl_issues#1587](https://github.com/OpenConceptLab/ocl_issues/issues/1587) | correcting wildcard
+- [OpenConceptLab/ocl_issues#1587](https://github.com/OpenConceptLab/ocl_issues/issues/1587) | fixing pylint
+- [OpenConceptLab/ocl_issues#1587](https://github.com/OpenConceptLab/ocl_issues/issues/1587) | must have and must not have with correct operators +/-
+- [OpenConceptLab/ocl_issues#1633](https://github.com/OpenConceptLab/ocl_issues/issues/1633) | fixing test
+- [OpenConceptLab/ocl_issues#1633](https://github.com/OpenConceptLab/ocl_issues/issues/1633) | Monthly usage report refactoring and using CSV format
+- [OpenConceptLab/ocl_issues#927](https://github.com/OpenConceptLab/ocl_issues/issues/927) Redis clustering, fix timeout
+- [OpenConceptLab/ocl_issues#927](https://github.com/OpenConceptLab/ocl_issues/issues/927) Redis clustering, move retry_policy
+- [OpenConceptLab/ocl_issues#927](https://github.com/OpenConceptLab/ocl_issues/issues/927) Redis clustering, move socket_timeout_* for result_backend
+- [OpenConceptLab/ocl_issues#927](https://github.com/OpenConceptLab/ocl_issues/issues/927) Redis clustering, move socket_timeout_
+- [OpenConceptLab/ocl_issues#927](https://github.com/OpenConceptLab/ocl_issues/issues/927) Redis clustering, disable broker heartbeat
+- [OpenConceptLab/ocl_issues#927](https://github.com/OpenConceptLab/ocl_issues/issues/927) Redis clustering, fix timeouts
+- using search queries to get facets
+- Removed exact match param from swagger
+- [OpenConceptLab/ocl_issues#927](https://github.com/OpenConceptLab/ocl_issues/issues/927) Redis clustering, fix Retry kombu error
+- [OpenConceptLab/ocl_issues#927](https://github.com/OpenConceptLab/ocl_issues/issues/927) Redis clustering, fix sentinels list
+- [OpenConceptLab/ocl_issues#927](https://github.com/OpenConceptLab/ocl_issues/issues/927) Redis clustering, using sentinel_kwargs
+- [OpenConceptLab/ocl_issues#927](https://github.com/OpenConceptLab/ocl_issues/issues/927) Redis clustering, use merge
+- [OpenConceptLab/ocl_issues#927](https://github.com/OpenConceptLab/ocl_issues/issues/927) Redis clustering, fixing settings.py
+- [OpenConceptLab/ocl_issues#1587](https://github.com/OpenConceptLab/ocl_issues/issues/1587) | must have in search using quotes
+- [OpenConceptLab/ocl_issues#927](https://github.com/OpenConceptLab/ocl_issues/issues/927) Redis clustering, fix formatting
+- [OpenConceptLab/ocl_issues#927](https://github.com/OpenConceptLab/ocl_issues/issues/927) Redis clustering, unify retry policy
+- [OpenConceptLab/ocl_issues#1583](https://github.com/OpenConceptLab/ocl_issues/issues/1583) | optimizing/refactoring search queries
+- [OpenConceptLab/ocl_issues#927](https://github.com/OpenConceptLab/ocl_issues/issues/927) Redis clustering, another attempt at setting timeouts
+- [OpenConceptLab/ocl_issues#1583](https://github.com/OpenConceptLab/ocl_issues/issues/1583) | Concept search term/prefix to use keyword name field
+- [OpenConceptLab/ocl_issues#927](https://github.com/OpenConceptLab/ocl_issues/issues/927) Redis clustering, enable back heartbeat
+- [OpenConceptLab/ocl_issues#927](https://github.com/OpenConceptLab/ocl_issues/issues/927) Redis clustering, fixing formatting
+- [OpenConceptLab/ocl_issues#927](https://github.com/OpenConceptLab/ocl_issues/issues/927) Redis clustering, fixing celery_once
+- [OpenConceptLab/ocl_issues#927](https://github.com/OpenConceptLab/ocl_issues/issues/927) Redis clustering, fixing celery startup
+- [OpenConceptLab/ocl_issues#927](https://github.com/OpenConceptLab/ocl_issues/issues/927) Redis clustering, fixing celery config
 ##### 2.3.44 - Wed Aug 23 03:46:34 2023 +0000
 - Fixing celery once config
 ##### 2.3.43 - Tue Aug 22 12:35:09 2023 +0000

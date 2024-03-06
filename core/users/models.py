@@ -5,6 +5,7 @@ from django.contrib.auth.models import AbstractUser
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
 from django.db import models
+from pydash import get
 from rest_framework.authtoken.models import Token
 
 from core.common.mixins import SourceContainerMixin
@@ -13,9 +14,10 @@ from core.common.tasks import send_user_verification_email, send_user_reset_pass
 from core.common.utils import web_url
 from core.users.constants import AUTH_GROUPS
 from .constants import USER_OBJECT_TYPE
+from ..common.checksums import ChecksumModel
 
 
-class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin):
+class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin, ChecksumModel):
     class Meta:
         db_table = 'user_profiles'
         swappable = 'AUTH_USER_MODEL'
@@ -43,12 +45,48 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
         'name': {'sortable': False, 'filterable': True, 'exact': True},
         '_name': {'sortable': True, 'filterable': False, 'exact': False},
         'date_joined': {'sortable': True, 'default': 'asc', 'filterable': False},
+        'updated_by': {'sortable': False, 'filterable': False, 'facet': True},
         'company': {'sortable': True, 'filterable': True, 'exact': True},
         'location': {'sortable': True, 'filterable': True, 'exact': True},
         'is_superuser': {'sortable': False, 'filterable': True, 'exact': False, 'facet': True},
         'is_staff': {'sortable': False, 'filterable': False, 'exact': False, 'facet': True},
         'is_admin': {'sortable': False, 'filterable': False, 'exact': False, 'facet': True}
     }
+
+    STANDARD_CHECKSUM_INCLUSIONS = [
+        'first_name', 'last_name', 'username', 'company', 'location', 'website', 'preferred_locale', 'extras']
+    SMART_CHECKSUM_INCLUSIONS = [
+        'first_name', 'last_name', 'username', 'company', 'location', 'website', 'is_active']
+
+    def get_standard_checksum_fields(self):
+        return self.get_standard_checksum_fields_for_resource(self)
+
+    def get_smart_checksum_fields(self):
+        return self.get_smart_checksum_fields_for_resource(self)
+
+    @staticmethod
+    def get_standard_checksum_fields_for_resource(data):
+        return {
+            'first_name': get(data, 'first_name'),
+            'last_name': get(data, 'last_name'),
+            'username': get(data, 'username'),
+            'company': get(data, 'company'),
+            'location': get(data, 'location'),
+            'website': get(data, 'website'),
+            'preferred_locale': get(data, 'preferred_locale'),
+            'extras': get(data, 'extras')
+        }
+
+    @staticmethod
+    def get_smart_checksum_fields_for_resource(data):
+        return {
+            'first_name': get(data, 'first_name'),
+            'last_name': get(data, 'last_name'),
+            'username': get(data, 'username'),
+            'company': get(data, 'company'),
+            'location': get(data, 'location'),
+            'is_active': get(data, 'is_active')
+        }
 
     def calculate_uri(self):
         return f"/users/{self.username}/"
@@ -189,6 +227,7 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
         self.deactivated_at = datetime.now()
         self.__delete_token()
         self.save()
+        self.set_checksums()
 
     def verify(self):
         self.is_active = True
@@ -208,3 +247,4 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
         self.deactivated_at = None
         self.is_active = True
         self.save()
+        self.set_checksums()

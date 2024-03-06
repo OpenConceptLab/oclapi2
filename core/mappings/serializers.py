@@ -23,11 +23,13 @@ class AbstractMappingSerializer(AbstractResourceSerializer):
     from_source = SourceListSerializer()
     to_source = SourceListSerializer()
     references = SerializerMethodField()
+    checksums = SerializerMethodField()
 
     class Meta:
         abstract = True
         fields = AbstractResourceSerializer.Meta.fields + (
-            'search_meta', 'from_concept', 'to_concept', 'from_source', 'to_source', 'extras', 'references'
+            'search_meta', 'from_concept', 'to_concept', 'from_source', 'to_source', 'extras', 'references',
+            'checksums'
         )
 
     def __init__(self, *args, **kwargs):
@@ -91,6 +93,10 @@ class AbstractMappingSerializer(AbstractResourceSerializer):
             return self.get_concept_serializer()(obj.to_concept, context=self.context).data
         return None
 
+    @staticmethod
+    def get_checksums(obj):
+        return obj.get_checksums()
+
 
 class MappingListSerializer(AbstractMappingSerializer):
     type = CharField(source='resource_type', read_only=True)
@@ -107,6 +113,8 @@ class MappingListSerializer(AbstractMappingSerializer):
     to_concept_code = EncodedDecodedCharField(required=False)
     from_concept_code = EncodedDecodedCharField(required=False)
     sort_weight = FloatField(required=False, allow_null=True)
+    version_updated_on = DateTimeField(source='updated_at', read_only=True)
+    version_updated_by = DateTimeField(source='updated_by.username', read_only=True)
     latest_source_version = CharField(
         source='latest_source_version.version', allow_null=True, allow_blank=True, read_only=True, required=False)
 
@@ -121,7 +129,8 @@ class MappingListSerializer(AbstractMappingSerializer):
             'url', 'version', 'id', 'versioned_object_id', 'versioned_object_url',
             'is_latest_version', 'update_comment', 'version_url', 'uuid', 'version_created_on',
             'from_source_version', 'to_source_version', 'from_concept_name_resolved',
-            'to_concept_name_resolved', 'type', 'sort_weight', 'latest_source_version'
+            'to_concept_name_resolved', 'type', 'sort_weight',
+            'version_updated_on', 'version_updated_by', 'latest_source_version'
         )
 
 
@@ -129,12 +138,11 @@ class MappingVersionListSerializer(MappingListSerializer):
     previous_version_url = CharField(read_only=True, source='prev_version_uri')
     source_versions = ListField(read_only=True)
     collection_versions = ListField(read_only=True)
-    checksums = SerializerMethodField()
 
     class Meta:
         model = Mapping
         fields = MappingListSerializer.Meta.fields + (
-            'previous_version_url', 'source_versions', 'collection_versions', 'checksums'
+            'previous_version_url', 'source_versions', 'collection_versions'
         )
 
     def __init__(self, *args, **kwargs):
@@ -149,10 +157,6 @@ class MappingVersionListSerializer(MappingListSerializer):
             self.fields.pop('collection_versions', None)
 
         super().__init__(*args, **kwargs)
-
-    @staticmethod
-    def get_checksums(obj):
-        return obj.get_checksums(queue=True)
 
 
 class MappingMinimalSerializer(AbstractMappingSerializer):
@@ -191,18 +195,24 @@ class MappingReverseMinimalSerializer(ModelSerializer):
     cascade_target_concept_url = CharField(source='from_concept_url')
     cascade_target_source_name = CharField(source='from_source_name', allow_blank=True, allow_null=True)
     cascade_target_source_owner = CharField(source='from_source_owner', allow_blank=True, allow_null=True)
+    checksums = SerializerMethodField()
 
     class Meta:
         model = Mapping
         fields = (
             'id', 'type', 'map_type', 'url', 'version_url', 'from_concept_code', 'from_concept_url',
             'cascade_target_concept_code', 'cascade_target_concept_url', 'cascade_target_source_owner',
-            'cascade_target_source_name', 'cascade_target_concept_name', 'retired', 'sort_weight'
+            'cascade_target_source_name', 'cascade_target_concept_name', 'retired', 'sort_weight',
+            'checksums'
         )
 
     @staticmethod
     def get_cascade_target_concept_name(obj):
         return obj.from_concept_name or get(obj, 'from_concept.display_name')
+
+    @staticmethod
+    def get_checksums(obj):
+        return obj.get_checksums()
 
 
 class MappingDetailSerializer(MappingListSerializer):
@@ -221,7 +231,6 @@ class MappingDetailSerializer(MappingListSerializer):
     to_source = SourceDetailSerializer()
     created_on = DateTimeField(source='created_at', read_only=True)
     updated_on = DateTimeField(source='updated_at', read_only=True)
-    checksums = SerializerMethodField()
     latest_source_version = CharField(
         source='latest_source_version.version', allow_null=True, allow_blank=True, read_only=True, required=False)
 
@@ -229,7 +238,7 @@ class MappingDetailSerializer(MappingListSerializer):
         model = Mapping
         fields = MappingListSerializer.Meta.fields + (
             'type', 'uuid', 'extras', 'created_on', 'updated_on', 'created_by',
-            'updated_by', 'parent_id', 'public_can_view', 'checksums', 'latest_source_version'
+            'updated_by', 'parent_id', 'public_can_view', 'latest_source_version'
         )
 
     def create(self, validated_data):
@@ -243,10 +252,6 @@ class MappingDetailSerializer(MappingListSerializer):
         if errors:
             self._errors.update(errors)
         return instance
-
-    @staticmethod
-    def get_checksums(obj):
-        return obj.get_checksums(queue=True)
 
 
 class MappingVersionDetailSerializer(MappingDetailSerializer):

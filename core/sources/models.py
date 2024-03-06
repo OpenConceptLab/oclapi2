@@ -5,16 +5,17 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import UniqueConstraint, F, Max, Count
+from django.db.models.functions import Cast
 from pydash import get
 
 from core.common.constants import HEAD
 from core.common.models import ConceptContainerModel
-from core.common.services import PostgresQL
 from core.common.tasks import update_mappings_source, index_source_concepts, index_source_mappings
 from core.common.validators import validate_non_negative
 from core.concepts.models import ConceptName, Concept
+from core.services.storages.postgres import PostgresQL
 from core.sources.constants import SOURCE_TYPE, SOURCE_VERSION_TYPE, HIERARCHY_ROOT_MUST_BELONG_TO_SAME_SOURCE, \
-    HIERARCHY_MEANINGS, AUTO_ID_CHOICES, AUTO_ID_SEQUENTIAL, AUTO_ID_UUID
+    HIERARCHY_MEANINGS, AUTO_ID_CHOICES, AUTO_ID_SEQUENTIAL, AUTO_ID_UUID, LOCALE_EXTERNAL_AUTO_ID_CHOICES
 
 
 class Source(DirtyFieldsMixin, ConceptContainerModel):
@@ -31,6 +32,7 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         'name': {'sortable': False, 'filterable': True, 'exact': True},
         '_name': {'sortable': True, 'filterable': False, 'exact': False},
         'last_update': {'sortable': True, 'filterable': False, 'default': 'desc'},
+        'updated_by': {'sortable': False, 'filterable': False, 'facet': True},
         'locale': {'sortable': False, 'filterable': True, 'facet': True},
         'owner': {'sortable': True, 'filterable': True, 'facet': True, 'exact': True},
         'owner_type': {'sortable': False, 'filterable': True, 'facet': True},
@@ -56,8 +58,17 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
             )
         ]
         indexes = [
-                      models.Index(fields=['uri']),
-                      models.Index(fields=['public_access'])
+                      models.Index(fields=['uri']), models.Index(fields=['public_access']),
+                      models.Index(
+                          name='source_org_released',
+                          fields=['mnemonic', 'organization', '-created_at'],
+                          condition=(models.Q(user__isnull=True, is_active=True, released=True))
+                      ),
+                      models.Index(
+                          name='source_user_released',
+                          fields=['mnemonic', 'user', '-created_at'],
+                          condition=(models.Q(organization__isnull=True, is_active=True, released=True))
+                      ),
                   ] + ConceptContainerModel.Meta.indexes
         # + index on UPPER(mnemonic) in custom migration 0022
 
@@ -83,9 +94,43 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         default=DEFAULT_AUTO_ID_START_FROM, validators=[validate_non_negative])
     autoid_mapping_external_id_start_from = models.IntegerField(
         default=DEFAULT_AUTO_ID_START_FROM, validators=[validate_non_negative])
+    autoid_concept_name_external_id = models.CharField(
+        null=True, blank=True, choices=LOCALE_EXTERNAL_AUTO_ID_CHOICES, max_length=10)
+    autoid_concept_description_external_id = models.CharField(
+        null=True, blank=True, choices=LOCALE_EXTERNAL_AUTO_ID_CHOICES, max_length=10)
 
     OBJECT_TYPE = SOURCE_TYPE
     OBJECT_VERSION_TYPE = SOURCE_VERSION_TYPE
+
+    def get_standard_checksum_fields(self):
+        return self.get_standard_checksum_fields_for_resource(self)
+
+    def get_smart_checksum_fields(self):
+        return self.get_smart_checksum_fields_for_resource(self)
+
+    @staticmethod
+    def get_standard_checksum_fields_for_resource(data):
+        return {
+            'source_type': get(data, 'source_type'),
+            'canonical_url': get(data, 'canonical_url'),
+            'custom_validation_schema': get(data, 'custom_validation_schema'),
+            'default_locale': get(data, 'default_locale'),
+            'supported_locales': get(data, 'supported_locales'),
+            'website': get(data, 'website'),
+            'hierarchy_meaning': get(data, 'hierarchy_meaning'),
+            'extras': get(data, 'extras'),
+        }
+
+    @staticmethod
+    def get_smart_checksum_fields_for_resource(data):
+        return {
+            'source_type': get(data, 'source_type'),
+            'canonical_url': get(data, 'canonical_url'),
+            'custom_validation_schema': get(data, 'custom_validation_schema'),
+            'default_locale': get(data, 'default_locale'),
+            'released': get(data, 'released'),
+            'retired': get(data, 'retired'),
+        }
 
     @property
     def is_sequential_concept_mnemonic(self):
@@ -110,6 +155,14 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
     @property
     def concept_external_id_next(self):
         return self.get_resource_next_attr_id(self.autoid_concept_external_id, self.concepts_external_id_seq_name)
+
+    @property
+    def concept_name_external_id_next(self):
+        return self.get_resource_next_attr_id(self.autoid_concept_name_external_id, None)
+
+    @property
+    def concept_description_external_id_next(self):
+        return self.get_resource_next_attr_id(self.autoid_concept_description_external_id, None)
 
     @property
     def mapping_mnemonic_next(self):
@@ -322,6 +375,14 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         return f"{prefix}_concepts_external_id_seq"
 
     @property
+    def is_sequential_concepts_mnemonic(self):
+        return self.autoid_concept_mnemonic == AUTO_ID_SEQUENTIAL
+
+    @property
+    def is_sequential_mappings_mnemonic(self):
+        return self.autoid_mapping_mnemonic == AUTO_ID_SEQUENTIAL
+
+    @property
     def mappings_mnemonic_seq_name(self):
         prefix = self.__get_resource_db_sequence_prefix()
         return f"{prefix}_mappings_mnemonic_seq"
@@ -416,15 +477,36 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         else:
             update_mappings_source.delay(self.id)
 
+    def get_max_concept_attribute(self, attribute):
+        return get(self.get_concepts_queryset().aggregate(max_val=Max(attribute)), 'max_val', None)
+
+    def get_max_mapping_attribute(self, attribute):
+        return get(self.get_mappings_queryset().aggregate(max_val=Max(attribute)), 'max_val', None)
+
+    def get_max_concept_mnemonic(self):
+        return self.get_max_mnemonic_for_resource(self.get_concepts_queryset())
+
+    def get_max_mapping_mnemonic(self):
+        return self.get_max_mnemonic_for_resource(self.get_mappings_queryset())
+
+    @staticmethod
+    def get_max_mnemonic_for_resource(queryset):
+        return get(
+            queryset.filter(
+                mnemonic__regex=r'^\d+$'
+            ).annotate(
+                mnemonic_int=Cast('mnemonic', models.IntegerField())
+            ).aggregate(
+                max_val=Max('mnemonic_int')), 'max_val', None
+        )
+
     @property
     def last_concept_update(self):
-        queryset = self.concepts_set.filter(id=F('versioned_object_id')) if self.is_head else self.concepts
-        return get(queryset.aggregate(max_updated_at=Max('updated_at')), 'max_updated_at', None)
+        return self.get_max_concept_attribute('updated_at')
 
     @property
     def last_mapping_update(self):
-        queryset = self.mappings_set.filter(id=F('versioned_object_id')) if self.is_head else self.mappings
-        return get(queryset.aggregate(max_updated_at=Max('updated_at')), 'max_updated_at', None)
+        return self.get_max_mapping_attribute('updated_at')
 
     def get_mapped_sources(self):
         """Returns only direct mapped sources"""
@@ -654,13 +736,18 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         if self.is_head:
             return self.concepts_set.filter(id=F('versioned_object_id'))
 
-        return self.concepts.filter()
+        return Concept.objects.filter(
+            id__in=Concept.sources.through.objects.filter(source_id=self.id).values_list('concept_id', flat=True)
+        )
 
     def get_mappings_queryset(self):
         if self.is_head:
             return self.mappings_set.filter(id=F('versioned_object_id'))
 
-        return self.mappings.filter()
+        from core.mappings.models import Mapping
+        return Mapping.objects.filter(
+            id__in=Mapping.sources.through.objects.filter(source_id=self.id).values_list('mapping_id', flat=True)
+        )
 
     @property
     def mappings_distribution(self):
@@ -671,7 +758,8 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
             'retired': self.retired_mappings_count,
             'map_type': self._to_clean_facets(facets.mapType or []),
             'to_concept_source': self._to_clean_facets(facets.toConceptSource or [], True),
-            'from_concept_source': self._to_clean_facets(facets.fromConceptSource or [], True)
+            'from_concept_source': self._to_clean_facets(facets.fromConceptSource or [], True),
+            'contributors': self._to_clean_facets(facets.updatedBy or [])
         }
 
     def _get_resource_facet_filters(self, filters=None):
@@ -687,3 +775,15 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
             _filters['source_version'] = self.version
 
         return {**_filters, **(filters or {})}
+
+    @staticmethod
+    def compare(version1, version2, verbose=False):  # pragma: no cover
+        from core.common.checksums import ChecksumDiff
+        diff = ChecksumDiff(
+            resources1=version1.get_concepts_queryset().only('mnemonic', 'checksums'),
+            resources2=version2.get_concepts_queryset().only('mnemonic', 'checksums'),
+            verbose=verbose
+        )
+        diff.process()
+        diff.print()
+        return diff.result

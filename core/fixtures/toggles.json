@@ -6,7 +6,9 @@
       "is_active": true,
       "name": "CHECKSUMS_TOGGLE",
       "dev": true,
-      "qa": true
+      "qa": true,
+      "staging": true,
+      "production": true
     }
   },
   {
@@ -15,6 +17,26 @@
     "fields": {
       "is_active": true,
       "name": "LOCALIZATION_TOGGLE",
+      "dev": true,
+      "qa": true
+    }
+  },
+  {
+    "pk": 4,
+    "model": "toggles.toggle",
+    "fields": {
+      "is_active": true,
+      "name": "URL_REGISTRY_IN_RESOLVE_REFERENCE_TOGGLE",
+      "dev": true,
+      "qa": true
+    }
+  },
+  {
+    "pk": 5,
+    "model": "toggles.toggle",
+    "fields": {
+      "is_active": true,
+      "name": "PREVENT_DUPLICATE_VERSION_TOGGLE",
       "dev": true,
       "qa": true
     }

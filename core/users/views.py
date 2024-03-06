@@ -19,7 +19,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from core.common.constants import NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY, LAST_LOGIN_SINCE_PARAM, \
-    LAST_LOGIN_BEFORE_PARAM, DATE_JOINED_SINCE_PARAM, DATE_JOINED_BEFORE_PARAM
+    LAST_LOGIN_BEFORE_PARAM, DATE_JOINED_SINCE_PARAM, DATE_JOINED_BEFORE_PARAM, UPDATED_BY_USERNAME_PARAM
 from core.common.exceptions import Http400
 from core.common.mixins import ListWithHeadersMixin
 from core.common.swagger_parameters import last_login_before_param, last_login_since_param, updated_since_param, \
@@ -27,14 +27,14 @@ from core.common.swagger_parameters import last_login_before_param, last_login_s
 from core.common.utils import parse_updated_since_param, from_string_to_date, get_truthy_values
 from core.common.views import BaseAPIView, BaseLogoView
 from core.orgs.models import Organization
+from core.services.auth.core import AuthService
+from core.services.auth.openid import OpenIDAuthService
 from core.users.constants import VERIFICATION_TOKEN_MISMATCH, VERIFY_EMAIL_MESSAGE, REACTIVATE_USER_MESSAGE
 from core.users.documents import UserProfileDocument
 from core.users.search import UserProfileFacetedSearch
 from core.users.serializers import UserDetailSerializer, UserCreateSerializer, UserListSerializer, UserSummarySerializer
 from .models import UserProfile
 from ..common import ERRBIT_LOGGER
-from ..common.services import AuthService, OIDCAuthService
-
 
 TRUTHY = get_truthy_values()
 
@@ -59,7 +59,7 @@ class OIDCodeExchangeView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
         return Response(
-            OIDCAuthService.exchange_code_for_token(code, redirect_uri, client_id, client_secret))
+            OpenIDAuthService.exchange_code_for_token(code, redirect_uri, client_id, client_secret))
 
 
 # This API is only to migrate users from Django to OID, requires OID admin credentials in payload
@@ -82,7 +82,7 @@ class SSOMigrateView(APIView):  # pragma: no cover
                 status=status.HTTP_400_BAD_REQUEST
             )
         user = self.get_object()
-        result = OIDCAuthService.add_user(user=user, username=username, password=password)
+        result = OpenIDAuthService.add_user(user=user, username=username, password=password)
         return Response(result)
 
 
@@ -101,7 +101,7 @@ class OIDCLogoutView(APIView):
     def get(request):
         if AuthService.is_sso_enabled():
             return redirect(
-                OIDCAuthService.get_logout_redirect_url(
+                OpenIDAuthService.get_logout_redirect_url(
                     request.query_params.get('id_token_hint'),
                     request.query_params.get('post_logout_redirect_uri'),
                 )
@@ -116,7 +116,7 @@ class TokenAuthenticationView(ObtainAuthToken):
     def get(request):
         if AuthService.is_sso_enabled():
             return redirect(
-                OIDCAuthService.get_login_redirect_url(
+                OpenIDAuthService.get_login_redirect_url(
                     request.query_params.get('client_id'),
                     request.query_params.get('redirect_uri'),
                     request.query_params.get('state'),
@@ -177,12 +177,15 @@ class UserBaseView(BaseAPIView):
 
     def get_queryset(self):
         updated_since = parse_updated_since_param(self.request.query_params)
+        updated_by = self.request.query_params.get(UPDATED_BY_USERNAME_PARAM, None)
         last_login_since = self.request.query_params.get(LAST_LOGIN_SINCE_PARAM, None)
         last_login_before = self.request.query_params.get(LAST_LOGIN_BEFORE_PARAM, None)
         date_joined_since = self.request.query_params.get(DATE_JOINED_SINCE_PARAM, None)
         date_joined_before = self.request.query_params.get(DATE_JOINED_BEFORE_PARAM, None)
         if updated_since:
             self.queryset = self.queryset.filter(updated_at__gte=updated_since)
+        if updated_by:
+            self.queryset = self.queryset.filter(updated_by__username=updated_by)
         if last_login_since:
             self.queryset = self.queryset.filter(last_login__gte=from_string_to_date(last_login_since))
         if last_login_before:
@@ -263,6 +266,19 @@ class UserListView(UserBaseView,
 class UserSignup(UserBaseView, mixins.CreateModelMixin):
     serializer_class = UserCreateSerializer
     permission_classes = (AllowAny, )
+
+    @staticmethod
+    def get(request):
+        if AuthService.is_sso_enabled():
+            return redirect(
+                OpenIDAuthService.get_registration_redirect_url(
+                    request.query_params.get('client_id'),
+                    request.query_params.get('redirect_uri'),
+                    request.query_params.get('state'),
+                    request.query_params.get('nonce'),
+                )
+            )
+        return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
 
     def post(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         serializer = self.get_serializer(data={**request.data, 'verified': False})
@@ -483,6 +499,7 @@ class UserExtraRetrieveUpdateDestroyView(UserExtrasBaseView, RetrieveUpdateDestr
         instance.extras = get(instance, 'extras', {})
         instance.extras[key] = value
         instance.save()
+        instance.set_checksums()
         return Response({key: value})
 
     def delete(self, request, *args, **kwargs):
@@ -492,6 +509,7 @@ class UserExtraRetrieveUpdateDestroyView(UserExtrasBaseView, RetrieveUpdateDestr
         if key in instance.extras:
             del instance.extras[key]
             instance.save()
+            instance.set_checksums()
             return Response(status=status.HTTP_204_NO_CONTENT)
 
         return Response({'detail': NOT_FOUND}, status=status.HTTP_404_NOT_FOUND)

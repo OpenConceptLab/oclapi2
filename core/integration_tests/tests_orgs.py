@@ -521,7 +521,7 @@ class OrganizationLogoViewTest(OCLAPITestCase):
         self.user = UserProfileFactory(organizations=[self.organization])
         self.token = self.user.get_token()
 
-    @patch('core.common.services.S3.upload_base64')
+    @patch('core.services.storages.cloud.aws.S3.upload_base64')
     def test_post_200(self, upload_base64_mock):
         upload_base64_mock.return_value = 'orgs/org-1/logo.png'
         self.assertIsNone(self.organization.logo_url)

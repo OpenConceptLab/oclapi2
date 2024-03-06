@@ -3,8 +3,10 @@ from math import ceil
 from urllib import parse
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
-from django.db.models import Q, F
+from django.db import transaction
+from django.db.models import Q, F, QuerySet
 from django.http import HttpResponseForbidden, Http404
 from django.shortcuts import get_object_or_404
 from django.urls import resolve, Resolver404
@@ -16,12 +18,15 @@ from rest_framework.response import Response
 
 from core.common.constants import HEAD, ACCESS_TYPE_NONE, INCLUDE_FACETS, \
     LIST_DEFAULT_LIMIT, HTTP_COMPRESS_HEADER, CSV_DEFAULT_LIMIT, FACETS_ONLY, INCLUDE_RETIRED_PARAM, \
-    SEARCH_STATS_ONLY, INCLUDE_SEARCH_STATS
+    SEARCH_STATS_ONLY, INCLUDE_SEARCH_STATS, UPDATED_BY_USERNAME_PARAM, CHECKSUM_STANDARD_HEADER, \
+    CHECKSUM_SMART_HEADER, SEARCH_LATEST_REPO_VERSION, SAME_STANDARD_CHECKSUM_ERROR
 from core.common.permissions import HasPrivateAccess, HasOwnership, CanViewConceptDictionary, \
     CanViewConceptDictionaryVersion
-from .checksums import ChecksumModel
+from .checksums import ChecksumModel, Checksum
 from .utils import write_csv_to_s3, get_csv_from_s3, get_query_params_from_url_string, compact_dict_by_values, \
-    to_owner_uri, parse_updated_since_param, get_export_service, to_int, get_truthy_values
+    to_owner_uri, parse_updated_since_param, get_export_service, to_int, get_truthy_values, generate_temp_version
+from ..concepts.constants import PERSIST_CLONE_ERROR
+from ..toggles.models import Toggle
 
 logger = logging.getLogger('oclapi')
 TRUTHY = get_truthy_values()
@@ -34,7 +39,8 @@ class CustomPaginator:
     ):
         self.request = request
         self.queryset = queryset
-        self.total = total_count or self.queryset.count()
+        self.total = total_count or (
+            self.queryset.count() if isinstance(self.queryset, QuerySet) else len(self.queryset))
         self.page_size = int(page_size)
         self.page_number = to_int(request.GET.get('page', '1'), 1)
         if not is_sliced:
@@ -43,7 +49,8 @@ class CustomPaginator:
             if top >= self.total:
                 top = self.total
             self.queryset = self.queryset[bottom:top]
-        self.queryset.count = None
+        if isinstance(self.queryset, QuerySet):
+            self.queryset.count = None
         self.paginator = Paginator(self.queryset, self.page_size)
         self.page_object = self.paginator.get_page(self.page_number)
         self.page_count = ceil(int(self.total_count) / int(self.page_size))
@@ -109,8 +116,25 @@ class CustomPaginator:
             headers['next'] = self.get_next_page_url()
         if self.has_previous():
             headers['previous'] = self.get_previous_page_url()
-
+        standard, smart = self.checksums
+        if standard is not None:
+            headers[CHECKSUM_STANDARD_HEADER] = standard
+        if smart is not None:
+            headers[CHECKSUM_SMART_HEADER] = smart
         return headers
+
+    @property
+    def checksums(self):
+        standard, smart = [], []
+        if get(self.current_page_results, '0.checksums.standard'):
+            for result in self.current_page_results:
+                standard.append(get(result.checksums, 'standard'))
+                smart.append(get(result.checksums, 'smart'))
+        standard = compact(standard)
+        smart = compact(smart)
+        standard = Checksum.generate(standard) if len(standard) > 1 else get(standard, '0')
+        smart = Checksum.generate(smart) if len(smart) > 1 else get(smart, '0')
+        return standard, smart
 
 
 class ListWithHeadersMixin(ListModelMixin):
@@ -202,6 +226,9 @@ class ListWithHeadersMixin(ListModelMixin):
 
     def should_include_facets(self):
         return self.request.META.get(INCLUDE_FACETS, False) in TRUTHY
+
+    def is_latest_repo_search_header_present(self):
+        return self.request.META.get(SEARCH_LATEST_REPO_VERSION, False) in TRUTHY
 
     def should_include_search_stats(self):
         return self.request.META.get(INCLUDE_SEARCH_STATS, False) in TRUTHY
@@ -410,6 +437,7 @@ class ConceptDictionaryUpdateMixin(ConceptDictionaryMixin):
         if serializer.is_valid():
             self.object = serializer.save(**save_kwargs)
             if serializer.is_valid():
+                self.object.get_checksums(recalculate=True)
                 serializer = self.get_detail_serializer(self.object)
                 return Response(serializer.data, status=success_status_code)
 
@@ -417,6 +445,33 @@ class ConceptDictionaryUpdateMixin(ConceptDictionaryMixin):
 
 
 class SourceContainerMixin:
+    def find_repo_by_canonical_url(self, canonical_url):
+        repo = self.source_set.filter(canonical_url=canonical_url).first()
+        if not repo:
+            repo = self.collection_set.filter(canonical_url=canonical_url).first()
+        return repo
+
+    @staticmethod
+    def get_object_from_namespace(namespace):
+        if not namespace or namespace == '/':
+            return None
+
+        klass = None
+        if '/orgs/' in namespace:
+            from core.orgs.models import Organization
+            klass = Organization
+        elif '/users/' in namespace:
+            from core.users.models import UserProfile
+            klass = UserProfile
+        if klass:
+            return klass.objects.filter(uri=namespace).first()
+
+        return None
+
+    @property
+    def bookmarks_count(self):
+        return self.pins.count()
+
     @property
     def sources(self):
         return self.source_set.filter(version=HEAD)
@@ -479,17 +534,18 @@ class SourceChildMixin(ChecksumModel):
         self.set_specific_checksums('repo_versions', self.source_versions_checksum)
 
     @property
-    def source_versions_checksum(self):
-        checksums = [version.checksum for version in self.sources.exclude(version=HEAD)]
-        return self.generate_checksum(checksums) if checksums else None
+    def latest_source_version(self):
+        if self.is_in_latest_source_version:
+            return self._cached_latest_source_version
+        return None
+
+    @cached_property
+    def _cached_latest_source_version(self):
+        return self.parent.get_latest_released_version()
 
     @staticmethod
     def is_strictly_equal(instance1, instance2):
         return instance1.get_checksums() == instance2.get_checksums()
-
-    @staticmethod
-    def is_equal(instance1, instance2):
-        return instance1.get_basic_checksums() == instance2.get_basic_checksums()
 
     @staticmethod
     def apply_user_criteria(queryset, user):
@@ -506,12 +562,15 @@ class SourceChildMixin(ChecksumModel):
         is_latest = params.get('is_latest', None) in TRUTHY
         include_retired = params.get(INCLUDE_RETIRED_PARAM, None) in TRUTHY
         updated_since = parse_updated_since_param(params)
+        updated_by = params.get(UPDATED_BY_USERNAME_PARAM, None)
         if is_latest:
             queryset = queryset.filter(is_latest_version=True)
         if not include_retired and not params.get('concept', None) and not params.get('mapping', None):
             queryset = queryset.filter(retired=False)
         if updated_since:
             queryset = queryset.filter(updated_at__gte=updated_since)
+        if updated_by:
+            queryset = queryset.filter(updated_by__username=updated_by)
 
         return queryset
 
@@ -588,7 +647,7 @@ class SourceChildMixin(ChecksumModel):
         new_version = latest_version.clone()
         new_version.retired = retired
         new_version.comment = comment
-        return self.__class__.persist_clone(new_version, user)
+        return new_version.save_as_new_version(user)
 
     @classmethod
     def from_uri_queryset(cls, uri):  # soon to be deleted
@@ -691,6 +750,109 @@ class SourceChildMixin(ChecksumModel):
     def collection_references(self, collection):
         return self.references.filter(collection=collection)
 
+    def __update_latest_version(self, index, is_latest_version, parent, remove_parent=False, add_parent=False):  # pylint: disable=too-many-arguments
+        self._index = index  # pylint: disable=protected-access
+        self.is_latest_version = is_latest_version
+        self.save(update_fields=['is_latest_version', '_index'])
+        if parent:
+            if remove_parent:
+                self.sources.remove(parent)
+            if add_parent:
+                self.sources.add(parent)
+
+    def unmark_latest_version(self, index=True, parent=None):
+        parent = parent or self.parent
+        self.__update_latest_version(index, False, parent, True, False)
+
+    def mark_latest_version(self, index=True, parent=None):
+        parent = parent or self.parent
+        self.__update_latest_version(index, True, parent, False, True)
+
+    @staticmethod
+    def validate_locales_limit(names, descriptions):
+        pass
+
+    def _process_prev_latest_version_hierarchy(self, prev_latest, add_prev_version_children):
+        pass
+
+    def _process_latest_version_hierarchy(self, prev_latest, parent_concept_uris=None, create_parent_version=True):
+        pass
+
+    def _index_on_new_version_creation(self, prev_latest):
+        if self._index:
+            if prev_latest:
+                prev_latest.index()
+            self.index()
+
+    def remove_locales(self):
+        pass
+
+    def save_as_new_version(self, user, **kwargs):  # pylint: disable=too-many-branches,too-many-statements
+        cls = self.__class__
+        create_parent_version = kwargs.pop('create_parent_version', True)
+        parent_concept_uris = kwargs.pop('parent_concept_uris', None)
+        add_prev_version_children = kwargs.pop('add_prev_version_children', True)
+        _hierarchy_processing = kwargs.pop('_hierarchy_processing', False)
+        errors = {}
+        self.created_by = self.updated_by = user
+        self.version = self.version or generate_temp_version()
+        parent = self.parent
+        persisted = False
+        prev_latest = self.versions.exclude(id=self.id).filter(is_latest_version=True).first()
+        is_concept = self.__class__.__name__ == 'Concept'
+        try:
+            with transaction.atomic():
+                self.validate_locales_limit(get(self, 'cloned_names'), get(self, 'cloned_descriptions'))
+                cls.pause_indexing()
+                self.is_latest_version = True
+                self.save(**kwargs)
+
+                if self.id:
+                    self.post_version_create(parent, parent_concept_uris)
+                    if not prev_latest or _hierarchy_processing:
+                        self.set_checksums()
+                    should_process_hierarchy = bool(parent_concept_uris)
+                    if prev_latest:
+                        if not _hierarchy_processing:
+                            if is_concept:
+                                self._unsaved_child_concept_uris = prev_latest.child_concept_urls
+                            self.set_checksums()
+                        if Toggle.get(
+                                'PREVENT_DUPLICATE_VERSION_TOGGLE'
+                        ) and Toggle.get(
+                            'CHECKSUMS_TOGGLE'
+                        ) and not _hierarchy_processing and self.checksums.get(
+                            'standard'
+                        ) == prev_latest.get_checksums(recalculate=True).get('standard'):
+                            raise ValidationError({'__all__': [SAME_STANDARD_CHECKSUM_ERROR]})
+                        if not self._index:
+                            self.prev_latest_version_id = prev_latest.id
+                        prev_latest.unmark_latest_version(self._index, parent)
+                        should_process_hierarchy = should_process_hierarchy or bool(
+                            is_concept and prev_latest.parent_concept_urls)
+                        if should_process_hierarchy:
+                            self._process_prev_latest_version_hierarchy(prev_latest, add_prev_version_children)
+                    if should_process_hierarchy:
+                        self._process_latest_version_hierarchy(prev_latest, parent_concept_uris, create_parent_version)
+                    persisted = True
+                    cls.resume_indexing()
+
+                transaction.on_commit(lambda: self._index_on_new_version_creation(prev_latest))
+        except ValidationError as err:
+            errors.update(err.message_dict)
+        finally:
+            cls.resume_indexing()
+            if not persisted:
+                if prev_latest:
+                    prev_latest.mark_latest_version(True, parent)
+                if self.id:
+                    self.remove_locales()
+                    self.delete()
+                if not errors:
+                    errors['non_field_errors'] = [PERSIST_CLONE_ERROR]
+
+        return errors
+
 
 class ConceptContainerExportMixin:
     permission_classes = (CanViewConceptDictionaryVersion, )
@@ -712,7 +874,7 @@ class ConceptContainerExportMixin:
     def get(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         version = self.get_object()
         logger.debug(
-            'Export requested for %s version %s - Requesting AWS-S3 key', self.entity.lower(), version.version
+            'Export requested for %s version %s', self.entity.lower(), version.version
         )
         if version.is_head and not request.user.is_staff:
             return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)

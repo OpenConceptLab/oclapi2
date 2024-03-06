@@ -5,6 +5,7 @@ from rest_framework import serializers
 from rest_framework.fields import CharField, SerializerMethodField, \
     DateTimeField
 
+from core.common.fhir_helpers import delete_empty_fields
 from core.concept_maps.constants import RESOURCE_TYPE
 from core.common.constants import HEAD
 from core.common.serializers import StatusField, IdentifierSerializer
@@ -137,6 +138,7 @@ class ConceptMapDetailSerializer(serializers.ModelSerializer):
     def to_representation(self, instance):
         try:
             rep = super().to_representation(instance)
+            delete_empty_fields(rep)
             IdentifierSerializer.include_ocl_identifier(instance.uri, RESOURCE_TYPE, rep)
         except (Exception, ):
             msg = f'Failed to represent "{instance.uri}" as {RESOURCE_TYPE}'

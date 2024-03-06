@@ -25,7 +25,7 @@ from core.common.constants import (
 from core.common.models import ConceptContainerModel, BaseResourceModel
 from core.common.search import CustomESSearch
 from core.common.tasks import seed_children_to_expansion, batch_index_resources, index_expansion_concepts, \
-    index_expansion_mappings
+    index_expansion_mappings, readd_references_to_expansion_on_references_removal
 from core.common.utils import drop_version, to_owner_uri, generate_temp_version, es_id_in, \
     get_resource_class_from_resource_name, to_snake_case, \
     es_to_pks, batch_qs, split_list_by_condition, decode_string, is_canonical_uri, encode_string, \
@@ -52,6 +52,7 @@ class Collection(ConceptContainerModel):
         'name': {'sortable': False, 'filterable': True, 'exact': True},
         '_name': {'sortable': True, 'filterable': False, 'exact': False},
         'last_update': {'sortable': True, 'filterable': False, 'default': 'desc'},
+        'updated_by': {'sortable': False, 'filterable': False, 'facet': True},
         'locale': {'sortable': False, 'filterable': True, 'facet': True},
         'owner': {'sortable': True, 'filterable': True, 'facet': True, 'exact': True},
         'owner_type': {'sortable': False, 'filterable': True, 'facet': True},
@@ -79,6 +80,16 @@ class Collection(ConceptContainerModel):
                       models.Index(fields=['uri']),
                       models.Index(name="coll_mnemonic_like", fields=["mnemonic"], opclasses=["text_pattern_ops"]),
                       models.Index(fields=['public_access']),
+                      models.Index(
+                          name='coll_org_released',
+                          fields=['mnemonic', 'organization', '-created_at'],
+                          condition=(models.Q(user__isnull=True, is_active=True, released=True))
+                      ),
+                      models.Index(
+                          name='coll_user_released',
+                          fields=['mnemonic', 'user', '-created_at'],
+                          condition=(models.Q(organization__isnull=True, is_active=True, released=True))
+                      ),
                   ] + ConceptContainerModel.Meta.indexes
 
     collection_type = models.TextField(blank=True)
@@ -89,6 +100,35 @@ class Collection(ConceptContainerModel):
     autoexpand_head = models.BooleanField(default=True, null=True)
     autoexpand = models.BooleanField(default=True, null=True)
     expansion_uri = models.TextField(null=True, blank=True)
+
+    def get_standard_checksum_fields(self):
+        return self.get_standard_checksum_fields_for_resource(self)
+
+    def get_smart_checksum_fields(self):
+        return self.get_smart_checksum_fields_for_resource(self)
+
+    @staticmethod
+    def get_standard_checksum_fields_for_resource(data):
+        return {
+            'collection_type': get(data, 'collection_type'),
+            'canonical_url': get(data, 'canonical_url'),
+            'custom_validation_schema': get(data, 'custom_validation_schema'),
+            'default_locale': get(data, 'default_locale'),
+            'supported_locales': get(data, 'supported_locales'),
+            'website': get(data, 'website'),
+            'extras': get(data, 'extras'),
+        }
+
+    @staticmethod
+    def get_smart_checksum_fields_for_resource(data):
+        return {
+            'collection_type': get(data, 'collection_type'),
+            'canonical_url': get(data, 'canonical_url'),
+            'custom_validation_schema': get(data, 'custom_validation_schema'),
+            'default_locale': get(data, 'default_locale'),
+            'released': get(data, 'released'),
+            'retired': get(data, 'retired'),
+        }
 
     def set_active_concepts(self):
         expansion = self.expansion
@@ -186,12 +226,14 @@ class Collection(ConceptContainerModel):
             # making sure names in the submitted concept meet the same rule
             name_key = name.locale + name.name
             if name_key in matching_names_in_concept:
+                print("***NAME_KEY that dint match**", name_key)
                 raise ValidationError(validation_error)
 
             matching_names_in_concept[name_key] = True
-            if other_concepts_in_collection.filter(
-                    names__name=name.name, names__locale=name.locale, **{f"names__{attribute}": value}
-            ).exists():
+            other = other_concepts_in_collection.filter(
+                names__name=name.name, names__locale=name.locale, **{f"names__{attribute}": value})
+            if other.exists():
+                print(f"***Conflicting Name {name_key} of Expansion**", list(other.values_list('uri', flat=True)))
                 raise ValidationError(validation_error)
 
     @transaction.atomic
@@ -400,7 +442,7 @@ class Collection(ConceptContainerModel):
         _filters = {
             'collection': self.mnemonic,
             'collection_owner_url': to_owner_uri(self.uri),
-            'expansion': self.expansion.mnemonic,
+            'expansion': self.expansion.mnemonic if self.expansion_uri else '_NON_EXISTING_EXPANSION_',
             'retired': False,
             'collection_version': self.version
         }
@@ -565,6 +607,7 @@ class CollectionReference(models.Model):
     def get_concepts(self, system_version=None):
         system_version = system_version or self.resolve_system_version
         queryset = self.get_resource_queryset_from_system_and_valueset('concepts', system_version)
+        valueset_versions = self.resolve_valueset_versions
         mapping_queryset = Mapping.objects.none()
         if queryset is None:
             return Concept.objects.none(), mapping_queryset
@@ -574,7 +617,7 @@ class CollectionReference(models.Model):
             if self.resource_version:
                 queryset = queryset.filter(version=self.resource_version)
         if self.cascade:
-            cascade_params = self.get_concept_cascade_params(system_version)
+            cascade_params = self.get_concept_cascade_params(system_version or valueset_versions[0])
             for concept in queryset:
                 result = concept.cascade(**cascade_params)
                 queryset = Concept.objects.filter(
@@ -1012,17 +1055,20 @@ class Expansion(BaseResourceModel):
 
         index_concepts = False
         index_mappings = False
+        any_ref_with_resources = False
         for reference in refs:
             concepts = reference.concepts
             if concepts.exists():
+                any_ref_with_resources = True
                 index_concepts = True
-                filters = {'id__in': list(concepts.values_list('id', flat=True))}
+                filters = {'versioned_object_id__in': list(concepts.values_list('versioned_object_id', flat=True))}
                 self.concepts.set(self.concepts.exclude(**filters))
                 batch_index_resources.apply_async(('concept', filters), queue='indexing')
             mappings = reference.mappings
             if mappings.exists():
+                any_ref_with_resources = True
                 index_mappings = True
-                filters = {'id__in': list(mappings.values_list('id', flat=True))}
+                filters = {'versioned_object_id__in': list(mappings.values_list('versioned_object_id', flat=True))}
                 self.mappings.set(self.mappings.exclude(**filters))
                 batch_index_resources.apply_async(('mapping', filters), queue='indexing')
 
@@ -1031,9 +1077,13 @@ class Expansion(BaseResourceModel):
         if index_mappings:
             self.index_mappings()
 
-        references_to_readd = self.collection_version.references.exclude(
-            id__in=[ref.id for ref in self.to_ref_list(references)])
-        self.add_references(references_to_readd, True, True, False)
+        if any_ref_with_resources:
+            removed_reference_ids = [ref.id for ref in self.to_ref_list(references)]
+            readd_task = readd_references_to_expansion_on_references_removal
+            if get(settings, 'TEST_MODE', False):
+                readd_task(self.id, removed_reference_ids)
+            else:
+                readd_task.apply_async((self.id, removed_reference_ids), queue='default')
 
     def delete_expressions(self, expressions):  # Deprecated: Old way, must use delete_references instead
         concepts_filters = None

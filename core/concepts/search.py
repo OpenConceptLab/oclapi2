@@ -9,9 +9,9 @@ class ConceptFacetedSearch(CustomESFacetedSearch):
     index = 'concepts'
     doc_types = [Concept]
     fields = [
-        'datatype', 'concept_class', 'locale', 'retired',
-        'source', 'owner', 'owner_type', 'is_latest_version', 'is_active', 'name', 'collection', 'name_types',
-        'description_types', 'id', 'synonyms', 'extras'
+        'datatype', 'concept_class', 'locale', 'retired', 'is_latest_version',
+        'source', 'owner', 'owner_type', 'name', 'collection', 'name_types',
+        'description_types', 'id', 'synonyms', 'extras', 'updated_by'
     ]
 
     facets = {
@@ -23,6 +23,7 @@ class ConceptFacetedSearch(CustomESFacetedSearch):
         'collection': TermsFacet(field='collection', size=FACET_SIZE),
         'owner': TermsFacet(field='owner', size=FACET_SIZE),
         'ownerType': TermsFacet(field='owner_type'),
+        'updatedBy': TermsFacet(field='updated_by', size=FACET_SIZE),
         'is_latest_version': TermsFacet(field='is_latest_version'),
         'is_in_latest_source_version': TermsFacet(field='is_in_latest_source_version'),
         'collection_owner_url': TermsFacet(field='collection_owner_url', size=FACET_SIZE),

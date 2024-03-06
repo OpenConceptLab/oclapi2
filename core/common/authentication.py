@@ -10,7 +10,7 @@ class OCLAuthentication(BaseAuthentication):
     3. Uses Auth Service to determine auth class Django/OIDC
     """
     def get_auth_class(self, request):
-        from core.common.services import AuthService
+        from core.services.auth.core import AuthService
         if AuthService.is_valid_django_token(request) or get(settings, 'TEST_MODE', False):
             klass = TokenAuthentication
         else:

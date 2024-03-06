@@ -2,7 +2,7 @@ from django.conf import settings
 from django.contrib.postgres.indexes import HashIndex
 from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator
-from django.db import models, IntegrityError, transaction
+from django.db import models, IntegrityError
 from django.db.models import F, Q
 from pydash import get, compact
 
@@ -16,10 +16,10 @@ from core.common.utils import generate_temp_version, drop_version, \
     encode_string, decode_string, startswith_temp_version, is_versioned_uri
 from core.concepts.constants import CONCEPT_TYPE, LOCALES_FULLY_SPECIFIED, LOCALES_SHORT, LOCALES_SEARCH_INDEX_TERM, \
     CONCEPT_WAS_RETIRED, CONCEPT_IS_ALREADY_RETIRED, CONCEPT_IS_ALREADY_NOT_RETIRED, CONCEPT_WAS_UNRETIRED, \
-    PERSIST_CLONE_ERROR, PERSIST_CLONE_SPECIFY_USER_ERROR, ALREADY_EXISTS, CONCEPT_REGEX, MAX_LOCALES_LIMIT, \
+    ALREADY_EXISTS, CONCEPT_REGEX, MAX_LOCALES_LIMIT, \
     MAX_NAMES_LIMIT, MAX_DESCRIPTIONS_LIMIT
 from core.concepts.mixins import ConceptValidationMixin
-from core.toggles.models import Toggle
+from core.services.storages.postgres import PostgresQL
 
 
 class AbstractLocalizedText(ChecksumModel):
@@ -35,6 +35,7 @@ class AbstractLocalizedText(ChecksumModel):
     created_at = models.DateTimeField(auto_now_add=True)
 
     CHECKSUM_INCLUSIONS = ['locale', 'locale_preferred']
+    SMART_CHECKSUM_KEY = None
 
     def to_dict(self):
         return {
@@ -68,13 +69,21 @@ class AbstractLocalizedText(ChecksumModel):
 
     @property
     def is_fully_specified(self):
-        return self.type in LOCALES_FULLY_SPECIFIED or self.is_fully_specified_after_clean
+        return self.is_fully_specified_type(self.type)
+
+    @staticmethod
+    def is_fully_specified_type(_type):
+        return _type in LOCALES_FULLY_SPECIFIED or AbstractLocalizedText.is_fully_specified_type_after_clean(_type)
 
     @property
     def is_fully_specified_after_clean(self):  # needed for OpenMRS schema content created from TermBrowser
-        if not self.type:
+        return self.is_fully_specified_type_after_clean(self.type)
+
+    @staticmethod
+    def is_fully_specified_type_after_clean(_type):
+        if not _type:
             return False
-        _type = self.type.replace(' ', '').replace('-', '').replace('_', '').lower()
+        _type = _type.replace(' ', '').replace('-', '').replace('_', '').lower()
         return _type == 'fullyspecified'
 
     @property
@@ -87,7 +96,7 @@ class AbstractLocalizedText(ChecksumModel):
 
 
 class ConceptDescription(AbstractLocalizedText):
-    CHECKSUM_INCLUSIONS = AbstractLocalizedText.CHECKSUM_INCLUSIONS + ['description', 'description_type']
+    CHECKSUM_INCLUSIONS = AbstractLocalizedText.CHECKSUM_INCLUSIONS + ['locale', 'description', 'description_type']
 
     concept = models.ForeignKey('concepts.Concept', on_delete=models.CASCADE, related_name='descriptions')
 
@@ -132,6 +141,11 @@ class ConceptName(AbstractLocalizedText):
                       models.Index(fields=['locale']),
                       models.Index(fields=['created_at']),
                       models.Index(fields=['type']),
+                      models.Index(
+                          name='preferred_locale',
+                          fields=['concept', 'locale_preferred', 'locale', '-created_at'],
+                          condition=Q(locale_preferred=True)
+                      ),
                   ]
 
     @property
@@ -182,8 +196,18 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                                    condition=(Q(is_active=True) & Q(retired=False) & Q(id=F('versioned_object_id')))),
                       models.Index(name='concepts_parent_active', fields=['parent_id', 'id', 'retired'],
                                    condition=(Q(retired=False, id=F('versioned_object_id')))),
+                      models.Index(
+                          name='concepts_latest',
+                          fields=['versioned_object_id', '-created_at'],
+                          condition=(Q(is_active=True, is_latest_version=True) & ~Q(id=F('versioned_object_id')))
+                      ),
                       models.Index(fields=['uri']),
                       models.Index(fields=['version']),
+                      models.Index(
+                          name='repo_version_concepts',
+                          fields=['id', '-updated_at'],
+                          condition=Q(is_active=True, retired=False)
+                      )
                   ] + VersionedModel.Meta.indexes
 
     external_id = models.TextField(null=True, blank=True)
@@ -220,10 +244,6 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     CHECKSUM_INCLUSIONS = [
         'extras', 'concept_class', 'datatype', 'retired'
     ]
-    CHECKSUM_TYPES = {
-        'meta', 'names', 'descriptions', 'mappings', 'repo_versions', 'all'
-    }
-    BASIC_CHECKSUM_TYPES = {'meta', 'names', 'descriptions'}
 
     # $cascade as hierarchy attributes
     cascaded_entries = None
@@ -236,6 +256,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         'name': {'sortable': False, 'filterable': True, 'exact': True},
         '_name': {'sortable': True, 'filterable': False, 'exact': False},
         'last_update': {'sortable': True, 'filterable': False, 'default': 'desc'},
+        'updated_by': {'sortable': False, 'filterable': False, 'facet': True},
         'is_latest_version': {'sortable': False, 'filterable': True},
         'is_in_latest_source_version': {'sortable': False, 'filterable': True},
         'concept_class': {'sortable': True, 'filterable': True, 'facet': True, 'exact': False},
@@ -256,29 +277,58 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         'other_map_codes': {'sortable': False, 'filterable': True, 'facet': False, 'exact': True},
     }
 
-    def get_basic_checksums(self):
+    def get_standard_checksum_fields(self):
+        return self.get_standard_checksum_fields_for_resource(self)
+
+    def get_smart_checksum_fields(self):
+        return self.get_smart_checksum_fields_for_resource(self)
+
+    @staticmethod
+    def _locales_for_checksums(data, relation, fields, predicate_func):
+        locales = get(data, relation).filter() if isinstance(data, Concept) else get(data, relation, [])
+        return [{field: get(locale, field) for field in fields} for locale in locales if predicate_func(locale)]
+
+    @staticmethod
+    def get_standard_checksum_fields_for_resource(data):
         return {
-            **super().get_basic_checksums(),
-            'names': self.names_checksum,
-            'descriptions': self.descriptions_checksum,
-            'mappings': self.mappings_checksum
+            'concept_class': get(data, 'concept_class'),
+            'datatype': get(data, 'datatype'),
+            'retired': get(data, 'retired'),
+            'external_id': get(data, 'external_id') or None,
+            'extras': get(data, 'extras') or None,
+            'names': Concept._locales_for_checksums(
+                data,
+                'names',
+                ConceptName.CHECKSUM_INCLUSIONS,
+                lambda _: True
+            ),
+            'descriptions': Concept._locales_for_checksums(
+                data,
+                'descriptions',
+                ConceptDescription.CHECKSUM_INCLUSIONS,
+                lambda _: True
+            ),
+            'parent_concept_urls': get(
+                data, '_unsaved_parent_concept_uris', []
+            ) or get(data, 'parent_concept_urls', []),
+            'child_concept_urls': get(
+                data, '_unsaved_child_concept_uris', []
+            ) or get(data, 'child_concept_urls', []),
         }
 
-    def set_mappings_checksum(self):
-        if Toggle.get('CHECKSUMS_TOGGLE'):
-            self.set_specific_checksums('mappings', self.mappings_checksum)
-
-    @property
-    def mappings_checksum(self):
-        return self.generate_queryset_checksum(self.get_unidirectional_mappings().filter(retired=False), True)
-
-    @property
-    def names_checksum(self):
-        return self.generate_queryset_checksum(self.names.filter())
-
-    @property
-    def descriptions_checksum(self):
-        return self.generate_queryset_checksum(self.descriptions.filter())
+    @staticmethod
+    def get_smart_checksum_fields_for_resource(data):
+        return {
+            'concept_class': get(data, 'concept_class'),
+            'datatype': get(data, 'datatype'),
+            'retired': get(data, 'retired'),
+            'names': Concept._locales_for_checksums(
+                data,
+                'names',
+                ConceptName.CHECKSUM_INCLUSIONS,
+                lambda locale: ConceptName.is_fully_specified_type(get(locale, 'name_type'))
+            ),
+        }
 
     @staticmethod
     def get_search_document():
@@ -530,6 +580,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     @classmethod
     def create_new_version_for(
             cls, instance, data, user, create_parent_version=True, add_prev_version_children=True,
+            _hierarchy_processing=False
     ):  # pylint: disable=too-many-arguments
         instance.id = None  # Clear id so it is persisted as a new object
         instance.version = data.get('version', None)
@@ -551,10 +602,16 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         if not parent_concept_uris and has_parent_concept_uris_attr:
             parent_concept_uris = []
 
-        return cls.persist_clone(instance, user, create_parent_version, parent_concept_uris, add_prev_version_children)
+        return instance.save_as_new_version(
+            user=user,
+            create_parent_version=create_parent_version,
+            parent_concept_uris=parent_concept_uris,
+            add_prev_version_children=add_prev_version_children,
+            _hierarchy_processing=_hierarchy_processing
+        )
 
     def set_parent_concepts_from_uris(self, create_parent_version=True):
-        parent_concepts = get(self, '_parent_concepts', None)
+        parent_concepts = get(self, '_parent_concepts', [])
         if create_parent_version:
             for parent in parent_concepts:
                 current_latest_version = parent.get_latest_version()
@@ -567,7 +624,8 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                         'parent_concept_urls': parent.parent_concept_urls
                     },
                     self.created_by,
-                    create_parent_version=False
+                    create_parent_version=False,
+                    _hierarchy_processing=True
                 )
                 new_latest_version = parent.get_latest_version()
                 for uri in current_latest_version.child_concept_urls:
@@ -594,7 +652,8 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                     },
                     concept.created_by,
                     create_parent_version=False,
-                    add_prev_version_children=False
+                    add_prev_version_children=False,
+                    _hierarchy_processing=True
                 )
                 new_latest_version = concept.get_latest_version()
                 for uri in current_latest_version.child_concept_urls:
@@ -605,9 +664,13 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     def set_locales(self, locales, locale_klass):
         if not self.id:
             return  # pragma: no cover
+        is_name = locale_klass == ConceptName
         for locale in locales:
             new_locale = locale.clone() if isinstance(locale, locale_klass) else locale_klass.build(locale)
             new_locale.concept_id = self.id
+            if not new_locale.external_id:
+                new_locale.external_id = self.parent.concept_name_external_id_next if is_name \
+                    else self.parent.concept_description_external_id_next
             new_locale.save()
             new_locale.set_checksums()
 
@@ -639,7 +702,17 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             self.errors = {}
             self.save()
             if self.id:
-                self.name = self.mnemonic = parent.concept_mnemonic_next or str(self.id)
+                next_valid_seq = parent.concept_mnemonic_next  # returns str of int or None
+                if parent.is_sequential_concepts_mnemonic:
+                    try:
+                        available_next = int(parent.get_max_concept_mnemonic())
+                        if available_next and available_next >= int(next_valid_seq):
+                            PostgresQL.update_seq(parent.concepts_mnemonic_seq_name, available_next)
+                            next_valid_seq = parent.concept_mnemonic_next
+                    except:  # pylint: disable=bare-except
+                        pass
+
+                self.name = self.mnemonic = next_valid_seq or str(self.id)
                 self.external_id = parent.concept_external_id_next
                 self.versioned_object_id = self.id
                 self.version = str(self.id)
@@ -686,13 +759,22 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             concept.set_locales(names, ConceptName)
             concept.set_locales(descriptions, ConceptDescription)
 
-            parent_resource = concept.parent
+            parent = concept.parent
             if startswith_temp_version(concept.mnemonic):
-                concept.name = concept.mnemonic = parent_resource.concept_mnemonic_next or str(concept.id)
+                next_valid_seq = parent.concept_mnemonic_next  # returns str of int or None
+                if parent.is_sequential_concepts_mnemonic:
+                    try:
+                        available_next = int(parent.get_max_concept_mnemonic())
+                        if available_next and available_next >= int(next_valid_seq):
+                            PostgresQL.update_seq(parent.concepts_mnemonic_seq_name, available_next)
+                            next_valid_seq = parent.concept_mnemonic_next
+                    except:  # pylint: disable=bare-except
+                        pass
+                concept.name = concept.mnemonic = next_valid_seq or str(concept.id)
             if not concept.external_id:
-                concept.external_id = parent_resource.concept_external_id_next
+                concept.external_id = parent.concept_external_id_next
             concept.is_latest_version = not create_initial_version
-            concept.public_access = parent_resource.public_access
+            concept.public_access = parent.public_access
             concept.save()
             concept.full_clean()
 
@@ -700,11 +782,13 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             if create_initial_version:
                 initial_version = cls.create_initial_version(concept)
                 if initial_version.id:
+                    if not concept._index:
+                        concept.latest_version_id = initial_version.id
                     initial_version.set_locales(names, ConceptName)
                     initial_version.set_locales(descriptions, ConceptDescription)
-                    initial_version.sources.set([parent_resource])
+                    initial_version.sources.set([parent])
 
-            concept.sources.set([parent_resource])
+            concept.sources.set([parent])
             if get(settings, 'TEST_MODE', False):
                 update_mappings_concept(concept.id)
             else:
@@ -720,7 +804,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                         queue='concurrent'
                     )
             if create_initial_version and concept._counted is True:
-                parent_resource.update_concepts_count()
+                parent.update_concepts_count()
             concept.set_checksums()
         except ValidationError as ex:
             if concept.id:
@@ -744,93 +828,38 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         concept.datatype = self.datatype
         concept.retired = self.retired
         concept.external_id = self.external_id or concept.external_id
+        concept.updated_by_id = self.updated_by_id
         concept.save()
+        concept.set_checksums()
 
-    @classmethod
-    def persist_clone(
-            cls, obj, user=None, create_parent_version=True, parent_concept_uris=None, add_prev_version_children=True,
-            **kwargs
-    ):  # pylint: disable=too-many-statements,too-many-branches,too-many-arguments
-        errors = {}
-        if not user:
-            errors['version_created_by'] = PERSIST_CLONE_SPECIFY_USER_ERROR
-            return errors
-        obj.created_by = user
-        obj.updated_by = user
-        obj.version = obj.version or generate_temp_version()
-        parent = obj.parent
-        persisted = False
-        versioned_object = obj.versioned_object
-        prev_latest_version = versioned_object.versions.exclude(id=obj.id).filter(is_latest_version=True).first()
-        try:
-            with transaction.atomic():
-                cls.validate_locales_limit(obj.cloned_names, obj.cloned_descriptions)
+    def post_version_create(self, parent, parent_concept_uris):
+        if self.id:
+            self.version = str(self.id)
+            self.save()
+            self.set_locales(self.cloned_names, ConceptName)
+            self.set_locales(self.cloned_descriptions, ConceptDescription)
+            self.cloned_names = []
+            self.cloned_descriptions = []
+            self.clean()  # clean here to validate locales that can only be saved after obj is saved
+            self.update_versioned_object()
+            self.sources.set([parent])
+            self._unsaved_parent_concept_uris = parent_concept_uris
 
-                cls.pause_indexing()
+    def _process_prev_latest_version_hierarchy(self, prev_latest, add_prev_version_children=True):
+        if add_prev_version_children:
+            task = process_hierarchy_for_new_parent_concept_version
+            if get(settings, 'TEST_MODE', False):
+                task(prev_latest.id, self.id)
+            else:
+                task.apply_async((prev_latest.id, self.id), queue='concurrent')
 
-                obj.is_latest_version = True
-                obj.save(**kwargs)
-                if obj.id:
-                    obj.version = str(obj.id)
-                    obj.save()
-                    obj.set_locales(obj.cloned_names, ConceptName)
-                    obj.set_locales(obj.cloned_descriptions, ConceptDescription)
-                    obj.cloned_names = []
-                    obj.cloned_descriptions = []
-                    obj.clean()  # clean here to validate locales that can only be saved after obj is saved
-                    obj.update_versioned_object()
-                    if prev_latest_version:
-                        prev_latest_version._index = obj._index  # pylint: disable=protected-access
-                        prev_latest_version.is_latest_version = False
-                        prev_latest_version.save(update_fields=['is_latest_version', '_index'])
-                        prev_latest_version.sources.remove(parent)
-                        if add_prev_version_children:
-                            if get(settings, 'TEST_MODE', False):
-                                process_hierarchy_for_new_parent_concept_version(prev_latest_version.id, obj.id)
-                            else:
-                                process_hierarchy_for_new_parent_concept_version.apply_async(
-                                    (prev_latest_version.id, obj.id),
-                                    queue='concurrent'
-                                )
-
-                    obj.sources.set([parent])
-                    obj.set_checksums()
-                    versioned_object.set_checksums()
-                    persisted = True
-                    cls.resume_indexing()
-                    if get(settings, 'TEST_MODE', False):
-                        process_hierarchy_for_concept_version(
-                            obj.id, get(prev_latest_version, 'id'), parent_concept_uris, create_parent_version)
-                    else:
-                        process_hierarchy_for_concept_version.apply_async(
-                            (obj.id, get(prev_latest_version, 'id'), parent_concept_uris, create_parent_version),
-                            queue='concurrent'
-                        )
-
-                    def index_all():
-                        if obj._index:  # pylint: disable=protected-access
-                            if prev_latest_version:
-                                prev_latest_version.index()
-                            obj.index()
-
-                    transaction.on_commit(index_all)
-        except ValidationError as err:
-            if get(err, 'error_dict'):
-                errors.update(err.message_dict)
-        finally:
-            cls.resume_indexing()
-            if not persisted:
-                if prev_latest_version:
-                    prev_latest_version._index = True  # pylint: disable=protected-access
-                    prev_latest_version.is_latest_version = True
-                    prev_latest_version.save(update_fields=['is_latest_version', '_index'])
-                    prev_latest_version.sources.add(parent)
-                if obj.id:
-                    obj.remove_locales()
-                    obj.delete()
-                errors['non_field_errors'] = [PERSIST_CLONE_ERROR]
-
-        return errors
+    def _process_latest_version_hierarchy(self, prev_latest, parent_concept_uris=None, create_parent_version=True):
+        task = process_hierarchy_for_concept_version
+        if get(settings, 'TEST_MODE', False):
+            task(self.id, get(prev_latest, 'id'), parent_concept_uris, create_parent_version)
+        else:
+            task.apply_async(
+                (self.id, get(prev_latest, 'id'), parent_concept_uris, create_parent_version), queue='concurrent')
 
     @staticmethod
     def validate_locales_limit(names, descriptions):
@@ -862,24 +891,11 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         return self.__get_mappings_from_relation('mappings_to')
 
     def __get_mappings_from_relation(self, relation_manager, is_latest=False):
+        key = 'from_concept_id__in' if relation_manager == 'mappings_from' else 'to_concept_id__in'
+        filters = {key: list(set(compact([self.id, self.versioned_object_id, get(self.get_latest_version(), 'id')])))}
+
         from core.mappings.models import Mapping
-        mappings = Mapping.objects.filter(parent_id=self.parent_id)
-
-        if relation_manager == 'mappings_from':
-            key = 'from_concept_id__in'
-        else:
-            key = 'to_concept_id__in'
-
-        filters = {key: [self.id]}
-        if self.is_latest_version:
-            filters[key].append(self.versioned_object_id)
-        elif self.is_versioned_object:
-            latest_version = self.get_latest_version()
-            filters[key].append(get(latest_version, 'id'))
-
-        filters[key] = compact(filters[key])
-
-        mappings = mappings.filter(**filters)
+        mappings = Mapping.objects.filter(parent_id=self.parent_id, **filters)
 
         if is_latest:
             return mappings.filter(is_latest_version=True)
@@ -924,8 +940,6 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         Mapping.objects.filter(
             from_concept_code=self.mnemonic, from_source_url__in=parent_uris, from_concept__isnull=True
         ).update(from_concept=self)
-
-        self.set_mappings_checksum()
 
     @property
     def parent_concept_urls(self):

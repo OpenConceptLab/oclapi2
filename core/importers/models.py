@@ -14,7 +14,7 @@ from pydash import compact, get
 from core.celery import app
 from core.collections.models import Collection
 from core.common.constants import HEAD
-from core.common.services import RedisService
+from core.services.storages.redis import RedisService
 from core.common.tasks import bulk_import_parts_inline, delete_organization, batch_index_resources, \
     post_import_update_resource_counts
 from core.common.utils import drop_version, is_url_encoded_string, encode_string, to_parent_uri, chunks
@@ -751,14 +751,28 @@ class BulkImportInline(BaseImporter):
                 concept_importer = ConceptImporter(item, self.user, self.update_if_exists)
                 _result = concept_importer.delete() if action == 'delete' else concept_importer.run()
                 if get(concept_importer.instance, 'id'):
-                    new_concept_ids.add(concept_importer.instance.versioned_object_id)
+                    new_concept_ids.update(set(compact(
+                        [
+                            concept_importer.instance.versioned_object_id,
+                            get(concept_importer.instance, 'prev_latest_version_id'),
+                            get(concept_importer.instance, 'latest_version_id'),
+                            concept_importer.instance.id,
+                        ]
+                    )))
                 self.handle_item_import_result(_result, original_item)
                 continue
             if item_type == 'mapping':
                 mapping_importer = MappingImporter(item, self.user, self.update_if_exists)
                 _result = mapping_importer.delete() if action == 'delete' else mapping_importer.run()
                 if get(mapping_importer.instance, 'id'):
-                    new_mapping_ids.add(mapping_importer.instance.versioned_object_id)
+                    new_mapping_ids.update(set(compact(
+                        [
+                            mapping_importer.instance.versioned_object_id,
+                            get(mapping_importer.instance, 'prev_latest_version_id'),
+                            get(mapping_importer.instance, 'latest_version_id'),
+                            mapping_importer.instance.id,
+                        ]
+                    )))
                 self.handle_item_import_result(_result, original_item)
                 continue
             if item_type == 'reference':
@@ -768,13 +782,13 @@ class BulkImportInline(BaseImporter):
                 continue
 
         if new_concept_ids:
-            for chunk in chunks(list(new_concept_ids), 1000):
+            for chunk in chunks(list(set(new_concept_ids)), 5000):
                 batch_index_resources.apply_async(
-                    ('concept', {'versioned_object_id__in': chunk}, True), queue='indexing')
+                    ('concept', {'id__in': chunk}, True), queue='indexing')
         if new_mapping_ids:
-            for chunk in chunks(list(new_mapping_ids), 1000):
+            for chunk in chunks(list(set(new_mapping_ids)), 5000):
                 batch_index_resources.apply_async(
-                    ('mapping', {'versioned_object_id__in': chunk}, True), queue='indexing')
+                    ('mapping', {'id__in': chunk}, True), queue='indexing')
 
         self.elapsed_seconds = time.time() - self.start_time
 
@@ -786,7 +800,7 @@ class BulkImportInline(BaseImporter):
     def detailed_summary(self):
         return f"Processed: {self.processed}/{self.total} | Created: {len(self.created)} | " \
             f"Updated: {len(self.updated)} | DELETED: {len(self.deleted)} | Existing: {len(self.exists)} | " \
-            f"Permision Denied: {len(self.permission_denied)} | Failed: {len(self.failed)} | " \
+            f"Permission Denied: {len(self.permission_denied)} | Failed: {len(self.failed)} | " \
             f"Time: {self.elapsed_seconds}secs"
 
     @property
@@ -854,7 +868,7 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
         for line in self.input_list:
             data = line if isinstance(line, dict) else json.loads(line)
             data_type = data.get('type', None)
-            if not data_type:
+            if not data_type or data_type.lower() not in ['organization', 'source', 'collection']:
                 continue
             if data_type not in self.resource_distribution:
                 self.resource_distribution[data_type] = []
@@ -862,9 +876,9 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
 
     def make_parts(self):
         prev_line = None
-        orgs = self.resource_distribution.get('Organization', None)
-        sources = self.resource_distribution.get('Source', None)
-        collections = self.resource_distribution.get('Collection', None)
+        orgs = self.resource_distribution.pop('Organization', None)
+        sources = self.resource_distribution.pop('Source', None)
+        collections = self.resource_distribution.pop('Collection', None)
         if orgs:
             self.parts = deque([orgs])
         if sources:

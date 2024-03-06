@@ -26,9 +26,11 @@ from core import VERSION
 from core.collections.views import ReferenceExpressionResolveView
 from core.common.constants import NAMESPACE_PATTERN
 from core.common.utils import get_api_base_url
-from core.common.views import RootView, FeedbackView, APIVersionView, ChangeLogView, ChecksumView
+from core.common.views import RootView, FeedbackView, APIVersionView, ChangeLogView, StandardChecksumView, \
+    SmartChecksumView
 from core.concepts.views import ConceptsHierarchyAmendAdminView
 from core.importers.views import BulkImportView
+from core.settings import ENV
 
 SchemaView = get_schema_view(
     openapi.Info(
@@ -56,11 +58,14 @@ urlpatterns = [
         'admin/reports/monthly-usage/job/', report_views.ResourcesReportJobView.as_view(), name='monthly-usage-job'),
     path('admin/concepts/amend-hierarchy/', ConceptsHierarchyAmendAdminView.as_view(), name='concepts-amend-hierarchy'),
     re_path(r'^\$resolveReference/$', ReferenceExpressionResolveView.as_view(), name='$resolveReference'),
-    re_path(r'^\$checksum/$', ChecksumView.as_view(), name='$checksum'),
+    re_path(r'^\$checksum/standard/$', StandardChecksumView.as_view(), name='$checksum-standard'),
+    re_path(r'^\$checksum/smart/$', SmartChecksumView.as_view(), name='$checksum-smart'),
     path('users/', include('core.users.urls'), name='users_urls'),
     path('user/', include('core.users.user_urls'), name='current_user_urls'),
     path('orgs/', include('core.orgs.urls'), name='orgs_url'),
     path('sources/', include('core.sources.urls'), name='sources_url'),
+    path('repos/', include('core.repos.urls'), name='repos_url'),
+    path('url-registry/', include('core.url_registry.urls'), name='url_registry_url'),
     #TODO: require FHIR subdomain
     path('fhir/CodeSystem/', include('core.code_systems.urls'), name='code_systems_urls'),
     path('fhir/ValueSet/', include('core.value_sets.urls'), name='value_sets_urls'),
@@ -89,3 +94,13 @@ urlpatterns = [
     path('manage/bulkimport/', BulkImportView.as_view(), name='bulk_import_urls'),
     path('toggles/', include('core.toggles.urls'), name='toggles'),
 ]
+
+if ENV == 'development':
+    urlpatterns = [
+        path("silk/", include("silk.urls", namespace="silk")),
+        *urlpatterns
+    ]
+
+
+handler500 = 'rest_framework.exceptions.server_error'
+handler400 = 'rest_framework.exceptions.bad_request'

@@ -3,20 +3,20 @@ import uuid
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator
-from django.db import models, IntegrityError, transaction
-from django.db.models import Q, F
+from django.db import models, IntegrityError
+from django.db.models import Q, F, Max
 from pydash import get
 
-from core.common.constants import NAMESPACE_REGEX, LATEST
+from core.common.constants import NAMESPACE_REGEX, LATEST, HEAD
 from core.common.mixins import SourceChildMixin
 from core.common.models import VersionedModel
 from core.common.tasks import batch_index_resources
 from core.common.utils import separate_version, to_parent_uri, generate_temp_version, \
     encode_string, is_url_encoded_string
 from core.mappings.constants import MAPPING_TYPE, MAPPING_IS_ALREADY_RETIRED, MAPPING_WAS_RETIRED, \
-    MAPPING_IS_ALREADY_NOT_RETIRED, MAPPING_WAS_UNRETIRED, PERSIST_CLONE_ERROR, PERSIST_CLONE_SPECIFY_USER_ERROR, \
-    ALREADY_EXISTS
+    MAPPING_IS_ALREADY_NOT_RETIRED, MAPPING_WAS_UNRETIRED, ALREADY_EXISTS
 from core.mappings.mixins import MappingValidationMixin
+from core.services.storages.postgres import PostgresQL
 
 
 class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
@@ -44,6 +44,26 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
                                    condition=(Q(is_active=True) & Q(retired=False))),
                       models.Index(name="mappings_map_type_like", fields=["map_type"], opclasses=["text_pattern_ops"]),
                       models.Index(fields=['uri']),
+                      models.Index(
+                          name='mappings_sort_weight_next',
+                          fields=['from_concept_id', 'sort_weight', 'parent_id', 'map_type'],
+                          condition=Q(sort_weight__isnull=False, id=F('versioned_object_id'), retired=False)
+                      ),
+                      models.Index(
+                          name='mappings_latest',
+                          fields=['versioned_object_id', '-created_at'],
+                          condition=(Q(is_active=True, is_latest_version=True) & ~Q(id=F('versioned_object_id')))
+                      ),
+                      models.Index(
+                          name='direct_mappings',
+                          fields=['from_concept', 'parent_id'],
+                          condition=(Q(id=F('versioned_object_id')))
+                      ),
+                      models.Index(
+                          name='repo_version_mappings',
+                          fields=['id', '-updated_at'],
+                          condition=Q(is_active=True, retired=False)
+                      ),
                   ] + VersionedModel.Meta.indexes
     parent = models.ForeignKey('sources.Source', related_name='mappings_set', on_delete=models.CASCADE)
     map_type = models.TextField()
@@ -102,14 +122,12 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         'from_concept_code', 'from_concept_name',
         'to_concept_code', 'to_concept_name'
     ]
-    CHECKSUM_TYPES = {
-        'meta', 'repo_versions', 'all'
-    }
 
     es_fields = {
         'id': {'sortable': False, 'filterable': True, 'exact': True},
         'id_lowercase': {'sortable': True, 'filterable': False, 'exact': False},
         'last_update': {'sortable': True, 'filterable': False, 'facet': False, 'default': 'desc'},
+        'updated_by': {'sortable': False, 'filterable': False, 'facet': True},
         'from_concept': {'sortable': False, 'filterable': True, 'facet': False, 'exact': True},
         'to_concept': {'sortable': False, 'filterable': True, 'facet': False, 'exact': True},
         'retired': {'sortable': False, 'filterable': True, 'facet': True},
@@ -131,6 +149,31 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         'to_concept_owner_type': {'sortable': False, 'filterable': True, 'facet': True},
         'external_id': {'sortable': False, 'filterable': True, 'facet': False, 'exact': True},
     }
+
+    def get_standard_checksum_fields(self):
+        return self.get_standard_checksum_fields_for_resource(self)
+
+    def get_smart_checksum_fields(self):
+        return self.get_smart_checksum_fields_for_resource(self)
+
+    @staticmethod
+    def get_standard_checksum_fields_for_resource(data):
+        return {
+            **Mapping.get_smart_checksum_fields_for_resource(data),
+            'extras': get(data, 'extras') or None,
+            'external_id': get(data, 'external_id') or None,
+        }
+
+    @staticmethod
+    def get_smart_checksum_fields_for_resource(data):
+        return {
+            'map_type': get(data, 'map_type'),
+            'from_concept_code': get(data, 'from_concept_code'),
+            'to_concept_code': get(data, 'to_concept_code'),
+            'from_concept_name': get(data, 'from_concept_name'),
+            'to_concept_name': get(data, 'to_concept_name'),
+            'retired': get(data, 'retired')
+        }
 
     @staticmethod
     def get_search_document():
@@ -282,6 +325,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
     @classmethod
     def create_initial_version(cls, mapping, **kwargs):
         initial_version = mapping.clone()
+        initial_version.created_by = initial_version.updated_by = mapping.created_by
         initial_version.comment = mapping.comment
         initial_version.save(**kwargs)
         initial_version.version = initial_version.id
@@ -290,77 +334,70 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         initial_version.save()
         return initial_version
 
-    def populate_fields_from_relations(self, data):
+    def populate_fields_from_relations(self, data):  # pylint: disable=too-many-locals
         from core.concepts.models import Concept
         from core.sources.models import Source
 
-        to_concept_url = data.get('to_concept_url', None)
-        from_concept_url = data.get('from_concept_url', None)
-        to_source_url = data.get('to_source_url', None)
-        from_source_url = data.get('from_source_url', None)
-
-        def get_concept(expression):
-            concept = Concept.objects.filter(uri=expression).first()
-            if concept:
-                return concept
-            concept = Concept.objects.filter(uri=encode_string(expression, safe='/')).first()
-            if concept:
-                return concept
-
-            parent_uri = to_parent_uri(expression)
-            code = expression.replace(parent_uri, '').replace('concepts/', '').split('/')[0]
-            return {'mnemonic': code}
-
-        def get_source_info(parent_uri, child_uri, existing_version, concept):
-            if not parent_uri and not child_uri:
-                return existing_version, get(concept, 'parent.uri')
-
-            if parent_uri:
-                version, uri = separate_version(parent_uri)
-            else:
-                version, uri = separate_version(to_parent_uri(child_uri))
-
-            return version or existing_version, uri or get(concept, 'parent.uri')
-
         to_concept_code = data.get('to_concept_code')
         from_concept_code = data.get('from_concept_code')
+        from_concept_url = data.get('from_concept_url', '')
+        to_concept_url = data.get('to_concept_url', '')
+        from_source_url = data.get('from_source_url', None) or to_parent_uri(from_concept_url)
+        to_source_url = data.get('to_source_url', None) or to_parent_uri(to_concept_url)
+
+        def get_concept(expr):
+            concept = Concept.objects.filter(
+                uri=expr).first() or Concept.objects.filter(uri=encode_string(expr, safe='/')).first()
+
+            return concept or {'mnemonic': expr.replace(to_parent_uri(expr), '').replace('concepts/', '').split('/')[0]}
+
+        def get_source(url):
+            source = Source.resolve_reference_expression(url, None, HEAD)
+            if source.id:
+                return source, source.versioned_object_url or source.resolution_url or url
+            return None, source.resolution_url or url
+
+        self.from_source, self.from_source_url = get_source(from_source_url)
+        self.to_source, self.to_source_url = get_source(to_source_url)
+
         if to_concept_code and not is_url_encoded_string(to_concept_code):
             to_concept_code = encode_string(to_concept_code)
         if from_concept_code and not is_url_encoded_string(from_concept_code):
             from_concept_code = encode_string(from_concept_code)
 
-        if not to_concept_url and not get(self, 'to_concept') and to_source_url and (
+        if not to_concept_url and not get(self, 'to_concept') and self.to_source_url and (
                 to_concept_code or self.to_concept_code):
             to_concept_code = to_concept_code or self.to_concept_code
-            to_concept_url = to_source_url + 'concepts/' + to_concept_code + '/'
+            to_concept_url = self.to_source_url + 'concepts/' + to_concept_code + '/'
 
-        if not from_concept_url and not get(self, 'from_concept') and from_source_url and (
+        if not from_concept_url and not get(self, 'from_concept') and self.from_source_url and (
                 from_concept_code or self.from_concept_code):
             from_concept_code = from_concept_code or self.from_concept_code
-            from_concept_url = from_source_url + 'concepts/' + from_concept_code + '/'
+            from_concept_url = self.from_source_url + 'concepts/' + from_concept_code + '/'
 
         from_concept = get_concept(from_concept_url) if from_concept_url else get(self, 'from_concept')
         to_concept = get_concept(to_concept_url) if to_concept_url else get(self, 'to_concept')
 
         self.from_concept_id = get(from_concept, 'id')
         self.to_concept_id = get(to_concept, 'id')
-
+        self.from_source = self.from_source or get(from_concept, 'parent')
+        self.to_source = self.to_source or get(to_concept, 'parent')
+        self.to_source_url = self.to_source_url or get(to_concept, 'parent.uri')
+        self.from_source_url = self.from_source_url or get(from_concept, 'parent.uri')
         self.from_concept_code = data.get(
             'from_concept_code', None) or get(from_concept, 'mnemonic') or self.from_concept_code
         self.from_concept_name = data.get('from_concept_name', None) or self.from_concept_name
-        self.to_concept_code = data.get('to_concept_code', None) or get(to_concept, 'mnemonic') or self.to_concept_code
+        self.to_concept_code = data.get(
+            'to_concept_code', None) or get(to_concept, 'mnemonic') or self.to_concept_code
         self.to_concept_name = data.get('to_concept_name', None) or self.to_concept_name
-
-        self.from_source_version, self.from_source_url = get_source_info(
-            from_source_url, from_concept_url, self.from_source_version, from_concept
-        )
-        self.to_source_version, self.to_source_url = get_source_info(
-            to_source_url, to_concept_url, self.to_source_version, to_concept
-        )
         if self.to_source_url:
-            self.to_source = Source.get_first_or_head(self.to_source_url)
+            to_source_version, to_source_url = separate_version(self.to_source_url)
+            self.to_source_version = self.to_source_version or to_source_version
+            self.to_source_url = to_source_url
         if self.from_source_url:
-            self.from_source = Source.get_first_or_head(self.from_source_url)
+            from_source_version, from_source_url = separate_version(self.from_source_url)
+            self.from_source_version = self.from_source_version or from_source_version
+            self.from_source_url = from_source_url
 
     def is_existing_in_parent(self):
         return self.parent.mappings_set.filter(mnemonic__exact=self.mnemonic).exists()
@@ -376,7 +413,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         instance.map_type = data.get('map_type', instance.map_type)
         instance.sort_weight = data.get('sort_weight', instance.sort_weight)
 
-        return cls.persist_clone(instance, user)
+        return instance.save_as_new_version(user)
 
     def save_cloned(self):
         try:
@@ -388,7 +425,16 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
             self.full_clean()
             self.save()
             if self.id:
-                self.mnemonic = parent.mapping_mnemonic_next or str(self.id)
+                next_valid_seq = parent.mapping_mnemonic_next  # returns str of int or None
+                if parent.is_sequential_mappings_mnemonic:
+                    try:
+                        available_next = int(parent.get_max_mapping_mnemonic())
+                        if available_next and available_next >= int(next_valid_seq):
+                            PostgresQL.update_seq(parent.mappings_mnemonic_seq_name, available_next)
+                            next_valid_seq = parent.mapping_mnemonic_next
+                    except:  # pylint: disable=bare-except
+                        pass
+                self.mnemonic = next_valid_seq or str(self.id)
                 self.versioned_object_id = self.id
                 self.version = str(self.id)
                 self.external_id = parent.mapping_external_id_next
@@ -398,7 +444,6 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
                 self.sources.set([parent])
                 self.set_checksums()
                 if self.from_concept_id:
-                    self.from_concept.set_mappings_checksum()
                     self.index_from_concept()
         except ValidationError as ex:
             self.errors.update(ex.message_dict)
@@ -412,6 +457,18 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
             ) if get(settings, 'TEST_MODE', False) else batch_index_resources.delay(
                 'concepts', {'versioned_object_id': self.from_concept.versioned_object_id}
             )
+
+    def get_next_sort_weight(self):
+        if not self.sort_weight and self.from_concept_id and self.map_type:
+            max_sort_weight = self.from_concept.get_unidirectional_mappings().filter(
+                map_type=self.map_type, retired=False
+            ).aggregate(
+                max_sort_weight=Max('sort_weight')
+            )['max_sort_weight']
+            if max_sort_weight is not None:
+                max_sort_weight += 1
+            return max_sort_weight
+        return None
 
     @classmethod
     def persist_new(cls, data, user):
@@ -438,17 +495,26 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
             mapping.is_latest_version = False
             parent = mapping.parent
             if mapping.mnemonic == temp_version:
-                mapping.mnemonic = parent.mapping_mnemonic_next or str(mapping.id)
+                next_valid_seq = parent.mapping_mnemonic_next  # returns str of int or None
+                if parent.is_sequential_mappings_mnemonic:
+                    try:
+                        available_next = int(parent.get_max_mapping_mnemonic())
+                        if available_next and available_next >= int(next_valid_seq):
+                            PostgresQL.update_seq(parent.mappings_mnemonic_seq_name, available_next)
+                            next_valid_seq = parent.mapping_mnemonic_next
+                    except:  # pylint: disable=bare-except
+                        pass
+                mapping.mnemonic = next_valid_seq or str(mapping.id)
             if not mapping.external_id:
                 mapping.external_id = parent.mapping_external_id_next
             mapping.public_access = parent.public_access
             mapping.save()
             initial_version = cls.create_initial_version(mapping)
+            if initial_version.id and not mapping._index:
+                mapping.latest_version_id = initial_version.id
             initial_version.sources.set([parent])
             mapping.sources.set([parent])
             mapping.set_checksums()
-            if mapping.from_concept_id:
-                mapping.from_concept.set_mappings_checksum()
             if mapping._counted is True:
                 parent.update_mappings_count()
                 mapping.index_from_concept()
@@ -480,68 +546,21 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         mapping.from_concept_name = self.from_concept_name
         mapping.from_source_url = self.from_source_url
         mapping.from_source_version = self.from_source_version
-
+        mapping.updated_by_id = self.updated_by_id
         mapping.save()
+        mapping.set_checksums()
 
-    @classmethod
-    def persist_clone(cls, obj, user=None, **kwargs):  # pylint: disable=too-many-statements
-        errors = {}
-        if not user:
-            errors['version_created_by'] = PERSIST_CLONE_SPECIFY_USER_ERROR
-            return errors
-        obj.version = obj.version or generate_temp_version()
-        obj.created_by = user
-        obj.updated_by = user
-        parent = obj.parent
-        persisted = False
-        prev_latest_version = cls.objects.filter(
-            versioned_object_id=obj.versioned_object_id, is_latest_version=True).first()
-        try:
-            with transaction.atomic():
-                cls.pause_indexing()
+    def post_version_create(self, parent, _):
+        if self.id:
+            self.version = str(self.id)
+            self.save()
+            self.update_versioned_object()
+            self.sources.set([parent])
 
-                obj.is_latest_version = True
-                obj.save(**kwargs)
-                if obj.id:
-                    obj.version = str(obj.id)
-                    obj.save()
-                    obj.update_versioned_object()
-                    if prev_latest_version:
-                        prev_latest_version.is_latest_version = False
-                        prev_latest_version._index = obj._index  # pylint: disable=protected-access
-                        prev_latest_version.save(update_fields=['is_latest_version', '_index'])
-                        prev_latest_version.sources.remove(parent)
-
-                    obj.sources.set([parent])
-                    obj.set_checksums()
-                    obj.versioned_object.set_checksums()
-                    if obj.from_concept_id:
-                        obj.from_concept.set_mappings_checksum()
-                    persisted = True
-                    cls.resume_indexing()
-
-                    def index_all():
-                        if obj._index:  # pylint: disable=protected-access
-                            if prev_latest_version:
-                                prev_latest_version.index()
-                            obj.index()
-                            obj.index_from_concept()
-                    transaction.on_commit(index_all)
-        except ValidationError as err:
-            errors.update(err.message_dict)
-        finally:
-            cls.resume_indexing()
-            if not persisted:
-                if obj.id:
-                    if prev_latest_version:
-                        prev_latest_version._index = True  # pylint: disable=protected-access
-                        prev_latest_version.is_latest_version = True
-                        prev_latest_version.save(update_fields=['is_latest_version', '_index'])
-                        prev_latest_version.sources.add(parent)
-                    obj.delete()
-                errors['non_field_errors'] = [PERSIST_CLONE_ERROR]
-
-        return errors
+    def _index_on_new_version_creation(self, prev_latest):
+        if self._index:
+            super()._index_on_new_version_creation(prev_latest)
+            self.index_from_concept()
 
     @classmethod
     def get_base_queryset(cls, params):  # pylint: disable=too-many-branches,too-many-locals,too-many-statements

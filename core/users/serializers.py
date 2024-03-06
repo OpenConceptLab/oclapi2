@@ -23,7 +23,7 @@ class UserListSerializer(AbstractResourceSerializer):
     class Meta:
         model = UserProfile
         fields = AbstractResourceSerializer.Meta.fields + (
-            'username', 'name', 'url'
+            'username', 'name', 'url', 'logo_url'
         )
 
 
@@ -31,12 +31,13 @@ class UserSummarySerializer(serializers.ModelSerializer):
     sources = IntegerField(source='public_sources')
     collections = IntegerField(source='public_collections')
     organizations = IntegerField(source='orgs_count')
+    bookmarks = IntegerField(source='bookmarks_count')
 
     class Meta:
         model = UserProfile
         fields = (
             'username', 'name', 'url', 'logo_url', 'sources', 'collections', 'organizations',
-            'is_superuser', 'is_staff', 'first_name', 'last_name', 'status'
+            'is_superuser', 'is_staff', 'first_name', 'last_name', 'status', 'bookmarks'
         )
 
 
@@ -88,8 +89,11 @@ class UserCreateSerializer(serializers.ModelSerializer):
             return user
 
         user = UserProfile(
-            username=username, email=validated_data.get('email'), company=validated_data.get('company', None),
-            location=validated_data.get('location', None), extras=validated_data.get('extras', None),
+            username=username,
+            email=validated_data.get('email'),
+            company=validated_data.get('company', None),
+            location=validated_data.get('location', None),
+            extras=validated_data.get('extras', None),
             preferred_locale=validated_data.get('preferred_locale', None),
             first_name=validated_data.get('name', None) or validated_data.get('first_name'),
             last_name=validated_data.get('last_name', '')
@@ -112,6 +116,7 @@ class UserCreateSerializer(serializers.ModelSerializer):
                 user.verification_token = uuid.uuid4()
 
         user.save()
+        user.set_checksums()
         user.token = user.get_token()
         user.send_verification_email()
 
@@ -133,6 +138,7 @@ class UserDetailSerializer(AbstractResourceSerializer):
     orgs = serializers.IntegerField(read_only=True, source='orgs_count')
     owned_orgs = serializers.IntegerField(read_only=True, source='owned_orgs_count')
     sources = serializers.IntegerField(read_only=True, source='all_sources_count')
+    bookmarks = serializers.IntegerField(read_only=True, source='bookmarks_count')
     collections = serializers.IntegerField(read_only=True, source='all_collections_count')
     created_on = serializers.DateTimeField(source='created_at', read_only=True)
     updated_on = serializers.DateTimeField(source='updated_at', read_only=True)
@@ -151,7 +157,7 @@ class UserDetailSerializer(AbstractResourceSerializer):
             'url', 'organizations_url', 'extras', 'sources_url', 'collections_url', 'website', 'last_login',
             'logo_url', 'subscribed_orgs', 'is_superuser', 'is_staff', 'first_name', 'last_name', 'verified',
             'verification_token', 'date_joined', 'auth_groups', 'status', 'deactivated_at',
-            'sources', 'collections', 'owned_orgs'
+            'sources', 'collections', 'owned_orgs', 'bookmarks'
         )
 
     def __init__(self, *args, **kwargs):
@@ -201,4 +207,6 @@ class UserDetailSerializer(AbstractResourceSerializer):
                     return instance
 
         instance.save()
+        if instance.id:
+            instance.set_checksums()
         return instance

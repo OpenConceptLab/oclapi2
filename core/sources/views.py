@@ -24,7 +24,8 @@ from core.common.permissions import CanViewConceptDictionary, CanEditConceptDict
     CanViewConceptDictionaryVersion
 from core.common.serializers import TaskSerializer
 from core.common.swagger_parameters import q_param, limit_param, sort_desc_param, sort_asc_param, \
-    page_param, verbose_param, include_retired_param, updated_since_param, include_facets_header, compress_header
+    page_param, verbose_param, include_retired_param, updated_since_param, include_facets_header, compress_header, \
+    canonical_url_param
 from core.common.tasks import export_source, index_source_concepts, index_source_mappings, delete_source
 from core.common.utils import parse_boolean_query_param, compact_dict_by_values, to_parent_uri
 from core.common.views import BaseAPIView, BaseLogoView, ConceptContainerExtraRetrieveUpdateDestroyView, TaskMixin
@@ -39,6 +40,7 @@ from core.sources.serializers import (
     SourceVersionSummaryDetailSerializer, SourceMinimalSerializer, SourceSummaryVerboseSerializer,
     SourceVersionSummaryVerboseSerializer, SourceSummaryFieldDistributionSerializer,
     SourceVersionSummaryFieldDistributionSerializer, SourceVersionMinimalSerializer)
+from core.toggles.models import Toggle
 
 logger = logging.getLogger('oclapi')
 
@@ -131,7 +133,7 @@ class SourceListView(SourceBaseView, ConceptDictionaryCreateMixin, ListWithHeade
     @swagger_auto_schema(
         manual_parameters=[
             q_param, limit_param, sort_desc_param, sort_asc_param, page_param, verbose_param,
-            include_retired_param, updated_since_param, include_facets_header, compress_header
+            include_retired_param, updated_since_param, canonical_url_param, include_facets_header, compress_header
         ]
     )
     def get(self, request, *args, **kwargs):
@@ -196,6 +198,11 @@ class SourceRetrieveUpdateDestroyView(SourceBaseView, ConceptDictionaryUpdateMix
                     version.update_concepts_count()
                 if version.should_set_active_mappings:
                     version.update_mappings_count()
+
+        if Toggle.get('CHECKSUMS_TOGGLE'):
+            instance.get_checksums()
+            for version in instance.versions:
+                version.get_checksums()
 
         return instance
 
@@ -436,6 +443,7 @@ class SourceVersionRetrieveUpdateDestroyView(SourceVersionBaseView, RetrieveAPIV
         if serializer.is_valid():
             self.object = serializer.save(force_update=True)
             if serializer.is_valid():
+                self.object.get_checksums(recalculate=False)
                 return Response(serializer.data, status=status.HTTP_200_OK)
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -585,3 +593,22 @@ class SourceMappedSourcesListView(SourceListView):
 
     def post(self, request, **kwargs):
         raise Http405()
+
+
+class SourceVersionComparisonView(BaseAPIView):  # pragma: no cover
+    permission_classes = (CanViewConceptDictionaryVersion,)
+    swagger_schema = None
+
+    def get_objects(self):
+        data = self.request.data
+        version1_uri = data.get('version1')
+        version2_uri = data.get('version2')
+        version1 = get_object_or_404(Source.objects.filter(uri=version1_uri))
+        version2 = get_object_or_404(Source.objects.filter(uri=version2_uri))
+        self.check_object_permissions(self.request, version1)
+        self.check_object_permissions(self.request, version2)
+        return version1, version2
+
+    def post(self, _):
+        version1, version2 = self.get_objects()
+        return Response(Source.compare(version1, version2, self.is_verbose()))

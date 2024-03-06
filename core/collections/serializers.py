@@ -12,7 +12,7 @@ from core.client_configs.serializers import ClientConfigSerializer
 from core.collections.models import Collection, CollectionReference, Expansion
 from core.common.constants import HEAD, DEFAULT_ACCESS_TYPE, NAMESPACE_REGEX, ACCESS_TYPE_CHOICES, INCLUDE_SUMMARY, \
     INCLUDE_CLIENT_CONFIGS, INVALID_EXPANSION_URL
-from core.common.serializers import AbstractRepoResourcesSerializer
+from core.common.serializers import AbstractRepoResourcesSerializer, AbstractResourceSerializer
 from core.common.utils import get_truthy_values
 from core.orgs.models import Organization
 from core.settings import DEFAULT_LOCALE
@@ -23,12 +23,12 @@ from core.users.models import UserProfile
 TRUTHY = get_truthy_values()
 
 
-class CollectionMinimalSerializer(ModelSerializer):
+class CollectionMinimalSerializer(AbstractResourceSerializer):
     id = CharField(source='mnemonic')
 
     class Meta:
         model = Collection
-        fields = ('id', 'url')
+        fields = AbstractResourceSerializer.Meta.fields + ('id', 'url')
 
 
 class CollectionVersionMinimalSerializer(ModelSerializer):
@@ -47,7 +47,7 @@ class CollectionVersionMinimalSerializer(ModelSerializer):
         return obj.should_auto_expand
 
 
-class CollectionListSerializer(ModelSerializer):
+class CollectionListSerializer(AbstractResourceSerializer):
     type = CharField(source='resource_type')
     short_code = CharField(source='mnemonic')
     owner = CharField(source='parent_resource')
@@ -55,13 +55,14 @@ class CollectionListSerializer(ModelSerializer):
     owner_url = CharField(source='parent_url')
     id = CharField(source='mnemonic')
     summary = SerializerMethodField()
+    checksums = SerializerMethodField()
 
     class Meta:
         model = Collection
-        fields = (
+        fields = AbstractResourceSerializer.Meta.fields + (
             'short_code', 'name', 'url', 'owner', 'owner_type', 'owner_url', 'version', 'created_at', 'id',
             'collection_type', 'updated_at', 'canonical_url', 'autoexpand_head',
-            'summary', 'type',
+            'summary', 'type', 'checksums'
         )
 
     def __init__(self, *args, **kwargs):
@@ -86,6 +87,10 @@ class CollectionListSerializer(ModelSerializer):
             summary = CollectionSummarySerializer(obj).data
 
         return summary
+
+    @staticmethod
+    def get_checksums(obj):
+        return obj.get_all_checksums()
 
 
 class CollectionVersionListSerializer(ModelSerializer):
@@ -112,7 +117,7 @@ class CollectionVersionListSerializer(ModelSerializer):
 
     @staticmethod
     def get_checksums(obj):
-        return obj.get_checksums(queue=True)
+        return obj.get_all_checksums()
 
 
 class CollectionCreateOrUpdateSerializer(ModelSerializer):
@@ -266,8 +271,6 @@ class CollectionSummaryDetailSerializer(CollectionSummarySerializer):
 
 
 class AbstractCollectionSummaryVerboseSerializer(ModelSerializer):
-    # sources = JSONField(source='referenced_sources_distribution')
-    # collections = JSONField(source='referenced_collections_distribution')
     concepts = JSONField(source='concepts_distribution')
     mappings = JSONField(source='mappings_distribution')
     versions = JSONField(source='versions_distribution')
@@ -279,7 +282,6 @@ class AbstractCollectionSummaryVerboseSerializer(ModelSerializer):
         model = Collection
         fields = (
             'id', 'uuid', 'concepts', 'mappings', 'versions', 'references', 'expansions',
-            # 'sources', 'collections'
         )
 
 
@@ -361,7 +363,6 @@ class CollectionDetailSerializer(CollectionCreateOrUpdateSerializer, AbstractRep
     summary = SerializerMethodField()
     client_configs = SerializerMethodField()
     expansion_url = CharField(source='expansion_uri', read_only=True, allow_null=True, allow_blank=True)
-    checksums = SerializerMethodField()
 
     class Meta:
         model = Collection
@@ -416,10 +417,6 @@ class CollectionDetailSerializer(CollectionCreateOrUpdateSerializer, AbstractRep
         ret.update({"supported_locales": instance.get_supported_locales()})
         return ret
 
-    @staticmethod
-    def get_checksums(obj):
-        return obj.get_checksums(queue=True)
-
 
 class CollectionVersionDetailSerializer(CollectionCreateOrUpdateSerializer, AbstractRepoResourcesSerializer):
     type = CharField(source='resource_version_type')
@@ -442,7 +439,6 @@ class CollectionVersionDetailSerializer(CollectionCreateOrUpdateSerializer, Abst
     summary = SerializerMethodField()
     autoexpand = SerializerMethodField()
     expansion_url = CharField(source='expansion_uri', allow_null=True, allow_blank=True)
-    checksums = SerializerMethodField()
 
     class Meta:
         model = Collection
@@ -484,10 +480,6 @@ class CollectionVersionDetailSerializer(CollectionCreateOrUpdateSerializer, Abst
     @staticmethod
     def get_autoexpand(obj):
         return obj.should_auto_expand
-
-    @staticmethod
-    def get_checksums(obj):
-        return obj.get_checksums(queue=True)
 
 
 class CollectionReferenceSerializer(ModelSerializer):

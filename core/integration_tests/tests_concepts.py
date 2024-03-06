@@ -233,6 +233,20 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         self.assertTrue(concept.is_versioned_object)
         self.assertEqual(concept.datatype, "None")
 
+        response = self.client.put(
+            concepts_url,
+            {**self.concept_payload, 'datatype': 'None', 'update_comment': 'Updated Nothing'},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.data,
+            {
+                '__all__': ['No changes detected. Standard checksum is same as last version.']
+            }
+        )
+
     def test_put_200_openmrs_schema(self):  # pylint: disable=too-many-statements
         self.create_lookup_concept_classes()
         source = OrganizationSourceFactory(custom_validation_schema=OPENMRS_VALIDATION_SCHEMA)
@@ -698,7 +712,8 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
             sorted(['uuid', 'id', 'external_id', 'concept_class', 'datatype', 'url', 'retired', 'source',
                     'owner', 'owner_type', 'owner_url', 'display_name', 'display_locale', 'version', 'update_comment',
                     'locale', 'version_created_by', 'version_created_on', 'is_latest_version', 'latest_source_version',
-                    'versions_url', 'version_url', 'type', 'versioned_object_id'])
+                    'versions_url', 'version_url', 'type', 'versioned_object_id',
+                    'version_updated_on', 'version_updated_by', 'checksums'])
         )
 
         response = self.client.get(
@@ -724,7 +739,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
             sorted(response.data[0].keys()),
-            sorted(['uuid', 'id', 'url', 'version_url', 'type', 'retired'])
+            sorted(['uuid', 'id', 'url', 'version_url', 'type', 'retired', 'checksums'])
         )
 
     def test_get_200_with_mappings(self):
@@ -1253,9 +1268,9 @@ class ConceptCascadeViewTest(OCLAPITestCase):
         self.assertEqual(response.data['resourceType'], 'Bundle')
 
         entry = response.data['entry']
-        self.assertEqual(
+        self.assertCountEqual(
             list(entry.keys()),
-            ['id', 'type', 'url', 'version_url', 'terminal', 'entries', 'display_name', 'retired']
+            ['id', 'type', 'url', 'version_url', 'terminal', 'entries', 'display_name', 'retired', 'checksums']
         )
         self.assertEqual(entry['id'], concept1.mnemonic)
         self.assertEqual(entry['type'], 'Concept')
@@ -1311,9 +1326,9 @@ class ConceptCascadeViewTest(OCLAPITestCase):
         self.assertEqual(response.data['resourceType'], 'Bundle')
 
         entry = response.data['entry']
-        self.assertEqual(
+        self.assertCountEqual(
             list(entry.keys()),
-            ['id', 'type', 'url', 'version_url', 'terminal', 'entries', 'display_name', 'retired']
+            ['id', 'type', 'url', 'version_url', 'terminal', 'entries', 'display_name', 'retired', 'checksums']
         )
         self.assertEqual(entry['id'], concept2.mnemonic)
         self.assertEqual(entry['type'], 'Concept')
@@ -1353,9 +1368,9 @@ class ConceptCascadeViewTest(OCLAPITestCase):
         self.assertEqual(response.data['resourceType'], 'Bundle')
 
         entry = response.data['entry']
-        self.assertEqual(
+        self.assertCountEqual(
             list(entry.keys()),
-            ['id', 'type', 'url', 'version_url', 'terminal', 'entries', 'display_name', 'retired']
+            ['id', 'type', 'url', 'version_url', 'terminal', 'entries', 'display_name', 'retired', 'checksums']
         )
         self.assertEqual(entry['id'], concept1.mnemonic)
         self.assertEqual(entry['type'], 'Concept')
@@ -1368,9 +1383,9 @@ class ConceptCascadeViewTest(OCLAPITestCase):
         self.assertEqual(response.data['resourceType'], 'Bundle')
 
         entry = response.data['entry']
-        self.assertEqual(
+        self.assertCountEqual(
             list(entry.keys()),
-            ['id', 'type', 'url', 'version_url', 'terminal', 'entries', 'display_name', 'retired']
+            ['id', 'type', 'url', 'version_url', 'terminal', 'entries', 'display_name', 'retired', 'checksums']
         )
         self.assertEqual(entry['id'], concept2.mnemonic)
         self.assertEqual(entry['type'], 'Concept')
@@ -1411,6 +1426,21 @@ class ConceptCascadeViewTest(OCLAPITestCase):
         self.assertEqual(
             sorted([data['url'] for data in response.data['entry']['entries']]),
             sorted([
+                mapping1.uri,
+                mapping4.uri,
+            ])
+        )
+
+        response = self.client.get(
+            concept1.uri + '$cascade/?includeSelf=false&includeRetired=true&omitIfExistsIn=' + collection.uri
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data['entry']), 3)
+        self.assertEqual(
+            sorted([data['url'] for data in response.data['entry']]),
+            sorted([
+                concept1.uri,
                 mapping1.uri,
                 mapping4.uri,
             ])
@@ -1668,7 +1698,10 @@ class ConceptListViewTest(OCLAPITestCase):
         self.assertEqual(response.data[0]['id'], 'MyConcept2')
         self.assertEqual(
             response.data[0]['search_meta']['search_highlight'],
-            {'extras.bar': ['<em>foo</em>'], 'id': ['<em>MyConcept2</em>']}
+            {
+                'extras.foo': ['<em>bar</em>'],
+                'id': ['<em>MyConcept1</em>']
+            }
         )
 
         response = self.client.get(
@@ -1687,9 +1720,24 @@ class ConceptListViewTest(OCLAPITestCase):
         self.assertEqual(
             response.data,
             [
-                {'name': 'high', 'threshold': ANY, 'confidence': ANY, 'total': ANY},
-                {'name': 'medium', 'threshold': ANY, 'confidence': ANY, 'total': 0},
-                {'name': 'low', 'threshold': 0.01, 'confidence': '<50.0%', 'total': 0}
+                {
+                    'name': 'high',
+                    'threshold': ANY,
+                    'confidence': ANY,
+                    'total': ANY
+                },
+                {
+                    'name': 'medium',
+                    'threshold': ANY,
+                    'confidence': ANY,
+                    'total': 0
+                },
+                {
+                    'name': 'low',
+                    'threshold': 0.01,
+                    'confidence': '<50.0%',
+                    'total': 0
+                }
             ]
         )
         self.assertTrue(response.data[0]['total'] >= 1)
@@ -1715,6 +1763,130 @@ class ConceptListViewTest(OCLAPITestCase):
         response = self.client.get(
             self.source.uri + 'v1/concepts/?q=MyConcept',
             HTTP_AUTHORIZATION='Token ' + self.token,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+
+    def test_search_with_latest_released_repo_search(self):  # pylint: disable=too-many-statements
+        response = self.client.get(
+            '/concepts/?q=MyConcept',
+            HTTP_INCLUDESEARCHLATEST=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['id'], 'MyConcept2')
+        self.assertEqual(response.data[0]['uuid'], str(self.concept2.get_latest_version().id))
+        self.assertEqual(response.data[0]['versioned_object_id'], self.concept2.id)
+
+        response = self.client.get(
+            '/concepts/?q=MyConcept1',
+            HTTP_INCLUDESEARCHLATEST=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 0)
+
+        response = self.client.get(
+            '/concepts/?q=MyConcept&conceptClass=classA',
+            HTTP_INCLUDESEARCHLATEST=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 0)
+
+        response = self.client.get(
+            '/concepts/?q=MyConcept2&conceptClass=classB',
+            HTTP_INCLUDESEARCHLATEST=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['id'], 'MyConcept2')
+        self.assertEqual(response.data[0]['uuid'], str(self.concept2.get_latest_version().id))
+        self.assertEqual(response.data[0]['versioned_object_id'], self.concept2.id)
+
+        response = self.client.get(
+            '/concepts/?conceptClass=classA',
+            HTTP_INCLUDESEARCHLATEST=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 0)
+
+        response = self.client.get(
+            '/concepts/?extras.foo=bar',
+            HTTP_INCLUDESEARCHLATEST=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 0)
+
+        response = self.client.get(
+            '/concepts/?extras.exists=bar',
+            HTTP_INCLUDESEARCHLATEST=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['id'], 'MyConcept2')
+
+        response = self.client.get(
+            self.source.concepts_url + '?q=MyConcept&extras.exact.bar=foo&includeSearchMeta=true',
+            HTTP_INCLUDESEARCHLATEST=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['id'], 'MyConcept2')
+        self.assertEqual(
+            response.data[0]['search_meta']['search_highlight'],
+            {'extras.bar': ['<em>foo</em>'], 'id': ['<em>MyConcept2</em>']}
+        )
+
+        response = self.client.get(
+            self.source.uri + 'v1/concepts/?q=MyConcept&sortAsc=last_update',
+            HTTP_AUTHORIZATION='Token ' + self.random_user.get_token(),
+            HTTP_INCLUDESEARCHLATEST=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['id'], 'MyConcept2')
+
+        response = self.client.get(
+            self.source.concepts_url + '?q=MyConcept&searchStatsOnly=true',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            HTTP_INCLUDESEARCHLATEST=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data,
+            [
+                {'name': 'high', 'threshold': ANY, 'confidence': ANY, 'total': ANY},
+                {'name': 'medium', 'threshold': ANY, 'confidence': ANY, 'total': 0},
+                {'name': 'low', 'threshold': 0.01, 'confidence': '<50.0%', 'total': 0}
+            ]
+        )
+        self.assertTrue(response.data[0]['total'] >= 1)
+
+        response = self.client.get(
+            self.source.concepts_url + '?q=MyConcept',  # assumes HEAD
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            HTTP_INCLUDESEARCHLATEST=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 2)
+        self.assertEqual(response.data[0]['id'], 'MyConcept1')
+        self.assertEqual(response.data[1]['id'], 'MyConcept2')
+
+        response = self.client.get(
+            self.source.uri + 'HEAD/concepts/?q=MyConcept',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            HTTP_INCLUDESEARCHLATEST=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 2)
+        self.assertEqual(
+            sorted([data['id'] for data in response.data]),
+            sorted(['MyConcept1', 'MyConcept2'])
+        )
+
+        response = self.client.get(
+            self.source.uri + 'v1/concepts/?q=MyConcept',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            HTTP_INCLUDESEARCHLATEST=True,
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 1)
@@ -1752,8 +1924,44 @@ class ConceptListViewTest(OCLAPITestCase):
         self.assertTrue(class_b_facet[1] >= 1)
         self.assertFalse(class_b_facet[2])
 
+    def test_facets_with_latest_released_repo_search(self):
+        if settings.ENV == 'ci':
+            rebuild_indexes(['concepts'])
+        ConceptDocument().update(self.source.concepts_set.all())
+
         response = self.client.get(
-            self.source.concepts_url + '?facetsOnly=true'  # assumes HEAD
+            '/concepts/?facetsOnly=true',
+            HTTP_INCLUDESEARCHLATEST=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(list(response.data.keys()), ['facets'])
+
+        class_b_facet = [x for x in response.data['facets']['fields']['conceptClass'] if x[0] == 'classb'][0]
+        self.assertEqual(class_b_facet[0], 'classb')
+        self.assertTrue(class_b_facet[1] >= 1)
+        self.assertFalse(class_b_facet[2])
+        self.assertEqual([x for x in response.data['facets']['fields']['conceptClass'] if x[0] == 'classa'], [])
+
+        response = self.client.get(
+            self.source.uri + 'HEAD/concepts/?facetsOnly=true',
+            HTTP_INCLUDESEARCHLATEST=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(list(response.data.keys()), ['facets'])
+
+        class_a_facet = [x for x in response.data['facets']['fields']['conceptClass'] if x[0] == 'classa'][0]
+        self.assertEqual(class_a_facet[0], 'classa')
+        self.assertTrue(class_a_facet[1] >= 1)
+        self.assertFalse(class_a_facet[2])
+
+        class_b_facet = [x for x in response.data['facets']['fields']['conceptClass'] if x[0] == 'classb'][0]
+        self.assertEqual(class_b_facet[0], 'classb')
+        self.assertTrue(class_b_facet[1] >= 1)
+        self.assertFalse(class_b_facet[2])
+
+        response = self.client.get(
+            self.source.concepts_url + '?facetsOnly=true',  # assumes HEAD
+            HTTP_INCLUDESEARCHLATEST=True,
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(list(response.data.keys()), ['facets'])
@@ -1768,7 +1976,8 @@ class ConceptListViewTest(OCLAPITestCase):
         self.assertFalse(class_a_facet[2])
 
         response = self.client.get(
-            self.source.uri + 'v1/concepts/?facetsOnly=true'
+            self.source.uri + 'v1/concepts/?facetsOnly=true',
+            HTTP_INCLUDESEARCHLATEST=True,
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(list(response.data.keys()), ['facets'])

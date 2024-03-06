@@ -1,4 +1,5 @@
 import json
+import time
 from datetime import datetime
 from json import JSONDecodeError
 
@@ -22,7 +23,6 @@ from core.common.constants import CONFIRM_EMAIL_ADDRESS_MAIL_SUBJECT, PASSWORD_R
 from core.common.utils import write_export_file, web_url, get_resource_class_from_resource_name, get_export_service, \
     get_date_range_label
 from core.reports.models import ResourceUsageReport
-from core.toggles.models import Toggle
 
 logger = get_task_logger(__name__)
 
@@ -86,6 +86,8 @@ def delete_collection(collection_id):
 
     try:
         logger.info('Found collection %s.  Beginning purge...', collection.mnemonic)
+        collection.references.all().delete()
+        collection.expansions.all().delete()
         collection.delete(force=True)
         logger.info('Delete complete!')
         return True
@@ -97,6 +99,7 @@ def delete_collection(collection_id):
 
 @app.task(base=QueueOnce, bind=True)
 def export_source(self, version_id):
+    start_time = time.time()
     from core.sources.models import Source
     logger.info('Finding source version...')
 
@@ -111,7 +114,12 @@ def export_source(self, version_id):
     version.add_processing(self.request.id)
     try:
         logger.info('Found source version %s.  Beginning export...', version.version)
-        write_export_file(version, 'source', 'core.sources.serializers.SourceVersionExportSerializer', logger)
+        write_export_file(
+            version,
+            'source', 'core.sources.serializers.SourceVersionExportSerializer',
+            logger,
+            start_time
+        )
         logger.info('Export complete!')
     finally:
         version.remove_processing(self.request.id)
@@ -119,6 +127,7 @@ def export_source(self, version_id):
 
 @app.task(base=QueueOnce, bind=True)
 def export_collection(self, version_id):
+    start_time = time.time()
     from core.collections.models import Collection
     logger.info('Finding collection version...')
 
@@ -139,7 +148,10 @@ def export_collection(self, version_id):
     try:
         logger.info('Found collection version %s.  Beginning export...', version.version)
         write_export_file(
-            version, 'collection', 'core.collections.serializers.CollectionVersionExportSerializer', logger
+            version,
+            'collection', 'core.collections.serializers.CollectionVersionExportSerializer',
+            logger,
+            start_time
         )
         logger.info('Export complete!')
     finally:
@@ -232,13 +244,13 @@ def __run_search_index_command(command, app_names=None):
         call_command('search_index', command, '-f', '--parallel')
 
 
-@app.task(base=QueueOnce)
+@app.task(base=QueueOnce, retry_kwargs={'max_retries': 0})
 def bulk_import(to_import, username, update_if_exists):
     from core.importers.models import BulkImport
     return BulkImport(content=to_import, username=username, update_if_exists=update_if_exists).run()
 
 
-@app.task(base=QueueOnce, bind=True)
+@app.task(base=QueueOnce, bind=True, retry_kwargs={'max_retries': 0})
 def bulk_import_parallel_inline(self, to_import, username, update_if_exists, threads=5):
     from core.importers.models import BulkImportParallelRunner
     try:
@@ -253,13 +265,13 @@ def bulk_import_parallel_inline(self, to_import, username, update_if_exists, thr
     return importer.run()
 
 
-@app.task(base=QueueOnce)
+@app.task(base=QueueOnce, retry_kwargs={'max_retries': 0})
 def bulk_import_inline(to_import, username, update_if_exists):
     from core.importers.models import BulkImportInline
     return BulkImportInline(content=to_import, username=username, update_if_exists=update_if_exists).run()
 
 
-@app.task(bind=True)
+@app.task(bind=True, retry_kwargs={'max_retries': 0})
 def bulk_import_parts_inline(self, input_list, username, update_if_exists):
     from core.importers.models import BulkImportInline
     return BulkImportInline(
@@ -338,11 +350,6 @@ def seed_children_to_new_version(self, resource, obj_id, export=True, sync=False
             if is_source:
                 instance.seed_concepts(index=index)
                 instance.seed_mappings(index=index)
-                if Toggle.get('CHECKSUMS_TOGGLE'):
-                    if get(settings, 'TEST_MODE', False):
-                        set_source_children_checksums(instance.id)
-                    else:
-                        set_source_children_checksums.apply_async((instance.id,), queue='indexing')
             elif autoexpand:
                 instance.cascade_children_to_expansion(index=index, sync=sync)
 
@@ -482,7 +489,7 @@ def batch_index_resources(resource, filters, update_indexed=False):
     model = get_resource_class_from_resource_name(resource)
     if isinstance(filters, str):
         filters = json.loads(filters)
-    if model:
+    if model and filters is not None:
         queryset = model.objects.filter(**filters)
         model.batch_index(queryset, model.get_search_document())
 
@@ -618,17 +625,19 @@ def delete_s3_objects(path):
 
 @app.task(ignore_result=True)
 def beat_healthcheck():  # pragma: no cover
-    from core.common.services import RedisService
+    from core.services.storages.redis import RedisService
     redis_service = RedisService()
     redis_service.set(settings.CELERYBEAT_HEALTHCHECK_KEY, str(datetime.now()), ex=120)
 
 
 @app.task(ignore_result=True)
-def resources_report():  # pragma: no cover
+def resources_report(start_date=None, end_date=None):  # pragma: no cover
     # runs on first of every month
     # reports usage of prev month
     now = timezone.now().replace(day=1)
-    report = ResourceUsageReport(start_date=now - relativedelta(months=1), end_date=now)
+    start_date = start_date or now - relativedelta(months=1)
+    end_date = end_date or now
+    report = ResourceUsageReport(start_date=start_date, end_date=end_date)
     buff, file_name = report.generate()
     date_range_label = get_date_range_label(report.start_date, report.end_date)
     env = settings.ENV.upper()
@@ -681,18 +690,6 @@ def post_import_update_resource_counts():
 
 
 @app.task(ignore_result=True)
-def set_source_children_checksums(source_id):
-    from core.sources.models import Source
-    source = Source.objects.filter(id=source_id).first()
-    if not source:
-        return
-    for concept in source.concepts.filter():
-        concept.set_source_versions_checksum()
-    for mapping in source.mappings.filter():
-        mapping.set_source_versions_checksum()
-
-
-@app.task(ignore_result=True)
 def update_mappings_source(source_id):
     # Updates mappings where mapping.to_source_url or mapping.from_source_url matches source url or canonical url
     from core.sources.models import Source
@@ -714,7 +711,7 @@ def update_mappings_concept(concept_id):
 def calculate_checksums(resource_type, resource_id):
     model = get_resource_class_from_resource_name(resource_type)
     if model:
-        is_source_child = model.__class__.__name__ in ('Concept', 'Mapping')
+        is_source_child = model.__name__ in ('Concept', 'Mapping')
         instance = model.objects.filter(id=resource_id).first()
         if instance:
             instance.set_checksums()
@@ -723,3 +720,12 @@ def calculate_checksums(resource_type, resource_id):
                     instance.get_latest_version().set_checksums()
                 if not instance.is_versioned_object:
                     instance.versioned_object.set_checksums()
+
+
+@app.task(ignore_result=True)
+def readd_references_to_expansion_on_references_removal(expansion_id, removed_reference_ids):
+    from core.collections.models import Expansion
+    expansion = Expansion.objects.filter(id=expansion_id).first()
+    if expansion and removed_reference_ids:
+        reference_to_readd = expansion.collection_version.references.exclude(id__in=removed_reference_ids)
+        expansion.add_references(reference_to_readd, True, True, False)

@@ -269,10 +269,14 @@ class BulkImportInlineTest(OCLTestCase):
 
         self.assertEqual(source.concepts_set.count(), 2)
         self.assertEqual(Concept.objects.filter(mnemonic='Food').count(), 2)
-        self.assertEqual(
-            Concept.objects.filter(mnemonic='Food', id=F('versioned_object_id')).first().versions.count(), 1
-        )
+        concept = Concept.objects.filter(mnemonic='Food', id=F('versioned_object_id')).first()
+        self.assertEqual(concept.versions.count(), 1)
         self.assertTrue(Concept.objects.filter(mnemonic='Food', is_latest_version=True).exists())
+        batch_index_resources_mock.apply_async.assert_called_with(('concept', {'id__in': ANY}, True), queue='indexing')
+        self.assertEqual(
+            sorted(batch_index_resources_mock.apply_async.mock_calls[0][1][0][1]['id__in']),
+            sorted([concept.id, concept.get_latest_version().id])
+        )
 
         data = {
             "type": "Concept", "id": "Food", "concept_class": "Root",
@@ -290,11 +294,39 @@ class BulkImportInlineTest(OCLTestCase):
         self.assertEqual(importer.failed, [])
         self.assertTrue(importer.elapsed_seconds > 0)
         self.assertEqual(source.concepts_set.count(), 3)
-        self.assertEqual(
-            Concept.objects.filter(mnemonic='Food', id=F('versioned_object_id')).first().versions.count(), 2
-        )
+        concept = Concept.objects.filter(mnemonic='Food', id=F('versioned_object_id')).first()
+        self.assertEqual(concept.versions.count(), 2)
         self.assertTrue(Concept.objects.filter(mnemonic='Food', is_latest_version=True, datatype='Rule').exists())
-        batch_index_resources_mock.apply_async.assert_called()
+        batch_index_resources_mock.apply_async.assert_called_with(('concept', {'id__in': ANY}, True), queue='indexing')
+        self.assertEqual(
+            sorted(batch_index_resources_mock.apply_async.mock_calls[1][1][0][1]['id__in']),
+            sorted([concept.id, concept.get_latest_version().prev_version.id, concept.get_latest_version().id])
+        )
+
+        data = {
+            "type": "Concept", "id": "Food", "concept_class": "Root",
+            "datatype": "Foo", "source": "DemoSource", "owner": "DemoOrg", "owner_type": "Organization",
+            "names": [{"name": "Food", "locale": "en", "locale_preferred": "True", "name_type": "Fully Specified"}],
+            "descriptions": [],
+        }
+
+        importer = BulkImportInline(json.dumps(data), 'ocladmin', True)
+        importer.run()
+
+        self.assertEqual(importer.processed, 1)
+        self.assertEqual(len(importer.created), 0)
+        self.assertEqual(len(importer.updated), 1)
+        self.assertEqual(importer.failed, [])
+        self.assertTrue(importer.elapsed_seconds > 0)
+        self.assertEqual(source.concepts_set.count(), 4)
+        concept = Concept.objects.filter(mnemonic='Food', id=F('versioned_object_id')).first()
+        self.assertEqual(concept.versions.count(), 3)
+        self.assertTrue(Concept.objects.filter(mnemonic='Food', is_latest_version=True, datatype='Foo').exists())
+        batch_index_resources_mock.apply_async.assert_called_with(('concept', {'id__in': ANY}, True), queue='indexing')
+        self.assertEqual(
+            sorted(batch_index_resources_mock.apply_async.mock_calls[2][1][0][1]['id__in']),
+            sorted([concept.id, concept.get_latest_version().prev_version.id, concept.get_latest_version().id])
+        )
 
     @patch('core.importers.models.batch_index_resources')
     def test_concept_import_with_auto_assignment_mnemonic(self, batch_index_resources_mock):
@@ -402,10 +434,15 @@ class BulkImportInlineTest(OCLTestCase):
         importer.run()
 
         self.assertEqual(Mapping.objects.filter(map_type='Has Child').count(), 2)
-        self.assertEqual(
-            Mapping.objects.filter(map_type='Has Child', id=F('versioned_object_id')).first().versions.count(), 1
-        )
+        mapping = Mapping.objects.filter(map_type='Has Child', id=F('versioned_object_id')).first()
+        self.assertEqual(mapping.versions.count(), 1)
         self.assertTrue(Mapping.objects.filter(map_type='Has Child', is_latest_version=True).exists())
+        batch_index_resources_mock.apply_async.assert_called_with(('mapping', {'id__in': ANY}, True), queue='indexing')
+        self.assertEqual(
+            sorted(batch_index_resources_mock.apply_async.mock_calls[0][1][0][1]['id__in']),
+            sorted([mapping.id, mapping.get_latest_version().id])
+        )
+
         self.assertEqual(importer.processed, 1)
         self.assertEqual(len(importer.created), 1)
         self.assertEqual(importer.failed, [])
@@ -422,15 +459,18 @@ class BulkImportInlineTest(OCLTestCase):
         importer = BulkImportInline(json.dumps(data), 'ocladmin', True)
         importer.run()
 
+        mapping = Mapping.objects.filter(map_type='Has Child', id=F('versioned_object_id')).first()
+        self.assertEqual(mapping.versions.count(), 2)
+        batch_index_resources_mock.apply_async.assert_called_with(('mapping', {'id__in': ANY}, True), queue='indexing')
         self.assertEqual(
-            Mapping.objects.filter(map_type='Has Child', id=F('versioned_object_id')).first().versions.count(), 2
+            sorted(batch_index_resources_mock.apply_async.mock_calls[1][1][0][1]['id__in']),
+            sorted([mapping.id, mapping.get_latest_version().prev_version.id, mapping.get_latest_version().id])
         )
         self.assertEqual(importer.processed, 1)
         self.assertEqual(len(importer.created), 0)
         self.assertEqual(len(importer.updated), 1)
         self.assertEqual(importer.failed, [])
         self.assertTrue(importer.elapsed_seconds > 0)
-        batch_index_resources_mock.apply_async.assert_called()
 
     @patch('core.importers.models.batch_index_resources')
     def test_mapping_import_with_autoid_assignment(self, batch_index_resources_mock):
@@ -501,8 +541,8 @@ class BulkImportInlineTest(OCLTestCase):
         self.assertEqual(importer.processed, 9)
         self.assertEqual(len(importer.created), 2)
         self.assertEqual(len(importer.exists), 3)
-        self.assertEqual(len(importer.updated), 4)
-        self.assertEqual(len(importer.failed), 0)
+        self.assertEqual(len(importer.updated), 0)
+        self.assertEqual(len(importer.failed), 4)  # due to same concept checksum
         self.assertEqual(len(importer.invalid), 0)
         self.assertEqual(len(importer.others), 0)
         self.assertEqual(len(importer.permission_denied), 0)
@@ -528,9 +568,9 @@ class BulkImportInlineTest(OCLTestCase):
         self.assertEqual(importer.processed, 64)
         self.assertEqual(len(importer.created), 49)
         self.assertEqual(len(importer.exists), 3)
-        self.assertEqual(len(importer.updated), 12)
+        self.assertEqual(len(importer.updated), 1)  # last 11 rows are duplicate rows
+        self.assertEqual(len(importer.failed), 11)
         self.assertEqual(len(importer.deleted), 0)
-        self.assertEqual(len(importer.failed), 0)
         self.assertEqual(len(importer.invalid), 0)
         self.assertEqual(len(importer.others), 0)
         self.assertEqual(len(importer.permission_denied), 0)
@@ -790,13 +830,13 @@ class BulkImportParallelRunnerTest(OCLTestCase):
         self.assertEqual(len(importer.parts[4]), 22)
         self.assertEqual(len(importer.parts[5]), 2)
         self.assertEqual(len(importer.parts[6]), 12)
-        self.assertEqual([l['type'] for l in importer.parts[0]], ['Organization', 'Organization'])
-        self.assertEqual([l['type'] for l in importer.parts[1]], ['Source', 'Source'])
-        self.assertEqual([l['type'] for l in importer.parts[2]], ['Source Version'])
-        self.assertEqual(list({l['type'] for l in importer.parts[3]}), ['Concept'])
-        self.assertEqual(list({l['type'] for l in importer.parts[4]}), ['Mapping'])
-        self.assertEqual([l['type'] for l in importer.parts[5]], ['Source Version', 'Source Version'])
-        self.assertEqual(list({l['type'] for l in importer.parts[6]}), ['Concept'])
+        self.assertEqual([part['type'] for part in importer.parts[0]], ['Organization', 'Organization'])
+        self.assertEqual([part['type'] for part in importer.parts[1]], ['Source', 'Source'])
+        self.assertEqual([part['type'] for part in importer.parts[2]], ['Source Version'])
+        self.assertEqual(list({part['type'] for part in importer.parts[3]}), ['Concept'])
+        self.assertEqual(list({part['type'] for part in importer.parts[4]}), ['Mapping'])
+        self.assertEqual([part['type'] for part in importer.parts[5]], ['Source Version', 'Source Version'])
+        self.assertEqual(list({part['type'] for part in importer.parts[6]}), ['Concept'])
 
     @patch('core.importers.models.app.control')
     @patch('core.importers.models.RedisService')

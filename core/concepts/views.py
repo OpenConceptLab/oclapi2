@@ -24,7 +24,7 @@ from core.common.swagger_parameters import (
     compress_header, include_source_versions_param, include_collection_versions_param, cascade_method_param,
     cascade_map_types_param, cascade_exclude_map_types_param, cascade_hierarchy_param, cascade_mappings_param,
     cascade_levels_param, cascade_direction_param, cascade_view_hierarchy, return_map_types_param,
-    omit_if_exists_in_param, equivalency_map_types_param)
+    omit_if_exists_in_param, equivalency_map_types_param, search_from_latest_repo_header)
 from core.common.tasks import delete_concept, make_hierarchy
 from core.common.utils import to_parent_uri_from_kwargs, generate_temp_version, get_truthy_values
 from core.common.views import SourceChildCommonBaseView, SourceChildExtrasView, \
@@ -40,7 +40,7 @@ from core.concepts.serializers import (
     ConceptVersionListSerializer, ConceptSummarySerializer, ConceptMinimalSerializer,
     ConceptChildrenSerializer, ConceptParentsSerializer, ConceptLookupListSerializer)
 from core.mappings.serializers import MappingListSerializer
-
+from core.toggles.models import Toggle
 
 TRUTHY = get_truthy_values()
 
@@ -191,7 +191,7 @@ class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
         manual_parameters=[
             q_param, limit_param, sort_desc_param, sort_asc_param, page_param, verbose_param,
             include_retired_param, include_inverse_mappings_param, updated_since_param,
-            include_facets_header, compress_header
+            include_facets_header, compress_header, search_from_latest_repo_header
         ]
     )
     def get(self, request, *args, **kwargs):
@@ -291,6 +291,11 @@ class ConceptRetrieveUpdateDestroyView(ConceptBaseView, RetrieveAPIView, UpdateA
             raise Http404()
 
         self.check_object_permissions(self.request, instance)
+
+        if Toggle.get('CHECKSUMS_TOGGLE'):
+            instance.get_checksums()
+            for version in instance.versions:
+                version.get_checksums()
 
         return instance
 
@@ -591,24 +596,25 @@ class ConceptLabelListCreateView(ConceptBaseView, ListWithHeadersMixin, ListCrea
         return getattr(instance, self.parent_list_attribute).all()
 
     def create(self, request, **_):  # pylint: disable=arguments-differ
-        name = request.data.get('name', None) or request.data.get('description', None)
+        name = request.data.get('name', None)
+        description = request.data.get('description', None)
+        locale = name or description
         serializer = self.get_serializer(data=request.data.copy())
-        if name and serializer.is_valid():
-            new_version = self.get_object().clone()
-            new_version.comment = f'Added to {self.parent_list_attribute}: {name}.'
-            errors = Concept.persist_clone(new_version, request.user)
-            if new_version.id:
-                serializer = self.get_serializer(data={**request.data, 'concept_id': new_version.id})
-                if serializer.is_valid():
-                    serializer.save()
-                    locale = serializer.instance
-                    if locale.id:
-                        versioned_object_locale = locale.clone()
-                        versioned_object_locale.concept_id = new_version.versioned_object_id
-                        versioned_object_locale.save()
-
-            if errors:
-                return Response(errors, status=status.HTTP_400_BAD_REQUEST)
+        if locale and serializer.is_valid():
+            serializer = self.get_serializer(data=request.data)
+            if serializer.is_valid():
+                new_version = self.get_object().clone()
+                new_version.comment = f'Added to {self.parent_list_attribute}: {locale}.'
+                if name:
+                    new_version.cloned_names = [*new_version.cloned_names, request.data]
+                elif description:
+                    new_version.cloned_descriptions = [*new_version.cloned_descriptions, request.data]
+                errors = new_version.save_as_new_version(request.user)
+                if errors:
+                    return Response(errors, status=status.HTTP_400_BAD_REQUEST)
+                locales = new_version.names if name else new_version.descriptions
+                instance = locales.order_by('-id').first()
+                serializer = self.get_serializer(instance)
             headers = self.get_success_headers(serializer.data)
             return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -653,7 +659,7 @@ class ConceptLabelRetrieveUpdateDestroyView(ConceptBaseView, RetrieveUpdateDestr
             saved_instance = serializer.save()
             setattr(new_version, subject_label_attr, [*[locale.clone() for locale in locales.all()], saved_instance])
             new_version.comment = f'Updated {saved_instance.name} in {self.parent_list_attribute}.'
-            errors = Concept.persist_clone(new_version, request.user)
+            errors = new_version.save_as_new_version(request.user)
             if errors:
                 return Response(errors, status=status.HTTP_400_BAD_REQUEST)
             return Response(serializer.data, status=status.HTTP_200_OK)
@@ -670,7 +676,7 @@ class ConceptLabelRetrieveUpdateDestroyView(ConceptBaseView, RetrieveUpdateDestr
             labels = [name.clone() for name in resource_instance.names.exclude(id=instance.id)]
             setattr(new_version, subject_label_attr, labels)
             new_version.comment = f'Deleted {instance.name} in {self.parent_list_attribute}.'
-            errors = Concept.persist_clone(new_version, request.user)
+            errors = new_version.save_as_new_version(request.user)
             if errors:
                 return Response(errors, status=status.HTTP_400_BAD_REQUEST)
         return Response(status=status.HTTP_204_NO_CONTENT)

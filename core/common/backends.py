@@ -54,19 +54,27 @@ class OCLOIDCAuthenticationBackend(OIDCAuthenticationBackend):
         #     'email': 'inactive@user.com'
         # }
         from core.users.models import UserProfile
-        return UserProfile.objects.create_user(
+        user = UserProfile.objects.create_user(
             claims.get('preferred_username'),
             email=claims.get('email'),
             first_name=claims.get('given_name'),
             last_name=claims.get('family_name'),
-            verified=claims.get('email_verified')
+            verified=claims.get('email_verified'),
+            company=claims.get('company', None),
+            location=claims.get('location', None)
         )
+        if user.id:
+            user.set_checksums()
+        return user
 
     def update_user(self, user, claims):
         user.first_name = claims.get('given_name') or user.first_name
         user.last_name = claims.get('family_name') or user.last_name
         user.email = claims.get('email') or user.email
+        user.company = claims.get('company', None) or user.company
+        user.location = claims.get('location', None) or user.location
         user.save()
+        user.set_checksums()
         return user
 
     def filter_users_by_claims(self, claims):
@@ -91,7 +99,7 @@ class OCLAuthenticationBackend(ModelBackend):
         if get(self, '_authentication_backend'):
             return get(self, '_authentication_backend')
 
-        from core.common.services import AuthService
+        from core.services.auth.core import AuthService
         if AuthService.is_valid_django_token(request) or get(settings, 'TEST_MODE', False):
             klass = ModelBackend
         else:

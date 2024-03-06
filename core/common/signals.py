@@ -25,7 +25,7 @@ def propagate_owner_status(sender, instance=None, created=False, **kwargs):  # p
 
         if updated_sources:
             from core.sources.documents import SourceDocument
-            instance.batch_index(instance.source_set, SourceDocument)
+            instance.batch_index(instance.source_set, SourceDocument, True)
         if updated_collections:
             from core.collections.documents import CollectionDocument
-            instance.batch_index(instance.collection_set, CollectionDocument)
+            instance.batch_index(instance.collection_set, CollectionDocument, True)

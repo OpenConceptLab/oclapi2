@@ -12,7 +12,7 @@ from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
 from elasticsearch import RequestError, TransportError
 from elasticsearch_dsl import Q
-from pydash import get, compact
+from pydash import get, compact, flatten
 from rest_framework import response, generics, status
 from rest_framework.generics import ListAPIView, RetrieveUpdateDestroyAPIView
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -20,17 +20,19 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from core import __version__
-from core.common.checksums import Checksum
 from core.common.constants import SEARCH_PARAM, LIST_DEFAULT_LIMIT, CSV_DEFAULT_LIMIT, \
     LIMIT_PARAM, NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY, INCLUDE_RETIRED_PARAM, VERBOSE_PARAM, HEAD, LATEST, \
     BRIEF_PARAM, ES_REQUEST_TIMEOUT, INCLUDE_INACTIVE, FHIR_LIMIT_PARAM, RAW_PARAM, SEARCH_MAP_CODES_PARAM, \
-    INCLUDE_SEARCH_META_PARAM, EXCLUDE_FUZZY_SEARCH_PARAM, EXCLUDE_WILDCARD_SEARCH_PARAM
+    INCLUDE_SEARCH_META_PARAM, EXCLUDE_FUZZY_SEARCH_PARAM, EXCLUDE_WILDCARD_SEARCH_PARAM, UPDATED_BY_USERNAME_PARAM, \
+    CANONICAL_URL_REQUEST_PARAM
 from core.common.exceptions import Http400
 from core.common.mixins import PathWalkerMixin
 from core.common.search import CustomESSearch
 from core.common.serializers import RootSerializer
+from core.common.swagger_parameters import all_resource_query_param
 from core.common.utils import compact_dict_by_values, to_snake_case, parse_updated_since_param, \
-    to_int, get_user_specific_task_id, get_falsy_values, get_truthy_values
+    to_int, get_user_specific_task_id, get_falsy_values, get_truthy_values, get_resource_class_from_resource_name, \
+    format_url_for_search
 from core.concepts.permissions import CanViewParentDictionary, CanEditParentDictionary
 from core.orgs.constants import ORG_OBJECT_TYPE
 from core.tasks.constants import TASK_NOT_COMPLETED
@@ -50,6 +52,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     pk_field = 'mnemonic'
     user_is_self = False
     is_searchable = False
+    is_only_searchable = False
     limit = LIST_DEFAULT_LIMIT
     default_filters = {}
     sort_asc_param = 'sortAsc'
@@ -74,7 +77,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         return self.has_owner_scope() and self.has_concept_container_scope()
 
     def _should_exclude_retired_from_search_results(self):
-        if self.is_owner_document_model() or 'expansion' in self.kwargs:
+        if self.is_owner_document_model() or 'expansion' in self.kwargs or self.is_url_registry_document():
             return False
 
         params = get(self, 'params') or self.request.query_params.dict()
@@ -85,7 +88,8 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         return self.request.query_params.get(INCLUDE_INACTIVE) in TRUTHY
 
     def _should_include_private(self):
-        return self.is_user_document() or self.request.user.is_staff or self.is_user_scope()
+        return (self.is_user_document() or self.request.user.is_staff or
+                self.is_user_scope() or self.is_url_registry_document())
 
     def is_verbose(self):
         return self.request.query_params.get(VERBOSE_PARAM, False) in TRUTHY
@@ -144,7 +148,10 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         return response.Response(status=status.HTTP_204_NO_CONTENT)
 
     def get_host_url(self):
-        return self.request.META['wsgi.url_scheme'] + '://' + self.request.get_host()
+        scheme = self.request.META['wsgi.url_scheme']
+        if settings.ENV != 'development':
+            scheme += 's'
+        return scheme + '://' + self.request.get_host()
 
     def filter_queryset(self, queryset=None):
         if self.is_searchable and self.should_perform_es_search():
@@ -207,12 +214,6 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
     def get_raw_search_string(self):
         return self.request.query_params.dict().get(SEARCH_PARAM, '').strip()
-
-    def get_search_must_haves(self):
-        return CustomESSearch.get_must_haves(self.get_raw_search_string())
-
-    def get_search_must_not_haves(self):
-        return CustomESSearch.get_must_not_haves(self.get_raw_search_string())
 
     @property
     def is_fuzzy_search(self):
@@ -389,14 +390,14 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                 filters['collection_url'] = f"{filters['collection_owner_url']}collections/{self.kwargs['collection']}/"
                 if is_version_specified and self.kwargs['version'] != HEAD:
                     filters['collection_url'] += f"{self.kwargs['version']}/"
-            if is_source_specified and not is_version_specified and not self.should_search_latest_released_repo():
+            if is_source_specified and not is_version_specified and not self.should_search_latest_repo():
                 filters['source_version'] = HEAD
         return filters
 
     def get_latest_version_filter_field_for_source_child(self):
         query_latest = self.__should_query_latest_version()
         if query_latest:
-            return 'is_in_latest_source_version'
+            return 'is_in_latest_source_version' if self.should_search_latest_repo() else 'is_latest_version'
         if not self.is_global_scope() and (
                 self.kwargs.get('version') == HEAD or not self.kwargs.get('version')
         ) and 'collection' not in self.kwargs:
@@ -420,7 +421,18 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                 facets = s.facets.to_dict()
             except TransportError as ex:  # pragma: no cover
                 raise Http400(detail=get(ex, 'info') or get(ex, 'error') or str(ex)) from ex
-
+        if not get(self.request.user, 'is_authenticated'):
+            facets.pop('updatedBy', None)
+        if self.should_search_latest_repo() and self.is_source_child_document_model() and 'source_version' in facets:
+            facets['source_version'] = [facet for facet in facets['source_version'] if facet[0] != 'HEAD']
+        is_global_scope = ('org' not in self.kwargs and 'user' not in self.kwargs and not self.user_is_self)
+        if is_global_scope:
+            facets.pop('source_version', None)
+            facets.pop('collection_version', None)
+            facets.pop('expansion', None)
+            facets.pop('collection_owner_url', None)
+        facets.pop('is_in_latest_source_version', None)
+        facets.pop('is_latest_version', None)
         return facets
 
     def get_extras_searchable_fields_from_query_params(self):
@@ -457,6 +469,10 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         from core.users.documents import UserProfileDocument
         return self.document_model == UserProfileDocument
 
+    def is_url_registry_document(self):
+        from core.url_registry.documents import URLRegistryDocument
+        return self.document_model == URLRegistryDocument
+
     def is_concept_document(self):
         from core.concepts.documents import ConceptDocument
         return self.document_model == ConceptDocument
@@ -469,12 +485,19 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     def is_source_child_document_model(self):
         from core.concepts.documents import ConceptDocument
         from core.mappings.documents import MappingDocument
-        return self.document_model in [ConceptDocument, MappingDocument]
+        from core.concepts.search import ConceptFacetedSearch
+        from core.mappings.search import MappingFacetedSearch
+        return self.document_model in [
+            ConceptDocument, MappingDocument] or self.facet_class in [ConceptFacetedSearch, MappingFacetedSearch]
 
     def is_concept_container_document_model(self):
         from core.collections.documents import CollectionDocument
         from core.sources.documents import SourceDocument
         return self.document_model in [SourceDocument, CollectionDocument]
+
+    def is_repo_document_model(self):
+        from core.repos.documents import RepoDocument
+        return self.document_model == RepoDocument
 
     def is_user_scope(self):
         org = self.kwargs.get('org', None)
@@ -523,10 +546,20 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         if not force and not self.should_perform_es_search():
             return results
 
-        results = self.document_model.search()
+        search_kwargs = {'index': self.document_model.indexes} if get(self.document_model, 'indexes') else {}
+        results = self.document_model.search(**search_kwargs)
         default_filters = self.default_filters.copy()
         if self.is_user_document() and self.should_include_inactive():
             default_filters.pop('is_active', None)
+
+        updated_by = self.request.query_params.get(UPDATED_BY_USERNAME_PARAM, None)
+        if updated_by:
+            results = results.query("terms", updated_by=compact(updated_by.split(',')))
+        if self.is_canonical_specified():
+            results = results.query(
+                'match_phrase',
+                _canonical_url=format_url_for_search(self.request.query_params.get(CANONICAL_URL_REQUEST_PARAM))
+            )
         if self.is_source_child_document_model():
             latest_attr = self.get_latest_version_filter_field_for_source_child()
             if latest_attr:
@@ -550,6 +583,11 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         if faceted_criterion:
             results = results.query(faceted_criterion)
         return results
+
+    def is_canonical_specified(self):
+        return (
+                       self.is_concept_container_document_model() or self.is_repo_document_model()
+               ) and self.request.query_params.get(CANONICAL_URL_REQUEST_PARAM, None)
 
     def __get_fuzzy_search_results(
             self, source_versions=None, other_filters=None, sort=True
@@ -654,6 +692,8 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         is_authenticated = user.is_authenticated
         username = user.username
 
+        is_members_view = self.get_view_name() in ['Organization Collection List', 'Organization Source List',
+                                                   'Organization Repo List', 'Organization Url Registry List']
         if self.is_owner_document_model():
             kwargs_filters = self.kwargs.copy()
             if self.user_is_self and is_authenticated:
@@ -661,13 +701,29 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                 kwargs_filters['user'] = username
         else:
             kwargs_filters = self.get_kwargs_filters()
-            if self.get_view_name() in ['Organization Collection List', 'Organization Source List']:
+            if is_members_view:
                 kwargs_filters['ownerType'] = 'Organization'
                 kwargs_filters['owner'] = list(
                     user.organizations.values_list('mnemonic', flat=True)) or ['UNKNOWN-ORG-DUMMY']
             elif self.user_is_self and is_authenticated:
                 kwargs_filters['ownerType'] = 'User'
                 kwargs_filters['owner'] = username
+
+        if self.is_url_registry_document() and not is_members_view:
+            kwargs_filters = self.kwargs.copy()
+            if self.user_is_self and is_authenticated:
+                kwargs_filters.pop('user_is_self', None)
+                kwargs_filters['ownerType'] = 'User'
+                kwargs_filters['owner'] = username
+            elif not kwargs_filters:
+                kwargs_filters['ownerUrl'] = '/'
+            else:
+                if 'org' in kwargs_filters:
+                    kwargs_filters['ownerType'] = 'Organization'
+                    kwargs_filters['owner'] = kwargs_filters.pop('org')
+                elif 'user' in kwargs_filters:
+                    kwargs_filters['ownerType'] = 'User'
+                    kwargs_filters['owner'] = kwargs_filters.pop('user')
 
         for key, value in kwargs_filters.items():
             attr = to_snake_case(key)
@@ -718,7 +774,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         end = start + self.limit
         try:
             search_results = search_results.params(request_timeout=ES_REQUEST_TIMEOUT)
-            es_search = CustomESSearch(search_results[start:end])
+            es_search = CustomESSearch(search_results[start:end], self.document_model)
             es_search.to_queryset()
             self.total_count = es_search.total - offset
             return es_search.queryset, es_search.scores, es_search.max_score, es_search.highlights
@@ -747,14 +803,16 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
     def should_perform_es_search(self):
         return (
+                self.is_only_searchable or
                 bool(self.get_search_string()) or
                 self.has_searchable_extras_fields() or
                 bool(self.get_faceted_filters())
-        ) or (SEARCH_PARAM in self.request.query_params.dict() and self.should_search_latest_released_repo())
+        ) or (SEARCH_PARAM in self.request.query_params.dict() and self.should_search_latest_repo())
 
-    def should_search_latest_released_repo(self):
+    def should_search_latest_repo(self):
         return self.is_source_child_document_model() and (
-                'version' not in self.kwargs and 'collection' not in self.kwargs)
+                'version' not in self.kwargs and 'collection' not in self.kwargs
+        ) and self.is_latest_repo_search_header_present()
 
     def has_searchable_extras_fields(self):
         return bool(
@@ -855,7 +913,7 @@ class SourceChildExtraRetrieveUpdateDestroyView(SourceChildExtrasBaseView, Retri
         new_version = self.get_object().clone()
         new_version.extras[key] = value
         new_version.comment = f'Updated extras: {key}={value}.'
-        errors = self.model.persist_clone(new_version, request.user)
+        errors = new_version.save_as_new_version(request.user)
         if errors:
             return Response(errors, status=status.HTTP_400_BAD_REQUEST)
         return Response({key: value})
@@ -866,7 +924,7 @@ class SourceChildExtraRetrieveUpdateDestroyView(SourceChildExtrasBaseView, Retri
         if key in new_version.extras:
             del new_version.extras[key]
             new_version.comment = f'Deleted extra {key}.'
-            errors = self.model.persist_clone(new_version, request.user)
+            errors = new_version.save_as_new_version(request.user)
             if errors:
                 return Response(errors, status=status.HTTP_400_BAD_REQUEST)
             return Response(status=status.HTTP_204_NO_CONTENT)
@@ -1009,6 +1067,7 @@ class ConceptContainerExtraRetrieveUpdateDestroyView(RetrieveUpdateDestroyAPIVie
         instance.extras[key] = value
         instance.comment = f'Updated extras: {key}={value}.'
         instance.save()
+        instance.set_checksums()
         return Response({key: value})
 
     def delete(self, request, *args, **kwargs):
@@ -1019,27 +1078,56 @@ class ConceptContainerExtraRetrieveUpdateDestroyView(RetrieveUpdateDestroyAPIVie
             del instance.extras[key]
             instance.comment = f'Deleted extra {key}.'
             instance.save()
+            instance.set_checksums()
             return Response(status=status.HTTP_204_NO_CONTENT)
 
         return Response({'detail': NOT_FOUND}, status=status.HTTP_404_NOT_FOUND)
 
 
-class ChecksumView(APIView):
+class AbstractChecksumView(APIView):
     permission_classes = (IsAuthenticated,)
+    smart = False
 
     @swagger_auto_schema(
-        request_body=openapi.Schema(type=openapi.TYPE_OBJECT),
+        manual_parameters=[all_resource_query_param],
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            description='Data to generate checksum',
+        ),
         responses={
             200: openapi.Response(
-                'MD5 checksum of the request body',
+                'MD5 checksum of the request body for a resource',
                 openapi.Schema(type=openapi.TYPE_STRING),
             )
         },
     )
     def post(self, request):
-        if not request.data:
-            return Response({'error': 'Request body is required'}, status=status.HTTP_400_BAD_REQUEST)
-        return Response(Checksum.generate(request.data))
+        resource = request.query_params.get('resource')
+        data = request.data
+        if not resource or not data:
+            return Response({'error': 'resource and data are both required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        klass = get_resource_class_from_resource_name(resource)
+
+        if not klass:
+            return Response({'error': 'Invalid resource.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        method = 'get_smart_checksum_fields_for_resource' if self.smart else 'get_standard_checksum_fields_for_resource'
+        func = get(klass, method)
+
+        if not func:
+            return Response(
+                {'error': 'Checksums for this resource is not yet implemented.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(klass.generate_checksum_from_many([func(_data) for _data in flatten([data])]))
+
+
+class StandardChecksumView(AbstractChecksumView):
+    smart = False
+
+
+class SmartChecksumView(AbstractChecksumView):
+    smart = True
 
 
 class TaskMixin:
@@ -1061,8 +1149,8 @@ class TaskMixin:
             status=status.HTTP_202_ACCEPTED
         )
 
-    def perform_task(self, task_func, task_args, queue='default'):
-        is_async = self.is_async_requested()
+    def perform_task(self, task_func, task_args, queue='default', is_default_async=False):
+        is_async = is_default_async or self.is_async_requested()
         if self.is_inline_requested() or (get(settings, 'TEST_MODE', False) and not is_async):
             result = task_func(*task_args)
         else:

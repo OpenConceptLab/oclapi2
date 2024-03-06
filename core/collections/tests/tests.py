@@ -1474,7 +1474,7 @@ class ExpansionParametersTest(OCLTestCase):
             mnemonic='c1', canonical_url='http://c1.com', version='HEAD')
         expansion = ExpansionFactory(mnemonic='e1', collection_version=collection)
 
-        ref1 = CollectionReference(system='https://s1.com', code=concept1.mnemonic)
+        ref1 = CollectionReference(system='https://s1.com', code=concept1.mnemonic, namespace=source1.organization.uri)
         expansion.parameters['system-version'] = 'https://s1.com|v1'
         expansion.add_references(ref1)
 
@@ -1483,25 +1483,7 @@ class ExpansionParametersTest(OCLTestCase):
 
         expansion.concepts.clear()
 
-        ref2 = CollectionReference(system='https://s1.com', code=concept1.mnemonic)
-        expansion.parameters['system-version'] = None
-        expansion.add_references(ref2)
-
-        self.assertEqual(expansion.concepts.count(), 1)
-        self.assertEqual(expansion.concepts.first().id, concept1_v1.id)  # latest source version concept c1
-
-        expansion.concepts.clear()
-
-        ref2 = CollectionReference(system='https://s1.com', code=concept1.mnemonic, version='HEAD')
-        expansion.parameters['system-version'] = None
-        expansion.add_references(ref2)
-
-        self.assertEqual(expansion.concepts.count(), 1)
-        self.assertEqual(expansion.concepts.first().id, concept1.id)  # HEAD source version concept c1
-
-        expansion.concepts.clear()
-
-        ref2 = CollectionReference(system='https://s1.com', code=concept1.mnemonic)
+        ref2 = CollectionReference(system='https://s1.com', code=concept1.mnemonic, namespace=source1.organization.uri)
         expansion.parameters['system-version'] = None
         expansion.add_references(ref2)
 
@@ -1511,7 +1493,27 @@ class ExpansionParametersTest(OCLTestCase):
         expansion.concepts.clear()
 
         ref2 = CollectionReference(
-            system='https://s1.com', code=concept1.mnemonic, resource_version=concept1_v1.version)
+            system='https://s1.com', code=concept1.mnemonic, version='HEAD', namespace=source1.organization.uri)
+        expansion.parameters['system-version'] = None
+        expansion.add_references(ref2)
+
+        self.assertEqual(expansion.concepts.count(), 1)
+        self.assertEqual(expansion.concepts.first().id, concept1.id)  # HEAD source version concept c1
+
+        expansion.concepts.clear()
+
+        ref2 = CollectionReference(system='https://s1.com', code=concept1.mnemonic, namespace=source1.organization.uri)
+        expansion.parameters['system-version'] = None
+        expansion.add_references(ref2)
+
+        self.assertEqual(expansion.concepts.count(), 1)
+        self.assertEqual(expansion.concepts.first().id, concept1_v1.id)  # latest source version concept c1
+
+        expansion.concepts.clear()
+
+        ref2 = CollectionReference(
+            system='https://s1.com', code=concept1.mnemonic, resource_version=concept1_v1.version,
+            namespace=source1.organization.uri)
         expansion.parameters['system-version'] = 'https://s1.com|v1'
         expansion.add_references(ref2)
 
@@ -1521,7 +1523,7 @@ class ExpansionParametersTest(OCLTestCase):
         expansion.concepts.clear()
 
         ref2 = CollectionReference(
-            system='https://s2.com', code=concept2.mnemonic)
+            system='https://s2.com', code=concept2.mnemonic, namespace=source2.organization.uri)
         expansion.parameters['system-version'] = 'https://s1.com|v1'
         expansion.add_references(ref2)
 
@@ -1529,7 +1531,7 @@ class ExpansionParametersTest(OCLTestCase):
         self.assertEqual(expansion.concepts.first().id, concept2.id)
 
         ref2 = CollectionReference(
-            system='https://s2.com', code=concept2.mnemonic)
+            system='https://s2.com', code=concept2.mnemonic, namespace=source2.organization.uri)
         expansion.parameters['system-version'] = 'https://s1.com|v1,https://s2.com|latest'
         expansion.add_references(ref2)
 
@@ -1537,7 +1539,7 @@ class ExpansionParametersTest(OCLTestCase):
         self.assertEqual(expansion.concepts.first().id, concept2.id)
 
         ref2 = CollectionReference(
-            system='https://s1.com', code=concept1.mnemonic)
+            system='https://s1.com', code=concept1.mnemonic, namespace=source1.organization.uri)
         expansion.parameters['system-version'] = 'https://s1.com|v1,https://s1.com|latest'
         expansion.add_references(ref2)
 

@@ -1,34 +1,33 @@
-import base64
+import datetime
 import os
 import uuid
 from collections import OrderedDict
-from unittest.mock import patch, Mock, mock_open, ANY
+from unittest.mock import patch, Mock, ANY
 
-import boto3
 import django
 import factory
-from botocore.exceptions import ClientError
 from colour_runner.django_runner import ColourRunnerMixin
 from django.conf import settings
-from django.core.files.base import ContentFile, File
+from django.core.files.base import File
 from django.core.management import call_command
 from django.test import TestCase
 from django.test.runner import DiscoverRunner
-from moto import mock_s3
+from mock.mock import call
 from requests.auth import HTTPBasicAuth
 from rest_framework.exceptions import ValidationError
-from rest_framework.test import APITestCase
+from rest_framework.test import APITestCase, APITransactionTestCase
 
 from core.collections.models import CollectionReference
 from core.common.constants import HEAD
-from core.common.tasks import delete_s3_objects, bulk_import_parallel_inline, resources_report
+from core.common.tasks import delete_s3_objects, bulk_import_parallel_inline, resources_report, calculate_checksums
 from core.common.utils import (
     compact_dict_by_values, to_snake_case, flower_get, task_exists, parse_bulk_import_task_id,
     to_camel_case,
     drop_version, is_versioned_uri, separate_version, to_parent_uri, jsonify_safe, es_get,
     get_resource_class_from_resource_name, flatten_dict, is_csv_file, is_url_encoded_string, to_parent_uri_from_kwargs,
     set_current_user, get_current_user, set_request_url, get_request_url, nested_dict_values, chunks, api_get,
-    split_list_by_condition, is_zip_file)
+    split_list_by_condition, is_zip_file, get_date_range_label, get_prev_month, from_string_to_date, get_end_of_month,
+    get_start_of_month, es_id_in, web_url)
 from core.concepts.models import Concept
 from core.orgs.models import Organization
 from core.sources.models import Source
@@ -38,9 +37,10 @@ from .backends import OCLOIDCAuthenticationBackend
 from .checksums import Checksum
 from .fhir_helpers import translate_fhir_query
 from .serializers import IdentifierSerializer
-from .services import S3, PostgresQL, DjangoAuthService, OIDCAuthService
 from .validators import URIValidator
 from ..code_systems.serializers import CodeSystemDetailSerializer
+from ..concepts.tests.factories import ConceptFactory, ConceptNameFactory
+from ..sources.tests.factories import OrganizationSourceFactory
 
 
 class CustomTestRunner(ColourRunnerMixin, DiscoverRunner):
@@ -56,9 +56,6 @@ class SetupTestEnvironment:
 class BaseTestCase(SetupTestEnvironment):
     @staticmethod
     def create_lookup_concept_classes(user=None, org=None):
-        from core.sources.tests.factories import OrganizationSourceFactory
-        from core.concepts.tests.factories import ConceptNameFactory, ConceptFactory
-
         org = org or Organization.objects.get(mnemonic='OCL')
         user = user or UserProfile.objects.get(username='ocladmin')
 
@@ -205,6 +202,16 @@ class BaseTestCase(SetupTestEnvironment):
         )
 
 
+class OCLAPITransactionTestCase(APITransactionTestCase, BaseTestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        call_command("loaddata", "core/fixtures/base_entities.yaml")
+        call_command("loaddata", "core/fixtures/toggles.json")
+        org = Organization.objects.get(id=1)
+        org.members.add(1)
+
+
 class OCLAPITestCase(APITestCase, BaseTestCase):
     @classmethod
     def setUpClass(cls):
@@ -229,172 +236,6 @@ class OCLTestCase(TestCase, BaseTestCase):
             **factory.build(dict, FACTORY_CLASS=factory_klass),
             **kwargs
         }
-
-
-class S3Test(TestCase):
-    @mock_s3
-    def test_upload(self):
-        _conn = boto3.resource('s3', region_name='us-east-1')
-        _conn.create_bucket(Bucket='oclapi2-dev')
-
-        S3._upload('some/path', 'content')  # pylint: disable=protected-access
-
-        self.assertEqual(
-            _conn.Object(
-                'oclapi2-dev',
-                'some/path'
-            ).get()['Body'].read().decode("utf-8"),
-            'content'
-        )
-
-    @mock_s3
-    def test_exists(self):
-        _conn = boto3.resource('s3', region_name='us-east-1')
-        _conn.create_bucket(Bucket='oclapi2-dev')
-
-        self.assertFalse(S3.exists('some/path'))
-
-        S3._upload('some/path', 'content')  # pylint: disable=protected-access
-
-        self.assertTrue(S3.exists('some/path'))
-
-    @patch('core.common.services.S3._conn')
-    def test_upload_public(self, client_mock):
-        conn_mock = Mock()
-        conn_mock.upload_fileobj = Mock(return_value='success')
-        client_mock.return_value = conn_mock
-
-        self.assertEqual(S3._upload_public('some/path', 'content'), 'success')  # pylint: disable=protected-access
-
-        conn_mock.upload_fileobj.assert_called_once_with(
-            'content',
-            'oclapi2-dev',
-            'some/path',
-            ExtraArgs={'ACL': 'public-read'},
-        )
-
-    def test_upload_file(self):
-        with patch("builtins.open", mock_open(read_data="file-content")) as mock_file:
-            S3._upload = Mock(return_value=200)  # pylint: disable=protected-access
-            file_path = "path/to/file.ext"
-            res = S3.upload_file(key=file_path, headers={'header1': 'val1'})
-            self.assertEqual(res, 200)
-            S3._upload.assert_called_once_with(file_path, 'file-content', {'header1': 'val1'}, None)  # pylint: disable=protected-access
-            mock_file.assert_called_once_with(file_path, 'r')
-
-    @patch('core.common.services.S3._upload')
-    def test_upload_base64(self, s3_upload_mock):
-        file_content = base64.b64encode(b'file-content')
-        uploaded_file_name_with_ext = S3.upload_base64(
-            doc_base64='extension/ext;base64,' + file_content.decode(),
-            file_name='some-file-name',
-        )
-
-        self.assertEqual(
-            uploaded_file_name_with_ext,
-            'some-file-name.ext'
-        )
-        mock_calls = s3_upload_mock.mock_calls
-        self.assertEqual(len(mock_calls), 1)
-        self.assertEqual(
-            mock_calls[0][1][0],
-            'some-file-name.ext'
-        )
-        self.assertTrue(
-            isinstance(mock_calls[0][1][1], ContentFile)
-        )
-
-    @patch('core.common.services.S3._upload_public')
-    def test_upload_base64_public(self, s3_upload_mock):
-        file_content = base64.b64encode(b'file-content')
-        uploaded_file_name_with_ext = S3.upload_base64(
-            doc_base64='extension/ext;base64,' + file_content.decode(),
-            file_name='some-file-name',
-            public_read=True,
-        )
-
-        self.assertEqual(
-            uploaded_file_name_with_ext,
-            'some-file-name.ext'
-        )
-        mock_calls = s3_upload_mock.mock_calls
-        self.assertEqual(len(mock_calls), 1)
-        self.assertEqual(
-            mock_calls[0][1][0],
-            'some-file-name.ext'
-        )
-        self.assertTrue(
-            isinstance(mock_calls[0][1][1], ContentFile)
-        )
-
-    @patch('core.common.services.S3._upload')
-    def test_upload_base64_no_ext(self, s3_upload_mock):
-        file_content = base64.b64encode(b'file-content')
-        uploaded_file_name_with_ext = S3.upload_base64(
-            doc_base64='extension/ext;base64,' + file_content.decode(),
-            file_name='some-file-name',
-            append_extension=False,
-        )
-
-        self.assertEqual(
-            uploaded_file_name_with_ext,
-            'some-file-name.jpg'
-        )
-        mock_calls = s3_upload_mock.mock_calls
-        self.assertEqual(len(mock_calls), 1)
-        self.assertEqual(
-            mock_calls[0][1][0],
-            'some-file-name.jpg'
-        )
-        self.assertTrue(
-            isinstance(mock_calls[0][1][1], ContentFile)
-        )
-
-    @mock_s3
-    def test_remove(self):
-        conn = boto3.resource('s3', region_name='us-east-1')
-        conn.create_bucket(Bucket='oclapi2-dev')
-
-        S3._upload('some/path', 'content')  # pylint: disable=protected-access
-        self.assertEqual(
-            conn.Object(
-                'oclapi2-dev',
-                'some/path'
-            ).get()['Body'].read().decode("utf-8"),
-            'content'
-        )
-
-        S3.remove(key='some/path')
-
-        with self.assertRaises(ClientError):
-            conn.Object('oclapi2-dev', 'some/path').get()
-
-    @mock_s3
-    def test_url_for(self):
-        _conn = boto3.resource('s3', region_name='us-east-1')
-        _conn.create_bucket(Bucket='oclapi2-dev')
-
-        S3._upload('some/path', 'content')  # pylint: disable=protected-access
-        _url = S3.url_for('some/path')
-
-        self.assertTrue(
-            'https://oclapi2-dev.s3.amazonaws.com/some/path' in _url
-        )
-        self.assertTrue(
-            '&X-Amz-Credential=' in _url
-        )
-        self.assertTrue(
-            '&X-Amz-Signature=' in _url
-        )
-        self.assertTrue(
-            'X-Amz-Expires=' in _url
-        )
-
-    def test_public_url_for(self):
-        self.assertEqual(
-            S3.public_url_for('some/path').replace('https://', 'http://'),
-            'http://oclapi2-dev.s3.amazonaws.com/some/path'
-        )
 
 
 class FhirHelpersTest(OCLTestCase):
@@ -576,13 +417,34 @@ class UtilsTest(OCLTestCase):
             headers={'Authorization': f'Token {user.get_token()}'}
         )
 
+    @patch('core.common.utils.settings')
     @patch('core.common.utils.requests.get')
-    def test_es_get(self, http_get_mock):
+    def test_es_get(self, http_get_mock, settings_mock):
+        settings_mock.ES_USER = 'es-user'
+        settings_mock.ES_PASSWORD = 'es-password'
+        settings_mock.ES_HOSTS = 'es:9200'
+        settings_mock.ES_SCHEME = 'http'
         http_get_mock.return_value = 'dummy-response'
 
         self.assertEqual(es_get('some-url', timeout=1), 'dummy-response')
 
-        http_get_mock.assert_called_once_with('http://es:9200/some-url', timeout=1)
+        http_get_mock.assert_called_with(
+            'http://es:9200/some-url',
+            auth=HTTPBasicAuth('es-user', 'es-password'),
+            timeout=1
+        )
+
+        settings_mock.ES_HOSTS = None
+        settings_mock.ES_HOST = 'es'
+        settings_mock.ES_PORT = '9201'
+
+        self.assertEqual(es_get('some-url', timeout=1), 'dummy-response')
+
+        http_get_mock.assert_called_with(
+            'http://es:9201/some-url',
+            auth=HTTPBasicAuth('es-user', 'es-password'),
+            timeout=1
+        )
 
     @patch('core.common.utils.flower_get')
     def test_task_exists(self, flower_get_mock):
@@ -792,11 +654,14 @@ class UtilsTest(OCLTestCase):
         self.assertEqual(jsonify_safe('{"foo": "bar"}'), {'foo': 'bar'})
 
     def test_get_resource_class_from_resource_name(self):
+        self.assertEqual(get_resource_class_from_resource_name(None), None)
         self.assertEqual(get_resource_class_from_resource_name('mappings').__name__, 'Mapping')
         self.assertEqual(get_resource_class_from_resource_name('sources').__name__, 'Source')
         self.assertEqual(get_resource_class_from_resource_name('source').__name__, 'Source')
         self.assertEqual(get_resource_class_from_resource_name('collections').__name__, 'Collection')
         self.assertEqual(get_resource_class_from_resource_name('collection').__name__, 'Collection')
+        self.assertEqual(get_resource_class_from_resource_name('expansion').__name__, 'Expansion')
+        self.assertEqual(get_resource_class_from_resource_name('reference').__name__, 'CollectionReference')
         for name in ['orgs', 'organizations', 'org', 'ORG']:
             self.assertEqual(get_resource_class_from_resource_name(name).__name__, 'Organization')
         for name in ['user', 'USer', 'user_profile', 'USERS']:
@@ -903,6 +768,7 @@ class UtilsTest(OCLTestCase):
         self.assertTrue(is_url_encoded_string('foo'))
         self.assertFalse(is_url_encoded_string('foo/bar'))
         self.assertTrue(is_url_encoded_string('foo%2Fbar'))
+        self.assertTrue(is_url_encoded_string('foo%2Fbar', False))
 
     def test_to_parent_uri_from_kwargs(self):
         self.assertEqual(
@@ -982,6 +848,86 @@ class UtilsTest(OCLTestCase):
         self.assertEqual(include, [ref1, ref4])
         self.assertEqual(exclude, [ref2, ref3])
 
+    def test_get_date_range_label(self):
+        self.assertEqual(
+            get_date_range_label('2019-01-01', '2019-01-31'),
+            '01 - 31 January 2019'
+        )
+        self.assertEqual(
+            get_date_range_label('2019-01-01 10:00:00', '2019-01-01 11:00:00'),
+            '01 - 01 January 2019'
+        )
+        self.assertEqual(
+            get_date_range_label('2019-01-02 10:10:00', '2019-01-01'),
+            '02 - 01 January 2019'
+        )
+        self.assertEqual(
+            get_date_range_label('2019-02-01 10:10:00', '2019-01-01'),
+            '01 February - 01 January 2019'
+        )
+        self.assertEqual(
+            get_date_range_label('2019-01-01', '2020-01-01'),
+            '01 January 2019 - 01 January 2020'
+        )
+
+    def test_get_prev_month(self):
+        self.assertEqual(get_prev_month(from_string_to_date('2023-01-01')), from_string_to_date('2022-12-31'))
+        self.assertEqual(get_prev_month(from_string_to_date('2024-12-01')), from_string_to_date('2024-11-30'))
+        self.assertEqual(get_prev_month(from_string_to_date('2024-12-05')), from_string_to_date('2024-11-30'))
+
+    def test_get_end_of_month(self):
+        self.assertEqual(get_end_of_month(from_string_to_date('2023-01-01')), from_string_to_date('2023-01-31'))
+        self.assertEqual(get_end_of_month(from_string_to_date('2024-12-01')), from_string_to_date('2024-12-31'))
+        self.assertEqual(get_end_of_month(from_string_to_date('2024-12-05')), from_string_to_date('2024-12-31'))
+        self.assertEqual(get_end_of_month(from_string_to_date('2024-11-05')), from_string_to_date('2024-11-30'))
+        self.assertEqual(get_end_of_month(from_string_to_date('2024-02-05')), from_string_to_date('2024-02-29'))
+        self.assertEqual(
+            get_end_of_month(from_string_to_date('2024-11-30 11:00')), from_string_to_date('2024-11-30 11:00'))
+        self.assertEqual(
+            get_end_of_month(from_string_to_date('2024-11-15 11:00')), from_string_to_date('2024-11-30 11:00'))
+
+    def test_get_start_of_month(self):
+        self.assertEqual(get_start_of_month(from_string_to_date('2023-01-01')), from_string_to_date('2023-01-01'))
+        self.assertEqual(get_start_of_month(from_string_to_date('2024-12-31')), from_string_to_date('2024-12-01'))
+        self.assertEqual(get_start_of_month(from_string_to_date('2024-02-05')), from_string_to_date('2024-02-01'))
+        self.assertEqual(get_start_of_month(from_string_to_date('2023-02-28')), from_string_to_date('2023-02-01'))
+
+    def test_es_id_in(self):
+        search = Mock(query=Mock(return_value='search'))
+
+        self.assertEqual(es_id_in(search, []), search)
+
+        self.assertEqual(es_id_in(search, [1, 2, 3]), 'search')
+        search.query.assert_called_once_with("terms", _id=[1, 2, 3])
+
+    @patch('core.common.utils.settings')
+    def test_web_url(self, settings_mock):
+        settings_mock.WEB_URL = 'https://ocl.org'
+        self.assertEqual(web_url(), 'https://ocl.org')
+
+        settings_mock.WEB_URL = None
+
+        for env in [None, 'development', 'ci']:
+            settings_mock.ENV = env
+            self.assertEqual(web_url(), 'http://localhost:4000')
+
+        settings_mock.ENV = 'production'
+        self.assertEqual(web_url(), 'https://app.openconceptlab.org')
+
+        settings_mock.ENV = 'staging'
+        self.assertEqual(web_url(), 'https://app.staging.openconceptlab.org')
+
+        settings_mock.ENV = 'foo'
+        self.assertEqual(web_url(), 'https://app.foo.openconceptlab.org')
+
+    def test_from_string_to_date(self):
+        self.assertEqual(
+            from_string_to_date('2023-02-28'), datetime.datetime(2023, 2, 28))
+        self.assertEqual(
+            from_string_to_date('2023-02-28 10:00:00'), datetime.datetime(2023, 2, 28, 10))
+        self.assertEqual(
+            from_string_to_date('2023-02-29'), None)
+
 
 class BaseModelTest(OCLTestCase):
     def test_model_name(self):
@@ -1045,7 +991,7 @@ class TaskTest(OCLTestCase):
         email_message_instance_mock.attach.assert_called_once_with(ANY, ANY, 'text/csv')
         self.assertTrue('_resource_report_' in email_message_instance_mock.attach.call_args[0][0])
         self.assertTrue('.csv' in email_message_instance_mock.attach.call_args[0][0])
-        self.assertTrue(b'Resources Created' in email_message_instance_mock.attach.call_args[0][1])
+        self.assertTrue(b'OCL Usage Report' in email_message_instance_mock.attach.call_args[0][1])
 
         self.assertEqual(res, 1)
         call_args = email_message_mock.call_args[1]
@@ -1054,170 +1000,38 @@ class TaskTest(OCLTestCase):
         self.assertTrue('Please find attached resources report of' in call_args['body'])
         self.assertTrue('for the period of' in call_args['body'])
 
-
-class PostgresQLTest(OCLTestCase):
-    @patch('core.common.services.connection')
-    def test_create_seq(self, db_connection_mock):
-        cursor_context_mock = Mock(execute=Mock())
-        cursor_mock = Mock()
-        cursor_mock.__enter__ = Mock(return_value=cursor_context_mock)
-        cursor_mock.__exit__ = Mock(return_value=None)
-        db_connection_mock.cursor = Mock(return_value=cursor_mock)
-
-        self.assertEqual(PostgresQL.create_seq('foobar_seq', 'sources.uri', 1, 100), None)
-
-        db_connection_mock.cursor.assert_called_once()
-        cursor_context_mock.execute.assert_called_once_with(
-            'CREATE SEQUENCE IF NOT EXISTS foobar_seq MINVALUE 1 START 100 OWNED BY sources.uri;')
-
-    @patch('core.common.services.connection')
-    def test_update_seq(self, db_connection_mock):
-        cursor_context_mock = Mock(execute=Mock())
-        cursor_mock = Mock()
-        cursor_mock.__enter__ = Mock(return_value=cursor_context_mock)
-        cursor_mock.__exit__ = Mock(return_value=None)
-        db_connection_mock.cursor = Mock(return_value=cursor_mock)
-
-        self.assertEqual(PostgresQL.update_seq('foobar_seq', 1567), None)
-
-        db_connection_mock.cursor.assert_called_once()
-        cursor_context_mock.execute.assert_called_once_with("SELECT setval('foobar_seq', 1567, true);")
-
-    @patch('core.common.services.connection')
-    def test_drop_seq(self, db_connection_mock):
-        cursor_context_mock = Mock(execute=Mock())
-        cursor_mock = Mock()
-        cursor_mock.__enter__ = Mock(return_value=cursor_context_mock)
-        cursor_mock.__exit__ = Mock(return_value=None)
-        db_connection_mock.cursor = Mock(return_value=cursor_mock)
-
-        self.assertEqual(PostgresQL.drop_seq('foobar_seq'), None)
-
-        db_connection_mock.cursor.assert_called_once()
-        cursor_context_mock.execute.assert_called_once_with("DROP SEQUENCE IF EXISTS foobar_seq;")
-
-    @patch('core.common.services.connection')
-    def test_next_value(self, db_connection_mock):
-        cursor_context_mock = Mock(execute=Mock(), fetchone=Mock(return_value=[1568]))
-        cursor_mock = Mock()
-        cursor_mock.__enter__ = Mock(return_value=cursor_context_mock)
-        cursor_mock.__exit__ = Mock(return_value=None)
-        db_connection_mock.cursor = Mock(return_value=cursor_mock)
-
-        self.assertEqual(PostgresQL.next_value('foobar_seq'), 1568)
-
-        db_connection_mock.cursor.assert_called_once()
-        cursor_context_mock.execute.assert_called_once_with("SELECT nextval('foobar_seq');")
-
-    @patch('core.common.services.connection')
-    def test_last_value(self, db_connection_mock):
-        cursor_context_mock = Mock(execute=Mock(), fetchone=Mock(return_value=[1567]))
-        cursor_mock = Mock()
-        cursor_mock.__enter__ = Mock(return_value=cursor_context_mock)
-        cursor_mock.__exit__ = Mock(return_value=None)
-        db_connection_mock.cursor = Mock(return_value=cursor_mock)
-
-        self.assertEqual(PostgresQL.last_value('foobar_seq'), 1567)
-
-        db_connection_mock.cursor.assert_called_once()
-        cursor_context_mock.execute.assert_called_once_with("SELECT last_value from foobar_seq;")
-
-
-class DjangoAuthServiceTest(OCLTestCase):
-    def test_get_token(self):
-        user = UserProfileFactory(username='foobar')
-
-        token = DjangoAuthService(user=user, password='foobar').get_token(True)
-        self.assertEqual(token, False)
-
-        user.set_password('foobar')
-        user.save()
-
-        token = DjangoAuthService(username='foobar', password='foobar').get_token(True)
-        self.assertTrue('Token ' in token)
-        self.assertTrue(len(token), 64)
-
-
-class OIDCAuthServiceTest(OCLTestCase):
-    def test_get_login_redirect_url(self):
-        self.assertEqual(
-            OIDCAuthService.get_login_redirect_url('client-id', 'http://localhost:4000', 'state', 'nonce'),
-            '/realms/ocl/protocol/openid-connect/auth?response_type=code id_token&client_id=client-id&'
-            'state=state&nonce=nonce&redirect_uri=http://localhost:4000'
-        )
-
-    def test_get_logout_redirect_url(self):
-        self.assertEqual(
-            OIDCAuthService.get_logout_redirect_url('id-token-hint', 'http://localhost:4000'),
-            '/realms/ocl/protocol/openid-connect/logout?id_token_hint=id-token-hint&'
-            'post_logout_redirect_uri=http://localhost:4000'
-        )
-
-    @patch('requests.post')
-    def test_exchange_code_for_token(self, post_mock):
-        post_mock.return_value = Mock(json=Mock(return_value={'token': 'token', 'foo': 'bar'}))
-
-        result = OIDCAuthService.exchange_code_for_token(
-            'code', 'http://localhost:4000', 'client-id', 'client-secret'
-        )
-
-        self.assertEqual(result, {'token': 'token', 'foo': 'bar'})
-        post_mock.assert_called_once_with(
-            '/realms/ocl/protocol/openid-connect/token',
+    def test_calculate_checksums(self):
+        concept = ConceptFactory()
+        concept_prev_latest = concept.get_latest_version()
+        Concept.create_new_version_for(
+            instance=concept.clone(),
             data={
-                'grant_type': 'authorization_code',
-                'client_id': 'client-id',
-                'client_secret': 'client-secret',
-                'code': 'code',
-                'redirect_uri': 'http://localhost:4000'
-            }
-        )
-
-    @patch('requests.post')
-    def test_get_admin_token(self, post_mock):
-        post_mock.return_value = Mock(json=Mock(return_value={'access_token': 'token', 'foo': 'bar'}))
-
-        result = OIDCAuthService.get_admin_token('username', 'password')
-
-        self.assertEqual(result, 'token')
-        post_mock.assert_called_once_with(
-            '/realms/master/protocol/openid-connect/token',
-            data={
-                'grant_type': 'password',
-                'username': 'username',
-                'password': 'password',
-                'client_id': 'admin-cli'
+                'names': [{'locale': 'en', 'name': 'English', 'locale_preferred': True}]
             },
-            verify=False
+            user=concept.created_by,
+            create_parent_version=False
         )
+        concept_latest = concept.get_latest_version()
 
-    @patch('core.common.services.OIDCAuthService.get_admin_token')
-    @patch('requests.post')
-    def test_add_user(self, post_mock, get_admin_token_mock):
-        post_mock.return_value = Mock(status_code=201, json=Mock(return_value={'foo': 'bar'}))
-        get_admin_token_mock.return_value = 'token'
-        user = UserProfileFactory(username='username')
-        user.set_password('password')
-        user.save()
+        Concept.objects.filter(id__in=[concept.id, concept_latest.id, concept_prev_latest.id]).update(checksums={})
 
-        result = OIDCAuthService.add_user(user, 'username', 'password')
+        concept.refresh_from_db()
+        concept_prev_latest.refresh_from_db()
+        concept_latest.refresh_from_db()
 
-        self.assertEqual(result, True)
-        get_admin_token_mock.assert_called_once_with(username='username', password='password')
-        post_mock.assert_called_once_with(
-            '/admin/realms/ocl/users',
-            json={
-                'enabled': True,
-                'emailVerified': user.verified,
-                'firstName': user.first_name,
-                'lastName': user.last_name,
-                'email': user.email,
-                'username': user.username,
-                'credentials': ANY
-            },
-            verify=False,
-            headers={'Authorization': 'Bearer token'}
-        )
+        self.assertEqual(concept.checksums, {})
+        self.assertEqual(concept_prev_latest.checksums, {})
+        self.assertEqual(concept_latest.checksums, {})
+
+        calculate_checksums('concepts', concept_prev_latest.id)
+
+        concept.refresh_from_db()
+        concept_prev_latest.refresh_from_db()
+        concept_latest.refresh_from_db()
+
+        self.assertEqual(concept_prev_latest.checksums, {'smart': ANY, 'standard': ANY})
+        self.assertEqual(concept_latest.checksums, {'smart': ANY, 'standard': ANY})
+        self.assertEqual(concept.checksums, {'smart': ANY, 'standard': ANY})
 
 
 class URIValidatorTest(OCLTestCase):
@@ -1272,7 +1086,9 @@ class OCLOIDCAuthenticationBackendTest(OCLTestCase):
             email='batman@gotham.com',
             first_name='Bruce',
             last_name='Wayne',
-            verified=True
+            verified=True,
+            company=None,
+            location=None
         )
 
     def test_update_user(self):
@@ -1317,8 +1133,27 @@ class ChecksumTest(OCLTestCase):
         self.assertEqual(Checksum.generate({'a': 1.1}), Checksum.generate({'a': 1.10}))
 
         # value order
-        self.assertEqual(Checksum.generate({'a': [1, 2, 3]}), Checksum.generate({'a': [2, 1, 3]}))
         self.assertEqual(Checksum.generate([1, 2, 3]), Checksum.generate([2, 1, 3]))
+        self.assertEqual(Checksum.generate({'a': [1, 2, 3]}), Checksum.generate({'a': [2, 1, 3]}))
+        self.assertEqual(
+            Checksum.generate({'a': {'b': [1, 2, 3], 'c': 'd'}}), Checksum.generate({'a': {'c': 'd', 'b': [3, 1, 2]}}))
+        self.assertEqual(
+            Checksum.generate(
+                [
+                    {'foo': 'bar', 'bar': 'foo'},
+                    {'1': '2',}
+                ]
+            ),
+            Checksum.generate(
+                [
+                    {'1': '2',},
+                    {'foo': 'bar', 'bar': 'foo'}
+                ]
+            )
+        )
+        self.assertIsNotNone(Checksum.generate(uuid.uuid4()))
+        self.assertNotEqual(
+            Checksum.generate({'a': {'b': [1, 2, 3], 'c': 'd'}}), Checksum.generate({'a': {'c': [1, 2, 3], 'b': 'd'}}))
 
 
 class ChecksumViewTest(OCLAPITestCase):
@@ -1328,8 +1163,28 @@ class ChecksumViewTest(OCLAPITestCase):
     @patch('core.common.checksums.Checksum.generate')
     def test_post_400(self, checksum_generate_mock):
         response = self.client.post(
-            '/$checksum/',
-            data={},
+            '/$checksum/standard/',
+            {},
+            HTTP_AUTHORIZATION=f"Token {self.token}",
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 400)
+        checksum_generate_mock.assert_not_called()
+
+        response = self.client.post(
+            '/$checksum/smart/',
+            {"foo": "bar"},
+            HTTP_AUTHORIZATION=f"Token {self.token}",
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 400)
+        checksum_generate_mock.assert_not_called()
+
+        response = self.client.post(
+            '/$checksum/smart/?resource=foobar',
+            {"foo": "bar"},
             HTTP_AUTHORIZATION=f"Token {self.token}",
             format='json'
         )
@@ -1338,16 +1193,154 @@ class ChecksumViewTest(OCLAPITestCase):
         checksum_generate_mock.assert_not_called()
 
     @patch('core.common.checksums.Checksum.generate')
-    def test_post_200(self, checksum_generate_mock):
+    def test_post_200_concept(self, checksum_generate_mock):
         checksum_generate_mock.return_value = 'checksum'
 
         response = self.client.post(
-            '/$checksum/',
-            data={'foo': 'bar'},
+            '/$checksum/standard/?resource=concept_version',
+            data={'foo': 'bar', 'concept_class': 'foobar', 'extras': {}},
             HTTP_AUTHORIZATION=f"Token {self.token}",
             format='json'
         )
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data, 'checksum')
-        checksum_generate_mock.assert_called_once_with({'foo': 'bar'})
+        checksum_generate_mock.assert_called_once_with(
+            {
+                'concept_class': 'foobar',
+                'names': [],
+                'descriptions': [],
+                'child_concept_urls': [],
+                'parent_concept_urls': []
+            }
+        )
+
+    @patch('core.common.checksums.Checksum.generate')
+    def test_post_200_mapping_standard(self, checksum_generate_mock):
+        checksum_generate_mock.side_effect = ['checksum1', 'checksum2', 'checksum3']
+
+        response = self.client.post(
+            '/$checksum/standard/?resource=mapping',
+            data=[
+                {
+                    'id': 'bar',
+                    'map_type': 'foobar',
+                    'from_concept_url': '/foo/',
+                    'to_source_url': '/bar/',
+                    'from_concept_code': 'foo',
+                    'to_concept_code': 'bar',
+                    'from_concept_name': 'fooName',
+                    'to_concept_name': 'barName',
+                    'retired': False,
+                    'external_id': 'EX123',
+                    'extras': {
+                        'foo': 'bar'
+                    }
+                },
+                {
+                    'id': 'barbara',
+                    'map_type': 'foobarbara',
+                    'from_concept_url': '/foobara/',
+                    'to_source_url': '/barbara/',
+                    'from_concept_code': 'foobara',
+                    'to_concept_code': 'barbara',
+                    'from_concept_name': 'foobaraName',
+                    'to_concept_name': 'barbaraName',
+                    'retired': True,
+                    'extras': {
+                        'foo': 'barbara'
+                    }
+                }
+            ],
+            HTTP_AUTHORIZATION=f"Token {self.token}",
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, 'checksum3')
+        self.assertEqual(checksum_generate_mock.call_count, 3)
+        self.assertEqual(
+            checksum_generate_mock.mock_calls,
+            [
+                call({
+                    'map_type': 'foobar',
+                    'from_concept_code': 'foo',
+                    'to_concept_code': 'bar',
+                    'from_concept_name': 'fooName',
+                    'to_concept_name': 'barName',
+                    'extras': {'foo': 'bar'},
+                    'external_id': 'EX123'
+                }),
+                call({
+                    'map_type': 'foobarbara',
+                    'from_concept_code': 'foobara',
+                    'to_concept_code': 'barbara',
+                    'from_concept_name': 'foobaraName',
+                    'to_concept_name': 'barbaraName',
+                    'extras': {'foo': 'barbara'},
+                    'retired': True
+                }),
+                call(['checksum1', 'checksum2'])
+            ]
+        )
+
+    @patch('core.common.checksums.Checksum.generate')
+    def test_post_200_mapping_smart(self, checksum_generate_mock):
+        checksum_generate_mock.side_effect = ['checksum1', 'checksum2', 'checksum3']
+
+        response = self.client.post(
+            '/$checksum/smart/?resource=mapping',
+            data=[
+                {
+                    'id': 'bar',
+                    'map_type': 'foobar',
+                    'from_concept_url': '/foo/',
+                    'to_source_url': '/bar/',
+                    'from_concept_code': 'foo',
+                    'to_concept_code': 'bar',
+                    'from_concept_name': 'fooName',
+                    'to_concept_name': 'barName',
+                    'retired': False,
+                    'extras': {'foo': 'bar'}
+                },
+                {
+                    'id': 'barbara',
+                    'map_type': 'foobarbara',
+                    'from_concept_url': '/foobara/',
+                    'to_source_url': '/barbara/',
+                    'from_concept_code': 'foobara',
+                    'to_concept_code': 'barbara',
+                    'from_concept_name': 'foobaraName',
+                    'to_concept_name': 'barbaraName',
+                    'retired': True,
+                    'extras': {'foo': 'barbara'}
+                }
+            ],
+            HTTP_AUTHORIZATION=f"Token {self.token}",
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, 'checksum3')
+        self.assertEqual(checksum_generate_mock.call_count, 3)
+        self.assertEqual(
+            checksum_generate_mock.mock_calls,
+            [
+                call({
+                      'map_type': 'foobar',
+                      'from_concept_code': 'foo',
+                      'to_concept_code': 'bar',
+                      'from_concept_name': 'fooName',
+                      'to_concept_name': 'barName'
+                }),
+                call({
+                      'map_type': 'foobarbara',
+                      'from_concept_code': 'foobara',
+                      'to_concept_code': 'barbara',
+                      'from_concept_name': 'foobaraName',
+                      'to_concept_name': 'barbaraName',
+                      'retired': True
+                }),
+                call(['checksum1', 'checksum2'])
+            ]
+        )

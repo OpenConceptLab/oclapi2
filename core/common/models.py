@@ -27,11 +27,13 @@ from .constants import (
     ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT, SUPER_ADMIN_USER_ID,
     HEAD, PERSIST_NEW_ERROR_MESSAGE, SOURCE_PARENT_CANNOT_BE_NONE, PARENT_RESOURCE_CANNOT_BE_NONE,
     CREATOR_CANNOT_BE_NONE, CANNOT_DELETE_ONLY_VERSION, OPENMRS_VALIDATION_SCHEMA, VALIDATION_SCHEMAS,
-    DEFAULT_VALIDATION_SCHEMA, ES_REQUEST_TIMEOUT)
+    DEFAULT_VALIDATION_SCHEMA, ES_REQUEST_TIMEOUT, UPDATED_BY_USERNAME_PARAM)
 from .exceptions import Http400
 from .fields import URIField
+from .mixins import SourceContainerMixin
 from .tasks import handle_save, handle_m2m_changed, seed_children_to_new_version, update_validation_schema, \
     update_source_active_concepts_count, update_source_active_mappings_count
+from ..toggles.models import Toggle
 
 TRUTHY = get_truthy_values()
 
@@ -177,22 +179,23 @@ class BaseModel(models.Model):
         return criteria
 
     @staticmethod
-    def batch_index(queryset, document):
-        count = queryset.count()
-        batch_size = 1000
-        offset = 0
-        limit = batch_size
-        while offset < count:
-            print(f"Indexing {offset}-{min([limit, count])}/{count}")
-            document().update(queryset.order_by('-id')[offset:limit], parallel=True)
-            offset = limit
-            limit += batch_size
+    def batch_index(queryset, document, single_batch=False):
+        if not get(settings, 'TEST_MODE'):
+            doc = document()
+            if single_batch or not get(settings, 'DB_CURSOR_ON', True):
+                doc.update(queryset.all(), parallel=True)
+            else:
+                for batch in queryset.iterator(chunk_size=500):
+                    doc.update(batch, parallel=True)
 
     @staticmethod
     @transaction.atomic
     def batch_delete(queryset):
-        for batch in queryset.iterator(chunk_size=1000):
-            batch.delete()
+        if get(settings, 'DB_CURSOR_ON', True):
+            for batch in queryset.iterator(chunk_size=1000):
+                batch.delete()
+        else:
+            queryset.delete()
 
 
 class CommonLogoModel(models.Model):
@@ -457,6 +460,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         version = params.get('version', None)
         is_latest = params.get('is_latest', None) in TRUTHY
         updated_since = parse_updated_since_param(params)
+        updated_by = params.get(UPDATED_BY_USERNAME_PARAM, None)
 
         queryset = cls.objects.filter(is_active=True)
         if username:
@@ -469,6 +473,8 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
             queryset = queryset.filter(is_latest_version=True)
         if updated_since:
             queryset = queryset.filter(updated_at__gte=updated_since)
+        if updated_by:
+            queryset = queryset.filter(updated_by__username=updated_by)
 
         return queryset
 
@@ -650,6 +656,9 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         obj.snapshot = serializer(head).data
         obj.update_version_data(head)
         obj.save(**kwargs)
+
+        if obj.id:
+            obj.get_checksums(recalculate=True)
 
         is_test_mode = get(settings, 'TEST_MODE', False)
         if is_test_mode or sync:
@@ -876,31 +885,77 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
             instance = cls.resolve_reference_expression(url, namespace, version)
         return instance
 
-    @staticmethod
-    def resolve_reference_expression(url, namespace=None, version=None):
-        lookup_url = url
-        if '|' in lookup_url:
-            lookup_url, version = lookup_url.split('|')
+    @classmethod
+    def resolve_reference_expression(cls, url, namespace=None, version=None):
+        """
+        resolves to repository version according to this process:
 
-        lookup_url = lookup_url.split('?')[0]
+        1. If canonical URL provided:
+            - Owner's URL Registry: If namespace is set in the request (and not global) and an owner-specific
+            canonical URL registry is defined for the namespace, attempt to resolve with the
+            namespace-specific canonical URL registry:
+                -- If the canonical URL is defined in the owner's registry, return the matching repo/repo version
+                from the namespace specified in the registry entry or return 404 not found
+                -- If no matching entry in the registry, then continue
+            - Repos in the namespace: If namespace is set in the request (and not global), attempt to resolve the
+             canonical URL with the repos defined in the namespace:
+                -- If the canonical URL matches a repo/repo version in the namespace, then return the repo/repo version
+                -- If unresolved, then continue
+            - Global URL Registry: If namespace is undefined or explicitly set to global in the request, or if URL
+             did not match an entry in the owner-specific registry and did not match a repo in the namespace, attempt
+             to resolve the canonical URL with the Global Canonical URL Registry:
+                -- If the canonical URL is defined in the global registry, return the matching repo/repo version from
+                 the namespace specified in the registry entry or return 404 not found
+                -- If no matching entry in the global registry, then return 404 not found (even if the canonical URL
+                is defined somewhere else in OCL)
+        2. Else if relative URL provided:
+            - Return the repository directly using the relative URL, or return 404 if not found
+        """
 
-        is_fqdn = is_canonical_uri(lookup_url) or is_canonical_uri(url)
-
+        resolution_url, version, is_canonical = cls.__get_resolution_url(url, version)
+        instance = None
+        is_global_namespace = not namespace or namespace == '/'
         criteria = models.Q(is_active=True, retired=False)
-        if is_fqdn:
-            resolution_url = lookup_url
-            criteria &= models.Q(canonical_url=resolution_url)
-            if namespace:
-                criteria &= models.Q(models.Q(user__uri=namespace) | models.Q(organization__uri=namespace))
+
+        from core.url_registry.models import URLRegistry
+        if is_canonical:
+            if Toggle.get('URL_REGISTRY_IN_RESOLVE_REFERENCE_TOGGLE'):
+                url_registry_entry = None
+                owner = None
+                if not is_global_namespace:
+                    owner = SourceContainerMixin.get_object_from_namespace(namespace)
+                    if owner:
+                        url_registry_entry = owner.url_registry_entries.filter(
+                            is_active=True, url=resolution_url).first()
+                        if not url_registry_entry:
+                            instance = owner.find_repo_by_canonical_url(resolution_url)
+
+                if is_global_namespace or (not url_registry_entry and not instance):
+                    url_registry_entry = URLRegistry.get_active_global_entries().filter(url=resolution_url).first()
+
+                if not owner and url_registry_entry and url_registry_entry.namespace:
+                    owner = url_registry_entry.namespace_owner
+
+                if instance or not url_registry_entry or not url_registry_entry.namespace or not owner:
+                    return cls.resolve_repo(instance, version, is_canonical, resolution_url)
+
+                criteria &= models.Q(
+                    canonical_url=resolution_url, **{
+                        f"{owner.resource_type.lower()}__uri": url_registry_entry.namespace
+                    })
+            else:
+                criteria &= models.Q(canonical_url=resolution_url)
+                if namespace:
+                    criteria &= models.Q(models.Q(user__uri=namespace) | models.Q(organization__uri=namespace))
         else:
-            resolution_url = to_parent_uri(lookup_url)
             criteria &= models.Q(uri=resolution_url)
 
+        from core.repos.models import Repository
+        return cls.resolve_repo(Repository.get(criteria), version, is_canonical, resolution_url)
+
+    @classmethod
+    def resolve_repo(cls, instance, version, is_canonical, resolution_url):
         from core.sources.models import Source
-        instance = Source.objects.filter(criteria).first()
-        if not instance:
-            from core.collections.models import Collection
-            instance = Collection.objects.filter(criteria).first()
 
         if instance:
             if version:
@@ -911,12 +966,21 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         if not instance:
             instance = Source()
 
-        instance.is_fqdn = is_fqdn
+        instance.is_fqdn = is_canonical
         instance.resolution_url = resolution_url
-        if is_fqdn and instance.id and not instance.canonical_url:
+        if is_canonical and instance.id and not instance.canonical_url:
             instance.canonical_url = resolution_url
-
         return instance
+
+    @staticmethod
+    def __get_resolution_url(url, version):
+        lookup_url = url
+        if '|' in lookup_url:
+            lookup_url, version = lookup_url.split('|')
+        lookup_url = lookup_url.split('?')[0]
+        is_canonical = is_canonical_uri(lookup_url) or is_canonical_uri(url)
+        resolution_url = lookup_url if is_canonical else to_parent_uri(lookup_url)
+        return resolution_url, version, is_canonical
 
     def clean(self):
         if not self.custom_validation_schema:
@@ -956,7 +1020,8 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
             'concept_class': self._to_clean_facets(facets.conceptClass or []),
             'datatype': self._to_clean_facets(facets.datatype or []),
             'locale': self._to_clean_facets(facets.locale or []),
-            'name_type': self._to_clean_facets(facets.nameTypes or [])
+            'name_type': self._to_clean_facets(facets.nameTypes or []),
+            'contributors': self._to_clean_facets(facets.updatedBy or [])
         }
 
     @property
@@ -966,7 +1031,8 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         return {
             'active': self.active_mappings,
             'retired': self.retired_mappings_count,
-            'map_type': self._to_clean_facets(facets.mapType or [])
+            'map_type': self._to_clean_facets(facets.mapType or []),
+            'contributors': self._to_clean_facets(facets.updatedBy or [])
         }
 
     @property
@@ -1028,7 +1094,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         try:
             facets = search.execute().facets
         except TransportError as ex:  # pragma: no cover
-            raise Http400(detail=get(ex, 'error') or str(ex)) from ex
+            raise Http400(detail=get(ex, 'info') or get(ex, 'error') or str(ex)) from ex
 
         return facets
 

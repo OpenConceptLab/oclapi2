@@ -6,6 +6,7 @@ import os
 import random
 import shutil
 import tempfile
+import time
 import uuid
 import zipfile
 from collections import OrderedDict
@@ -21,7 +22,6 @@ from django.conf import settings
 from django.urls import NoReverseMatch, reverse, get_resolver
 from django.utils import timezone
 from djqscsv import csv_file_for
-from elasticsearch_dsl import Q as es_Q
 from pydash import flatten, compact, get
 from requests import ConnectTimeout
 from requests.auth import HTTPBasicAuth
@@ -194,7 +194,7 @@ def get_class(kls):
 
 
 def write_export_file(
-        version, resource_type, resource_serializer_type, logger
+        version, resource_type, resource_serializer_type, logger, start_time
 ):  # pylint: disable=too-many-statements,too-many-locals,too-many-branches
     from core.concepts.models import Concept
     from core.mappings.models import Mapping
@@ -263,8 +263,6 @@ def write_export_file(
             batch_queryset = concepts_qs.order_by('-concept_id')[start:end]
 
         logger.info('Done serializing concepts.')
-    else:
-        logger.info(f'{resource_name} has no concepts to serialize.')
 
     if is_collection:
         references_qs = version.references
@@ -289,8 +287,6 @@ def write_export_file(
                     if end != total_references:
                         out.write(', ')
             logger.info('Done serializing references.')
-        else:
-            logger.info(f'{resource_name} has no references to serialize.')
 
     with open('export.json', 'a') as out:
         out.write('], "mappings": [')
@@ -322,11 +318,10 @@ def write_export_file(
             batch_queryset = mappings_qs.order_by('-mapping_id')[start:end]
 
         logger.info('Done serializing mappings.')
-    else:
-        logger.info(f'{resource_name} has no mappings to serialize.')
 
     with open('export.json', 'a') as out:
-        out.write(']}')
+        end_time = str(round((time.time() - start_time) + 2, 2)) + 'secs'
+        out.write('], "export_time": ' + json.dumps(end_time, cls=encoders.JSONEncoder) + '}')
 
     with zipfile.ZipFile('export.zip', 'w', zipfile.ZIP_DEFLATED) as _zip:
         _zip.write('export.json')
@@ -358,10 +353,6 @@ def write_export_file(
 
 def get_api_base_url():
     return settings.API_BASE_URL
-
-
-def get_api_internal_base_url():
-    return settings.API_INTERNAL_BASE_URL
 
 
 def to_snake_case(string):
@@ -414,18 +405,22 @@ def es_get(url, **kwargs):
     :param url:
     :return:
     """
+    auth = None
+    if settings.ES_USER and settings.ES_PASSWORD:
+        auth = HTTPBasicAuth(settings.ES_USER, settings.ES_PASSWORD)
+
     if settings.ES_HOSTS:
         for es_host in settings.ES_HOSTS.split(','):
             try:
                 return requests.get(
-                    f'{settings.ES_SCHEME}://{es_host}/{url}',
+                    f'{settings.ES_SCHEME}://{es_host}/{url}', auth=auth,
                     **kwargs
                 )
             except ConnectTimeout:
                 continue
     else:
         return requests.get(
-            f'{settings.ES_SCHEME}://{settings.ES_HOST}:{settings.ES_PORT}/{url}',
+            f'{settings.ES_SCHEME}://{settings.ES_HOST}:{settings.ES_PORT}/{url}', auth=auth,
             **kwargs
         )
 
@@ -586,35 +581,43 @@ def get_resource_class_from_resource_name(resource):  # pylint: disable=too-many
         return resource
 
     name = resource.lower()
-    if name in ['concepts', 'concept']:
+    if 'concept' in name:
         from core.concepts.models import Concept
         return Concept
-    if name in ['mappings', 'mapping']:
+    if 'mapping' in name:
         from core.mappings.models import Mapping
         return Mapping
-    if name in ['users', 'user', 'user_profiles', 'user_profile', 'userprofiles', 'userprofile']:
+    if 'user' in name:
         from core.users.models import UserProfile
         return UserProfile
-    if name in ['orgs', 'org', 'organizations', 'organization']:
+    if 'org' in name:
         from core.orgs.models import Organization
         return Organization
-    if name in ['sources', 'source']:
+    if 'source' in name:
         from core.sources.models import Source
         return Source
-    if name in ['collections', 'collection']:
+    if 'collection' in name and 'reference' not in name and 'expansion' not in name:
         from core.collections.models import Collection
         return Collection
+    if 'reference' in name:
+        from core.collections.models import CollectionReference
+        return CollectionReference
+    if 'expansion' in name:
+        from core.collections.models import Expansion
+        return Expansion
 
     return None
 
 
 def get_content_type_from_resource_name(resource):
+    content_type = None
+
     model = get_resource_class_from_resource_name(resource)
     if model:
         from django.contrib.contenttypes.models import ContentType
-        return ContentType.objects.get_for_model(model)
+        content_type = ContentType.objects.get_for_model(model)
 
-    return None
+    return content_type
 
 
 def flatten_dict(dikt, parent_key='', sep='__'):
@@ -651,14 +654,14 @@ def get_celery_once_lock_key(name, args):
 
 
 def guess_extension(file=None, name=None):
-    if not file and not name:
-        return None
-    if file:
-        name = file.name
-    _, extension = os.path.splitext(name)
+    extension = None
+    if file or name:
+        if file:
+            name = file.name
+        _, extension = os.path.splitext(name)
 
-    if not extension:
-        extension = mimetypes.guess_extension(name)
+        if not extension:
+            extension = mimetypes.guess_extension(name)
     return extension
 
 
@@ -754,14 +757,6 @@ def get_request_url():
     return request_url
 
 
-def named_tuple_fetchall(cursor):
-    """Return all rows from a cursor as a namedtuple"""
-    from collections import namedtuple
-    desc = cursor.description
-    nt_result = namedtuple('Result', [col[0] for col in desc])
-    return [nt_result(*row) for row in cursor.fetchall()]
-
-
 def nested_dict_values(_dict):
     for value in _dict.values():
         if isinstance(value, dict):
@@ -780,27 +775,6 @@ def es_id_in(search, ids):
     if ids:
         return search.query("terms", _id=ids)
     return search
-
-
-def get_es_wildcard_search_criterion(search_str, name_attr='name'):
-    def get_query(_str):
-        return es_Q(
-            "wildcard", id={'value': _str, 'boost': 2}
-        ) | es_Q(
-            "wildcard", **{name_attr: {'value': _str, 'boost': 5}}
-        ) | es_Q(
-            "query_string", query=f"*{_str}*"
-        )
-
-    if search_str:
-        words = search_str.split()
-        criterion = get_query(words[0])
-        for word in words[1:]:
-            criterion |= get_query(word)
-    else:
-        criterion = get_query(search_str)
-
-    return criterion
 
 
 def es_to_pks(search):
@@ -853,7 +827,7 @@ def get_export_service():
     parts = EXPORT_SERVICE.split('.')
     klass = parts[-1]
     mod = __import__('.'.join(parts[0:-1]), fromlist=[klass])
-    return getattr(mod, klass)
+    return getattr(mod, klass)()
 
 
 def get_start_of_month(date=timezone.now().date()):
@@ -905,3 +879,13 @@ def get_date_range_label(start_date, end_date):
         return f"{start.day:02d} {start_month} - {end.day:02d} {end_month} {start.year}"
 
     return f"{start.day:02d} {start_month} {start.year} - {end.day:02d} {end_month} {end.year}"
+
+
+def format_url_for_search(url):
+    if url:
+        return url.replace('/', '_').replace(':', '_')
+    return url
+
+
+def clean_term(term):
+    return term.lower().replace(' ', '').replace('-', '').replace('_', '')

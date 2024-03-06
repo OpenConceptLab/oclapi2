@@ -52,7 +52,7 @@ class ValueSetTest(OCLAPITestCase):
 
         self.assertEqual(
             resource['identifier'][0]['value'], f'/orgs/{self.org.mnemonic}/ValueSet/{self.collection.mnemonic}/')
-        self.assertEqual(resource['compose'], None)
+        self.assertFalse('compose' in resource)
 
     def test_public_can_find_globally(self):
         self.collection.add_references([
@@ -118,7 +118,7 @@ class ValueSetTest(OCLAPITestCase):
         resource = response.data
         self.assertEqual(resource['version'], 'v1')
         self.assertEqual(resource['identifier'][0]['value'], f'/users/{self.user.username}/ValueSet/c2/')
-        self.assertEqual(resource['compose'], None)
+        self.assertFalse('compose' in resource)
 
     def test_can_create_with_compose(self):
         response = self.client.post(
@@ -258,7 +258,7 @@ class ValueSetTest(OCLAPITestCase):
         resource = response.data
         self.assertEqual(resource['version'], 'v2')
         self.assertEqual(resource['identifier'][0]['value'], f'/orgs/{self.org.mnemonic}/ValueSet/c1/')
-        self.assertEqual(resource['compose'], None)
+        self.assertFalse('compose' in resource)
 
     def test_update_with_compose(self):
         self.collection.add_references([
@@ -444,6 +444,7 @@ class ValueSetTest(OCLAPITestCase):
                         {
                             'system': 'http://some/url',
                             'version': self.org_source_v2.version,
+                            'namespace': self.org.uri,
                             'concept': [
                                 {
                                     'code': self.concept_1.mnemonic

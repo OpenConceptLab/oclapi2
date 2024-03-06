@@ -14,6 +14,7 @@ import os
 # Build paths inside the project like this: os.path.join(BASE_DIR, ...)
 
 from corsheaders.defaults import default_headers
+from elasticsearch import RequestsHttpConnection
 from kombu import Queue, Exchange
 from redis.backoff import ExponentialBackoff
 from redis.retry import Retry
@@ -41,6 +42,7 @@ ALLOWED_HOSTS = ['*']
 CORS_ALLOW_HEADERS = default_headers + (
     'INCLUDEFACETS',
     'INCLUDESEARCHSTATS',
+    'INCLUDESEARCHLATEST'
 )
 
 CORS_EXPOSE_HEADERS = (
@@ -59,6 +61,8 @@ CORS_EXPOSE_HEADERS = (
     'X-OCL-REQUEST-URL',
     'X-OCL-REQUEST-METHOD',
     'X-OCL-API-DEPRECATED',
+    'X-OCL-API-STANDARD-CHECKSUM',
+    'X-OCL-API-SMART-CHECKSUM',
 )
 
 CORS_ORIGIN_ALLOW_ALL = True
@@ -96,6 +100,8 @@ INSTALLED_APPS = [
     'core.client_configs',
     'core.tasks',
     'core.toggles',
+    'core.repos',
+    'core.url_registry',
 ]
 REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': (
@@ -185,28 +191,39 @@ DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
         'NAME': os.environ.get('DB', 'postgres'),
-        'USER': 'postgres',
+        'USER': os.environ.get('DB_USER', 'postgres'),
         'PASSWORD': os.environ.get('DB_PASSWORD', 'Postgres123'),
         'HOST': os.environ.get('DB_HOST', 'db'),
         'PORT': os.environ.get('DB_PORT', 5432),
     }
 }
 
+DB_CURSOR_ON = os.environ.get('DB_CURSOR_ON', 'true').lower() == 'true'
+
 ES_HOST = os.environ.get('ES_HOST', 'es')  # Deprecated. Use ES_HOSTS instead.
 ES_PORT = os.environ.get('ES_PORT', '9200')  # Deprecated. Use ES_HOSTS instead.
 ES_HOSTS = os.environ.get('ES_HOSTS', None)
 ES_SCHEME = os.environ.get('ES_SCHEME', 'http')
+ES_VERIFY_CERTS = os.environ.get('ES_VERIFY_CERTS', str(ES_SCHEME == 'https'))
+ES_USER = os.environ.get('ES_USER', None)
+ES_PASSWORD = os.environ.get('ES_PASSWORD', None)
+http_auth = None
+if ES_USER and ES_PASSWORD:
+    http_auth = (ES_USER, ES_PASSWORD)
+
 ELASTICSEARCH_DSL = {
     'default': {
         'hosts': ES_HOSTS.split(',') if ES_HOSTS else [ES_HOST + ':' + ES_PORT],
+        'http_auth': http_auth,
         'use_ssl': ES_SCHEME == 'https',
-        'verify_certs': ES_SCHEME == 'https',
+        'verify_certs': ES_VERIFY_CERTS.lower() == 'true',
         'sniff_on_connection_fail': True,
         'sniff_on_start': True,
         'sniffer_timeout': 60,
         'sniff_timeout': 10,
         'max_retries': 3,
-        'retry_on_timeout': True
+        'retry_on_timeout': True,
+        'connection_class': RequestsHttpConnection # Needed for verify_certs=False to work
     },
 }
 
@@ -300,10 +317,21 @@ STATICFILES_STORAGE = 'whitenoise.storage.CompressedStaticFilesStorage'
 AUTH_USER_MODEL = 'users.UserProfile'
 TEST_RUNNER = 'core.common.tests.CustomTestRunner'
 DEFAULT_LOCALE = os.environ.get('DEFAULT_LOCALE', 'en')
+
+# AWS storage settings
 AWS_ACCESS_KEY_ID = os.environ.get('AWS_ACCESS_KEY_ID', '')
 AWS_SECRET_ACCESS_KEY = os.environ.get('AWS_SECRET_ACCESS_KEY', '')
 AWS_STORAGE_BUCKET_NAME = os.environ.get('AWS_STORAGE_BUCKET_NAME', 'oclapi2-dev')
 AWS_REGION_NAME = os.environ.get('AWS_REGION_NAME', 'us-east-2')
+
+# Azure storage settings
+AZURE_STORAGE_ACCOUNT_NAME = os.environ.get('AZURE_STORAGE_ACCOUNT_NAME', 'ocltestaccount')
+AZURE_STORAGE_CONTAINER_NAME = os.environ.get('AZURE_STORAGE_CONTAINER_NAME', 'ocl-test-exports')
+AZURE_STORAGE_CONNECTION_STRING = os.environ.get('AZURE_STORAGE_CONNECTION_STRING', 'conn-str')
+
+# Repo Export Upload/download
+EXPORT_SERVICE = os.environ.get('EXPORT_SERVICE', 'core.services.storages.cloud.aws.S3')
+
 DISABLE_VALIDATION = os.environ.get('DISABLE_VALIDATION', False)
 API_SUPERUSER_PASSWORD = os.environ.get('API_SUPERUSER_PASSWORD', 'Root123')  # password for ocladmin superuser
 API_SUPERUSER_TOKEN = os.environ.get('API_SUPERUSER_TOKEN', '891b4b17feab99f3ff7e5b5d04ccc5da7aa96da6')
@@ -321,6 +349,7 @@ REDIS_PORT = os.environ.get('REDIS_PORT', 6379)
 REDIS_DB = 0
 REDIS_HOST = os.environ.get('REDIS_HOST', 'redis')
 REDIS_URL = f"redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}"
+REDIS_PASSWORD = os.environ.get('REDIS_PASSWORD', None)
 
 REDIS_SENTINELS = os.environ.get('REDIS_SENTINELS', None)
 if REDIS_SENTINELS:
@@ -333,6 +362,7 @@ REDIS_SENTINELS_LIST = []
 
 # django cache
 OPTIONS = {
+    'PASSWORD': REDIS_PASSWORD,
     'CONNECTION_POOL_KWARGS': {
                                   'retry': Retry(ExponentialBackoff(cap=10, base=0.5), 10),
                                   'retry_on_error': [ConnectionError]
@@ -359,13 +389,6 @@ CACHES = {
 }
 
 # Celery
-RETRY_POLICY = {
-    'max_retries': 10,
-    'interval_start': 0,
-    'interval_step': 1,
-    'interval_max': 10
-}
-
 CELERY_ENABLE_UTC = True
 CELERY_TIMEZONE = "UTC"
 CELERY_ALWAYS_EAGER = False
@@ -397,7 +420,7 @@ CELERY_RESULT_BACKEND_TRANSPORT_OPTIONS = {
     'socket_connect_timeout': 5.0,
     'retry_policy': {
         'timeout': 5.0
-    } | RETRY_POLICY
+    }
 }
 
 CELERY_RESULT_EXTENDED = True
@@ -409,7 +432,7 @@ CELERY_BROKER_TRANSPORT_OPTIONS = {
     'socket_connect_timeout': 5.0,
     'retry_policy': {
         'timeout': 5.0
-    } | RETRY_POLICY
+    }
 }
 
 if REDIS_SENTINELS:
@@ -425,8 +448,17 @@ if REDIS_SENTINELS:
         {
             'master_name': REDIS_SENTINELS_MASTER
         })
+    if REDIS_PASSWORD:
+        CELERY_BROKER_TRANSPORT_OPTIONS.update(
+            {
+                'sentinel_kwargs': { 'password': REDIS_PASSWORD }
+            }
+        )
 else:
-    CELERY_RESULT_BACKEND = f'redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}'
+    if REDIS_PASSWORD:
+        CELERY_RESULT_BACKEND = f'redis://:{REDIS_PASSWORD}@{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}'
+    else:
+        CELERY_RESULT_BACKEND = f'redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}'
 
 CELERY_BROKER_URL = CELERY_RESULT_BACKEND
 CELERY_BROKER_POOL_LIMIT = 100  # should be adjusted considering the number of threads
@@ -440,7 +472,7 @@ CELERY_BROKER_HEARTBEAT = None
 CELERY_TASK_PUBLISH_RETRY = True
 CELERY_TASK_PUBLISH_RETRY_POLICY = {
     'retry_errors': None,
-} | RETRY_POLICY
+}
 
 CELERY_ACCEPT_CONTENT = ['application/json']
 CELERY_ONCE = {
@@ -504,9 +536,6 @@ VERSION = __version__
 ERRBIT_URL = os.environ.get('ERRBIT_URL', 'http://errbit:8080')
 ERRBIT_KEY = os.environ.get('ERRBIT_KEY', 'errbit-key')
 
-# Repo Export Upload/download
-EXPORT_SERVICE = os.environ.get('EXPORT_SERVICE', 'core.common.services.S3')
-
 # Locales Repository URI
 # can either be /orgs/OCL/sources/Locales/ (old-style, ISO-639-2)
 # or /orgs/ISO/sources/iso639-1/ (ISO-639-1, OCL's new default)
@@ -519,6 +548,7 @@ OIDC_RP_CLIENT_SECRET = ''  # only needed a defined var in mozilla_django_oidc
 OIDC_SERVER_INTERNAL_URL = os.environ.get('OIDC_SERVER_INTERNAL_URL', '') or OIDC_SERVER_URL
 OIDC_REALM = os.environ.get('OIDC_REALM', 'ocl')
 OIDC_OP_AUTHORIZATION_ENDPOINT = f'{OIDC_SERVER_URL}/realms/{OIDC_REALM}/protocol/openid-connect/auth'
+OIDC_OP_REGISTRATION_ENDPOINT = f'{OIDC_SERVER_URL}/realms/{OIDC_REALM}/protocol/openid-connect/registrations'
 OIDC_OP_LOGOUT_ENDPOINT = f'{OIDC_SERVER_URL}/realms/{OIDC_REALM}/protocol/openid-connect/logout'
 OIDC_OP_TOKEN_ENDPOINT = f'{OIDC_SERVER_INTERNAL_URL}/realms/{OIDC_REALM}/protocol/openid-connect/token'
 OIDC_OP_USER_ENDPOINT = f'{OIDC_SERVER_INTERNAL_URL}/realms/{OIDC_REALM}/protocol/openid-connect/userinfo'
@@ -530,3 +560,10 @@ OIDC_RP_SCOPES = 'openid profile email'
 OIDC_STORE_ACCESS_TOKEN = True
 OIDC_CREATE_USER = True
 OIDC_CALLBACK_CLASS = 'core.users.views.OCLOIDCAuthenticationCallbackView'
+
+# Profiler Django Silk
+if ENV == 'development':
+    INSTALLED_APPS = [*INSTALLED_APPS, 'silk']
+    # MIDDLEWARE = [*MIDDLEWARE, "silk.middleware.SilkyMiddleware"]
+    # SILKY_PYTHON_PROFILER = True
+    # SILKY_PYTHON_PROFILER_RESULT_PATH = '/code/core/'

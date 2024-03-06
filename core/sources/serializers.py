@@ -48,12 +48,13 @@ class SourceListSerializer(AbstractResourceSerializer):
     owner_url = CharField(source='parent_url')
     id = CharField(source='mnemonic')
     summary = SerializerMethodField()
+    checksums = SerializerMethodField()
 
     class Meta:
         model = Source
         fields = AbstractResourceSerializer.Meta.fields + (
             'short_code', 'name', 'url', 'owner', 'owner_type', 'owner_url', 'version', 'created_at', 'id',
-            'source_type', 'updated_at', 'canonical_url', 'summary', 'type',
+            'source_type', 'updated_at', 'canonical_url', 'summary', 'type', 'checksums'
         )
 
     def __init__(self, *args, **kwargs):
@@ -79,6 +80,10 @@ class SourceListSerializer(AbstractResourceSerializer):
 
         return summary
 
+    @staticmethod
+    def get_checksums(obj):
+        return obj.get_all_checksums()
+
 
 class SourceVersionListSerializer(ModelSerializer):
     type = CharField(source='resource_version_type')
@@ -102,7 +107,7 @@ class SourceVersionListSerializer(ModelSerializer):
 
     @staticmethod
     def get_checksums(obj):
-        return obj.get_checksums(queue=True)
+        return obj.get_all_checksums()
 
 
 class SourceCreateOrUpdateSerializer(ModelSerializer):
@@ -140,6 +145,7 @@ class SourceCreateOrUpdateSerializer(ModelSerializer):
                 'autoid_mapping_mnemonic', 'autoid_mapping_external_id',
                 'autoid_concept_mnemonic_start_from', 'autoid_concept_external_id_start_from',
                 'autoid_mapping_mnemonic_start_from', 'autoid_mapping_external_id_start_from',
+                'autoid_concept_name_external_id', 'autoid_concept_description_external_id'
         ]:
             setattr(source, attr, validated_data.get(attr, get(source, attr)))
         for attr in ['jurisdiction', 'identifier', 'contact', 'meta']:
@@ -264,6 +270,14 @@ class AbstractSourceSummaryVerboseSerializer(ModelSerializer):
             'id', 'uuid', 'concepts', 'mappings', 'versions', 'default_locale', 'supported_locales'
         )
 
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        user = self.context['request'].user
+        if not get(user, 'is_authenticated'):
+            data['concepts'].pop('contributors', None)
+            data['mappings'].pop('contributors', None)
+        return data
+
 
 class AbstractSourceSummaryFieldDistributionSerializer(ModelSerializer):
     uuid = CharField(source='id')
@@ -347,7 +361,6 @@ class SourceDetailSerializer(SourceCreateOrUpdateSerializer, AbstractRepoResourc
     client_configs = SerializerMethodField()
     hierarchy_root = SerializerMethodField()
     hierarchy_root_url = CharField(source='hierarchy_root.url', required=False, allow_blank=True, allow_null=True)
-    checksums = SerializerMethodField()
 
     class Meta:
         model = Source
@@ -362,6 +375,7 @@ class SourceDetailSerializer(SourceCreateOrUpdateSerializer, AbstractRepoResourc
             'experimental', 'case_sensitive', 'collection_reference', 'hierarchy_meaning', 'compositional',
             'version_needed', 'hierarchy_root_url', 'hierarchy_root', 'meta',
             'autoid_concept_mnemonic', 'autoid_concept_external_id',
+            'autoid_concept_name_external_id', 'autoid_concept_description_external_id',
             'autoid_mapping_mnemonic', 'autoid_mapping_external_id',
             'autoid_concept_mnemonic_start_from', 'autoid_concept_external_id_start_from',
             'autoid_mapping_mnemonic_start_from', 'autoid_mapping_external_id_start_from', 'checksums'
@@ -414,10 +428,6 @@ class SourceDetailSerializer(SourceCreateOrUpdateSerializer, AbstractRepoResourc
         ret.update({"supported_locales": instance.get_supported_locales()})
         return ret
 
-    @staticmethod
-    def get_checksums(obj):
-        return obj.get_checksums(queue=True)
-
 
 class SourceVersionDetailSerializer(SourceCreateOrUpdateSerializer, AbstractRepoResourcesSerializer):
     type = CharField(source='resource_version_type')
@@ -439,7 +449,6 @@ class SourceVersionDetailSerializer(SourceCreateOrUpdateSerializer, AbstractRepo
     previous_version_url = CharField(source='prev_version_uri')
     summary = SerializerMethodField()
     hierarchy_root_url = CharField(source='hierarchy_root.url', required=False, allow_blank=True, allow_null=True)
-    checksums = SerializerMethodField()
 
     class Meta:
         model = Source
@@ -478,10 +487,6 @@ class SourceVersionDetailSerializer(SourceCreateOrUpdateSerializer, AbstractRepo
             summary = SourceVersionSummarySerializer(obj).data
 
         return summary
-
-    @staticmethod
-    def get_checksums(obj):
-        return obj.get_checksums(queue=True)
 
 
 class SourceVersionExportSerializer(SourceVersionDetailSerializer):

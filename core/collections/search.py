@@ -10,7 +10,7 @@ class CollectionFacetedSearch(CustomESFacetedSearch):
     doc_types = [Collection]
     fields = [
         'collection_type', 'locale', 'owner', 'owner_type', 'is_active', 'version', 'custom_validation_schema',
-        'name', 'mnemonic', 'extras', 'identifier', 'publisher', 'immutable'
+        'name', 'mnemonic', 'extras', 'identifier', 'publisher', 'immutable', 'updated_by'
     ]
 
     facets = {
@@ -21,4 +21,5 @@ class CollectionFacetedSearch(CustomESFacetedSearch):
         'is_active': TermsFacet(field='is_active'),
         'version': TermsFacet(field='version', size=FACET_SIZE),
         'customValidationSchema': TermsFacet(field='custom_validation_schema'),
+        'updatedBy': TermsFacet(field='updated_by', size=FACET_SIZE),
     }

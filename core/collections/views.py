@@ -2,7 +2,6 @@ import logging
 
 from celery_once import AlreadyQueued
 from django.conf import settings
-from django.core.exceptions import ValidationError
 from django.db import IntegrityError
 from django.db.models import Q
 from django.http import Http404
@@ -53,7 +52,8 @@ from core.common.permissions import (
 )
 from core.common.serializers import TaskSerializer
 from core.common.swagger_parameters import q_param, compress_header, page_param, verbose_param, \
-    include_facets_header, sort_asc_param, sort_desc_param, updated_since_param, include_retired_param, limit_param
+    include_facets_header, sort_asc_param, sort_desc_param, updated_since_param, include_retired_param, limit_param, \
+    canonical_url_param
 from core.common.tasks import add_references, export_collection, delete_collection, index_expansion_concepts, \
     index_expansion_mappings
 from core.common.utils import compact_dict_by_values, parse_boolean_query_param
@@ -64,6 +64,7 @@ from core.concepts.search import ConceptFacetedSearch
 from core.mappings.documents import MappingDocument
 from core.mappings.models import Mapping
 from core.mappings.search import MappingFacetedSearch
+from core.toggles.models import Toggle
 
 logger = logging.getLogger('oclapi')
 
@@ -187,7 +188,7 @@ class CollectionListView(CollectionBaseView, ConceptDictionaryCreateMixin, ListW
     @swagger_auto_schema(
         manual_parameters=[
             q_param, limit_param, sort_desc_param, sort_asc_param, page_param, verbose_param,
-            include_retired_param, updated_since_param, include_facets_header, compress_header
+            include_retired_param, updated_since_param, canonical_url_param, include_facets_header, compress_header
         ]
     )
     def get(self, request, *args, **kwargs):
@@ -254,6 +255,11 @@ class CollectionRetrieveUpdateDestroyView(
                     version.update_concepts_count()
                 if version.should_set_active_mappings:
                     version.update_mappings_count()
+
+        if Toggle.get('CHECKSUMS_TOGGLE'):
+            instance.get_checksums()
+            for version in instance.versions:
+                version.get_checksums()
 
         return instance
 
@@ -423,6 +429,20 @@ class CollectionReferencesView(
 
     def retrieve(self, request, *args, **kwargs):
         return self.list(request, *args, **kwargs)
+
+    @swagger_auto_schema(request_body=openapi.Schema(
+        type=openapi.TYPE_OBJECT,
+        properties={
+            'expressions': openapi.Schema(
+                type=openapi.TYPE_ARRAY,
+                items=openapi.Items(type=openapi.TYPE_STRING),
+                uniqueItems=True,
+                description='Expressions List from References, or * for ALL'
+            )
+        }
+    ))
+    def delete(self, request, *args, **kwargs):
+        return super().delete(request, *args, **kwargs)
 
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
@@ -643,7 +663,7 @@ class CollectionLatestVersionRetrieveUpdateView(CollectionVersionBaseView, Retri
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
-class CollectionVersionRetrieveUpdateDestroyView(CollectionBaseView, RetrieveAPIView, UpdateAPIView):
+class CollectionVersionRetrieveUpdateDestroyView(CollectionBaseView, RetrieveAPIView, UpdateAPIView, TaskMixin):
     serializer_class = CollectionVersionDetailSerializer
 
     def get_permissions(self):
@@ -677,14 +697,15 @@ class CollectionVersionRetrieveUpdateDestroyView(CollectionBaseView, RetrieveAPI
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     def delete(self, _, **kwargs):  # pylint: disable=unused-argument
-        instance = self.get_object()
+        result = self.perform_task(delete_collection, (self.get_object().id,))
 
-        try:
-            instance.delete()
-        except ValidationError as ex:
-            return Response(ex.message_dict, status=status.HTTP_400_BAD_REQUEST)
+        if isinstance(result, Response):
+            return result
 
-        return Response(status=status.HTTP_204_NO_CONTENT)
+        if result is True:
+            return Response({'detail': DELETE_SUCCESS}, status=status.HTTP_204_NO_CONTENT)
+
+        return Response({'detail': get(result, 'messages', [DELETE_FAILURE])}, status=status.HTTP_400_BAD_REQUEST)
 
 
 class CollectionVersionExpansionsView(CollectionBaseView, ListWithHeadersMixin, CreateAPIView):
@@ -860,6 +881,7 @@ class CollectionVersionConceptsView(CollectionBaseView, ListWithHeadersMixin):
         return queryset
 
     def get(self, request, *args, **kwargs):
+        self.get_object()  # to set instance on request for references
         return self.list(request, *args, **kwargs)
 
 
@@ -1024,6 +1046,7 @@ class CollectionVersionMappingsView(CollectionBaseView, ListWithHeadersMixin):
         return queryset
 
     def get(self, request, *args, **kwargs):
+        self.get_object()  # to set instance on request for references
         return self.list(request, *args, **kwargs)
 
 

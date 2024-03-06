@@ -280,9 +280,66 @@ class ConceptTest(OCLTestCase):
         self.assertIsNotNone(concept2.id)
         self.assertTrue(len(concept2.mnemonic), 36)
         self.assertTrue(len(concept2.external_id), 36)
+        self.assertIsNone(concept2.names.first().external_id)
 
         self.assertNotEqual(concept1.mnemonic, concept2.mnemonic)
         self.assertNotEqual(concept1.external_id, concept2.external_id)
+
+    def test_persist_new_with_locale_autoid_uuid(self):
+        source = OrganizationSourceFactory(
+            version=HEAD, autoid_concept_mnemonic='uuid', autoid_concept_external_id='uuid',
+            autoid_concept_name_external_id='uuid', autoid_concept_description_external_id='uuid'
+        )
+        concept1 = Concept.persist_new({
+            **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'parent': source, 'mnemonic': None,
+            'names': [ConceptNameFactory.build(locale='en', name='English', locale_preferred=True)],
+            'descriptions': [ConceptDescriptionFactory.build(locale='en', name='English', locale_preferred=True)]
+        })
+
+        self.assertEqual(concept1.errors, {})
+        self.assertIsNotNone(concept1.id)
+        self.assertTrue(len(concept1.mnemonic), 36)
+        self.assertTrue(len(concept1.external_id), 36)
+        self.assertTrue(len(concept1.names.first().external_id), 36)
+        self.assertTrue(len(concept1.descriptions.first().external_id), 36)
+
+        concept2 = Concept.persist_new({
+            **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'parent': source, 'mnemonic': None,
+            'names': [
+                ConceptNameFactory.build(locale='en', name='English', locale_preferred=True, external_id=None)
+            ],
+            'descriptions': [
+                ConceptDescriptionFactory.build(locale='en', name='English', locale_preferred=True, external_id=None)
+            ]
+        })
+
+        self.assertEqual(concept2.errors, {})
+        self.assertIsNotNone(concept2.id)
+        self.assertTrue(len(concept2.mnemonic), 36)
+        self.assertTrue(len(concept2.external_id), 36)
+        self.assertTrue(len(concept2.names.first().external_id), 36)
+        self.assertTrue(len(concept2.descriptions.first().external_id), 36)
+
+        self.assertNotEqual(concept1.mnemonic, concept2.mnemonic)
+        self.assertNotEqual(concept1.external_id, concept2.external_id)
+        self.assertNotEqual(concept1.names.first().external_id, concept2.names.first().external_id)
+        self.assertNotEqual(concept1.descriptions.first().external_id, concept2.descriptions.first().external_id)
+
+        concept3 = Concept.persist_new({
+            **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'parent': source, 'mnemonic': None,
+            'names': [
+                ConceptNameFactory.build(
+                    locale='en', name='English', locale_preferred=True, external_id='name-ext-id')
+            ],
+            'descriptions': [
+                ConceptDescriptionFactory.build(
+                    locale='en', name='English', locale_preferred=True, external_id='desc-ext-id')
+            ]
+        })
+
+        self.assertEqual(concept3.errors, {})
+        self.assertTrue(concept3.names.first().external_id, 'name-ext-id')
+        self.assertTrue(concept3.descriptions.first().external_id, 'desc-ext-id')
 
     def test_hierarchy_one_parent_child(self):
         parent_concept = ConceptFactory(
@@ -745,7 +802,7 @@ class ConceptTest(OCLTestCase):
         self.assertEqual(concept_version.mnemonic, concept.mnemonic)
         self.assertFalse(concept_version.released)
 
-    def test_persist_clone(self):
+    def test_save_as_new_version(self):
         es_description = ConceptDescriptionFactory.build(locale='es', name='Not English')
         en_description = ConceptDescriptionFactory.build(locale='en', name='English')
         en_name = ConceptNameFactory.build(locale='en', name='English')
@@ -764,13 +821,9 @@ class ConceptTest(OCLTestCase):
         )
         source_version0.concepts.add(concept)
         cloned_concept = Concept.version_for_concept(concept, 'v1', source_head)
+        cloned_concept.datatype = 'foobar'
 
-        self.assertEqual(
-            Concept.persist_clone(cloned_concept),
-            {'version_created_by': 'Must specify which user is attempting to create a new concept version.'}
-        )
-
-        self.assertEqual(Concept.persist_clone(cloned_concept, concept.created_by), {})
+        self.assertEqual(cloned_concept.save_as_new_version(concept.created_by), {})
 
         persisted_concept = Concept.objects.filter(
             mnemonic=cloned_concept.mnemonic, version=cloned_concept.version
@@ -794,7 +847,9 @@ class ConceptTest(OCLTestCase):
             **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'c1', 'parent': source,
             'names': [ConceptNameFactory.build(locale='en', name='English', locale_preferred=True)]
         })
-        Concept.persist_clone(concept.clone(), concept.created_by)
+        concept_v1 = concept.clone()
+        concept_v1.datatype = 'foobar'
+        concept_v1.save_as_new_version(concept.created_by)
         concept_v1 = Concept.objects.order_by('-created_at').first()
         concept.refresh_from_db()
 
@@ -826,7 +881,9 @@ class ConceptTest(OCLTestCase):
             **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'c1', 'parent': source, 'retired': True,
             'names': [ConceptNameFactory.build(locale='en', name='English', locale_preferred=True)]
         })
-        Concept.persist_clone(concept.clone(), concept.created_by)
+        concept_v1 = concept.clone()
+        concept_v1.datatype = 'foobar'
+        concept_v1.save_as_new_version(concept.created_by)
         concept_v1 = Concept.objects.order_by('-created_at').first()
         concept.refresh_from_db()
 
@@ -1134,7 +1191,8 @@ class ConceptTest(OCLTestCase):
             version='v2', mnemonic=source.mnemonic, organization=source.organization)
 
         cloned_concept = Concept.version_for_concept(concept, 'v1', source)
-        Concept.persist_clone(cloned_concept, concept.created_by)
+        cloned_concept.datatype = 'foobar'
+        cloned_concept.save_as_new_version(concept.created_by)
 
         self.assertEqual(concept.versions.count(), 2)
 
@@ -1174,7 +1232,8 @@ class ConceptTest(OCLTestCase):
         OrganizationSourceFactory(
             version='v2', mnemonic=source.mnemonic, organization=source.organization)
         cloned_concept = Concept.version_for_concept(concept, 'v1', source)
-        Concept.persist_clone(cloned_concept, concept.created_by)
+        cloned_concept.datatype = 'foobar'
+        cloned_concept.save_as_new_version(concept.created_by)
         self.assertEqual(concept.versions.count(), 2)
 
         concept_v1 = concept.get_latest_version()
@@ -1284,87 +1343,37 @@ class ConceptTest(OCLTestCase):
     @patch('core.common.checksums.Checksum.generate')
     def test_checksum(self, checksum_generate_mock):
         checksum_generate_mock.side_effect = [
-            'meta-checksum', 'names-checksum', 'descriptions-checksum', 'mappings-checksum', 'all-checksum'
+            'standard-checksum', 'smart-checksum'
         ]
         concept = ConceptFactory()
 
         self.assertEqual(concept.checksums, {})
-        self.assertEqual(concept.checksum, 'meta-checksum')
+        self.assertEqual(concept.checksum, 'standard-checksum')
         self.assertEqual(
             concept.checksums,
             {
-                'meta': 'meta-checksum',
-                'names': 'names-checksum',
-                'descriptions': 'descriptions-checksum',
-                'mappings': 'mappings-checksum',
-                'repo_versions': None,
-                'all': 'all-checksum'
+                'standard': 'standard-checksum',
+                'smart': 'smart-checksum',
             }
         )
         checksum_generate_mock.assert_called()
 
-    @patch('core.common.checksums.Checksum.generate')
-    def test_mappings_checksum(self, checksum_generate_mock):
-        checksum_generate_mock.return_value = 'checksum'
-        parent = OrganizationSourceFactory()
-        concept = ConceptFactory(parent=parent)
-        MappingFactory(from_concept=concept, parent=parent, checksums={'meta': 'm1-checksum'})
-        MappingFactory(from_concept=concept, parent=parent, checksums={'meta': 'm2-checksum'})
-        MappingFactory(from_concept=concept, parent=parent, checksums={'meta': 'm3-checksum'}, retired=True)
-
-        self.assertEqual(concept.mappings_checksum, 'checksum')
-        checksum_generate_mock.assert_called_once()
-        self.assertCountEqual(checksum_generate_mock.call_args[0][0], ['m1-checksum', 'm2-checksum'])
-
-    @patch('core.common.checksums.Checksum.generate')
-    def test_names_checksum(self, checksum_generate_mock):
-        checksum_generate_mock.return_value = 'checksum'
-        concept = ConceptFactory()
-        ConceptNameFactory(concept=concept, checksums={'meta': 'n1-checksum'})
-        ConceptNameFactory(concept=concept, checksums={'meta': 'n2-checksum'})
-
-        self.assertEqual(concept.names_checksum, 'checksum')
-
-        checksum_generate_mock.assert_called_once_with(['n1-checksum', 'n2-checksum'])
-
-    @patch('core.common.checksums.Checksum.generate')
-    def test_descriptions_checksum(self, checksum_generate_mock):
-        checksum_generate_mock.return_value = 'checksum'
-        concept = ConceptFactory()
-        ConceptDescriptionFactory(concept=concept, checksums={'meta': 'd1-checksum'})
-        ConceptDescriptionFactory(concept=concept, checksums={'meta': 'd2-checksum'})
-
-        self.assertEqual(concept.descriptions_checksum, 'checksum')
-
-        checksum_generate_mock.assert_called_once_with(['d1-checksum', 'd2-checksum'])
-
     def test_get_checksums(self):
         parent = OrganizationSourceFactory()
         concept = ConceptFactory(parent=parent)
-        description = ConceptDescriptionFactory(concept=concept)
-        name = ConceptNameFactory(concept=concept)
-        mapping = MappingFactory(from_concept=concept, parent=parent)
+        ConceptDescriptionFactory(concept=concept)
+        ConceptNameFactory(concept=concept)
+        MappingFactory(from_concept=concept, parent=parent)
 
         checksums = concept.get_checksums()
         concept.refresh_from_db()
-        description.refresh_from_db()
-        name.refresh_from_db()
-        mapping.refresh_from_db()
 
         self.assertEqual(
             checksums,
-            {'meta': ANY, 'names': ANY, 'descriptions': ANY, 'mappings': ANY, 'repo_versions': ANY, 'all': ANY}
+            {'standard': ANY, 'smart': ANY}
         )
-        self.assertTrue(checksums['meta'] == concept.checksums['meta'] == concept.checksum)
-        self.assertTrue(checksums['names'] == concept.names_checksum)
-        self.assertTrue(checksums['descriptions'] == concept.descriptions_checksum)
-        self.assertTrue(checksums['mappings'] == concept.mappings_checksum)
-        self.assertTrue(checksums['repo_versions'] == concept.source_versions_checksum)
-        self.assertTrue(checksums['all'] == concept.checksums['all'])
-
-        self.assertEqual(name.checksums, {'meta': ANY})
-        self.assertEqual(description.checksums, {'meta': ANY})
-        self.assertEqual(mapping.checksums, {'meta': ANY})
+        self.assertTrue(checksums['standard'] == concept.checksums['standard'] == concept.checksum)
+        self.assertTrue(checksums['smart'] == concept.checksums['smart'])
 
 
 class OpenMRSConceptValidatorTest(OCLTestCase):

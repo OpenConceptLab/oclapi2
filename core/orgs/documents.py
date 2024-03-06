@@ -14,6 +14,7 @@ class OrganizationDocument(Document):
         settings = {'number_of_shards': 1, 'number_of_replicas': 0}
 
     last_update = fields.DateField(attr='updated_at')
+    updated_by = fields.KeywordField(attr='updated_by.username')
     public_can_view = fields.BooleanField(attr='public_can_view')
     name = fields.TextField(attr='name')
     _name = fields.KeywordField(attr='name', normalizer='lowercase')
