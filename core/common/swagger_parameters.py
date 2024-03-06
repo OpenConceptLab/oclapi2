@@ -183,3 +183,13 @@ cascade_view_hierarchy = openapi.Parameter(
     enum=['', 'hierarchy'],
     description='Hierarchy (nested) or Flat Response'
 )
+task_state_param = openapi.Parameter(
+    'state',
+    openapi.IN_QUERY,
+    description="filter by states - PENDING,STARTED,RETRY,SUCCESS,FAILED,REVOKED",
+    type=openapi.TYPE_STRING
+)
+task_start_date_param = openapi.Parameter(
+    'start_date', openapi.IN_QUERY, type=openapi.TYPE_STRING, format='YYYY-MM-DD', required=False,
+    description='filter by start date of tasks'
+)

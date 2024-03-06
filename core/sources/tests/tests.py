@@ -1238,6 +1238,7 @@ class TasksTest(OCLTestCase):
     @patch('core.sources.models.Source.index_children')
     @patch('core.common.tasks.export_source')
     def test_seed_children_task_with_export(self, export_source_task, index_children_mock):
+        export_source_task.__name__ = 'export_source'
         source = OrganizationSourceFactory()
         ConceptFactory(parent=source)
         MappingFactory(parent=source)
@@ -1251,7 +1252,7 @@ class TasksTest(OCLTestCase):
 
         self.assertEqual(source_v1.concepts.count(), 1)
         self.assertEqual(source_v1.mappings.count(), 1)
-        export_source_task.delay.assert_called_once_with(source_v1.id)
+        export_source_task.apply_async.assert_called_once_with((source_v1.id,), task_id=ANY, queue='default')
         index_children_mock.assert_called_once()
 
     def test_update_source_active_mappings_count(self):

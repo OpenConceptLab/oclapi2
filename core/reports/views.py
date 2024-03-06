@@ -10,6 +10,8 @@ from rest_framework.views import APIView
 
 from core.common.tasks import resources_report
 from core.common.views import BaseAPIView
+from core.tasks.models import Task
+from core.tasks.serializers import TaskBriefSerializer
 from core.users.reports import UserReport
 
 
@@ -37,15 +39,13 @@ class ResourcesReportJobView(APIView):  # pragma: no cover
         )
     )
     def post(request):
-        task = resources_report.delay(request.data.get('start_date'), request.data.get('end_date'))
-        return Response(
-            {
-                'task': task.id,
-                'state': task.state,
-                'queue': task.queue or 'default'
-            },
-            status=status.HTTP_202_ACCEPTED
-        )
+        task = Task.make_new(queue='default', user=request.user, name=resources_report.__name__)
+        resources_report.apply_async(
+            (request.data.get('start_date'), request.data.get('end_date')), queue=task.queue, task_id=task.id)
+
+        task.refresh_from_db()
+
+        return Response(TaskBriefSerializer(task).data, status=status.HTTP_202_ACCEPTED)
 
 
 class AuthoredView(BaseAPIView):  # pragma: no cover

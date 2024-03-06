@@ -40,6 +40,7 @@ from core.concepts.serializers import (
     ConceptVersionListSerializer, ConceptSummarySerializer, ConceptMinimalSerializer,
     ConceptChildrenSerializer, ConceptParentsSerializer, ConceptLookupListSerializer)
 from core.mappings.serializers import MappingListSerializer
+from core.tasks.models import Task
 from core.toggles.models import Toggle
 
 TRUTHY = get_truthy_values()
@@ -353,7 +354,8 @@ class ConceptRetrieveUpdateDestroyView(ConceptBaseView, RetrieveAPIView, UpdateA
 
         if is_hard_delete_requested:
             if self.is_async_requested():
-                delete_concept.delay(concept.id)
+                task = Task.make_new(queue='default', user=request.user, name=delete_concept.__name__)
+                delete_concept.apply_async((concept.id,), queue=task.queue, task_id=task.id)
                 return Response(status=status.HTTP_204_NO_CONTENT)
             concept.delete()
             parent.update_concepts_count()
@@ -720,8 +722,8 @@ class ConceptsHierarchyAmendAdminView(APIView):  # pragma: no cover
         concept_map = request.data
         if not concept_map:
             return Response(status=status.HTTP_400_BAD_REQUEST)
-
-        result = make_hierarchy.delay(concept_map)
+        task = Task.make_new(queue='default', user=request.user, name=make_hierarchy.__name__)
+        result = make_hierarchy.apply_async((concept_map,), queue=task.queue, task_id=task.id)
 
         return Response(
             {

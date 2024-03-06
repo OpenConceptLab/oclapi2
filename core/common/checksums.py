@@ -40,7 +40,7 @@ class ChecksumModel(models.Model):
             calculate_checksums(self.__class__.__name__, self.id)
             self.refresh_from_db()
         else:
-            calculate_checksums.delay(self.__class__.__name__, self.id)
+            calculate_checksums.apply_async((self.__class__.__name__, self.id), queue='default', permanent=False)
 
     def has_all_checksums(self):
         return self.has_standard_checksum() and self.has_smart_checksum()

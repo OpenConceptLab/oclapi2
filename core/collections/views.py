@@ -57,13 +57,16 @@ from core.common.swagger_parameters import q_param, compress_header, page_param,
 from core.common.tasks import add_references, export_collection, delete_collection, index_expansion_concepts, \
     index_expansion_mappings
 from core.common.utils import compact_dict_by_values, parse_boolean_query_param
-from core.common.views import BaseAPIView, BaseLogoView, ConceptContainerExtraRetrieveUpdateDestroyView, TaskMixin
+from core.common.views import BaseAPIView, BaseLogoView, ConceptContainerExtraRetrieveUpdateDestroyView
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept
 from core.concepts.search import ConceptFacetedSearch
 from core.mappings.documents import MappingDocument
 from core.mappings.models import Mapping
 from core.mappings.search import MappingFacetedSearch
+from core.tasks.mixins import TaskMixin
+from core.tasks.models import Task
+from core.tasks.serializers import TaskListSerializer
 from core.toggles.models import Toggle
 
 logger = logging.getLogger('oclapi')
@@ -835,18 +838,17 @@ class ExpansionResourcesIndexView(CollectionVersionExpansionBaseView):
 
     def post(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         expansion = self.get_object()
+        user = self.request.user
+        task_func = index_expansion_concepts if self.resource == 'concepts' else index_expansion_mappings
+        task = Task.make_new(queue='indexing', user=user, name=task_func.__name__)
         try:
-            if self.resource == 'concepts':
-                result = index_expansion_concepts.delay(expansion.id)
-            else:
-                result = index_expansion_mappings.delay(expansion.id)
+            task_func.apply_async((expansion.id,), task_id=task.id, queue=task.queue)
         except AlreadyQueued:
+            if task:
+                task.delete()
             return Response({'detail': 'Already Queued'}, status=status.HTTP_409_CONFLICT)
 
-        return Response(
-            {'state': result.state, 'username': self.request.user.username, 'task': result.task_id, 'queue': 'default'},
-            status=status.HTTP_202_ACCEPTED
-        )
+        return Response(TaskListSerializer(task).data, status=status.HTTP_202_ACCEPTED)
 
 
 class ExpansionConceptsIndexView(ExpansionResourcesIndexView):
@@ -1143,10 +1145,13 @@ class CollectionVersionExportView(ConceptContainerExportMixin, CollectionVersion
 
     def handle_export_version(self):
         version = self.get_object()
+        task = Task.make_new(queue='default', user=self.request.user, name=export_collection.__name__)
         try:
-            export_collection.delay(version.id)
+            export_collection.apply_async((version.id,), task_id=task.id, queue=task.queue)
             return status.HTTP_202_ACCEPTED
         except AlreadyQueued:
+            if task:
+                task.delete()
             return status.HTTP_409_CONFLICT
 
 

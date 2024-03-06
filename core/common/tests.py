@@ -21,7 +21,7 @@ from core.collections.models import CollectionReference
 from core.common.constants import HEAD
 from core.common.tasks import delete_s3_objects, bulk_import_parallel_inline, resources_report, calculate_checksums
 from core.common.utils import (
-    compact_dict_by_values, to_snake_case, flower_get, task_exists, parse_bulk_import_task_id,
+    compact_dict_by_values, to_snake_case, flower_get,
     to_camel_case,
     drop_version, is_versioned_uri, separate_version, to_parent_uri, jsonify_safe, es_get,
     get_resource_class_from_resource_name, flatten_dict, is_csv_file, is_url_encoded_string, to_parent_uri_from_kwargs,
@@ -444,43 +444,6 @@ class UtilsTest(OCLTestCase):
             'http://es:9201/some-url',
             auth=HTTPBasicAuth('es-user', 'es-password'),
             timeout=1
-        )
-
-    @patch('core.common.utils.flower_get')
-    def test_task_exists(self, flower_get_mock):
-        flower_get_mock.return_value = None
-
-        self.assertFalse(task_exists('task-id'))
-        flower_get_mock.assert_called_with('api/task/info/task-id')
-
-        flower_get_mock.return_value = Mock(status_code=400)
-
-        self.assertFalse(task_exists('task-id'))
-        flower_get_mock.assert_called_with('api/task/info/task-id')
-
-        flower_get_mock.return_value = Mock(status_code=200, text=None)
-
-        self.assertFalse(task_exists('task-id'))
-        flower_get_mock.assert_called_with('api/task/info/task-id')
-
-        flower_get_mock.return_value = Mock(status_code=200, text='Success')
-
-        self.assertTrue(task_exists('task-id'))
-        flower_get_mock.assert_called_with('api/task/info/task-id')
-
-    def test_parse_bulk_import_task_id(self):
-        task_uuid = str(uuid.uuid4())
-
-        task_id = f"{task_uuid}-username~queue"
-        self.assertEqual(
-            parse_bulk_import_task_id(task_id),
-            {'uuid': task_uuid + '-', 'username': 'username', 'queue': 'queue'}
-        )
-
-        task_id = f"{task_uuid}-username"
-        self.assertEqual(
-            parse_bulk_import_task_id(task_id),
-            {'uuid': task_uuid + '-', 'username': 'username', 'queue': 'default'}
         )
 
     def test_drop_version(self):

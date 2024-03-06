@@ -29,10 +29,11 @@ from core.common.tasks import seed_children_to_expansion, batch_index_resources,
 from core.common.utils import drop_version, to_owner_uri, generate_temp_version, es_id_in, \
     get_resource_class_from_resource_name, to_snake_case, \
     es_to_pks, batch_qs, split_list_by_condition, decode_string, is_canonical_uri, encode_string, \
-    get_truthy_values, get_falsy_values
+    get_truthy_values, get_falsy_values, get_current_authorized_user
 from core.concepts.constants import LOCALES_FULLY_SPECIFIED
 from core.concepts.models import Concept
 from core.mappings.models import Mapping
+from core.tasks.models import Task
 
 TRUTHY = get_truthy_values()
 FALSEY = get_falsy_values()
@@ -1020,20 +1021,32 @@ class Expansion(BaseResourceModel):
             if get(settings, 'TEST_MODE', False):
                 index_expansion_concepts(self.id)
             else:
+                task = None
                 try:
-                    index_expansion_concepts.apply_async((self.id, ), queue='indexing')
+                    task = Task.make_new(
+                        queue='indexing', user=get_current_authorized_user() or self.updated_by,
+                        name=index_expansion_concepts.__name__
+                    )
+                    index_expansion_concepts.apply_async((self.id, ), task_id=task.id, queue=task.queue)
                 except AlreadyQueued:
-                    pass
+                    if task:
+                        task.delete()
 
     def index_mappings(self):
         if self.mappings.exists():
             if get(settings, 'TEST_MODE', False):
                 index_expansion_mappings(self.id)
             else:
+                task = None
                 try:
-                    index_expansion_mappings.apply_async((self.id, ), queue='indexing')
+                    task = Task.make_new(
+                        queue='indexing', user=get_current_authorized_user() or self.updated_by,
+                        name=index_expansion_mappings.__name__
+                    )
+                    index_expansion_mappings.apply_async((self.id, ), task_id=task.id, queue=task.queue)
                 except AlreadyQueued:
-                    pass
+                    if task:
+                        task.delete()
 
     @staticmethod
     def to_ref_list(references):
@@ -1063,14 +1076,14 @@ class Expansion(BaseResourceModel):
                 index_concepts = True
                 filters = {'versioned_object_id__in': list(concepts.values_list('versioned_object_id', flat=True))}
                 self.concepts.set(self.concepts.exclude(**filters))
-                batch_index_resources.apply_async(('concept', filters), queue='indexing')
+                batch_index_resources.apply_async(('concept', filters), queue='indexing', permanent=False)
             mappings = reference.mappings
             if mappings.exists():
                 any_ref_with_resources = True
                 index_mappings = True
                 filters = {'versioned_object_id__in': list(mappings.values_list('versioned_object_id', flat=True))}
                 self.mappings.set(self.mappings.exclude(**filters))
-                batch_index_resources.apply_async(('mapping', filters), queue='indexing')
+                batch_index_resources.apply_async(('mapping', filters), queue='indexing', permanent=False)
 
         if index_concepts:
             self.index_concepts()
@@ -1083,7 +1096,7 @@ class Expansion(BaseResourceModel):
             if get(settings, 'TEST_MODE', False):
                 readd_task(self.id, removed_reference_ids)
             else:
-                readd_task.apply_async((self.id, removed_reference_ids), queue='default')
+                readd_task.apply_async((self.id, removed_reference_ids), queue='default', permanent=False)
 
     def delete_expressions(self, expressions):  # Deprecated: Old way, must use delete_references instead
         concepts_filters = None
@@ -1101,8 +1114,8 @@ class Expansion(BaseResourceModel):
             self.mappings.set(self.mappings.exclude(**mappings_filters))
 
         if not get(settings, 'TEST_MODE', False):
-            batch_index_resources.apply_async(('concept', concepts_filters), queue='indexing')
-            batch_index_resources.apply_async(('mapping', mappings_filters), queue='indexing')
+            batch_index_resources.apply_async(('concept', concepts_filters), queue='indexing', permanent=False)
+            batch_index_resources.apply_async(('mapping', mappings_filters), queue='indexing', permanent=False)
 
     def add_references(self, references, index=True, is_adding_all=False, attempt_reevaluate=True):  # pylint: disable=too-many-locals,too-many-statements
         include_refs, exclude_refs = self.to_ref_list_separated(references)
@@ -1270,7 +1283,7 @@ class Expansion(BaseResourceModel):
         if get(settings, 'TEST_MODE', False) or sync:
             seed_children_to_expansion(expansion.id, index)
         else:
-            seed_children_to_expansion.delay(expansion.id, index)
+            seed_children_to_expansion.apply_async((expansion.id, index), queue='indexing', permanent=False)
 
         return expansion
 

@@ -187,14 +187,14 @@ class UserProfileTest(OCLTestCase):
         user = UserProfile(id=189)
         user.send_verification_email()
 
-        mail_mock.delay.assert_called_once_with(189)
+        mail_mock.apply_async.assert_called_once_with((189,), queue='default', permanent=False)
 
     @patch('core.users.models.send_user_reset_password_email')
     def test_send_reset_password_email(self, mail_mock):
         user = UserProfile(id=189)
         user.send_reset_password_email()
 
-        mail_mock.delay.assert_called_once_with(189)
+        mail_mock.apply_async.assert_called_once_with((189,), queue='default', permanent=False)
 
     def test_email_verification_url(self):
         user = UserProfile(id=189, username='foobar', verification_token='some-token')

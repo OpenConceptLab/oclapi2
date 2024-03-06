@@ -1,33 +1,68 @@
 from drf_yasg.utils import swagger_auto_schema
-from rest_framework import status
-from rest_framework.permissions import IsAuthenticated
-from rest_framework.response import Response
-from rest_framework.views import APIView
+from pydash import compact
+from rest_framework.generics import RetrieveAPIView, DestroyAPIView
+from rest_framework.permissions import IsAuthenticated, IsAdminUser
 
-from core.common.utils import flower_get
-from core.tasks.serializers import FlowerTaskSerializer
+from core.common.exceptions import Http400
+from core.common.mixins import ListWithHeadersMixin
+from core.common.swagger_parameters import page_param, verbose_param, task_state_param, limit_param, \
+    task_start_date_param, q_param
+from core.common.utils import from_string_to_date
+from core.common.views import BaseAPIView
+from core.tasks.models import Task
+from core.tasks.serializers import TaskDetailSerializer, TaskListSerializer
 
 
-class AbstractTaskView(APIView):
-    permission_classes = (IsAuthenticated, )
-    FLOWER_URL = 'api/task/info/{}'
+class AbstractTaskView(BaseAPIView, RetrieveAPIView):
+    queryset = Task.objects.filter()
+    is_searchable = False
+    permission_classes = (IsAuthenticated,)
+    default_qs_sort_attr = '-created_at'
 
-    @swagger_auto_schema(responses={200: FlowerTaskSerializer()})
-    def get(self, _, task_id):
+    def get_serializer_class(self):
+        return TaskDetailSerializer if self.is_verbose() else TaskListSerializer
+
+    def get_queryset(self):
+        states = compact((self.request.query_params.get('state', None) or '').split(','))
+        start_date = from_string_to_date(self.request.query_params.get('start_date', None))
+        search_str = self.request.query_params.get('q', None)
+        queryset = self.queryset.filter(started_at__gte=start_date) if start_date else self.queryset
+
+        if states:
+            queryset = queryset.filter(state__in=states)
+        if search_str:
+            queryset = queryset.filter(name__icontains=search_str)
+
+        return queryset.order_by('-created_at')
+
+
+class AbstractTaskListView(AbstractTaskView, ListWithHeadersMixin):
+    @swagger_auto_schema(
+        manual_parameters=[q_param, task_state_param, task_start_date_param, page_param, limit_param, verbose_param]
+    )
+    def get(self, request, *args, **kwargs):
+        return self.list(request, *args, **kwargs)
+
+
+class TaskView(AbstractTaskView, DestroyAPIView):
+    lookup_field = 'id'
+    lookup_url_kwarg = 'task_id'
+
+    def perform_destroy(self, instance):
+        if not instance.has_access(self.request.user):
+            self.permission_denied(self.request)
+        if instance.is_finished():
+            raise Http400('Task is already finished.')
         try:
-            res = flower_get(self.FLOWER_URL.format(task_id))
-        except Exception as ex:  # pylint: disable=broad-except
-            return Response(f"{str(ex)}", status=status.HTTP_400_BAD_REQUEST)
-        if res.status_code != 200:
-            return Response(status=res.status_code)
-        return Response(res.json())
+            instance.revoke()
+        except Exception as ex:
+            raise Http400({'errors': ex.args}) from ex
 
 
-# Returns state of task and gist of result if Task is completed
-class TaskView(AbstractTaskView):
-    FLOWER_URL = 'api/task/info/{}'
+class UserTaskListView(AbstractTaskListView):
+    def get_queryset(self):
+        return super().get_queryset().filter(created_by=self.request.user)
 
 
-# Returns full result
-class TaskResultView(AbstractTaskView):
-    FLOWER_URL = 'api/task/result/{}'
+class TaskListView(AbstractTaskListView):
+    permission_classes = (IsAdminUser,)

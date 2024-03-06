@@ -10,6 +10,7 @@ from rest_framework.views import APIView
 from core.common.swagger_parameters import apps_param, ids_param, resources_body_param, uri_param, filter_param
 from core.common.tasks import rebuild_indexes, populate_indexes, batch_index_resources
 from core.common.utils import get_resource_class_from_resource_name
+from core.tasks.models import Task
 
 
 class BaseESIndexView(APIView):  # pragma: no cover
@@ -22,7 +23,8 @@ class BaseESIndexView(APIView):  # pragma: no cover
         apps = request.data.get('apps', None)
         if apps:
             apps = apps.split(',')
-        result = self.task.delay(apps)
+        task = Task.make_new(queue='indexing', user=request.user, name=self.task.__name__)
+        result = self.task.apply_async((apps,), queue=task.queue, task_id=task.id)
 
         return Response(
             {
@@ -75,6 +77,7 @@ class ResourceIndexView(APIView):
         if get(settings, 'TEST_MODE', False):
             batch_index_resources(resource, filters, update_indexed)
         else:
-            batch_index_resources.delay(resource, filters, update_indexed)
+            task = Task.make_new(queue='indexing', user=self.request.user, name=batch_index_resources.__name__)
+            batch_index_resources.apply_async((resource, filters, update_indexed), queue=task.queue, task_id=task.id)
 
         return Response(status=status.HTTP_202_ACCEPTED)
