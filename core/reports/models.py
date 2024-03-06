@@ -38,12 +38,16 @@ class AbstractReport:
         return self.__class__()
 
     def build_queryset(self):
+        self.queryset = self.make_queryset(self.queryset)
+
+    def make_queryset(self, queryset):
         if self.select_related:
-            self.queryset = self.queryset.select_related(*self.select_related)
+            queryset = queryset.select_related(*self.select_related)
         if self.start_date:
-            self.queryset = self.queryset.filter(created_at__gte=self.start_date)
+            queryset = queryset.filter(created_at__gte=self.start_date)
         if self.end_date:
-            self.queryset = self.queryset.filter(created_at__lte=self.end_date)
+            queryset = queryset.filter(created_at__lte=self.end_date)
+        return queryset
 
     @property
     def count(self):
@@ -107,6 +111,7 @@ class ResourceUsageReport:
         self.concept_version = None
         self.mapping = None
         self.mapping_version = None
+        self.repo = None
         self.stats_row = {}
 
     def build(self):
@@ -116,6 +121,7 @@ class ResourceUsageReport:
         from core.collections.reports import CollectionReport, CollectionVersionReport, ExpansionReport, ReferenceReport
         from core.concepts.reports import ConceptReport, ConceptVersionReport
         from core.mappings.reports import MappingReport, MappingVersionReport
+        from core.repos.reports import RepoReport
 
         self.organization = OrganizationReport(self.start_date, self.end_date)
         self.user = UserReport(self.start_date, self.end_date)
@@ -129,6 +135,7 @@ class ResourceUsageReport:
         self.concept_version = ConceptVersionReport(self.start_date, self.end_date)
         self.mapping = MappingReport(self.start_date, self.end_date)
         self.mapping_version = MappingVersionReport(self.start_date, self.end_date)
+        self.repo = RepoReport(self.start_date, self.end_date)
 
     @property
     def resources(self):
@@ -169,7 +176,7 @@ class ResourceUsageReport:
             ]
         ]
 
-    def generate(self, write_to_file=False):  # pylint: disable=too-many-locals
+    def generate(self, write_to_file=False):  # pylint: disable=too-many-locals,too-many-statements
         self.build()
         buff = io.StringIO()
         writer = csv.writer(buff, dialect='excel', delimiter=',')
@@ -209,6 +216,39 @@ class ResourceUsageReport:
             self.stats_row[resource.id] = stats
             if resource.id == 'mapping_versions':
                 writer.writerow(to_row(self.get_overall_mapping_versions_stats()))
+
+        writer.writerow(blank_row)
+
+        writer.writerow(to_row([self.repo.summary_label]))
+        writer.writerow(to_row(self.repo.SUMMARY_HEADERS))
+        for row in self.repo.to_summary_rows():
+            writer.writerow(to_row(row))
+
+        writer.writerow(blank_row)
+
+        writer.writerow(to_row([self.mapping.summary_label]))
+        writer.writerow(to_row(self.mapping.SUMMARY_HEADERS))
+        mapping_summary_row = self.mapping.to_summary_row()
+        mapping_version_summary_row = self.mapping_version.to_summary_row()
+        writer.writerow(to_row(mapping_summary_row))
+        writer.writerow(to_row(mapping_version_summary_row))
+        writer.writerow(to_row(
+            [
+                'All Mapping Versions',
+                *[
+                    x + y for x, y in zip(
+                        mapping_summary_row[1:],
+                        mapping_version_summary_row[1:],
+                    )
+                ]
+            ]
+        ))
+
+        writer.writerow(blank_row)
+
+        writer.writerow(to_row([self.reference.summary_label]))
+        writer.writerow(to_row(self.reference.SUMMARY_HEADERS))
+        writer.writerow(to_row(self.reference.to_summary_row()))
 
         writer.writerow(blank_row)
 

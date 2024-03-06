@@ -80,6 +80,7 @@ class ReferenceReport(AbstractReport):
     name = 'References'
     id = 'references'
     grouped_label = "New References"
+    summary_label = "Summary of References"
     verbose = False
     grouped = True
     GROUPED_HEADERS = [
@@ -89,6 +90,27 @@ class ReferenceReport(AbstractReport):
         "Subtotal during Period",
         "Total as of Report Date"
     ]
+
+    SUMMARY_HEADERS = [
+        "Created during Period -- with canonical URL",
+        "Created during Period -- no canonical URL",
+        "Subtotal Created during Period",
+        "Active as of Report Date -- with canonical URL",
+        "Active as of Report Date -- no canonical URL",
+        "Total as of Report Date"
+    ]
+
+    def to_summary_row(self):
+        base_queryset = CollectionReference.objects.filter()
+        queryset = self.queryset
+        return [
+            queryset.filter(system__contains=':').count(),
+            queryset.exclude(system__contains=':').count(),
+            queryset.count(),
+            base_queryset.filter(system__contains=':').count(),
+            base_queryset.exclude(system__contains=':').count(),
+            base_queryset.count()
+        ]
 
     @property
     def retired(self):
