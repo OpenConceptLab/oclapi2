@@ -35,7 +35,7 @@ class CustomESFacetedSearch(FacetedSearch):
 
 class CustomESSearch:
     MUST_HAVE_PREFIX = '+'
-    MUST_NOT_HAVE_PREFIX = '-'
+    MUST_NOT_HAVE_PREFIX = ' -'
     MUST_HAVE_REGEX = fr'\{MUST_HAVE_PREFIX}(\w+)'
     MUST_NOT_HAVE_REGEX = fr'\{MUST_NOT_HAVE_PREFIX}(\w+)'
 
