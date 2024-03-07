@@ -182,7 +182,7 @@ class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
         from core.sources.models import Source
         source_versions = []
         for version_url in compact((self.request.query_params.dict().get('source_version', '')).split(',')):
-            source_version = Source.resolve_expression_to_version(version_url)
+            source_version, _ = Source.resolve_expression_to_version(version_url)
             if source_version.id:
                 source_versions.append(source_version)
         self._source_versions = source_versions

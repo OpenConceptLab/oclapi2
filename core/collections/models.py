@@ -825,7 +825,7 @@ class CollectionReference(models.Model):
     def resolve_system_version(self):
         if self.system:
             from core.sources.models import Source
-            version = Source.resolve_reference_expression(self.system, self.namespace, self.version)
+            version, _ = Source.resolve_reference_expression(self.system, self.namespace, self.version)
             if version.id:
                 return version
         return None
@@ -836,7 +836,7 @@ class CollectionReference(models.Model):
         if isinstance(self.valueset, list):
             for valueset in self.valueset:  # pylint: disable=not-an-iterable
                 if valueset:
-                    version = Collection.resolve_reference_expression(valueset, self.namespace)
+                    version, _ = Collection.resolve_reference_expression(valueset, self.namespace)
                     if version.id:
                         versions.append(version)
         return versions
@@ -1129,7 +1129,7 @@ class Expansion(BaseResourceModel):
             for system_version in compact(system_versions.split(',')):
                 _system = system_version.strip()
                 _cache_key = f"NONE-{_system}-NONE"
-                version = ConceptContainerModel.resolve_reference_expression(_system)
+                version, _ = ConceptContainerModel.resolve_reference_expression(_system)
                 _system_version_cache[_cache_key] = version
                 if version.id:
                     include_system_versions.append(version)

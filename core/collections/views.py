@@ -1239,11 +1239,13 @@ class ReferenceExpressionResolveView(APIView):
         from core.common.models import ConceptContainerModel
         results = []
         for expression in data:
-            instance = ConceptContainerModel.resolve_expression_to_version(expression)
+            instance, registry_entry = ConceptContainerModel.resolve_expression_to_version(expression)
             if instance:
                 result = {
                     **ReferenceExpressionResolveSerializer(instance).data,
-                    'request': expression, 'resolution_url': instance.resolution_url
+                    'request': expression,
+                    'resolution_url': instance.resolution_url,
+                    'url_registry_entry': get(registry_entry, 'relative_uri')
                 }
                 if instance.id:
                     from core.sources.serializers import SourceVersionListSerializer

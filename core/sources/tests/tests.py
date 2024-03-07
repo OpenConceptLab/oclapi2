@@ -625,20 +625,20 @@ class SourceTest(OCLTestCase):
         self.assertTrue(source_v1.is_hierarchy_root_belonging_to_self())
 
     def test_resolve_reference_expression_non_existing(self):
-        resolved_source_version = Source.resolve_reference_expression('/some/url/')
+        resolved_source_version, _ = Source.resolve_reference_expression('/some/url/')
         self.assertIsNone(resolved_source_version.id)
         self.assertFalse(resolved_source_version.is_fqdn)
 
-        resolved_source_version = Source.resolve_reference_expression('/some/url/', namespace='/orgs/foo/')
+        resolved_source_version, _ = Source.resolve_reference_expression('/some/url/', namespace='/orgs/foo/')
         self.assertIsNone(resolved_source_version.id)
         self.assertFalse(resolved_source_version.is_fqdn)
 
-        resolved_source_version = Source.resolve_reference_expression('https://some/url/')
+        resolved_source_version, _ = Source.resolve_reference_expression('https://some/url/')
         self.assertIsNone(resolved_source_version.id)
         self.assertEqual(resolved_source_version.version, '')
         self.assertTrue(resolved_source_version.is_fqdn)
 
-        resolved_source_version = Source.resolve_reference_expression(
+        resolved_source_version, _ = Source.resolve_reference_expression(
             'https://some/url/', namespace='/orgs/foo/')
         self.assertIsNone(resolved_source_version.id)
         self.assertTrue(resolved_source_version.is_fqdn)
@@ -650,15 +650,15 @@ class SourceTest(OCLTestCase):
         OrganizationSourceFactory(
             mnemonic='source', canonical_url='https://source.org.com', organization=org, version='v1.0')
 
-        resolved_source_version = Source.resolve_reference_expression('https://source.org.com|v2.0')
+        resolved_source_version, _ = Source.resolve_reference_expression('https://source.org.com|v2.0')
         self.assertIsNone(resolved_source_version.id)
         self.assertTrue(resolved_source_version.is_fqdn)
 
-        resolved_source_version = Source.resolve_reference_expression('https://source.org.com', version='2.0')
+        resolved_source_version, _ = Source.resolve_reference_expression('https://source.org.com', version='2.0')
         self.assertIsNone(resolved_source_version.id)
         self.assertTrue(resolved_source_version.is_fqdn)
 
-        resolved_source_version = Source.resolve_reference_expression('https://source.org.com', version='2.0')
+        resolved_source_version, _ = Source.resolve_reference_expression('https://source.org.com', version='2.0')
         self.assertIsNone(resolved_source_version.id)
         self.assertTrue(resolved_source_version.is_fqdn)
 
@@ -682,7 +682,7 @@ class SourceTest(OCLTestCase):
         OrganizationCollectionFactory(id=8, mnemonic='collection2', organization=org)
         OrganizationCollectionFactory(id=9, mnemonic='collection2', organization=org, version='v1.0', released=False)
 
-        resolved_version = Source.resolve_reference_expression(
+        resolved_version, _ = Source.resolve_reference_expression(
             '/orgs/org/sources/source/', version="v1.0")
         self.assertEqual(resolved_version.id, 2)
         self.assertTrue(isinstance(resolved_version, Source))
@@ -690,14 +690,14 @@ class SourceTest(OCLTestCase):
         self.assertEqual(resolved_version.canonical_url, 'https://source.org.com')
         self.assertFalse(resolved_version.is_fqdn)
 
-        resolved_version = Source.resolve_reference_expression('/orgs/org/sources/source/')
+        resolved_version, _ = Source.resolve_reference_expression('/orgs/org/sources/source/')
         self.assertEqual(resolved_version.id, 3)
         self.assertTrue(isinstance(resolved_version, Source))
         self.assertEqual(resolved_version.version, 'v2.0')
         self.assertEqual(resolved_version.canonical_url, 'https://source.org.com')
         self.assertFalse(resolved_version.is_fqdn)
 
-        resolved_version = Source.resolve_reference_expression(
+        resolved_version, _ = Source.resolve_reference_expression(
             '/orgs/org/sources/source/', namespace='/orgs/org/')
         self.assertEqual(resolved_version.id, 3)
         self.assertTrue(isinstance(resolved_version, Source))
@@ -705,7 +705,7 @@ class SourceTest(OCLTestCase):
         self.assertEqual(resolved_version.canonical_url, 'https://source.org.com')
         self.assertFalse(resolved_version.is_fqdn)
 
-        resolved_version = Source.resolve_reference_expression(
+        resolved_version, _ = Source.resolve_reference_expression(
             '/orgs/org/sources/source/v1.0/', namespace='/orgs/org/')
         self.assertEqual(resolved_version.id, 2)
         self.assertTrue(isinstance(resolved_version, Source))
@@ -713,14 +713,14 @@ class SourceTest(OCLTestCase):
         self.assertEqual(resolved_version.canonical_url, 'https://source.org.com')
         self.assertFalse(resolved_version.is_fqdn)
 
-        resolved_version = Source.resolve_reference_expression(
+        resolved_version, _ = Source.resolve_reference_expression(
             'https://source.org.com', version="v3.0")
         self.assertEqual(resolved_version.id, None)
         self.assertTrue(isinstance(resolved_version, Source))
         self.assertEqual(resolved_version.resolution_url, 'https://source.org.com')
         self.assertTrue(resolved_version.is_fqdn)
 
-        resolved_version = Source.resolve_reference_expression(
+        resolved_version, _ = Source.resolve_reference_expression(
             'https://source.org.com', version="v3.0", namespace='/orgs/org/')
         self.assertEqual(resolved_version.id, 4)
         self.assertTrue(isinstance(resolved_version, Source))
@@ -728,17 +728,17 @@ class SourceTest(OCLTestCase):
         self.assertEqual(resolved_version.canonical_url, 'https://source.org.com')
         self.assertTrue(resolved_version.is_fqdn)
 
-        resolved_version = Source.resolve_reference_expression('https://source.org.com')
+        resolved_version, _ = Source.resolve_reference_expression('https://source.org.com')
         self.assertEqual(resolved_version.id, None)
 
-        resolved_version = Source.resolve_reference_expression('https://source.org.com', namespace='/orgs/org/')
+        resolved_version, _ = Source.resolve_reference_expression('https://source.org.com', namespace='/orgs/org/')
         self.assertEqual(resolved_version.id, 3)
         self.assertTrue(isinstance(resolved_version, Source))
         self.assertEqual(resolved_version.version, 'v2.0')
         self.assertEqual(resolved_version.canonical_url, 'https://source.org.com')
         self.assertTrue(resolved_version.is_fqdn)
 
-        resolved_version = Source.resolve_reference_expression(
+        resolved_version, _ = Source.resolve_reference_expression(
             'https://source.org.com|v1.0', namespace='/orgs/org/')
         self.assertEqual(resolved_version.id, 2)
         self.assertTrue(isinstance(resolved_version, Source))
@@ -746,7 +746,7 @@ class SourceTest(OCLTestCase):
         self.assertEqual(resolved_version.canonical_url, 'https://source.org.com')
         self.assertTrue(resolved_version.is_fqdn)
 
-        resolved_version = Source.resolve_reference_expression(
+        resolved_version, _ = Source.resolve_reference_expression(
             '/orgs/org/collections/collection/concepts/?q=foobar', namespace='/orgs/org/')
         self.assertEqual(resolved_version.id, 6)
         self.assertTrue(isinstance(resolved_version, Collection))
@@ -754,7 +754,7 @@ class SourceTest(OCLTestCase):
         self.assertEqual(resolved_version.canonical_url, None)
         self.assertFalse(resolved_version.is_fqdn)
 
-        resolved_version = Source.resolve_reference_expression(
+        resolved_version, _ = Source.resolve_reference_expression(
             '/orgs/org/collections/collection/concepts/123/', namespace='/orgs/org/', version='v2.0')
         self.assertEqual(resolved_version.id, 7)
         self.assertTrue(isinstance(resolved_version, Collection))
@@ -762,7 +762,7 @@ class SourceTest(OCLTestCase):
         self.assertEqual(resolved_version.canonical_url, None)
         self.assertFalse(resolved_version.is_fqdn)
 
-        resolved_version = Source.resolve_reference_expression(
+        resolved_version, _ = Source.resolve_reference_expression(
             '/orgs/org/collections/collection2/', namespace='/orgs/org/')
         self.assertEqual(resolved_version.id, 8)
         self.assertTrue(isinstance(resolved_version, Collection))
@@ -770,19 +770,20 @@ class SourceTest(OCLTestCase):
         self.assertEqual(resolved_version.canonical_url, None)
         self.assertFalse(resolved_version.is_fqdn)
 
-    def test_resolve_reference_expression_with_canonical_url(self):
+    def test_resolve_reference_expression_with_canonical_url(self):  # pylint:disable=too-many-statements,too-many-locals
         org1 = OrganizationFactory(mnemonic='org1')
         org2 = OrganizationFactory(mnemonic='org2')
-        OrganizationURLRegistryFactory(organization=org1, url='https://source1.com', namespace=org1.uri)
-        OrganizationURLRegistryFactory(organization=org1, url='https://source2.com', namespace=org1.uri)
-        OrganizationURLRegistryFactory(organization=org1, url='https://source3.com')
-        OrganizationURLRegistryFactory(organization=org1, url='https://unknown1.com', namespace=org2.uri)
-        OrganizationURLRegistryFactory(organization=org1, url='https://source6.com', namespace=org1.uri)
-        GlobalURLRegistryFactory(url='https://source1.com', namespace=org1.uri)
+        org1_entry1 = OrganizationURLRegistryFactory(organization=org1, url='https://source1.com', namespace=org1.uri)
+        org1_entry2 = OrganizationURLRegistryFactory(organization=org1, url='https://source2.com', namespace=org1.uri)
+        org1_entry3 = OrganizationURLRegistryFactory(organization=org1, url='https://source3.com')
+        org1_entry_unknown1 = OrganizationURLRegistryFactory(
+            organization=org1, url='https://unknown1.com', namespace=org2.uri)
+        org1_entry6 = OrganizationURLRegistryFactory(organization=org1, url='https://source6.com', namespace=org1.uri)
+        global_entry1 = GlobalURLRegistryFactory(url='https://source1.com', namespace=org1.uri)
         GlobalURLRegistryFactory(url='https://source2.com', namespace=org1.uri)
         GlobalURLRegistryFactory(url='https://source3.com')
-        GlobalURLRegistryFactory(url='https://source4.com', namespace=org2.uri)
-        GlobalURLRegistryFactory(url='https://source6.com', namespace=org2.uri)
+        global_entry4 = GlobalURLRegistryFactory(url='https://source4.com', namespace=org2.uri)
+        global_entry6 = GlobalURLRegistryFactory(url='https://source6.com', namespace=org2.uri)
         GlobalURLRegistryFactory(url='https://unknown2.com', namespace=org2.uri)
         source1 = OrganizationSourceFactory(organization=org1, canonical_url='https://source1.com')
         source2 = OrganizationSourceFactory(organization=org1, canonical_url='https://source2.com')
@@ -792,83 +793,88 @@ class SourceTest(OCLTestCase):
         source6 = OrganizationSourceFactory(organization=org2, canonical_url='https://source6.com')
 
         # should hit owner's url registry
-        self.assertEqual(
-            Source.resolve_reference_expression('https://source1.com', '/orgs/org1/').id,
-            source1.id
-        )
+        resolved_version, resolved_entry = Source.resolve_reference_expression('https://source1.com', '/orgs/org1/')
+        self.assertEqual(resolved_version.id, source1.id)
+        self.assertEqual(resolved_entry.relative_uri, f"/orgs/org1/url-registry/{org1_entry1.id}/")
 
         # should hit global url registry
-        self.assertEqual(
-            Source.resolve_reference_expression('https://source1.com', None).id,
-            source1.id
-        )
+        resolved_version, resolved_entry = Source.resolve_reference_expression('https://source1.com', None)
+        self.assertEqual(resolved_version.id, source1.id)
+        self.assertEqual(resolved_entry.relative_uri,  f"/url-registry/{global_entry1.id}/")
 
         # should hit global url registry
-        self.assertEqual(
-            Source.resolve_reference_expression('https://source1.com', '/').id,
-            source1.id
-        )
+        resolved_version, resolved_entry = Source.resolve_reference_expression('https://source1.com', '/')
+        self.assertEqual(resolved_version.id, source1.id)
+        self.assertEqual(resolved_entry.relative_uri,  f"/url-registry/{global_entry1.id}/")
 
         # should hit org2 registry and then org2 repos and then global url registry
-        self.assertEqual(
-            Source.resolve_reference_expression('https://source1.com', '/orgs/org2/').id,
-            source1.id
-        )
+        resolved_version, resolved_entry = Source.resolve_reference_expression('https://source1.com', '/orgs/org2/')
+        self.assertEqual(resolved_version.id, source1.id)
+        self.assertEqual(resolved_entry.relative_uri, f"/url-registry/{global_entry1.id}/")
 
         # should hit org2 registry and then org2 repos
-        self.assertEqual(
-            Source.resolve_reference_expression('https://source4.com', '/orgs/org2/').id,
-            source4.id
-        )
+        resolved_version, resolved_entry = Source.resolve_reference_expression('https://source4.com', '/orgs/org2/')
+        self.assertEqual(resolved_version.id, source4.id)
+        self.assertEqual(resolved_entry, None)
 
         # should hit org1 registry and then org1 repos and then global url registry
-        self.assertEqual(
-            Source.resolve_reference_expression('https://source4.com', '/orgs/org1/').id,
-            source4.id
-        )
+        resolved_version, resolved_entry = Source.resolve_reference_expression('https://source4.com', '/orgs/org1/')
+        self.assertEqual(resolved_version.id, source4.id)
+        self.assertEqual(resolved_entry.relative_uri, f"/url-registry/{global_entry4.id}/")
 
         # should hit org2 registry and then org2 repos
-        self.assertEqual(
-            Source.resolve_reference_expression('https://source5.com', '/orgs/org2/').id,
-            source5.id
-        )
+        resolved_version, resolved_entry = Source.resolve_reference_expression('https://source5.com', '/orgs/org2/')
+        self.assertEqual(resolved_version.id, source5.id)
+        self.assertEqual(resolved_entry, None)
+
+        # should hit org1 registry
+        resolved_version, resolved_entry = Source.resolve_reference_expression('https://source2.com', '/orgs/org1/')
+        self.assertEqual(resolved_version.id, source2.id)
+        self.assertEqual(resolved_entry.relative_uri, f"/orgs/org1/url-registry/{org1_entry2.id}/")
 
         # should hit org1 registry and then org1 repos and then global registry
-        self.assertEqual(
-            Source.resolve_reference_expression('https://source2.com', '/orgs/org1/').id,
-            source2.id
-        )
-
-        # should hit org1 registry and then org1 repos and then global registry
-        self.assertIsNone(Source.resolve_reference_expression('https://source3.com', '/orgs/org1/').id)
+        resolved_version, resolved_entry = Source.resolve_reference_expression('https://source3.com', '/orgs/org1/')
+        self.assertIsNone(resolved_version.id)
+        self.assertEqual(resolved_entry.relative_uri, f'/orgs/org1/url-registry/{org1_entry3.id}/')
 
         # should hit org2 registry and then org2 repos
-        self.assertEqual(
-            Source.resolve_reference_expression('https://source3.com', '/orgs/org2/').id,
-            source3.id
-        )
+        resolved_version, resolved_entry = Source.resolve_reference_expression('https://source3.com', '/orgs/org2/')
+        self.assertEqual(resolved_version.id, source3.id)
+        self.assertEqual(resolved_entry, None)
 
         # should hit org2 registry and then org2 repos
-        self.assertEqual(
-            Source.resolve_reference_expression('https://source6.com', '/orgs/org2/').id,
-            source6.id
-        )
+        resolved_version, resolved_entry = Source.resolve_reference_expression('https://source6.com', '/orgs/org2/')
+        self.assertEqual(resolved_version.id, source6.id)
+        self.assertEqual(resolved_entry, None)
 
         # should hit global registry
-        self.assertEqual(
-            Source.resolve_reference_expression('https://source6.com', '/').id,
-            source6.id
-        )
+        resolved_version, resolved_entry = Source.resolve_reference_expression('https://source6.com', '/')
+        self.assertEqual(resolved_version.id, source6.id)
+        self.assertEqual(resolved_entry.relative_uri, f"/url-registry/{global_entry6.id}/")
 
         # should hit org1 registry only
-        self.assertIsNone(Source.resolve_reference_expression('https://source6.com', '/orgs/org1/').id)
+        resolved_version, resolved_entry = Source.resolve_reference_expression('https://source6.com', '/orgs/org1/')
+        self.assertIsNone(resolved_version.id)
+        self.assertEqual(resolved_entry, org1_entry6)
 
-        self.assertIsNone(Source.resolve_reference_expression('https://source5.com', '/').id)
-        self.assertIsNone(Source.resolve_reference_expression('https://source5.com', '/orgs/org1/').id)
-        self.assertIsNone(Source.resolve_reference_expression('https://source5.com', 'foobar').id)
-        self.assertIsNone(Source.resolve_reference_expression('https://unknown1.com', '/orgs/org2/').id)
-        self.assertIsNone(Source.resolve_reference_expression('https://unknown1.com', '/orgs/org1/').id)
-        self.assertIsNone(Source.resolve_reference_expression('https://unknown1.com', '/').id)
+        resolved_version, resolved_entry = Source.resolve_reference_expression('https://source5.com', '/')
+        self.assertIsNone(resolved_version.id)
+        self.assertEqual(resolved_entry, None)
+        resolved_version, resolved_entry = Source.resolve_reference_expression('https://source5.com', '/orgs/org1/')
+        self.assertIsNone(resolved_version.id)
+        self.assertEqual(resolved_entry, None)
+        resolved_version, resolved_entry = Source.resolve_reference_expression('https://source5.com', 'foobar')
+        self.assertIsNone(resolved_version.id)
+        self.assertEqual(resolved_entry, None)
+        resolved_version, resolved_entry = Source.resolve_reference_expression('https://unknown1.com', '/orgs/org2/')
+        self.assertIsNone(resolved_version.id)
+        self.assertEqual(resolved_entry, None)
+        resolved_version, resolved_entry = Source.resolve_reference_expression('https://unknown1.com', '/orgs/org1/')
+        self.assertIsNone(resolved_version.id)
+        self.assertEqual(resolved_entry.relative_uri, f"/orgs/org1/url-registry/{org1_entry_unknown1.id}/")
+        resolved_version, resolved_entry = Source.resolve_reference_expression('https://unknown1.com', '/')
+        self.assertIsNone(resolved_version.id)
+        self.assertEqual(resolved_entry, None)
 
     @patch('core.sources.models.Source.batch_index')
     def test_index_children(self, batch_index_mock):

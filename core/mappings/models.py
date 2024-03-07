@@ -352,7 +352,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
             return concept or {'mnemonic': expr.replace(to_parent_uri(expr), '').replace('concepts/', '').split('/')[0]}
 
         def get_source(url):
-            source = Source.resolve_reference_expression(url, None, HEAD)
+            source, _ = Source.resolve_reference_expression(url, None, HEAD)
             if source.id:
                 return source, source.versioned_object_url or source.resolution_url or url
             return None, source.resolution_url or url

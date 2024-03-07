@@ -1019,7 +1019,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     @staticmethod
     def __get_omit_from_version(omit_if_exists_in):
         if omit_if_exists_in:
-            omit_from_version = ConceptContainerModel.resolve_expression_to_version(omit_if_exists_in)
+            omit_from_version, _ = ConceptContainerModel.resolve_expression_to_version(omit_if_exists_in)
             if omit_from_version.id:
                 return omit_from_version
 

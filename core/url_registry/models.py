@@ -49,6 +49,11 @@ class URLRegistry(BaseModel):
             ),
         ]
 
+    @property
+    def relative_uri(self):
+        owner = self.owner
+        return f'{owner.uri}url-registry/{self.id}/' if owner else f'/url-registry/{self.id}/'
+
     def save(self, *args, **kwargs):
         self.clean()
         super().save(*args, **kwargs)

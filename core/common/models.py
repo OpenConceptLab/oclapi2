@@ -877,13 +877,14 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         namespace = None
         version = None
         instance = None
+        resolved_registry_entry = None
         if isinstance(expression, dict) and get(expression, 'url'):
             url = expression['url']
             namespace = expression.get('namespace', None)
             version = expression.get('version', None)
         if url:
-            instance = cls.resolve_reference_expression(url, namespace, version)
-        return instance
+            instance, resolved_registry_entry = cls.resolve_reference_expression(url, namespace, version)
+        return instance, resolved_registry_entry
 
     @classmethod
     def resolve_reference_expression(cls, url, namespace=None, version=None):
@@ -918,9 +919,9 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         criteria = models.Q(is_active=True, retired=False)
 
         from core.url_registry.models import URLRegistry
+        url_registry_entry = None
         if is_canonical:
             if Toggle.get('URL_REGISTRY_IN_RESOLVE_REFERENCE_TOGGLE'):
-                url_registry_entry = None
                 owner = None
                 if not is_global_namespace:
                     owner = SourceContainerMixin.get_object_from_namespace(namespace)
@@ -937,7 +938,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
                     owner = url_registry_entry.namespace_owner
 
                 if instance or not url_registry_entry or not url_registry_entry.namespace or not owner:
-                    return cls.resolve_repo(instance, version, is_canonical, resolution_url)
+                    return cls.resolve_repo(instance, version, is_canonical, resolution_url), url_registry_entry
 
                 criteria &= models.Q(
                     canonical_url=resolution_url, **{
@@ -951,7 +952,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
             criteria &= models.Q(uri=resolution_url)
 
         from core.repos.models import Repository
-        return cls.resolve_repo(Repository.get(criteria), version, is_canonical, resolution_url)
+        return cls.resolve_repo(Repository.get(criteria), version, is_canonical, resolution_url), url_registry_entry
 
     @classmethod
     def resolve_repo(cls, instance, version, is_canonical, resolution_url):
