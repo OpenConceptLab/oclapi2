@@ -176,6 +176,25 @@ class ResourceUsageReport:
             ]
         ]
 
+    @staticmethod
+    def _write_grouped_report(resource, writer, to_row, date_range_label):
+        if resource.grouped and (
+                resource.grouped_queryset.exists() if isinstance(
+                    resource.grouped_queryset, QuerySet
+                ) else len(resource.grouped_queryset) > 0
+        ):
+            writer.writerow(to_row([f"{resource.grouped_label}: {date_range_label}"]))
+            writer.writerow(to_row(resource.GROUPED_HEADERS))
+            for obj in resource.grouped_queryset:
+                writer.writerow(to_row(resource.to_grouped_stat_csv_row(obj)))
+
+    @staticmethod
+    def _write_verbose_report(resource, writer, to_row):
+        writer.writerow(to_row([resource.label]))
+        writer.writerow(to_row(resource.VERBOSE_HEADERS))
+        for obj in resource.queryset.order_by('-created_at'):
+            writer.writerow(to_row(resource.to_csv_row(obj)))
+
     def generate(self, write_to_file=False):  # pylint: disable=too-many-locals,too-many-statements
         self.build()
         buff = io.StringIO()
@@ -223,7 +242,14 @@ class ResourceUsageReport:
         writer.writerow(to_row(self.repo.SUMMARY_HEADERS))
         for row in self.repo.to_summary_rows():
             writer.writerow(to_row(row))
+        writer.writerow(blank_row)
 
+        writer.writerow(to_row([self.reference.summary_label]))
+        writer.writerow(to_row(self.reference.SUMMARY_HEADERS))
+        writer.writerow(to_row(self.reference.to_summary_row()))
+        writer.writerow(blank_row)
+
+        self._write_grouped_report(self.reference, writer, to_row, date_range_label)
         writer.writerow(blank_row)
 
         writer.writerow(to_row([self.mapping.summary_label]))
@@ -243,35 +269,14 @@ class ResourceUsageReport:
                 ]
             ]
         ))
-
         writer.writerow(blank_row)
 
-        writer.writerow(to_row([self.reference.summary_label]))
-        writer.writerow(to_row(self.reference.SUMMARY_HEADERS))
-        writer.writerow(to_row(self.reference.to_summary_row()))
-
+        self._write_grouped_report(self.mapping, writer, to_row, date_range_label)
         writer.writerow(blank_row)
 
         for resource in resources:
             if resource.verbose and resource.queryset.exists():
-                writer.writerow(to_row([resource.label]))
-                writer.writerow(to_row(resource.VERBOSE_HEADERS))
-                for obj in resource.queryset.order_by('-created_at'):
-                    writer.writerow(to_row(resource.to_csv_row(obj)))
-
-                writer.writerow(blank_row)
-
-        for resource in resources:
-            if resource.grouped and (
-                    resource.grouped_queryset.exists() if isinstance(
-                        resource.grouped_queryset, QuerySet
-                    ) else len(resource.grouped_queryset) > 0
-            ):
-                writer.writerow(to_row([f"{resource.grouped_label}: {date_range_label}"]))
-                writer.writerow(to_row(resource.GROUPED_HEADERS))
-                for obj in resource.grouped_queryset:
-                    writer.writerow(to_row(resource.to_grouped_stat_csv_row(obj)))
-
+                self._write_verbose_report(resource, writer, to_row)
                 writer.writerow(blank_row)
 
         buff2 = io.BytesIO(buff.getvalue().encode())
