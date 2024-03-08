@@ -1,3 +1,5 @@
+from django.db import models
+
 from core.collections.models import Collection, Expansion, CollectionReference
 from core.common.constants import HEAD
 from core.reports.models import AbstractReport
@@ -120,10 +122,12 @@ class ReferenceReport(AbstractReport):
         return self.queryset.exclude(cascade__isnull=True).exclude(cascade__in=['', 'none', False])
 
     def get_concepts_queryset(self):
-        return self.queryset.filter(reference_type='concepts').exclude(cascade__isnull=False)
+        return self.queryset.filter(reference_type='concepts').filter(
+            models.Q(cascade__in=['', 'none', False]) | models.Q(cascade__isnull=True))
 
     def get_mappings_queryset(self):
-        return self.queryset.filter(reference_type='mappings').exclude(cascade__isnull=False)
+        return self.queryset.filter(reference_type='mappings').filter(
+            models.Q(cascade__in=['', 'none', False]) | models.Q(cascade__isnull=True))
 
     @property
     def grouped_queryset(self):
