@@ -62,6 +62,9 @@ class MappingDocument(Document):
             },
             'from_concept': {
                 'boost': 3,
+            },
+            'external_id': {
+                'boost': 2.5
             }
         }
 

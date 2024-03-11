@@ -63,6 +63,9 @@ class ConceptDocument(Document):
             'name': {
                 'boost': 15
             },
+            'external_id': {
+                'boost': 10
+            },
             'same_as_map_codes': {
                 'boost': 5.5,
             },
