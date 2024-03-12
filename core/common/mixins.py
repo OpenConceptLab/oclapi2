@@ -768,6 +768,14 @@ class SourceChildMixin(ChecksumModel):
     def remove_locales(self):
         pass
 
+    @staticmethod
+    def get_standard_checksum_error():
+        return {'__all__': [SAME_STANDARD_CHECKSUM_ERROR]}
+
+    @classmethod
+    def is_standard_checksum_error(cls, errors):
+        return errors == cls.get_standard_checksum_error()
+
     def save_as_new_version(self, user, **kwargs):  # pylint: disable=too-many-branches,too-many-statements
         cls = self.__class__
         create_parent_version = kwargs.pop('create_parent_version', True)
@@ -805,7 +813,7 @@ class SourceChildMixin(ChecksumModel):
                         ) and not _hierarchy_processing and self.checksums.get(
                             'standard'
                         ) == prev_latest.get_checksums(recalculate=True).get('standard'):
-                            raise ValidationError({'__all__': [SAME_STANDARD_CHECKSUM_ERROR]})
+                            raise ValidationError(self.get_standard_checksum_error())
                         if not self._index:
                             self.prev_latest_version_id = prev_latest.id
                         prev_latest.unmark_latest_version(self._index, parent)

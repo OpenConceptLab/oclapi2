@@ -522,6 +522,7 @@ class BulkImportInlineTest(OCLTestCase):
         self.assertEqual(len(importer.exists), 0)
         self.assertEqual(len(importer.updated), 0)
         self.assertEqual(len(importer.failed), 0)
+        self.assertEqual(len(importer.unchanged), 0)
         self.assertEqual(len(importer.invalid), 0)
         self.assertEqual(len(importer.others), 0)
         collection = Collection.objects.filter(uri='/orgs/PEPFAR/collections/MER-R-MOH-Facility-FY19/').first()
@@ -542,7 +543,8 @@ class BulkImportInlineTest(OCLTestCase):
         self.assertEqual(len(importer.created), 2)
         self.assertEqual(len(importer.exists), 3)
         self.assertEqual(len(importer.updated), 0)
-        self.assertEqual(len(importer.failed), 4)  # due to same concept checksum
+        self.assertEqual(len(importer.failed), 0)
+        self.assertEqual(len(importer.unchanged), 4)  # due to same concept checksum
         self.assertEqual(len(importer.invalid), 0)
         self.assertEqual(len(importer.others), 0)
         self.assertEqual(len(importer.permission_denied), 0)
@@ -569,7 +571,8 @@ class BulkImportInlineTest(OCLTestCase):
         self.assertEqual(len(importer.created), 49)
         self.assertEqual(len(importer.exists), 3)
         self.assertEqual(len(importer.updated), 1)  # last 11 rows are duplicate rows
-        self.assertEqual(len(importer.failed), 11)
+        self.assertEqual(len(importer.failed), 0)
+        self.assertEqual(len(importer.unchanged), 11)
         self.assertEqual(len(importer.deleted), 0)
         self.assertEqual(len(importer.invalid), 0)
         self.assertEqual(len(importer.others), 0)

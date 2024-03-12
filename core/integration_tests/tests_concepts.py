@@ -239,7 +239,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.status_code, 208)
         self.assertEqual(
             response.data,
             {

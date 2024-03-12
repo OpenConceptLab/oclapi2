@@ -194,6 +194,9 @@ class MappingRetrieveUpdateDestroyView(MappingBaseView, RetrieveAPIView, UpdateA
             if serializer.is_valid():
                 return Response(serializer.data, status=success_status_code)
 
+        if Mapping.is_standard_checksum_error(serializer.errors):
+            return Response(serializer.errors, status=status.HTTP_208_ALREADY_REPORTED)
+
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     def destroy(self, request, *args, **kwargs):

@@ -100,6 +100,7 @@ FAILED = 3
 DELETED = 4
 NOT_FOUND = 5
 PERMISSION_DENIED = 6
+UNCHANGED = 7
 
 
 class BaseResourceImporter:
@@ -428,6 +429,8 @@ class ConceptImporter(BaseResourceImporter):
                     instance=self.instance, data=self.data, user=self.user, create_parent_version=False,
                     add_prev_version_children=False
                 )
+                if errors and Concept.is_standard_checksum_error(errors):
+                    return UNCHANGED
                 return errors or UPDATED
 
             if 'update_comment' in self.data:
@@ -566,6 +569,8 @@ class MappingImporter(BaseResourceImporter):
                 self.instance._counted = None  # pylint: disable=protected-access
                 self.instance._index = False  # pylint: disable=protected-access
                 errors = Mapping.create_new_version_for(self.instance, self.data, self.user)
+                if errors and Mapping.is_standard_checksum_error(errors):
+                    return UNCHANGED
                 return errors or UPDATED
             if 'update_comment' in self.data:
                 self.data['comment'] = self.data['update_comment']
@@ -659,6 +664,7 @@ class BulkImportInline(BaseImporter):
         self.failed = []
         self.exception = []
         self.permission_denied = []
+        self.unchanged = []
         self.others = []
         self.processed = 0
         self.total = len(self.input_list)
@@ -693,6 +699,9 @@ class BulkImportInline(BaseImporter):
             return
         if result == PERMISSION_DENIED:
             self.permission_denied.append(item)
+            return
+        if result == UNCHANGED:
+            self.unchanged.append(item)
             return
 
         print("****Unexpected Result****", result)
@@ -801,6 +810,7 @@ class BulkImportInline(BaseImporter):
         return f"Processed: {self.processed}/{self.total} | Created: {len(self.created)} | " \
             f"Updated: {len(self.updated)} | DELETED: {len(self.deleted)} | Existing: {len(self.exists)} | " \
             f"Permission Denied: {len(self.permission_denied)} | Failed: {len(self.failed)} | " \
+            f"Unchanged (standard checksum): {len(self.unchanged)} | " \
             f"Time: {self.elapsed_seconds}secs"
 
     @property
@@ -817,6 +827,7 @@ class BulkImportInline(BaseImporter):
             'not_found': self.not_found,
             'exception': self.exception,
             'permission_denied': self.permission_denied,
+            'unchanged': self.unchanged,
             'others': self.others,
             'unknown': self.unknown,
             'elapsed_seconds': self.elapsed_seconds
@@ -1038,6 +1049,7 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
             f"Created: {len(result.get('created'))} | Updated: {len(result.get('updated'))} | " \
             f"Deleted: {len(result.get('deleted'))} | Existing: {len(result.get('exists'))} | " \
             f"Permission Denied: {len(result.get('permission_denied'))} | " \
+            f"Unchanged: {len(result.get('unchanged'))} | " \
             f"Time: {self.elapsed_seconds}secs"
 
     @property
@@ -1062,6 +1074,7 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
             'others': [],
             'unknown': [],
             'permission_denied': [],
+            'unchanged': [],
             'elapsed_seconds': self.elapsed_seconds
         }
         for task in self.tasks:

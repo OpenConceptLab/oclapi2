@@ -330,6 +330,9 @@ class ConceptRetrieveUpdateDestroyView(ConceptBaseView, RetrieveAPIView, UpdateA
             if serializer.is_valid():
                 return Response(serializer.data, status=success_status_code)
 
+        if Concept.is_standard_checksum_error(serializer.errors):
+            return Response(serializer.errors, status=status.HTTP_208_ALREADY_REPORTED)
+
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     def is_db_delete_requested(self):
