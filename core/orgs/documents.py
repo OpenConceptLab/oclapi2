@@ -32,7 +32,7 @@ class OrganizationDocument(Document):
 
     @staticmethod
     def get_match_phrase_attrs():
-        return ['name']
+        return ['name', 'mnemonic']
 
     @staticmethod
     def get_exact_match_attrs():

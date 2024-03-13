@@ -34,7 +34,7 @@ class UserProfileDocument(Document):
 
     @staticmethod
     def get_match_phrase_attrs():
-        return ['name']
+        return ['username', 'name']
 
     @staticmethod
     def get_exact_match_attrs():
