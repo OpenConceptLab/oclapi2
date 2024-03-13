@@ -153,6 +153,7 @@ class Task(models.Model):
             return
         task.result = json.dumps(retval, default=str)
         task.state = SUCCESS
+        task.finished_at = timezone.now()
         task.save_common(args, kwargs)
 
     @property
