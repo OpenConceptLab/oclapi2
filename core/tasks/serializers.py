@@ -11,9 +11,11 @@ class FlowerTaskSerializer(Serializer):  # pylint: disable=abstract-method
 
 
 class TaskBriefSerializer(ModelSerializer):
+    task = CharField(source='id')
+
     class Meta:
         model = Task
-        fields = ('id', 'state', 'name', 'queue', 'username')
+        fields = ('id', 'state', 'name', 'queue', 'username', 'task')
 
 
 class TaskListSerializer(TaskBriefSerializer):

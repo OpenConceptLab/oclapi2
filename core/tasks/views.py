@@ -47,6 +47,7 @@ class AbstractTaskListView(AbstractTaskView, ListWithHeadersMixin):
 class TaskView(AbstractTaskView, DestroyAPIView):
     lookup_field = 'id'
     lookup_url_kwarg = 'task_id'
+    pk_field = 'id'
 
     def perform_destroy(self, instance):
         if not instance.has_access(self.request.user):
