@@ -1108,4 +1108,5 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
         self.groups.append(group_result)
         self.tasks += group_result.results
         self.task.children += list({task.task_id for task in self.tasks})
+        self.task.children = list(set(self.task.children))
         self.task.save()
