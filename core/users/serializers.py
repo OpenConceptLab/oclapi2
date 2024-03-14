@@ -10,7 +10,7 @@ from rest_framework.fields import IntegerField
 from rest_framework.validators import UniqueValidator
 
 from core.common.constants import NAMESPACE_REGEX, INCLUDE_SUBSCRIBED_ORGS, INCLUDE_VERIFICATION_TOKEN, \
-    INCLUDE_AUTH_GROUPS
+    INCLUDE_AUTH_GROUPS, INCLUDE_PINS
 from core.users.constants import INVALID_AUTH_GROUP_NAME
 from .models import UserProfile
 from ..common.serializers import AbstractResourceSerializer
@@ -148,6 +148,7 @@ class UserDetailSerializer(AbstractResourceSerializer):
     subscribed_orgs = serializers.SerializerMethodField()
     auth_groups = serializers.ListField(required=False, allow_null=True, allow_empty=True)
     deactivated_at = serializers.DateTimeField(read_only=True)
+    pins = serializers.SerializerMethodField()
 
     class Meta:
         model = UserProfile
@@ -157,7 +158,7 @@ class UserDetailSerializer(AbstractResourceSerializer):
             'url', 'organizations_url', 'extras', 'sources_url', 'collections_url', 'website', 'last_login',
             'logo_url', 'subscribed_orgs', 'is_superuser', 'is_staff', 'first_name', 'last_name', 'verified',
             'verification_token', 'date_joined', 'auth_groups', 'status', 'deactivated_at',
-            'sources', 'collections', 'owned_orgs', 'bookmarks'
+            'sources', 'collections', 'owned_orgs', 'bookmarks', 'pins'
         )
 
     def __init__(self, *args, **kwargs):
@@ -166,6 +167,7 @@ class UserDetailSerializer(AbstractResourceSerializer):
         self.include_subscribed_orgs = self.query_params.get(INCLUDE_SUBSCRIBED_ORGS) in TRUTHY
         self.include_verification_token = self.query_params.get(INCLUDE_VERIFICATION_TOKEN) in TRUTHY
         self.include_auth_groups = self.query_params.get(INCLUDE_AUTH_GROUPS) in TRUTHY
+        self.include_pins = self.query_params.get(INCLUDE_PINS) in TRUTHY
 
         if not self.include_subscribed_orgs:
             self.fields.pop('subscribed_orgs')
@@ -173,6 +175,8 @@ class UserDetailSerializer(AbstractResourceSerializer):
             self.fields.pop('verification_token')
         if not self.include_auth_groups:
             self.fields.pop('auth_groups')
+        if not self.include_pins:
+            self.fields.pop('pins')
 
         super().__init__(*args, **kwargs)
 
@@ -180,6 +184,13 @@ class UserDetailSerializer(AbstractResourceSerializer):
         if self.include_subscribed_orgs:
             from core.orgs.serializers import OrganizationListSerializer
             return OrganizationListSerializer(obj.organizations.all(), many=True).data
+
+        return None
+
+    def get_pins(self, obj):
+        if self.include_pins:
+            from core.pins.serializers import PinSerializer
+            return PinSerializer(obj.pins.prefetch_related('resource').all(), many=True).data
 
         return None
 
