@@ -1074,6 +1074,7 @@ class BulkImportViewTest(OCLAPITestCase):
             [dict(d) for d in response.data],
             [{
                  'id': task_id1,
+                 'task': task_id1,
                  'state': 'SUCCESS',
                  'name': 'core.common.tasks.bulk_import_parallel_inline',
                  'queue': 'priority',
@@ -1098,6 +1099,7 @@ class BulkImportViewTest(OCLAPITestCase):
             sorted([dict(d) for d in response.data], key=lambda x: x['id']),
             sorted([{
                 'id': task_id2,
+                'task': task_id2,
                 'state': 'FAILED',
                 'name': 'core.common.tasks.bulk_import_parallel_inline',
                 'queue': 'normal',
@@ -1110,6 +1112,7 @@ class BulkImportViewTest(OCLAPITestCase):
                 'children': []
             }, {
                 'id': task_id3,
+                'task': task_id3,
                 'state': 'PENDING',
                 'name': 'core.common.tasks.bulk_import_parallel_inline',
                 'queue': 'pending',
@@ -1134,6 +1137,7 @@ class BulkImportViewTest(OCLAPITestCase):
             [dict(d) for d in response.data],
             [{
                 'id': task_id1,
+                'task': task_id1,
                 'state': 'SUCCESS',
                 'name': 'core.common.tasks.bulk_import_parallel_inline',
                 'queue': 'priority',
@@ -1181,6 +1185,7 @@ class BulkImportViewTest(OCLAPITestCase):
         self.assertEqual(
             response.data, {
                 'id': task_id,
+                'task': task_id,
                 'state': 'PENDING',
                 'name': 'core.common.tasks.bulk_import_parallel_inline',
                 'queue': 'normal',
@@ -1245,6 +1250,7 @@ class BulkImportViewTest(OCLAPITestCase):
             response.data,
             {
                 'id': ANY,
+                'task': ANY,
                 'state': 'PENDING',
                 'name': 'bulk_import_parallel_inline',
                 'queue': 'bulk_import_root',
@@ -1278,6 +1284,7 @@ class BulkImportViewTest(OCLAPITestCase):
             response.data,
             {
                 'id': task.id,
+                'task': task.id,
                 'state': 'PENDING',
                 'name': 'bulk_import_parallel_inline',
                 'queue': task.queue,
@@ -1308,6 +1315,7 @@ class BulkImportViewTest(OCLAPITestCase):
             response.data,
             {
                 'id': task.id,
+                'task': task.id,
                 'state': 'PENDING',
                 'name': 'bulk_import_parallel_inline',
                 'queue': task.queue,
@@ -1382,6 +1390,7 @@ class BulkImportViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 202)
         self.assertEqual(response.data, {
                 'id': ANY,
+                'task': ANY,
                 'state': 'PENDING',
                 'name': 'bulk_import_parallel_inline',
                 'queue': 'bulk_import_root',
@@ -1414,6 +1423,7 @@ class BulkImportViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 202)
         self.assertEqual(response.data, {
                 'id': ANY,
+                'task': ANY,
                 'state': 'PENDING',
                 'name': 'bulk_import_inline',
                 'queue': 'bulk_import_root',

@@ -3056,6 +3056,7 @@ class ExpansionConceptsIndexViewTest(OCLAPITestCase):
             response.data,
             {
                 'id': ANY,
+                'task': ANY,
                 'state': 'PENDING',
                 'name': 'index_expansion_concepts_task_mock',
                 'queue': 'indexing',
@@ -3093,6 +3094,7 @@ class ExpansionMappingsIndexViewTest(OCLAPITestCase):
             response.data,
             {
                 'id': ANY,
+                'task': ANY,
                 'state': 'PENDING',
                 'name': 'index_expansion_mappings_task_mock',
                 'queue': 'indexing',
