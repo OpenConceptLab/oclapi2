@@ -342,6 +342,7 @@ class SourceRetrieveUpdateDestroyViewTest(OCLAPITestCase):
             response.data,
             {
                 'id': ANY,
+                'task': ANY,
                 'state': 'PENDING',
                 'queue': 'default',
                 'username': self.user.username,
@@ -1729,6 +1730,7 @@ class SourceMappingsIndexViewTest(OCLAPITestCase):
                 'state': 'PENDING',
                 'username': 'soop',
                 'id': ANY,
+                'task': ANY,
                 'queue': 'indexing',
                 'name': 'index_source_mappings'
             })
@@ -1755,6 +1757,7 @@ class SourceConceptsIndexViewTest(OCLAPITestCase):
                 'state': 'PENDING',
                 'username': 'soop',
                 'id': ANY,
+                'task': ANY,
                 'queue': 'indexing',
                 'name': 'index_source_concepts',
             }

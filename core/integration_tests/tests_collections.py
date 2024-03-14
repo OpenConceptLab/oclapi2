@@ -455,6 +455,7 @@ class CollectionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
             response.data,
             {
                 'id': ANY,
+                'task': ANY,
                 'queue': 'default',
                 'state': 'PENDING',
                 'username': user.username,
@@ -681,6 +682,7 @@ class CollectionReferencesViewTest(OCLAPITestCase):
             response.data,
             {
                 'id': ANY,
+                'task': ANY,
                 'state': 'PENDING',
                 'name': 'add_references',
                 'queue': 'default',
