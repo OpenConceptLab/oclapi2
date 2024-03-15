@@ -160,8 +160,17 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
     def get_standard_checksum_fields_for_resource(data):
         return {
             **Mapping.get_smart_checksum_fields_for_resource(data),
-            'extras': get(data, 'extras') or None,
-            'external_id': get(data, 'external_id') or None,
+            **{
+                field: get(data, field) or None for field in [
+                    'extras',
+                    'external_id',
+                    'sort_weight',
+                    'from_source_url',
+                    'from_source_version',
+                    'to_source_url'
+                    'to_source_version'
+                ]
+            }
         }
 
     @staticmethod
