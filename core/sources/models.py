@@ -797,13 +797,13 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
             'meta': {
                 'version1': {
                     'uri': version1.uri,
-                    'concepts': version1.get_concepts_queryset().count(),
-                    'mappings': version1.get_mappings_queryset().count(),
+                    'concepts': len(concepts_diff.resources1_set),
+                    'mappings': len(mappings_diff.resources1_set),
                 },
                 'version2': {
                     'uri': version2.uri,
-                    'concepts': version2.get_concepts_queryset().count(),
-                    'mappings': version2.get_mappings_queryset().count(),
+                    'concepts': len(concepts_diff.resources2_set),
+                    'mappings': len(mappings_diff.resources2_set),
                 }
             },
             'concepts': concepts_diff.result,
