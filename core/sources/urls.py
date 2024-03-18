@@ -109,4 +109,9 @@ urlpatterns = [
         views.SourceVersionProcessingView.as_view(),
         name='sourceversion-processing'
     ),
+    re_path(
+        r'^(?P<source>{pattern})/(?P<version>{pattern})/resources-checksums/$'.format(pattern=NAMESPACE_PATTERN),
+        views.SourceVersionResourcesChecksumGenerateView.as_view(),
+        name='sourceversion-resource-checksums-generate'
+    ),
 ]

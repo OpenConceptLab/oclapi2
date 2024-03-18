@@ -724,6 +724,24 @@ def calculate_checksums(resource_type, resource_id):
 
 
 @app.task(ignore_result=True)
+def generate_source_resources_checksums(repo_id):  # pragma: no cover
+    from core.sources.models import Source
+    repo = Source.objects.filter(id=repo_id).first()
+    concepts_queryset = repo.get_concepts_queryset()
+    mappings_queryset = repo.get_mappings_queryset()
+    if get(settings, 'DB_CURSOR_ON', False):
+        for concept in concepts_queryset.iterator(chunk_size=500):
+            concept.set_checksums()
+        for mapping in mappings_queryset.iterator(chunk_size=500):
+            mapping.set_checksums()
+    else:
+        for concept in concepts_queryset:
+            concept.set_checksums()
+        for mapping in mappings_queryset:
+            mapping.set_checksums()
+
+
+@app.task(ignore_result=True)
 def readd_references_to_expansion_on_references_removal(expansion_id, removed_reference_ids):
     from core.collections.models import Expansion
     expansion = Expansion.objects.filter(id=expansion_id).first()

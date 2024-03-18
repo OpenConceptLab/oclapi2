@@ -12,6 +12,7 @@ from pydash import get
 from rest_framework import status
 from rest_framework.generics import (
     RetrieveAPIView, ListAPIView, UpdateAPIView, CreateAPIView)
+from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
 
 from core.bundles.serializers import BundleSerializer
@@ -26,7 +27,8 @@ from core.common.serializers import TaskSerializer
 from core.common.swagger_parameters import q_param, limit_param, sort_desc_param, sort_asc_param, \
     page_param, verbose_param, include_retired_param, updated_since_param, include_facets_header, compress_header, \
     canonical_url_param
-from core.common.tasks import export_source, index_source_concepts, index_source_mappings, delete_source
+from core.common.tasks import export_source, index_source_concepts, index_source_mappings, delete_source, \
+    generate_source_resources_checksums
 from core.common.utils import parse_boolean_query_param, compact_dict_by_values, to_parent_uri
 from core.common.views import BaseAPIView, BaseLogoView, ConceptContainerExtraRetrieveUpdateDestroyView
 from core.sources.constants import DELETE_FAILURE, DELETE_SUCCESS, VERSION_ALREADY_EXISTS
@@ -472,6 +474,16 @@ class SourceVersionExtrasView(SourceBaseView, ListAPIView):
         return Response(get(instance, 'extras', {}))
 
 
+class SourceVersionResourcesChecksumGenerateView(SourceBaseView, TaskMixin):  # pragma: no cover
+    serializer_class = SourceVersionListSerializer
+    permission_classes = (IsAdminUser,)
+
+    def get(self, request, *args, **kwargs):  # pylint: disable=unused-argument
+        instance = get_object_or_404(self.get_queryset(), version=self.kwargs['version'])
+        result = self.perform_task(generate_source_resources_checksums, (instance.id, ))
+        return result if isinstance(result, Response) else Response(status=status.HTTP_200_OK)
+
+
 class SourceExtraRetrieveUpdateDestroyView(SourceExtrasBaseView, ConceptContainerExtraRetrieveUpdateDestroyView):
     serializer_class = SourceDetailSerializer
 
@@ -607,4 +619,5 @@ class SourceVersionComparisonView(BaseAPIView):  # pragma: no cover
 
     def post(self, _):
         version1, version2 = self.get_objects()
-        return Response(Source.compare(version1, version2, self.is_verbose()))
+        verbosity_level = self.request.query_params.get('verbosity') or 0
+        return Response(Source.compare(version1, version2, self.is_verbose(), verbosity_level))

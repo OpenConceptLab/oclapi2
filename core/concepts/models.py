@@ -96,7 +96,7 @@ class AbstractLocalizedText(ChecksumModel):
 
 
 class ConceptDescription(AbstractLocalizedText):
-    CHECKSUM_INCLUSIONS = AbstractLocalizedText.CHECKSUM_INCLUSIONS + ['locale', 'description', 'description_type']
+    CHECKSUM_INCLUSIONS = AbstractLocalizedText.CHECKSUM_INCLUSIONS + ['description', 'description_type']
 
     concept = models.ForeignKey('concepts.Concept', on_delete=models.CASCADE, related_name='descriptions')
 
