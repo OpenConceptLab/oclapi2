@@ -3,7 +3,7 @@ import traceback
 import uuid
 
 from celery.result import AsyncResult
-from celery.states import PENDING, ALL_STATES, FAILURE, RETRY, SUCCESS, REJECTED, REVOKED
+from celery.states import PENDING, ALL_STATES, FAILURE, RETRY, SUCCESS, REJECTED, REVOKED, STARTED
 from celery import Task as CeleryTask
 from celery.worker.request import Request
 from celery_once import QueueOnce, AlreadyQueued
@@ -105,12 +105,13 @@ class Task(models.Model):
         task = cls.objects.filter(id=task_id).first()
         if not task:
             if name and 'bulk_import_parts_inline' in name:
-                task = cls(id=task_id)
+                task = cls(id=task_id, state=STARTED)
                 task.save()
             else:
                 return None
         task.created_by = UserProfile.objects.filter(username=kwargs.pop('username', None)).first() or task.created_by
         task.name = name or task.name
+        task.state = STARTED
         task.queue = kwargs.get('queue', None) or 'default'
         task.args = args
         task.kwargs = kwargs
