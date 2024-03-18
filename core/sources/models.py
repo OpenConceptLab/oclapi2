@@ -777,13 +777,35 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         return {**_filters, **(filters or {})}
 
     @staticmethod
-    def compare(version1, version2, verbose=False):  # pragma: no cover
+    def compare(version1, version2, verbose=False, verbosity_level=0):  # pragma: no cover
         from core.common.checksums import ChecksumDiff
-        diff = ChecksumDiff(
+        concepts_diff = ChecksumDiff(
             resources1=version1.get_concepts_queryset().only('mnemonic', 'checksums'),
             resources2=version2.get_concepts_queryset().only('mnemonic', 'checksums'),
-            verbose=verbose
+            verbose=verbose,
+            verbosity_level=verbosity_level
         )
-        diff.process()
-        diff.print()
-        return diff.result
+        mappings_diff = ChecksumDiff(
+            resources1=version1.get_mappings_queryset().only('mnemonic', 'checksums'),
+            resources2=version2.get_mappings_queryset().only('mnemonic', 'checksums'),
+            verbose=verbose,
+            verbosity_level=verbosity_level
+        )
+        concepts_diff.process()
+        mappings_diff.process()
+        return {
+            'meta': {
+                'version1': {
+                    'uri': version1.uri,
+                    'concepts': version1.get_concepts_queryset().count(),
+                    'mappings': version1.get_mappings_queryset().count(),
+                },
+                'version2': {
+                    'uri': version2.uri,
+                    'concepts': version2.get_concepts_queryset().count(),
+                    'mappings': version2.get_mappings_queryset().count(),
+                }
+            },
+            'concepts': concepts_diff.result,
+            'mappings': mappings_diff.result
+        }

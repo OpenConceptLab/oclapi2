@@ -118,7 +118,9 @@ class ChecksumModel(models.Model):
             for key, value in fields.items():
                 if value is None:
                     continue
-                if key in ['is_active', 'retired'] and not value:
+                if key in ['retired'] and not value:
+                    continue
+                if key in ['is_active'] and value:
                     continue
                 if key in ['extras'] and not value:
                     continue
@@ -157,11 +159,12 @@ class Checksum:
 
 
 class ChecksumDiff:  # pragma: no cover
-    def __init__(self, resources1, resources2, identity='mnemonic', verbose=False):
+    def __init__(self, resources1, resources2, identity='mnemonic', verbose=False, verbosity_level=1):  # pylint: disable=too-many-arguments
         self.resources1 = resources1
         self.resources2 = resources2
         self.identity = identity
         self.verbose = verbose
+        self.verbosity_level = verbosity_level
         self.same = {}
         self.same_smart = {}
         self.same_standard = {}
@@ -258,19 +261,21 @@ class ChecksumDiff:  # pragma: no cover
         denominator = self.denominator
         new = self.new
         deleted = self.deleted
+        is_very_verbose = self.verbose and self.verbosity_level == 2
 
         self.result = {
-            'new': self.get_struct(len(new) / denominator, new, True),
-            'removed': self.get_struct(len(deleted) / denominator, deleted, True),
-            'same': self.get_struct(len(self.same) / denominator, self.same, self.verbose),
-            'changed': self.get_struct(len(self.changed) / denominator, self.changed, True),
+            'new': self.get_struct(len(new) / denominator, new, self.verbose),
+            'removed': self.get_struct(len(deleted) / denominator, deleted, self.verbose),
+            'same': self.get_struct(len(self.same) / denominator, self.same, is_very_verbose),
+            'changed': self.get_struct(len(self.changed) / denominator, self.changed, self.verbose),
             'standard': {
-                'same': self.get_struct(len(self.same_standard) / denominator, self.same_standard, self.verbose),
-                'changed': self.get_struct(len(self.changed_standard) / denominator, self.changed_standard, True),
+                'same': self.get_struct(len(self.same_standard) / denominator, self.same_standard, is_very_verbose),
+                'changed': self.get_struct(
+                    len(self.changed_standard) / denominator, self.changed_standard, self.verbose),
             },
             'smart': {
-                'same': self.get_struct(len(self.same_smart) / denominator, self.same_smart, self.verbose),
-                'changed': self.get_struct(len(self.changed_smart) / denominator, self.changed_smart, True),
+                'same': self.get_struct(len(self.same_smart) / denominator, self.same_smart, is_very_verbose),
+                'changed': self.get_struct(len(self.changed_smart) / denominator, self.changed_smart, self.verbose),
             }
         }
 
