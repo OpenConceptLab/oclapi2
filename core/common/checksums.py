@@ -243,40 +243,27 @@ class ChecksumDiff:  # pragma: no cover
             else:
                 self.changed[key] = info
 
-    @property
-    def denominator(self):
-        return max(len(self.resources1_set), len(self.resources2_set))
+    def get_struct(self, values, is_verbose=False):
+        total = len(values or [])
+        if is_verbose:
+            if values:
+                return {'total': total, self.identity: list(values.keys())}
+            return total
 
-    def get_struct(self, percentage, values, is_verbose=False):
-        struct = {
-            'percentage': round(percentage * 100, 2),
-            'total': len(values or [])
-        }
-        if is_verbose and values:
-            struct[self.identity] = list(values.keys())
-
-        return struct
+        return total
 
     def prepare(self):
-        denominator = self.denominator
         new = self.new
         deleted = self.deleted
         is_very_verbose = self.verbose and self.verbosity_level == 2
 
         self.result = {
-            'new': self.get_struct(len(new) / denominator, new, self.verbose),
-            'removed': self.get_struct(len(deleted) / denominator, deleted, self.verbose),
-            'same': self.get_struct(len(self.same) / denominator, self.same, is_very_verbose),
-            'changed': self.get_struct(len(self.changed) / denominator, self.changed, self.verbose),
-            'standard': {
-                'same': self.get_struct(len(self.same_standard) / denominator, self.same_standard, is_very_verbose),
-                'changed': self.get_struct(
-                    len(self.changed_standard) / denominator, self.changed_standard, self.verbose),
-            },
-            'smart': {
-                'same': self.get_struct(len(self.same_smart) / denominator, self.same_smart, is_very_verbose),
-                'changed': self.get_struct(len(self.changed_smart) / denominator, self.changed_smart, self.verbose),
-            }
+            'new': self.get_struct(new, self.verbose),
+            'removed': self.get_struct(deleted, self.verbose),
+            'same': self.get_struct(self.same_standard, is_very_verbose),
+            'changed': self.get_struct(self.changed_standard, self.verbose),
+            'smart_same': self.get_struct(self.same_smart, is_very_verbose),
+            'smart_changed': self.get_struct(self.changed_smart, self.verbose),
         }
 
     def process(self, refresh=False):
