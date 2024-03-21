@@ -127,6 +127,10 @@ class Task(models.Model):
         task.state = status
         task.result = retval
         task.finished_at = timezone.now()
+        if isinstance(task.result, Exception):
+            task.result = str(task.result)
+            task.record_exception(task.result)
+
         return task.save_common(args, kwargs, einfo)
 
     @classmethod

@@ -22,6 +22,7 @@ from core.common.utils import reverse_resource, reverse_resource_version, parse_
     get_current_authorized_user
 from core.common.utils import to_owner_uri
 from core.settings import DEFAULT_LOCALE
+from . import ERRBIT_LOGGER
 from .checksums import ChecksumModel
 from .constants import (
     ACCESS_TYPE_CHOICES, DEFAULT_ACCESS_TYPE, NAMESPACE_REGEX,
@@ -182,12 +183,15 @@ class BaseModel(models.Model):
     @staticmethod
     def batch_index(queryset, document, single_batch=False):
         if not get(settings, 'TEST_MODE'):
-            doc = document()
-            if single_batch or not get(settings, 'DB_CURSOR_ON', True):
-                doc.update(queryset.all(), parallel=True)
-            else:
-                for batch in queryset.iterator(chunk_size=500):
-                    doc.update(batch, parallel=True)
+            try:
+                doc = document()
+                if single_batch or not get(settings, 'DB_CURSOR_ON', True):
+                    doc.update(queryset.all(), parallel=True)
+                else:
+                    for batch in queryset.iterator(chunk_size=500):
+                        doc.update(batch, parallel=True)
+            except Exception as e:
+                ERRBIT_LOGGER.log(e)
 
     @staticmethod
     @transaction.atomic
