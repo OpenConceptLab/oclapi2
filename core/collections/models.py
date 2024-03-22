@@ -1,6 +1,7 @@
 import time
 
 from celery_once import AlreadyQueued
+from dirtyfields import DirtyFieldsMixin
 from django.conf import settings
 from django.contrib.postgres.fields import ArrayField
 from django.core.exceptions import ValidationError
@@ -25,7 +26,7 @@ from core.common.constants import (
 from core.common.models import ConceptContainerModel, BaseResourceModel
 from core.common.search import CustomESSearch
 from core.common.tasks import seed_children_to_expansion, batch_index_resources, index_expansion_concepts, \
-    index_expansion_mappings, readd_references_to_expansion_on_references_removal
+    index_expansion_mappings, readd_references_to_expansion_on_references_removal, resolve_url_registry_entries
 from core.common.utils import drop_version, to_owner_uri, generate_temp_version, es_id_in, \
     get_resource_class_from_resource_name, to_snake_case, \
     es_to_pks, batch_qs, split_list_by_condition, decode_string, is_canonical_uri, encode_string, \
@@ -38,7 +39,7 @@ TRUTHY = get_truthy_values()
 FALSEY = get_falsy_values()
 
 
-class Collection(ConceptContainerModel):
+class Collection(DirtyFieldsMixin, ConceptContainerModel):
     OBJECT_TYPE = COLLECTION_TYPE
     OBJECT_VERSION_TYPE = COLLECTION_VERSION_TYPE
     CHECKSUM_INCLUSIONS = ConceptContainerModel.CHECKSUM_INCLUSIONS + [
@@ -184,6 +185,16 @@ class Collection(ConceptContainerModel):
             return self.autoexpand_head
 
         return self.autoexpand
+
+    def save(
+            self, force_insert=False, force_update=False, using=None, update_fields=None
+    ):
+        dirty_fields = self.get_dirty_fields()
+
+        super().save(force_insert=force_insert, force_update=force_update, using=using, update_fields=update_fields)
+
+        if self.id and 'canonical_url' in dirty_fields and self.active_url_registry_entries.exists():
+            resolve_url_registry_entries.apply_async((self.id, self.resource_type), queue='default')
 
     def post_create_actions(self):
         if self.should_auto_expand:

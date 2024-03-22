@@ -747,3 +747,12 @@ def readd_references_to_expansion_on_references_removal(expansion_id, removed_re
     if expansion and removed_reference_ids:
         reference_to_readd = expansion.collection_version.references.exclude(id__in=removed_reference_ids)
         expansion.add_references(reference_to_readd, True, True, False)
+
+
+@app.task(ignore_result=True)
+def resolve_url_registry_entries(repo_id, repo_type):
+    repo_klass = get_resource_class_from_resource_name(repo_type)
+    if repo_klass:
+        repo = repo_klass.objects.filter(id=repo_id).first()
+        for entry in repo.active_url_registry_entries:
+            entry.resolve()

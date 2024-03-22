@@ -367,9 +367,6 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
     copyright = models.TextField(null=True, blank=True)
     revision_date = models.DateTimeField(null=True, blank=True)
     text = models.TextField(null=True, blank=True)  # for about description (markup)
-    client_configs = GenericRelation(
-        'client_configs.ClientConfig', object_id_field='resource_id', content_type_field='resource_type'
-    )
     snapshot = models.JSONField(null=True, blank=True, default=dict)
     experimental = models.BooleanField(null=True, blank=True, default=None)
     meta = models.JSONField(null=True, blank=True)
@@ -377,6 +374,12 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
     active_mappings = models.IntegerField(null=True, blank=True, default=None)
     custom_validation_schema = models.CharField(
         choices=VALIDATION_SCHEMAS, default=DEFAULT_VALIDATION_SCHEMA, max_length=100
+    )
+    client_configs = GenericRelation(
+        'client_configs.ClientConfig', object_id_field='resource_id', content_type_field='resource_type'
+    )
+    url_registry_entries = GenericRelation(
+        'url_registry.URLRegistry', object_id_field='repo_id', content_type_field='repo_type'
     )
 
     CHECKSUM_INCLUSIONS = [
@@ -824,6 +827,10 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
         return False
 
+    @property
+    def active_url_registry_entries(self):
+        return self.url_registry_entries.filter(is_active=True)
+
     @cached_property
     def version_export_path(self):
         last_update = self.last_child_update.strftime('%Y-%m-%d_%H%M%S')
@@ -887,7 +894,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         return instance, resolved_registry_entry
 
     @classmethod
-    def resolve_reference_expression(cls, url, namespace=None, version=None):
+    def resolve_reference_expression(cls, url, namespace=None, version=None, registry_entry=None):
         """
         resolves to repository version according to this process:
 
@@ -922,10 +929,11 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         url_registry_entry = None
         if is_canonical:
             if Toggle.get('URL_REGISTRY_IN_RESOLVE_REFERENCE_TOGGLE'):
-                owner = None
+                url_registry_entry = registry_entry or None
+                owner = url_registry_entry.namespace_owner if url_registry_entry else None
                 if not is_global_namespace:
-                    owner = SourceContainerMixin.get_object_from_namespace(namespace)
-                    if owner:
+                    owner = owner or SourceContainerMixin.get_object_from_namespace(namespace)
+                    if owner and not url_registry_entry:
                         url_registry_entry = owner.url_registry_entries.filter(
                             is_active=True, url=resolution_url).first()
                         if not url_registry_entry:

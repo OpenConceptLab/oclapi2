@@ -1,8 +1,11 @@
+from django.contrib.contenttypes.fields import GenericForeignKey
+from django.contrib.contenttypes.models import ContentType
 from django.db import models
 from pydash import get
 
+from core.common.constants import HEAD
 from core.common.fields import URIField
-from core.common.models import BaseModel
+from core.common.models import BaseModel, ConceptContainerModel
 
 
 class URLRegistry(BaseModel):
@@ -17,6 +20,9 @@ class URLRegistry(BaseModel):
         'users.UserProfile', on_delete=models.CASCADE, null=True, blank=True,
         related_name='url_registry_entries'
     )
+    repo_type = models.ForeignKey(ContentType, on_delete=models.CASCADE, null=True, blank=True)
+    repo_id = models.PositiveIntegerField(null=True, blank=True)
+    repo = GenericForeignKey('repo_type', 'repo_id')
     public_access = None
     uri = None
     OBJECT_TYPE = 'URLRegistryEntry'
@@ -115,3 +121,11 @@ class URLRegistry(BaseModel):
     def get_entry(cls, url, owner=None):
         entries = owner.url_registry_entries.filter(is_active=True) if owner else cls.get_active_global_entries()
         return entries.filter(url=url).first()
+
+    def resolve(self):
+        repo, _ = ConceptContainerModel.resolve_reference_expression(
+            url=self.url, namespace=self.namespace, version=HEAD, registry_entry=self
+        )
+        if repo.id:
+            self.repo = repo
+            self.save()

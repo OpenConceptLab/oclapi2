@@ -10,7 +10,8 @@ from pydash import get
 
 from core.common.constants import HEAD
 from core.common.models import ConceptContainerModel
-from core.common.tasks import update_mappings_source, index_source_concepts, index_source_mappings
+from core.common.tasks import update_mappings_source, index_source_concepts, index_source_mappings, \
+    resolve_url_registry_entries
 from core.common.validators import validate_non_negative
 from core.concepts.models import ConceptName, Concept
 from core.services.storages.postgres import PostgresQL
@@ -405,6 +406,9 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
                 self.__create_sequences()
             else:
                 self.__update_sequences(dirty_fields)
+
+        if self.id and 'canonical_url' in dirty_fields and self.active_url_registry_entries.exists():
+            resolve_url_registry_entries.apply_async((self.id, self.resource_type), queue='default')
 
     def __update_sequences(self, dirty_fields=[]):  # pylint: disable=dangerous-default-value
         def should_update(is_seq, field):
