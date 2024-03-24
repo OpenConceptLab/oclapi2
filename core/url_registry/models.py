@@ -3,9 +3,8 @@ from django.contrib.contenttypes.models import ContentType
 from django.db import models
 from pydash import get
 
-from core.common.constants import HEAD
 from core.common.fields import URIField
-from core.common.models import BaseModel, ConceptContainerModel
+from core.common.models import BaseModel
 
 
 class URLRegistry(BaseModel):
@@ -113,7 +112,9 @@ class URLRegistry(BaseModel):
     def lookup_repo(self):
         namespace_owner = self.namespace_owner
         if namespace_owner:
-            return namespace_owner.find_repo_by_canonical_url(self.url)
+            repo = namespace_owner.find_repo_by_canonical_url(self.url)
+            self._set_repo(repo)
+            return repo
 
         return None
 
@@ -122,10 +123,7 @@ class URLRegistry(BaseModel):
         entries = owner.url_registry_entries.filter(is_active=True) if owner else cls.get_active_global_entries()
         return entries.filter(url=url).first()
 
-    def resolve(self):
-        repo, _ = ConceptContainerModel.resolve_reference_expression(
-            url=self.url, namespace=self.namespace, version=HEAD, registry_entry=self
-        )
-        if repo.id:
+    def _set_repo(self, repo):
+        if repo:
             self.repo = repo
             self.save()

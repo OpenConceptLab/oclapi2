@@ -24,7 +24,8 @@ from core.common.permissions import HasPrivateAccess, HasOwnership, CanViewConce
     CanViewConceptDictionaryVersion
 from .checksums import ChecksumModel, Checksum
 from .utils import write_csv_to_s3, get_csv_from_s3, get_query_params_from_url_string, compact_dict_by_values, \
-    to_owner_uri, parse_updated_since_param, get_export_service, to_int, get_truthy_values, generate_temp_version
+    to_owner_uri, parse_updated_since_param, get_export_service, to_int, get_truthy_values, generate_temp_version, \
+    canonical_url_to_url_and_version
 from ..concepts.constants import PERSIST_CLONE_ERROR
 from ..toggles.models import Toggle
 
@@ -446,10 +447,13 @@ class ConceptDictionaryUpdateMixin(ConceptDictionaryMixin):
 
 class SourceContainerMixin:
     def find_repo_by_canonical_url(self, canonical_url):
-        repo = self.source_set.filter(canonical_url=canonical_url).first()
-        if not repo:
-            repo = self.collection_set.filter(canonical_url=canonical_url).first()
-        return repo
+        url, version = canonical_url_to_url_and_version(canonical_url)
+        queryset = self.source_set.filter(canonical_url=url)
+        if not queryset.exists():
+            queryset = self.collection_set.filter(canonical_url=url)
+        if version:
+            queryset = queryset.filter(version=version)
+        return queryset.first()
 
     @staticmethod
     def get_object_from_namespace(namespace):

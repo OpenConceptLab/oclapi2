@@ -18,7 +18,8 @@ from pydash import get, compact
 from core.common.tasks import update_collection_active_concepts_count, update_collection_active_mappings_count, \
     delete_s3_objects
 from core.common.utils import reverse_resource, reverse_resource_version, parse_updated_since_param, drop_version, \
-    to_parent_uri, is_canonical_uri, get_export_service, from_string_to_date, get_truthy_values
+    to_parent_uri, is_canonical_uri, get_export_service, from_string_to_date, get_truthy_values, \
+    canonical_url_to_url_and_version
 from core.common.utils import to_owner_uri
 from core.settings import DEFAULT_LOCALE
 from .checksums import ChecksumModel
@@ -856,6 +857,9 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         return path
 
     def get_export_url(self):
+        return get_export_service().url_for(self.get_export_path())
+
+    def get_export_path(self):
         service = get_export_service()
         if self.is_head:
             path = self.version_export_path
@@ -863,7 +867,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
             path = service.get_last_key_from_path(
                 self.get_version_export_path(suffix=None)
             ) or self.version_export_path
-        return service.url_for(path)
+        return path
 
     def has_export(self):
         service = get_export_service()
@@ -894,7 +898,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         return instance, resolved_registry_entry
 
     @classmethod
-    def resolve_reference_expression(cls, url, namespace=None, version=None, registry_entry=None):
+    def resolve_reference_expression(cls, url, namespace=None, version=None):
         """
         resolves to repository version according to this process:
 
@@ -926,46 +930,35 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         criteria = models.Q(is_active=True, retired=False)
 
         from core.url_registry.models import URLRegistry
-        url_registry_entry = None
+        registry_entry = None
         if is_canonical:
             if Toggle.get('URL_REGISTRY_IN_RESOLVE_REFERENCE_TOGGLE'):
-                url_registry_entry = registry_entry or None
-                owner = url_registry_entry.namespace_owner if url_registry_entry else None
+                registry_entry = None
                 if not is_global_namespace:
-                    owner = owner or SourceContainerMixin.get_object_from_namespace(namespace)
-                    if owner and not url_registry_entry:
-                        url_registry_entry = owner.url_registry_entries.filter(
-                            is_active=True, url=resolution_url).first()
-                        if not url_registry_entry:
-                            instance = owner.find_repo_by_canonical_url(resolution_url)
+                    owner = SourceContainerMixin.get_object_from_namespace(namespace)
+                    if owner:
+                        registry_entry = owner.url_registry_entries.filter(is_active=True, url=resolution_url).first()
+                        instance = registry_entry.lookup_repo() if registry_entry else owner.find_repo_by_canonical_url(
+                            resolution_url)
 
-                if is_global_namespace or (not url_registry_entry and not instance):
-                    url_registry_entry = URLRegistry.get_active_global_entries().filter(url=resolution_url).first()
+                if is_global_namespace or (not registry_entry and not instance):
+                    registry_entry = URLRegistry.get_active_global_entries().filter(url=resolution_url).first()
+                    if registry_entry:
+                        instance = registry_entry.lookup_repo()
 
-                if not owner and url_registry_entry and url_registry_entry.namespace:
-                    owner = url_registry_entry.namespace_owner
+                return cls.resolve_repo(instance, version, is_canonical, resolution_url), registry_entry
 
-                if instance or not url_registry_entry or not url_registry_entry.namespace or not owner:
-                    return cls.resolve_repo(instance, version, is_canonical, resolution_url), url_registry_entry
-
-                criteria &= models.Q(
-                    canonical_url=resolution_url, **{
-                        f"{owner.resource_type.lower()}__uri": url_registry_entry.namespace
-                    })
-            else:
-                criteria &= models.Q(canonical_url=resolution_url)
-                if namespace:
-                    criteria &= models.Q(models.Q(user__uri=namespace) | models.Q(organization__uri=namespace))
+            criteria &= models.Q(canonical_url=resolution_url)
+            if namespace:
+                criteria &= models.Q(models.Q(user__uri=namespace) | models.Q(organization__uri=namespace))
         else:
             criteria &= models.Q(uri=resolution_url)
 
         from core.repos.models import Repository
-        return cls.resolve_repo(Repository.get(criteria), version, is_canonical, resolution_url), url_registry_entry
+        return cls.resolve_repo(Repository.get(criteria), version, is_canonical, resolution_url), registry_entry
 
     @classmethod
     def resolve_repo(cls, instance, version, is_canonical, resolution_url):
-        from core.sources.models import Source
-
         if instance:
             if version:
                 instance = instance.versions.filter(version=version).first()
@@ -973,6 +966,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
                 instance = instance.get_latest_released_version() or instance
 
         if not instance:
+            from core.sources.models import Source
             instance = Source()
 
         instance.is_fqdn = is_canonical
@@ -983,9 +977,8 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
     @staticmethod
     def __get_resolution_url(url, version):
-        lookup_url = url
-        if '|' in lookup_url:
-            lookup_url, version = lookup_url.split('|')
+        lookup_url, extracted_version = canonical_url_to_url_and_version(url)
+        version = version or extracted_version
         lookup_url = lookup_url.split('?')[0]
         is_canonical = is_canonical_uri(lookup_url) or is_canonical_uri(url)
         resolution_url = lookup_url if is_canonical else to_parent_uri(lookup_url)

@@ -544,6 +544,14 @@ def separate_version(expression):
     return None, expression
 
 
+def canonical_url_to_url_and_version(canonical_url):
+    version = None
+    if '|' in canonical_url:
+        canonical_url, version = canonical_url.split('|')
+
+    return canonical_url, version
+
+
 def generate_temp_version():
     return f"{TEMP_PREFIX}{str(uuid.uuid4())[:8]}"
 

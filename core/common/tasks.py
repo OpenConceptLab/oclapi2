@@ -755,4 +755,4 @@ def resolve_url_registry_entries(repo_id, repo_type):
     if repo_klass:
         repo = repo_klass.objects.filter(id=repo_id).first()
         for entry in repo.active_url_registry_entries:
-            entry.resolve()
+            entry.lookup_repo()
