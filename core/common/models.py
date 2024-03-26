@@ -187,7 +187,7 @@ class BaseModel(models.Model):
             if single_batch:
                 doc.update(queryset.all(), parallel=True)
             else:
-                paginator = Paginator(queryset, 500)
+                paginator = Paginator(queryset.order_by('-id'), 500)
                 for page_number in paginator.page_range:
                     page = paginator.page(page_number)
                     doc.update(page.object_list, parallel=True)
@@ -195,7 +195,7 @@ class BaseModel(models.Model):
     @staticmethod
     @transaction.atomic
     def batch_delete(queryset):
-        paginator = Paginator(queryset, 1000)
+        paginator = Paginator(queryset.order_by('-id'), 1000)
         for page_number in paginator.page_range:
             page = paginator.page(page_number)
             page.object_list.delete()

@@ -729,7 +729,7 @@ def generate_source_resources_checksums(repo_id):  # pragma: no cover
     repo = Source.objects.filter(id=repo_id).first()
 
     def set_checksums(queryset):
-        paginator = Paginator(queryset, 500)
+        paginator = Paginator(queryset.order_by('-id'), 500)
         for page_number in paginator.page_range:
             page = paginator.page(page_number)
             for resource in page.object_list:
