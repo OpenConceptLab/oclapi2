@@ -26,7 +26,9 @@ class URLRegistryDocument(Document):
     owner = fields.KeywordField(attr='owner.mnemonic', normalizer='lowercase')
     owner_type = fields.KeywordField(attr='owner_type')
     owner_url = fields.KeywordField(attr='owner_url')
-    repo_id = fields.TextField()
+    repo = fields.TextField()
+    repo_owner_type = fields.KeywordField(attr='repo.parent_resource_type')
+    repo_owner = fields.KeywordField(attr='repo.parent_resource', normalizer='lowercase')
 
     class Django:
         model = URLRegistry
@@ -34,7 +36,7 @@ class URLRegistryDocument(Document):
 
     @staticmethod
     def get_match_phrase_attrs():
-        return ['_url', '_name', 'namespace', 'repo_id']
+        return ['_url', '_name', 'namespace', 'repo', 'repo_owner']
 
     @staticmethod
     def get_exact_match_attrs():
@@ -92,5 +94,5 @@ class URLRegistryDocument(Document):
         return value or {}
 
     @staticmethod
-    def prepare_repo_id(instance):
+    def prepare_repo(instance):
         return get(instance, 'repo.mnemonic')

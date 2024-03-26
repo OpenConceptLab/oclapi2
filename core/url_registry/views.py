@@ -12,6 +12,7 @@ from core.common.views import BaseAPIView
 from core.repos.serializers import RepoListSerializer
 from core.url_registry.documents import URLRegistryDocument
 from core.url_registry.models import URLRegistry
+from core.url_registry.search import URLRegistryFacetedSearch
 from core.url_registry.serializers import URLRegistryDetailSerializer
 
 
@@ -22,6 +23,7 @@ class URLRegistryBaseView(BaseAPIView):
     parent_resource = None
     parent_resource_type = None
     default_filters = {'is_active': True}
+    facet_class = URLRegistryFacetedSearch
 
     def set_parent_resource(self):
         from core.orgs.models import Organization
