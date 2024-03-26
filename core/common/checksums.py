@@ -113,7 +113,7 @@ class ChecksumModel(models.Model):
     @staticmethod
     def _cleanup(fields):
         result = fields
-        if isinstance(fields, dict):
+        if isinstance(fields, dict):  # pylint: disable=too-many-nested-blocks
             result = {}
             for key, value in fields.items():
                 if value is None:
@@ -122,8 +122,15 @@ class ChecksumModel(models.Model):
                     continue
                 if key in ['is_active'] and value:
                     continue
-                if key in ['extras'] and not value:
-                    continue
+                if key in ['extras']:
+                    if not value:
+                        continue
+                    if isinstance(value, dict) and any(key.startswith('__') for key in value):
+                        value_copied = value.copy()
+                        for extra_key in value:
+                            if extra_key.startswith('__'):
+                                value_copied.pop(extra_key)
+                        value = value_copied
                 result[key] = value
         return result
 

@@ -1281,6 +1281,8 @@ class ExportSourceTaskTest(OCLAPITestCase):
         self.assertTrue('secs' in time_taken)
         time_taken = float(time_taken.replace('secs', ''))
         self.assertTrue(time_taken > 2)
+        source_v1.refresh_from_db()
+        self.assertEqual(source_v1.extras['__export_time'], str(time_taken))
 
         exported_concepts = exported_data['concepts']
         expected_concepts = ConceptVersionExportSerializer([concept2, concept1], many=True).data

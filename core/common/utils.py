@@ -319,9 +319,11 @@ def write_export_file(
 
         logger.info('Done serializing mappings.')
 
+    end_time = str(round((time.time() - start_time) + 2, 2))
     with open('export.json', 'a') as out:
-        end_time = str(round((time.time() - start_time) + 2, 2)) + 'secs'
-        out.write('], "export_time": ' + json.dumps(end_time, cls=encoders.JSONEncoder) + '}')
+        out.write('], "export_time": ' + json.dumps(f"{end_time}secs", cls=encoders.JSONEncoder) + '}')
+
+    version.update_extras('__export_time', end_time)
 
     with zipfile.ZipFile('export.zip', 'w', zipfile.ZIP_DEFLATED) as _zip:
         _zip.write('export.json')

@@ -78,6 +78,11 @@ class BaseModel(models.Model):
     uri = models.TextField(null=True, blank=True)
     _index = True
 
+    def update_extras(self, key, value):
+        self.extras = self.extras or {}
+        self.extras[key] = value
+        self.save(update_fields=['extras'])
+
     @property
     def model_name(self):
         return self.__class__.__name__
