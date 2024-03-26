@@ -3,6 +3,7 @@ import io
 
 import requests
 from celery_once import AlreadyQueued
+from django.db.models import Q
 from django.http import Http404
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
@@ -15,11 +16,11 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from core.common.constants import DEPRECATED_API_HEADER
+from core.common.views import BaseAPIView
+from core.common.tasks import bulk_import_new
 from core.common.swagger_parameters import update_if_exists_param, task_param, result_param, username_param, \
     file_upload_param, file_url_param, parallel_threads_param, verbose_param
-from core.common.utils import queue_bulk_import, \
-    is_csv_file, get_truthy_values
-from core.common.views import BaseAPIView
+from core.common.utils import queue_bulk_import, is_csv_file, get_truthy_values, get_queue_task_names
 from core.importers.constants import ALREADY_QUEUED, INVALID_UPDATE_IF_EXISTS, NO_CONTENT_TO_IMPORT
 from core.importers.input_parsers import ImportContentParser
 from core.tasks.models import Task
@@ -85,7 +86,8 @@ class ImportRetrieveDestroyMixin(BaseAPIView):
         if not requesting_user.is_staff and requesting_user.username != user.username:
             return Response(status=status.HTTP_403_FORBIDDEN)
 
-        tasks = user.async_tasks.filter(name__icontains='bulk_import_parallel_inline').order_by('-created_at')
+        tasks = user.async_tasks.filter(Q(name__icontains='bulk_import_parallel_inline') |
+                                        Q(name__icontains='bulk_import_new')).order_by('-created_at')
 
         if task_id:
             task = tasks.filter(id=task_id).first()
@@ -171,6 +173,18 @@ class ImportView(BulkImportParallelInlineView, ImportRetrieveDestroyMixin):
         manual_parameters=[update_if_exists_param, file_url_param, file_upload_param, parallel_threads_param],
     )
     def post(self, request, import_queue=None):
+        if 'import_type' in request.data:
+            file_url = request.data.get('file_url')
+            task = get_queue_task_names(import_queue, self.request.user.username)
+            new_task = bulk_import_new.apply_async(
+                (file_url, self.request.user.username,
+                 request.data.get('owner_type', 'user'), request.data.get('owner', self.request.user.username),
+                 request.data.get('import_type', 'npm')), task_id=task.id, queue=task.queue)
+            return Response({
+                'task': new_task.id,
+                'state': new_task.state
+            }, status=status.HTTP_202_ACCEPTED)
+
         return super().post(request, import_queue)
 
 

@@ -174,11 +174,11 @@ ERRBIT_LOGGER = ErrbitClient(
 original_print_exception = traceback.print_exception
 
 
-def print_exception_with_errbit_logging(etype, value, tb, limit=None, file=None):
+def print_exception_with_errbit_logging(etype, value, tb, limit=None, file=None, chain=True):
     if not (etype == KeyError and str(value) == "'cid'"):
         message = ERRBIT_LOGGER.xml_raw(etype, value, tb)
         ERRBIT_LOGGER.send_message(message.encode('utf-8'))
-        original_print_exception(etype, value, tb, limit=None, file=None)
+        original_print_exception(etype, value, tb, limit=limit, file=file, chain=chain)
 
 
 traceback.print_exception = print_exception_with_errbit_logging

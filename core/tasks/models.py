@@ -1,4 +1,3 @@
-import ast
 import json
 import traceback
 import uuid
@@ -51,7 +50,7 @@ class Task(models.Model):
                 return json.loads(self.result)
             except Exception:  # pylint: disable=broad-except
                 try:
-                    return json.loads(json.dumps(ast.literal_eval(self.result)))
+                    return json.loads(self.result)
                 except Exception:  # pylint: disable=broad-except
                     return self.result
         return self.result
@@ -202,10 +201,18 @@ class Task(models.Model):
 
     def revoke(self):
         result = AsyncResult(self.id)
+
         for child in self.children_still_playing():
             child.revoke()
 
         app.control.revoke(self.id, terminate=True, signal='SIGKILL')
+
+        #  If new import task
+        from core.importers.importer import ImportTask
+        import_result = ImportTask.import_task_from_async_result(result)
+        if import_result:
+            import_result.revoke()
+
         celery_once_key = get_bulk_import_celery_once_lock_key(result)
         if celery_once_key:
             celery_once = QueueOnce()

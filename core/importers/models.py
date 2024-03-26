@@ -114,6 +114,14 @@ class BaseResourceImporter:
         self.update_if_exists = update_if_exists
         self.queryset = None
 
+    @classmethod
+    def can_handle(cls, obj):
+        return isinstance(obj, dict) and obj.get('type', '').lower() == cls.get_resource_type()
+
+    @staticmethod
+    def get_resource_type():
+        raise NotImplementedError()
+
     def get(self, attr, default_value=None):
         return self.data.get(attr, default_value)
 
@@ -177,6 +185,10 @@ class OrganizationImporter(BaseResourceImporter):
     mandatory_fields = {'id', 'name'}
     allowed_fields = ["id", "company", "extras", "location", "name", "public_access", "website"]
 
+    @staticmethod
+    def get_resource_type():
+        return 'organization'
+
     def exists(self):
         return self.get_queryset().exists()
 
@@ -215,6 +227,10 @@ class SourceImporter(BaseResourceImporter):
         'revision_date', 'text', 'content_type', 'experimental', 'case_sensitive', 'collection_reference',
         'hierarchy_meaning', 'compositional', 'version_needed', 'meta',
     ]
+
+    @staticmethod
+    def get_resource_type():
+        return 'source'
 
     def exists(self):
         return self.get_queryset().exists()
@@ -265,6 +281,10 @@ class SourceVersionImporter(BaseResourceImporter):
     mandatory_fields = {"id"}
     allowed_fields = ["id", "external_id", "description", "released"]
 
+    @staticmethod
+    def get_resource_type():
+        return 'source version'
+
     def exists(self):
         return Source.objects.filter(
             **{self.get_owner_type_filter(): self.get('owner'),
@@ -298,6 +318,10 @@ class CollectionImporter(BaseResourceImporter):
         'canonical_url', 'identifier', 'contact', 'jurisdiction', 'publisher', 'purpose', 'copyright',
         'revision_date', 'text', 'immutable', 'experimental', 'locked_date', 'meta',
     ]
+
+    @staticmethod
+    def get_resource_type():
+        return 'collection'
 
     def exists(self):
         return self.get_queryset().exists()
@@ -348,6 +372,10 @@ class CollectionVersionImporter(BaseResourceImporter):
     mandatory_fields = {"id"}
     allowed_fields = ["id", "external_id", "description", "released"]
 
+    @staticmethod
+    def get_resource_type():
+        return 'collection version'
+
     def exists(self):
         return Collection.objects.filter(
             **{self.get_owner_type_filter(): self.get('owner'),
@@ -379,6 +407,10 @@ class ConceptImporter(BaseResourceImporter):
         "id", "external_id", "concept_class", "datatype", "names", "descriptions", "retired", "extras",
         "parent_concept_urls", 'update_comment', 'comment'
     ]
+
+    @staticmethod
+    def get_resource_type():
+        return 'concept'
 
     def __init__(self, data, user, update_if_exists):
         super().__init__(data, user, update_if_exists)
@@ -469,6 +501,10 @@ class MappingImporter(BaseResourceImporter):
         "id", "map_type", "from_concept_url", "to_source_url", "to_concept_url", "to_concept_code",
         "to_concept_name", "extras", "external_id", "retired", 'update_comment', 'comment', 'sort_weight'
     ]
+
+    @staticmethod
+    def get_resource_type():
+        return 'mapping'
 
     def __init__(self, data, user, update_if_exists):
         super().__init__(data, user, update_if_exists)
@@ -604,6 +640,10 @@ class MappingImporter(BaseResourceImporter):
 class ReferenceImporter(BaseResourceImporter):
     mandatory_fields = {"data"}
     allowed_fields = ["data", "collection", "owner", "owner_type", "__cascade", "collection_url"]
+
+    @staticmethod
+    def get_resource_type():
+        return 'reference'
 
     def exists(self):
         return False

@@ -23,7 +23,7 @@ from core.common.constants import CONFIRM_EMAIL_ADDRESS_MAIL_SUBJECT, PASSWORD_R
 from core.common.utils import write_export_file, web_url, get_resource_class_from_resource_name, get_export_service, \
     get_date_range_label
 from core.reports.models import ResourceUsageReport
-from core.tasks.models import QueueOnceCustomTask, Task
+from core.tasks.models import QueueOnceCustomTask
 
 logger = get_task_logger(__name__)
 
@@ -272,6 +272,42 @@ def bulk_import_inline(to_import, username, update_if_exists):
     return BulkImportInline(content=to_import, username=username, update_if_exists=update_if_exists).run()
 
 
+# pylint: disable=too-many-arguments
+@app.task(bind=True, base=QueueOnceCustomTask, retry_kwargs={'max_retries': 0})
+def bulk_import_new(self, path, username, owner_type, owner, import_type='default'):
+    from core.importers.importer import Importer
+    task_id = self.request.id
+    return Importer(task_id, path, username, owner_type, owner, import_type).run()
+
+
+# pylint: disable=too-many-arguments
+@app.task(retry_kwargs={'max_retries': 0}, compression='gzip')
+def bulk_import_subtask(path, username, owner_type, owner, resource_type, files):
+    from core.importers.importer import ImporterSubtask
+    return ImporterSubtask(path, username, owner_type, owner, resource_type, files).run()
+
+
+@app.task
+def import_finisher(task_id):
+    """Persist final import results so that they can be retrieved instantly"""
+    from core.importers.importer import ImportTask
+    from core.tasks.models import Task
+    task = Task.objects.filter(id=task_id).first()
+    if task:
+        if task.json_result:
+            import_task = ImportTask.import_task_from_json(task.json_result)
+            if import_task:
+                # Persist final results
+                import_task.final_summary = import_task.summary
+                import_task.time_finished = datetime.now()
+                return import_task.model_dump(exclude={'summary'})
+
+            task.json_result['time_finished'] = datetime.now()
+            return task.json_result
+
+    return {'time_finished': datetime.now()}
+
+
 @app.task(bind=True, retry_kwargs={'max_retries': 0})
 def bulk_import_parts_inline(self, input_list, username, update_if_exists):
     from core.importers.models import BulkImportInline
@@ -358,6 +394,7 @@ def seed_children_to_new_version(self, resource, obj_id, export=True, sync=False
                 instance.cascade_children_to_expansion(index=index, sync=sync)
 
             if export:
+                from core.tasks.models import Task
                 task = Task.new(queue='default', username=instance.updated_by, name=export_task.__name__)
                 export_task.apply_async((obj_id,), queue=task.queue, task_id=task.id)
                 if autoexpand:
@@ -776,6 +813,7 @@ def resolve_url_registry_entries(repo_id, repo_type):
 
 @app.task(ignore_result=True)
 def expire_old_celery_tasks():
+    from core.tasks.models import Task
     Task.objects.filter(updated_at__lt=timezone.now() - timezone.timedelta(days=7)).delete()
 
 

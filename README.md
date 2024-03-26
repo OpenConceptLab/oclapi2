@@ -4,13 +4,13 @@ The new and improved OCL terminology service v2
 
 ### Dev Setup
 1. `sysctl -w vm.max_map_count=262144` #required by Elasticsearch
-2. `docker-compose up -d`
+2. `docker compose up -d`
 3. Go to http://localhost:8000/swagger/ to benefit.
 
 
 ### Dev Setup with KeyCloak (SSO)
 1. `sysctl -w vm.max_map_count=262144` #required by Elasticsearch
-2. `docker-compose -f docker-compose.yml -f docker-compose.sso.yml up -d`
+2. `docker compose -f docker-compose.yml -f docker-compose.sso.yml up -d`
 3. Go to http://localhost:8000/swagger/ to benefit.
 4. Go to http://localhost:8080 for keyCloak.
 
@@ -29,21 +29,21 @@ API supports the OpenID implicit flow.
 If `OIDC_SERVER_URL` and `OIDC_REALM` are not provided then the Django Auth is enabled by default.
 
 ### Run Checks
-(use the `docker exec` command in a service started with `docker-compose up -d`)
+(use the `docker exec` command in a service started with `docker compose up -d`)
 1. Pylint (pep8):
    
    `docker exec -it oclapi2-api-1 pylint -j2 core` 
 
     or
 
-   `docker-compose -f docker-compose.yml -f docker-compose.ci.yml run --rm api pylint -j0 core`
+   `docker compose -f docker-compose.yml -f docker-compose.ci.yml run --rm api pylint -j0 core`
 2. Coverage
 
    `docker exec -it oclapi2-api-1 bash coverage.sh`
 
    or
 
-   `docker-compose -f docker-compose.yml -f docker-compose.ci.yml run --rm api bash coverage.sh`
+   `docker compose -f docker-compose.yml -f docker-compose.ci.yml run --rm api bash coverage.sh`
 3. Tests
 
     `docker exec -it oclapi2-api-1  python manage.py test --keepdb -v3` 
@@ -54,12 +54,12 @@ If `OIDC_SERVER_URL` and `OIDC_REALM` are not provided then the Django Auth is e
 
     or
 
-    `docker-compose -f docker-compose.yml -f docker-compose.ci.yml run --rm api python manage.py test --keepdb -v3`
+    `docker compose -f docker-compose.yml -f docker-compose.ci.yml run --rm api python manage.py test --keepdb -v3`
 
 ### DB migrations
 After modifying model you need to create migration files. Run:
 
-`docker-compose run --rm api python manage.py makemigrations`
+`docker compose run --rm api python manage.py makemigrations`
 
 Make sure to commit newly created migration files.
 
@@ -78,28 +78,29 @@ In order to debug tests or api you can use PDB. Set a breakpoint in code with:
 
 Run tests with:
 
-`docker-compose run --rm api python manage.py test core.code_systems --keepdb -v3`
+`docker compose run --rm api python manage.py test core.code_systems --keepdb -v3`
 
 Run api with:
 
-`docker-compose run --rm --service-ports api`
+`docker compose run --rm --service-ports api`
 
 ### Profiler
 #### We use [django-silk](https://github.com/jazzband/django-silk) as our profiler #####
 #### Skip to step 3 if not first time
-1. `docker-compose run --rm api python manage.py migrate`
-2. `docker-compose run --rm api python manage.py collectstatic`
+1. `docker compose run --rm api python manage.py migrate`
+2. `docker compose run --rm api python manage.py collectstatic`
 3. Go to http://localhost:8000/silk/
 
 ### Importing FHIR resources
 
 In order to import FHIR resources run:
 
-`docker-compose run --no-deps --rm -v $(pwd)/../fhir_imports:/fhir api python tools/import.py -f /fhir -t http://api:8000/orgs/test -s 891b4b17feab99f3ff7e5b5d04ccc5da7aa96da6 -c http://api:8000/orgs/test`
+`docker compose run --no-deps --rm -v $(pwd)/../fhir_imports:/fhir api python tools/import.py -f /fhir -t 
+http://api:8000/orgs/test -s 891b4b17feab99f3ff7e5b5d04ccc5da7aa96da6 -c http://api:8000/orgs/test`
 
 For help run:
 
-`docker-compose run --no-deps --rm api python tools/fhir_import.py -h`
+`docker compose run --no-deps --rm api python tools/fhir_import.py -h`
 
 ### Release
 

@@ -2,13 +2,15 @@ import json
 import os
 import uuid
 from json import JSONDecodeError
+from unittest.mock import mock_open
 from zipfile import ZipFile
 
+import responses
 from celery_once import AlreadyQueued
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.db.models import F
-from mock import patch, Mock, ANY, PropertyMock
+from mock import patch, Mock, ANY, PropertyMock, call
 from ocldev.oclcsvtojsonconverter import OclStandardCsvToJsonConverter
 
 from core.collections.models import Collection
@@ -18,6 +20,7 @@ from core.common.tasks import post_import_update_resource_counts, bulk_import_pa
 from core.common.tests import OCLAPITestCase, OCLTestCase
 from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory
+from core.importers.importer import ImporterSubtask, ImportTask, Importer, ResourceImporter
 from core.importers.input_parsers import ImportContentParser
 from core.importers.models import BulkImport, BulkImportInline, BulkImportParallelRunner
 from core.importers.views import csv_file_data_to_input_list
@@ -1100,6 +1103,29 @@ class BulkImportParallelRunnerTest(OCLTestCase):
             ]
         )
 
+    @responses.activate
+    def test_import_subtask_single_resource_per_file(self):
+        pass
+
+    @responses.activate
+    def test_import_subtask_multiple_resource_per_file(self):
+        with open(os.path.join(os.path.dirname(__file__), '..', 'samples/BI-FY19-baseline.json'), 'rb') \
+                as file:
+            responses.add(responses.GET, 'http://fetch.com/some/npm/package', body=file.read(), status=200,
+                          content_type='application/json', stream=True)
+
+            org_result = ImporterSubtask('http://fetch.com/some/npm/package', 'ocladmin', 'organization',
+                                         'OCL', 'Organization', [{'start_index': 0, 'end_index': 1}]).run()
+            self.assertEqual(org_result, [1])
+
+            source_result = ImporterSubtask('http://fetch.com/some/npm/package', 'ocladmin', 'organization',
+                                            'OCL', 'Source', [{'start_index': 0, 'end_index': 1}]).run()
+            self.assertEqual(source_result, [1])
+
+            concept_result = ImporterSubtask('http://fetch.com/some/npm/package', 'ocladmin', 'organization',
+                                             'OCL', 'Concept', [{'start_index': 5, 'end_index': 10}]).run()
+            self.assertEqual(concept_result, [1, 1, 1, 1, 1])
+
 
 class BulkImportViewTest(OCLAPITestCase):
     def setUp(self):
@@ -1633,33 +1659,6 @@ class BulkImportViewTest(OCLAPITestCase):
         self.assertEqual(response.data, {'errors': ('foobar',)})
         celery_app_mock.control.revoke.assert_called_once_with(task_id, terminate=True, signal='SIGKILL')
 
-    @patch('core.tasks.models.AsyncResult')
-    def test_delete_403(self, async_result_mock):
-        random_user = UserProfileFactory(username='random_user')
-        response = self.client.delete(
-            "/importers/bulk-import/",
-            {'task_id': ''},
-            HTTP_AUTHORIZATION='Token ' + self.token,
-        )
-
-        self.assertEqual(response.status_code, 400)
-
-        async_result_mock.return_value = Mock(
-            args=['content', 'ocladmin', True]  # content, username, update_if_exists
-        )
-
-        task_id = 'ace5abf4-3b7f-4e4a-b16f-d1c041088c3e-ocladmin~priority'
-        Task(
-            id=task_id, created_by=self.superuser, queue='priority', state='PENDING',
-            name='core.common.tasks.bulk_import').save()
-        response = self.client.delete(
-            "/importers/bulk-import/",
-            {'task_id': task_id},
-            HTTP_AUTHORIZATION='Token ' + random_user.get_token(),
-        )
-
-        self.assertEqual(response.status_code, 403)
-
 
 class TasksTest(OCLTestCase):
     @patch('core.sources.models.Source.update_mappings_count')
@@ -1717,7 +1716,610 @@ class TasksTest(OCLTestCase):
         bulk_import_mock().run.assert_called_once()
 
 
+class ImportTaskTest(OCLTestCase):
+
+    def test_import_task_from_async_result_for_unexisting_task(self):
+        async_result = Mock()
+        async_result.state = 'PENDING'
+        import_task = ImportTask.import_task_from_async_result(async_result)
+        self.assertIsNone(import_task)
+
+    def test_import_task_from_async_result_for_other_task(self):
+        async_result = Mock()
+        async_result.result = {}
+        async_result.state = 'SUCCESS'
+        import_task = ImportTask.import_task_from_async_result(async_result)
+        self.assertIsNone(import_task)
+
+    def test_import_task_from_async_result_for_import_task(self):
+        async_result = Mock()
+        async_result.result = {'import_task': ('id', '1')}
+        async_result.state = 'SUCCESS'
+        import_task = ImportTask.import_task_from_async_result(async_result)
+        self.assertIsNotNone(import_task)
+
+    def test_import_task_from_json(self):
+        json_task = {'import_task': ('id', '1')}
+        import_task = ImportTask.import_task_from_json(json_task)
+        self.assertIsNotNone(import_task)
+
+    def test_revoke(self):
+        import_task = ImportTask()
+        mock = Mock()
+        mock.parent = Mock()
+        mock.parent.parent = Mock()
+        mock.parent.parent.parent = None
+
+        import_task.import_async_result = mock
+        import_task.revoke()
+
+        mock.revoke.assert_called_once_with()
+        mock.parent.revoke.assert_called_once_with()
+        mock.parent.parent.revoke.assert_called_once_with()
+
+
+class ImporterTest(OCLTestCase):
+
+    @staticmethod
+    def get_absolute_path(path):
+        module_dir = os.path.dirname(__file__)  # get current directory
+        file_path = os.path.join(module_dir, path)
+        return file_path
+
+    @patch.object(Importer, 'prepare_resources')
+    def test_traverse_dependencies(self, mocked_prepare_resources):
+        importer = Importer('1', 'path', 'root', 'users', 'root')
+        with patch('builtins.open', mock_open(read_data='{ "dependencies" : '
+                                                        '{'
+                                                        '"hl7.fhir.r4.core" : "4.0.1",'
+                                                        '"hl7.terminology.r4" : "5.3.0",'
+                                                        '"hl7.fhir.uv.extensions.r4" : "1.0.0",'
+                                                        '"ans.fr.nos" : "1.2.0"'
+                                                        '}'
+                                                        '}')):
+            with open('/dev/null') as package_file:
+                importer.traverse_dependencies(package_file, '/', [], [], [], {})
+                mocked_prepare_resources.assert_has_calls([
+                    call('https://packages.simplifier.net/hl7.fhir.r4.core/4.0.1/', [], ['/'], ['/'], {}),
+                    call('https://packages.simplifier.net/hl7.terminology.r4/5.3.0/', [], ['/'], ['/'], {}),
+                    call('https://packages.simplifier.net/hl7.fhir.uv.extensions.r4/1.0.0/', [], ['/'], ['/'], {}),
+                    call('https://packages.simplifier.net/ans.fr.nos/1.2.0/', [], ['/'], ['/'], {})
+                ])
+
+    @patch.object(Importer, 'prepare_resources')
+    def test_traverse_dependencies_with_circuit(self, mocked_prepare_resources):
+        importer = Importer('1', 'path', 'root', 'users', 'root')
+        with patch('builtins.open', mock_open(read_data='{ "dependencies" : '
+                                                        '{'
+                                                        '"hl7.fhir.r4.core" : "4.0.1",'
+                                                        '"hl7.terminology.r4" : "5.3.0",'
+                                                        '"hl7.fhir.uv.extensions.r4" : "1.0.0",'
+                                                        '"ans.fr.nos" : "1.2.0"'
+                                                        '}'
+                                                        '}')):
+            with open('/dev/null') as package_file:
+                visited_dependencies = ['https://packages.simplifier.net/hl7.fhir.uv.extensions.r4/1.0.0/']
+                importer.traverse_dependencies(package_file, '/', [], [], visited_dependencies, {})
+                mocked_prepare_resources.assert_has_calls([
+                    call('https://packages.simplifier.net/hl7.fhir.r4.core/4.0.1/', [], ['/'],
+                         ['https://packages.simplifier.net/hl7.fhir.uv.extensions.r4/1.0.0/', '/'], {}),
+                    call('https://packages.simplifier.net/hl7.terminology.r4/5.3.0/', [], ['/'],
+                         ['https://packages.simplifier.net/hl7.fhir.uv.extensions.r4/1.0.0/', '/'], {}),
+                    call('https://packages.simplifier.net/ans.fr.nos/1.2.0/', [], ['/'], [
+                        'https://packages.simplifier.net/hl7.fhir.uv.extensions.r4/1.0.0/', '/'], {})])
+
+    @responses.activate
+    @patch.object(Importer, 'prepare_resources')
+    def test_traverse_dependencies_with_x(self, mocked_prepare_resources):
+        importer = Importer('1', 'path', 'root', 'users', 'root')
+        with patch('builtins.open', mock_open(read_data='{ "dependencies" : '
+                                                        '{'
+                                                        '"hl7.fhir.r4.core" : "4.0.1",'
+                                                        '"hl7.terminology.r4" : "5.3.0",'
+                                                        '"hl7.fhir.uv.extensions.r4" : "1.0.0",'
+                                                        '"ans.fr.nos" : "1.1.x"'
+                                                        '}'
+                                                        '}')):
+            with open('/dev/null') as package_file:
+                responses.add(responses.GET, 'https://packages.simplifier.net/ans.fr.nos',
+                              body='{"_id":"ans.fr.nos","name":"ans.fr.nos","description":"Les nomenclatures des '
+                                   'objets de Sante (built Wed, Feb 28, 2024 14:48+0000+00:00)",'
+                                   '"dist-tags":{"latest":"1.2.0"},'
+                                   '"versions":{"1.1.0":{"name":"ans.fr.nos","version":"1.1.0",'
+                                   '"description":"None.","dist":{"shasum":"65b8a03213e0760e6fd083d89aa5dbaf5dc320a9",'
+                                   '"tarball":"https://packages.simplifier.net/ans.fr.nos/1.1.0"},"fhirVersion":"R4",'
+                                   '"url":"https://packages.simplifier.net/ans.fr.nos/1.1.0"},'
+                                   '"1.2.0":{"name":"ans.fr.nos","version":"1.2.0","description":"None.",'
+                                   '"dist":{"shasum":"f881709302cf869fa8159e21550ec5a77e80c1b2","tarball":'
+                                   '"https://packages.simplifier.net/ans.fr.nos/1.2.0"},"fhirVersion":"R4",'
+                                   '"url":"https://packages.simplifier.net/ans.fr.nos/1.2.0"}}}', status=200,
+                              content_type='application/json', stream=True)
+                importer.traverse_dependencies(package_file, '/', [], [], [], {})
+                mocked_prepare_resources.assert_has_calls([
+                    call('https://packages.simplifier.net/hl7.fhir.r4.core/4.0.1/', [], ['/'], ['/'], {}),
+                    call('https://packages.simplifier.net/hl7.terminology.r4/5.3.0/', [], ['/'], ['/'], {}),
+                    call('https://packages.simplifier.net/hl7.fhir.uv.extensions.r4/1.0.0/', [], ['/'], ['/'], {}),
+                    call('https://packages.simplifier.net/ans.fr.nos/1.1.0/', [], ['/'], ['/'], {})
+                ])
+
+    @responses.activate
+    @patch.object(Importer, 'prepare_resources')
+    def test_traverse_dependencies_with_x_without_match(self, _):
+        importer = Importer('1', 'path', 'root', 'users', 'root')
+        with patch('builtins.open', mock_open(read_data='{ "dependencies" : '
+                                                        '{'
+                                                        '"hl7.fhir.r4.core" : "4.0.1",'
+                                                        '"hl7.terminology.r4" : "5.3.0",'
+                                                        '"hl7.fhir.uv.extensions.r4" : "1.0.0",'
+                                                        '"ans.fr.nos" : "1.3.x"'
+                                                        '}'
+                                                        '}')):
+            with open('/dev/null') as package_file:
+                responses.add(responses.GET, 'https://packages.simplifier.net/ans.fr.nos',
+                              body='{"_id":"ans.fr.nos","name":"ans.fr.nos","description":"Les nomenclatures des '
+                                   'objets de Sante (built Wed, Feb 28, 2024 14:48+0000+00:00)",'
+                                   '"dist-tags":{"latest":"1.2.0"},'
+                                   '"versions":{"1.1.0":{"name":"ans.fr.nos","version":"1.1.0",'
+                                   '"description":"None.","dist":{"shasum":"65b8a03213e0760e6fd083d89aa5dbaf5dc320a9",'
+                                   '"tarball":"https://packages.simplifier.net/ans.fr.nos/1.1.0"},"fhirVersion":"R4",'
+                                   '"url":"https://packages.simplifier.net/ans.fr.nos/1.1.0"},'
+                                   '"1.2.0":{"name":"ans.fr.nos","version":"1.2.0","description":"None.",'
+                                   '"dist":{"shasum":"f881709302cf869fa8159e21550ec5a77e80c1b2","tarball":'
+                                   '"https://packages.simplifier.net/ans.fr.nos/1.2.0"},"fhirVersion":"R4",'
+                                   '"url":"https://packages.simplifier.net/ans.fr.nos/1.2.0"}}}', status=200,
+                              content_type='application/json', stream=True)
+                with self.assertRaises(LookupError) as err:
+                    importer.traverse_dependencies(package_file, '/', [], [], [], {})
+                self.assertEqual("No version matching 1.3.x found in ['1.2.0', '1.1.0'] for package ans.fr.nos",
+                                 str(err.exception))
+
+    def test_categorize_resources_all_from_file(self):
+        importer = Importer('1', 'path', 'root', 'users', 'root')
+        resources = {}
+        with open(ImporterTest.get_absolute_path('tests/fhir_resources_01.json')) as json_file:
+            importer.categorize_resources(json_file, '/path/', 'json', ['CodeSystem', 'ValueSet'], resources)
+
+        self.assertEqual(list(resources.keys()), ['CodeSystem', 'ValueSet'])
+        self.assertEqual(resources.get('CodeSystem'),  {'/path//json': 2})
+        self.assertEqual(resources.get('ValueSet'),  {'/path//json': 2})
+
+    def test_categorize_resources_none_from_file(self):
+        importer = Importer('1', 'path', 'root', 'users', 'root')
+        resources = {}
+        with open(ImporterTest.get_absolute_path('tests/fhir_resources_01.json')) as json_file:
+            importer.categorize_resources(json_file, '/path/', 'json', ['ConceptMap'], resources)
+
+        self.assertEqual(list(resources.keys()), ['ConceptMap'])
+        self.assertEqual(resources.get('ConceptMap'), {})
+
+    def test_categorize_resources_few_from_file(self):
+        importer = Importer('1', 'path', 'root', 'users', 'root')
+        resources = {}
+        with open(ImporterTest.get_absolute_path('tests/fhir_resources_01.json')) as json_file:
+            importer.categorize_resources(json_file, '/path/', 'json', ['CodeSystem'], resources)
+
+        self.assertEqual(list(resources.keys()), ['CodeSystem'])
+        self.assertEqual(resources.get('CodeSystem'), {'/path//json': 2})
+
+    def test_categorize_resources_for_npm_file(self):
+        importer = Importer('1', 'path', 'root', 'users', 'root', 'npm')
+        resources = {}
+        with open(ImporterTest.get_absolute_path('tests/fhir_resources_01.json')) as json_file:
+            importer.categorize_resources(json_file, '/path/', 'json', ['ValueSet', 'CodeSystem'], resources)
+
+        self.assertEqual(list(resources.keys()), ['ValueSet', 'CodeSystem'])
+        self.assertEqual(resources.get('ValueSet'), {'/path//json': 1})
+        self.assertEqual(resources.get('CodeSystem'), {})
+
+    def test_prepare_tasks(self):
+        importer = Importer('1', 'path', 'root', 'users', 'root')
+        tasks = importer.prepare_tasks(['CodeSystem', 'ValueSet', 'ConceptMap'], ['/package2', '/package1'], {
+                                   'ValueSet': {'/package1/path1': 101, '/package1/path2': 299, '/package2/path3': 50},
+                                   'CodeSystem': {'/package1/path4:': 10},
+                                   'ConceptMap': {'/package2/path5': 250}
+                               })
+
+        self.assertEqual(tasks, [
+            # Executed in sequence
+            [  # Executed in parallel
+                {'path': '/package2', 'username': 'root', 'owner_type': 'users', 'owner': 'root',
+                 'resource_type': 'ValueSet', 'files': [{'filepath': '/path3', 'start_index': 0, 'end_index': 50}]}
+            ], [  # Executed in parallel
+                {'path': '/package2', 'username': 'root', 'owner_type': 'users', 'owner': 'root',
+                 'resource_type': 'ConceptMap', 'files': [{'filepath': '/path5', 'start_index': 0, 'end_index': 100}]},
+                {'path': '/package2', 'username': 'root', 'owner_type': 'users', 'owner': 'root',
+                 'resource_type': 'ConceptMap', 'files': [{'filepath': '/path5', 'start_index': 100,
+                                                           'end_index': 200}]},
+                {'path': '/package2', 'username': 'root', 'owner_type': 'users', 'owner': 'root',
+                 'resource_type': 'ConceptMap', 'files': [{'filepath': '/path5', 'start_index': 200, 'end_index': 250}]}
+            ], [  # Executed in parallel
+                {'path': '/package1', 'username': 'root', 'owner_type': 'users', 'owner': 'root',
+                 'resource_type': 'CodeSystem', 'files': [{'filepath': '/path4:', 'start_index': 0, 'end_index': 10}]}
+            ], [  # Executed in parallel
+                {'path': '/package1', 'username': 'root', 'owner_type': 'users', 'owner': 'root',
+                 'resource_type': 'ValueSet', 'files': [{'filepath': '/path1', 'start_index': 0, 'end_index': 100}]},
+                {'path': '/package1', 'username': 'root', 'owner_type': 'users', 'owner': 'root',
+                 'resource_type': 'ValueSet', 'files': [{'filepath': '/path1', 'start_index': 100, 'end_index': 101}]},
+                {'path': '/package1', 'username': 'root', 'owner_type': 'users', 'owner': 'root',
+                 'resource_type': 'ValueSet', 'files': [{'filepath': '/path2', 'start_index': 0, 'end_index': 100}]},
+                {'path': '/package1', 'username': 'root', 'owner_type': 'users', 'owner': 'root',
+                 'resource_type': 'ValueSet', 'files': [{'filepath': '/path2', 'start_index': 100, 'end_index': 200}]},
+                {'path': '/package1', 'username': 'root', 'owner_type': 'users', 'owner': 'root',
+                 'resource_type': 'ValueSet', 'files': [{'filepath': '/path2', 'start_index': 200,
+                                                         'end_index': 299}]}
+            ]])
+
+    hl7_fhir_fr_core_resources = {
+        'CodeSystem': {'http://fetch/npm/package/package/CodeSystem-fr-core-cs-circonstances-sortie.json': 1,
+                       'http://fetch/npm/package/package/CodeSystem-fr-core-cs-contact-relationship.json': 1,
+                       'http://fetch/npm/package/package/CodeSystem-fr-core-cs-fiabilite-identite.json': 1,
+                       'http://fetch/npm/package/package/CodeSystem-fr-core-cs-identifier-type.json': 1,
+                       'http://fetch/npm/package/package/CodeSystem-fr-core-cs-location-identifier-type.json': 1,
+                       'http://fetch/npm/package/package/CodeSystem-fr-core-cs-location-physical-type.json': 1,
+                       'http://fetch/npm/package/package/CodeSystem-fr-core-cs-location-position-room.json': 1,
+                       'http://fetch/npm/package/package/CodeSystem-fr-core-cs-location-type.json': 1,
+                       'http://fetch/npm/package/package/CodeSystem-fr-core-cs-marital-status.json': 1,
+                       'http://fetch/npm/package/package/CodeSystem-fr-core-cs-method-collection.json': 1,
+                       'http://fetch/npm/package/package/CodeSystem-fr-core-cs-mode-validation-identity.json': 1,
+                       'http://fetch/npm/package/package/CodeSystem-fr-core-cs-schedule-type.json': 1,
+                       'http://fetch/npm/package/package/CodeSystem-fr-core-cs-type-admission.json': 1,
+                       'http://fetch/npm/package/package/CodeSystem-fr-core-cs-type-organisation.json': 1,
+                       'http://fetch/npm/package/package/CodeSystem-fr-core-cs-v2-0203.json': 1,
+                       'http://fetch/npm/package/package/CodeSystem-fr-core-cs-v2-0445.json': 1,
+                       'http://fetch/npm/package/package/CodeSystem-fr-core-cs-v2-3307.json': 1,
+                       'http://fetch/npm/package/package/CodeSystem-fr-core-cs-v2-3311.json': 1},
+        'ValueSet': {'http://fetch/npm/package/package/ValueSet-fr-core-vs-availability-time-day.json': 1,
+                     'http://fetch/npm/package/package/ValueSet-fr-core-vs-availability-time-rule.json': 1,
+                     'http://fetch/npm/package/package/ValueSet-fr-core-vs-bp-method.json': 1,
+                     'http://fetch/npm/package/package/ValueSet-fr-core-vs-civility-exercice-rass.json': 1,
+                     'http://fetch/npm/package/package/ValueSet-fr-core-vs-civility-rass.json': 1,
+                     'http://fetch/npm/package/package/ValueSet-fr-core-vs-civility.json': 1,
+                     'http://fetch/npm/package/package/ValueSet-fr-core-vs-cog-commune-pays.json': 1,
+                     'http://fetch/npm/package/package/ValueSet-fr-core-vs-contact-relationship.json': 1,
+                     'http://fetch/npm/package/package/ValueSet-fr-core-vs-email-type.json': 1,
+                     'http://fetch/npm/package/package/ValueSet-fr-core-vs-encounter-class.json': 1,
+                     'http://fetch/npm/package/package/ValueSet-fr-core-vs-encounter-discharge-disposition.json': 1,
+                     'http://fetch/npm/package/package/ValueSet-fr-core-vs-encounter-identifier-type.json': 1,
+                     'http://fetch/npm/package/package/ValueSet-fr-core-vs-encounter-type.json': 1,
+                     'http://fetch/npm/package/package/ValueSet-fr-core-vs-height-body-position.json': 1,
+                     'http://fetch/npm/package/package/ValueSet-fr-core-vs-identity-method-collection.json': 1,
+                     'http://fetch/npm/package/package/ValueSet-fr-core-vs-identity-reliability.json': 1,
+                     'http://fetch/npm/package/package/ValueSet-fr-core-vs-insee-code.json': 1,
+                     'http://fetch/npm/package/package/ValueSet-fr-core-vs-location-identifier-type.json': 1,
+                     'http://fetch/npm/package/package/ValueSet-fr-core-vs-location-physical-type.json': 1,
+                     'http://fetch/npm/package/package/ValueSet-fr-core-vs-location-position-room.json': 1,
+                     'http://fetch/npm/package/package/ValueSet-fr-core-vs-location-type.json': 1,
+                     'http://fetch/npm/package/package/ValueSet-fr-core-vs-marital-status.json': 1,
+                     'http://fetch/npm/package/package/ValueSet-fr-core-vs-mode-validation-identity.json': 1,
+                     'http://fetch/npm/package/package/ValueSet-fr-core-vs-organization-activity-field.json': 1,
+                     'http://fetch/npm/package/package/ValueSet-fr-core-vs-organization-identifier-type.json': 1,
+                     'http://fetch/npm/package/package/ValueSet-fr-core-vs-organization-type.json': 1,
+                     'http://fetch/npm/package/package/ValueSet-fr-core-vs-organization-uf-activity-field.json': 1,
+                     'http://fetch/npm/package/package/ValueSet-fr-core-vs-patient-contact-role.json': 1,
+                     'http://fetch/npm/package/package/ValueSet-fr-core-vs-patient-gender-INS.json': 1,
+                     'http://fetch/npm/package/package/ValueSet-fr-core-vs-patient-identifier-type.json': 1,
+                     'http://fetch/npm/package/package/ValueSet-fr-core-vs-practitioner-identifier-type.json': 1,
+                     'http://fetch/npm/package/package/ValueSet-fr-core-vs-practitioner-qualification.json': 1,
+                     'http://fetch/npm/package/package/ValueSet-fr-core-vs-practitioner-role-exercice.json': 1,
+                     'http://fetch/npm/package/package/ValueSet-fr-core-vs-practitioner-role-profession.json': 1,
+                     'http://fetch/npm/package/package/ValueSet-fr-core-vs-practitioner-specialty.json': 1,
+                     'http://fetch/npm/package/package/ValueSet-fr-core-vs-relation-type.json': 1,
+                     'http://fetch/npm/package/package/ValueSet-fr-core-vs-schedule-type.json': 1,
+                     'http://fetch/npm/package/package/ValueSet-fr-core-vs-schedule-unavailability-reason.json': 1,
+                     'http://fetch/npm/package/package/ValueSet-fr-core-vs-title.json': 1}}
+
+    @patch.object(Importer, 'traverse_dependencies')
+    @responses.activate
+    def test_prepare_resources_tar_gzip(self, _):
+        importer = Importer('1', 'path', 'root', 'users', 'root', 'npm')
+        path = ImporterTest.get_absolute_path('tests/hl7.fhir.fr.core-2.0.1.tgz')
+        resources = {}
+        with open(path, 'rb') as file:
+            responses.add(responses.GET, 'http://fetch/npm/package', body=file.read(), status=200,
+                          content_type='application/tar+gzip', stream=True)
+            importer.prepare_resources('http://fetch/npm/package', ['CodeSystem', 'ValueSet'], [], [], resources)
+
+        self.assertEqual(resources, self.hl7_fhir_fr_core_resources)
+
+    @patch.object(Importer, 'traverse_dependencies')
+    @responses.activate
+    def test_prepare_resources_zip(self, _):
+        importer = Importer('1', 'path', 'root', 'users', 'root', 'npm')
+        path = ImporterTest.get_absolute_path('tests/hl7.fhir.fr.core-2.0.1.zip')
+        resources = {}
+        with open(path, 'rb') as file:
+            responses.add(responses.GET, 'http://fetch/npm/package', body=file.read(), status=200,
+                          content_type='application/zip', stream=True)
+            importer.prepare_resources('http://fetch/npm/package', ['CodeSystem', 'ValueSet'], [], [], resources)
+
+        self.assertEqual(resources, self.hl7_fhir_fr_core_resources)
+
+    @patch.object(Importer, 'traverse_dependencies')
+    @responses.activate
+    def test_prepare_resources_json(self, _):
+        importer = Importer('1', 'path', 'root', 'users', 'root')
+        path = ImporterTest.get_absolute_path('tests/fhir_resources_01.json')
+        resources = {}
+        with open(path, 'rb') as file:
+            responses.add(responses.GET, 'http://fetch/json', body=file.read(), status=200,
+                          content_type='application/json', stream=True)
+            importer.prepare_resources('http://fetch/json', ['CodeSystem', 'ValueSet'], [], [], resources)
+
+        self.assertEqual(resources, {'CodeSystem': {'http://fetch/json/': 2}, 'ValueSet': {'http://fetch/json/': 2}})
+
+
+class ImporterSubtaskTest(OCLTestCase):
+
+    @staticmethod
+    def get_absolute_path(path):
+        module_dir = os.path.dirname(__file__)  # get current directory
+        file_path = os.path.join(module_dir, path)
+        return file_path
+
+    @patch.object(ResourceImporter, 'import_resource')
+    @responses.activate
+    def test_run(self, mocked_import_resource):
+        path = 'http://fetch/npm/package'
+        importer = ImporterSubtask(path, 'root', 'user', 'root', 'ValueSet', [
+            {'filepath': 'package/ValueSet-fr-core-vs-location-type.json', 'start_index': 0, 'end_index': 1},
+            {'filepath': 'package/ValueSet-fr-core-vs-marital-status.json', 'start_index': 0, 'end_index': 1},
+            {'filepath': 'package/ValueSet-fr-core-vs-identity-reliability.json', 'start_index': 0, 'end_index': 1},
+        ])
+        with open(ImporterSubtaskTest.get_absolute_path('tests/hl7.fhir.fr.core-2.0.1.tgz'), 'rb') as file:
+            responses.add(responses.GET, path, body=file.read(), status=200,
+                          content_type='application/tar+gzip', stream=True)
+            importer.run()
+
+        mocked_import_resource.assert_has_calls([
+            call({'resourceType': 'ValueSet', 'id': 'fr-core-vs-location-type',
+                  'meta': {'profile': ['http://hl7.org/fhir/StructureDefinition/shareablevalueset']},
+                  'text': {'status': 'generated',
+                           'div': '<div xmlns="http://www.w3.org/1999/xhtml"><ul><li>Include all codes defined in '
+                                  '<a href="CodeSystem-fr-core-cs-location-type.html"><code>https://hl7.fr/ig/fhir/'
+                                  'core/CodeSystem/fr-core-cs-location-type</code></a></li></ul></div>'},
+                  'extension': [{'url': 'http://hl7.org/fhir/StructureDefinition/valueset-warning',
+                                 'valueMarkdown': 'Types are for general categories of identifiers. See [the '
+                                                  'identifier registry](identifier-registry.html) for a list of common '
+                                                  'identifier systems'},
+                                {'url': 'http://hl7.org/fhir/StructureDefinition/structuredefinition-standards-status',
+                                 'valueCode': 'informative'},
+                                {'url': 'http://hl7.org/fhir/StructureDefinition/structuredefinition-fmm',
+                                 'valueInteger': 1},
+                                {'url': 'http://hl7.org/fhir/StructureDefinition/structuredefinition-wg',
+                                 'valueCode': 'fhir'}],
+                  'url': 'https://hl7.fr/ig/fhir/core/ValueSet/fr-core-vs-location-type', 'version': '2.0.1',
+                  'name': 'FRCoreValueSetLocationType', 'title': 'FR Core ValueSet Location type', 'status': 'active',
+                  'experimental': False, 'date': '2024-04-16T11:41:28+02:00', 'publisher': "Interop'Santé", 'contact': [
+                    {'name': "Interop'Santé", 'telecom': [{'system': 'url', 'value': 'http://interopsante.org/'}]},
+                    {'name': 'InteropSanté',
+                     'telecom': [{'system': 'email', 'value': 'fhir@interopsante.org', 'use': 'work'}]}],
+                  'description': 'A role for a location | Jeu de valeurs du rôle joué par un lieu',
+                  'jurisdiction': [{'coding': [{'system': 'urn:iso:std:iso:3166', 'code': 'FR', 'display': 'France'}]}],
+                  'compose': {
+                      'include': [{'system': 'https://hl7.fr/ig/fhir/core/CodeSystem/fr-core-cs-location-type'}]}},
+                 'root', 'user', 'root'),
+            call({'resourceType': 'ValueSet', 'id': 'fr-core-vs-marital-status',
+                  'meta': {'profile': ['http://hl7.org/fhir/StructureDefinition/shareablevalueset']},
+                  'text': {'status': 'extensions',
+                           'div': '<div xmlns="http://www.w3.org/1999/xhtml"><p>This value set includes codes based on '
+                                  'the following rules:</p><ul><li>Include all codes defined in <a href="CodeSystem-fr-'
+                                  'core-cs-marital-status.html"><code>https://hl7.fr/ig/fhir/core/CodeSystem/fr-core-cs'
+                                  '-marital-status</code></a></li><li>Include all codes defined in <a href="http://'
+                                  'terminology.hl7.org/5.3.0/CodeSystem-v3-MaritalStatus.html"><code>http://terminology'
+                                  '.hl7.org/CodeSystem/v3-MaritalStatus</code></a></li><li>Include these codes as '
+                                  'defined in <a href="http://terminology.hl7.org/5.3.0/CodeSystem-v3-NullFlavor.html">'
+                                  '<code>http://terminology.hl7.org/CodeSystem/v3-NullFlavor</code></a><table '
+                                  'class="none"><tr><td style="white-space:nowrap"><b>XXXX</b></td><td><b>XXXX</b></td>'
+                                  '<td><b>XXXX</b></td></tr><tr><td><a href="http://terminology.hl7.org/5.3.0/'
+                                  'CodeSystem-v3-NullFlavor.html#v3-NullFlavor-UNK">UNK</a></td><td>unknown</td><td>'
+                                  '**Description:**A proper value is applicable, but not known.<br/><br/>**Usage Notes'
+                                  '**: This means the actual value is not known. If the only thing that is unknown is '
+                                  'how to properly express the value in the necessary constraints (value set, datatype,'
+                                  ' etc.), then the OTH or UNC flavor should be used. No properties should be included '
+                                  'for a datatype with this property unless:<br/><br/>1.  Those properties themselves '
+                                  'directly translate to a semantic of &quot;unknown&quot;. (E.g. a local code sent as '
+                                  'a translation that conveys \'unknown\')<br/>2.  Those properties further qualify '
+                                  'the nature of what is unknown. (E.g. specifying a use code of &quot;H&quot; and a '
+                                  'URL prefix of &quot;tel:&quot; to convey that it is the home phone number that is '
+                                  'unknown.)</td></tr></table></li></ul></div>'},
+                  'url': 'https://hl7.fr/ig/fhir/core/ValueSet/fr-core-vs-marital-status', 'version': '2.0.1',
+                  'name': 'FRCoreValueSetMaritalStatus', 'title': 'FR Core ValueSet Patient gender INS ValueSet',
+                  'status': 'active', 'experimental': False, 'date': '2024-04-16T11:41:28+02:00',
+                  'publisher': "Interop'Santé", 'contact': [
+                    {'name': "Interop'Santé", 'telecom': [{'system': 'url', 'value': 'http://interopsante.org/'}]},
+                    {'name': 'InteropSanté',
+                     'telecom': [{'system': 'email', 'value': 'fhir@interopsante.org', 'use': 'work'}]}],
+                  'description': 'Patient Gender for INS : male | female | unknown',
+                  'jurisdiction': [{'coding': [{'system': 'urn:iso:std:iso:3166', 'code': 'FR', 'display': 'France'}]}],
+                  'compose': {
+                      'include': [{'system': 'https://hl7.fr/ig/fhir/core/CodeSystem/fr-core-cs-marital-status'},
+                                  {'system': 'http://terminology.hl7.org/CodeSystem/v3-MaritalStatus'},
+                                  {'system': 'http://terminology.hl7.org/CodeSystem/v3-NullFlavor',
+                                   'concept': [{'code': 'UNK', 'display': 'unknown'}]}]}}, 'root', 'user', 'root'),
+            call({'resourceType': 'ValueSet', 'id': 'fr-core-vs-identity-reliability',
+                  'meta': {'profile': ['http://hl7.org/fhir/StructureDefinition/shareablevalueset']},
+                  'text': {'status': 'generated',
+                           'div': '<div xmlns="http://www.w3.org/1999/xhtml"><ul><li>Include all codes defined in '
+                                  '<a href="CodeSystem-fr-core-cs-v2-0445.html"><code>https://hl7.fr/ig/fhir/core/'
+                                  'CodeSystem/fr-core-cs-v2-0445</code></a></li></ul></div>'},
+                  'url': 'https://hl7.fr/ig/fhir/core/ValueSet/fr-core-vs-identity-reliability', 'version': '2.0.1',
+                  'name': 'FRCoreValueSetIdentityReliabilityStatus', 'title': 'FR Core ValueSet Identity reliability',
+                  'status': 'active', 'experimental': False, 'date': '2024-04-16T11:41:28+02:00',
+                  'publisher': "Interop'Santé", 'contact': [
+                    {'name': "Interop'Santé", 'telecom': [{'system': 'url', 'value': 'http://interopsante.org/'}]},
+                    {'name': 'InteropSanté',
+                     'telecom': [{'system': 'email', 'value': 'fhir@interopsante.org', 'use': 'work'}]}],
+                  'description': 'The reliability of the identity.',
+                  'jurisdiction': [{'coding': [{'system': 'urn:iso:std:iso:3166', 'code': 'FR', 'display': 'France'}]}],
+                  'compose': {'include': [{'system': 'https://hl7.fr/ig/fhir/core/CodeSystem/fr-core-cs-v2-0445'}]}},
+                 'root', 'user', 'root')])
+
+    @patch.object(ResourceImporter, 'import_resource')
+    @responses.activate
+    def test_run_with_start_index(self, mocked_import_resource):
+        path = 'http://fetch/npm/package'
+        importer = ImporterSubtask(path, 'root', 'user', 'root', 'ValueSet', [
+            {'filepath': '/', 'start_index': 0, 'end_index': 1},
+            {'filepath': '/', 'start_index': 1, 'end_index': 2}
+        ])
+        with open(ImporterSubtaskTest.get_absolute_path('tests/fhir_resources_01.json'), 'rb') as file:
+            responses.add(responses.GET, path, body=file.read(), status=200,
+                          content_type='application/json', stream=True)
+            importer.run()
+
+        mocked_import_resource.assert_has_calls([
+            call({'resourceType': 'ValueSet', 'id': 'fr-core-vs-email-type',
+                  'meta': {'profile': ['http://hl7.org/fhir/StructureDefinition/shareablevalueset']},
+                  'text': {'status': 'generated',
+                           'div': '<div xmlns="http://www.w3.org/1999/xhtml"><ul><li>Include all codes defined in '
+                                  '<a href="https://interop.esante.gouv.fr/ig/nos/1.2.0/CodeSystem-TRE-R256-'
+                                  'TypeMessagerie.html"><code>https://mos.esante.gouv.fr/NOS/TRE_R256-TypeMessagerie'
+                                  '/FHIR/TRE-R256-TypeMessagerie</code></a></li></ul></div>'},
+                  'extension': [{'url': 'http://hl7.org/fhir/StructureDefinition/structuredefinition-standards-status',
+                                 'valueCode': 'informative'},
+                                {'url': 'http://hl7.org/fhir/StructureDefinition/structuredefinition-fmm',
+                                 'valueInteger': 0},
+                                {'url': 'http://hl7.org/fhir/StructureDefinition/structuredefinition-wg',
+                                 'valueCode': 'fhir'}],
+                  'url': 'https://hl7.fr/ig/fhir/core/ValueSet/fr-core-vs-email-type', 'version': '2.0.1',
+                  'name': 'FRCoreValueSetEmailType', 'title': 'FR Core ValueSet Email type', 'status': 'draft',
+                  'experimental': False, 'date': '2024-04-16T11:41:28+02:00', 'publisher': "Interop'Santé", 'contact': [
+                    {'name': "Interop'Santé", 'telecom': [{'system': 'url', 'value': 'http://interopsante.org/'}]},
+                    {'name': 'InteropSanté',
+                     'telecom': [{'system': 'email', 'value': 'fhir@interopsante.org', 'use': 'work'}]}],
+                  'description': 'The type of email',
+                  'jurisdiction': [{'coding': [{'system': 'urn:iso:std:iso:3166', 'code': 'FR', 'display': 'France'}]}],
+                  'compose': {'include': [{
+                                              'system': 'https://mos.esante.gouv.fr/NOS/TRE_R256-TypeMessagerie/'
+                                                        'FHIR/TRE-R256-TypeMessagerie'}]}},
+                 'root', 'user', 'root'),
+            call({'resourceType': 'ValueSet', 'id': 'fr-core-vs-encounter-class',
+                  'meta': {'profile': ['http://hl7.org/fhir/StructureDefinition/shareablevalueset']},
+                  'text': {'status': 'generated',
+                           'div': '<div xmlns="http://www.w3.org/1999/xhtml"><ul><li>Include these codes as defined '
+                                  'in <code>http://terminology.hl7.org/ValueSet/v3-ActEncounterCode</code><table '
+                                  'class="none"><tr><td style="white-space:nowrap"><b>XXXX</b></td><td><b>XXXX</b>'
+                                  '</td></tr><tr><td>ACUTE</td><td>Inpatient acute</td></tr><tr><td>NONAC</td><td>'
+                                  'Inpatient non acute</td></tr><tr><td>PRENC</td><td>Pre-admission</td></tr><tr>'
+                                  '<td>SS</td><td>Short stay</td></tr><tr><td>VR</td><td>Virtual</td></tr></table>'
+                                  '</li></ul></div>'},
+                  'extension': [{'url': 'http://hl7.org/fhir/StructureDefinition/structuredefinition-standards-status',
+                                 'valueCode': 'informative'},
+                                {'url': 'http://hl7.org/fhir/StructureDefinition/structuredefinition-fmm',
+                                 'valueInteger': 2},
+                                {'url': 'http://hl7.org/fhir/StructureDefinition/structuredefinition-wg',
+                                 'valueCode': 'pa'}],
+                  'url': 'https://hl7.fr/ig/fhir/core/ValueSet/fr-core-vs-encounter-class', 'version': '2.0.1',
+                  'name': 'FRCoreValueSetEncounterClass', 'title': 'FR Core ValueSet Encounter class',
+                  'status': 'active', 'experimental': False, 'date': '2024-04-16T11:41:28+02:00',
+                  'publisher': "Interop'Santé", 'contact': [
+                    {'name': "Interop'Santé", 'telecom': [{'system': 'url', 'value': 'http://interopsante.org/'}]},
+                    {'name': 'InteropSanté',
+                     'telecom': [{'system': 'email', 'value': 'fhir@interopsante.org', 'use': 'work'}]}],
+                  'description': 'A set of codes that can be used to indicate the class of the encounter.',
+                  'jurisdiction': [{'coding': [{'system': 'urn:iso:std:iso:3166', 'code': 'FR', 'display': 'France'}]}],
+                  'compose': {'include': [{'system': 'http://terminology.hl7.org/ValueSet/v3-ActEncounterCode',
+                                           'concept': [{'code': 'ACUTE', 'display': 'Inpatient acute'},
+                                                       {'code': 'NONAC', 'display': 'Inpatient non acute'},
+                                                       {'code': 'PRENC', 'display': 'Pre-admission'},
+                                                       {'code': 'SS', 'display': 'Short stay'},
+                                                       {'code': 'VR', 'display': 'Virtual'}]}]}}, 'root', 'user',
+                 'root')])
+
+    @patch.object(ResourceImporter, 'import_resource')
+    @responses.activate
+    def test_run_with_import_exception(self, mocked_import_resource):
+        path = 'http://fetch/npm/package'
+        importer = ImporterSubtask(path, 'root', 'user', 'root', 'ValueSet', [
+            {'filepath': '/', 'start_index': 0, 'end_index': 1},
+            {'filepath': '/', 'start_index': 1, 'end_index': 2}
+        ])
+        with open(ImporterSubtaskTest.get_absolute_path('tests/fhir_resources_01.json'), 'rb') as file:
+            responses.add(responses.GET, path, body=file.read(), status=200,
+                          content_type='application/json', stream=True)
+
+            mocked_import_resource.side_effect = ImportError('Failed to save')
+            results = importer.run()
+
+        self.assertEqual(results, [['Failed to import resource with id fr-core-vs-email-type from '
+                                    'http://fetch/npm/package// to user/root by root due to: Failed to save'],
+                                   ['Failed to import resource with id fr-core-vs-encounter-class from '
+                                    'http://fetch/npm/package// to user/root by root due to: Failed to save']])
+
+    @patch.object(ResourceImporter, 'import_resource')
+    @responses.activate
+    def test_run_with_request_exception(self, _):
+        path = 'http://fetch/npm/package'
+        importer = ImporterSubtask(path, 'root', 'user', 'root', 'ValueSet', [
+            {'filepath': '/', 'start_index': 0, 'end_index': 1},
+            {'filepath': '/', 'start_index': 1, 'end_index': 2}
+        ])
+        responses.add(responses.GET, path, body='Not found', status=404, content_type='application/text', stream=True)
+        results = importer.run()
+
+        self.assertEqual(results, ['Failed to GET http://fetch/npm/package, responded with 404',
+                                   'Failed to GET http://fetch/npm/package, responded with 404'])
+
+
+class ResourceImporterTest(OCLAPITestCase):
+
+    def test_import_code_system(self):
+        ResourceImporter().import_resource(
+            {"resourceType": "CodeSystem", "id": "fr-core-cs-identifier-type",
+             "meta": {"profile": ["http://hl7.org/fhir/StructureDefinition/shareablecodesystem"]},
+             "text": {"status": "generated",
+                      "div": "<div xmlns=\"http://www.w3.org/1999/xhtml\"><p>ThXXXX</p><table class=\"codes\"><tr>"
+                             "<td style=\"white-space:nowrap\"><b>XXXX</b></td><td><b>XXXX</b></td></tr><tr>"
+                             "<td style=\"white-space:nowrap\">VN<a name=\"fr-core-cs-identifier-type-VN\"> </a></td>"
+                             "<td>Visit Number</td></tr><tr><td style=\"white-space:nowrap\">MN"
+                             "<a name=\"fr-core-cs-identifier-type-MN\"> </a></td><td>Movement Number</td></tr>"
+                             "</table></div>"},
+             "url": "https://hl7.fr/ig/fhir/core/CodeSystem/fr-core-cs-identifier-type", "version": "2.0.1",
+             "name": "FRCoreCodeSystemIdentifierType", "title": "FR Core CodeSystem Identifier Type", "status": "draft",
+             "experimental": False, "date": "2024-04-16T11:41:28+02:00", "publisher": "Interop'Santé",
+             "contact": [{"name": "Interop'Santé", "telecom": [{"system": "url", "value": "http://interopsante.org/"}]},
+                         {"name": "InteropSanté",
+                          "telecom": [{"system": "email", "value": "fhir@interopsante.org", "use": "work"}]}],
+             "description": "Identifier type",
+             "jurisdiction": [{"coding": [{"system": "urn:iso:std:iso:3166", "code": "FR", "display": "France"}]}],
+             "caseSensitive": True, "content": "complete", "count": 2,
+             "concept": [{"code": "VN", "display": "Visit Number"}, {"code": "MN", "display": "Movement Number"}]}
+            , 'ocladmin', 'orgs', 'OCL')
+        source = Source.objects.filter(mnemonic='fr-core-cs-identifier-type').first()
+        self.assertEqual(source.mnemonic, 'fr-core-cs-identifier-type')
+
+    def test_import_value_set(self):
+        ResourceImporter().import_resource(
+            {"resourceType": "ValueSet", "id": "fr-core-vs-identity-reliability",
+             "meta": {"profile": ["http://hl7.org/fhir/StructureDefinition/shareablevalueset"]},
+             "text": {"status": "generated",
+                      "div": "<div xmlns=\"http://www.w3.org/1999/xhtml\"><ul><li>Include all codes defined in "
+                             "<a href=\"CodeSystem-fr-core-cs-v2-0445.html\"><code>https://hl7.fr/ig/fhir/core/"
+                             "CodeSystem/fr-core-cs-v2-0445</code></a></li></ul></div>"},
+             "url": "https://hl7.fr/ig/fhir/core/ValueSet/fr-core-vs-identity-reliability", "version": "2.0.1",
+             "name": "FRCoreValueSetIdentityReliabilityStatus", "title": "FR Core ValueSet Identity reliability",
+             "status": "active", "experimental": False, "date": "2024-04-16T11:41:28+02:00",
+             "publisher": "Interop'Santé",
+             "contact": [{"name": "Interop'Santé", "telecom": [{"system": "url", "value": "http://interopsante.org/"}]},
+                         {"name": "InteropSanté",
+                          "telecom": [{"system": "email", "value": "fhir@interopsante.org", "use": "work"}]}],
+             "description": "The reliability of the identity.",
+             "jurisdiction": [{"coding": [{"system": "urn:iso:std:iso:3166", "code": "FR", "display": "France"}]}],
+             "compose": {"include": [{"system": "https://hl7.fr/ig/fhir/core/CodeSystem/fr-core-cs-v2-0445"}]}}
+            , 'ocladmin', 'orgs', 'OCL')
+        collection = Collection.objects.filter(mnemonic='fr-core-vs-identity-reliability').first()
+        self.assertEqual(collection.mnemonic, 'fr-core-vs-identity-reliability')
+
+    def test_import_source(self):
+        ResourceImporter().import_resource({'type': 'source', 'id': 'full_name', 'name': 'Full name',
+                                            'owner_type': 'Organization', 'owner': 'OCL'},
+                                           'ocladmin', 'orgs', 'OCL')
+        source = Source.objects.filter(mnemonic='full_name').first()
+        self.assertEqual(source.mnemonic, 'full_name')
+
+
 class ImportContentParserTest(OCLTestCase):
+
     def test_parse_content(self):
         parser = ImportContentParser(content='foobar')
         parser.parse()

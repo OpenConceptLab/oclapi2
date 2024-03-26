@@ -1,7 +1,9 @@
+from celery import states
 from pydash import get
 from rest_framework.fields import CharField, SerializerMethodField, JSONField
 from rest_framework.serializers import ModelSerializer
 
+from core.importers.importer import ImportTask
 from core.tasks.models import Task
 
 
@@ -22,6 +24,34 @@ class TaskBriefSerializer(ModelSerializer):
         self.result_type = self.query_params.get('result', None) or 'summary'
 
         super().__init__(*args, **kwargs)
+
+    def get_result(self, obj):
+        if self.include_result:
+            return obj.json_result
+        return None
+
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        if instance.json_result:
+            import_task = ImportTask.import_task_from_json(instance.json_result)
+            if import_task:
+                # If using new bulk import check ImportTask for parents' results
+                if 'result' in ret:
+                    ret['result'] = import_task.json_dump
+                if 'finished_at' in ret:
+                    if ret['state'] is states.SUCCESS:
+                        ret['finished_at'] = import_task.time_finished
+                if import_task.time_finished is None:
+                    if ret['state'] is states.SUCCESS:
+                        ret['state'] = states.STARTED
+                else:
+                    ret['state'] = import_task.import_async_result.state
+                if 'runtime' in ret:
+                    ret['runtime'] = import_task.elapsed_seconds
+                if 'summary' in ret:
+                    ret['summary'] = import_task.summary
+
+        return ret
 
 
 class TaskListSerializer(TaskBriefSerializer):
