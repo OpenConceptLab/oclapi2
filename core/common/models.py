@@ -877,15 +877,11 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
         return path
 
-    def get_export_url(self):
-        service = get_export_service()
+    def get_export_path(self):
         if self.is_head:
-            path = self.version_export_path
-        else:
-            path = service.get_last_key_from_path(
-                self.get_version_export_path(suffix=None)
-            ) or self.version_export_path
-        return service.url_for(path)
+            return self.version_export_path
+        service = get_export_service()
+        return service.get_last_key_from_path(self.get_version_export_path(suffix=None)) or self.version_export_path
 
     def has_export(self):
         service = get_export_service()

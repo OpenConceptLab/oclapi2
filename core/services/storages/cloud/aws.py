@@ -6,6 +6,7 @@ from botocore.config import Config
 from botocore.exceptions import ClientError, NoCredentialsError
 from django.conf import settings
 from django.core.files.base import ContentFile
+from django.http import StreamingHttpResponse
 from pydash import get
 
 from core.services.storages.cloud.core import CloudStorageServiceInterface
@@ -106,6 +107,25 @@ class S3(CloudStorageServiceInterface):
 
         return None
 
+    def get_object(self, key):
+        client = self.__get_connection()
+        response = client.get_object(Key=key, Bucket=settings.AWS_STORAGE_BUCKET_NAME)
+        return response
+
+    @staticmethod
+    def file_iterator(response):
+        for chunk in response['Body'].iter_chunks():
+            yield chunk
+
+    def get_streaming_response(self, key):
+        response = StreamingHttpResponse(
+            self.file_iterator(self.get_object(key)),
+            content_type=self.get_object(key)['ContentType']
+        )
+        response['Content-Disposition'] = f'attachment; filename={key.split("/")[-1]}'
+
+        return response
+
     # private
     def _generate_signed_url(self, accessor, key, metadata=None):
         params = {
@@ -174,8 +194,12 @@ class S3(CloudStorageServiceInterface):
 
     @staticmethod
     def __session():
-        return boto3.Session(
-            aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
-            aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
-            region_name=settings.AWS_REGION_NAME
-        )
+        return boto3.Session(**S3.__get_kwargs())
+
+    @staticmethod
+    def __get_kwargs():
+        return {
+            'aws_access_key_id': settings.AWS_ACCESS_KEY_ID,
+            'aws_secret_access_key': settings.AWS_SECRET_ACCESS_KEY,
+            'region_name': settings.AWS_REGION_NAME
+        }
