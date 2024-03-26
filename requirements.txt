@@ -39,3 +39,7 @@ django-celery-beat==2.5.0
 jsondiff==2.0.0
 django-silk==5.0.4
 azure-storage-blob==12.19.0
+fhir.resources==7.1.0
+ijson==3.2.3
+responses==0.25.0
+pydantic==2.6.4

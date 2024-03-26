@@ -271,6 +271,23 @@ def bulk_import_inline(to_import, username, update_if_exists):
     return BulkImportInline(content=to_import, username=username, update_if_exists=update_if_exists).run()
 
 
+@app.task(base=QueueOnce, retry_kwargs={'max_retries': 0})
+def bulk_import_new(path, username, owner_type, owner, import_type='default'):
+    from core.importers.importer import Importer
+    return Importer(path, username, owner_type, owner, import_type).run()
+
+
+@app.task(retry_kwargs={'max_retries': 0})
+def bulk_import_subtask(path, username, owner_type, owner, resource_type, files):
+    from core.importers.importer import ImporterSubtask
+    return ImporterSubtask(path, username, owner_type, owner, resource_type, files).run()
+
+@app.task
+def chordfinisher(*args, **kwargs):
+    """Used for waiting for all results of a group of tasks. See Importer.run()"""
+    return "Done!"
+
+
 @app.task(bind=True, retry_kwargs={'max_retries': 0})
 def bulk_import_parts_inline(self, input_list, username, update_if_exists):
     from core.importers.models import BulkImportInline

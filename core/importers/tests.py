@@ -4,6 +4,7 @@ import uuid
 from json import JSONDecodeError
 from zipfile import ZipFile
 
+import responses
 from celery_once import AlreadyQueued
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
@@ -18,6 +19,7 @@ from core.common.tasks import post_import_update_resource_counts, bulk_import_pa
 from core.common.tests import OCLAPITestCase, OCLTestCase
 from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory
+from core.importers.importer import ImportSubtask
 from core.importers.input_parsers import ImportContentParser
 from core.importers.models import BulkImport, BulkImportInline, BulkImportParallelRunner
 from core.importers.views import csv_file_data_to_input_list
@@ -1033,6 +1035,30 @@ class BulkImportParallelRunnerTest(OCLTestCase):
                 ]
             ]
         )
+
+    @responses.activate
+    def test_import_subtask_single_resource_per_file(self):
+        pass
+
+    @responses.activate
+    def test_import_subtask_multiple_resource_per_file(self):
+        with open(os.path.join(os.path.dirname(__file__), '..', 'samples/BI-FY19-baseline.json'), 'rb') \
+                as file:
+            responses.add(responses.GET, 'http://fetch.com/some/npm/package', body=file.read(), status=200,
+                          content_type='application/json', stream=True)
+
+            org_result = ImportSubtask('http://fetch.com/some/npm/package', 'ocladmin', 'organization',
+                                       'OCL', 'export.json', 'Organization', 0, 1).run()
+            self.assertEqual(org_result, [False])
+
+            source_result = ImportSubtask('http://fetch.com/some/npm/package', 'ocladmin', 'organization',
+                                          'OCL', 'export.json', 'Source', 0, 1).run()
+
+            self.assertEqual(source_result, '')
+
+            concept_result = ImportSubtask('http://fetch.com/some/npm/package', 'ocladmin', 'organization',
+                                           'OCL', 'export.json', 'Concept', 5, 10).run()
+            self.assertEqual(concept_result, '')
 
 
 class BulkImportViewTest(OCLAPITestCase):

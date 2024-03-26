@@ -27,7 +27,7 @@ RUN chown -R ocl:ocl $APP_HOME /temp /staticfiles
 
 WORKDIR $APP_HOME
 
-RUN apk update && apk upgrade && apk add --no-cache libpq bash curl
+RUN apk update && apk upgrade && apk add --no-cache libpq bash curl busybox-extras
 
 RUN pip install --upgrade pip
 

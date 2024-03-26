@@ -1,7 +1,10 @@
 import json
 
+import responses
+from fhir.resources.codesystem import CodeSystem
 from rest_framework.test import APIClient
 
+from core.code_systems.converter import CodeSystemConverter
 from core.code_systems.serializers import CodeSystemDetailSerializer
 from core.code_systems.views import CodeSystemLookupNotFoundError
 from core.common.tests import OCLTestCase
@@ -589,3 +592,18 @@ class CodeSystemTest(OCLTestCase):
         self.assertDictEqual(serialized, {
             'resourceType': 'OperationOutcome',
             'issue': [{'severity': 'error', 'details': 'Failed to represent "/invalid/uri" as CodeSystem'}]})
+
+    def test_conversion_from_fhir(self):
+        code_system = CodeSystem(**{
+            'resourceType': 'CodeSystem',
+            'id': 'test',
+            'content': 'complete',
+            'status': 'draft'
+        })
+        source = CodeSystemConverter.from_fhir(code_system)
+        self.assertEqual(source['mnemonic'], 'test')
+
+    def test_conversion_to_fhir(self):
+        source = OrganizationSourceFactory.build(mnemonic='test')
+        code_system = CodeSystemConverter.to_fhir(source)
+        self.assertEqual(code_system['id'], 'test')

@@ -16,11 +16,12 @@ from rest_framework.views import APIView
 
 from core.celery import app
 from core.common.constants import DEPRECATED_API_HEADER
+from core.common.tasks import bulk_import_new
 from core.services.storages.redis import RedisService
 from core.common.swagger_parameters import update_if_exists_param, task_param, result_param, username_param, \
     file_upload_param, file_url_param, parallel_threads_param, verbose_param
 from core.common.utils import parse_bulk_import_task_id, task_exists, flower_get, queue_bulk_import, \
-    get_bulk_import_celery_once_lock_key, is_csv_file, get_truthy_values
+    get_bulk_import_celery_once_lock_key, is_csv_file, get_truthy_values, get_queue_task_names
 from core.importers.constants import ALREADY_QUEUED, INVALID_UPDATE_IF_EXISTS, NO_CONTENT_TO_IMPORT
 from core.importers.input_parsers import ImportContentParser
 
@@ -256,6 +257,18 @@ class ImportView(BulkImportParallelInlineView, ImportRetrieveDestroyMixin):
         manual_parameters=[update_if_exists_param, file_url_param, file_upload_param, parallel_threads_param],
     )
     def post(self, request, import_queue=None):
+        if 'import_type' in request.data:
+            file_url = request.data.get('file_url')
+            queue_id, task_id = get_queue_task_names(import_queue, self.request.user.username)
+            task = bulk_import_new.apply_async(
+                (file_url, self.request.user.username,
+                 request.data.get('owner_type', 'user'), request.data.get('owner', self.request.user.username),
+                 request.data.get('import_type', 'npm')), task_id=task_id, queue=queue_id)
+            return Response({
+                'task': task.id,
+                'state': task.state
+            }, status=status.HTTP_202_ACCEPTED)
+
         return super().post(request, import_queue)
 
 
