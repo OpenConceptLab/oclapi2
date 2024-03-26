@@ -12,6 +12,7 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.mail import EmailMessage
 from django.core.management import call_command
+from django.core.paginator import Paginator
 from django.template.loader import render_to_string
 from django.utils import timezone
 from django_elasticsearch_dsl.registries import registry
@@ -726,18 +727,16 @@ def calculate_checksums(resource_type, resource_id):
 def generate_source_resources_checksums(repo_id):  # pragma: no cover
     from core.sources.models import Source
     repo = Source.objects.filter(id=repo_id).first()
-    concepts_queryset = repo.get_concepts_queryset()
-    mappings_queryset = repo.get_mappings_queryset()
-    if get(settings, 'DB_CURSOR_ON', False):
-        for concept in concepts_queryset.iterator(chunk_size=500):
-            concept.set_checksums()
-        for mapping in mappings_queryset.iterator(chunk_size=500):
-            mapping.set_checksums()
-    else:
-        for concept in concepts_queryset:
-            concept.set_checksums()
-        for mapping in mappings_queryset:
-            mapping.set_checksums()
+
+    def set_checksums(queryset):
+        paginator = Paginator(queryset, 500)
+        for page_number in paginator.page_range:
+            page = paginator.page(page_number)
+            for resource in page.object_list:
+                resource.set_checksums()
+
+    set_checksums(repo.get_concepts_queryset())
+    set_checksums(repo.get_mappings_queryset())
 
 
 @app.task(ignore_result=True)

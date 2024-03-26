@@ -4,6 +4,7 @@ from django.conf import settings
 from django.contrib.contenttypes.fields import GenericRelation
 from django.contrib.postgres.fields import ArrayField
 from django.core.exceptions import ValidationError
+from django.core.paginator import Paginator
 from django.core.validators import RegexValidator
 from django.db import models, IntegrityError, transaction
 from django.db.models import Value, Q, Count
@@ -183,20 +184,21 @@ class BaseModel(models.Model):
     def batch_index(queryset, document, single_batch=False):
         if not get(settings, 'TEST_MODE'):
             doc = document()
-            if single_batch or not get(settings, 'DB_CURSOR_ON', True):
+            if single_batch:
                 doc.update(queryset.all(), parallel=True)
             else:
-                for batch in queryset.iterator(chunk_size=500):
-                    doc.update(batch, parallel=True)
+                paginator = Paginator(queryset, 500)
+                for page_number in paginator.page_range:
+                    page = paginator.page(page_number)
+                    doc.update(page.object_list, parallel=True)
 
     @staticmethod
     @transaction.atomic
     def batch_delete(queryset):
-        if get(settings, 'DB_CURSOR_ON', True):
-            for batch in queryset.iterator(chunk_size=1000):
-                batch.delete()
-        else:
-            queryset.delete()
+        paginator = Paginator(queryset, 1000)
+        for page_number in paginator.page_range:
+            page = paginator.page(page_number)
+            page.object_list.delete()
 
 
 class CommonLogoModel(models.Model):
