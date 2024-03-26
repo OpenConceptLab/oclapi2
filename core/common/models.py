@@ -199,10 +199,8 @@ class BaseModel(models.Model):
     @staticmethod
     @transaction.atomic
     def batch_delete(queryset):
-        paginator = Paginator(queryset.order_by('-id'), 1000)
-        for page_number in paginator.page_range:
-            page = paginator.page(page_number)
-            page.object_list.delete()
+        for obj in queryset.filter():
+            obj.delete()
 
 
 class CommonLogoModel(models.Model):
