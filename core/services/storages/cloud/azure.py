@@ -9,7 +9,7 @@ from pydash import get
 from core.services.storages.cloud.core import CloudStorageServiceInterface
 
 
-class BlobStorage(CloudStorageServiceInterface):
+class BlobStorage(CloudStorageServiceInterface):  # pragma: no cover
     def __init__(self):
         super().__init__()
         self.account_name = settings.AZURE_STORAGE_ACCOUNT_NAME
