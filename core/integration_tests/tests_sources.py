@@ -351,8 +351,6 @@ class SourceRetrieveUpdateDestroyViewTest(OCLAPITestCase):
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
-        
-        print("****", response.data)
 
         self.assertEqual(response.status_code, 204)
         self.assertFalse(Source.objects.filter(id=source.id).exists())
