@@ -118,11 +118,13 @@ class S3(CloudStorageServiceInterface):
             yield chunk
 
     def get_streaming_response(self, key):
+        s3_response = self.get_object(key)
         response = StreamingHttpResponse(
-            self.file_iterator(self.get_object(key)),
-            content_type=self.get_object(key)['ContentType']
+            self.file_iterator(s3_response),
+            content_type=s3_response['ContentType']
         )
         response['Content-Disposition'] = f'attachment; filename={key.split("/")[-1]}'
+        response['Content-Length'] = s3_response['ContentLength']
 
         return response
 

@@ -122,6 +122,7 @@ class BlobStorage(CloudStorageServiceInterface):
             content_type=blob_properties.content_settings.content_type
         )
         response['Content-Disposition'] = f'attachment; filename={key.split("/")[-1]}'
+        response['Content-Length'] = blob_properties.size
 
         return response
 
