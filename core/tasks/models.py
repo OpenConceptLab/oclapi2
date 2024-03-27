@@ -109,10 +109,11 @@ class Task(models.Model):
                 task.save()
             else:
                 return None
+        parsed_task = task.parse_id() if '~' in task_id else {}
         task.created_by = UserProfile.objects.filter(username=kwargs.pop('username', None)).first() or task.created_by
         task.name = name or task.name
         task.state = STARTED
-        task.queue = kwargs.get('queue', None) or task.queue or 'default'
+        task.queue = parsed_task.get('queue', None) or kwargs.get('queue', None) or task.queue or 'default'
         task.args = args
         task.kwargs = kwargs
         task.started_at = timezone.now()
@@ -214,9 +215,9 @@ class Task(models.Model):
             from core.users.models import UserProfile
             user = UserProfile.objects.filter(username=username).first()
         username = user.username if user else username
-        task = cls(
-            id=cls.generate_user_task_id(username, import_queue or queue or 'default'),
-            created_by=user, queue=queue or 'default', **kwargs)
+        queue_name = import_queue or queue or 'default'
+        task_id = cls.generate_user_task_id(username, queue_name)
+        task = cls(id=task_id, created_by=user, queue=queue_name, **kwargs)
         task.save()
         return task
 
