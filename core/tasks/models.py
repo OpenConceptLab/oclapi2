@@ -112,7 +112,7 @@ class Task(models.Model):
         task.created_by = UserProfile.objects.filter(username=kwargs.pop('username', None)).first() or task.created_by
         task.name = name or task.name
         task.state = STARTED
-        task.queue = kwargs.get('queue', None) or 'default'
+        task.queue = kwargs.get('queue', None) or task.queue or 'default'
         task.args = args
         task.kwargs = kwargs
         task.started_at = timezone.now()
