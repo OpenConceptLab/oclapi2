@@ -124,7 +124,6 @@ class S3(CloudStorageServiceInterface):
             content_type=s3_response['ContentType']
         )
         response['Content-Disposition'] = f'attachment; filename={key.split("/")[-1]}'
-        response['Content-Length'] = s3_response['ContentLength']
 
         return response
 
