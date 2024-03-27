@@ -1311,6 +1311,8 @@ class BulkImportViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 202)
         task = random_user.async_tasks.filter(id__icontains='foobar').order_by('id').last()
+        self.assertTrue(task.queue.startswith('bulk_import_'))
+        self.assertTrue(task.user_queue, 'foobar-queue')
         self.assertEqual(
             response.data,
             {
@@ -1318,7 +1320,7 @@ class BulkImportViewTest(OCLAPITestCase):
                 'task': task.id,
                 'state': 'PENDING',
                 'name': 'bulk_import_parallel_inline',
-                'queue': task.queue,
+                'queue': 'foobar-queue',
                 'username': random_user.username,
                 'created_at': ANY,
                 'started_at': None,

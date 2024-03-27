@@ -609,6 +609,8 @@ def flatten_dict(dikt, parent_key='', sep='__'):
 
 def get_bulk_import_celery_once_lock_key(async_result):
     result_args = async_result.args
+    if not result_args:
+        return None
     args = [('to_import', result_args[0]), ('username', result_args[1]), ('update_if_exists', result_args[2])]
 
     if async_result.name == 'core.common.tasks.bulk_import_parallel_inline':

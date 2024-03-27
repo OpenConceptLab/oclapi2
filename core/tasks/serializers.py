@@ -12,6 +12,7 @@ class FlowerTaskSerializer(Serializer):  # pylint: disable=abstract-method
 
 class TaskBriefSerializer(ModelSerializer):
     task = CharField(source='id')
+    queue = CharField(source='queue_name')
 
     class Meta:
         model = Task

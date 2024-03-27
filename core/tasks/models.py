@@ -48,6 +48,15 @@ class Task(models.Model):
         return self.state in (SUCCESS, FAILURE)
 
     @property
+    def user_queue(self):
+        parsed_task = self.parse_id() if '~' in self.id else {}
+        return parsed_task.get('queue', None)
+
+    @property
+    def queue_name(self):
+        return self.user_queue or self.queue
+
+    @property
     def runtime(self):
         elapsed_seconds = None
         start_at = self.started_at
