@@ -104,12 +104,14 @@ class URLRegistry(BaseModel):
     @classmethod
     def lookup(cls, url, registry_owner=None):
         entry = cls.get_entry(url, registry_owner)
+        repo = None
+
         if entry:
-            return entry.lookup_repo()
+            repo = entry.lookup_entry()
 
-        return None
+        return repo, entry
 
-    def lookup_repo(self):
+    def lookup_entry(self):
         namespace_owner = self.namespace_owner
         if namespace_owner:
             repo = namespace_owner.find_repo_by_canonical_url(self.url)

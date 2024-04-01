@@ -62,11 +62,11 @@ class URLRegistryDetailSerializer(URLRegistryBaseSerializer):
             self._errors['non_fields_error'] = ['This entry already exists.']
         if not self._errors:
             url_registry.save()
-            url_registry.lookup_repo()
+            url_registry.lookup_entry()
         return url_registry
 
     def update(self, instance, validated_data):
         instance = super().update(instance, validated_data)
         if instance.is_active:
-            instance.lookup_repo()
+            instance.lookup_entry()
         return instance

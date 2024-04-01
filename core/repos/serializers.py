@@ -8,7 +8,10 @@ from core.sources.serializers import SourceListSerializer
 
 class RepoListSerializer(serializers.Serializer):  # pylint: disable=abstract-method
     def to_representation(self, instance):
-        return self.get_data(instance)
+        data = self.get_data(instance)
+        if self.context.get('url_registry_entry', None):
+            data['url_registry_entry'] = self.context['url_registry_entry'].relative_uri
+        return data
 
     def get_data(self, item):
         repo = None

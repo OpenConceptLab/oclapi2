@@ -1,6 +1,7 @@
 from django.http import Http404
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
+from rest_framework import status
 from rest_framework.generics import CreateAPIView, RetrieveUpdateDestroyAPIView, get_object_or_404
 from rest_framework.permissions import IsAuthenticatedOrReadOnly
 from rest_framework.response import Response
@@ -114,9 +115,12 @@ class URLRegistryLookupView(URLRegistryBaseView):
         if not url:
             raise Http400('url is required in query params')
 
-        repo = URLRegistry.lookup(url, self.parent_resource)
+        repo, entry = URLRegistry.lookup(url, self.parent_resource)
 
         if repo and repo.id:
-            return Response(RepoListSerializer(repo).data)
+            return Response(RepoListSerializer(repo, context={'request': request, 'url_registry_entry': entry}).data)
 
-        raise Http404()
+        if entry:
+            return Response({'url_registry_entry': entry.relative_uri})
+
+        return Response(status=status.HTTP_204_NO_CONTENT)
