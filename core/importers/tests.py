@@ -1787,13 +1787,13 @@ class ImportContentParserTest(OCLTestCase):
                  'type': 'Concept'
              },
              {
-                 'from_concept_url': '/orgs/DemoOrg/sources/MyDemoSource/concepts//orgs/DemoOrg/sources/MyDemoSource/concepts/Child_of_child//',
+                 'from_concept_url': '/orgs/DemoOrg/sources/MyDemoSource/concepts//orgs/DemoOrg/sources/MyDemoSource/concepts/Child_of_child//',  # pylint: disable=line-too-long
                  'map_type': 'Child-Parent',
                  'owner': 'DemoOrg',
                  'owner_type': 'Organization',
                  'retired': False,
                  'source': 'MyDemoSource',
-                 'to_concept_url': '/orgs/DemoOrg/sources/MyDemoSource/concepts//orgs/DemoOrg/sources/MyDemoSource/concepts/Child//',
+                 'to_concept_url': '/orgs/DemoOrg/sources/MyDemoSource/concepts//orgs/DemoOrg/sources/MyDemoSource/concepts/Child//',  # pylint: disable=line-too-long
                  'type': 'Mapping'
              },
              {
