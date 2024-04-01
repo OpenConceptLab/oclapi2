@@ -1608,170 +1608,184 @@ class ImportContentParserTest(OCLTestCase):
         self.assertEqual(
             parser.content,
             [{
-                 'type': 'Organization',
-                 'id': 'DemoOrg',
-                 'name': 'My Demo Organization',
                  'company': 'DemoLand Inc.',
-                 'website': 'https://www.demoland.fake',
-                 'location': 'DemoLand',
-                 'public_access': 'View',
                  'extras': {
                      'Ex_Num': '6'
-                 }
-             }, {
-                 'type': 'Source',
-                 'id': 'MyDemoSource',
-                 'external_id': '164531246546-IDK',
-                 'short_code': 'MyDemoSource',
-                 'name': 'My Test Source',
-                 'full_name': 'My Demonstrative Test Source',
-                 'source_type': 'Dictionary',
-                 'public_access': 'Edit',
-                 'default_locale': 'en',
-                 'supported_locales': 'en,fk',
-                 'website': 'https://www.demoland.fake/source',
-                 'description': 'Using this source just for testing purposes',
+                 },
+                 'id': 'DemoOrg',
+                 'location': 'DemoLand',
+                 'name': 'My Demo Organization',
+                 'public_access': 'View',
+                 'type': 'Organization',
+                 'website': 'https://www.demoland.fake'
+             },
+             {
+                 'canonical_url': 'https://demo.fake/CodeSystem/Source',
                  'custom_validation_schema': 'None',
-                 'owner': 'DemoOrg',
-                 'owner_type': 'Organization',
+                 'default_locale': 'en',
+                 'description': 'Using this source just for testing purposes',
+                 'external_id': '164531246546-IDK',
                  'extras': {
                      'ex_name': 'Source Name'
-                 }
-             }, {
-                 'type': 'Source',
-                 'id': 'MyFHIRSource',
-                 'external_id': 'FHIR1641246546-IDK',
-                 'short_code': 'MyFHIRSource',
-                 'name': 'My FHIR Source',
-                 'full_name': 'My Demonstrative FHIR Test Source',
-                 'source_type': 'Dictionary',
-                 'public_access': 'Edit',
-                 'default_locale': 'en',
-                 'supported_locales': 'en,fk',
-                 'website': 'https://www.demoland.fake/source',
-                 'description': 'Using this source just for FHIR testing purposes',
-                 'custom_validation_schema': 'None',
+                 },
+                 'full_name': 'My Demonstrative Test Source',
+                 'id': 'MyDemoSource',
+                 'name': 'My Test Source',
                  'owner': 'DemoOrg',
                  'owner_type': 'Organization',
+                 'public_access': 'Edit',
+                 'short_code': 'MyDemoSource',
+                 'source_type': 'Dictionary',
+                 'supported_locales': 'en,fk',
+                 'type': 'Source',
+                 'website': 'https://www.demoland.fake/source'
+             },
+             {
+                 'canonical_url': 'https://demo.fake/CodeSystem/FHIRSource',
+                 'custom_validation_schema': 'None',
+                 'default_locale': 'en',
+                 'description': 'Using this source just for FHIR testing purposes',
+                 'external_id': 'FHIR1641246546-IDK',
                  'extras': {
                      'ex_name': 'FHIR Source Name'
-                 }
-             }, {
-                 'type': 'Collection',
-                 'id': 'MyDemoCollection',
-                 'external_id': '654246546-IDK',
-                 'short_code': 'MyDemoCollection',
-                 'name': 'My Test Collection',
-                 'full_name': 'My Demonstrative Test Collection',
-                 'collection_type': 'Value Set',
-                 'public_access': 'Edit',
-                 'default_locale': 'en',
-                 'supported_locales': 'en,fk',
-                 'website': 'https://www.demoland.fake/source',
-                 'description': 'Using this collection just for testing purposes',
-                 'custom_validation_schema': 'None',
+                 },
+                 'full_name': 'My Demonstrative FHIR Test Source',
+                 'id': 'MyFHIRSource',
+                 'name': 'My FHIR Source',
                  'owner': 'DemoOrg',
                  'owner_type': 'Organization',
+                 'public_access': 'Edit',
+                 'short_code': 'MyFHIRSource',
+                 'source_type': 'Dictionary',
+                 'supported_locales': 'en,fk',
+                 'type': 'Source',
+                 'website': 'https://www.demoland.fake/source'
+             },
+             {
+                 'canonical_url': 'https://demo.fake/ValueSet/Collection',
+                 'collection_type': 'Value Set',
+                 'custom_validation_schema': 'None',
+                 'default_locale': 'en',
+                 'description': 'Using this collection just for testing purposes',
+                 'external_id': '654246546-IDK',
                  'extras': {
                      'ex_name': 'Collection Name'
-                 }
-             }, {
-                 'type': 'Concept',
-                 'id': 'Act',
-                 'retired': False,
-                 'external_id': 'HSpL3hSBx6F',
-                 'concept_class': 'Misc',
-                 'datatype': 'None',
+                 },
+                 'full_name': 'My Demonstrative Test Collection',
+                 'id': 'MyDemoCollection',
+                 'name': 'My Test Collection',
                  'owner': 'DemoOrg',
                  'owner_type': 'Organization',
-                 'source': 'MyDemoSource',
-                 'names': [{
-                               'name': 'Active Demo Concept',
-                               'locale': 'en',
-                               'name_type': 'Fully Specified'
-                           }],
+                 'public_access': 'Edit',
+                 'short_code': 'MyDemoCollection',
+                 'supported_locales': 'en,fk',
+                 'type': 'Collection',
+                 'website': 'https://www.demoland.fake/source'
+             },
+             {
+                 'concept_class': 'Misc',
+                 'datatype': 'None',
                  'descriptions': [{
                                       'description': 'Just one description',
                                       'locale': 'en'
-                                  }]
-             }, {
-                 'type': 'Concept',
-                 'id': 'Ret',
-                 'retired': True,
+                                  }],
                  'external_id': 'HSpL3hSBx6F',
-                 'concept_class': 'Misc',
-                 'datatype': 'None',
-                 'owner': 'DemoOrg',
-                 'owner_type': 'Organization',
-                 'source': 'MyDemoSource',
+                 'id': 'Act',
                  'names': [{
-                               'name': 'Retired Demo Concept',
                                'locale': 'en',
-                               'name_type': 'Fully Specified'
-                           }]
-             }, {
-                 'type': 'Concept',
-                 'id': 'Child',
-                 'retired': False,
-                 'external_id': 'HSpL3hSBx6F',
-                 'concept_class': 'Misc',
-                 'datatype': 'None',
-                 'owner': 'DemoOrg',
-                 'owner_type': 'Organization',
-                 'source': 'MyDemoSource',
-                 'names': [{
-                               'name': 'Child Demo Concept',
-                               'locale': 'en',
-                               'name_type': 'Fully Specified'
-                           }]
-             }, {
-                 'type': 'Concept',
-                 'id': 'Child_of_child',
-                 'retired': False,
-                 'external_id': 'asdkfjhasLKfjhsa',
-                 'concept_class': 'Misc',
-                 'datatype': 'None',
-                 'owner': 'DemoOrg',
-                 'owner_type': 'Organization',
-                 'source': 'MyDemoSource',
-                 'names': [{
-                               'name': 'Child of the Child Demo Concept',
-                               'locale': 'en',
+                               'name': 'Active Demo Concept',
                                'name_type': 'Fully Specified'
                            }],
+                 'owner': 'DemoOrg',
+                 'owner_type': 'Organization',
+                 'retired': False,
+                 'source': 'MyDemoSource',
+                 'type': 'Concept'
+             },
+             {
+                 'concept_class': 'Misc',
+                 'datatype': 'None',
+                 'external_id': 'HSpL3hSBx6F',
+                 'id': 'Ret',
+                 'names': [{
+                               'locale': 'en',
+                               'name': 'Retired Demo Concept',
+                               'name_type': 'Fully Specified'
+                           }],
+                 'owner': 'DemoOrg',
+                 'owner_type': 'Organization',
+                 'retired': True,
+                 'source': 'MyDemoSource',
+                 'type': 'Concept'
+             },
+             {
+                 'concept_class': 'Misc',
+                 'datatype': 'None',
+                 'external_id': 'HSpL3hSBx6F',
+                 'id': 'Child',
+                 'names': [{
+                               'locale': 'en',
+                               'name': 'Child Demo Concept',
+                               'name_type': 'Fully Specified'
+                           }],
+                 'owner': 'DemoOrg',
+                 'owner_type': 'Organization',
+                 'retired': False,
+                 'source': 'MyDemoSource',
+                 'type': 'Concept'
+             },
+             {
+                 'concept_class': 'Misc',
+                 'datatype': 'None',
                  'descriptions': [{
                                       'description': 'Main description',
                                       'locale': 'en'
-                                  }, {
+                                  },
+                                  {
                                       'description': 'Secondary description',
                                       'locale': 'en'
-                                  }]
-             }, {
-                 'type': 'Mapping',
+                                  }],
+                 'external_id': 'asdkfjhasLKfjhsa',
+                 'id': 'Child_of_child',
+                 'names': [{
+                               'locale': 'en',
+                               'name': 'Child of the Child Demo Concept',
+                               'name_type': 'Fully Specified'
+                           }],
+                 'owner': 'DemoOrg',
+                 'owner_type': 'Organization',
                  'retired': False,
+                 'source': 'MyDemoSource',
+                 'type': 'Concept'
+             },
+             {
+                 'from_concept_url': '/orgs/DemoOrg/sources/MyDemoSource/concepts//orgs/DemoOrg/sources/MyDemoSource/concepts/Child_of_child//',
                  'map_type': 'Child-Parent',
                  'owner': 'DemoOrg',
                  'owner_type': 'Organization',
+                 'retired': False,
                  'source': 'MyDemoSource',
-                 'from_concept_url': '/orgs/DemoOrg/sources/MyDemoSource/concepts//orgs/DemoOrg/sources/MyDemoSource/concepts/Child_of_child//',  # pylint: disable=line-too-long
-                 'to_concept_url': '/orgs/DemoOrg/sources/MyDemoSource/concepts//orgs/DemoOrg/sources/MyDemoSource/concepts/Child//'  # pylint: disable=line-too-long
-             }, {
-                 'type': 'Mapping',
+                 'to_concept_url': '/orgs/DemoOrg/sources/MyDemoSource/concepts//orgs/DemoOrg/sources/MyDemoSource/concepts/Child//',
+                 'type': 'Mapping'
+             },
+             {
+                 'from_concept_url': '/orgs/DemoOrg/sources/MyDemoSource/concepts/Act/',
                  'map_type': 'Parent-child',
                  'owner': 'DemoOrg',
                  'owner_type': 'Organization',
                  'source': 'MyDemoSource',
+                 'to_concept_url': '/orgs/DemoOrg/sources/MyDemoSource/concepts/Child/',
+                 'type': 'Mapping'
+             },
+             {
                  'from_concept_url': '/orgs/DemoOrg/sources/MyDemoSource/concepts/Act/',
-                 'to_concept_url': '/orgs/DemoOrg/sources/MyDemoSource/concepts/Child/'
-             }, {
-                 'type': 'Mapping',
-                 'retired': True,
                  'map_type': 'Parent-child-retired',
                  'owner': 'DemoOrg',
                  'owner_type': 'Organization',
+                 'retired': True,
                  'source': 'MyDemoSource',
-                 'from_concept_url': '/orgs/DemoOrg/sources/MyDemoSource/concepts/Act/',
-                 'to_concept_url': '/orgs/DemoOrg/sources/MyDemoSource/concepts/Child/'
+                 'to_concept_url': '/orgs/DemoOrg/sources/MyDemoSource/concepts/Child/',
+                 'type': 'Mapping'
              }]
         )
 
