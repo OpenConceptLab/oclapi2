@@ -943,7 +943,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
                     owner = SourceContainerMixin.get_object_from_namespace(namespace)
                     if owner:
                         registry_entry = owner.url_registry_entries.filter(is_active=True, url=resolution_url).first()
-                        instance = registry_entry.lookup_entry() if registry_entry else owner.find_repo_by_canonical_url(
+                        instance = registry_entry.lookup_entry() if registry_entry else owner.find_repo_by_canonical_url(  # pylint: disable=line-too-long
                             resolution_url)
 
                 if is_global_namespace or (not registry_entry and not instance):

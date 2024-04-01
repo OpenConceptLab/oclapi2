@@ -34,7 +34,7 @@ class URLRegistryTest(OCLTestCase):
         self.assertEqual(URLRegistry(organization=org).owner_url, '/orgs/foo/')
         self.assertEqual(URLRegistry(user=user).owner_url, '/users/foo/')
 
-    def test_lookup(self):
+    def test_lookup(self):  # pylint: disable=too-many-statements,too-many-locals
         org = OrganizationFactory()
         user = UserProfileFactory()
         source1 = OrganizationSourceFactory(organization=org, canonical_url='https://foo.com')
