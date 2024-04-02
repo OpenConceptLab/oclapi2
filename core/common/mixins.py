@@ -514,9 +514,9 @@ class SourceChildMixin(ChecksumModel):
         abstract = True
 
     def calculate_uri(self):
-        uri = self.parent.uri + self.resource_type.lower() + 's/' + self.mnemonic
+        uri = self.parent.uri + self.resource_type.lower() + 's/' + str(self.mnemonic) + '/'
         if not self.is_head:
-            uri += '/' + self.version
+            uri += str(self.version) + '/'
         return uri
 
     @property
