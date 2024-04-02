@@ -180,11 +180,22 @@ class ChecksumDiff:  # pragma: no cover
         self.changed_standard = {}
         self.result = {}
         self._resources1_map = None
+        self._resources1_map_retired = None
         self._resources2_map = None
+        self._resources2_map_retired = None
         self._resources1_set = None
+        self._resources1_set_retired = None
         self._resources2_set = None
+        self._resources2_set_retired = None
+        self._retired = None
 
     def get_resources_map(self, resources):
+        return {
+            'active': self._get_resource_map(resources.filter(retired=False)),
+            'retired': self._get_resource_map(resources.filter(retired=False))
+        }
+
+    def _get_resource_map(self, resources):
         return {
             get(resource, self.identity): {
                 'checksums': resource.checksums
@@ -195,15 +206,37 @@ class ChecksumDiff:  # pragma: no cover
     def resources1_map(self):
         if self._resources1_map is not None:
             return self._resources1_map
-        self._resources1_map = self.get_resources_map(self.resources1)
+        resources_map = self.get_resources_map(self.resources1)
+        self._resources1_map = resources_map['active']
+        self._resources1_map_retired = resources_map['retired']
         return self._resources1_map
+
+    @property
+    def resources1_map_retired(self):
+        if self._resources1_map_retired is not None:
+            return self._resources1_map_retired
+        resources_map = self.get_resources_map(self.resources1)
+        self._resources1_map = resources_map['active']
+        self._resources1_map_retired = resources_map['retired']
+        return self._resources1_map_retired
 
     @property
     def resources2_map(self):
         if self._resources2_map is not None:
             return self._resources2_map
-        self._resources2_map = self.get_resources_map(self.resources2)
+        resources_map = self.get_resources_map(self.resources2)
+        self._resources2_map = resources_map['active']
+        self._resources2_map_retired = resources_map['retired']
         return self._resources2_map
+
+    @property
+    def resources2_map_retired(self):
+        if self._resources2_map_retired is not None:
+            return self._resources2_map_retired
+        resources_map = self.get_resources_map(self.resources2)
+        self._resources2_map = resources_map['active']
+        self._resources2_map_retired = resources_map['retired']
+        return self._resources2_map_retired
 
     @property
     def resources1_set(self):
@@ -213,6 +246,13 @@ class ChecksumDiff:  # pragma: no cover
         return self._resources1_set
 
     @property
+    def resources1_set_retired(self):
+        if self._resources1_set_retired is not None:
+            return self._resources1_set_retired
+        self._resources1_set_retired = set(self.resources1_map_retired.keys())
+        return self._resources1_set_retired
+
+    @property
     def resources2_set(self):
         if self._resources2_set is not None:
             return self._resources2_set
@@ -220,12 +260,28 @@ class ChecksumDiff:  # pragma: no cover
         return self._resources2_set
 
     @property
+    def resources2_set_retired(self):
+        if self._resources2_set_retired is not None:
+            return self._resources2_set_retired
+        self._resources2_set_retired = set(self.resources2_map_retired.keys())
+        return self._resources2_set_retired
+
+    @property
     def new(self):
         return {key: self.resources1_map[key] for key in self.resources1_set - self.resources2_set}
 
     @property
     def deleted(self):
-        return {key: self.resources2_map[key] for key in self.resources2_set - self.resources1_set}
+        diff_set = self.resources2_set - self.resources1_set
+        return {key: self.resources2_map[key] for key in diff_set if key not in self.retired}
+
+    @property
+    def retired(self):
+        if self._retired is not None:
+            return self._retired
+        self._retired = {
+            key: self.resources2_map_retired[key] for key in self.resources2_set_retired - self.resources1_set_retired}
+        return self._retired
 
     @property
     def common(self):
@@ -261,12 +317,12 @@ class ChecksumDiff:  # pragma: no cover
 
     def prepare(self):
         new = self.new
-        deleted = self.deleted
         is_very_verbose = self.verbose and self.verbosity_level == 2
 
         self.result = {
             'new': self.get_struct(new, self.verbose),
-            'removed': self.get_struct(deleted, self.verbose),
+            'removed': self.get_struct(self.deleted, self.verbose),
+            'retired': self.get_struct(self.retired, self.verbose),
             'same': self.get_struct(self.same_standard, is_very_verbose),
             'changed': self.get_struct(self.changed_standard, self.verbose),
             'smart_same': self.get_struct(self.same_smart, is_very_verbose),

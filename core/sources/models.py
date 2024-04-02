@@ -784,14 +784,14 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
     def compare(version1, version2, verbose=False, verbosity_level=0):  # pragma: no cover
         from core.common.checksums import ChecksumDiff
         concepts_diff = ChecksumDiff(
-            resources1=version1.get_concepts_queryset().only('mnemonic', 'checksums'),
-            resources2=version2.get_concepts_queryset().only('mnemonic', 'checksums'),
+            resources1=version1.get_concepts_queryset().only('mnemonic', 'checksums', 'retired'),
+            resources2=version2.get_concepts_queryset().only('mnemonic', 'checksums', 'retired'),
             verbose=verbose,
             verbosity_level=verbosity_level
         )
         mappings_diff = ChecksumDiff(
-            resources1=version1.get_mappings_queryset().only('mnemonic', 'checksums'),
-            resources2=version2.get_mappings_queryset().only('mnemonic', 'checksums'),
+            resources1=version1.get_mappings_queryset().only('mnemonic', 'checksums', 'retired'),
+            resources2=version2.get_mappings_queryset().only('mnemonic', 'checksums', 'retired'),
             verbose=verbose,
             verbosity_level=verbosity_level
         )
