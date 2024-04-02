@@ -513,6 +513,12 @@ class SourceChildMixin(ChecksumModel):
     class Meta:
         abstract = True
 
+    def calculate_uri(self):
+        uri = self.parent.uri + self.resource_type.lower() + 's/' + self.mnemonic
+        if not self.is_head:
+            uri += '/' + self.version
+        return uri
+
     @property
     def is_in_latest_source_version(self):
         version = self._cached_latest_source_version
