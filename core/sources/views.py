@@ -12,7 +12,7 @@ from pydash import get
 from rest_framework import status
 from rest_framework.generics import (
     RetrieveAPIView, ListAPIView, UpdateAPIView, CreateAPIView)
-from rest_framework.permissions import IsAdminUser
+from rest_framework.permissions import IsAdminUser, IsAuthenticated
 from rest_framework.response import Response
 
 from core.bundles.serializers import BundleSerializer
@@ -608,7 +608,7 @@ class SourceMappedSourcesListView(SourceListView):
 
 
 class SourceVersionComparisonView(BaseAPIView):  # pragma: no cover
-    permission_classes = (CanViewConceptDictionaryVersion,)
+    permission_classes = (IsAuthenticated, CanViewConceptDictionaryVersion)
     swagger_schema = None
 
     def get_objects(self):
