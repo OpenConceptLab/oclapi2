@@ -879,6 +879,9 @@ class SourceChildExtrasBaseView:
         else:
             instance = queryset.filter(is_latest_version=True).first()
 
+        if not instance:
+            raise Http404()
+
         self.check_object_permissions(self.request, instance)
 
         return instance
