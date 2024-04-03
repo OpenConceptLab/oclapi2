@@ -107,8 +107,8 @@ class FhirMiddleware(BaseMiddleware):
             elif is_fhir_resource:
                 return HttpResponseNotFound()
 
-        if settings.FHIR_VALIDATOR_URL and (
-                '/CodeSystem/' in absolute_uri or '/ValueSet/' in absolute_uri or '/ConceptMap' in absolute_uri):
+        if settings.FHIR_VALIDATOR_URL and ('/fhir/' in absolute_uri or '/CodeSystem/' in absolute_uri or
+                                            '/ValueSet/' in absolute_uri or '/ConceptMap' in absolute_uri):
             accept_content_type = request.headers.get('Accept', '')
             content_type = request.headers.get('Content-Type', '')
 
