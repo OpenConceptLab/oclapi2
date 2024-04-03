@@ -2145,9 +2145,9 @@ class ReferenceExpressionResolveViewTest(OCLAPITestCase):
         self.assertEqual(collection_resolution['resolution_url'], collection.uri)
         self.assertEqual(collection_resolution['request'], {'url': collection.uri})
         self.assertEqual(collection_resolution['result']['short_code'], collection.mnemonic)
-        self.assertEqual(collection_resolution['result']['id'], collection.version)
+        self.assertEqual(collection_resolution['result']['id'], collection.mnemonic)
         self.assertEqual(collection_resolution['result']['url'], collection.uri)
-        self.assertEqual(collection_resolution['result']['type'], 'Collection Version')
+        self.assertEqual(collection_resolution['result']['type'], 'Collection')
 
         source_resolution = response.data[1]
         self.assertTrue(source_resolution['resolved'])
@@ -2155,7 +2155,7 @@ class ReferenceExpressionResolveViewTest(OCLAPITestCase):
         self.assertEqual(source_resolution['resolution_url'], mapping.parent.uri)
         self.assertEqual(source_resolution['request'], mapping.parent.uri)
         self.assertEqual(source_resolution['result']['short_code'], mapping.parent.mnemonic)
-        self.assertEqual(source_resolution['result']['id'], mapping.parent.version)
+        self.assertEqual(source_resolution['result']['id'], mapping.parent.mnemonic)
         self.assertEqual(source_resolution['result']['url'], mapping.parent.uri)
 
         unknown_resolution = response.data[2]

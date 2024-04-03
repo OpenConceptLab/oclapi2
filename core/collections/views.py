@@ -1248,9 +1248,13 @@ class ReferenceExpressionResolveView(APIView):
                     'url_registry_entry': get(registry_entry, 'relative_uri')
                 }
                 if instance.id:
-                    from core.sources.serializers import SourceVersionListSerializer
-                    serializer_klass = CollectionVersionListSerializer if isinstance(
-                        instance, Collection) else SourceVersionListSerializer
+                    is_collection = isinstance(instance, Collection)
+                    from core.sources.serializers import SourceListSerializer, SourceVersionListSerializer
+                    if instance.is_head:
+                        serializer_klass = CollectionListSerializer if is_collection else SourceListSerializer
+                    else:
+                        serializer_klass = CollectionVersionListSerializer if is_collection \
+                            else SourceVersionListSerializer
                     result = {**result, "result": serializer_klass(instance).data}
                 results.append(result)
 
