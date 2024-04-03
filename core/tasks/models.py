@@ -165,7 +165,7 @@ class Task(models.Model):
         task = cls.objects.filter(id=task_id).first()
         if not task:
             return
-        task.result = json.dumps(retval, default=str)
+        task.result = json.loads(json.dumps(retval, default=str))
         task.state = SUCCESS
         task.finished_at = timezone.now()
         task.save_common(args, kwargs)
