@@ -6,7 +6,7 @@ from celery.schedules import crontab
 from django.conf import settings
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "core.settings")
-app = Celery('core')
+app = Celery('core', task_cls='core.tasks.models:AsyncTask')
 app.conf.redis_socket_timeout = 5.0
 app.conf.redis_socket_connect_timeout = 5.0
 app.conf.redis_backend_health_check_interval = 0

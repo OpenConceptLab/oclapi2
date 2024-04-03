@@ -5,6 +5,7 @@ import zipfile
 from celery_once import AlreadyQueued
 from django.conf import settings
 from django.db import transaction
+from django.http import StreamingHttpResponse
 from mock import patch, Mock, ANY, PropertyMock
 from mock.mock import call
 from rest_framework.exceptions import ErrorDetail
@@ -328,6 +329,7 @@ class SourceRetrieveUpdateDestroyViewTest(OCLAPITestCase):
 
     @patch('core.sources.views.delete_source')
     def test_delete_202(self, delete_source_task_mock):  # async delete
+        delete_source_task_mock.__name__ = 'delete_source_task'
         delete_source_task_mock.apply_async = Mock(return_value=Mock(task_id='task-id', state='PENDING'))
         source = OrganizationSourceFactory(mnemonic='source', organization=self.organization)
         response = self.client.delete(
@@ -339,7 +341,14 @@ class SourceRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 202)
         self.assertEqual(
             response.data,
-            {'task': 'task-id', 'state': 'PENDING', 'queue': 'default', 'username': self.user.username}
+            {
+                'id': ANY,
+                'task': ANY,
+                'state': 'PENDING',
+                'queue': 'default',
+                'username': self.user.username,
+                'name': 'delete_source_task'
+            }
         )
         delete_source_task_mock.apply_async.assert_called_once_with((source.id,), task_id=ANY)
 
@@ -355,8 +364,9 @@ class SourceRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 204)
         self.assertFalse(Source.objects.filter(id=source.id).exists())
         self.assertFalse(Source.objects.filter(mnemonic='source').exists())
-        delete_s3_objects_mock.delay.assert_called_once_with(
-            f'orgs/{self.organization.mnemonic}/{self.organization.mnemonic}_source_vHEAD.'
+        delete_s3_objects_mock.apply_async.assert_called_once_with(
+            (f'orgs/{self.organization.mnemonic}/{self.organization.mnemonic}_source_vHEAD.',),
+            queue = 'default', permanent = False
         )
 
 
@@ -428,8 +438,10 @@ class SourceVersionListViewTest(OCLAPITestCase):
         self.assertEqual(version.version, 'v1')
         self.assertEqual(version.released, True)
         self.assertEqual(version.get_prev_released_version(), None)
-        index_source_concepts_task_mock.delay.assert_called_once_with(version.id)
-        index_source_mappings_task_mock.delay.assert_called_once_with(version.id)
+        index_source_concepts_task_mock.apply_async.assert_called_once_with(
+            (version.id,), queue='indexing', permanent=False)
+        index_source_mappings_task_mock.apply_async.assert_called_once_with(
+            (version.id,), queue='indexing', permanent=False)
 
     @patch('core.sources.models.index_source_mappings')
     @patch('core.sources.models.index_source_concepts')
@@ -458,10 +470,20 @@ class SourceVersionListViewTest(OCLAPITestCase):
         self.assertEqual(version.version, 'v2')
         self.assertEqual(version.released, True)
         self.assertEqual(version.get_prev_released_version().id, source_v1.id)
-        self.assertEqual(index_source_concepts_task_mock.delay.call_count, 2)
-        self.assertEqual(index_source_mappings_task_mock.delay.call_count, 2)
-        self.assertEqual(index_source_concepts_task_mock.delay.mock_calls, [call(source_v1.id), call(version.id)])
-        self.assertEqual(index_source_mappings_task_mock.delay.mock_calls, [call(source_v1.id), call(version.id)])
+        self.assertEqual(index_source_concepts_task_mock.apply_async.call_count, 2)
+        self.assertEqual(index_source_mappings_task_mock.apply_async.call_count, 2)
+        self.assertEqual(
+            index_source_concepts_task_mock.apply_async.mock_calls,
+            [
+                call((source_v1.id,), queue='indexing', permanent=False),
+                call((version.id,), queue='indexing', permanent=False)
+            ])
+        self.assertEqual(
+            index_source_mappings_task_mock.apply_async.mock_calls,
+            [
+                call((source_v1.id,), queue='indexing', permanent=False),
+                call((version.id,), queue='indexing', permanent=False)
+            ])
 
     def test_post_409(self):
         OrganizationSourceFactory(version='v1', organization=self.organization, mnemonic=self.source.mnemonic)
@@ -493,7 +515,7 @@ class SourceVersionListViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.data, {'version': [ErrorDetail(string='This field may not be null.', code='null')]})
-        export_source_mock.delay.assert_not_called()
+        export_source_mock.apply_async.assert_not_called()
 
 
 class SourceLatestVersionRetrieveUpdateViewTest(OCLAPITestCase):
@@ -660,8 +682,10 @@ class SourceVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 204)
         self.assertEqual(self.source.versions.count(), 1)
         self.assertFalse(self.source.versions.filter(version='v1').exists())
-        delete_s3_objects_mock.delay.assert_called_once_with(
-            f'orgs/{self.source.parent.mnemonic}/{self.source.parent.mnemonic}_{self.source.mnemonic}_v1.')
+        delete_s3_objects_mock.apply_async.assert_called_once_with(
+            (f'orgs/{self.source.parent.mnemonic}/{self.source.parent.mnemonic}_{self.source.mnemonic}_v1.',),
+            queue='default', permanent=False
+        )
 
     @patch('core.common.models.delete_s3_objects')
     def test_version_delete_204_referenced_in_private_collection(self, delete_s3_objects_mock):
@@ -684,8 +708,10 @@ class SourceVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 204)
         self.assertEqual(self.source.versions.count(), 1)
         self.assertFalse(self.source.versions.filter(version='v1').exists())
-        delete_s3_objects_mock.delay.assert_called_once_with(
-            f'orgs/{self.source.parent.mnemonic}/{self.source.parent.mnemonic}_{self.source.mnemonic}_v1.')
+        delete_s3_objects_mock.apply_async.assert_called_once_with(
+            (f'orgs/{self.source.parent.mnemonic}/{self.source.parent.mnemonic}_{self.source.mnemonic}_v1.',),
+            queue='default', permanent=False
+        )
 
         source_v2 = OrganizationSourceFactory(
             mnemonic=self.source.mnemonic, organization=self.organization, version='v2',
@@ -735,8 +761,10 @@ class SourceVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         version = self.source.get_latest_released_version()
         self.assertEqual(version.id, self.source_v1.id)
         self.assertTrue(version.is_latest_released)
-        index_source_concepts_task_mock.delay.assert_called_once_with(version.id)
-        index_source_mappings_task_mock.delay.assert_called_once_with(version.id)
+        index_source_concepts_task_mock.apply_async.assert_called_once_with(
+            (version.id,), queue='indexing', permanent=False)
+        index_source_mappings_task_mock.apply_async.assert_called_once_with(
+            (version.id,), queue='indexing', permanent=False)
 
     @patch('core.sources.models.index_source_mappings')
     @patch('core.sources.models.index_source_concepts')
@@ -759,8 +787,8 @@ class SourceVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         version = self.source.get_latest_released_version()
         self.assertEqual(version.id, self.source_v1.id)
         self.assertTrue(version.is_latest_released)
-        index_source_concepts_task_mock.delay.assert_not_called()
-        index_source_mappings_task_mock.delay.assert_not_called()
+        index_source_concepts_task_mock.apply_async.assert_not_called()
+        index_source_mappings_task_mock.apply_async.assert_not_called()
 
     @patch('core.sources.models.index_source_mappings')
     @patch('core.sources.models.index_source_concepts')
@@ -783,8 +811,10 @@ class SourceVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(self.source.get_latest_released_version(), None)
         self.source_v1.refresh_from_db()
         self.assertFalse(self.source_v1.released)
-        index_source_concepts_task_mock.delay.assert_called_once_with(self.source_v1.id)
-        index_source_mappings_task_mock.delay.assert_called_once_with(self.source_v1.id)
+        index_source_concepts_task_mock.apply_async.assert_called_once_with(
+            (self.source_v1.id,), queue='indexing', permanent=False)
+        index_source_mappings_task_mock.apply_async.assert_called_once_with(
+            (self.source_v1.id,), queue='indexing', permanent=False)
 
     @patch('core.sources.models.index_source_mappings')
     @patch('core.sources.models.index_source_concepts')
@@ -817,12 +847,22 @@ class SourceVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertTrue(self.source_v1.is_latest_released)
         self.assertFalse(source_v2.released)
         self.assertFalse(source_v2.is_latest_released)
-        self.assertEqual(index_source_concepts_task_mock.delay.call_count, 2)
-        self.assertEqual(index_source_mappings_task_mock.delay.call_count, 2)
+        self.assertEqual(index_source_concepts_task_mock.apply_async.call_count, 2)
+        self.assertEqual(index_source_mappings_task_mock.apply_async.call_count, 2)
         self.assertEqual(
-            index_source_concepts_task_mock.delay.mock_calls, [call(source_v2.id), call(self.source_v1.id)])
+            index_source_concepts_task_mock.apply_async.mock_calls,
+            [
+                call((source_v2.id,), queue='indexing', permanent=False),
+                call((self.source_v1.id,), queue='indexing', permanent=False)
+            ]
+        )
         self.assertEqual(
-            index_source_mappings_task_mock.delay.mock_calls, [call(source_v2.id), call(self.source_v1.id)])
+            index_source_mappings_task_mock.apply_async.mock_calls,
+            [
+                call((source_v2.id,), queue='indexing', permanent=False),
+                call((self.source_v1.id,), queue='indexing', permanent=False)
+            ]
+        )
 
     @patch('core.sources.models.index_source_mappings')
     @patch('core.sources.models.index_source_concepts')
@@ -855,12 +895,22 @@ class SourceVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertFalse(self.source_v1.is_latest_released)
         self.assertTrue(source_v2.released)
         self.assertTrue(source_v2.is_latest_released)
-        self.assertEqual(index_source_concepts_task_mock.delay.call_count, 2)
-        self.assertEqual(index_source_mappings_task_mock.delay.call_count, 2)
+        self.assertEqual(index_source_concepts_task_mock.apply_async.call_count, 2)
+        self.assertEqual(index_source_mappings_task_mock.apply_async.call_count, 2)
         self.assertEqual(
-            index_source_concepts_task_mock.delay.mock_calls, [call(self.source_v1.id), call(source_v2.id)])
+            index_source_concepts_task_mock.apply_async.mock_calls,
+            [
+                call((self.source_v1.id,), queue='indexing', permanent=False),
+                call((source_v2.id,), queue='indexing', permanent=False)
+            ]
+        )
         self.assertEqual(
-            index_source_mappings_task_mock.delay.mock_calls, [call(self.source_v1.id), call(source_v2.id)])
+            index_source_mappings_task_mock.apply_async.mock_calls,
+            [
+                call((self.source_v1.id,), queue='indexing', permanent=False),
+                call((source_v2.id,), queue='indexing', permanent=False)
+            ]
+        )
 
 
 class SourceExtraRetrieveUpdateDestroyViewTest(OCLAPITestCase):
@@ -984,34 +1034,11 @@ class SourceVersionExportViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 204)
         s3_has_path_mock.assert_called_once_with("users/username/username_source1_v1.")
 
-    @patch('core.services.storages.cloud.aws.S3.url_for')
-    @patch('core.services.storages.cloud.aws.S3.get_last_key_from_path')
-    @patch('core.services.storages.cloud.aws.S3.has_path')
-    def test_get_303_version(self, s3_has_path_mock, s3_get_last_key_from_path_mock, s3_url_for_mock):
-        s3_has_path_mock.return_value = True
-        s3_url = f'https://s3/users/username/username_source1_v1.{self.v1_updated_at}.zip'
-        s3_url_for_mock.return_value = s3_url
-        s3_get_last_key_from_path_mock.return_value = f'users/username/username_source1_v1.{self.v1_updated_at}.zip'
-
-        response = self.client.get(
-            self.source_v1.uri + 'export/',
-            HTTP_AUTHORIZATION='Token ' + self.token,
-            format='json'
-        )
-
-        self.assertEqual(response.status_code, 303)
-        self.assertEqual(response['Location'], s3_url)
-        self.assertEqual(
-            response['Last-Updated'], str(self.source_v1.last_child_update.isoformat()).split('.', maxsplit=1)[0])
-        self.assertEqual(response['Last-Updated-Timezone'], 'America/New_York')
-        s3_has_path_mock.assert_called_once_with("users/username/username_source1_v1.")
-        s3_url_for_mock.assert_called_once_with(f"users/username/username_source1_v1.{self.v1_updated_at}.zip")
-
-    @patch('core.services.storages.cloud.aws.S3.url_for')
+    @patch('core.services.storages.cloud.aws.S3.get_streaming_response')
     @patch('core.services.storages.cloud.aws.S3.exists')
-    def test_get_303_head(self, s3_exists_mock, s3_url_for_mock):
-        s3_url = f'https://s3/users/username/username_source1_vHEAD.{self.HEAD_updated_at}.zip'
-        s3_url_for_mock.return_value = s3_url
+    def test_get_200_head(self, s3_exists_mock, s3_streaming_response):
+        response = StreamingHttpResponse()
+        s3_streaming_response.return_value = response
         s3_exists_mock.return_value = True
 
         response = self.client.get(
@@ -1020,52 +1047,28 @@ class SourceVersionExportViewTest(OCLAPITestCase):
             format='json'
         )
 
-        self.assertEqual(response.status_code, 303)
-        self.assertEqual(response['Location'], s3_url)
-        self.assertEqual(
-            response['Last-Updated'], str(self.source.last_child_update.isoformat()).split('.', maxsplit=1)[0])
-        self.assertEqual(response['Last-Updated-Timezone'], 'America/New_York')
-        s3_exists_mock.assert_called_once_with(f"users/username/username_source1_vHEAD.{self.HEAD_updated_at}.zip")
-        s3_url_for_mock.assert_called_once_with(f"users/username/username_source1_vHEAD.{self.HEAD_updated_at}.zip")
-
-    @patch('core.services.storages.cloud.aws.S3.url_for')
-    @patch('core.services.storages.cloud.aws.S3.exists')
-    def test_get_200_head(self, s3_exists_mock, s3_url_for_mock):
-        s3_url = f'https://s3/username/source1_vHEAD.{self.HEAD_updated_at}.zip'
-        s3_url_for_mock.return_value = s3_url
-        s3_exists_mock.return_value = True
-
-        response = self.client.get(
-            self.source.uri + 'HEAD/export/?noRedirect=true',
-            HTTP_AUTHORIZATION='Token ' + self.admin_token,
-            format='json'
-        )
-
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data, {'url': s3_url})
         s3_exists_mock.assert_called_once_with(f"users/username/username_source1_vHEAD.{self.HEAD_updated_at}.zip")
-        s3_url_for_mock.assert_called_once_with(f"users/username/username_source1_vHEAD.{self.HEAD_updated_at}.zip")
 
-    @patch('core.services.storages.cloud.aws.S3.url_for')
+    @patch('core.services.storages.cloud.aws.S3.get_streaming_response')
     @patch('core.services.storages.cloud.aws.S3.get_last_key_from_path')
     @patch('core.services.storages.cloud.aws.S3.has_path')
-    def test_get_200_version(self, s3_has_path_mock, s3_get_last_key_from_path_mock, s3_url_for_mock):
-        s3_url = f'https://s3/users/username/username_source1_v1.{self.v1_updated_at}.zip'
-        s3_url_for_mock.return_value = s3_url
+    def test_get_200_version(self, s3_has_path_mock, s3_get_last_key_from_path_mock, s3_streaming_response):
+        response = StreamingHttpResponse()
+        s3_streaming_response.return_value = response
         s3_has_path_mock.return_value = True
         s3_get_last_key_from_path_mock.return_value = f'users/username/username_source1_v1.{self.v1_updated_at}.zip'
 
         response = self.client.get(
-            self.source_v1.uri + 'export/?noRedirect=true',
+            self.source_v1.uri + 'export/',
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data, {'url': s3_url})
+        self.assertEqual(response, response)
         s3_has_path_mock.assert_called_once_with("users/username/username_source1_v1.")
         s3_get_last_key_from_path_mock.assert_called_once_with("users/username/username_source1_v1.")
-        s3_url_for_mock.assert_called_once_with(f"users/username/username_source1_v1.{self.v1_updated_at}.zip")
 
     @patch('core.sources.models.Source.is_exporting', new_callable=PropertyMock)
     @patch('core.services.storages.cloud.aws.S3.exists')
@@ -1142,6 +1145,7 @@ class SourceVersionExportViewTest(OCLAPITestCase):
     @patch('core.sources.views.export_source')
     @patch('core.services.storages.cloud.aws.S3.exists')
     def test_post_202_head(self, s3_exists_mock, export_source_mock):
+        export_source_mock.__name__ = 'export_source'
         s3_exists_mock.return_value = False
         response = self.client.post(
             self.source.uri + 'HEAD/export/',
@@ -1151,11 +1155,12 @@ class SourceVersionExportViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 202)
         s3_exists_mock.assert_called_once_with(f"users/username/username_source1_vHEAD.{self.HEAD_updated_at}.zip")
-        export_source_mock.delay.assert_called_once_with(self.source.id)
+        export_source_mock.apply_async.assert_called_once_with((self.source.id,), queue='default', task_id=ANY)
 
     @patch('core.sources.views.export_source')
     @patch('core.services.storages.cloud.aws.S3.has_path')
     def test_post_202_version(self, s3_has_path_mock, export_source_mock):
+        export_source_mock.__name__ = 'export_source'
         s3_has_path_mock.return_value = False
         response = self.client.post(
             self.source_v1.uri + 'export/',
@@ -1165,13 +1170,14 @@ class SourceVersionExportViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 202)
         s3_has_path_mock.assert_called_once_with("users/username/username_source1_v1.")
-        export_source_mock.delay.assert_called_once_with(self.source_v1.id)
+        export_source_mock.apply_async.assert_called_once_with((self.source_v1.id,), queue='default', task_id=ANY)
 
     @patch('core.sources.views.export_source')
     @patch('core.services.storages.cloud.aws.S3.exists')
     def test_post_409_head(self, s3_exists_mock, export_source_mock):
+        export_source_mock.__name__ = 'export_source'
+        export_source_mock.apply_async.side_effect = AlreadyQueued('already-queued')
         s3_exists_mock.return_value = False
-        export_source_mock.delay.side_effect = AlreadyQueued('already-queued')
         response = self.client.post(
             self.source.uri + 'HEAD/export/',
             HTTP_AUTHORIZATION='Token ' + self.admin_token,
@@ -1180,13 +1186,14 @@ class SourceVersionExportViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 409)
         s3_exists_mock.assert_called_once_with(f"users/username/username_source1_vHEAD.{self.HEAD_updated_at}.zip")
-        export_source_mock.delay.assert_called_once_with(self.source.id)
+        export_source_mock.apply_async.assert_called_once_with((self.source.id,), queue='default', task_id=ANY)
 
     @patch('core.sources.views.export_source')
     @patch('core.services.storages.cloud.aws.S3.has_path')
     def test_post_409_version(self, s3_has_path_mock, export_source_mock):
         s3_has_path_mock.return_value = False
-        export_source_mock.delay.side_effect = AlreadyQueued('already-queued')
+        export_source_mock.apply_async.side_effect = AlreadyQueued('already-queued')
+        export_source_mock.__name__ = 'export_source'
         response = self.client.post(
             self.source_v1.uri + 'export/',
             HTTP_AUTHORIZATION='Token ' + self.token,
@@ -1195,7 +1202,7 @@ class SourceVersionExportViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 409)
         s3_has_path_mock.assert_called_once_with("users/username/username_source1_v1.")
-        export_source_mock.delay.assert_called_once_with(self.source_v1.id)
+        export_source_mock.apply_async.assert_called_once_with((self.source_v1.id,), queue='default', task_id=ANY)
 
     def test_delete_405(self):
         random_user = UserProfileFactory()
@@ -1663,7 +1670,8 @@ class SourceHierarchyViewTest(OCLAPITestCase):
 class SourceMappingsIndexViewTest(OCLAPITestCase):
     @patch('core.sources.views.index_source_mappings')
     def test_post_202(self, index_source_mappings_task_mock):
-        index_source_mappings_task_mock.delay = Mock(return_value=Mock(state='PENDING', task_id='task-id-123'))
+        index_source_mappings_task_mock.__name__ = 'index_source_mappings'
+        index_source_mappings_task_mock.apply_async = Mock(return_value=Mock(state='PENDING', task_id='task-id-123'))
         source = OrganizationSourceFactory(id=100)
         user = UserProfileFactory(is_superuser=True, is_staff=True, username='soop')
 
@@ -1674,14 +1682,22 @@ class SourceMappingsIndexViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 202)
         self.assertEqual(
-            response.data, {'state': 'PENDING', 'username': 'soop', 'task': 'task-id-123', 'queue': 'default'})
-        index_source_mappings_task_mock.delay.assert_called_once_with(100)
+            response.data, {
+                'state': 'PENDING',
+                'username': 'soop',
+                'id': ANY,
+                'task': ANY,
+                'queue': 'indexing',
+                'name': 'index_source_mappings'
+            })
+        index_source_mappings_task_mock.apply_async.assert_called_once_with((100,), queue='indexing', task_id=ANY)
 
 
 class SourceConceptsIndexViewTest(OCLAPITestCase):
     @patch('core.sources.views.index_source_concepts')
     def test_post_202(self, index_source_concepts_task_mock):
-        index_source_concepts_task_mock.delay = Mock(return_value=Mock(state='PENDING', task_id='task-id-123'))
+        index_source_concepts_task_mock.__name__ = 'index_source_concepts'
+        index_source_concepts_task_mock.apply_async = Mock(return_value=Mock(state='PENDING', task_id='task-id-123'))
         source = OrganizationSourceFactory(id=100)
         user = UserProfileFactory(is_superuser=True, is_staff=True, username='soop')
 
@@ -1692,8 +1708,17 @@ class SourceConceptsIndexViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 202)
         self.assertEqual(
-            response.data, {'state': 'PENDING', 'username': 'soop', 'task': 'task-id-123', 'queue': 'default'})
-        index_source_concepts_task_mock.delay.assert_called_once_with(100)
+            response.data,
+            {
+                'state': 'PENDING',
+                'username': 'soop',
+                'id': ANY,
+                'task': ANY,
+                'queue': 'indexing',
+                'name': 'index_source_concepts',
+            }
+        )
+        index_source_concepts_task_mock.apply_async.assert_called_once_with((100,), queue='indexing', task_id=ANY)
 
 
 class SourceVersionProcessingViewTest(OCLAPITestCase):

@@ -14,7 +14,6 @@ from pydash import compact, get
 from core.celery import app
 from core.collections.models import Collection
 from core.common.constants import HEAD
-from core.services.storages.redis import RedisService
 from core.common.tasks import bulk_import_parts_inline, delete_organization, batch_index_resources, \
     post_import_update_resource_counts
 from core.common.utils import drop_version, is_url_encoded_string, encode_string, to_parent_uri, chunks
@@ -22,6 +21,7 @@ from core.concepts.models import Concept
 from core.mappings.models import Mapping
 from core.orgs.models import Organization
 from core.sources.models import Source
+from core.tasks.models import Task
 from core.users.models import UserProfile
 
 logger = get_task_logger(__name__)
@@ -45,6 +45,7 @@ class BaseImporter:
     def __init__(
             self, content, username, update_if_exists, user=None, parse_data=True, set_user=True
     ):  # pylint: disable=too-many-arguments
+        self.task = None
         self.input_list = []
         self.user = None
         self.result = None
@@ -636,9 +637,11 @@ class ReferenceImporter(BaseResourceImporter):
                         mapping_ids += list(ref.mappings.values_list('id', flat=True))
 
                     if concept_ids:
-                        batch_index_resources.apply_async(('concept', {'id__in': concept_ids}), queue='indexing')
+                        batch_index_resources.apply_async(
+                            ('concept', {'id__in': concept_ids}), queue='indexing', permanent=False)
                     if mapping_ids:
-                        batch_index_resources.apply_async(('mapping', {'id__in': mapping_ids}), queue='indexing')
+                        batch_index_resources.apply_async(
+                            ('mapping', {'id__in': mapping_ids}), queue='indexing', permanent=False)
 
                 return CREATED
             return PERMISSION_DENIED
@@ -652,6 +655,7 @@ class BulkImportInline(BaseImporter):
     ):
         super().__init__(content, username, update_if_exists, user, not bool(input_list), set_user)
         self.self_task_id = self_task_id
+        self.set_task()
         if input_list:
             self.input_list = input_list
         self.unknown = []
@@ -670,6 +674,9 @@ class BulkImportInline(BaseImporter):
         self.total = len(self.input_list)
         self.start_time = time.time()
         self.elapsed_seconds = 0
+
+    def set_task(self):
+        self.task = Task.objects.filter(id=self.self_task_id).first()
 
     def handle_item_import_result(self, result, item):  # pylint: disable=too-many-return-statements
         if result is None:
@@ -708,9 +715,9 @@ class BulkImportInline(BaseImporter):
         self.others.append(item)
 
     def notify_progress(self):
-        if self.self_task_id:  # pragma: no cover
-            service = RedisService()
-            service.set(self.self_task_id, self.processed)
+        if self.task:  # pragma: no cover
+            self.task.summary = {'processed': self.processed, 'total': self.total}
+            self.task.save()
 
     def run(self):  # pylint: disable=too-many-branches,too-many-statements,too-many-locals
         if self.self_task_id:  # pragma: no cover
@@ -793,11 +800,11 @@ class BulkImportInline(BaseImporter):
         if new_concept_ids:
             for chunk in chunks(list(set(new_concept_ids)), 5000):
                 batch_index_resources.apply_async(
-                    ('concept', {'id__in': chunk}, True), queue='indexing')
+                    ('concept', {'id__in': chunk}, True), queue='indexing', permanent=False)
         if new_mapping_ids:
             for chunk in chunks(list(set(new_mapping_ids)), 5000):
                 batch_index_resources.apply_async(
-                    ('mapping', {'id__in': chunk}, True), queue='indexing')
+                    ('mapping', {'id__in': chunk}, True), queue='indexing', permanent=False)
 
         self.elapsed_seconds = time.time() - self.start_time
 
@@ -854,6 +861,7 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
         super().__init__(content, username, update_if_exists, None, False)
         self.start_time = time.time()
         self.self_task_id = self_task_id
+        self.set_task()
         self.username = username
         self.total = 0
         self.resource_distribution = {}
@@ -866,7 +874,6 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
         self.parts = deque([])
         self.result = None
         self._json_result = None
-        self.redis_service = RedisService()
         if self.content:
             self.input_list = self.content if isinstance(self.content, list) else self.content.splitlines()
             self.total = len(self.input_list)
@@ -874,6 +881,9 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
         self.make_parts()
         self.content = None  # memory optimization
         self.input_list = []  # memory optimization
+
+    def set_task(self):
+        self.task = Task.objects.filter(id=self.self_task_id).first()
 
     def make_resource_distribution(self):
         for line in self.input_list:
@@ -978,19 +988,13 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
 
         return result
 
+    def get_sub_tasks(self):
+        if self.tasks:
+            return Task.objects.filter(id__in=[task.task_id for task in self.tasks])
+        return Task.objects.none()
+
     def get_overall_tasks_progress(self):
-        total_processed = 0
-        if not self.tasks:
-            return total_processed
-
-        for task in self.tasks:
-            try:
-                if task.task_id:
-                    total_processed += self.redis_service.get_int(task.task_id)
-            except:  # pylint: disable=bare-except
-                pass
-
-        return total_processed
+        return sum(compact(self.get_sub_tasks().values_list('summary__processed', flat=True)))
 
     def get_details_to_notify(self):
         summary = f"Started: {self.start_time_formatted} | " \
@@ -1000,17 +1004,15 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
         return {'summary': summary}
 
     def notify_progress(self):
-        if self.self_task_id:
-            try:
-                self.redis_service.set_json(self.self_task_id, self.get_details_to_notify())
-            except:  # pylint: disable=bare-except
-                pass
+        if self.task:
+            self.task.summary = {'processed': self.get_overall_tasks_progress(), 'total': self.total}
+            self.task.save()
 
     def wait_till_tasks_alive(self):
         while self.is_any_process_alive():
+            time.sleep(5)
             self.update_elapsed_seconds()
             self.notify_progress()
-            time.sleep(1)
 
     def run(self):
         if self.self_task_id:
@@ -1031,7 +1033,7 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
                             self.resource_wise_time[part_type] = 0
                         self.resource_wise_time[part_type] += (time.time() - start_time)
 
-        post_import_update_resource_counts.delay()
+        post_import_update_resource_counts.apply_async(queue='default', permanent=False)
 
         self.update_elapsed_seconds()
 
@@ -1118,3 +1120,6 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
         group_result = jobs.apply_async(queue='concurrent')
         self.groups.append(group_result)
         self.tasks += group_result.results
+        self.task.children += list({task.task_id for task in self.tasks})
+        self.task.children = list(set(self.task.children))
+        self.task.save()

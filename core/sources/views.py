@@ -30,7 +30,7 @@ from core.common.swagger_parameters import q_param, limit_param, sort_desc_param
 from core.common.tasks import export_source, index_source_concepts, index_source_mappings, delete_source, \
     generate_source_resources_checksums
 from core.common.utils import parse_boolean_query_param, compact_dict_by_values, to_parent_uri
-from core.common.views import BaseAPIView, BaseLogoView, ConceptContainerExtraRetrieveUpdateDestroyView, TaskMixin
+from core.common.views import BaseAPIView, BaseLogoView, ConceptContainerExtraRetrieveUpdateDestroyView
 from core.sources.constants import DELETE_FAILURE, DELETE_SUCCESS, VERSION_ALREADY_EXISTS
 from core.sources.documents import SourceDocument
 from core.sources.mixins import SummaryMixin
@@ -42,6 +42,9 @@ from core.sources.serializers import (
     SourceVersionSummaryDetailSerializer, SourceMinimalSerializer, SourceSummaryVerboseSerializer,
     SourceVersionSummaryVerboseSerializer, SourceSummaryFieldDistributionSerializer,
     SourceVersionSummaryFieldDistributionSerializer, SourceVersionMinimalSerializer)
+from core.tasks.mixins import TaskMixin
+from core.tasks.models import Task
+from core.tasks.serializers import TaskBriefSerializer
 from core.toggles.models import Toggle
 
 logger = logging.getLogger('oclapi')
@@ -325,20 +328,15 @@ class SourceConceptsIndexView(SourceBaseView):
 
     def post(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         source = self.get_object()
+        task = Task.make_new(queue='indexing', user=request.user, name=index_source_concepts.__name__)
         try:
-            result = index_source_concepts.delay(source.id)
+            index_source_concepts.apply_async((source.id,), queue=task.queue, task_id=task.id)
         except AlreadyQueued:
+            if task:
+                task.delete()
             return Response({'detail': 'Already Queued'}, status=status.HTTP_409_CONFLICT)
 
-        return Response(
-            {
-                'state': result.state,
-                'username': self.request.user.username,
-                'task': result.task_id,
-                'queue': 'default'
-            },
-            status=status.HTTP_202_ACCEPTED
-        )
+        return Response(TaskBriefSerializer(task).data, status=status.HTTP_202_ACCEPTED)
 
 
 class SourceMappingsIndexView(SourceBaseView):
@@ -354,20 +352,15 @@ class SourceMappingsIndexView(SourceBaseView):
 
     def post(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         source = self.get_object()
+        task = Task.make_new(queue='indexing', user=request.user, name=index_source_mappings.__name__)
         try:
-            result = index_source_mappings.delay(source.id)
+            index_source_mappings.apply_async((source.id,), queue=task.queue, task_id=task.id)
         except AlreadyQueued:
+            if task:
+                task.delete()
             return Response({'detail': 'Already Queued'}, status=status.HTTP_409_CONFLICT)
 
-        return Response(
-            {
-                'state': result.state,
-                'username': self.request.user.username,
-                'task': result.task_id,
-                'queue': 'default'
-            },
-            status=status.HTTP_202_ACCEPTED
-        )
+        return Response(TaskBriefSerializer(task).data, status=status.HTTP_202_ACCEPTED)
 
 
 class SourceConceptsCloneView(SourceBaseView):
@@ -507,10 +500,13 @@ class SourceVersionExportView(ConceptContainerExportMixin, SourceVersionBaseView
 
     def handle_export_version(self):
         version = self.get_object()
+        task = Task.make_new(queue='default', user=self.request.user, name=export_source.__name__)
         try:
-            export_source.delay(version.id)
+            export_source.apply_async((version.id,), queue=task.queue, task_id=task.id)
             return status.HTTP_202_ACCEPTED
         except AlreadyQueued:
+            if task:
+                task.delete()
             return status.HTTP_409_CONFLICT
 
 

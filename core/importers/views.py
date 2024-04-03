@@ -2,8 +2,8 @@ import csv
 import io
 
 import requests
-from celery.result import AsyncResult
-from celery_once import AlreadyQueued, QueueOnce
+from celery_once import AlreadyQueued
+from django.http import Http404
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
 from ocldev.oclcsvtojsonconverter import OclStandardCsvToJsonConverter
@@ -14,15 +14,17 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from core.celery import app
 from core.common.constants import DEPRECATED_API_HEADER
-from core.services.storages.redis import RedisService
 from core.common.swagger_parameters import update_if_exists_param, task_param, result_param, username_param, \
     file_upload_param, file_url_param, parallel_threads_param, verbose_param
-from core.common.utils import parse_bulk_import_task_id, task_exists, flower_get, queue_bulk_import, \
-    get_bulk_import_celery_once_lock_key, is_csv_file, get_truthy_values
+from core.common.utils import queue_bulk_import, \
+    is_csv_file, get_truthy_values
+from core.common.views import BaseAPIView
 from core.importers.constants import ALREADY_QUEUED, INVALID_UPDATE_IF_EXISTS, NO_CONTENT_TO_IMPORT
 from core.importers.input_parsers import ImportContentParser
+from core.tasks.models import Task
+from core.tasks.serializers import TaskDetailSerializer, TaskListSerializer
+from core.users.models import UserProfile
 
 TRUTHY = get_truthy_values()
 
@@ -46,128 +48,53 @@ def import_response(request, import_queue, data, threads=None, inline=False, dep
     update_if_exists = update_if_exists == 'true'
 
     data = data.decode('utf-8') if isinstance(data, bytes) else data
-
+    task = None
     try:
         task = queue_bulk_import(data, import_queue, username, update_if_exists, threads, inline)
+        task.refresh_from_db()
     except AlreadyQueued:
+        if task:
+            task.delete()
         return Response({'exception': ALREADY_QUEUED}, status=status.HTTP_409_CONFLICT)
-    parsed_task = parse_bulk_import_task_id(task.id)
-    response = Response({
-                            'task': task.id,
-                            'state': task.state,
-                            'username': username,
-                            'queue': parsed_task['queue']
-                        }, status=status.HTTP_202_ACCEPTED)
+    response = Response(TaskListSerializer(task).data, status=status.HTTP_202_ACCEPTED)
+
     if deprecated:
         response[DEPRECATED_API_HEADER] = True
     return response
 
 
-class ImportRetrieveDestroyMixin(APIView):
+class ImportRetrieveDestroyMixin(BaseAPIView):
+    def get_serializer_class(self):
+        return TaskDetailSerializer if self.is_verbose() and self.request.GET.get('task') else TaskListSerializer
+
     @swagger_auto_schema(
-        manual_parameters=[task_param, result_param, username_param, verbose_param],
+        manual_parameters=[task_param, username_param, verbose_param],
     )
     def get(
             self, request, import_queue=None
     ):  # pylint: disable=too-many-return-statements,too-many-locals,too-many-branches
         task_id = request.GET.get('task')
-        result_format = request.GET.get('result')
         username = request.GET.get('username')
-        is_verbose = request.GET.get('verbose') in TRUTHY
-        user = self.request.user
+        requesting_user = self.request.user
+        user = UserProfile.objects.filter(username=username).first() if username else requesting_user
+        if not user:
+            raise Http404('User not found')
+
+        if not requesting_user.is_staff and requesting_user.username != user.username:
+            return Response(status=status.HTTP_403_FORBIDDEN)
+
+        tasks = user.async_tasks.filter(name__icontains='bulk_import_parallel_inline').order_by('-created_at')
 
         if task_id:
-            parsed_task = parse_bulk_import_task_id(task_id)
-            username = parsed_task['username']
+            task = tasks.filter(id=task_id).first()
+            if not task:
+                return Response(status=status.HTTP_404_NOT_FOUND)
+            return Response(self.get_serializer(task).data)
 
-            if not user.is_staff and user.username != username:
-                return Response(status=status.HTTP_403_FORBIDDEN)
+        if import_queue:
+            tasks = tasks.filter(queue=import_queue)
 
-            task = AsyncResult(task_id)
-
-            if task.successful():
-                result = task.get()
-                if result and result_format == 'json':
-                    return Response(result.get('json', None), content_type="application/json")
-                if result and result_format == 'report':
-                    return Response(result.get('report', None))
-                if result:
-                    return Response(result.get('detailed_summary', None))
-            if task.failed():
-                return Response({'exception': str(task.result)}, status=status.HTTP_400_BAD_REQUEST)
-            if task.state == 'STARTED':
-                service = RedisService()
-                if service.exists(task_id):
-                    return Response(
-                        {
-                            'details': service.get_formatted(task_id),
-                            'task': task.id,
-                            'state': task.state,
-                            'username': username,
-                            'queue': parsed_task['queue']
-                        },
-                        status=status.HTTP_200_OK
-                    )
-            if task.state == 'PENDING' and not task_exists(task_id):
-                return Response({'exception': 'task ' + task_id + ' not found'}, status=status.HTTP_404_NOT_FOUND)
-
-            return Response(
-                {
-                    'task': task.id,
-                    'state': task.state,
-                    'username': username,
-                    'queue': parsed_task['queue']
-                },
-                status=status.HTTP_202_ACCEPTED
-            )
-
-        try:
-            flower_tasks = {}
-            import_task_names = [
-                'core.common.tasks.bulk_import',
-                'core.common.tasks.bulk_import_parallel_inline',
-                'core.common.tasks.bulk_import_inline',
-            ]
-            for import_task_name in import_task_names:
-                flower_tasks = {**flower_tasks, **flower_get(f'api/tasks?taskname={import_task_name}').json()}
-
-            pending_tasks = RedisService().get_pending_tasks(
-                import_queue or 'bulk_import_root',
-                import_task_names,
-                ['bulk_import_parts_inline']
-            )
-            all_tasks = {
-                **flower_tasks,
-                **{task['task_id']: task for task in pending_tasks if task.get('task_id')},
-            }
-        except Exception as ex:
-            return Response(
-                {'detail': 'Flower service returned unexpected result. Maybe check healthcheck.', 'exception': str(ex)},
-                status=status.HTTP_422_UNPROCESSABLE_ENTITY
-            )
-
-        tasks = []
-        for task_id, value in all_tasks.items():
-            task = parse_bulk_import_task_id(task_id)
-
-            if user.is_staff or user.username == task['username']:
-                if (not import_queue or task['queue'] == import_queue) and \
-                        (not username or task['username'] == username):
-                    details = {
-                        'task': task_id,
-                        'state': value['state'],
-                        'queue': task['queue'],
-                        'username': task['username']
-                    }
-                    if value['state'] in ['RECEIVED', 'PENDING']:
-                        result = AsyncResult(task_id)
-                        if result.state and result.state != value['state']:
-                            details['state'] = result.state
-                    if is_verbose:
-                        details['details'] = value
-                    tasks.append(details)
-
-        return Response(tasks)
+        return Response(self.get_serializer(tasks, many=True).data)
 
     @staticmethod
     @swagger_auto_schema(request_body=openapi.Schema(
@@ -176,37 +103,22 @@ class ImportRetrieveDestroyMixin(APIView):
             'task_id': openapi.Schema(
                 type=openapi.TYPE_STRING, description='Task Id to be terminated (mandatory)',
             ),
-            'signal': openapi.Schema(
-                type=openapi.TYPE_STRING, description='Kill Signal', default='SIGKILL',
-            ),
         }
     ))
     def delete(request, _=None):  # pylint: disable=unused-argument
         task_id = request.data.get('task_id', None)
-        signal = request.data.get('signal', None) or 'SIGKILL'
         if not task_id:
             return Response(status=status.HTTP_400_BAD_REQUEST)
 
-        result = AsyncResult(task_id)
-        user = request.user
-        if not user.is_staff:  # non-admin users should be able to cancel their own tasks
-            task_info = parse_bulk_import_task_id(task_id)
-            username = task_info.get('username', None)
-            if not username:
-                username = get(result, 'args.1')  # for parallel child tasks
-            if username != user.username:
-                return Response(status=status.HTTP_403_FORBIDDEN)
+        task = Task.objects.filter(id=task_id).first()
+
+        if not task:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        if not task.has_access(request.user):
+            return Response(status=status.HTTP_403_FORBIDDEN)
 
         try:
-            app.control.revoke(task_id, terminate=True, signal=signal)
-
-            # Below code is needed for removing the lock from QueueOnce
-            if (get(result, 'name') or '').startswith('core.common.tasks.bulk_import'):
-                celery_once_key = get_bulk_import_celery_once_lock_key(result)
-                if celery_once_key:
-                    celery_once = QueueOnce()
-                    celery_once.name = result.name
-                    celery_once.once_backend.clear_lock(celery_once_key)
+            task.revoke()
         except Exception as ex:
             return Response({'errors': ex.args}, status=status.HTTP_400_BAD_REQUEST)
 

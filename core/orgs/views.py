@@ -16,7 +16,8 @@ from core.common.permissions import HasPrivateAccess, CanViewConceptDictionary
 from core.common.swagger_parameters import org_no_members_param
 from core.common.tasks import delete_organization
 from core.common.utils import parse_updated_since_param, get_truthy_values
-from core.common.views import BaseAPIView, BaseLogoView, TaskMixin
+from core.common.views import BaseAPIView, BaseLogoView
+from core.tasks.mixins import TaskMixin
 from core.orgs.constants import NO_MEMBERS
 from core.orgs.documents import OrganizationDocument
 from core.orgs.models import Organization

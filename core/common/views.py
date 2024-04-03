@@ -3,7 +3,6 @@ from email.mime.image import MIMEImage
 
 import markdown
 import requests
-from celery_once import AlreadyQueued
 from django.conf import settings
 from django.core.mail import EmailMessage
 from django.http import Http404, HttpResponse
@@ -31,12 +30,10 @@ from core.common.search import CustomESSearch
 from core.common.serializers import RootSerializer
 from core.common.swagger_parameters import all_resource_query_param
 from core.common.utils import compact_dict_by_values, to_snake_case, parse_updated_since_param, \
-    to_int, get_user_specific_task_id, get_falsy_values, get_truthy_values, get_resource_class_from_resource_name, \
+    to_int, get_falsy_values, get_truthy_values, get_resource_class_from_resource_name, \
     format_url_for_search
 from core.concepts.permissions import CanViewParentDictionary, CanEditParentDictionary
 from core.orgs.constants import ORG_OBJECT_TYPE
-from core.tasks.constants import TASK_NOT_COMPLETED
-from core.tasks.utils import wait_until_task_complete
 from core.users.constants import USER_OBJECT_TYPE
 
 TRUTHY = get_truthy_values()
@@ -1131,43 +1128,3 @@ class StandardChecksumView(AbstractChecksumView):
 
 class SmartChecksumView(AbstractChecksumView):
     smart = True
-
-
-class TaskMixin:
-    """
-    - Runs task in following way:
-        1.?inline=true or TEST_MODE , run the task inline
-        2. ?async=true, return task id/state/queue
-        3. else, run the task and wait for few seconds to get the result, either returns result or task id/state/queue
-    - Assigns username to task_id so that it can be tracked by username
-    """
-    def task_response(self, task, queue='default'):
-        return Response(
-            {
-                'state': task.state,
-                'username': self.request.user.username,
-                'task': task.task_id,
-                'queue': queue
-            },
-            status=status.HTTP_202_ACCEPTED
-        )
-
-    def perform_task(self, task_func, task_args, queue='default', is_default_async=False):
-        is_async = is_default_async or self.is_async_requested()
-        if self.is_inline_requested() or (get(settings, 'TEST_MODE', False) and not is_async):
-            result = task_func(*task_args)
-        else:
-            try:
-                task = task_func.apply_async(
-                    task_args, task_id=get_user_specific_task_id(queue, self.request.user.username)
-                )
-            except AlreadyQueued:
-                return Response({'detail': 'Already Queued'}, status=status.HTTP_409_CONFLICT)
-            if is_async:
-                return self.task_response(task, queue)
-
-            result = wait_until_task_complete(task.task_id, 15)
-            if result == TASK_NOT_COMPLETED:
-                return self.task_response(task, queue)
-
-        return result

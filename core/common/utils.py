@@ -16,6 +16,7 @@ from threading import local
 from urllib import parse
 
 import requests
+from celery_once import AlreadyQueued
 from celery_once.helpers import queue_once_key
 from dateutil import parser
 from django.conf import settings
@@ -368,26 +369,6 @@ def to_camel_case(string):
     return str(temp[0] + ''.join(ele.title() for ele in temp[1:]))
 
 
-def parse_bulk_import_task_id(task_id):
-    """
-    Used to parse bulk import task id, which is in format '{uuid}-{username}~{queue}'.
-    :param task_id:
-    :return: dictionary with uuid, username, queue
-    """
-    task = {'uuid': task_id[:37]}
-    username = task_id[37:]
-    queue_index = username.find('~')
-    if queue_index != -1:
-        queue = username[queue_index + 1:]
-        username = username[:queue_index]
-    else:
-        queue = 'default'
-
-    task['username'] = username
-    task['queue'] = queue
-    return task
-
-
 def flower_get(url, **kwargs):
     """
     Returns a flower response from the given endpoint url.
@@ -429,15 +410,6 @@ def es_get(url, **kwargs):
     return None
 
 
-def task_exists(task_id):
-    """
-    This method is used to check Celery Task validity when state is PENDING. If task exists in
-    Flower then it's considered as Valid task otherwise invalid task.
-    """
-    flower_response = flower_get('api/task/info/' + task_id)
-    return bool(flower_response and flower_response.status_code == 200 and flower_response.text)
-
-
 def queue_bulk_import(  # pylint: disable=too-many-arguments
         to_import, import_queue, username, update_if_exists, threads=None, inline=False, sub_task=False
 ):
@@ -454,49 +426,45 @@ def queue_bulk_import(  # pylint: disable=too-many-arguments
     :param sub_task:
     :return: task
     """
-    queue_id, task_id = get_queue_task_names(import_queue, username)
 
+    from core.common.tasks import bulk_import_parts_inline, bulk_import_parallel_inline, bulk_import_inline, bulk_import
+    args = (to_import, username, update_if_exists)
     if inline:
         if sub_task:
-            from core.common.tasks import bulk_import_parts_inline
-            return bulk_import_parts_inline.apply_async(
-                (to_import, username, update_if_exists), task_id=task_id, queue=queue_id
-            )
+            task_func = bulk_import_parts_inline
+        elif threads:
+            task_func = bulk_import_parallel_inline
+            args = (to_import, username, update_if_exists, threads)
+        else:
+            task_func = bulk_import_inline
+    else:
+        task_func = bulk_import
+    task = get_queue_task_names(import_queue, username, name=task_func.__name__)
 
-        if threads:
-            from core.common.tasks import bulk_import_parallel_inline
-            return bulk_import_parallel_inline.apply_async(
-                (to_import, username, update_if_exists, threads), task_id=task_id, queue=queue_id
-            )
-        from core.common.tasks import bulk_import_inline
-        return bulk_import_inline.apply_async(
-            (to_import, username, update_if_exists), task_id=task_id, queue=queue_id
-        )
+    try:
+        task_func.apply_async(args, task_id=task.id, queue=task.queue)
+    except AlreadyQueued as ex:
+        if task:
+            task.delete()
+        raise ex
 
-    from core.common.tasks import bulk_import
-    return bulk_import.apply_async((to_import, username, update_if_exists), task_id=task_id, queue=queue_id)
+    return task
 
 
-def get_queue_task_names(import_queue, username):
+def get_queue_task_names(import_queue, username, **kwargs):
     if username in ['root', 'ocladmin'] and import_queue != 'concurrent':
         queue_id = 'bulk_import_root'
-        task_id = get_user_specific_task_id('priority', username)
     elif import_queue == 'concurrent':
         queue_id = import_queue
-        task_id = get_user_specific_task_id(import_queue, username)
     elif import_queue:
         # assigning to one of 5 queues processed in order
         queue_id = 'bulk_import_' + str(hash(username + import_queue) % BULK_IMPORT_QUEUES_COUNT)
-        task_id = get_user_specific_task_id(import_queue, username)
     else:
         # assigning randomly to one of 5 queues processed in order
         queue_id = 'bulk_import_' + str(random.randrange(0, BULK_IMPORT_QUEUES_COUNT))
-        task_id = get_user_specific_task_id('default', username)
-    return queue_id, task_id
 
-
-def get_user_specific_task_id(queue, username):
-    return str(uuid.uuid4()) + '-' + username + '~' + queue
+    from core.tasks.models import Task
+    return Task.make_new(queue=queue_id, username=username, import_queue=import_queue, **kwargs)
 
 
 def drop_version(expression):
@@ -651,6 +619,8 @@ def flatten_dict(dikt, parent_key='', sep='__'):
 
 def get_bulk_import_celery_once_lock_key(async_result):
     result_args = async_result.args
+    if not result_args:
+        return None
     args = [('to_import', result_args[0]), ('username', result_args[1]), ('update_if_exists', result_args[2])]
 
     if async_result.name == 'core.common.tasks.bulk_import_parallel_inline':
@@ -757,6 +727,11 @@ def get_current_user():
         current_user = current_user()  # pylint: disable=not-callable
 
     return current_user
+
+
+def get_current_authorized_user():
+    user = get_current_user()
+    return user if user and user.is_authenticated else None
 
 
 def get_request_url():

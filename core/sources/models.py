@@ -319,10 +319,10 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         if self.is_latest_released:
             prev_released_version = self.get_prev_released_version()
             if prev_released_version:
-                index_source_concepts.delay(prev_released_version.id)
-                index_source_mappings.delay(prev_released_version.id)
-            index_source_concepts.delay(self.id)
-            index_source_mappings.delay(self.id)
+                index_source_concepts.apply_async((prev_released_version.id,), queue='indexing', permanent=False)
+                index_source_mappings.apply_async((prev_released_version.id,), queue='indexing', permanent=False)
+            index_source_concepts.apply_async((self.id,), queue='indexing', permanent=False)
+            index_source_mappings.apply_async((self.id,), queue='indexing', permanent=False)
 
     def index_resources_for_self_as_unreleased(self):
         """
@@ -331,12 +331,12 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         3. indexes latest released version's (if exists) concepts and mappings
         """
         if not self.released:
-            index_source_concepts.delay(self.id)
-            index_source_mappings.delay(self.id)
+            index_source_concepts.apply_async((self.id,), queue='indexing', permanent=False)
+            index_source_mappings.apply_async((self.id,), queue='indexing', permanent=False)
             latest_released = self.get_latest_released_version()
             if latest_released:
-                index_source_concepts.delay(latest_released.id)
-                index_source_mappings.delay(latest_released.id)
+                index_source_concepts.apply_async((latest_released.id,), queue='indexing', permanent=False)
+                index_source_mappings.apply_async((latest_released.id,), queue='indexing', permanent=False)
 
     def seed_concepts(self, index=True):
         head = self.head
@@ -408,7 +408,7 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
                 self.__update_sequences(dirty_fields)
 
         if self.id and 'canonical_url' in dirty_fields and self.active_url_registry_entries.exists():
-            resolve_url_registry_entries.apply_async((self.id, self.resource_type), queue='default')
+            resolve_url_registry_entries.apply_async((self.id, self.resource_type), queue='default', permanent=False)
 
     def __update_sequences(self, dirty_fields=[]):  # pylint: disable=dangerous-default-value
         def should_update(is_seq, field):
@@ -479,7 +479,7 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         if get(settings, 'TEST_MODE', False):
             update_mappings_source(self.id)
         else:
-            update_mappings_source.delay(self.id)
+            update_mappings_source.apply_async((self.id,), queue='default', permanent=False)
 
     def get_max_concept_attribute(self, attribute):
         return get(self.get_concepts_queryset().aggregate(max_val=Max(attribute)), 'max_val', None)

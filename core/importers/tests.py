@@ -8,7 +8,7 @@ from celery_once import AlreadyQueued
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.db.models import F
-from mock import patch, Mock, ANY, call, PropertyMock
+from mock import patch, Mock, ANY, PropertyMock
 from ocldev.oclcsvtojsonconverter import OclStandardCsvToJsonConverter
 
 from core.collections.models import Collection
@@ -28,6 +28,7 @@ from core.orgs.tests.factories import OrganizationFactory
 from core.sources.constants import AUTO_ID_UUID
 from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory
+from core.tasks.models import Task
 from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
 
@@ -246,6 +247,7 @@ class BulkImportInlineTest(OCLTestCase):
 
     @patch('core.importers.models.batch_index_resources')
     def test_concept_import(self, batch_index_resources_mock):
+        batch_index_resources_mock.__name__ = 'batch_index_resources'
         self.assertFalse(Concept.objects.filter(mnemonic='Food').exists())
 
         source = OrganizationSourceFactory(
@@ -272,7 +274,14 @@ class BulkImportInlineTest(OCLTestCase):
         concept = Concept.objects.filter(mnemonic='Food', id=F('versioned_object_id')).first()
         self.assertEqual(concept.versions.count(), 1)
         self.assertTrue(Concept.objects.filter(mnemonic='Food', is_latest_version=True).exists())
-        batch_index_resources_mock.apply_async.assert_called_with(('concept', {'id__in': ANY}, True), queue='indexing')
+        batch_index_resources_mock.apply_async.assert_called_with(
+            ('concept', {'id__in': ANY}, True), queue='indexing', permanent=False)
+        self.assertEqual(
+            Concept.objects.filter(mnemonic='Food', id=F('versioned_object_id')).first().versions.count(), 1
+        )
+        self.assertTrue(Concept.objects.filter(mnemonic='Food', is_latest_version=True).exists())
+        batch_index_resources_mock.apply_async.assert_called_with(
+            ('concept', {'id__in': ANY}, True), queue='indexing', permanent=False)
         self.assertEqual(
             sorted(batch_index_resources_mock.apply_async.mock_calls[0][1][0][1]['id__in']),
             sorted([concept.id, concept.get_latest_version().id])
@@ -297,7 +306,8 @@ class BulkImportInlineTest(OCLTestCase):
         concept = Concept.objects.filter(mnemonic='Food', id=F('versioned_object_id')).first()
         self.assertEqual(concept.versions.count(), 2)
         self.assertTrue(Concept.objects.filter(mnemonic='Food', is_latest_version=True, datatype='Rule').exists())
-        batch_index_resources_mock.apply_async.assert_called_with(('concept', {'id__in': ANY}, True), queue='indexing')
+        batch_index_resources_mock.apply_async.assert_called_with(
+            ('concept', {'id__in': ANY}, True), queue='indexing', permanent=False)
         self.assertEqual(
             sorted(batch_index_resources_mock.apply_async.mock_calls[1][1][0][1]['id__in']),
             sorted([concept.id, concept.get_latest_version().prev_version.id, concept.get_latest_version().id])
@@ -322,7 +332,8 @@ class BulkImportInlineTest(OCLTestCase):
         concept = Concept.objects.filter(mnemonic='Food', id=F('versioned_object_id')).first()
         self.assertEqual(concept.versions.count(), 3)
         self.assertTrue(Concept.objects.filter(mnemonic='Food', is_latest_version=True, datatype='Foo').exists())
-        batch_index_resources_mock.apply_async.assert_called_with(('concept', {'id__in': ANY}, True), queue='indexing')
+        batch_index_resources_mock.apply_async.assert_called_with(
+            ('concept', {'id__in': ANY}, True), queue='indexing', permanent=False)
         self.assertEqual(
             sorted(batch_index_resources_mock.apply_async.mock_calls[2][1][0][1]['id__in']),
             sorted([concept.id, concept.get_latest_version().prev_version.id, concept.get_latest_version().id])
@@ -414,6 +425,7 @@ class BulkImportInlineTest(OCLTestCase):
 
     @patch('core.importers.models.batch_index_resources')
     def test_mapping_import(self, batch_index_resources_mock):
+        batch_index_resources_mock.__name__ = 'batch_index_resources'
         self.assertEqual(Mapping.objects.count(), 0)
 
         source = OrganizationSourceFactory(
@@ -437,7 +449,14 @@ class BulkImportInlineTest(OCLTestCase):
         mapping = Mapping.objects.filter(map_type='Has Child', id=F('versioned_object_id')).first()
         self.assertEqual(mapping.versions.count(), 1)
         self.assertTrue(Mapping.objects.filter(map_type='Has Child', is_latest_version=True).exists())
-        batch_index_resources_mock.apply_async.assert_called_with(('mapping', {'id__in': ANY}, True), queue='indexing')
+        batch_index_resources_mock.apply_async.assert_called_with(
+            ('mapping', {'id__in': ANY}, True), queue='indexing', permanent=False)
+        self.assertEqual(
+            Mapping.objects.filter(map_type='Has Child', id=F('versioned_object_id')).first().versions.count(), 1
+        )
+        self.assertTrue(Mapping.objects.filter(map_type='Has Child', is_latest_version=True).exists())
+        batch_index_resources_mock.apply_async.assert_called_with(
+            ('mapping', {'id__in': ANY}, True), queue='indexing', permanent=False)
         self.assertEqual(
             sorted(batch_index_resources_mock.apply_async.mock_calls[0][1][0][1]['id__in']),
             sorted([mapping.id, mapping.get_latest_version().id])
@@ -461,7 +480,8 @@ class BulkImportInlineTest(OCLTestCase):
 
         mapping = Mapping.objects.filter(map_type='Has Child', id=F('versioned_object_id')).first()
         self.assertEqual(mapping.versions.count(), 2)
-        batch_index_resources_mock.apply_async.assert_called_with(('mapping', {'id__in': ANY}, True), queue='indexing')
+        batch_index_resources_mock.apply_async.assert_called_with(
+            ('mapping', {'id__in': ANY}, True), queue='indexing', permanent=False)
         self.assertEqual(
             sorted(batch_index_resources_mock.apply_async.mock_calls[1][1][0][1]['id__in']),
             sorted([mapping.id, mapping.get_latest_version().prev_version.id, mapping.get_latest_version().id])
@@ -814,10 +834,7 @@ class BulkImportParallelRunnerTest(OCLTestCase):
             )
         self.assertEqual(ex.exception.msg, 'Expecting property name enclosed in double quotes')
 
-    @patch('core.importers.models.RedisService')
-    def test_make_parts(self, redis_service_mock):
-        redis_service_mock.return_value = Mock()
-
+    def test_make_parts(self):
         importer = BulkImportParallelRunner(
             open(
                 os.path.join(os.path.dirname(__file__), '..', 'samples/sample_ocldev.json'), 'r'
@@ -842,9 +859,7 @@ class BulkImportParallelRunnerTest(OCLTestCase):
         self.assertEqual(list({part['type'] for part in importer.parts[6]}), ['Concept'])
 
     @patch('core.importers.models.app.control')
-    @patch('core.importers.models.RedisService')
-    def test_is_any_process_alive(self, redis_service_mock, celery_app_mock):
-        redis_service_mock.return_value = Mock()
+    def test_is_any_process_alive(self, celery_app_mock):
         importer = BulkImportParallelRunner(
             open(
                 os.path.join(os.path.dirname(__file__), '..', 'samples/sample_ocldev.json'), 'r'
@@ -892,11 +907,9 @@ class BulkImportParallelRunnerTest(OCLTestCase):
         self.assertTrue(importer.is_any_process_alive())
         self.assertCountEqual(celery_app_mock.ping.call_args[1]['destination'], ['worker1', 'worker2'])
 
-    @patch('core.importers.models.RedisService')
-    def test_get_overall_tasks_progress(self, redis_service_mock):
-        redis_instance_mock = Mock()
-        redis_instance_mock.get_int.side_effect = [100, 50]
-        redis_service_mock.return_value = redis_instance_mock
+    def test_get_overall_tasks_progress(self):
+        Task(id='task1', name='sub_task', summary={'processed': 100, 'total': 200}).save()
+        Task(id='task2', name='sub_task', summary={'processed': 50, 'total': 100}).save()
         importer = BulkImportParallelRunner(
             open(
                 os.path.join(os.path.dirname(__file__), '..', 'samples/sample_ocldev.json'), 'r'
@@ -907,10 +920,7 @@ class BulkImportParallelRunnerTest(OCLTestCase):
         importer.tasks = [Mock(task_id='task1'), Mock(task_id='task2')]
         self.assertEqual(importer.get_overall_tasks_progress(), 150)
 
-    @patch('core.importers.models.RedisService')
-    def test_update_elapsed_seconds(self, redis_service_mock):
-        redis_service_mock.return_value = Mock()
-
+    def test_update_elapsed_seconds(self):
         importer = BulkImportParallelRunner(
             open(
                 os.path.join(os.path.dirname(__file__), '..', 'samples/sample_ocldev.json'), 'r'
@@ -922,10 +932,12 @@ class BulkImportParallelRunnerTest(OCLTestCase):
         importer.update_elapsed_seconds()
         self.assertTrue(importer.elapsed_seconds > 0)
 
-    @patch('core.importers.models.RedisService')
-    def test_notify_progress(self, redis_service_mock):
-        redis_instance_mock = Mock(set_json=Mock())
-        redis_service_mock.return_value = redis_instance_mock
+    def test_notify_progress(self):
+        task = Task(id='task-id', name='bulk_import')
+        task.save()
+        Task(id='task-1', name='sub_task', summary={'processed': 100, 'total': 200}).save()
+        Task(id='task-2', name='sub_task', summary={'processed': 50, 'total': 100}).save()
+
         importer = BulkImportParallelRunner(
             open(
                 os.path.join(os.path.dirname(__file__), '..', 'samples/sample_ocldev.json'), 'r'
@@ -938,10 +950,8 @@ class BulkImportParallelRunnerTest(OCLTestCase):
         importer.elapsed_seconds = 10.45
         importer.notify_progress()
 
-        redis_instance_mock.set_json.assert_called_once_with(
-            'task-id',
-            {'summary': "Started: 2020-12-07 13:09:01.793877 | Processed: 0/64 | Time: 10.45secs"}
-        )
+        task.refresh_from_db()
+        self.assertEqual(task.summary, {'processed': 150, 'total': 64})
 
     def test_chunker_list(self):
         self.assertEqual(
@@ -1041,21 +1051,20 @@ class BulkImportViewTest(OCLAPITestCase):
         self.superuser = UserProfile.objects.get(username='ocladmin')
         self.token = self.superuser.get_token()
 
-    @patch('core.importers.views.RedisService.get_pending_tasks')
-    @patch('core.importers.views.AsyncResult')
-    @patch('core.importers.views.flower_get')
-    def test_get_without_task_id(self, flower_get_mock, async_result_mock, pending_tasks_mock):
-        pending_tasks_mock.return_value = []
-        async_result_mock.return_value = Mock(state='DONE')
+    def test_get_without_task_id(self, ):
+        random_user = UserProfileFactory(username='foobar')
         task_id1 = f"{str(uuid.uuid4())}-ocladmin~priority"
         task_id2 = f"{str(uuid.uuid4())}-foobar~normal"
         task_id3 = f"{str(uuid.uuid4())}-foobar~pending"
-        flower_tasks = {
-            task_id1: {'name': 'core.common.tasks.bulk_import', 'state': 'success'},
-            task_id2: {'name': 'core.common.tasks.bulk_import', 'state': 'failed'},
-            task_id3: {'name': 'core.common.tasks.bulk_import', 'state': 'PENDING'},
-        }
-        flower_get_mock.return_value = Mock(json=Mock(return_value=flower_tasks))
+        Task(
+            queue='priority', id=task_id1,
+            name='core.common.tasks.bulk_import_parallel_inline', created_by=self.superuser, state='SUCCESS').save()
+        Task(
+            queue='normal', id=task_id2,
+            name='core.common.tasks.bulk_import_parallel_inline', created_by=random_user, state='FAILED').save()
+        Task(
+            queue='pending', id=task_id3,
+            name='core.common.tasks.bulk_import_parallel_inline', created_by=random_user, state='PENDING').save()
 
         response = self.client.get(
             '/importers/bulk-import/?username=ocladmin&verbose=true',
@@ -1065,19 +1074,21 @@ class BulkImportViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
-            response.data,
-            [
-                {
-                    'queue': 'priority',
-                    'state': 'success',
-                    'task': task_id1,
-                    'username': 'ocladmin',
-                    'details': {
-                        'name': 'core.common.tasks.bulk_import',
-                        'state': 'success'
-                    }
-                }
-            ]
+            [dict(d) for d in response.data],
+            [{
+                 'id': task_id1,
+                 'task': task_id1,
+                 'state': 'SUCCESS',
+                 'name': 'core.common.tasks.bulk_import_parallel_inline',
+                 'queue': 'priority',
+                 'username': 'ocladmin',
+                 'created_at': ANY,
+                 'started_at': None,
+                 'finished_at': None,
+                 'runtime': None,
+                 'summary': None,
+                 'children': []
+             }]
         )
 
         response = self.client.get(
@@ -1088,11 +1099,35 @@ class BulkImportViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
-            response.data,
-            [
-                {'queue': 'normal', 'state': 'failed', 'task': task_id2, 'username': 'foobar'},
-                {'queue': 'pending', 'state': 'DONE', 'task': task_id3, 'username': 'foobar'},
-            ])
+            sorted([dict(d) for d in response.data], key=lambda x: x['id']),
+            sorted([{
+                'id': task_id2,
+                'task': task_id2,
+                'state': 'FAILED',
+                'name': 'core.common.tasks.bulk_import_parallel_inline',
+                'queue': 'normal',
+                'username': 'foobar',
+                'created_at': ANY,
+                'started_at': None,
+                'finished_at': None,
+                'runtime': None,
+                'summary': None,
+                'children': []
+            }, {
+                'id': task_id3,
+                'task': task_id3,
+                'state': 'PENDING',
+                'name': 'core.common.tasks.bulk_import_parallel_inline',
+                'queue': 'pending',
+                'username': 'foobar',
+                'created_at': ANY,
+                'started_at': None,
+                'finished_at': None,
+                'runtime': None,
+                'summary': None,
+                'children': []
+            }], key= lambda x: x['id'])
+        )
 
         response = self.client.get(
             '/importers/bulk-import/priority/?username=ocladmin',
@@ -1102,8 +1137,21 @@ class BulkImportViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
-            response.data,
-            [{'queue': 'priority', 'state': 'success', 'task': task_id1, 'username': 'ocladmin'}]
+            [dict(d) for d in response.data],
+            [{
+                'id': task_id1,
+                'task': task_id1,
+                'state': 'SUCCESS',
+                'name': 'core.common.tasks.bulk_import_parallel_inline',
+                'queue': 'priority',
+                'username': 'ocladmin',
+                'created_at': ANY,
+                'started_at': None,
+                'finished_at': None,
+                'runtime': None,
+                'summary': None,
+                'children': []
+            }]
         )
 
         response = self.client.get(
@@ -1114,85 +1162,10 @@ class BulkImportViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data, [])
-        calls = flower_get_mock.mock_calls
-        self.assertTrue(call('api/tasks?taskname=core.common.tasks.bulk_import') in calls)
-        self.assertTrue(call('api/tasks?taskname=core.common.tasks.bulk_import_parallel_inline') in calls)
-        self.assertTrue(call('api/tasks?taskname=core.common.tasks.bulk_import_inline') in calls)
 
-    @patch('core.importers.views.AsyncResult')
-    def test_get_with_task_id_success(self, async_result_klass_mock):
-        task_id1 = f"{str(uuid.uuid4())}-ocladmin'~priority"
-        task_id2 = f"{str(uuid.uuid4())}-foobar~normal"
-        foobar_user = UserProfileFactory(username='foobar')
-
-        response = self.client.get(
-            f'/importers/bulk-import/?task={task_id1}',
-            HTTP_AUTHORIZATION='Token ' + foobar_user.get_token(),
-            format='json'
-        )
-        self.assertEqual(response.status_code, 403)
-
-        async_result_mock = {'json': 'json-format', 'report': 'report-format', 'detailed_summary': 'summary'}
-        async_result_instance_mock = Mock(successful=Mock(return_value=True), get=Mock(return_value=async_result_mock))
-        async_result_klass_mock.return_value = async_result_instance_mock
-
-        response = self.client.get(
-            f'/importers/bulk-import/?task={task_id2}',
-            HTTP_AUTHORIZATION='Token ' + foobar_user.get_token(),
-            format='json'
-        )
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data, 'summary')
-
-        response = self.client.get(
-            f'/importers/bulk-import/?task={task_id2}&result=json',
-            HTTP_AUTHORIZATION='Token ' + foobar_user.get_token(),
-            format='json'
-        )
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data, 'json-format')
-
-        response = self.client.get(
-            f'/importers/bulk-import/?task={task_id2}&result=report',
-            HTTP_AUTHORIZATION='Token ' + foobar_user.get_token(),
-            format='json'
-        )
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data, 'report-format')
-
-        async_result_instance_mock.successful.assert_called()
-
-    @patch('core.importers.views.AsyncResult')
-    def test_get_with_task_id_failed(self, async_result_klass_mock):
+    def test_get_task(self):
         task_id = f"{str(uuid.uuid4())}-foobar~normal"
         foobar_user = UserProfileFactory(username='foobar')
-
-        async_result_instance_mock = Mock(
-            successful=Mock(return_value=False), failed=Mock(return_value=True), result='task-failure-result'
-        )
-        async_result_klass_mock.return_value = async_result_instance_mock
-
-        response = self.client.get(
-            f'/importers/bulk-import/?task={task_id}',
-            HTTP_AUTHORIZATION='Token ' + foobar_user.get_token(),
-            format='json'
-        )
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.data, {'exception': 'task-failure-result'})
-        async_result_instance_mock.successful.assert_called()
-        async_result_instance_mock.failed.assert_called()
-
-    @patch('core.importers.views.task_exists')
-    @patch('core.importers.views.AsyncResult')
-    def test_get_task_pending(self, async_result_klass_mock, task_exists_mock):
-        task_exists_mock.return_value = False
-        task_id = f"{str(uuid.uuid4())}-foobar~normal"
-        foobar_user = UserProfileFactory(username='foobar')
-
-        async_result_instance_mock = Mock(
-            successful=Mock(return_value=False), failed=Mock(return_value=False), state='PENDING', id=task_id
-        )
-        async_result_klass_mock.return_value = async_result_instance_mock
 
         response = self.client.get(
             f'/importers/bulk-import/?task={task_id}',
@@ -1201,40 +1174,32 @@ class BulkImportViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 404)
-        self.assertEqual(response.data, {'exception': f"task {task_id} not found"})
 
-        async_result_instance_mock.successful.assert_called_once()
-        async_result_instance_mock.failed.assert_called_once()
-        task_exists_mock.assert_called_once()
-
-        task_exists_mock.return_value = True
+        Task(
+            id=task_id, created_by=foobar_user, queue='normal', state='PENDING',
+            name='core.common.tasks.bulk_import_parallel_inline').save()
         response = self.client.get(
             f'/importers/bulk-import/?task={task_id}',
             HTTP_AUTHORIZATION='Token ' + foobar_user.get_token(),
             format='json'
         )
 
-        self.assertEqual(response.status_code, 202)
-        self.assertEqual(response.data, {'task': task_id, 'state': 'PENDING', 'username': 'foobar', 'queue': 'normal'})
-
-    @patch('core.importers.views.flower_get')
-    def test_get_flower_failed(self, flower_get_mock):
-        flower_get_mock.side_effect = Exception('Service Down')
-
-        response = self.client.get(
-            '/importers/bulk-import/?username=ocladmin',
-            HTTP_AUTHORIZATION='Token ' + self.token,
-            format='json'
-        )
-
-        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.status_code, 200)
         self.assertEqual(
-            response.data,
-            {
-                'detail': 'Flower service returned unexpected result. Maybe check healthcheck.',
-                'exception': str('Service Down')
-            }
-        )
+            response.data, {
+                'id': task_id,
+                'task': task_id,
+                'state': 'PENDING',
+                'name': 'core.common.tasks.bulk_import_parallel_inline',
+                'queue': 'normal',
+                'username': 'foobar',
+                'created_at': ANY,
+                'started_at': None,
+                'finished_at': None,
+                'runtime': None,
+                'summary': None,
+                'children': []
+            })
 
     def test_post_400(self):
         response = self.client.post(
@@ -1272,6 +1237,7 @@ class BulkImportViewTest(OCLAPITestCase):
 
     @patch('core.common.tasks.bulk_import_parallel_inline')
     def test_post_202(self, bulk_import_mock):
+        bulk_import_mock.__name__ = 'bulk_import_parallel_inline'
         task_mock = Mock(id='task-id', state='pending')
         bulk_import_mock.apply_async = Mock(return_value=task_mock)
 
@@ -1284,11 +1250,26 @@ class BulkImportViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 202)
         self.assertEqual(
-            response.data, {'task': 'task-id', 'state': 'pending', 'queue': 'default', 'username': 'ocladmin'})
+            response.data,
+            {
+                'id': ANY,
+                'task': ANY,
+                'state': 'PENDING',
+                'name': 'bulk_import_parallel_inline',
+                'queue': 'bulk_import_root',
+                'username': 'ocladmin',
+                'created_at': ANY,
+                'started_at': None,
+                'finished_at': None,
+                'runtime': None,
+                'summary': None,
+                'children': []
+            }
+        )
         self.assertTrue(DEPRECATED_API_HEADER not in response)
         self.assertEqual(bulk_import_mock.apply_async.call_count, 1)
         self.assertEqual(bulk_import_mock.apply_async.call_args[0], ((["some-data"], 'ocladmin', True, 5),))
-        self.assertEqual(bulk_import_mock.apply_async.call_args[1]['task_id'][36:], '-ocladmin~priority')
+        self.assertEqual(bulk_import_mock.apply_async.call_args[1]['task_id'][36:], '-ocladmin~bulk_import_root')
         self.assertEqual(bulk_import_mock.apply_async.call_args[1]['queue'], 'bulk_import_root')
 
         random_user = UserProfileFactory(username='oswell')
@@ -1301,15 +1282,27 @@ class BulkImportViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 202)
-        self.assertEqual(response.data, {
-            'task': 'task-id',
-            'state': 'pending',
-            'queue': 'default',
-            'username': 'oswell'
-        })
+        task = random_user.async_tasks.order_by('id').last()
+        self.assertEqual(
+            response.data,
+            {
+                'id': task.id,
+                'task': task.id,
+                'state': 'PENDING',
+                'name': 'bulk_import_parallel_inline',
+                'queue': task.queue,
+                'username': random_user.username,
+                'created_at': ANY,
+                'started_at': None,
+                'finished_at': None,
+                'runtime': None,
+                'summary': None,
+                'children': []
+            }
+        )
         self.assertEqual(bulk_import_mock.apply_async.call_count, 2)
         self.assertEqual(bulk_import_mock.apply_async.call_args[0], ((["some-data"], 'oswell', True, 2),))
-        self.assertEqual(bulk_import_mock.apply_async.call_args[1]['task_id'][36:], '-oswell~default')
+        self.assertEqual(bulk_import_mock.apply_async.call_args[1]['task_id'][36:], f'-oswell~{task.queue}')
         self.assertTrue(bulk_import_mock.apply_async.call_args[1]['queue'].startswith('bulk_import_'))
 
         response = self.client.post(
@@ -1320,12 +1313,26 @@ class BulkImportViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 202)
-        self.assertEqual(response.data, {
-            'task': 'task-id',
-            'state': 'pending',
-            'queue': 'default',
-            'username': 'oswell'
-        })
+        task = random_user.async_tasks.filter(id__icontains='foobar').order_by('id').last()
+        self.assertTrue(task.queue.startswith('bulk_import_'))
+        self.assertTrue(task.user_queue, 'foobar-queue')
+        self.assertEqual(
+            response.data,
+            {
+                'id': task.id,
+                'task': task.id,
+                'state': 'PENDING',
+                'name': 'bulk_import_parallel_inline',
+                'queue': 'foobar-queue',
+                'username': random_user.username,
+                'created_at': ANY,
+                'started_at': None,
+                'finished_at': None,
+                'runtime': None,
+                'summary': None,
+                'children': []
+            }
+        )
         self.assertEqual(bulk_import_mock.apply_async.call_count, 3)
         self.assertEqual(bulk_import_mock.apply_async.call_args[0], ((["some-data"], 'oswell', True, 10),))
         self.assertEqual(bulk_import_mock.apply_async.call_args[1]['task_id'][36:], '-oswell~foobar-queue')
@@ -1376,9 +1383,7 @@ class BulkImportViewTest(OCLAPITestCase):
 
     @patch('core.common.tasks.bulk_import_parallel_inline')
     def test_post_inline_parallel_202(self, bulk_import_mock):
-        task_id = 'ace5abf4-3b7f-4e4a-b16f-d1c041088c3e-ocladmin~priority'
-        task_mock = Mock(id=task_id, state='pending')
-        bulk_import_mock.apply_async = Mock(return_value=task_mock)
+        bulk_import_mock.__name__ = 'bulk_import_parallel_inline'
         file = SimpleUploadedFile('file.json', b'{"key": "value"}', "application/json")
 
         response = self.client.post(
@@ -1389,23 +1394,29 @@ class BulkImportViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 202)
         self.assertEqual(response.data, {
-            'task': task_id,
-            'state': 'pending',
-            'queue': 'priority',
-            'username': 'ocladmin'
-        })
+                'id': ANY,
+                'task': ANY,
+                'state': 'PENDING',
+                'name': 'bulk_import_parallel_inline',
+                'queue': 'bulk_import_root',
+                'username': 'ocladmin',
+                'created_at': ANY,
+                'started_at': None,
+                'finished_at': None,
+                'runtime': None,
+                'summary': None,
+                'children': []
+            })
         self.assertTrue(DEPRECATED_API_HEADER in response)
         self.assertEqual(response[DEPRECATED_API_HEADER], 'True')
         self.assertEqual(bulk_import_mock.apply_async.call_count, 1)
         self.assertEqual(bulk_import_mock.apply_async.call_args[0], (('{"key": "value"}', 'ocladmin', True, 5),))
-        self.assertEqual(bulk_import_mock.apply_async.call_args[1]['task_id'][37:], 'ocladmin~priority')
+        self.assertEqual(bulk_import_mock.apply_async.call_args[1]['task_id'][37:], 'ocladmin~bulk_import_root')
         self.assertEqual(bulk_import_mock.apply_async.call_args[1]['queue'], 'bulk_import_root')
 
     @patch('core.common.tasks.bulk_import_inline')
     def test_post_inline_202(self, bulk_import_mock):
-        task_id = 'ace5abf4-3b7f-4e4a-b16f-d1c041088c3e-ocladmin~priority'
-        task_mock = Mock(id=task_id, state='pending')
-        bulk_import_mock.apply_async = Mock(return_value=task_mock)
+        bulk_import_mock.__name__ = 'bulk_import_inline'
         file = SimpleUploadedFile('file.json', b'{"key": "value"}', "application/json")
 
         response = self.client.post(
@@ -1416,19 +1427,27 @@ class BulkImportViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 202)
         self.assertEqual(response.data, {
-            'task': task_id,
-            'state': 'pending',
-            'queue': 'priority',
-            'username': 'ocladmin'
-        })
+                'id': ANY,
+                'task': ANY,
+                'state': 'PENDING',
+                'name': 'bulk_import_inline',
+                'queue': 'bulk_import_root',
+                'username': self.superuser.username,
+                'created_at': ANY,
+                'started_at': None,
+                'finished_at': None,
+                'runtime': None,
+                'summary': None,
+                'children': []
+            })
         self.assertEqual(bulk_import_mock.apply_async.call_count, 1)
         self.assertEqual(bulk_import_mock.apply_async.call_args[0], (('{"key": "value"}', 'ocladmin', True),))
-        self.assertEqual(bulk_import_mock.apply_async.call_args[1]['task_id'][37:], 'ocladmin~priority')
+        self.assertEqual(bulk_import_mock.apply_async.call_args[1]['task_id'][37:], 'ocladmin~bulk_import_root')
         self.assertEqual(bulk_import_mock.apply_async.call_args[1]['queue'], 'bulk_import_root')
 
-    @patch('core.importers.views.QueueOnce.once_backend', new_callable=PropertyMock)
-    @patch('core.importers.views.AsyncResult')
-    @patch('core.importers.views.app')
+    @patch('core.tasks.models.QueueOnce.once_backend', new_callable=PropertyMock)
+    @patch('core.tasks.models.AsyncResult')
+    @patch('core.tasks.models.app')
     def test_delete_parallel_import_204(self, celery_app_mock, async_result_mock, queue_once_backend_mock):
         clear_lock_mock = Mock()
         queue_once_backend_mock.return_value = Mock(clear_lock=clear_lock_mock)
@@ -1438,6 +1457,9 @@ class BulkImportViewTest(OCLAPITestCase):
         result_mock.name = 'core.common.tasks.bulk_import_parallel_inline'
         async_result_mock.return_value = result_mock
         task_id = 'ace5abf4-3b7f-4e4a-b16f-d1c041088c3e-ocladmin~priority'
+        Task(
+            id=task_id, created_by=self.superuser, queue='priority', state='PENDING',
+            name='core.common.tasks.bulk_import_parallel_inline').save()
         response = self.client.delete(
             "/importers/bulk-import/",
             {'task_id': task_id},
@@ -1450,9 +1472,9 @@ class BulkImportViewTest(OCLAPITestCase):
             'core.common.tasks.bulk_import_parallel_inline_threads-5_to_import-content_update_if_exists-True_username-ocladmin'  # pylint: disable=line-too-long
         ))
 
-    @patch('core.importers.views.QueueOnce.once_backend', new_callable=PropertyMock)
-    @patch('core.importers.views.AsyncResult')
-    @patch('core.importers.views.app')
+    @patch('core.tasks.models.QueueOnce.once_backend', new_callable=PropertyMock)
+    @patch('core.tasks.models.AsyncResult')
+    @patch('core.tasks.models.app')
     def test_delete_204(self, celery_app_mock, async_result_mock, queue_once_backend_mock):
         clear_lock_mock = Mock()
         queue_once_backend_mock.return_value = Mock(clear_lock=clear_lock_mock)
@@ -1462,20 +1484,23 @@ class BulkImportViewTest(OCLAPITestCase):
         result_mock.name = 'core.common.tasks.bulk_import'
         async_result_mock.return_value = result_mock
         task_id = 'ace5abf4-3b7f-4e4a-b16f-d1c041088c3e-ocladmin~priority'
+        Task(
+            id=task_id, created_by=self.superuser, queue='priority', state='PENDING',
+            name='core.common.tasks.bulk_import').save()
         response = self.client.delete(
             "/importers/bulk-import/",
-            {'task_id': task_id, 'signal': 'SIGTERM'},
+            {'task_id': task_id},
             HTTP_AUTHORIZATION='Token ' + self.token,
         )
 
         self.assertEqual(response.status_code, 204)
-        celery_app_mock.control.revoke.assert_called_once_with(task_id, terminate=True, signal='SIGTERM')
+        celery_app_mock.control.revoke.assert_called_once_with(task_id, terminate=True, signal='SIGKILL')
         self.assertTrue(clear_lock_mock.call_args[0][0].endswith(
             'core.common.tasks.bulk_import_to_import-content_update_if_exists-True_username-ocladmin'
         ))
 
-    @patch('core.importers.views.AsyncResult')
-    @patch('core.importers.views.app')
+    @patch('core.tasks.models.AsyncResult')
+    @patch('core.tasks.models.app')
     def test_delete_400(self, celery_app_mock, async_result_mock):
         response = self.client.delete(
             "/importers/bulk-import/",
@@ -1492,10 +1517,13 @@ class BulkImportViewTest(OCLAPITestCase):
         async_result_mock.return_value = result_mock
 
         task_id = 'ace5abf4-3b7f-4e4a-b16f-d1c041088c3e-ocladmin~priority'
+        Task(
+            id=task_id, created_by=self.superuser, queue='priority', state='PENDING',
+            name='core.common.tasks.bulk_import').save()
         celery_app_mock.control.revoke.side_effect = Exception('foobar')
         response = self.client.delete(
             "/importers/bulk-import/",
-            {'task_id': task_id, 'signal': 'SIGKILL'},
+            {'task_id': task_id},
             HTTP_AUTHORIZATION='Token ' + self.token,
         )
 
@@ -1503,7 +1531,7 @@ class BulkImportViewTest(OCLAPITestCase):
         self.assertEqual(response.data, {'errors': ('foobar',)})
         celery_app_mock.control.revoke.assert_called_once_with(task_id, terminate=True, signal='SIGKILL')
 
-    @patch('core.importers.views.AsyncResult')
+    @patch('core.tasks.models.AsyncResult')
     def test_delete_403(self, async_result_mock):
         random_user = UserProfileFactory(username='random_user')
         response = self.client.delete(
@@ -1519,9 +1547,12 @@ class BulkImportViewTest(OCLAPITestCase):
         )
 
         task_id = 'ace5abf4-3b7f-4e4a-b16f-d1c041088c3e-ocladmin~priority'
+        Task(
+            id=task_id, created_by=self.superuser, queue='priority', state='PENDING',
+            name='core.common.tasks.bulk_import').save()
         response = self.client.delete(
             "/importers/bulk-import/",
-            {'task_id': task_id, 'signal': 'SIGKILL'},
+            {'task_id': task_id},
             HTTP_AUTHORIZATION='Token ' + random_user.get_token(),
         )
 

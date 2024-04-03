@@ -1,5 +1,6 @@
 from django.core.exceptions import ValidationError
 from mock import patch, Mock, PropertyMock
+from mock.mock import ANY
 
 from core.collections.documents import CollectionDocument
 from core.collections.models import CollectionReference, Collection, Expansion
@@ -1029,12 +1030,14 @@ class TasksTest(OCLTestCase):
         expansion = collection_v1.expansion
         self.assertEqual(expansion.concepts.count(), 1)
         self.assertEqual(expansion.mappings.count(), 1)
-        export_collection_task.delay.assert_not_called()
+        export_collection_task.apply_async.assert_not_called()
         index_children_mock.assert_not_called()
 
     @patch('core.collections.models.Collection.index_children')
     @patch('core.common.tasks.export_collection')
     def test_seed_children_task_with_export(self, export_collection_task, index_children_mock):
+        export_collection_task.__name__ = 'export_collection'
+        index_children_mock.__name__ = 'index_children'
         collection = OrganizationCollectionFactory()
         expansion = ExpansionFactory(collection_version=collection)
         collection.expansion_uri = expansion.uri
@@ -1069,7 +1072,7 @@ class TasksTest(OCLTestCase):
         expansion = collection_v1.expansions.first()
         self.assertEqual(expansion.concepts.count(), 1)
         self.assertEqual(expansion.mappings.count(), 1)
-        export_collection_task.delay.assert_called_once_with(collection_v1.id)
+        export_collection_task.apply_async.assert_called_once_with((collection_v1.id,), queue='default', task_id=ANY)
         index_children_mock.assert_called_once()
 
     def test_update_collection_active_mappings_count(self):
@@ -3035,7 +3038,7 @@ class CollectionReferenceParserTest(OCLTestCase):
 class ExpansionConceptsIndexViewTest(OCLAPITestCase):
     @patch('core.collections.views.index_expansion_concepts')
     def test_post_200(self, index_expansion_concepts_task_mock):
-        index_expansion_concepts_task_mock.delay = Mock(return_value=Mock(state='PENDING', task_id='task-id-123'))
+        index_expansion_concepts_task_mock.__name__ = 'index_expansion_concepts_task_mock'
         admin = UserProfile.objects.get(username='ocladmin')
         collection = UserCollectionFactory(user=admin, created_by=admin, updated_by=admin)
         expansion = ExpansionFactory(collection_version=collection, created_by=admin)
@@ -3050,14 +3053,30 @@ class ExpansionConceptsIndexViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 202)
         self.assertEqual(
-            response.data, {'state': 'PENDING', 'username': 'ocladmin', 'task': 'task-id-123', 'queue': 'default'})
-        index_expansion_concepts_task_mock.delay.assert_called_once_with(expansion.id)
+            response.data,
+            {
+                'id': ANY,
+                'task': ANY,
+                'state': 'PENDING',
+                'name': 'index_expansion_concepts_task_mock',
+                'queue': 'indexing',
+                'username': 'ocladmin',
+                'created_at': ANY,
+                'started_at': None,
+                'finished_at': None,
+                'runtime': None,
+                'summary': None,
+                'children': []
+            }
+        )
+        index_expansion_concepts_task_mock.apply_async.assert_called_once_with(
+            (expansion.id,), task_id=ANY, queue='indexing')
 
 
 class ExpansionMappingsIndexViewTest(OCLAPITestCase):
     @patch('core.collections.views.index_expansion_mappings')
     def test_post_200(self, index_expansion_mappings_task_mock):
-        index_expansion_mappings_task_mock.delay = Mock(return_value=Mock(state='PENDING', task_id='task-id-123'))
+        index_expansion_mappings_task_mock.__name__ = 'index_expansion_mappings_task_mock'
         admin = UserProfile.objects.get(username='ocladmin')
         collection = UserCollectionFactory(user=admin, created_by=admin, updated_by=admin)
         expansion = ExpansionFactory(collection_version=collection, created_by=admin)
@@ -3072,5 +3091,21 @@ class ExpansionMappingsIndexViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 202)
         self.assertEqual(
-            response.data, {'state': 'PENDING', 'username': 'ocladmin', 'task': 'task-id-123', 'queue': 'default'})
-        index_expansion_mappings_task_mock.delay.assert_called_once_with(expansion.id)
+            response.data,
+            {
+                'id': ANY,
+                'task': ANY,
+                'state': 'PENDING',
+                'name': 'index_expansion_mappings_task_mock',
+                'queue': 'indexing',
+                'username': 'ocladmin',
+                'created_at': ANY,
+                'started_at': None,
+                'finished_at': None,
+                'runtime': None,
+                'summary': None,
+                'children': []
+            }
+        )
+        index_expansion_mappings_task_mock.apply_async.assert_called_once_with(
+            (expansion.id,), task_id=ANY, queue='indexing')

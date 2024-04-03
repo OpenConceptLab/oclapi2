@@ -2,7 +2,6 @@ import logging
 from math import ceil
 from urllib import parse
 
-from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
 from django.db import transaction
@@ -882,22 +881,7 @@ class ConceptContainerExportMixin:
             return Response(status=status.HTTP_208_ALREADY_REPORTED)
 
         if version.has_export():
-            export_url = version.get_export_url()
-
-            no_redirect = request.query_params.get('noRedirect', False) in TRUTHY
-            if no_redirect:
-                return Response({'url': export_url}, status=status.HTTP_200_OK)
-
-            response = Response(status=status.HTTP_303_SEE_OTHER)
-            response['Location'] = export_url
-
-            # Set headers to ensure sure response is not cached by a client
-            response['Cache-Control'] = 'no-cache, no-store, must-revalidate'
-            response['Pragma'] = 'no-cache'
-            response['Expires'] = '0'
-            response['Last-Updated'] = version.get_last_child_update_from_export_url(export_url)
-            response['Last-Updated-Timezone'] = settings.TIME_ZONE_PLACE
-            return response
+            return get_export_service().get_streaming_response(version.get_export_path())
 
         return Response(status=status.HTTP_204_NO_CONTENT)
 

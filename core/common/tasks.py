@@ -5,7 +5,6 @@ from json import JSONDecodeError
 
 from billiard.exceptions import WorkerLostError
 from celery.utils.log import get_task_logger
-from celery_once import QueueOnce
 from dateutil.relativedelta import relativedelta
 from django.apps import apps
 from django.conf import settings
@@ -24,11 +23,12 @@ from core.common.constants import CONFIRM_EMAIL_ADDRESS_MAIL_SUBJECT, PASSWORD_R
 from core.common.utils import write_export_file, web_url, get_resource_class_from_resource_name, get_export_service, \
     get_date_range_label
 from core.reports.models import ResourceUsageReport
+from core.tasks.models import QueueOnceCustomTask, Task
 
 logger = get_task_logger(__name__)
 
 
-@app.task(base=QueueOnce)
+@app.task(base=QueueOnceCustomTask)
 def delete_organization(org_id):
     from core.orgs.models import Organization
     logger.info('Finding org...')
@@ -47,7 +47,7 @@ def delete_organization(org_id):
         logger.info('Org delete failed for %s with exception %s', org.mnemonic, ex.args)
 
 
-@app.task(base=QueueOnce)
+@app.task(base=QueueOnceCustomTask)
 def delete_source(source_id):
     from core.sources.models import Source
     logger.info('Finding source...')
@@ -74,7 +74,7 @@ def delete_source(source_id):
         return False
 
 
-@app.task(base=QueueOnce)
+@app.task(base=QueueOnceCustomTask)
 def delete_collection(collection_id):
     from core.collections.models import Collection
     logger.info('Finding collection...')
@@ -98,7 +98,7 @@ def delete_collection(collection_id):
         return False
 
 
-@app.task(base=QueueOnce, bind=True)
+@app.task(base=QueueOnceCustomTask, bind=True)
 def export_source(self, version_id):
     start_time = time.time()
     from core.sources.models import Source
@@ -126,7 +126,7 @@ def export_source(self, version_id):
         version.remove_processing(self.request.id)
 
 
-@app.task(base=QueueOnce, bind=True)
+@app.task(base=QueueOnceCustomTask, bind=True)
 def export_collection(self, version_id):
     start_time = time.time()
     from core.collections.models import Collection
@@ -225,12 +225,12 @@ def handle_pre_delete(app_name, model_name, instance_id):
     __handle_pre_delete(apps.get_model(app_name, model_name).objects.filter(id=instance_id).first())
 
 
-@app.task(base=QueueOnce)
+@app.task(base=QueueOnceCustomTask)
 def populate_indexes(app_names=None):  # app_names has to be an iterable of strings
     __run_search_index_command('--populate', app_names)
 
 
-@app.task(base=QueueOnce)
+@app.task(base=QueueOnceCustomTask)
 def rebuild_indexes(app_names=None):  # app_names has to be an iterable of strings
     __run_search_index_command('--rebuild', app_names)
 
@@ -245,13 +245,13 @@ def __run_search_index_command(command, app_names=None):
         call_command('search_index', command, '-f', '--parallel')
 
 
-@app.task(base=QueueOnce, retry_kwargs={'max_retries': 0})
+@app.task(base=QueueOnceCustomTask, retry_kwargs={'max_retries': 0})
 def bulk_import(to_import, username, update_if_exists):
     from core.importers.models import BulkImport
     return BulkImport(content=to_import, username=username, update_if_exists=update_if_exists).run()
 
 
-@app.task(base=QueueOnce, bind=True, retry_kwargs={'max_retries': 0})
+@app.task(base=QueueOnceCustomTask, bind=True, retry_kwargs={'max_retries': 0})
 def bulk_import_parallel_inline(self, to_import, username, update_if_exists, threads=5):
     from core.importers.models import BulkImportParallelRunner
     try:
@@ -266,7 +266,7 @@ def bulk_import_parallel_inline(self, to_import, username, update_if_exists, thr
     return importer.run()
 
 
-@app.task(base=QueueOnce, retry_kwargs={'max_retries': 0})
+@app.task(base=QueueOnceCustomTask, retry_kwargs={'max_retries': 0})
 def bulk_import_inline(to_import, username, update_if_exists):
     from core.importers.models import BulkImportInline
     return BulkImportInline(content=to_import, username=username, update_if_exists=update_if_exists).run()
@@ -355,7 +355,8 @@ def seed_children_to_new_version(self, resource, obj_id, export=True, sync=False
                 instance.cascade_children_to_expansion(index=index, sync=sync)
 
             if export:
-                export_task.delay(obj_id)
+                task = Task.make_new(queue='default', username=instance.updated_by, name=export_task.__name__)
+                export_task.apply_async((obj_id,), queue=task.queue, task_id=task.id)
                 if autoexpand:
                     instance.index_children()
         finally:
@@ -505,7 +506,7 @@ def batch_index_resources(resource, filters, update_indexed=False):
 
 @app.task(
     ignore_result=True, autoretry_for=(Exception, WorkerLostError, ), retry_kwargs={'max_retries': 2, 'countdown': 2},
-    acks_late=True, reject_on_worker_lost=True, base=QueueOnce
+    acks_late=True, reject_on_worker_lost=True, base=QueueOnceCustomTask
 )
 def index_expansion_concepts(expansion_id):
     from core.collections.models import Expansion
@@ -517,7 +518,7 @@ def index_expansion_concepts(expansion_id):
 
 @app.task(
     ignore_result=True, autoretry_for=(Exception, WorkerLostError, ), retry_kwargs={'max_retries': 2, 'countdown': 2},
-    acks_late=True, reject_on_worker_lost=True, base=QueueOnce
+    acks_late=True, reject_on_worker_lost=True, base=QueueOnceCustomTask
 )
 def index_expansion_mappings(expansion_id):
     from core.collections.models import Expansion
@@ -552,7 +553,7 @@ def make_hierarchy(concept_map):  # pragma: no cover
 
 @app.task(
     ignore_result=True, autoretry_for=(Exception, WorkerLostError, ), retry_kwargs={'max_retries': 2, 'countdown': 2},
-    acks_late=True, reject_on_worker_lost=True, base=QueueOnce
+    acks_late=True, reject_on_worker_lost=True, base=QueueOnceCustomTask
 )
 def index_source_concepts(source_id):
     from core.sources.models import Source
@@ -564,7 +565,7 @@ def index_source_concepts(source_id):
 
 @app.task(
     ignore_result=True, autoretry_for=(Exception, WorkerLostError, ), retry_kwargs={'max_retries': 2, 'countdown': 2},
-    acks_late=True, reject_on_worker_lost=True, base=QueueOnce
+    acks_late=True, reject_on_worker_lost=True, base=QueueOnceCustomTask
 )
 def index_source_mappings(source_id):
     from core.sources.models import Source
@@ -574,7 +575,7 @@ def index_source_mappings(source_id):
         source.batch_index(source.mappings, MappingDocument)
 
 
-@app.task(base=QueueOnce)
+@app.task(base=QueueOnceCustomTask)
 def update_source_active_concepts_count(source_id):
     from core.sources.models import Source
     source = Source.objects.filter(id=source_id).first()
@@ -585,7 +586,7 @@ def update_source_active_concepts_count(source_id):
             source.save(update_fields=['active_concepts'])
 
 
-@app.task(base=QueueOnce)
+@app.task(base=QueueOnceCustomTask)
 def update_source_active_mappings_count(source_id):
     from core.sources.models import Source
     source = Source.objects.filter(id=source_id).first()
@@ -596,7 +597,7 @@ def update_source_active_mappings_count(source_id):
             source.save(update_fields=['active_mappings'])
 
 
-@app.task(base=QueueOnce)
+@app.task(base=QueueOnceCustomTask)
 def update_collection_active_concepts_count(collection_id):
     from core.collections.models import Collection
     collection = Collection.objects.filter(id=collection_id).first()
@@ -607,7 +608,7 @@ def update_collection_active_concepts_count(collection_id):
             collection.save(update_fields=['active_concepts'])
 
 
-@app.task(base=QueueOnce)
+@app.task(base=QueueOnceCustomTask)
 def update_collection_active_mappings_count(collection_id):
     from core.collections.models import Collection
     collection = Collection.objects.filter(id=collection_id).first()

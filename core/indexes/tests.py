@@ -1,4 +1,5 @@
 from mock import patch, Mock
+from mock.mock import ANY
 
 from core.common.tests import OCLAPITestCase
 from core.concepts.tests.factories import ConceptFactory
@@ -28,7 +29,8 @@ class PopulateESIndexViewTest(OCLAPITestCase):
 
     @patch('core.indexes.views.PopulateESIndexView.task')
     def test_post_202(self, task_mock):
-        task_mock.delay = Mock(return_value=Mock(state='state', task_id='task-id'))
+        task_mock.__name__ = 'populate_es_index'
+        task_mock.apply_async = Mock(return_value=Mock(state='state', task_id='task-id'))
         response = self.client.post(
             '/indexes/apps/populate/',
             {'apps': 'concepts,sources,users'},
@@ -44,7 +46,8 @@ class PopulateESIndexViewTest(OCLAPITestCase):
                 'queue': 'default'
             }
         )
-        task_mock.delay.assert_called_once_with(['concepts', 'sources', 'users'])
+        task_mock.apply_async.assert_called_once_with(
+            (['concepts', 'sources', 'users'],), queue='indexing', task_id=ANY)
 
 
 class RebuildESIndexViewTest(OCLAPITestCase):
@@ -69,7 +72,8 @@ class RebuildESIndexViewTest(OCLAPITestCase):
 
     @patch('core.indexes.views.RebuildESIndexView.task')
     def test_post_202(self, task_mock):
-        task_mock.delay = Mock(return_value=Mock(state='state', task_id='task-id'))
+        task_mock.__name__ = 'rebuild_es_index'
+        task_mock.apply_async = Mock(return_value=Mock(state='state', task_id='task-id'))
         response = self.client.post(
             '/indexes/apps/rebuild/',
             HTTP_AUTHORIZATION=self.token_header,
@@ -84,7 +88,7 @@ class RebuildESIndexViewTest(OCLAPITestCase):
                 'queue': 'default'
             }
         )
-        task_mock.delay.assert_called_once_with(None)
+        task_mock.apply_async.assert_called_once_with((None,), queue='indexing', task_id=ANY)
 
 
 class ResourceIndexViewTest(OCLAPITestCase):

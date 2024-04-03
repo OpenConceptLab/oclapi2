@@ -792,7 +792,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             if get(settings, 'TEST_MODE', False):
                 update_mappings_concept(concept.id)
             else:
-                update_mappings_concept.delay(concept.id)
+                update_mappings_concept.apply_async((concept.id,), queue='default', permanent=False)
 
             if parent_concept_uris:
                 if get(settings, 'TEST_MODE', False):
@@ -801,7 +801,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                 else:
                     process_hierarchy_for_new_concept.apply_async(
                         (concept.id, get(initial_version, 'id'), parent_concept_uris, create_parent_version),
-                        queue='concurrent'
+                        queue='concurrent', permanent=False
                     )
             if create_initial_version and concept._counted is True:
                 parent.update_concepts_count()
@@ -851,7 +851,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             if get(settings, 'TEST_MODE', False):
                 task(prev_latest.id, self.id)
             else:
-                task.apply_async((prev_latest.id, self.id), queue='concurrent')
+                task.apply_async((prev_latest.id, self.id), queue='concurrent', permanent=False)
 
     def _process_latest_version_hierarchy(self, prev_latest, parent_concept_uris=None, create_parent_version=True):
         task = process_hierarchy_for_concept_version
@@ -859,7 +859,8 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             task(self.id, get(prev_latest, 'id'), parent_concept_uris, create_parent_version)
         else:
             task.apply_async(
-                (self.id, get(prev_latest, 'id'), parent_concept_uris, create_parent_version), queue='concurrent')
+                (self.id, get(prev_latest, 'id'), parent_concept_uris, create_parent_version),
+                queue='concurrent', permanent=False)
 
     @staticmethod
     def validate_locales_limit(names, descriptions):

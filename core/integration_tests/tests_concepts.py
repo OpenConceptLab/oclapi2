@@ -429,7 +429,8 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         self.assertFalse(Concept.objects.filter(mnemonic=concept.mnemonic).exists())
 
     @patch('core.concepts.views.delete_concept')
-    def test_async_hard_delete_204(self, delete_conceot_task_mock):
+    def test_async_hard_delete_204(self, delete_concept_task_mock):
+        delete_concept_task_mock.__name__ = 'delete_concept'
         names = [ConceptNameFactory.build()]
         concept = ConceptFactory(parent=self.source, names=names)
         concepts_url = f"/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}/concepts/{concept.mnemonic}/"
@@ -442,7 +443,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 204)
-        delete_conceot_task_mock.delay.assert_called_once_with(concept.id)
+        delete_concept_task_mock.apply_async.assert_called_once_with((concept.id,), queue='default', task_id=ANY)
 
     def test_delete_404(self):
         concepts_url = f"/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}/concepts/foobar/"

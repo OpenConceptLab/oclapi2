@@ -2,6 +2,7 @@ from django.urls import re_path, include, path
 
 from core.common.constants import NAMESPACE_PATTERN
 from core.orgs import views as org_views
+from core.tasks import views as task_views
 from . import views
 from ..repos.views import OrganizationRepoListView
 from ..url_registry.views import OrganizationURLRegistryListView
@@ -22,6 +23,11 @@ urlpatterns = [
         '<str:user>/sso-migrate/',
         views.SSOMigrateView.as_view(),
         name='userprofile-sso-migrate'
+    ),
+    path(
+        '<str:user>/tasks/',
+        task_views.UserTaskListView.as_view(),
+        name='user-tasks-list'
     ),
     path(
         '<str:user>/verify/<str:verification_token>/',

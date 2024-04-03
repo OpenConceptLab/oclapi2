@@ -556,7 +556,7 @@ class UserListViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 201)
         self.assertIsNotNone(response.data['uuid'])
         self.assertIsNotNone(response.data['token'])
-        job_mock.delay.assert_called_once_with(int(response.data['uuid']))
+        job_mock.apply_async.assert_called_once_with((int(response.data['uuid']),), queue='default', permanent=False)
 
         response = self.client.post(
             '/users/',

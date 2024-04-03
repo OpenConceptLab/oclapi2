@@ -245,6 +245,7 @@ class OrganizationDetailViewTest(OCLAPITestCase):
 
     @patch('core.orgs.views.delete_organization')
     def test_delete_202_by_superuser(self, delete_organization_mock):
+        delete_organization_mock.__name__ = 'delete_organization'
         delete_organization_mock.apply_async = Mock(return_value=Mock(task_id='task-id', state='PENDING'))
 
         response = self.client.delete(
@@ -258,6 +259,7 @@ class OrganizationDetailViewTest(OCLAPITestCase):
 
     @patch('core.orgs.views.delete_organization')
     def test_delete_202_by_owner(self, delete_organization_mock):
+        delete_organization_mock.__name__ = 'delete_organization'
         delete_organization_mock.apply_async = Mock(return_value=Mock(task_id='task-id', state='PENDING'))
 
         response = self.client.delete(

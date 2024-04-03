@@ -5,7 +5,6 @@ from django_elasticsearch_dsl.registries import registry
 from pydash import get
 
 from core.common.utils import jsonify_safe, flatten_dict
-from core.orgs.models import Organization
 from core.url_registry.models import URLRegistry
 
 

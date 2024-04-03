@@ -179,10 +179,10 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
         return self.organizations.filter(created_by=self).count()
 
     def send_verification_email(self):
-        return send_user_verification_email.delay(self.id)
+        return send_user_verification_email.apply_async((self.id,), queue='default', permanent=False)
 
     def send_reset_password_email(self):
-        return send_user_reset_password_email.delay(self.id)
+        return send_user_reset_password_email.apply_async((self.id,), queue='default', permanent=False)
 
     @property
     def email_verification_url(self):
@@ -212,6 +212,9 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
     @property
     def auth_groups(self):
         return self.groups.values_list('name', flat=True)
+
+    def has_auth_group(self, group_name):
+        return self.groups.filter(name=group_name).exists()
 
     @property
     def auth_headers(self):

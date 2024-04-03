@@ -20,7 +20,7 @@ from core.common.tasks import update_collection_active_concepts_count, update_co
     delete_s3_objects
 from core.common.utils import reverse_resource, reverse_resource_version, parse_updated_since_param, drop_version, \
     to_parent_uri, is_canonical_uri, get_export_service, from_string_to_date, get_truthy_values, \
-    canonical_url_to_url_and_version
+    canonical_url_to_url_and_version, get_current_authorized_user
 from core.common.utils import to_owner_uri
 from core.settings import DEFAULT_LOCALE
 from .checksums import ChecksumModel
@@ -93,7 +93,7 @@ class BaseModel(models.Model):
 
     def index(self):
         if not get(settings, 'TEST_MODE', False):
-            handle_save.delay(self.app_name, self.model_name, self.id)
+            handle_save.apply_async((self.app_name, self.model_name, self.id), queue='indexing', permanent=False)
 
     @property
     def should_index(self):
@@ -423,28 +423,46 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         self.update_mappings_count(sync)
 
     def update_mappings_count(self, sync=False):
+        task = None
+        job = None
         try:
             if sync or get(settings, 'TEST_MODE'):
                 self.set_active_mappings()
                 self.save(update_fields=['active_mappings'])
             elif self.__class__.__name__ == 'Source':
-                update_source_active_mappings_count.apply_async((self.id,), queue='concurrent')
+                job = update_source_active_mappings_count
             elif self.__class__.__name__ == 'Collection':
-                update_collection_active_mappings_count.apply_async((self.id,), queue='concurrent')
+                job = update_collection_active_mappings_count
+            if job:
+                from core.tasks.models import Task
+                task = Task.make_new(
+                    name=job.__name__, queue='concurrent', user=(get_current_authorized_user() or self.updated_by)
+                )
+                job.apply_async((self.id,), task_id=task.id, queue='concurrent')
         except AlreadyQueued:
-            pass
+            if task:
+                task.delete()
 
     def update_concepts_count(self, sync=False):
+        task = None
+        job = None
         try:
             if sync or get(settings, 'TEST_MODE'):
                 self.set_active_concepts()
                 self.save(update_fields=['active_concepts'])
             elif self.__class__.__name__ == 'Source':
-                update_source_active_concepts_count.apply_async((self.id,), queue='concurrent')
+                job = update_source_active_concepts_count
             elif self.__class__.__name__ == 'Collection':
-                update_collection_active_concepts_count.apply_async((self.id,), queue='concurrent')
+                job = update_collection_active_concepts_count
+            if job:
+                from core.tasks.models import Task
+                task = Task.make_new(
+                    name=job.__name__, queue='concurrent', user=(get_current_authorized_user() or self.updated_by)
+                )
+                job.apply_async((self.id,), task_id=task.id, queue='concurrent')
         except AlreadyQueued:
-            pass
+            if task:
+                task.delete()
 
     @property
     def last_child_update(self):
@@ -542,7 +560,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
         export_path = self.get_version_export_path(suffix=None)
         super().delete(using=using, keep_parents=keep_parents)
-        delete_s3_objects.delay(export_path)
+        delete_s3_objects.apply_async((export_path,), queue='default', permanent=False)
         self.post_delete_actions()
 
     def post_delete_actions(self):
@@ -673,7 +691,10 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         if is_test_mode or sync:
             seed_children_to_new_version(obj.resource_type.lower(), obj.id, not is_test_mode, sync)
         else:
-            seed_children_to_new_version.delay(obj.resource_type.lower(), obj.id, True, sync)
+            from core.tasks.models import Task
+            task = Task.make_new(queue='default', user=user, name=seed_children_to_new_version.__name__)
+            seed_children_to_new_version.apply_async(
+                (obj.resource_type.lower(), obj.id, True, sync), task_id=task.id, queue='default')
 
         if obj.id:
             obj.sibling_versions.update(is_latest_version=False)
@@ -714,7 +735,10 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
             obj.save(**kwargs)
 
             if queue_schema_update_task:
-                update_validation_schema.delay(obj.app_name, obj.id, target_schema)
+                from core.tasks.models import Task
+                task = Task.make_new(queue='default', user=updated_by, name=update_validation_schema.__name__)
+                update_validation_schema.apply_async(
+                    (obj.app_name, obj.id, target_schema), task_id=task.id, queue='default')
             if should_reindex_resources:
                 if obj.released:
                     obj.index_resources_for_self_as_latest_released()
@@ -861,18 +885,11 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
         return path
 
-    def get_export_url(self):
-        return get_export_service().url_for(self.get_export_path())
-
     def get_export_path(self):
-        service = get_export_service()
         if self.is_head:
-            path = self.version_export_path
-        else:
-            path = service.get_last_key_from_path(
-                self.get_version_export_path(suffix=None)
-            ) or self.version_export_path
-        return path
+            return self.version_export_path
+        service = get_export_service()
+        return service.get_last_key_from_path(self.get_version_export_path(suffix=None)) or self.version_export_path
 
     def has_export(self):
         service = get_export_service()
@@ -1123,11 +1140,13 @@ class CelerySignalProcessor(RealTimeSignalProcessor):
             if get(settings, 'TEST_MODE', False):
                 handle_save(instance.app_name, instance.model_name, instance.id)
             else:
-                handle_save.delay(instance.app_name, instance.model_name, instance.id)
+                handle_save.apply_async(
+                    (instance.app_name, instance.model_name, instance.id), queue='indexing', permanent=False)
 
     def handle_m2m_changed(self, sender, instance, action, **kwargs):
         if settings.ES_SYNC and instance.__class__ in registry.get_models() and instance.should_index:
             if get(settings, 'TEST_MODE', False):
                 handle_m2m_changed(instance.app_name, instance.model_name, instance.id, action)
             else:
-                handle_m2m_changed.delay(instance.app_name, instance.model_name, instance.id, action)
+                handle_m2m_changed.apply_async(
+                    (instance.app_name, instance.model_name, instance.id, action), queue='indexing', permanent=False)

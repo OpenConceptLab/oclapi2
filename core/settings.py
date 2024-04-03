@@ -55,6 +55,7 @@ CORS_EXPOSE_HEADERS = (
     'offset',
     'Content-Length',
     'Content-Range',
+    'Content-Disposition',
     'X-OCL-API-VERSION',
     'X-OCL-REQUEST-USER',
     'X-OCL-RESPONSE-TIME',
