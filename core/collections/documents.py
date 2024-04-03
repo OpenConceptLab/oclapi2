@@ -48,18 +48,21 @@ class CollectionDocument(Document):
 
     @staticmethod
     def get_match_phrase_attrs():
-        return ['name', 'external_id', 'canonical_url']
+        return ['name', 'external_id', 'canonical_url', 'full_name']
 
     @staticmethod
     def get_exact_match_attrs():
         return {
-            'id': {
+            'mnemonic': {
                 'boost': 4
             },
-            'to_concept': {
+            'name': {
                 'boost': 3.5,
             },
-            'from_concept': {
+            'full_name': {
+                'boost': 3.2,
+            },
+            'canonical_url': {
                 'boost': 3,
             },
             'external_id': {
@@ -78,6 +81,11 @@ class CollectionDocument(Document):
                 'lower': True,
                 'wildcard': True
             },
+            'full_name': {
+                'boost': 0.6,
+                'lower': True,
+                'wildcard': True
+            },
             'canonical_url': {
                 'boost': 0.6,
                 'lower': True,
@@ -90,6 +98,11 @@ class CollectionDocument(Document):
         return {
             'name': {
                 'boost': 0.8,
+                'lower': True,
+                'wildcard': True
+            },
+            'full_name': {
+                'boost': 0.2,
                 'lower': True,
                 'wildcard': True
             },

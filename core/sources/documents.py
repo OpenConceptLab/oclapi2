@@ -52,7 +52,7 @@ class SourceDocument(Document):
 
     @staticmethod
     def get_match_phrase_attrs():
-        return ['name', 'external_id', 'canonical_url']
+        return ['name', 'external_id', 'canonical_url', 'full_name']
 
     @staticmethod
     def get_exact_match_attrs():
@@ -62,6 +62,9 @@ class SourceDocument(Document):
             },
             'name': {
                 'boost': 3.5,
+            },
+            'full_name': {
+                'boost': 3.2,
             },
             'canonical_url': {
                 'boost': 3,
@@ -84,6 +87,11 @@ class SourceDocument(Document):
                 'lower': True,
                 'wildcard': True
             },
+            'full_name': {
+                'boost': 0.6,
+                'lower': True,
+                'wildcard': True
+            },
             'canonical_url': {
                 'boost': 0.6,
                 'lower': True,
@@ -96,6 +104,13 @@ class SourceDocument(Document):
         return {
             'name': {
                 'boost': 0.8,
+                'lower': True,
+                'wildcard': True
+            },
+            'full_name': {
+                'boost': 0.2,
+                'lower': True,
+                'wildcard': True
             },
         }
 
