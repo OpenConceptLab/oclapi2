@@ -92,7 +92,8 @@ class ImportRetrieveDestroyMixin(BaseAPIView):
             return Response(self.get_serializer(task).data)
 
         if import_queue:
-            tasks = tasks.filter(queue=import_queue)
+            tasks = tasks.filter(Task.queue_criteria(import_queue))
+            tasks = Task.objects.filter(id__in=tasks.values_list('id', flat=True))
 
         return Response(self.get_serializer(tasks, many=True).data)
 

@@ -233,6 +233,10 @@ class Task(models.Model):
     def generate_user_task_id(cls, username, queue):
         return str(uuid.uuid4()) + '-' + username + '~' + queue
 
+    @staticmethod
+    def queue_criteria(queue):
+        return models.Q(queue=queue) | models.Q(id__endswith=f'~{queue}')
+
 
 class WorkerRequest(Request):
     def on_failure(self, exc_info, send_failed_event=True, return_ok=False):
