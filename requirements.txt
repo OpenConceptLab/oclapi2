@@ -1,6 +1,6 @@
 Django==4.2.11
 psycopg2==2.9.7
-gunicorn==21.2.0 #production server
+gunicorn==22.0.0 #production server
 whitenoise==6.5.0 #serving swagger static files
 djangorestframework==3.14.0
 pylint==2.17.5
