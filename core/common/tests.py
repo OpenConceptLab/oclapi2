@@ -27,7 +27,7 @@ from core.common.utils import (
     get_resource_class_from_resource_name, flatten_dict, is_csv_file, is_url_encoded_string, to_parent_uri_from_kwargs,
     set_current_user, get_current_user, set_request_url, get_request_url, nested_dict_values, chunks, api_get,
     split_list_by_condition, is_zip_file, get_date_range_label, get_prev_month, from_string_to_date, get_end_of_month,
-    get_start_of_month, es_id_in, web_url)
+    get_start_of_month, es_id_in, web_url, get_queue_task_names)
 from core.concepts.models import Concept
 from core.orgs.models import Organization
 from core.sources.models import Source
@@ -890,6 +890,71 @@ class UtilsTest(OCLTestCase):
             from_string_to_date('2023-02-28 10:00:00'), datetime.datetime(2023, 2, 28, 10))
         self.assertEqual(
             from_string_to_date('2023-02-29'), None)
+
+    @patch('core.tasks.models.Task.make_new')
+    def test_get_queue_task_names(self, task_new_mock):
+        task_new_mock.return_value = 'task'
+
+        self.assertEqual(get_queue_task_names(None, 'ocladmin'), 'task')
+        self.assertEqual(
+            task_new_mock.mock_calls[0],
+            call(queue='bulk_import_root', username='ocladmin', import_queue=None)
+        )
+
+        self.assertEqual(get_queue_task_names('foobar', 'ocladmin'), 'task')
+        self.assertEqual(
+            task_new_mock.mock_calls[1],
+            call(queue='bulk_import_root', username='ocladmin', import_queue='foobar')
+        )
+
+        self.assertEqual(get_queue_task_names('concurrent', 'ocladmin'), 'task')
+        self.assertEqual(
+            task_new_mock.mock_calls[2],
+            call(queue='concurrent', username='ocladmin', import_queue='concurrent')
+        )
+
+        self.assertEqual(
+            get_queue_task_names('concurrent', 'ocladmin', foo='bar'), 'task')
+        self.assertEqual(
+            task_new_mock.mock_calls[3],
+            call(queue='concurrent', username='ocladmin', import_queue='concurrent', foo='bar')
+        )
+
+        self.assertEqual(get_queue_task_names(None, 'datim-admin'), 'task')
+        self.assertEqual(
+            task_new_mock.mock_calls[4],
+            call(queue=ANY, username='datim-admin', import_queue=None)
+        )
+
+        self.assertEqual(get_queue_task_names('merfy24', 'datim-admin'), 'task') # first
+        self.assertEqual(
+            task_new_mock.mock_calls[5],
+            call(queue='bulk_import_3', username='datim-admin', import_queue='merfy24')
+        )
+
+        self.assertEqual(get_queue_task_names('merfy24', 'datim-admin'), 'task') # second
+        self.assertEqual(
+            task_new_mock.mock_calls[6],
+            call(queue='bulk_import_3', username='datim-admin', import_queue='merfy24')
+        )
+
+        self.assertEqual(get_queue_task_names('merfy24', 'datim-admin'), 'task') # third
+        self.assertEqual(
+            task_new_mock.mock_calls[7],
+            call(queue='bulk_import_3', username='datim-admin', import_queue='merfy24')
+        )
+
+        self.assertEqual(get_queue_task_names('merfy25', 'datim-admin'), 'task')
+        self.assertEqual(
+            task_new_mock.mock_calls[8],
+            call(queue='bulk_import_1', username='datim-admin', import_queue='merfy25')
+        )
+
+        self.assertEqual(get_queue_task_names('merfy25', 'datim-admin'), 'task')
+        self.assertEqual(
+            task_new_mock.mock_calls[9],
+            call(queue='bulk_import_1', username='datim-admin', import_queue='merfy25')
+        )
 
 
 class BaseModelTest(OCLTestCase):

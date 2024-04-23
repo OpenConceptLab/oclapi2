@@ -1,5 +1,5 @@
 # pylint: disable=cyclic-import # only occurring in dev env
-
+import hashlib
 import json
 import mimetypes
 import os
@@ -457,10 +457,11 @@ def get_queue_task_names(import_queue, username, **kwargs):
     elif import_queue == 'concurrent':
         queue_id = import_queue
     elif import_queue:
-        # assigning to one of 5 queues processed in order
-        queue_id = 'bulk_import_' + str(hash(username + import_queue) % BULK_IMPORT_QUEUES_COUNT)
+        # assigning to one of 4 queues processed in order
+        hash_value = hashlib.sha256((username + import_queue).encode()).hexdigest()
+        queue_id = 'bulk_import_' + str(int(hash_value[:2], 16) % BULK_IMPORT_QUEUES_COUNT)
     else:
-        # assigning randomly to one of 5 queues processed in order
+        # assigning randomly to one of 4 queues processed in order
         queue_id = 'bulk_import_' + str(random.randrange(0, BULK_IMPORT_QUEUES_COUNT))
 
     from core.tasks.models import Task
