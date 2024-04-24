@@ -20,8 +20,8 @@ from rest_framework.views import APIView
 
 from core.client_configs.views import ResourceClientConfigsView
 from core.collections.constants import (
-    INCLUDE_REFERENCES_PARAM, HEAD_OF_CONCEPT_ADDED_TO_COLLECTION,
-    HEAD_OF_MAPPING_ADDED_TO_COLLECTION, CONCEPT_ADDED_TO_COLLECTION_FMT, MAPPING_ADDED_TO_COLLECTION_FMT,
+    INCLUDE_REFERENCES_PARAM, CONCEPT_VERSION_ADDED_TO_COLLECTION,
+    MAPPING_VERSION_ADDED_TO_COLLECTION, CONCEPT_ADDED_TO_COLLECTION_FMT, MAPPING_ADDED_TO_COLLECTION_FMT,
     DELETE_FAILURE, DELETE_SUCCESS, NO_MATCH, VERSION_ALREADY_EXISTS,
     SOURCE_MAPPINGS,
     UNKNOWN_REFERENCE_ADDED_TO_COLLECTION_FMT)
@@ -535,27 +535,25 @@ class CollectionReferencesView(
         }
 
     def select_update_message(self, expression):
-        adding_head_version = not is_version_specified(expression)
-
         expression_parts = expression.split('/')
         resource_type = get(expression_parts, '5')
 
-        if adding_head_version:
-            return self.adding_to_head_message_by_type(resource_type)
+        if is_version_specified(expression):
+            return self.resource_version_added_message_by_type(resource_type)
 
         resource_name = get(expression_parts, '6')
-        return self.version_added_message_by_type(resource_name, self.parent_resource.name, resource_type)
+        return self.resource_added_message_by_type(resource_name, self.parent_resource.name, resource_type)
 
     @staticmethod
-    def adding_to_head_message_by_type(resource_type):
+    def resource_version_added_message_by_type(resource_type):
         if resource_type == 'concepts':
-            return HEAD_OF_CONCEPT_ADDED_TO_COLLECTION
+            return CONCEPT_VERSION_ADDED_TO_COLLECTION
         if resource_type == 'mappings':
-            return HEAD_OF_MAPPING_ADDED_TO_COLLECTION
+            return MAPPING_VERSION_ADDED_TO_COLLECTION
         return UNKNOWN_REFERENCE_ADDED_TO_COLLECTION_FMT.format('')
 
     @staticmethod
-    def version_added_message_by_type(resource_name, collection_name, resource_type):
+    def resource_added_message_by_type(resource_name, collection_name, resource_type):
         if resource_type == 'concepts':
             return CONCEPT_ADDED_TO_COLLECTION_FMT.format(resource_name, collection_name)
         if resource_type == 'mappings':

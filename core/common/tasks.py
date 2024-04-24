@@ -161,7 +161,7 @@ def export_collection(self, version_id):
 
 @app.task(bind=True)
 def add_references(  # pylint: disable=too-many-arguments,too-many-locals
-        self, user_id, data, collection_id, cascade=False, transform_to_resource_version=False
+        self, user_id, data, collection_id, cascade=False, transform=False
 ):
     from core.users.models import UserProfile
     from core.collections.models import Collection
@@ -172,7 +172,7 @@ def add_references(  # pylint: disable=too-many-arguments,too-many-locals
 
     try:
         (added_references, errors) = collection.add_expressions(
-            data, user, cascade, transform_to_resource_version, True)
+            data, user, cascade, transform, True)
     finally:
         head.remove_processing(self.request.id)
     if collection.expansion_uri:

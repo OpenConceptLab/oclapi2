@@ -57,7 +57,7 @@ class CollectionReferenceTranslator:
             code = decode_string(decode_string(code)) if is_url_encoded_string(code) else code
             if self.reference.resource_version:
                 english += f'version "{self.reference.resource_version}" of '
-            elif self.reference.transform:
+            elif self.reference.is_static_transform:
                 english += 'latest version of '
             english += f'{entity} "{code}" from '
         else:

@@ -15,7 +15,7 @@ from core.collections.constants import (
     COLLECTION_TYPE, REFERENCE_ALREADY_EXISTS, CONCEPT_FULLY_SPECIFIED_NAME_UNIQUE_PER_COLLECTION_AND_LOCALE,
     CONCEPT_PREFERRED_NAME_UNIQUE_PER_COLLECTION_AND_LOCALE, COLLECTION_VERSION_TYPE,
     REFERENCE_TYPE_CHOICES, CONCEPT_REFERENCE_TYPE, MAPPING_REFERENCE_TYPE, SOURCE_MAPPINGS, SOURCE_TO_CONCEPTS,
-    TRANSFORM_TO_RESOURCE_VERSIONS, COLLECTION_REFERENCE_TYPE)
+    TRANSFORM_TO_RESOURCE_VERSIONS, COLLECTION_REFERENCE_TYPE, TRANSFORM_TO_EXTENSIONAL)
 from core.collections.parsers import CollectionReferenceParser
 from core.collections.translators import CollectionReferenceTranslator
 from core.collections.utils import is_concept, is_mapping
@@ -646,8 +646,11 @@ class CollectionReference(models.Model):
                 if concept:
                     self.resource_version = concept.version
                     self.expression = concept.uri
-            if mapping_queryset.exists():
-                mapping_queryset = self.transform_to_latest_version(mapping_queryset, Mapping)
+            mapping_queryset = self.transform_to_latest_version(mapping_queryset, Mapping)
+        if self.should_transform_to_versioned() and not system_version.is_head:  # For HEAD it will be versioned
+            queryset = Concept.objects.filter(id__in=queryset.values_list('versioned_object_id', flat=True))
+            mapping_queryset = Mapping.objects.filter(
+                id__in=mapping_queryset.values_list('versioned_object_id', flat=True))
         return queryset, mapping_queryset
 
     def get_mappings(self, system_version=None):
@@ -686,7 +689,7 @@ class CollectionReference(models.Model):
                     code=encode_string(concept.mnemonic),
                     collection_id=self.collection_id,
                     created_by=self.created_by,
-                    resource_version=concept.version,
+                    resource_version=concept.version if self.transform == TRANSFORM_TO_RESOURCE_VERSIONS else None,
                     system=self.system,
                     version=self.version
                 ))
@@ -697,7 +700,7 @@ class CollectionReference(models.Model):
                     code=mapping.mnemonic,
                     collection_id=self.collection_id,
                     created_by=self.created_by,
-                    resource_version=mapping.version,
+                    resource_version=mapping.version if self.transform == TRANSFORM_TO_RESOURCE_VERSIONS else None,
                     system=self.system,
                     version=self.version
                 ))
@@ -720,7 +723,10 @@ class CollectionReference(models.Model):
         return queryset
 
     def should_transform_to_latest_version(self):
-        return not self.resource_version and self.transform
+        return not self.resource_version and self.is_static_transform
+
+    def should_transform_to_versioned(self):
+        return not self.resource_version and self.is_extensional_transform
 
     def should_apply_filter(self):
         return not self.code and self.filter
@@ -802,7 +808,7 @@ class CollectionReference(models.Model):
                 pks += es_to_pks(search_within_queryset.params(request_timeout=ES_REQUEST_TIMEOUT_ASYNC))
             if pks:
                 resource_versions = resource_klass.objects.filter(id__in=set(pks))
-                if self.version or self.valueset or self.transform:
+                if self.version or self.valueset or self.is_static_transform:
                     return resource_versions
                 return resource_klass.objects.filter(
                     id__in=resource_versions.values_list('versioned_object_id', flat=True))
@@ -820,7 +826,7 @@ class CollectionReference(models.Model):
             if system_version.is_head and not self.resource_version:
                 queryset = queryset.filter(
                     is_latest_version=True
-                ) if self.transform else queryset.filter(id=F('versioned_object_id'))
+                ) if self.is_static_transform else queryset.filter(id=F('versioned_object_id'))
 
         if valueset_versions:
             for valueset in valueset_versions:
@@ -832,6 +838,14 @@ class CollectionReference(models.Model):
                         queryset &= rel.all()
 
         return queryset
+
+    @property
+    def is_static_transform(self):
+        return self.transform and self.transform.lower() == TRANSFORM_TO_RESOURCE_VERSIONS
+
+    @property
+    def is_extensional_transform(self):
+        return self.transform and self.transform.lower() == TRANSFORM_TO_EXTENSIONAL
 
     @cached_property
     def resolve_system_version(self):
@@ -858,7 +872,7 @@ class CollectionReference(models.Model):
             raise ValidationError({'filter': ['Invalid filter schema.']})
 
         self.original_expression = str(self.expression)
-        if self.transform and self.transform.lower() != TRANSFORM_TO_RESOURCE_VERSIONS:
+        if not self.is_static_transform and not self.is_extensional_transform:
             self.transform = None
 
         self.evaluate()

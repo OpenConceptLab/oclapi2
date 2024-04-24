@@ -742,6 +742,23 @@ class CollectionReferenceTest(OCLTestCase):
 
         reference = CollectionReference(
             system=source.uri,
+            code=concept1.mnemonic,
+            created_by=source.created_by,
+            cascade={'method': 'sourcetoconcepts'},
+            transform='extensional'
+        )
+        concepts, mappings = reference.get_concepts()
+        concepts = concepts.distinct('id')
+        self.assertEqual(concepts.count(), 2)
+        self.assertEqual(
+            sorted(list(concepts.values_list('id', flat=True))),
+            sorted([concept1_latest.versioned_object_id, concept2.versioned_object_id])
+        )
+        self.assertEqual(mappings.count(), 1)
+        self.assertEqual(mappings.first().versioned_object_id, mapping1.versioned_object_id)
+
+        reference = CollectionReference(
+            system=source.uri,
             valueset=[coll1_v1.uri, coll2_v1.uri],
             created_by=source.created_by
         )
@@ -766,6 +783,17 @@ class CollectionReferenceTest(OCLTestCase):
 
         reference = CollectionReference(
             system=source.uri,
+            valueset=[coll1_v1.uri],
+            created_by=source.created_by,
+            transform='extensional'
+        )
+        concepts, mappings = reference.get_concepts()
+
+        self.assertEqual(concepts.count(), 0)  # coll_v1 has latest version of concept1
+        self.assertEqual(mappings.count(), 0)
+
+        reference = CollectionReference(
+            system=source.uri,
             created_by=source.created_by,
             code=concept1.mnemonic,
             transform='resourceversions'
@@ -775,6 +803,20 @@ class CollectionReferenceTest(OCLTestCase):
         self.assertEqual(concepts.count(), 1)
         self.assertEqual(
             sorted(list(concepts.values_list('id', flat=True))), sorted([concept1_latest.id])
+        )
+        self.assertEqual(mappings.count(), 0)
+
+        reference = CollectionReference(
+            system=source.uri,
+            created_by=source.created_by,
+            code=concept1.mnemonic,
+            transform='extensional'
+        )
+        concepts, mappings = reference.get_concepts()
+
+        self.assertEqual(concepts.count(), 1)
+        self.assertEqual(
+            sorted(list(concepts.values_list('id', flat=True))), sorted([concept1_latest.versioned_object_id])
         )
         self.assertEqual(mappings.count(), 0)
 
