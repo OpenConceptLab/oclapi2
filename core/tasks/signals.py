@@ -3,7 +3,7 @@ from django import db
 
 
 @task_postrun.connect
-def on_task_done(sender=None, headers=None, body=None, **kwargs):
+def on_task_done(sender=None, headers=None, body=None, **kwargs):  # pylint: disable=unused-argument
     for conn in db.connections.all():
         try:
             conn.close_if_unusable_or_obsolete()
