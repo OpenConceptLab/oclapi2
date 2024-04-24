@@ -99,7 +99,7 @@ INSTALLED_APPS = [
     'core.importers',
     'core.pins',
     'core.client_configs',
-    'core.tasks',
+    'core.tasks.apps.TaskConfig',
     'core.toggles',
     'core.repos',
     'core.url_registry',
