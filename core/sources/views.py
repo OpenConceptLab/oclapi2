@@ -29,7 +29,7 @@ from core.common.swagger_parameters import q_param, limit_param, sort_desc_param
     canonical_url_param
 from core.common.tasks import export_source, index_source_concepts, index_source_mappings, delete_source, \
     generate_source_resources_checksums
-from core.common.utils import parse_boolean_query_param, compact_dict_by_values, to_parent_uri
+from core.common.utils import parse_boolean_query_param, compact_dict_by_values, to_parent_uri, get_truthy_values
 from core.common.views import BaseAPIView, BaseLogoView, ConceptContainerExtraRetrieveUpdateDestroyView
 from core.sources.constants import DELETE_FAILURE, DELETE_SUCCESS, VERSION_ALREADY_EXISTS
 from core.sources.documents import SourceDocument
@@ -619,5 +619,11 @@ class SourceVersionComparisonView(BaseAPIView):  # pragma: no cover
 
     def post(self, _):
         version1, version2 = self.get_objects()
-        verbosity_level = self.request.query_params.get('verbosity') or 0
-        return Response(Source.compare(version1, version2, self.is_verbose(), verbosity_level))
+        try:
+            verbosity = int(self.request.query_params.get('verbosity', 0) or 0)
+        except:  # pylint: disable=bare-except
+            verbosity = 0
+        is_changelog = self.request.query_params.get('changelog', False) in get_truthy_values()
+        if is_changelog:
+            return Response(Source.changelog(version1, version2))
+        return Response(Source.compare(version1, version2, verbosity))

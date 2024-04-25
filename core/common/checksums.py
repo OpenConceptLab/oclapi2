@@ -1,5 +1,6 @@
 import hashlib
 import json
+import time
 from uuid import UUID
 
 from django.conf import settings
@@ -166,16 +167,13 @@ class Checksum:
 
 
 class ChecksumDiff:  # pragma: no cover
-    def __init__(self, resources1, resources2, identity='mnemonic', verbose=False, verbosity_level=1):  # pylint: disable=too-many-arguments
+    def __init__(self, resources1, resources2, identity='mnemonic', verbosity=0):  # pylint: disable=too-many-arguments
         self.resources1 = resources1
         self.resources2 = resources2
         self.identity = identity
-        self.verbose = verbose
-        self.verbosity_level = verbosity_level
+        self.verbosity = verbosity
         self.same = {}
         self.same_smart = {}
-        self.same_standard = {}
-        self.changed = {}
         self.changed_smart = {}
         self.changed_standard = {}
         self.result = {}
@@ -198,7 +196,8 @@ class ChecksumDiff:  # pragma: no cover
     def _get_resource_map(self, resources):
         return {
             get(resource, self.identity): {
-                'checksums': resource.checksums
+                'checksums': resource.checksums,
+                'id': resource.id
             } for resource in resources
         }
 
@@ -287,28 +286,37 @@ class ChecksumDiff:  # pragma: no cover
     def common(self):
         return {key: self.resources1_map[key] for key in self.resources1_set & self.resources2_set}
 
+    @property
+    def is_verbose(self):
+        return self.verbosity >= 1
+
+    @property
+    def is_very_verbose(self):
+        return self.verbosity == 2
+
+    @property
+    def include_same(self):
+        return self.is_verbose
+
     def populate_diff_from_common(self):
         common = self.common
         resources1_map = self.resources1_map
         resources2_map = self.resources2_map
 
         for key, info in common.items():
-            if resources1_map[key]['checksums'] == resources2_map[key]['checksums']:
+            if self.include_same and resources1_map[key]['checksums'] == resources2_map[key]['checksums']:
                 self.same[key] = info
                 self.same_smart[key] = info
-                self.same_standard[key] = info
             elif resources1_map[key]['checksums']['smart'] == resources2_map[key]['checksums']['smart']:
-                self.same_smart[key] = info
+                if self.include_same:
+                    self.same_smart[key] = info
                 self.changed_standard[key] = info
             elif resources1_map[key]['checksums']['standard'] == resources2_map[key]['checksums']['standard']:
-                self.same_standard[key] = info
                 self.changed_smart[key] = info
-            else:
-                self.changed[key] = info
 
-    def get_struct(self, values, is_verbose=False):
+    def get_struct(self, values):
         total = len(values or [])
-        if is_verbose:
+        if self.is_very_verbose:
             if values:
                 return {'total': total, self.identity: list(values.keys())}
             return total
@@ -316,18 +324,16 @@ class ChecksumDiff:  # pragma: no cover
         return total
 
     def prepare(self):
-        new = self.new
-        is_very_verbose = self.verbose and self.verbosity_level == 2
-
         self.result = {
-            'new': self.get_struct(new, self.verbose),
-            'removed': self.get_struct(self.deleted, self.verbose),
-            'retired': self.get_struct(self.retired, self.verbose),
-            'same': self.get_struct(self.same_standard, is_very_verbose),
-            'changed': self.get_struct(self.changed_standard, self.verbose),
-            'smart_same': self.get_struct(self.same_smart, is_very_verbose),
-            'smart_changed': self.get_struct(self.changed_smart, self.verbose),
+            'new': self.get_struct(self.new),
+            'removed': self.get_struct(self.deleted),
+            'retired': self.get_struct(self.retired),
+            'changed': self.get_struct(self.changed_standard),
+            'smart_changed': self.get_struct(self.changed_smart),
         }
+        if self.include_same:
+            self.result['same'] = self.get_struct(self.same)
+            self.result['smart_same'] = self.get_struct(self.same_smart)
 
     def process(self, refresh=False):
         if refresh:
@@ -352,3 +358,92 @@ class ChecksumDiff:  # pragma: no cover
 
     def print(self):
         print(self.pretty_print_dict(self.result))
+
+    def get_db_id_for(self, diff_key, identity):
+        if diff_key == 'retired':
+            return get(
+                self.resources1_map_retired, f'{identity}.id'
+            ) or self.resources2_map_retired[identity]['id']
+        return get(
+            self.resources1_map, f'{identity}.id'
+        ) or self.resources2_map[identity]['id']
+
+
+class ChecksumChangelog:  # pragma: no cover
+    def __init__(self, version1, version2, concepts_diff, mappings_diff, identity='mnemonic'):  # pylint: disable=too-many-arguments
+        self.version1 = version1
+        self.version2 = version2
+        self.concepts_diff = concepts_diff
+        self.mappings_diff = mappings_diff
+        self.identity = identity
+        self.result = {}
+
+    def get_mapping_summary(self, mapping, mapping_id=None):
+        return {
+            'id': mapping_id or get(mapping, self.identity),
+            'from_concept': mapping.from_concept_code or get(mapping.from_concept, 'mnemonic'),
+            'from_source': mapping.from_source_url,
+            'to_concept': mapping.to_concept_code or get(mapping.to_concept, 'mnemonic'),
+            'to_source': mapping.to_source_url,
+            'map_type': mapping.map_type,
+        }
+
+    def process(self):  # pylint: disable=too-many-locals,too-many-branches
+        from core.mappings.models import Mapping
+        from core.concepts.models import Concept
+        start_time = time.time()
+        concepts_result = {}
+        mappings_result = {}
+        traversed_mappings = set()
+        traversed_concepts = set()
+        ignored_diffs = ['same', 'smart_same']
+        for key, diff in self.concepts_diff.result.items():  # pylint: disable=too-many-nested-blocks
+            if key in ignored_diffs:
+                continue
+            if isinstance(diff, dict):
+                section_summary = {}
+                for concept_id in diff[self.identity]:
+                    if concept_id in traversed_concepts:
+                        continue
+                    traversed_concepts.add(concept_id)
+                    concept_db_id = self.concepts_diff.get_db_id_for(key, concept_id)
+                    concept = Concept.objects.filter(id=concept_db_id).first()
+                    summary = {'id': concept_id, 'display_name': concept.display_name}
+                    mappings_diff_summary = {}
+                    for mapping_diff_key in self.mappings_diff.result:
+                        if mapping_diff_key in ignored_diffs:
+                            continue
+                        mapping_ids = get(self.mappings_diff.result, f'{mapping_diff_key}.{self.identity}')
+                        if mapping_ids:
+                            mappings = Mapping.objects.filter(
+                                from_concept__versioned_object_id=concept.versioned_object_id,
+                                **{f'{self.identity}__in': set(mapping_ids) - traversed_mappings}
+                            )
+                            for mapping in mappings:
+                                if mapping_diff_key not in mappings_diff_summary:
+                                    mappings_diff_summary[mapping_diff_key] = []
+                                mappings_diff_summary[mapping_diff_key].append(self.get_mapping_summary(mapping))
+                                traversed_mappings.add(get(mapping, self.identity))
+                    if mappings_diff_summary:
+                        summary['mappings'] = mappings_diff_summary
+                    section_summary[concept_id] = summary
+                concepts_result[key] = section_summary
+        for key, diff in self.mappings_diff.result.items():
+            if key in ignored_diffs:
+                continue
+            if isinstance(diff, dict):
+                section_summary = {}
+                for mapping_id in diff[self.identity]:
+                    if mapping_id in traversed_mappings:
+                        continue
+                    traversed_mappings.add(mapping_id)
+                    mapping_db_id = self.mappings_diff.get_db_id_for(key, mapping_id)
+                    mapping = Mapping.objects.filter(id=mapping_db_id).first()
+                    section_summary[mapping_id] = self.get_mapping_summary(mapping, mapping_id)
+                mappings_result[key] = section_summary
+        self.result = {
+            'concepts': concepts_result,
+            'mappings': mappings_result,
+        }
+
+        print("**Seconds**", time.time() - start_time)

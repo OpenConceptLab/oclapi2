@@ -8,6 +8,7 @@ from django.db.models import UniqueConstraint, F, Max, Count
 from django.db.models.functions import Cast
 from pydash import get
 
+from core.common.checksums import ChecksumChangelog
 from core.common.constants import HEAD
 from core.common.models import ConceptContainerModel
 from core.common.tasks import update_mappings_source, index_source_concepts, index_source_mappings, \
@@ -781,19 +782,17 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         return {**_filters, **(filters or {})}
 
     @staticmethod
-    def compare(version1, version2, verbose=False, verbosity_level=0):  # pragma: no cover
+    def compare(version1, version2, verbosity=0):  # pragma: no cover
         from core.common.checksums import ChecksumDiff
         concepts_diff = ChecksumDiff(
             resources1=version1.get_concepts_queryset().only('mnemonic', 'checksums', 'retired'),
             resources2=version2.get_concepts_queryset().only('mnemonic', 'checksums', 'retired'),
-            verbose=verbose,
-            verbosity_level=verbosity_level
+            verbosity=verbosity,
         )
         mappings_diff = ChecksumDiff(
             resources1=version1.get_mappings_queryset().only('mnemonic', 'checksums', 'retired'),
             resources2=version2.get_mappings_queryset().only('mnemonic', 'checksums', 'retired'),
-            verbose=verbose,
-            verbosity_level=verbosity_level
+            verbosity=verbosity,
         )
         concepts_diff.process()
         mappings_diff.process()
@@ -812,4 +811,37 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
             },
             'concepts': concepts_diff.result,
             'mappings': mappings_diff.result
+        }
+
+    @staticmethod
+    def changelog(version1, version2):  # pragma: no cover
+        from core.common.checksums import ChecksumDiff
+        concepts_diff = ChecksumDiff(
+            resources1=version1.get_concepts_queryset().only('mnemonic', 'checksums', 'retired'),
+            resources2=version2.get_concepts_queryset().only('mnemonic', 'checksums', 'retired'),
+            verbosity=2
+        )
+        mappings_diff = ChecksumDiff(
+            resources1=version1.get_mappings_queryset().only('mnemonic', 'checksums', 'retired'),
+            resources2=version2.get_mappings_queryset().only('mnemonic', 'checksums', 'retired'),
+            verbosity=2
+        )
+        concepts_diff.process()
+        mappings_diff.process()
+        log = ChecksumChangelog(version1, version2, concepts_diff, mappings_diff)
+        log.process()
+        return {
+            'meta': {
+                'version1': {
+                    'uri': version1.uri,
+                    'concepts': len(concepts_diff.resources1_set),
+                    'mappings': len(mappings_diff.resources1_set),
+                },
+                'version2': {
+                    'uri': version2.uri,
+                    'concepts': len(concepts_diff.resources2_set),
+                    'mappings': len(mappings_diff.resources2_set),
+                }
+            },
+            **log.result
         }
