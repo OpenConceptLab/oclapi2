@@ -388,7 +388,7 @@ class ChecksumChangelog:  # pragma: no cover
             'map_type': mapping.map_type,
         }
 
-    def process(self):  # pylint: disable=too-many-locals,too-many-branches
+    def process(self):  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
         from core.mappings.models import Mapping
         from core.concepts.models import Concept
         start_time = time.time()
@@ -428,7 +428,9 @@ class ChecksumChangelog:  # pragma: no cover
                         summary['mappings'] = mappings_diff_summary
                     section_summary[concept_id] = summary
                 concepts_result[key] = section_summary
-        for key, diff in self.mappings_diff.result.items():
+        same_concept_ids = self.concepts_diff.result['same'][self.identity]
+        smart_same_concept_ids = self.concepts_diff.result['smart_same'][self.identity]
+        for key, diff in self.mappings_diff.result.items():  # pylint: disable=too-many-nested-blocks
             if key in ignored_diffs:
                 continue
             if isinstance(diff, dict):
@@ -439,8 +441,41 @@ class ChecksumChangelog:  # pragma: no cover
                     traversed_mappings.add(mapping_id)
                     mapping_db_id = self.mappings_diff.get_db_id_for(key, mapping_id)
                     mapping = Mapping.objects.filter(id=mapping_db_id).first()
-                    section_summary[mapping_id] = self.get_mapping_summary(mapping, mapping_id)
-                mappings_result[key] = section_summary
+                    from_concept_code = get(mapping, 'from_concept_code')
+                    if from_concept_code and from_concept_code not in traversed_concepts:
+                        from_concept = mapping.from_concept
+                        concept_id = from_concept_code
+                        traversed_concepts.add(concept_id)
+                        if concept_id in same_concept_ids:
+                            if 'same_with_mapping_changes' not in concepts_result:
+                                concepts_result['same_with_mapping_changes'] = {}
+                            if concept_id not in concepts_result['same_with_mapping_changes']:
+                                concepts_result['same_with_mapping_changes'][concept_id] = {
+                                    'id': concept_id,
+                                    'display_name': get(from_concept, 'display_name'),
+                                    'mappings': {}
+                                }
+                            if key not in concepts_result['same_with_mapping_changes'][concept_id]['mappings']:
+                                concepts_result['same_with_mapping_changes'][concept_id]['mappings'][key] = []
+                            concepts_result['same_with_mapping_changes'][concept_id]['mappings'][key].append(
+                                self.get_mapping_summary(mapping, mapping_id))
+                        elif concept_id in smart_same_concept_ids:
+                            if 'smart_same_with_mapping_changes' not in concepts_result:
+                                concepts_result['smart_same_with_mapping_changes'] = {}
+                            if concept_id not in concepts_result['smart_same_with_mapping_changes']:
+                                concepts_result['smart_same_with_mapping_changes'][concept_id] = {
+                                    'id': concept_id,
+                                    'display_name': get(from_concept, 'display_name'),
+                                    'mappings': {}
+                                }
+                            if key not in concepts_result['smart_same_with_mapping_changes'][concept_id]['mappings']:
+                                concepts_result['smart_same_with_mapping_changes'][concept_id]['mappings'][key] = []
+                            concepts_result['smart_same_with_mapping_changes'][concept_id]['mappings'][key].append(
+                                self.get_mapping_summary(mapping, mapping_id))
+                    else:
+                        section_summary[mapping_id] = self.get_mapping_summary(mapping, mapping_id)
+                if section_summary:
+                    mappings_result[key] = section_summary
         self.result = {
             'concepts': concepts_result,
             'mappings': mappings_result,
