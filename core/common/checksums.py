@@ -1,6 +1,5 @@
 import hashlib
 import json
-import time
 from uuid import UUID
 
 from django.conf import settings
@@ -304,15 +303,16 @@ class ChecksumDiff:  # pragma: no cover
         resources2_map = self.resources2_map
 
         for key, info in common.items():
-            if self.include_same and resources1_map[key]['checksums'] == resources2_map[key]['checksums']:
-                self.same[key] = info
-                self.same_smart[key] = info
-            elif resources1_map[key]['checksums']['smart'] == resources2_map[key]['checksums']['smart']:
-                if self.include_same:
-                    self.same_smart[key] = info
+            checksums1 = resources1_map[key]['checksums']
+            checksums2 = resources2_map[key]['checksums']
+            if checksums1['standard'] != checksums2['standard']:
                 self.changed_standard[key] = info
-            elif resources1_map[key]['checksums']['standard'] == resources2_map[key]['checksums']['standard']:
+            elif self.include_same:
+                self.same[key] = info
+            if checksums1['smart'] != checksums2['smart']:
                 self.changed_smart[key] = info
+            elif self.include_same:
+                self.same_smart[key] = info
 
     def get_struct(self, values):
         total = len(values or [])
@@ -391,7 +391,6 @@ class ChecksumChangelog:  # pragma: no cover
     def process(self):  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
         from core.mappings.models import Mapping
         from core.concepts.models import Concept
-        start_time = time.time()
         concepts_result = {}
         mappings_result = {}
         traversed_mappings = set()
@@ -427,9 +426,9 @@ class ChecksumChangelog:  # pragma: no cover
                     if mappings_diff_summary:
                         summary['mappings'] = mappings_diff_summary
                     section_summary[concept_id] = summary
-                concepts_result[key] = section_summary
+                if section_summary:
+                    concepts_result[key] = section_summary
         same_concept_ids = self.concepts_diff.result['same'][self.identity]
-        smart_same_concept_ids = self.concepts_diff.result['smart_same'][self.identity]
         for key, diff in self.mappings_diff.result.items():  # pylint: disable=too-many-nested-blocks
             if key in ignored_diffs:
                 continue
@@ -442,10 +441,9 @@ class ChecksumChangelog:  # pragma: no cover
                     mapping_db_id = self.mappings_diff.get_db_id_for(key, mapping_id)
                     mapping = Mapping.objects.filter(id=mapping_db_id).first()
                     from_concept_code = get(mapping, 'from_concept_code')
-                    if from_concept_code and from_concept_code not in traversed_concepts:
+                    if from_concept_code:
                         from_concept = mapping.from_concept
                         concept_id = from_concept_code
-                        traversed_concepts.add(concept_id)
                         if concept_id in same_concept_ids:
                             if 'same_with_mapping_changes' not in concepts_result:
                                 concepts_result['same_with_mapping_changes'] = {}
@@ -459,19 +457,6 @@ class ChecksumChangelog:  # pragma: no cover
                                 concepts_result['same_with_mapping_changes'][concept_id]['mappings'][key] = []
                             concepts_result['same_with_mapping_changes'][concept_id]['mappings'][key].append(
                                 self.get_mapping_summary(mapping, mapping_id))
-                        elif concept_id in smart_same_concept_ids:
-                            if 'smart_same_with_mapping_changes' not in concepts_result:
-                                concepts_result['smart_same_with_mapping_changes'] = {}
-                            if concept_id not in concepts_result['smart_same_with_mapping_changes']:
-                                concepts_result['smart_same_with_mapping_changes'][concept_id] = {
-                                    'id': concept_id,
-                                    'display_name': get(from_concept, 'display_name'),
-                                    'mappings': {}
-                                }
-                            if key not in concepts_result['smart_same_with_mapping_changes'][concept_id]['mappings']:
-                                concepts_result['smart_same_with_mapping_changes'][concept_id]['mappings'][key] = []
-                            concepts_result['smart_same_with_mapping_changes'][concept_id]['mappings'][key].append(
-                                self.get_mapping_summary(mapping, mapping_id))
                     else:
                         section_summary[mapping_id] = self.get_mapping_summary(mapping, mapping_id)
                 if section_summary:
@@ -480,5 +465,3 @@ class ChecksumChangelog:  # pragma: no cover
             'concepts': concepts_result,
             'mappings': mappings_result,
         }
-
-        print("**Seconds**", time.time() - start_time)
