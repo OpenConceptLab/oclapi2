@@ -23,10 +23,9 @@ class Task(models.Model):
     STATE_CHOICES = ((state, state) for state in sorted(ALL_STATES))
     id = models.TextField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=1000)
-    args = models.JSONField(null=True, blank=True)
     kwargs = models.JSONField(null=True, blank=True)
     state = models.CharField(max_length=255, default=PENDING, choices=STATE_CHOICES)
-    result = models.JSONField(null=True, blank=True)
+    result = models.TextField(null=True, blank=True)
     summary = models.JSONField(null=True, blank=True)
     error_message = models.TextField(null=True, blank=True)
     traceback = models.TextField(null=True, blank=True)
@@ -43,6 +42,15 @@ class Task(models.Model):
     started_at = models.DateTimeField(null=True, blank=True)
     finished_at = models.DateTimeField(null=True, blank=True)
     children = ArrayField(models.TextField(), null=True, blank=True, default=list)
+
+    @property
+    def json_result(self):
+        if self.result:
+            try:
+                return json.loads(self.result)
+            except json.JSONDecodeError:
+                return self.result
+        return self.result
 
     def is_finished(self):
         return self.state in (SUCCESS, FAILURE)
@@ -82,8 +90,7 @@ class Task(models.Model):
         self.save()
         return self
 
-    def save_common(self, args, kwargs, einfo=None):
-        self.args = args
+    def save_common(self, args, kwargs, einfo=None):  # pylint: disable=unused-argument
         self.kwargs = kwargs
 
         if einfo:
@@ -106,7 +113,7 @@ class Task(models.Model):
             self.created_by_id = user.id or SUPER_ADMIN_USER_ID
 
     @classmethod
-    def before_start(cls, task_id, args, kwargs, name=None):
+    def before_start(cls, task_id, args, kwargs, name=None):  # pylint: disable=unused-argument
         is_temp = kwargs.pop('permanent', None) is False
         if is_temp:
             return None
@@ -122,7 +129,6 @@ class Task(models.Model):
         task.name = name or task.name
         task.state = STARTED
         task.queue = kwargs.get('queue', None) or task.queue or 'default'
-        task.args = args
         task.kwargs = kwargs
         task.started_at = timezone.now()
         task.save()
@@ -134,7 +140,7 @@ class Task(models.Model):
         if not task:
             return None
         task.state = status
-        task.result = retval
+        task.result = str(retval) if retval else None
         task.finished_at = timezone.now()
         if isinstance(task.result, Exception):
             task.result = str(task.result)
@@ -165,7 +171,7 @@ class Task(models.Model):
         task = cls.objects.filter(id=task_id).first()
         if not task:
             return
-        task.result = json.loads(json.dumps(retval, default=str))
+        task.result = json.dumps(retval, default=str) if retval else None
         task.state = SUCCESS
         task.finished_at = timezone.now()
         task.save_common(args, kwargs)
