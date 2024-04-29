@@ -756,3 +756,9 @@ def resolve_url_registry_entries(repo_id, repo_type):
         repo = repo_klass.objects.filter(id=repo_id).first()
         for entry in repo.active_url_registry_entries:
             entry.lookup_entry()
+
+
+@app.task(ignore_result=True)
+def expire_old_celery_tasks():
+    from core.tasks.models import Task
+    Task.objects.filter(updated_at__lt=timezone.now() - timezone.timedelta(days=7)).delete()

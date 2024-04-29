@@ -29,7 +29,10 @@ app.conf.CELERYBEAT_SCHEDULE = {
         'task': 'core.common.tasks.vacuum_and_analyze_db',
         'schedule': crontab(0, 1),  # Run at 1 am
     },
-
+    'expire-celery-tasks': {
+        'task': 'core.common.tasks.expire_old_celery_tasks',
+        'schedule': crontab(0, 1),  # Run at 1 am
+    },
 }
 app.config_from_object('django.conf:settings', namespace='CELERY')
 app.autodiscover_tasks(lambda: settings.INSTALLED_APPS)
