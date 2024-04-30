@@ -803,7 +803,8 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                 self.is_only_searchable or
                 bool(self.get_search_string()) or
                 self.has_searchable_extras_fields() or
-                bool(self.get_faceted_filters())
+                bool(self.get_faceted_filters()) or
+                bool(self.get_sort_attributes())
         ) or (SEARCH_PARAM in self.request.query_params.dict() and self.should_search_latest_repo())
 
     def should_search_latest_repo(self):
