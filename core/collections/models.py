@@ -221,7 +221,7 @@ class Collection(DirtyFieldsMixin, ConceptContainerModel):
                 return errors
         if self.is_openmrs_schema and self.expansion_uri:
             if reference._concepts is None or reference._concepts.count() == 0:  # pylint: disable=protected-access
-                return
+                return None
             for concept in reference._concepts:   # pylint: disable=protected-access
                 errors1 = self.check_concept_uniqueness_in_collection_and_locale_by_name_attribute(
                     concept, attribute='type__in', value=LOCALES_FULLY_SPECIFIED,
@@ -240,7 +240,7 @@ class Collection(DirtyFieldsMixin, ConceptContainerModel):
     ):
         other_concepts_in_collection = self.expansion.concepts
         if not other_concepts_in_collection.exists():
-            return
+            return False
 
         errors = []
         matching_names_in_concept = {}
@@ -296,8 +296,7 @@ class Collection(DirtyFieldsMixin, ConceptContainerModel):
                 if reference_errors:
                     errors[reference.expression] = reference_errors
                     continue
-                else:
-                    reference.save()
+                reference.save()
             except Exception as ex:
                 errors[reference.expression] = ex.messages if hasattr(ex, 'messages') else ex
                 continue

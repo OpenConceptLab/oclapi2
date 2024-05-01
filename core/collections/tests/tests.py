@@ -244,7 +244,8 @@ class CollectionTest(OCLTestCase):
                 concept2.uri: {
                     'errors': [
                         {
-                            'description': 'Concept fully specified name must be unique for same collection and locale.',
+                            'description': 'Concept fully specified name must be unique for same collection and '
+                                           'locale.',
                             'conflicting_concept_url': concept1.uri,
                             'conflicting_concept_name': concept1.display_name,
                             'conflicting_name_url': f"{concept1.uri}names/{en_locale.id}/",
@@ -252,7 +253,8 @@ class CollectionTest(OCLTestCase):
                             'conflicting_references': [concept1_reference.uri]
                         },
                         {
-                            'description': 'Concept fully specified name must be unique for same collection and locale.',
+                            'description': 'Concept fully specified name must be unique for same collection and '
+                                           'locale.',
                             'conflicting_concept_url': concept1.uri,
                             'conflicting_concept_name': concept1.display_name,
                             'conflicting_name_url': f"{concept1.uri}names/{ch_locale.id}/",
@@ -305,7 +307,8 @@ class CollectionTest(OCLTestCase):
                 concept2.uri: {
                     'errors': [
                         {
-                            'description': 'Concept fully specified name must be unique for same collection and locale.',
+                            'description': 'Concept fully specified name must be unique for same collection and '
+                                           'locale.',
                             'conflicting_concept_url': concept2.uri,
                             'conflicting_concept_name': 'name',
                             'conflicting_name_url': f'{concept2.uri}names/{en_locale1.id}/',
