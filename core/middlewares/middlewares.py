@@ -2,7 +2,7 @@ import logging
 import time
 
 import requests
-from django.http import HttpResponseNotFound, HttpRequest, HttpResponse
+from django.http import HttpResponseNotFound, HttpResponse
 from request_logging.middleware import LoggingMiddleware
 
 from core.common.constants import VERSION_HEADER, REQUEST_USER_HEADER, RESPONSE_TIME_HEADER, REQUEST_URL_HEADER, \
@@ -107,26 +107,26 @@ class FhirMiddleware(BaseMiddleware):
             elif is_fhir_resource:
                 return HttpResponseNotFound()
 
-        if settings.FHIR_VALIDATOR_URL and ('/CodeSystem/' in absolute_uri or '/ValueSet/' in absolute_uri or
-                                            '/ConceptMap' in absolute_uri):
-            accept_content_type = request.headers.get('Accept')
-            content_type = request.headers.get('Content-Type')
+        if settings.FHIR_VALIDATOR_URL and (
+                '/CodeSystem/' in absolute_uri or '/ValueSet/' in absolute_uri or '/ConceptMap' in absolute_uri):
+            accept_content_type = request.headers.get('Accept', '')
+            content_type = request.headers.get('Content-Type', '')
 
             if content_type.startswith('application/xml') or content_type.startswith('application/fhir+xml'):
                 request.META['CONTENT_TYPE'] = "application/json"
-                if request.method == 'POST' or request.method == 'PUT':
+                if request.method in ['POST', 'PUT']:
                     json_request = requests.post(settings.FHIR_VALIDATOR_URL +
                                                  '/convert?version=4.0&type=xml&toType=json', data=request.body)
                     request._body = json_request
 
-            if accept_content_type.startswith('application/xml') or \
-                    accept_content_type.startswith('application/fhir+xml'):
+            if accept_content_type.startswith(
+                    'application/xml') or accept_content_type.startswith('application/fhir+xml'):
                 request.META['HTTP_ACCEPT'] = "application/json"
 
             response = self.get_response(request)
 
-            if accept_content_type.startswith('application/xml') or \
-                    accept_content_type.startswith('application/fhir+xml'):
+            if accept_content_type.startswith(
+                    'application/xml') or accept_content_type.startswith('application/fhir+xml'):
                 xml_response = requests.post(settings.FHIR_VALIDATOR_URL + '/convert?version=4.0&type=json&toType=xml',
                                              data=response.content)
                 response = HttpResponse(xml_response, content_type=accept_content_type)
