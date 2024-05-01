@@ -799,12 +799,13 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         ).get_aggregations(self.is_verbose(), self.is_raw())
 
     def should_perform_es_search(self):
+        sort_field, _ = self.get_sort_and_desc()
         return (
                 self.is_only_searchable or
                 bool(self.get_search_string()) or
                 self.has_searchable_extras_fields() or
                 bool(self.get_faceted_filters()) or
-                bool(self.get_sort_attributes())
+                (bool(sort_field) and sort_field != '_score')
         ) or (SEARCH_PARAM in self.request.query_params.dict() and self.should_search_latest_repo())
 
     def should_search_latest_repo(self):
