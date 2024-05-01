@@ -721,7 +721,14 @@ class CollectionReferencesViewTest(OCLAPITestCase):
                 {
                     'added': False,
                     'expression': self.concept.uri,
-                    'message': ['Concept or Mapping reference name must be unique in a collection.']
+                    'message': {
+                        self.concept.uri: {
+                            'errors': [{
+                                'description': 'Concept or Mapping reference name must be unique in a collection.',
+                                'conflicting_references': [self.reference.uri]
+                            }]
+                        }
+                    }
                 }
             ]
         )

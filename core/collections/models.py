@@ -206,22 +206,34 @@ class Collection(DirtyFieldsMixin, ConceptContainerModel):
             reference.full_clean()
         else:
             reference.last_resolved_at = None
-        if reference.expression and self.references.filter(
-                expression=reference.expression, include=reference.include).exists():
-            raise ValidationError({reference.expression: [REFERENCE_ALREADY_EXISTS]})
-
+        errors = {}
+        if reference.expression:
+            same_refs = self.references.filter(expression=reference.expression, include=reference.include)
+            if same_refs.exists():
+                errors = {
+                    reference.expression: {
+                        'errors': [{
+                            'description': REFERENCE_ALREADY_EXISTS,
+                            'conflicting_references': [ref.uri for ref in same_refs]
+                        }]
+                    }
+                }
+                return errors
         if self.is_openmrs_schema and self.expansion_uri:
             if reference._concepts is None or reference._concepts.count() == 0:  # pylint: disable=protected-access
                 return
             for concept in reference._concepts:   # pylint: disable=protected-access
-                self.check_concept_uniqueness_in_collection_and_locale_by_name_attribute(
+                errors1 = self.check_concept_uniqueness_in_collection_and_locale_by_name_attribute(
                     concept, attribute='type__in', value=LOCALES_FULLY_SPECIFIED,
                     error_message=CONCEPT_FULLY_SPECIFIED_NAME_UNIQUE_PER_COLLECTION_AND_LOCALE
-                )
-                self.check_concept_uniqueness_in_collection_and_locale_by_name_attribute(
+                ) or []
+                errors2 = self.check_concept_uniqueness_in_collection_and_locale_by_name_attribute(
                     concept, attribute='locale_preferred', value=True,
                     error_message=CONCEPT_PREFERRED_NAME_UNIQUE_PER_COLLECTION_AND_LOCALE
-                )
+                ) or []
+                if errors1 or errors2:
+                    errors[concept.uri] = {'errors': [*errors1, *errors2]}
+        return errors
 
     def check_concept_uniqueness_in_collection_and_locale_by_name_attribute(
             self, concept, attribute, value, error_message
@@ -230,23 +242,33 @@ class Collection(DirtyFieldsMixin, ConceptContainerModel):
         if not other_concepts_in_collection.exists():
             return
 
+        errors = []
         matching_names_in_concept = {}
-        names = concept.names.filter(**{attribute: value})
-
-        for name in names:
-            validation_error = {'names': [error_message]}
-            # making sure names in the submitted concept meet the same rule
-            name_key = name.locale + name.name
+        for name in concept.names.filter(**{attribute: value}).order_by('-id'):
+            name_key = f"{name.name}_{name.locale}"
             if name_key in matching_names_in_concept:
-                print("***NAME_KEY that dint match**", name_key)
-                raise ValidationError(validation_error)
-
+                errors.append(self.__get_conflicting_concept_error(concept, name, error_message))
             matching_names_in_concept[name_key] = True
             other = other_concepts_in_collection.filter(
                 names__name=name.name, names__locale=name.locale, **{f"names__{attribute}": value})
             if other.exists():
-                print(f"***Conflicting Name {name_key} of Expansion**", list(other.values_list('uri', flat=True)))
-                raise ValidationError(validation_error)
+                for other_concept in other:
+                    conflicting_concept_name = other_concept.names.filter(
+                        name=name.name, locale=name.locale, **{attribute: value}).first()
+                    errors.append(
+                        self.__get_conflicting_concept_error(other_concept, conflicting_concept_name, error_message))
+        return errors or False
+
+    def __get_conflicting_concept_error(self, concept, name, error_message):
+        return {
+            'description': error_message,
+            'conflicting_concept_url': concept.uri,
+            'conflicting_concept_id': concept.mnemonic,
+            'conflicting_concept_name': concept.display_name,
+            'conflicting_name_url': f"{concept.uri}names/{name.id}/",
+            'conflicting_name': name.name,
+            'conflicting_references': [ref.uri for ref in concept.collection_references(self)]
+        }
 
     @transaction.atomic
     def add_expressions(
@@ -270,8 +292,12 @@ class Collection(DirtyFieldsMixin, ConceptContainerModel):
             reference.created_by = user
             reference._async = _async  # pylint: disable=protected-access
             try:
-                self.validate(reference)
-                reference.save()
+                reference_errors = self.validate(reference)
+                if reference_errors:
+                    errors[reference.expression] = reference_errors
+                    continue
+                else:
+                    reference.save()
             except Exception as ex:
                 errors[reference.expression] = ex.messages if hasattr(ex, 'messages') else ex
                 continue

@@ -27,6 +27,10 @@ from core.users.models import UserProfile
 
 
 class CollectionTest(OCLTestCase):
+    def setUp(self):
+        super().setUp()
+        self.maxDiff = None
+
     def test_canonical_url_field(self):
         collection = OrganizationCollectionFactory.build()
         for uri in [
@@ -76,9 +80,7 @@ class CollectionTest(OCLTestCase):
 
         source = OrganizationSourceFactory()
         concept = ConceptFactory(parent=source, sources=[source])
-        concept_expression = concept.uri
-
-        collection.add_expressions({'expressions': [concept_expression]}, collection.created_by)
+        collection.add_expressions({'expressions': [concept.uri]}, collection.created_by)
         collection.refresh_from_db()
 
         self.assertEqual(collection.expansion.concepts.count(), 1)
@@ -87,9 +89,18 @@ class CollectionTest(OCLTestCase):
         self.assertEqual(collection.expansion.concepts.first().id, concept.id)
         self.assertEqual(collection.active_concepts, 1)
 
-        _, errors = collection.add_expressions({'concepts': [concept_expression]}, collection.created_by)
+        _, errors = collection.add_expressions({'concepts': [concept.uri]}, collection.created_by)
         self.assertEqual(
-            errors, {concept_expression: ['Concept or Mapping reference name must be unique in a collection.']}
+            errors, {
+                concept.uri: {
+                    concept.uri: {
+                        'errors': [{
+                            'description': 'Concept or Mapping reference name must be unique in a collection.',
+                            'conflicting_references': [collection.references.first().uri]
+                        }]
+                    }
+                }
+            }
         )
         collection.refresh_from_db()
         self.assertEqual(collection.expansion.concepts.count(), 1)
@@ -193,15 +204,17 @@ class CollectionTest(OCLTestCase):
 
         self.assertEqual(collection.references.count(), 1)
 
-        with self.assertRaises(ValidationError) as ex:
-            collection.validate(reference)
+        errors = collection.validate(reference)
 
         self.assertEqual(
-            ex.exception.message_dict,
+            errors,
             {
-                concept.uri: [
-                    'Concept or Mapping reference name must be unique in a collection.'
-                ]
+                concept.uri: {
+                    'errors': [{
+                        'description': 'Concept or Mapping reference name must be unique in a collection.',
+                        'conflicting_references': [reference.uri]
+                    }]
+                }
             }
         )
 
@@ -216,20 +229,55 @@ class CollectionTest(OCLTestCase):
         expansion.concepts.add(concept1)
         concept1_reference = CollectionReference(
             expression=concept1.uri, collection=collection, system=concept1.parent.uri, version='HEAD')
+        concept1_reference.evaluate()
         concept1_reference.save()
 
-        ch_locale = ConceptNameFactory.build(name=ch_locale.name, locale_preferred=True, locale='ch')
-        en_locale = ConceptNameFactory.build(name=en_locale.name, locale_preferred=True, locale='en')
-        concept2 = ConceptFactory(names=[ch_locale, en_locale])
+        duplicate_ch_locale = ConceptNameFactory.build(name=ch_locale.name, locale_preferred=True, locale='ch')
+        duplicate_en_locale = ConceptNameFactory.build(name=en_locale.name, locale_preferred=True, locale='en')
+        concept2 = ConceptFactory(names=[duplicate_ch_locale, duplicate_en_locale])
         concept2_reference = CollectionReference(
             expression=concept2.uri, collection=collection, system=concept2.parent.uri, version='HEAD')
 
-        with self.assertRaises(ValidationError) as ex:
-            collection.validate(concept2_reference)
-
         self.assertEqual(
-            ex.exception.message_dict,
-            {'names': ['Concept fully specified name must be unique for same collection and locale.']}
+            collection.validate(concept2_reference),
+            {
+                concept2.uri: {
+                    'errors': [
+                        {
+                            'description': 'Concept fully specified name must be unique for same collection and locale.',
+                            'conflicting_concept_url': concept1.uri,
+                            'conflicting_concept_name': concept1.display_name,
+                            'conflicting_name_url': f"{concept1.uri}names/{en_locale.id}/",
+                            'conflicting_name': en_locale.name,
+                            'conflicting_references': [concept1_reference.uri]
+                        },
+                        {
+                            'description': 'Concept fully specified name must be unique for same collection and locale.',
+                            'conflicting_concept_url': concept1.uri,
+                            'conflicting_concept_name': concept1.display_name,
+                            'conflicting_name_url': f"{concept1.uri}names/{ch_locale.id}/",
+                            'conflicting_name': ch_locale.name,
+                            'conflicting_references': [concept1_reference.uri]
+                        },
+                        {
+                            'description': 'Concept preferred name must be unique for same collection and locale.',
+                            'conflicting_concept_url': concept1.uri,
+                            'conflicting_concept_name': concept1.display_name,
+                            'conflicting_name_url': f"{concept1.uri}names/{en_locale.id}/",
+                            'conflicting_name': en_locale.name,
+                            'conflicting_references': [concept1_reference.uri]
+                        },
+                        {
+                            'description': 'Concept preferred name must be unique for same collection and locale.',
+                            'conflicting_concept_url': concept1.uri,
+                            'conflicting_concept_name': concept1.display_name,
+                            'conflicting_name_url': f"{concept1.uri}names/{ch_locale.id}/",
+                            'conflicting_name': ch_locale.name,
+                            'conflicting_references': [concept1_reference.uri]
+                        },
+                    ]
+                }
+            }
         )
 
     def test_validate_openmrs_schema_matching_name_locale(self):
@@ -242,6 +290,7 @@ class CollectionTest(OCLTestCase):
         collection.expansion.concepts.add(concept1)
         concept1_reference = CollectionReference(
             expression=concept1.uri, collection=collection, system=concept1.parent.uri, version='HEAD')
+        concept1_reference.evaluate()
         concept1_reference.save()
 
         en_locale1 = ConceptNameFactory.build(locale='en', locale_preferred=False, name='name')
@@ -250,12 +299,22 @@ class CollectionTest(OCLTestCase):
         concept2_reference = CollectionReference(
             expression=concept2.uri, collection=collection, system=concept2.parent.uri, version='HEAD')
 
-        with self.assertRaises(ValidationError) as ex:
-            collection.validate(concept2_reference)
-
         self.assertEqual(
-            ex.exception.message_dict,
-            {'names': ['Concept fully specified name must be unique for same collection and locale.']}
+            collection.validate(concept2_reference),
+            {
+                concept2.uri: {
+                    'errors': [
+                        {
+                            'description': 'Concept fully specified name must be unique for same collection and locale.',
+                            'conflicting_concept_url': concept2.uri,
+                            'conflicting_concept_name': 'name',
+                            'conflicting_name_url': f'{concept2.uri}names/{en_locale1.id}/',
+                            'conflicting_name': 'name',
+                            'conflicting_references': []
+                        }
+                    ]
+                }
+            }
         )
 
     def test_parent_id(self):
