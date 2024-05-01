@@ -54,8 +54,16 @@ services:
       - AZURE_STORAGE_ACCOUNT_NAME
       - AZURE_STORAGE_CONTAINER_NAME
       - AZURE_STORAGE_CONNECTION_STRING
+      - FHIR_VALIDATOR_URL=${FHIR_VALIDATOR_URL-http://fhir_validator:3500}
     healthcheck:
       test: "curl --silent --fail http://localhost:8000/version/ || exit 1"
+  fhir_validator:
+    image: openconceptlab/validator-wrapper:1.0.53-1deb1a4b
+    restart: "always"
+    ports:
+      - 3500:3500
+    healthcheck:
+      test: "curl --silent --fail http://localhost:3500/ || exit 1"
   celery:
     image: openconceptlab/oclapi2:${ENVIRONMENT-production}
     command: ["bash", "-c", "CELERY_WORKER_NAME=default ./start_celery_worker.sh -P prefork -Q default -c 2"]

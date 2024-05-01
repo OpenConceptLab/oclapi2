@@ -1,7 +1,8 @@
 import logging
 import time
 
-from django.http import HttpResponseNotFound
+import requests
+from django.http import HttpResponseNotFound, HttpRequest, HttpResponse
 from request_logging.middleware import LoggingMiddleware
 
 from core.common.constants import VERSION_HEADER, REQUEST_USER_HEADER, RESPONSE_TIME_HEADER, REQUEST_URL_HEADER, \
@@ -83,14 +84,16 @@ class TokenAuthMiddleWare(BaseMiddleware):
 
 class FhirMiddleware(BaseMiddleware):
     """
-    It is used to expose FHIR endpoints under FHIR subdomain only. If FHIR is not deployed under a dedicated subdomain
-    then FHIR_SUBDOMAIN environment variable should be empty.
+    It is used to expose FHIR endpoints under FHIR subdomain only and convert content from xml to json.
+    If FHIR is not deployed under a dedicated subdomain then FHIR_SUBDOMAIN environment variable should be empty.
     """
 
     def __call__(self, request):
+        absolute_uri = request.build_absolute_uri()
+
         from django.conf import settings
         if settings.FHIR_SUBDOMAIN:
-            uri = request.build_absolute_uri().split('/')
+            uri = absolute_uri.split('/')
             domain = uri[2] if len(uri) > 2 else ''
             is_fhir_domain = domain.startswith(settings.FHIR_SUBDOMAIN + '.')
             resource_type = uri[5] if len(uri) > 5 else None
@@ -104,5 +107,30 @@ class FhirMiddleware(BaseMiddleware):
             elif is_fhir_resource:
                 return HttpResponseNotFound()
 
-        response = self.get_response(request)
+        if settings.FHIR_VALIDATOR_URL and ('/CodeSystem/' in absolute_uri or '/ValueSet/' in absolute_uri or
+                                            '/ConceptMap' in absolute_uri):
+            accept_content_type = request.headers.get('Accept')
+            content_type = request.headers.get('Content-Type')
+
+            if content_type.startswith('application/xml') or content_type.startswith('application/fhir+xml'):
+                request.META['CONTENT_TYPE'] = "application/json"
+                if request.method == 'POST' or request.method == 'PUT':
+                    json_request = requests.post(settings.FHIR_VALIDATOR_URL +
+                                                 '/convert?version=4.0&type=xml&toType=json', data=request.body)
+                    request._body = json_request
+
+            if accept_content_type.startswith('application/xml') or \
+                    accept_content_type.startswith('application/fhir+xml'):
+                request.META['HTTP_ACCEPT'] = "application/json"
+
+            response = self.get_response(request)
+
+            if accept_content_type.startswith('application/xml') or \
+                    accept_content_type.startswith('application/fhir+xml'):
+                xml_response = requests.post(settings.FHIR_VALIDATOR_URL + '/convert?version=4.0&type=json&toType=xml',
+                                             data=response.content)
+                response = HttpResponse(xml_response, content_type=accept_content_type)
+        else:
+            response = self.get_response(request)
+
         return response

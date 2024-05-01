@@ -20,3 +20,7 @@ class ZippedJSONRenderer(JSONRenderer):
         wrapper = FileWrapper(temp)
         temp.seek(0)
         return wrapper
+
+
+class FhirRenderer(JSONRenderer):
+    media_type = 'application/fhir+json'

@@ -114,6 +114,7 @@ REST_FRAMEWORK = {
     'DEFAULT_RENDERER_CLASSES': (
         'rest_framework.renderers.JSONRenderer',
         'core.common.renderers.ZippedJSONRenderer',
+        'core.common.renderers.FhirRenderer'
     ),
     'COERCE_DECIMAL_TO_STRING': False,
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
@@ -336,6 +337,8 @@ EXPORT_SERVICE = os.environ.get('EXPORT_SERVICE', 'core.services.storages.cloud.
 DISABLE_VALIDATION = os.environ.get('DISABLE_VALIDATION', False)
 API_SUPERUSER_PASSWORD = os.environ.get('API_SUPERUSER_PASSWORD', 'Root123')  # password for ocladmin superuser
 API_SUPERUSER_TOKEN = os.environ.get('API_SUPERUSER_TOKEN', '891b4b17feab99f3ff7e5b5d04ccc5da7aa96da6')
+
+FHIR_VALIDATOR_URL = os.environ.get('FHIR_VALIDATOR_URL', None)
 
 # Redis
 REDIS_CONNECTION_OPTIONS = {
