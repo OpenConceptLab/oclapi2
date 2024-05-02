@@ -54,7 +54,7 @@ class ChecksumModel(models.Model):
     def set_checksums(self):
         if Toggle.get('CHECKSUMS_TOGGLE'):
             self.checksums = self._calculate_checksums()
-            self.save(update_fields=['checksums'])
+            self.__class__.objects.filter(id=self.id).update(checksums=self.checksums)
 
     @property
     def checksum(self):
