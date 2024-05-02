@@ -7,10 +7,10 @@ from core.common.exceptions import Http400
 from core.common.mixins import ListWithHeadersMixin
 from core.common.swagger_parameters import page_param, verbose_param, task_state_param, limit_param, \
     task_start_date_param, q_param
-from core.common.utils import from_string_to_date
+from core.common.utils import from_string_to_date, get_truthy_values
 from core.common.views import BaseAPIView
 from core.tasks.models import Task
-from core.tasks.serializers import TaskDetailSerializer, TaskListSerializer
+from core.tasks.serializers import TaskDetailSerializer, TaskListSerializer, TaskResultSerializer
 
 
 class AbstractTaskView(BaseAPIView, RetrieveAPIView):
@@ -20,6 +20,8 @@ class AbstractTaskView(BaseAPIView, RetrieveAPIView):
     default_qs_sort_attr = '-created_at'
 
     def get_serializer_class(self):
+        if self.request.query_params.get('result', None) in get_truthy_values():
+            return TaskResultSerializer
         return TaskDetailSerializer if self.is_verbose() else TaskListSerializer
 
     def get_queryset(self):

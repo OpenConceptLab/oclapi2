@@ -1,5 +1,5 @@
 from pydash import get
-from rest_framework.fields import CharField, SerializerMethodField
+from rest_framework.fields import CharField, SerializerMethodField, JSONField
 from rest_framework.serializers import ModelSerializer
 
 from core.tasks.models import Task
@@ -45,4 +45,14 @@ class TaskDetailSerializer(TaskListSerializer):
         model = Task
         fields = TaskListSerializer.Meta.fields + (
             'kwargs', 'error_message', 'traceback', 'retry'
+        )
+
+
+class TaskResultSerializer(TaskDetailSerializer):
+    result = JSONField(read_only=True, source='json_result')
+
+    class Meta:
+        model = Task
+        fields = TaskDetailSerializer.Meta.fields + (
+            'result'
         )
