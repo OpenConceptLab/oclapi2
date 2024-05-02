@@ -761,3 +761,11 @@ def resolve_url_registry_entries(repo_id, repo_type):
 @app.task(ignore_result=True)
 def expire_old_celery_tasks():
     Task.objects.filter(updated_at__lt=timezone.now() - timezone.timedelta(days=7)).delete()
+
+
+@app.task
+def source_version_compare(version1_uri, version2_uri, is_changelog, verbosity):
+    from core.sources.models import Source
+    version1 = Source.objects.get(uri=version1_uri)
+    version2 = Source.objects.get(uri=version2_uri)
+    return Source.changelog(version1, version2) if is_changelog else Source.compare(version1, version2, verbosity)

@@ -28,7 +28,7 @@ from core.common.swagger_parameters import q_param, limit_param, sort_desc_param
     page_param, verbose_param, include_retired_param, updated_since_param, include_facets_header, compress_header, \
     canonical_url_param
 from core.common.tasks import export_source, index_source_concepts, index_source_mappings, delete_source, \
-    generate_source_resources_checksums
+    generate_source_resources_checksums, source_version_compare
 from core.common.utils import parse_boolean_query_param, compact_dict_by_values, to_parent_uri, get_truthy_values
 from core.common.views import BaseAPIView, BaseLogoView, ConceptContainerExtraRetrieveUpdateDestroyView
 from core.sources.constants import DELETE_FAILURE, DELETE_SUCCESS, VERSION_ALREADY_EXISTS
@@ -603,7 +603,7 @@ class SourceMappedSourcesListView(SourceListView):
         raise Http405()
 
 
-class SourceVersionComparisonView(BaseAPIView):  # pragma: no cover
+class SourceVersionComparisonView(BaseAPIView, TaskMixin):  # pragma: no cover
     permission_classes = (IsAuthenticated, CanViewConceptDictionaryVersion)
     swagger_schema = None
 
@@ -624,6 +624,8 @@ class SourceVersionComparisonView(BaseAPIView):  # pragma: no cover
         except:  # pylint: disable=bare-except
             verbosity = 0
         is_changelog = self.request.query_params.get('changelog', False) in get_truthy_values()
-        if is_changelog:
-            return Response(Source.changelog(version1, version2))
-        return Response(Source.compare(version1, version2, verbosity))
+        result = self.perform_task(
+            source_version_compare, (version1.uri, version2.uri, is_changelog, verbosity))
+        if isinstance(result, Response):
+            return result
+        return Response(result)
