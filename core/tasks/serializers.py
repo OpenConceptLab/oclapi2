@@ -54,5 +54,5 @@ class TaskResultSerializer(TaskDetailSerializer):
     class Meta:
         model = Task
         fields = TaskDetailSerializer.Meta.fields + (
-            'result'
+            'result',
         )
