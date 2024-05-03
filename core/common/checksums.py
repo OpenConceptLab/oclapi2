@@ -395,10 +395,9 @@ class ChecksumChangelog:  # pragma: no cover
         mappings_result = {}
         traversed_mappings = set()
         traversed_concepts = set()
-        ignored_diffs = ['same', 'smart_same']
-        for key, diff in self.concepts_diff.result.items():  # pylint: disable=too-many-nested-blocks
-            if key in ignored_diffs:
-                continue
+        diff_keys = ['new', 'removed', 'retired', 'smart_changed', 'changed']
+        for key in diff_keys:
+            diff = self.concepts_diff.result.get(key, False)
             if isinstance(diff, dict):
                 section_summary = {}
                 for concept_id in diff[self.identity]:
@@ -409,9 +408,7 @@ class ChecksumChangelog:  # pragma: no cover
                     concept = Concept.objects.filter(id=concept_db_id).first()
                     summary = {'id': concept_id, 'display_name': concept.display_name}
                     mappings_diff_summary = {}
-                    for mapping_diff_key in self.mappings_diff.result:
-                        if mapping_diff_key in ignored_diffs:
-                            continue
+                    for mapping_diff_key in diff_keys:
                         mapping_ids = get(self.mappings_diff.result, f'{mapping_diff_key}.{self.identity}')
                         if mapping_ids:
                             mappings = Mapping.objects.filter(
@@ -429,9 +426,8 @@ class ChecksumChangelog:  # pragma: no cover
                 if section_summary:
                     concepts_result[key] = section_summary
         same_concept_ids = self.concepts_diff.result['same'][self.identity]
-        for key, diff in self.mappings_diff.result.items():  # pylint: disable=too-many-nested-blocks
-            if key in ignored_diffs:
-                continue
+        for key in diff_keys:
+            diff = self.mappings_diff.result.get(key, False)
             if isinstance(diff, dict):
                 section_summary = {}
                 for mapping_id in diff[self.identity]:
