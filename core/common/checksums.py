@@ -414,7 +414,7 @@ class ChecksumChangelog:  # pragma: no cover
                             mappings = Mapping.objects.filter(
                                 from_concept__versioned_object_id=concept.versioned_object_id,
                                 **{f'{self.identity}__in': set(mapping_ids) - traversed_mappings}
-                            )
+                            ).distinct(self.identity)
                             for mapping in mappings:
                                 if mapping_diff_key not in mappings_diff_summary:
                                     mappings_diff_summary[mapping_diff_key] = []
