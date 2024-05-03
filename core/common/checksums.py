@@ -396,7 +396,7 @@ class ChecksumChangelog:  # pragma: no cover
         traversed_mappings = set()
         traversed_concepts = set()
         diff_keys = ['new', 'removed', 'retired', 'smart_changed', 'changed']
-        for key in diff_keys:
+        for key in diff_keys:  # pylint: disable=too-many-nested-blocks
             diff = self.concepts_diff.result.get(key, False)
             if isinstance(diff, dict):
                 section_summary = {}
@@ -426,7 +426,7 @@ class ChecksumChangelog:  # pragma: no cover
                 if section_summary:
                     concepts_result[key] = section_summary
         same_concept_ids = self.concepts_diff.result['same'][self.identity]
-        for key in diff_keys:
+        for key in diff_keys:  # pylint: disable=too-many-nested-blocks
             diff = self.mappings_diff.result.get(key, False)
             if isinstance(diff, dict):
                 section_summary = {}
