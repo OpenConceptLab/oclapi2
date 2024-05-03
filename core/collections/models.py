@@ -1073,7 +1073,7 @@ class Expansion(BaseResourceModel):
             else:
                 task = None
                 try:
-                    task = Task.make_new(
+                    task = Task.new(
                         queue='indexing', user=get_current_authorized_user() or self.updated_by,
                         name=index_expansion_concepts.__name__
                     )
@@ -1089,7 +1089,7 @@ class Expansion(BaseResourceModel):
             else:
                 task = None
                 try:
-                    task = Task.make_new(
+                    task = Task.new(
                         queue='indexing', user=get_current_authorized_user() or self.updated_by,
                         name=index_expansion_mappings.__name__
                     )

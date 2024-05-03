@@ -328,7 +328,7 @@ class SourceConceptsIndexView(SourceBaseView):
 
     def post(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         source = self.get_object()
-        task = Task.make_new(queue='indexing', user=request.user, name=index_source_concepts.__name__)
+        task = Task.new(queue='indexing', user=request.user, name=index_source_concepts.__name__)
         try:
             index_source_concepts.apply_async((source.id,), queue=task.queue, task_id=task.id)
         except AlreadyQueued:
@@ -352,7 +352,7 @@ class SourceMappingsIndexView(SourceBaseView):
 
     def post(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         source = self.get_object()
-        task = Task.make_new(queue='indexing', user=request.user, name=index_source_mappings.__name__)
+        task = Task.new(queue='indexing', user=request.user, name=index_source_mappings.__name__)
         try:
             index_source_mappings.apply_async((source.id,), queue=task.queue, task_id=task.id)
         except AlreadyQueued:
@@ -500,7 +500,7 @@ class SourceVersionExportView(ConceptContainerExportMixin, SourceVersionBaseView
 
     def handle_export_version(self):
         version = self.get_object()
-        task = Task.make_new(queue='default', user=self.request.user, name=export_source.__name__)
+        task = Task.new(queue='default', user=self.request.user, name=export_source.__name__)
         try:
             export_source.apply_async((version.id,), queue=task.queue, task_id=task.id)
             return status.HTTP_202_ACCEPTED

@@ -357,7 +357,7 @@ class ConceptRetrieveUpdateDestroyView(ConceptBaseView, RetrieveAPIView, UpdateA
 
         if is_hard_delete_requested:
             if self.is_async_requested():
-                task = Task.make_new(queue='default', user=request.user, name=delete_concept.__name__)
+                task = Task.new(queue='default', user=request.user, name=delete_concept.__name__)
                 delete_concept.apply_async((concept.id,), queue=task.queue, task_id=task.id)
                 return Response(status=status.HTTP_204_NO_CONTENT)
             concept.delete()
@@ -725,7 +725,7 @@ class ConceptsHierarchyAmendAdminView(APIView):  # pragma: no cover
         concept_map = request.data
         if not concept_map:
             return Response(status=status.HTTP_400_BAD_REQUEST)
-        task = Task.make_new(queue='default', user=request.user, name=make_hierarchy.__name__)
+        task = Task.new(queue='default', user=request.user, name=make_hierarchy.__name__)
         result = make_hierarchy.apply_async((concept_map,), queue=task.queue, task_id=task.id)
 
         return Response(

@@ -29,7 +29,7 @@ class TaskMixin:
         else:
             celery_task = None
             try:
-                celery_task = Task.make_new(queue, self.request.user, name=task_func.__name__)
+                celery_task = Task.new(queue, self.request.user, name=task_func.__name__)
                 task_func.apply_async(task_args, task_id=celery_task.id)
             except AlreadyQueued:
                 if celery_task:

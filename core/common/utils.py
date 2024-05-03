@@ -465,7 +465,7 @@ def get_queue_task_names(import_queue, username, **kwargs):
         queue_id = 'bulk_import_' + str(random.randrange(0, BULK_IMPORT_QUEUES_COUNT))
 
     from core.tasks.models import Task
-    return Task.make_new(queue=queue_id, username=username, import_queue=import_queue, **kwargs)
+    return Task.new(queue=queue_id, username=username, import_queue=import_queue, **kwargs)
 
 
 def drop_version(expression):

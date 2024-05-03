@@ -39,7 +39,7 @@ class ResourcesReportJobView(APIView):  # pragma: no cover
         )
     )
     def post(request):
-        task = Task.make_new(queue='default', user=request.user, name=resources_report.__name__)
+        task = Task.new(queue='default', user=request.user, name=resources_report.__name__)
         resources_report.apply_async(
             (request.data.get('start_date'), request.data.get('end_date')), queue=task.queue, task_id=task.id)
 

@@ -180,13 +180,13 @@ class Task(models.Model):
     def child_tasks(self):
         return Task.objects.filter(id__in=self.children)
 
-    def child_tasks_unfinished(self):
+    def children_still_playing(self):
         return self.child_tasks.exclude(state__in=(SUCCESS, FAILURE, REVOKED))
 
     def revoke(self):
         result = AsyncResult(self.id)
-        for child_task in self.child_tasks_unfinished():
-            child_task.revoke()
+        for child in self.children_still_playing():
+            child.revoke()
 
         app.control.revoke(self.id, terminate=True, signal='SIGKILL')
         celery_once_key = get_bulk_import_celery_once_lock_key(result)
@@ -224,7 +224,7 @@ class Task(models.Model):
         return task
 
     @classmethod
-    def make_new(cls, queue='default', user=None, username=None, import_queue=None, **kwargs):
+    def new(cls, queue='default', user=None, username=None, import_queue=None, **kwargs):
         if not user and username:
             from core.users.models import UserProfile
             user = UserProfile.objects.filter(username=username).first()

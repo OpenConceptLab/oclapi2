@@ -838,7 +838,7 @@ class ExpansionResourcesIndexView(CollectionVersionExpansionBaseView):
         expansion = self.get_object()
         user = self.request.user
         task_func = index_expansion_concepts if self.resource == 'concepts' else index_expansion_mappings
-        task = Task.make_new(queue='indexing', user=user, name=task_func.__name__)
+        task = Task.new(queue='indexing', user=user, name=task_func.__name__)
         try:
             task_func.apply_async((expansion.id,), task_id=task.id, queue=task.queue)
         except AlreadyQueued:
@@ -1143,7 +1143,7 @@ class CollectionVersionExportView(ConceptContainerExportMixin, CollectionVersion
 
     def handle_export_version(self):
         version = self.get_object()
-        task = Task.make_new(queue='default', user=self.request.user, name=export_collection.__name__)
+        task = Task.new(queue='default', user=self.request.user, name=export_collection.__name__)
         try:
             export_collection.apply_async((version.id,), task_id=task.id, queue=task.queue)
             return status.HTTP_202_ACCEPTED

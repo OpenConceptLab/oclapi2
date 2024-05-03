@@ -355,7 +355,7 @@ def seed_children_to_new_version(self, resource, obj_id, export=True, sync=False
                 instance.cascade_children_to_expansion(index=index, sync=sync)
 
             if export:
-                task = Task.make_new(queue='default', username=instance.updated_by, name=export_task.__name__)
+                task = Task.new(queue='default', username=instance.updated_by, name=export_task.__name__)
                 export_task.apply_async((obj_id,), queue=task.queue, task_id=task.id)
                 if autoexpand:
                     instance.index_children()

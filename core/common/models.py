@@ -435,7 +435,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
                 job = update_collection_active_mappings_count
             if job:
                 from core.tasks.models import Task
-                task = Task.make_new(
+                task = Task.new(
                     name=job.__name__, queue='concurrent', user=(get_current_authorized_user() or self.updated_by)
                 )
                 job.apply_async((self.id,), task_id=task.id, queue='concurrent')
@@ -456,7 +456,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
                 job = update_collection_active_concepts_count
             if job:
                 from core.tasks.models import Task
-                task = Task.make_new(
+                task = Task.new(
                     name=job.__name__, queue='concurrent', user=(get_current_authorized_user() or self.updated_by)
                 )
                 job.apply_async((self.id,), task_id=task.id, queue='concurrent')
@@ -692,7 +692,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
             seed_children_to_new_version(obj.resource_type.lower(), obj.id, not is_test_mode, sync)
         else:
             from core.tasks.models import Task
-            task = Task.make_new(queue='default', user=user, name=seed_children_to_new_version.__name__)
+            task = Task.new(queue='default', user=user, name=seed_children_to_new_version.__name__)
             seed_children_to_new_version.apply_async(
                 (obj.resource_type.lower(), obj.id, True, sync), task_id=task.id, queue='default')
 
@@ -736,7 +736,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
             if queue_schema_update_task:
                 from core.tasks.models import Task
-                task = Task.make_new(queue='default', user=updated_by, name=update_validation_schema.__name__)
+                task = Task.new(queue='default', user=updated_by, name=update_validation_schema.__name__)
                 update_validation_schema.apply_async(
                     (obj.app_name, obj.id, target_schema), task_id=task.id, queue='default')
             if should_reindex_resources:
