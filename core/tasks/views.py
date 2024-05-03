@@ -1,6 +1,6 @@
 from drf_yasg.utils import swagger_auto_schema
 from pydash import compact
-from rest_framework.generics import RetrieveAPIView, DestroyAPIView
+from rest_framework.generics import RetrieveAPIView, DestroyAPIView, get_object_or_404
 from rest_framework.permissions import IsAuthenticated, IsAdminUser
 
 from core.common.exceptions import Http400
@@ -50,6 +50,12 @@ class TaskView(AbstractTaskView, DestroyAPIView):
     lookup_field = 'id'
     lookup_url_kwarg = 'task_id'
     pk_field = 'id'
+
+    def get_object(self, queryset=None):
+        queryset = self.get_queryset()
+        obj = get_object_or_404(queryset, **{self.lookup_field: self.kwargs[self.lookup_url_kwarg]})
+        self.check_object_permissions(self.request, obj)
+        return obj
 
     def perform_destroy(self, instance):
         if not instance.has_access(self.request.user):
