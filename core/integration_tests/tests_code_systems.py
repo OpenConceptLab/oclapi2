@@ -58,8 +58,8 @@ class CodeSystemsTest(OCLAPITestCase):
         json_file.update({'concept': concepts})
 
         self.update(json_file, 'concept[*].property', [
-            {'code': 'conceptclass', 'value': 'Misc'},
-            {'code': 'datatype', 'value': 'N/A'}
+            {'code': 'conceptclass', 'valueString': 'Misc'},
+            {'code': 'datatype', 'valueString': 'N/A'}
         ])
         self.update(json_file, 'language', 'en')
         self.update(json_file, 'property', [
@@ -76,7 +76,7 @@ class CodeSystemsTest(OCLAPITestCase):
             }, {
                 'code': 'inactive',
                 'description': 'True if the concept is not considered active.',
-                'type': 'coding',
+                'type': 'Coding',
                 'uri': 'http://hl7.org/fhir/concept-properties'
             }
         ])
@@ -85,10 +85,6 @@ class CodeSystemsTest(OCLAPITestCase):
         for path in paths:
             self.update(json_file, path, None)
             self.update(json_response, path, None)
-
-        for concept in json_response.get('concept', []):
-            if not concept.get('definition', None):
-                concept.pop('definition')
 
     @staticmethod
     def remove_duplicate_codes(json_file):

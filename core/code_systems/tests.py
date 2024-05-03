@@ -340,10 +340,10 @@ class CodeSystemTest(OCLTestCase):
                                 'display': 'Test',
                                 'property': [{
                                                  'code': 'conceptclass',
-                                                 'value': 'Locale'
+                                                 'valueString': 'Locale'
                                              }, {
                                                  'code': 'datatype',
-                                                 'value': 'N/A'
+                                                 'valueString': 'N/A'
                                              }],
                                 'designation': [{
                                                     'value': 'Testing',
@@ -415,10 +415,10 @@ class CodeSystemTest(OCLTestCase):
                                 'display': 'Test',
                                 'property': [{
                                                  'code': 'conceptclass',
-                                                 'value': 'Locale'
+                                                 'valueString': 'Locale'
                                              }, {
                                                  'code': 'datatype',
-                                                 'value': 'N/A'
+                                                 'valueString': 'N/A'
                                              }]
                             }]
             },
@@ -485,11 +485,11 @@ class CodeSystemTest(OCLTestCase):
                     'property': [
                         {
                             'code': 'conceptclass',
-                            'value': 'Locale'
+                            'valueString': 'Locale'
                         },
                         {
                             'code': 'datatype',
-                            'value': 'N/A'
+                            'valueString': 'N/A'
                         }]
                 }]
             },
@@ -524,20 +524,20 @@ class CodeSystemTest(OCLTestCase):
                                 'display': 'Test',
                                 'property': [{
                                                  'code': 'conceptclass',
-                                                 'value': 'Locale'
+                                                 'valueString': 'Locale'
                                              }, {
                                                  'code': 'datatype',
-                                                 'value': 'N/A'
+                                                 'valueString': 'N/A'
                                              }]
                             }, {
                                 'code': 'test2',
                                 'display': 'Test2',
                                 'property': [{
                                                  'code': 'conceptclass',
-                                                 'value': 'Locale'
+                                                 'valueString': 'Locale'
                                              }, {
                                                  'code': 'datatype',
-                                                 'value': 'N/A'
+                                                 'valueString': 'N/A'
                                              }]
                             }]
             },

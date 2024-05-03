@@ -75,7 +75,10 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         # + index on UPPER(mnemonic) in custom migration 0022
 
     source_type = models.TextField(blank=True, null=True)
-    content_type = models.TextField(blank=True, null=True)
+    content_type = models.TextField(blank=True, null=True, choices=[('not-present', 'not-present'),
+                                                                    ('example', 'example'), ('fragment', 'fragment'),
+                                                                    ('complete', 'complete'),
+                                                                    ('supplement', 'supplement')])
     collection_reference = models.CharField(null=True, blank=True, max_length=100)
     hierarchy_meaning = models.CharField(null=True, blank=True, max_length=50, choices=HIERARCHY_MEANINGS)
     case_sensitive = models.BooleanField(null=True, blank=True, default=None)

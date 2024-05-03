@@ -3,7 +3,7 @@ import logging
 from collections import OrderedDict
 
 from rest_framework import serializers
-from rest_framework.fields import CharField, BooleanField, IntegerField, SerializerMethodField, ChoiceField, \
+from rest_framework.fields import CharField, BooleanField, SerializerMethodField, ChoiceField, \
     DateTimeField
 
 from core import settings
@@ -59,20 +59,20 @@ class CodeSystemConceptPropertySerializer(serializers.Field):
         ret = {}
         for item in data:
             if item['code'] == 'inactive':
-                ret['retired'] = item['value']
+                ret['retired'] = item['valueBoolean']
             elif item['code'] == 'conceptclass':
-                ret['concept_class'] = item['value']
+                ret['concept_class'] = item['valueString']
             elif item['code'] == 'datatype':
-                ret['datatype'] = item['value']
+                ret['datatype'] = item['valueString']
 
         return ret
 
     def to_representation(self, value):
         """ Populate properties defined for source """
-        properties = [{'code': 'conceptclass', 'value': value.concept_class},
-                      {'code': 'datatype', 'value': value.datatype}]
+        properties = [{'code': 'conceptclass', 'valueString': value.concept_class},
+                      {'code': 'datatype', 'valueString': value.datatype}]
         if value.retired:
-            properties.append({'code': 'inactive', 'value': value.retired})
+            properties.append({'code': 'inactive', 'valueBoolean': value.retired})
 
         return properties
 
@@ -158,6 +158,7 @@ class CodeSystemConceptField(serializers.Field):
             limit = 1000
         return CodeSystemConceptSerializer(value.concepts.order_by('id')[:limit], many=True).data
 
+
 class TextField(ReadSerializerMixin, serializers.Serializer):
     status = ChoiceField(choices=['generated', 'extensions', 'additional', 'empty'], required=True)
     div = CharField(required=True)
@@ -170,6 +171,7 @@ class TextField(ReadSerializerMixin, serializers.Serializer):
         obj = ast.literal_eval(instance)
         return super().to_representation(obj)
 
+
 class CodeSystemDetailSerializer(serializers.ModelSerializer):
     resourceType = SerializerMethodField(method_name='get_resource_type')
     id = CharField(source='mnemonic')
@@ -177,11 +179,11 @@ class CodeSystemDetailSerializer(serializers.ModelSerializer):
     title = CharField(source='full_name', required=False)
     status = StatusField(source='*')
     language = CharField(source='default_locale', required=False)
-    count = IntegerField(source='active_concepts', read_only=True)
+    count = SerializerMethodField(method_name='get_total_count')
     content = ChoiceField(
         source='content_type',
         choices=['not-present', 'example', 'fragment', 'complete', 'supplement'],
-        allow_blank=True
+        required=True
     )
     property = SerializerMethodField()
     meta = SerializerMethodField()
@@ -215,6 +217,10 @@ class CodeSystemDetailSerializer(serializers.ModelSerializer):
         return RESOURCE_TYPE
 
     @staticmethod
+    def get_total_count(obj):
+        return obj.concepts.count()
+
+    @staticmethod
     def get_property(_):
         return CodeSystemPropertySerializer(
             [
@@ -234,7 +240,7 @@ class CodeSystemDetailSerializer(serializers.ModelSerializer):
                     'code': 'inactive',
                     'uri': 'http://hl7.org/fhir/concept-properties',
                     'description': 'True if the concept is not considered active.',
-                    'type': 'coding'
+                    'type': 'Coding'
                 }
             ],
             many=True
@@ -246,6 +252,8 @@ class CodeSystemDetailSerializer(serializers.ModelSerializer):
 
     def to_representation(self, instance):
         try:
+            if not instance.content_type:
+                instance.content_type = 'complete'
             rep = super().to_representation(instance)
             delete_empty_fields(rep)
             IdentifierSerializer.include_ocl_identifier(instance.uri, RESOURCE_TYPE, rep)
