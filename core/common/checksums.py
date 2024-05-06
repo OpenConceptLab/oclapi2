@@ -171,11 +171,12 @@ class ChecksumDiff:  # pragma: no cover
         self.resources2 = resources2
         self.identity = identity
         self.verbosity = verbosity
-        self.same = {}
+        self.same_standard = {}
         self.same_smart = {}
         self.changed_smart = {}
         self.changed_standard = {}
         self.result = {}
+        self.result_concise = {}
         self._resources1_map = None
         self._resources1_map_retired = None
         self._resources2_map = None
@@ -305,14 +306,14 @@ class ChecksumDiff:  # pragma: no cover
         for key, info in common.items():
             checksums1 = resources1_map[key]['checksums']
             checksums2 = resources2_map[key]['checksums']
-            if checksums1['standard'] != checksums2['standard']:
-                self.changed_standard[key] = info
-            elif self.include_same:
-                self.same[key] = info
             if checksums1['smart'] != checksums2['smart']:
                 self.changed_smart[key] = info
-            elif self.include_same:
+            elif checksums1['standard'] != checksums2['standard']:
+                self.changed_standard[key] = info
+            elif self.include_same and checksums1['smart'] == checksums2['smart']:
                 self.same_smart[key] = info
+            elif self.include_same and checksums1['standard'] == checksums2['standard']:
+                self.same_standard[key] = info
 
     def get_struct(self, values):
         total = len(values or [])
@@ -327,13 +328,25 @@ class ChecksumDiff:  # pragma: no cover
         self.result = {
             'new': self.get_struct(self.new),
             'removed': self.get_struct(self.deleted),
-            'retired': self.get_struct(self.retired),
-            'changed': self.get_struct(self.changed_standard),
-            'smart_changed': self.get_struct(self.changed_smart),
+            'changed_total': len(self.retired or []) + len(self.changed_standard or []) + len(self.changed_smart or []),
+            'changed_retired': self.get_struct(self.retired),
+            'changed_major': self.get_struct(self.changed_smart),
+            'changed_minor': self.get_struct(self.changed_standard),
         }
         if self.include_same:
-            self.result['same'] = self.get_struct(self.same)
-            self.result['smart_same'] = self.get_struct(self.same_smart)
+            self.result['same_total'] = len(self.same_standard or []) + len(self.same_smart or [])
+            self.result['same_minor'] = self.get_struct(self.same_standard)
+            self.result['same_major'] = self.get_struct(self.same_smart)
+
+    def set_concise_result(self):
+        self.result_concise = {
+            'new': len(self.new or []),
+            'removed': len(self.deleted or []),
+            'changed_total': self.result['changed_total'],
+            'changed_retired': len(self.retired or []),
+            'changed_major': len(self.changed_smart or []),
+            'changed_minor': len(self.changed_standard or []),
+        }
 
     def process(self, refresh=False):
         if refresh:
@@ -395,7 +408,7 @@ class ChecksumChangelog:  # pragma: no cover
         mappings_result = {}
         traversed_mappings = set()
         traversed_concepts = set()
-        diff_keys = ['new', 'removed', 'retired', 'smart_changed', 'changed']
+        diff_keys = ['new', 'removed', 'changed_retired', 'changed_major', 'changed_minor']
         for key in diff_keys:  # pylint: disable=too-many-nested-blocks
             diff = self.concepts_diff.result.get(key, False)
             if isinstance(diff, dict):
@@ -425,7 +438,10 @@ class ChecksumChangelog:  # pragma: no cover
                     section_summary[concept_id] = summary
                 if section_summary:
                     concepts_result[key] = section_summary
-        same_concept_ids = self.concepts_diff.result['same'][self.identity]
+        same_concept_ids = {
+            *get(self.concepts_diff.result, f'same_minor.{self.identity}', []),
+            *get(self.concepts_diff.result, f'same_major.{self.identity}', []),
+        }
         for key in diff_keys:  # pylint: disable=too-many-nested-blocks
             diff = self.mappings_diff.result.get(key, False)
             if isinstance(diff, dict):
@@ -441,17 +457,17 @@ class ChecksumChangelog:  # pragma: no cover
                         from_concept = mapping.from_concept
                         concept_id = from_concept_code
                         if concept_id in same_concept_ids:
-                            if 'same_with_mapping_changes' not in concepts_result:
-                                concepts_result['same_with_mapping_changes'] = {}
-                            if concept_id not in concepts_result['same_with_mapping_changes']:
-                                concepts_result['same_with_mapping_changes'][concept_id] = {
+                            if 'changed_mappings_only' not in concepts_result:
+                                concepts_result['changed_mappings_only'] = {}
+                            if concept_id not in concepts_result['changed_mappings_only']:
+                                concepts_result['changed_mappings_only'][concept_id] = {
                                     'id': concept_id,
                                     'display_name': get(from_concept, 'display_name'),
                                     'mappings': {}
                                 }
-                            if key not in concepts_result['same_with_mapping_changes'][concept_id]['mappings']:
-                                concepts_result['same_with_mapping_changes'][concept_id]['mappings'][key] = []
-                            concepts_result['same_with_mapping_changes'][concept_id]['mappings'][key].append(
+                            if key not in concepts_result['changed_mappings_only'][concept_id]['mappings']:
+                                concepts_result['changed_mappings_only'][concept_id]['mappings'][key] = []
+                            concepts_result['changed_mappings_only'][concept_id]['mappings'][key].append(
                                 self.get_mapping_summary(mapping, mapping_id))
                     else:
                         section_summary[mapping_id] = self.get_mapping_summary(mapping, mapping_id)

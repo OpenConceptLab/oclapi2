@@ -817,7 +817,7 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         }
 
     @staticmethod
-    def changelog(version1, version2):  # pragma: no cover
+    def changelog(version1, version2, verbosity=0):  # pragma: no cover
         from core.common.checksums import ChecksumDiff
         concepts_diff = ChecksumDiff(
             resources1=version1.get_concepts_queryset().only('mnemonic', 'checksums', 'retired'),
@@ -833,7 +833,7 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         mappings_diff.process()
         log = ChecksumChangelog(version1, version2, concepts_diff, mappings_diff)
         log.process()
-        return {
+        result = {
             'meta': {
                 'version1': {
                     'uri': version1.uri,
@@ -848,3 +848,11 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
             },
             **log.result
         }
+        if verbosity > 0:
+            concepts_diff.set_concise_result()
+            mappings_diff.set_concise_result()
+            result['meta']['diff'] = {
+                'concepts': concepts_diff.result_concise,
+                'mappings': mappings_diff.result_concise,
+            }
+        return result

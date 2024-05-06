@@ -608,9 +608,8 @@ class SourceVersionComparisonView(BaseAPIView, TaskMixin):  # pragma: no cover
     swagger_schema = None
 
     def get_objects(self):
-        data = self.request.data
-        version1_uri = data.get('version1')
-        version2_uri = data.get('version2')
+        version1_uri = self.request.data.get('version1')
+        version2_uri = self.request.data.get('version2')
         version1 = get_object_or_404(Source.objects.filter(uri=version1_uri))
         version2 = get_object_or_404(Source.objects.filter(uri=version2_uri))
         self.check_object_permissions(self.request, version1)
@@ -624,8 +623,8 @@ class SourceVersionComparisonView(BaseAPIView, TaskMixin):  # pragma: no cover
         except:  # pylint: disable=bare-except
             verbosity = 0
         is_changelog = self.request.query_params.get('changelog', False) in get_truthy_values()
-        result = self.perform_task(
-            source_version_compare, (version1.uri, version2.uri, is_changelog, verbosity))
+        fn = Source.changelog if is_changelog else Source.compare
+        result = fn(version1, version2, verbosity)
         if isinstance(result, Response):
             return result
         return Response(result)
