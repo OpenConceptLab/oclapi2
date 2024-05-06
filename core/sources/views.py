@@ -623,8 +623,8 @@ class SourceVersionComparisonView(BaseAPIView, TaskMixin):  # pragma: no cover
         except:  # pylint: disable=bare-except
             verbosity = 0
         is_changelog = self.request.query_params.get('changelog', False) in get_truthy_values()
-        fn = Source.changelog if is_changelog else Source.compare
-        result = fn(version1, version2, verbosity)
+        result = self.perform_task(
+            source_version_compare, (version1.uri, version2.uri, is_changelog, verbosity))
         if isinstance(result, Response):
             return result
         return Response(result)
