@@ -891,7 +891,7 @@ class UtilsTest(OCLTestCase):
         self.assertEqual(
             from_string_to_date('2023-02-29'), None)
 
-    @patch('core.tasks.models.Task.make_new')
+    @patch('core.tasks.models.Task.new')
     def test_get_queue_task_names(self, task_new_mock):
         task_new_mock.return_value = 'task'
 
