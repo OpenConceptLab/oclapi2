@@ -39,6 +39,9 @@ class AbstractTaskView(BaseAPIView, RetrieveAPIView):
 
 
 class AbstractTaskListView(AbstractTaskView, ListWithHeadersMixin):
+    def get_serializer_class(self):
+        return TaskDetailSerializer if self.is_verbose() else TaskListSerializer
+
     @swagger_auto_schema(
         manual_parameters=[q_param, task_state_param, task_start_date_param, page_param, limit_param, verbose_param]
     )
