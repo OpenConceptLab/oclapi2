@@ -419,9 +419,12 @@ class ChecksumChangelog:
                     traversed_concepts.add(concept_id)
                     concept_db_id = self.concepts_diff.get_db_id_for(key, concept_id)
                     concept = Concept.objects.filter(id=concept_db_id).first()
+                    concept_display_name = get(concept, 'display_name')
+                    if concept_display_name:
+                        concept_display_name = concept_display_name.replace('"', "'")
                     summary = {
                         'id': concept_id,
-                        'display_name': get(concept, 'display_name', '').replace('"', "'")
+                        'display_name': concept_display_name
                     }
                     mappings_diff_summary = {}
                     for mapping_diff_key in diff_keys:
@@ -462,10 +465,12 @@ class ChecksumChangelog:
                             if 'changed_mappings_only' not in concepts_result:
                                 concepts_result['changed_mappings_only'] = {}
                             if concept_id not in concepts_result['changed_mappings_only']:
+                                concept_display_name = get(mapping.from_concept, 'display_name')
+                                if concept_display_name:
+                                    concept_display_name = concept_display_name.replace('"', "'")
                                 concepts_result['changed_mappings_only'][concept_id] = {
                                     'id': concept_id,
-                                    'display_name': get(
-                                        mapping.from_concept, 'display_name', '').replace('"', "'"),
+                                    'display_name': concept_display_name,
                                     'mappings': {}
                                 }
                             if key not in concepts_result['changed_mappings_only'][concept_id]['mappings']:
