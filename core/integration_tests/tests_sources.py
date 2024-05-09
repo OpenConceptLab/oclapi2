@@ -16,9 +16,11 @@ from core.common.tasks import export_source, rebuild_indexes
 from core.common.tests import OCLAPITestCase
 from core.common.utils import get_latest_dir_in_path
 from core.concepts.documents import ConceptDocument
+from core.concepts.models import Concept
 from core.concepts.serializers import ConceptVersionExportSerializer
 from core.concepts.tests.factories import ConceptFactory, ConceptNameFactory
 from core.mappings.documents import MappingDocument
+from core.mappings.models import Mapping
 from core.mappings.serializers import MappingDetailSerializer
 from core.mappings.tests.factories import MappingFactory
 from core.orgs.models import Organization
@@ -1894,4 +1896,356 @@ class SourceConceptsCloneViewTest(OCLAPITestCase):
         bundle_clone_mock.assert_called_once_with(
             self.concept, self.concept.parent, self.clone_to_source, self.user, ANY, False,
             **parameters
+        )
+
+
+class SourceVersionsComparisonViewTest(OCLAPITestCase):
+    def test_post_200(self):
+        source = OrganizationSourceFactory()
+        source_v1 = OrganizationSourceFactory(mnemonic=source.mnemonic, organization=source.organization, version='v1')
+        source_v2 = OrganizationSourceFactory(mnemonic=source.mnemonic, organization=source.organization, version='v2')
+        concept1 = ConceptFactory(parent=source, mnemonic='concept1')
+        concept2 = ConceptFactory(parent=source, mnemonic='concept2')
+        concept2_v2 = ConceptFactory(parent=source, mnemonic=concept2.mnemonic, version='v2', concept_class='Foobar')
+        concept3 = ConceptFactory(parent=source, mnemonic='concept3')
+        concept3_v2 = ConceptFactory(parent=source, mnemonic=concept3.mnemonic, version='v2', retired=True)
+        concept4 = ConceptFactory(parent=source, mnemonic='concept4')
+        concept4_v2 = ConceptFactory(parent=source, mnemonic=concept4.mnemonic, version='v2', extras={'foo': 'bar'})
+        concept5 = ConceptFactory(parent=source, mnemonic='concept5')
+        concept6 = ConceptFactory(parent=source, mnemonic='concept6')
+        mapping1 = MappingFactory(parent=source, mnemonic='mapping1')
+        mapping2 = MappingFactory(parent=source, mnemonic='mapping2')
+        mapping2_v2 = MappingFactory(parent=source, mnemonic=mapping2.mnemonic, version='v2', map_type='Foobar')
+        mapping3 = MappingFactory(parent=source, mnemonic='mapping3')
+        mapping3_v2 = MappingFactory(parent=source, mnemonic=mapping3.mnemonic, version='v2', retired=True)
+        mapping4 = MappingFactory(parent=source, mnemonic='mapping4')
+        mapping4_v2 = MappingFactory(parent=source, mnemonic=mapping4.mnemonic, version='v2', extras={'foo': 'bar'})
+        mapping5 = MappingFactory(parent=source, mnemonic='mapping5')
+        mapping6 = MappingFactory(parent=source, mnemonic='mapping6')
+        source_v1.concepts.add(concept1)
+        source_v1.concepts.add(concept2)
+        source_v1.concepts.add(concept3)
+        source_v1.concepts.add(concept4)
+        source_v1.concepts.add(concept5)
+        source_v2.concepts.add(concept1)
+        source_v2.concepts.add(concept2_v2)
+        source_v2.concepts.add(concept3_v2)
+        source_v2.concepts.add(concept4_v2)
+        source_v2.concepts.add(concept6)
+
+        source_v1.mappings.add(mapping1)
+        source_v1.mappings.add(mapping2)
+        source_v1.mappings.add(mapping3)
+        source_v1.mappings.add(mapping4)
+        source_v1.mappings.add(mapping5)
+        source_v2.mappings.add(mapping1)
+        source_v2.mappings.add(mapping2_v2)
+        source_v2.mappings.add(mapping3_v2)
+        source_v2.mappings.add(mapping4_v2)
+        source_v2.mappings.add(mapping6)
+
+        for concept in Concept.objects.filter(parent=source):
+            concept.set_checksums()
+
+        for mapping in Mapping.objects.filter(parent=source):
+            mapping.set_checksums()
+
+        token = source.created_by.get_token()
+        response = self.client.post(
+            '/sources/$compare/?inline=true',
+            {
+                'version1': source_v2.uri,
+                'version2': source_v1.uri,
+                'verbosity': 2
+            },
+            HTTP_AUTHORIZATION=f'Token {token}',
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data,
+            {
+                'meta': {
+                    'version1': {
+                        'uri': source_v2.uri,
+                        'concepts': 4,  # active count
+                        'mappings': 4
+                    },
+                    'version2': {
+                        'uri': source_v1.uri,
+                        'concepts': 5,
+                        'mappings': 5
+                    }
+                },
+                'concepts': {
+                    'new': {
+                        'total': 1,
+                        'mnemonic': ['concept6']
+                    },
+                    'removed': {
+                        'total': 1,
+                        'mnemonic': ['concept5']
+                    },
+                    'changed_total': 3,
+                    'changed_retired': {
+                        'total': 1,
+                        'mnemonic': ['concept3']
+                    },
+                    'changed_major': {
+                        'total': 1,
+                        'mnemonic': ['concept2']
+                    },
+                    'changed_minor': {
+                        'total': 1,
+                        'mnemonic': ['concept4']
+                    },
+                    'same_total': 1,
+                    'same_minor': 0,
+                    'same_major': {
+                        'total': 1,
+                        'mnemonic': ['concept1']
+                    }
+                },
+                'mappings': {
+                    'new': {
+                        'total': 1,
+                        'mnemonic': ['mapping6']
+                    },
+                    'removed': {
+                        'total': 1,
+                        'mnemonic': ['mapping5']
+                    },
+                    'changed_total': 3,
+                    'changed_retired': {
+                        'total': 1,
+                        'mnemonic': ['mapping3']
+                    },
+                    'changed_major': {
+                        'total': 1,
+                        'mnemonic': ['mapping2']
+                    },
+                    'changed_minor': {
+                        'total': 1,
+                        'mnemonic': ['mapping4']
+                    },
+                    'same_total': 1,
+                    'same_minor': 0,
+                    'same_major': {
+                        'total': 1,
+                        'mnemonic': ['mapping1']
+                    }
+                }
+            }
+        )
+
+
+class SourceVersionsChangelogViewTest(OCLAPITestCase):
+    def test_post_200(self):
+        source = OrganizationSourceFactory()
+        source_v1 = OrganizationSourceFactory(mnemonic=source.mnemonic, organization=source.organization, version='v1')
+        source_v2 = OrganizationSourceFactory(mnemonic=source.mnemonic, organization=source.organization, version='v2')
+        concept1 = ConceptFactory(parent=source, mnemonic='concept1')
+        concept2 = ConceptFactory(parent=source, mnemonic='concept2')
+        concept2_v2 = ConceptFactory(parent=source, mnemonic=concept2.mnemonic, version='v2', concept_class='Foobar')
+        concept3 = ConceptFactory(parent=source, mnemonic='concept3')
+        concept3_v2 = ConceptFactory(parent=source, mnemonic=concept3.mnemonic, version='v2', retired=True)
+        concept4 = ConceptFactory(parent=source, mnemonic='concept4')
+        concept4_v2 = ConceptFactory(parent=source, mnemonic=concept4.mnemonic, version='v2', extras={'foo': 'bar'})
+        concept5 = ConceptFactory(parent=source, mnemonic='concept5')
+        concept6 = ConceptFactory(parent=source, mnemonic='concept6')
+        concept7 = ConceptFactory(parent=source, mnemonic='concept7')
+        mapping1 = MappingFactory(parent=source, mnemonic='mapping1')
+        mapping2 = MappingFactory(parent=source, mnemonic='mapping2')
+        mapping2_v2 = MappingFactory(parent=source, mnemonic=mapping2.mnemonic, version='v2', map_type='Foobar', from_concept=mapping2.from_concept, to_concept=mapping2.to_concept)
+        mapping3 = MappingFactory(parent=source, mnemonic='mapping3')
+        mapping3_v2 = MappingFactory(parent=source, mnemonic=mapping3.mnemonic, version='v2', retired=True, from_concept=mapping3.from_concept, to_concept=mapping3.to_concept)
+        mapping4 = MappingFactory(parent=source, mnemonic='mapping4')
+        mapping4_v2 = MappingFactory(parent=source, mnemonic=mapping4.mnemonic, version='v2', extras={'foo': 'bar'}, from_concept=mapping4.from_concept, to_concept=mapping4.to_concept)
+        mapping5 = MappingFactory(parent=source, mnemonic='mapping5')
+        mapping6 = MappingFactory(parent=source, mnemonic='mapping6')
+        mapping7 = MappingFactory(parent=source, mnemonic='mapping7', from_concept=concept7)
+        mapping7_v2 = MappingFactory(parent=source, mnemonic=mapping7.mnemonic, from_concept=concept7, to_concept=mapping7.to_concept, extras={'foo': 'bar'}, version='v2')
+        source_v1.concepts.add(concept1)
+        source_v1.concepts.add(concept2)
+        source_v1.concepts.add(concept3)
+        source_v1.concepts.add(concept4)
+        source_v1.concepts.add(concept5)
+        source_v1.concepts.add(concept7)
+        source_v2.concepts.add(concept1)
+        source_v2.concepts.add(concept2_v2)
+        source_v2.concepts.add(concept3_v2)
+        source_v2.concepts.add(concept4_v2)
+        source_v2.concepts.add(concept6)
+        source_v2.concepts.add(concept7)
+
+        source_v1.mappings.add(mapping1)
+        source_v1.mappings.add(mapping2)
+        source_v1.mappings.add(mapping3)
+        source_v1.mappings.add(mapping4)
+        source_v1.mappings.add(mapping5)
+        source_v1.mappings.add(mapping7)
+        source_v2.mappings.add(mapping1)
+        source_v2.mappings.add(mapping2_v2)
+        source_v2.mappings.add(mapping3_v2)
+        source_v2.mappings.add(mapping4_v2)
+        source_v2.mappings.add(mapping6)
+        source_v2.mappings.add(mapping7_v2)
+
+        for concept in Concept.objects.filter(parent=source):
+            concept.set_checksums()
+
+        for mapping in Mapping.objects.filter(parent=source):
+            mapping.set_checksums()
+
+        token = source.created_by.get_token()
+        response = self.client.post(
+            '/sources/$changelog/?inline=true',
+            {
+                'version1': source_v2.uri,
+                'version2': source_v1.uri,
+                'verbosity': 2
+            },
+            HTTP_AUTHORIZATION=f'Token {token}',
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data,
+            {
+                'meta': {
+                    'version1': {
+                        'uri': source_v2.uri,
+                        'concepts': 5,
+                        'mappings': 5
+                    },
+                    'version2': {
+                        'uri': source_v1.uri,
+                        'concepts': 6,
+                        'mappings': 6
+                    },
+                    'diff': {
+                        'concepts': {
+                            'new': 1,
+                            'removed': 1,
+                            'changed_total': 3,
+                            'changed_retired': 1,
+                            'changed_major': 1,
+                            'changed_minor': 1
+                        },
+                        'mappings': {
+                            'new': 1,
+                            'removed': 1,
+                            'changed_total': 4,
+                            'changed_retired': 1,
+                            'changed_major': 1,
+                            'changed_minor': 2
+                        }
+                    }
+                },
+                'concepts': {
+                    'new': {
+                        'concept6': {
+                            'id': 'concept6',
+                            'display_name': None
+                        }
+                    },
+                    'removed': {
+                        'concept5': {
+                            'id': 'concept5',
+                            'display_name': None
+                        }
+                    },
+                    'changed_retired': {
+                        'concept3': {
+                            'id': 'concept3',
+                            'display_name': None
+                        }
+                    },
+                    'changed_major': {
+                        'concept2': {
+                            'id': 'concept2',
+                            'display_name': None
+                        }
+                    },
+                    'changed_minor': {
+                        'concept4': {
+                            'id': 'concept4',
+                            'display_name': None
+                        }
+                    },
+                    'changed_mappings_only': {
+                        'concept7': {
+                            'id': 'concept7',
+                            'display_name': None,
+                            'mappings': {
+                                'changed_minor': [
+                                    {
+                                        'id': 'mapping7',
+                                        'from_concept': 'concept7',
+                                        'from_source': None,
+                                        'to_concept': mapping7.to_concept.mnemonic,
+                                        'to_source': None,
+                                        'map_type': 'SAME-AS'
+
+                                    }
+                                ]
+                            }
+                        }
+                    }
+                },
+                'mappings': {
+                    'new': {
+                        'mapping6': {
+                            'id': 'mapping6',
+                            'from_concept': mapping6.from_concept.mnemonic,
+                            'from_source': None,
+                            'to_concept': mapping6.to_concept.mnemonic,
+                            'to_source': None,
+                            'map_type': 'SAME-AS'
+                        }
+                    },
+                    'removed': {
+                        'mapping5': {
+                            'id': 'mapping5',
+                            'from_concept': mapping5.from_concept.mnemonic,
+                            'from_source': None,
+                            'to_concept': mapping5.to_concept.mnemonic,
+                            'to_source': None,
+                            'map_type': 'SAME-AS'
+                        }
+                    },
+                    'changed_retired': {
+                        'mapping3': {
+                            'id': 'mapping3',
+                            'from_concept': mapping3.from_concept.mnemonic,
+                            'from_source': None,
+                            'to_concept': mapping3.to_concept.mnemonic,
+                            'to_source': None,
+                            'map_type': 'SAME-AS'
+                        }
+                    },
+                    'changed_major': {
+                        'mapping2': {
+                            'id': 'mapping2',
+                            'from_concept': mapping2.from_concept.mnemonic,
+                            'from_source': None,
+                            'to_concept': mapping2.to_concept.mnemonic,
+                            'to_source': None,
+                            'map_type': 'Foobar'
+                        }
+                    },
+                    'changed_minor': {
+                        'mapping4': {
+                            'id': 'mapping4',
+                            'from_concept': mapping4.from_concept.mnemonic,
+                            'from_source': None,
+                            'to_concept': mapping4.to_concept.mnemonic,
+                            'to_source': None,
+                            'map_type': 'SAME-AS'
+                        }
+                    }
+                }
+            }
         )

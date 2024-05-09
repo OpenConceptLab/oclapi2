@@ -165,7 +165,7 @@ class Checksum:
         return json.dumps(obj)
 
 
-class ChecksumDiff:  # pragma: no cover
+class ChecksumDiff:
     def __init__(self, resources1, resources2, identity='mnemonic', verbosity=0):  # pylint: disable=too-many-arguments
         self.resources1 = resources1
         self.resources2 = resources2
@@ -190,7 +190,7 @@ class ChecksumDiff:  # pragma: no cover
     def get_resources_map(self, resources):
         return {
             'active': self._get_resource_map(resources.filter(retired=False)),
-            'retired': self._get_resource_map(resources.filter(retired=False))
+            'retired': self._get_resource_map(resources.filter(retired=True))
         }
 
     def _get_resource_map(self, resources):
@@ -279,7 +279,7 @@ class ChecksumDiff:  # pragma: no cover
         if self._retired is not None:
             return self._retired
         self._retired = {
-            key: self.resources2_map_retired[key] for key in self.resources2_set_retired - self.resources1_set_retired}
+            key: self.resources1_map_retired[key] for key in self.resources1_set_retired - self.resources2_set_retired}
         return self._retired
 
     @property
@@ -382,7 +382,7 @@ class ChecksumDiff:  # pragma: no cover
         ) or self.resources2_map[identity]['id']
 
 
-class ChecksumChangelog:  # pragma: no cover
+class ChecksumChangelog:
     def __init__(self, version1, version2, concepts_diff, mappings_diff, identity='mnemonic'):  # pylint: disable=too-many-arguments
         self.version1 = version1
         self.version2 = version2
@@ -452,9 +452,8 @@ class ChecksumChangelog:  # pragma: no cover
                     traversed_mappings.add(mapping_id)
                     mapping_db_id = self.mappings_diff.get_db_id_for(key, mapping_id)
                     mapping = Mapping.objects.filter(id=mapping_db_id).first()
-                    from_concept_code = get(mapping, 'from_concept_code')
+                    from_concept_code = get(mapping, 'from_concept_code') or get(mapping.from_concept, 'mnemonic')
                     if from_concept_code:
-                        from_concept = mapping.from_concept
                         concept_id = from_concept_code
                         if concept_id in same_concept_ids:
                             if 'changed_mappings_only' not in concepts_result:
@@ -462,13 +461,15 @@ class ChecksumChangelog:  # pragma: no cover
                             if concept_id not in concepts_result['changed_mappings_only']:
                                 concepts_result['changed_mappings_only'][concept_id] = {
                                     'id': concept_id,
-                                    'display_name': get(from_concept, 'display_name'),
+                                    'display_name': get(mapping.from_concept, 'display_name'),
                                     'mappings': {}
                                 }
                             if key not in concepts_result['changed_mappings_only'][concept_id]['mappings']:
                                 concepts_result['changed_mappings_only'][concept_id]['mappings'][key] = []
                             concepts_result['changed_mappings_only'][concept_id]['mappings'][key].append(
                                 self.get_mapping_summary(mapping, mapping_id))
+                        else:
+                            section_summary[mapping_id] = self.get_mapping_summary(mapping, mapping_id)
                     else:
                         section_summary[mapping_id] = self.get_mapping_summary(mapping, mapping_id)
                 if section_summary:

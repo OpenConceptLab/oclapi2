@@ -221,6 +221,10 @@ class OCLAPITestCase(APITestCase, BaseTestCase):
         org = Organization.objects.get(id=1)
         org.members.add(1)
 
+    def setUp(self):
+        super().setUp()
+        self.maxDiff = None
+
 
 class OCLTestCase(TestCase, BaseTestCase):
     @classmethod
@@ -236,6 +240,10 @@ class OCLTestCase(TestCase, BaseTestCase):
             **factory.build(dict, FACTORY_CLASS=factory_klass),
             **kwargs
         }
+
+    def setUp(self):
+        super().setUp()
+        self.maxDiff = None
 
 
 class FhirHelpersTest(OCLTestCase):

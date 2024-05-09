@@ -47,7 +47,7 @@ class Task(models.Model):
     def json_result(self):
         if self.result:
             try:
-                return json.loads(self.result)
+                return json.loads(self.result.replace("'", '"'))
             except json.JSONDecodeError:
                 return self.result
         return self.result

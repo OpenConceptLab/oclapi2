@@ -29,7 +29,7 @@ from core.common.swagger_parameters import q_param, limit_param, sort_desc_param
     canonical_url_param
 from core.common.tasks import export_source, index_source_concepts, index_source_mappings, delete_source, \
     generate_source_resources_checksums, source_version_compare
-from core.common.utils import parse_boolean_query_param, compact_dict_by_values, to_parent_uri, get_truthy_values
+from core.common.utils import parse_boolean_query_param, compact_dict_by_values, to_parent_uri
 from core.common.views import BaseAPIView, BaseLogoView, ConceptContainerExtraRetrieveUpdateDestroyView
 from core.sources.constants import DELETE_FAILURE, DELETE_SUCCESS, VERSION_ALREADY_EXISTS
 from core.sources.documents import SourceDocument
@@ -603,9 +603,10 @@ class SourceMappedSourcesListView(SourceListView):
         raise Http405()
 
 
-class SourceVersionComparisonView(BaseAPIView, TaskMixin):  # pragma: no cover
+class AbstractSourceVersionsDiffView(BaseAPIView, TaskMixin):
     permission_classes = (IsAuthenticated, CanViewConceptDictionaryVersion)
     swagger_schema = None
+    changelog = False
 
     def get_objects(self):
         version1_uri = self.request.data.get('version1')
@@ -616,15 +617,24 @@ class SourceVersionComparisonView(BaseAPIView, TaskMixin):  # pragma: no cover
         self.check_object_permissions(self.request, version2)
         return version1, version2
 
+    def get_verbosity(self):
+        try:
+            return int(self.request.query_params.get('verbosity', 0) or self.request.data.get('verbosity', 0) or 0)
+        except:  # pylint: disable=bare-except
+            return 0
+
     def post(self, _):
         version1, version2 = self.get_objects()
-        try:
-            verbosity = int(self.request.query_params.get('verbosity', 0) or 0)
-        except:  # pylint: disable=bare-except
-            verbosity = 0
-        is_changelog = self.request.query_params.get('changelog', False) in get_truthy_values()
         result = self.perform_task(
-            source_version_compare, (version1.uri, version2.uri, is_changelog, verbosity))
+            source_version_compare, (version1.uri, version2.uri, self.changelog, self.get_verbosity()))
         if isinstance(result, Response):
             return result
         return Response(result)
+
+
+class SourceVersionsComparisonView(AbstractSourceVersionsDiffView):
+    changelog = False
+
+
+class SourceVersionsChangelogView(AbstractSourceVersionsDiffView):
+    changelog = True

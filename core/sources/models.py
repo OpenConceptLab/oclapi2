@@ -785,7 +785,7 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         return {**_filters, **(filters or {})}
 
     @staticmethod
-    def compare(version1, version2, verbosity=0):  # pragma: no cover
+    def compare(version1, version2, verbosity=0):
         from core.common.checksums import ChecksumDiff
         concepts_diff = ChecksumDiff(
             resources1=version1.get_concepts_queryset().only('mnemonic', 'checksums', 'retired'),
@@ -817,7 +817,7 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         }
 
     @staticmethod
-    def changelog(version1, version2, verbosity=0):  # pragma: no cover
+    def changelog(version1, version2, verbosity=0):
         from core.common.checksums import ChecksumDiff
         concepts_diff = ChecksumDiff(
             resources1=version1.get_concepts_queryset().only('mnemonic', 'checksums', 'retired'),
