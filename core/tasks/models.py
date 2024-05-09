@@ -1,3 +1,4 @@
+import ast
 import json
 import traceback
 import uuid
@@ -47,7 +48,7 @@ class Task(models.Model):
     def json_result(self):
         if self.result:
             try:
-                return json.loads(self.result.replace("'", '"'))
+                return json.loads(json.dumps(ast.literal_eval(self.result)))
             except json.JSONDecodeError:
                 return self.result
         return self.result
