@@ -1900,7 +1900,7 @@ class SourceConceptsCloneViewTest(OCLAPITestCase):
 
 
 class SourceVersionsComparisonViewTest(OCLAPITestCase):
-    def test_post_200(self):
+    def test_post_200(self):  # pylint: disable=too-many-locals
         source = OrganizationSourceFactory()
         source_v1 = OrganizationSourceFactory(mnemonic=source.mnemonic, organization=source.organization, version='v1')
         source_v2 = OrganizationSourceFactory(mnemonic=source.mnemonic, organization=source.organization, version='v2')
@@ -2041,7 +2041,7 @@ class SourceVersionsComparisonViewTest(OCLAPITestCase):
 
 
 class SourceVersionsChangelogViewTest(OCLAPITestCase):
-    def test_post_200(self):
+    def test_post_200(self):  # pylint: disable=too-many-statements,too-many-locals
         source = OrganizationSourceFactory()
         source_v1 = OrganizationSourceFactory(mnemonic=source.mnemonic, organization=source.organization, version='v1')
         source_v2 = OrganizationSourceFactory(mnemonic=source.mnemonic, organization=source.organization, version='v2')
@@ -2057,15 +2057,23 @@ class SourceVersionsChangelogViewTest(OCLAPITestCase):
         concept7 = ConceptFactory(parent=source, mnemonic='concept7')
         mapping1 = MappingFactory(parent=source, mnemonic='mapping1')
         mapping2 = MappingFactory(parent=source, mnemonic='mapping2')
-        mapping2_v2 = MappingFactory(parent=source, mnemonic=mapping2.mnemonic, version='v2', map_type='Foobar', from_concept=mapping2.from_concept, to_concept=mapping2.to_concept)
+        mapping2_v2 = MappingFactory(
+            parent=source, mnemonic=mapping2.mnemonic, version='v2', map_type='Foobar',
+            from_concept=mapping2.from_concept, to_concept=mapping2.to_concept)
         mapping3 = MappingFactory(parent=source, mnemonic='mapping3')
-        mapping3_v2 = MappingFactory(parent=source, mnemonic=mapping3.mnemonic, version='v2', retired=True, from_concept=mapping3.from_concept, to_concept=mapping3.to_concept)
+        mapping3_v2 = MappingFactory(
+            parent=source, mnemonic=mapping3.mnemonic, version='v2', retired=True,
+            from_concept=mapping3.from_concept, to_concept=mapping3.to_concept)
         mapping4 = MappingFactory(parent=source, mnemonic='mapping4')
-        mapping4_v2 = MappingFactory(parent=source, mnemonic=mapping4.mnemonic, version='v2', extras={'foo': 'bar'}, from_concept=mapping4.from_concept, to_concept=mapping4.to_concept)
+        mapping4_v2 = MappingFactory(
+            parent=source, mnemonic=mapping4.mnemonic, version='v2', extras={'foo': 'bar'},
+            from_concept=mapping4.from_concept, to_concept=mapping4.to_concept)
         mapping5 = MappingFactory(parent=source, mnemonic='mapping5')
         mapping6 = MappingFactory(parent=source, mnemonic='mapping6')
         mapping7 = MappingFactory(parent=source, mnemonic='mapping7', from_concept=concept7)
-        mapping7_v2 = MappingFactory(parent=source, mnemonic=mapping7.mnemonic, from_concept=concept7, to_concept=mapping7.to_concept, extras={'foo': 'bar'}, version='v2')
+        mapping7_v2 = MappingFactory(
+            parent=source, mnemonic=mapping7.mnemonic,
+            from_concept=concept7, to_concept=mapping7.to_concept, extras={'foo': 'bar'}, version='v2')
         source_v1.concepts.add(concept1)
         source_v1.concepts.add(concept2)
         source_v1.concepts.add(concept3)
