@@ -196,6 +196,37 @@ class ValueSetTest(OCLAPITestCase):
         self.assertEqual(resource['compose']['include'][0]['version'], self.org_source_v2.version)
         self.assertIsNone(resource['compose']['include'][0].get('concept'))
 
+    def test_create_with_filter_and_system_and_no_filter(self):
+        ConceptDocument().update(self.org_source_v2.head.concepts_set.all())
+
+        response = self.client.post(
+            f'/users/{self.user.username}/ValueSet/',
+            HTTP_AUTHORIZATION='Token ' + self.user_token,
+            data={
+                'resourceType': 'ValueSet',
+                'id': 'c2',
+                'url': 'http://c2.com',
+                'status': 'draft',
+                'name': 'collection1',
+                'description': 'This is a test collection',
+                'compose': {
+                    'include': [
+                        {
+                            'system': 'http://some/url',
+                        }
+                    ]
+                }
+            },
+            format='json'
+        )
+
+        resource = response.data
+        self.assertEqual(resource['version'], '0.1')
+        self.assertEqual(resource['identifier'][0]['value'], f'/users/{self.user.username}/ValueSet/c2/')
+        self.assertEqual(len(resource['compose']['include']), 1)
+        self.assertEqual(resource['compose']['include'][0]['system'], 'http://some/url')
+        self.assertIsNone(resource['compose']['include'][0].get('concept'))
+
     def test_create_with_filter_and_concept(self):
         ConceptDocument().update(self.org_source_v2.head.concepts_set.all())
 
