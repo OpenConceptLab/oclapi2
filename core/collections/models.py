@@ -820,7 +820,7 @@ class CollectionReference(models.Model):
                 if to_snake_case(filter_def['property']) == 'exact_match' or filter_def['property'] in [
                     EXCLUDE_WILDCARD_SEARCH_PARAM, EXCLUDE_FUZZY_SEARCH_PARAM, SEARCH_MAP_CODES_PARAM,
                     INCLUDE_SEARCH_META_PARAM
-                ]:
+                ] or filter_def['property'] not in self.get_allowed_filter_properties():
                     continue
                 val = filter_def['value']
                 if filter_def['property'] == 'q':
@@ -941,11 +941,11 @@ class CollectionReference(models.Model):
             common = [*Mapping.es_fields.keys(), *common]
         return common
 
-    def __is_valid_filter_schema(self, filter_def):
+    @staticmethod
+    def __is_valid_filter_schema(filter_def):
         return isinstance(filter_def, dict) and \
                sorted(filter_def.keys()) == sorted(['property', 'op', 'value']) and \
-               {type(val) for val in filter_def.values()} == {str} and \
-               to_snake_case(filter_def['property']) in self.get_allowed_filter_properties()
+               {type(val) for val in filter_def.values()} == {str}
 
     def save(self, force_insert=False, force_update=False, using=None,
              update_fields=None):

@@ -196,6 +196,90 @@ class ValueSetTest(OCLAPITestCase):
         self.assertEqual(resource['compose']['include'][0]['version'], self.org_source_v2.version)
         self.assertIsNone(resource['compose']['include'][0].get('concept'))
 
+    def test_create_with_is_a_filter_and_system(self):
+        ConceptDocument().update(self.org_source_v2.head.concepts_set.all())
+
+        response = self.client.post(
+            f'/users/{self.user.username}/ValueSet/',
+            HTTP_AUTHORIZATION='Token ' + self.user_token,
+            data={
+               "resourceType": "ValueSet",
+              "id": "v3-ActEncounterCode",
+              "language": "en",
+              "text": {
+                "status": "extensions",
+                "div": "<div xmlns=\"http://www.w3.org/1999/xhtml\" xml:lang=\"en\" lang=\"en\"><p>This value set includes codes based on the following rules:</p><ul><li>Include codes from <a href=\"CodeSystem-v3-ActCode.html\"><code>http://terminology.hl7.org/CodeSystem/v3-ActCode</code></a> where concept  is-a  <a href=\"CodeSystem-v3-ActCode.html#v3-ActCode-_ActEncounterCode\">_ActEncounterCode</a></li></ul><p>This value set excludes codes based on the following rules:</p><ul><li>Exclude these codes as defined in <a href=\"CodeSystem-v3-ActCode.html\"><code>http://terminology.hl7.org/CodeSystem/v3-ActCode</code></a><table class=\"none\"><tr><td style=\"white-space:nowrap\"><b>Code</b></td><td><b>Display</b></td><td><b>Definition</b></td></tr><tr><td><a href=\"CodeSystem-v3-ActCode.html#v3-ActCode-_ActEncounterCode\">_ActEncounterCode</a></td><td>ActEncounterCode</td><td>Domain provides codes that qualify the ActEncounterClass (ENC)</td></tr></table></li></ul></div>"  # pylint: disable=line-too-long
+              },
+              "url": "http://terminology.hl7.org/ValueSet/v3-ActEncounterCode",
+              "identifier": [
+                {
+                  "system": "urn:ietf:rfc:3986",
+                  "value": "urn:oid:2.16.840.1.113883.1.11.13955"
+                }
+              ],
+              "version": "2.0.0",
+              "name": "ActEncounterCode",
+              "title": "ActEncounterCode",
+              "status": "active",
+              "date": "2014-03-26",
+              "description": "Domain provides codes that qualify the ActEncounterClass (ENC)",
+              "compose": {
+                "include": [
+                  {
+                    "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+                    "filter": [
+                      {
+                        "property": "concept",
+                        "op": "is-a",
+                        "value": "_ActEncounterCode"
+                      }
+                    ]
+                  }
+                ],
+                "exclude": [
+                  {
+                    "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+                    "concept": [
+                      {
+                        "code": "_ActEncounterCode"
+                      }
+                    ]
+                  }
+                ]
+              }
+            },
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 201)
+        resource = response.data
+        self.assertEqual(resource['version'], '2.0.0')
+        self.assertEqual(
+            resource['identifier'][0],
+            {'system': 'urn:ietf:rfc:3986', 'value': 'urn:oid:2.16.840.1.113883.1.11.13955'}
+        )
+        self.assertEqual(
+            resource['identifier'][1]['value'],
+            f'/users/{self.user.username}/ValueSet/v3-ActEncounterCode/'
+        )
+        self.assertEqual(len(resource['compose']['include']), 1)
+        self.assertEqual(
+            resource['compose']['include'][0]['system'],
+            'http://terminology.hl7.org/CodeSystem/v3-ActCode'
+        )
+        self.assertEqual(
+            resource['compose']['include'][0]['filter'][0],
+            {'property': 'concept', 'op': 'is-a', 'value': '_ActEncounterCode'}
+        )
+        self.assertIsNone(resource['compose']['include'][0].get('concept'))
+        self.assertEqual(
+            resource['compose']['exclude'],
+            [{
+                 'system': 'http://terminology.hl7.org/CodeSystem/v3-ActCode',
+                 'concept': [{'code': '_ActEncounterCode'}]
+             }]
+        )
+
     def test_create_with_filter_and_system_and_no_filter(self):
         ConceptDocument().update(self.org_source_v2.head.concepts_set.all())
 

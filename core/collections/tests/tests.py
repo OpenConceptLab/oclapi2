@@ -651,14 +651,9 @@ class CollectionReferenceTest(OCLTestCase):
         with self.assertRaises(ValidationError):
             ref = CollectionReference(expression='/concepts/', filter=[{'foo': 'bar'}])
             ref.clean()
-        with self.assertRaises(ValidationError):
+        with self.assertRaises(ValidationError) as ex:
             ref = CollectionReference(expression='/concepts/', filter=[{'property': 'bar'}])
             ref.clean()
-        with self.assertRaises(ValidationError) as ex:
-            ref = CollectionReference(
-                expression='/concepts/', filter=[{'property': 'map_type', 'value': 'foobar', 'op': '='}])
-            ref.clean()
-
         self.assertEqual(ex.exception.message_dict, {'filter': ['Invalid filter schema.']})
 
         ref = CollectionReference(
@@ -686,14 +681,8 @@ class CollectionReferenceTest(OCLTestCase):
         with self.assertRaises(ValidationError):
             ref = CollectionReference(expression='/mappings/', filter=[{'foo': 'bar'}], reference_type='mappings')
             ref.clean()
-        with self.assertRaises(ValidationError):
-            ref = CollectionReference(expression='/mappings/', filter=[{'property': 'bar'}], reference_type='mappings')
-            ref.clean()
         with self.assertRaises(ValidationError) as ex:
-            ref = CollectionReference(
-                expression='/mappings/',
-                reference_type='mappings',
-                filter=[{'property': 'concept_class', 'value': 'foobar', 'op': '='}])
+            ref = CollectionReference(expression='/mappings/', filter=[{'property': 'bar'}], reference_type='mappings')
             ref.clean()
 
         self.assertEqual(ex.exception.message_dict, {'filter': ['Invalid filter schema.']})
