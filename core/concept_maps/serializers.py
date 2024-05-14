@@ -27,7 +27,7 @@ class ConceptMapGroupField(serializers.Field):
         for group in data:
             for element in group.get('element', []):
                 for target in element.get('target', []):
-                    map_type = target.get('relationship')
+                    map_type = target.get('equivalence')
                     if map_type == 'equivalent':
                         map_type = SAME_AS
                     mapping = {
@@ -89,7 +89,7 @@ class ConceptMapGroupField(serializers.Field):
                 relationship = 'equivalent'
             targets.append({
                 'code': mapping.to_concept_code,
-                'relationship': relationship
+                'equivalence': relationship
             })
         return [*groups.values()]
 

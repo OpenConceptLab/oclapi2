@@ -58,12 +58,12 @@ class CodeSystemConceptPropertySerializer(serializers.Field):
     def to_internal_value(self, data):
         ret = {}
         for item in data:
-            if item['code'] == 'inactive':
-                ret['retired'] = item['valueBoolean']
-            elif item['code'] == 'conceptclass':
-                ret['concept_class'] = item['valueString']
-            elif item['code'] == 'datatype':
-                ret['datatype'] = item['valueString']
+            if item.get('code') == 'inactive':
+                ret['retired'] = item.get('valueBoolean', False)
+            elif item.get('code') == 'conceptclass':
+                ret['concept_class'] = item.get('valueString', 'Misc')
+            elif item.get('code') == 'datatype':
+                ret['datatype'] = item.get('valueString', 'N/A')
 
         return ret
 

@@ -84,11 +84,11 @@ class ConceptMapTest(OCLTestCase):
                                      'target': self.org_source.canonical_url,
                                      'element': [
                                          {'code': 'concept_B_1',
-                                          'target': [{'code': 'concept_1', 'relationship': 'equivalent'}]},
+                                          'target': [{'code': 'concept_1', 'equivalence': 'equivalent'}]},
                                          {'code': 'concept_B_2',
-                                          'target': [{'code': 'concept_2', 'relationship': 'equivalent'}]},
+                                          'target': [{'code': 'concept_2', 'equivalence': 'equivalent'}]},
                                          {'code': 'concept_B_2',
-                                          'target': [{'code': 'concept_1', 'relationship': 'equivalent'}]}]}])
+                                          'target': [{'code': 'concept_1', 'equivalence': 'equivalent'}]}]}])
 
     def test_private_can_view(self):
         response = self.client.get('/fhir/ConceptMap/?url=/some/url', HTTP_AUTHORIZATION='Token ' + self.user_token)
@@ -263,11 +263,11 @@ class ConceptMapTest(OCLTestCase):
                            'target': self.org_source.canonical_url,
                            'element': [
                                {'code': 'concept_B_1',
-                                'target': [{'code': 'concept_1', 'relationship': 'equivalent'}]},
+                                'target': [{'code': 'concept_1', 'equivalence': 'equivalent'}]},
                                {'code': 'concept_B_2',
-                                'target': [{'code': 'concept_2', 'relationship': 'equivalent'}]},
+                                'target': [{'code': 'concept_2', 'equivalence': 'equivalent'}]},
                                {'code': 'concept_B_2',
-                                'target': [{'code': 'concept_1', 'relationship': 'equivalent'}]}]}]
+                                'target': [{'code': 'concept_1', 'equivalence': 'equivalent'}]}]}]
             },
             format='json'
         )
@@ -318,11 +318,11 @@ class ConceptMapTest(OCLTestCase):
                            'target': self.org_source.url,
                            'element': [
                                {'code': 'concept_B_1',
-                                'target': [{'code': 'concept_1', 'relationship': 'equivalent'}]},
+                                'target': [{'code': 'concept_1', 'equivalence': 'equivalent'}]},
                                {'code': 'concept_B_2',
-                                'target': [{'code': 'concept_2', 'relationship': 'equivalent'}]},
+                                'target': [{'code': 'concept_2', 'equivalence': 'equivalent'}]},
                                {'code': 'concept_B_2',
-                                'target': [{'code': 'concept_1', 'relationship': 'equivalent'}]}]}]
+                                'target': [{'code': 'concept_1', 'equivalence': 'equivalent'}]}]}]
             },
             format='json'
         )
@@ -474,7 +474,7 @@ class ConceptMapTest(OCLTestCase):
                            'target': self.org_source.canonical_url,
                            'element': [
                                {'code': 'concept_B_1',
-                                'target': [{'code': 'concept_1', 'relationship': 'equivalent'}]}]
+                                'target': [{'code': 'concept_1', 'equivalence': 'equivalent'}]}]
                            }]
 
             },
