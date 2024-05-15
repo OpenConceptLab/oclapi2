@@ -736,7 +736,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             self.errors.update({'__all__': ex.args})
 
     @classmethod
-    def persist_new(cls, data, user=None, create_initial_version=True, create_parent_version=True):  # pylint: disable=too-many-statements,too-many-branches
+    def persist_new(cls, data, user=None, create_initial_version=True, create_parent_version=True, sync_checksum=True):  # pylint: disable=too-many-statements,too-many-branches,too-many-arguments,too-many-locals
         names = data.pop('names', []) or []
         descriptions = data.pop('descriptions', []) or []
         parent_concept_uris = data.pop('parent_concept_urls', None)
@@ -805,7 +805,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                     )
             if create_initial_version and concept._counted is True:
                 parent.update_concepts_count()
-            concept.set_checksums()
+            concept.set_checksums(sync=sync_checksum)
         except ValidationError as ex:
             if concept.id:
                 concept.delete()

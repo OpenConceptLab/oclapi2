@@ -1,7 +1,7 @@
 from django.core.exceptions import ValidationError
 
 from core.common.constants import (
-    NA, YES, NO, OPENMRS_VALIDATION_SCHEMA, HEAD, REFERENCE_VALUE_SOURCE_MNEMONICS
+    NA, YES, NO, OPENMRS_VALIDATION_SCHEMA, HEAD, REFERENCE_VALUE_SOURCE_MNEMONICS, DEFAULT_VALIDATION_SCHEMA
 )
 from core.orgs.models import Organization
 from .constants import BASIC_DESCRIPTION_CANNOT_BE_EMPTY, BASIC_NAMES_CANNOT_BE_EMPTY
@@ -37,11 +37,12 @@ class ValidatorSpecifier:
         return self
 
     def with_reference_values(self):
-        ocl = Organization.objects.get(mnemonic='OCL')
-        sources = ocl.source_set.filter(mnemonic__in=REFERENCE_VALUE_SOURCE_MNEMONICS, version=HEAD)
         self.reference_values = {}
-        for source in sources:
-            self.reference_values[source.mnemonic] = self._get_reference_values(source)
+        if self.validation_schema and self.validation_schema != DEFAULT_VALIDATION_SCHEMA:
+            ocl = Organization.objects.get(mnemonic='OCL')
+            sources = ocl.source_set.filter(mnemonic__in=REFERENCE_VALUE_SOURCE_MNEMONICS, version=HEAD)
+            for source in sources:
+                self.reference_values[source.mnemonic] = self._get_reference_values(source)
 
         return self
 

@@ -295,14 +295,14 @@ class CodeSystemDetailSerializer(serializers.ModelSerializer):
             concept_item.update({'parent_id': source.id})
             concept_serializer = ConceptDetailSerializer(data=concept_item)
             concept_serializer.is_valid(raise_exception=True)
-            Concept.persist_new(concept_serializer.validated_data)
+            Concept.persist_new(data=concept_serializer.validated_data, sync_checksum=False)
 
         # Create new version
         source.version = '0.1' if version == HEAD else version
 
         source.id = None  # pylint: disable=invalid-name
         # Make it synchronous for now so that the list of concepts is included in the response
-        errors = Source.persist_new_version(source, user, sync=True)
+        errors = Source.persist_new_version(source, user, sync=True, async_indexing=True)
         self._errors.update(errors)
         return source
 

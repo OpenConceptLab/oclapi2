@@ -671,6 +671,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
         obj.is_active = True
         sync = kwargs.pop('sync', False)
+        async_indexing = kwargs.pop('async_indexing', False)
         if user:
             obj.created_by = user
             obj.updated_by = user
@@ -689,12 +690,12 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
         is_test_mode = get(settings, 'TEST_MODE', False)
         if is_test_mode or sync:
-            seed_children_to_new_version(obj.resource_type.lower(), obj.id, not is_test_mode, sync)
+            seed_children_to_new_version(obj.resource_type.lower(), obj.id, not is_test_mode, sync, async_indexing)
         else:
             from core.tasks.models import Task
             task = Task.new(queue='default', user=user, name=seed_children_to_new_version.__name__)
             seed_children_to_new_version.apply_async(
-                (obj.resource_type.lower(), obj.id, True, sync), task_id=task.id, queue='default')
+                (obj.resource_type.lower(), obj.id, True, sync, async_indexing), task_id=task.id, queue='default')
 
         if obj.id:
             obj.sibling_versions.update(is_latest_version=False)

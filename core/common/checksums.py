@@ -49,9 +49,12 @@ class ChecksumModel(models.Model):
     def has_smart_checksum(self):
         return self.SMART_CHECKSUM_KEY in self.checksums if self.SMART_CHECKSUM_KEY else True
 
-    def set_checksums(self):
-        self.checksums = self._calculate_checksums()
-        self.__class__.objects.filter(id=self.id).update(checksums=self.checksums)
+    def set_checksums(self, sync=True):
+        if sync:
+            self.checksums = self._calculate_checksums()
+            self.__class__.objects.filter(id=self.id).update(checksums=self.checksums)
+        else:
+            self.queue_checksum_calculation()
 
     @property
     def checksum(self):

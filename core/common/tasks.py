@@ -323,7 +323,7 @@ def send_user_reset_password_email(user_id):
 
 
 @app.task(bind=True)
-def seed_children_to_new_version(self, resource, obj_id, export=True, sync=False):
+def seed_children_to_new_version(self, resource, obj_id, export=True, sync=False, async_indexing=False):  # pylint: disable=too-many-arguments,too-many-locals,too-many-branches
     instance = None
     export_task = None
     autoexpand = True
@@ -340,10 +340,13 @@ def seed_children_to_new_version(self, resource, obj_id, export=True, sync=False
         export_task = export_collection
         autoexpand = instance.should_auto_expand
 
-    if instance:
+    if instance:  # pylint: disable=too-many-nested-blocks
         task_id = self.request.id
 
         index = not export
+        if is_source and instance.released:  # will index in new version creation at the end
+            index = False
+            async_indexing = False
 
         try:
             instance.add_processing(task_id)
@@ -358,7 +361,14 @@ def seed_children_to_new_version(self, resource, obj_id, export=True, sync=False
                 task = Task.new(queue='default', username=instance.updated_by, name=export_task.__name__)
                 export_task.apply_async((obj_id,), queue=task.queue, task_id=task.id)
                 if autoexpand:
-                    instance.index_children()
+                    if async_indexing and is_source:
+                        index_source_concepts.apply_async((obj_id,), queue='indexing')
+                        index_source_mappings.apply_async((obj_id,), queue='indexing')
+                    else:
+                        if is_source and instance.released:
+                            pass
+                        else:
+                            instance.index_children()
         finally:
             instance.remove_processing(task_id)
 
