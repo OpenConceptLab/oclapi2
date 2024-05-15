@@ -16,7 +16,8 @@ class CapabilityStatementView(APIView):
         mode = request.query_params.get('mode')
         fhir_base_url = f"{settings.API_BASE_URL}/fhir"
         if settings.FHIR_SUBDOMAIN:
-            fhir_base_url = fhir_base_url.replace('://', f"://{settings.FHIR_SUBDOMAIN}.", 1)
+            #  TODO: it's not always right as 'api.' may not be a part of the API base url
+            fhir_base_url = fhir_base_url.replace('://api.', f"://{settings.FHIR_SUBDOMAIN}.", 1)
         if mode == 'terminology':
             response = {
                 "resourceType": "TerminologyCapabilities",
