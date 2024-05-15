@@ -102,8 +102,6 @@ class CodeSystemsTest(OCLAPITestCase):
     def test_posting_code_systems(self):
         test_files = ['code_systems_who_core.json', 'code_systems_who_fp.json', 'code_systems_who_sti.json',
                       'code_systems_who_ddcc_category_codes.json']
-        print()
-
         for test_file in test_files:
             print('Testing ' + test_file)
             url = f"/orgs/{self.organization.mnemonic}/CodeSystem/"
