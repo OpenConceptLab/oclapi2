@@ -67,7 +67,6 @@ from core.mappings.search import MappingFacetedSearch
 from core.tasks.mixins import TaskMixin
 from core.tasks.models import Task
 from core.tasks.serializers import TaskListSerializer
-from core.toggles.models import Toggle
 
 logger = logging.getLogger('oclapi')
 
@@ -259,10 +258,9 @@ class CollectionRetrieveUpdateDestroyView(
                 if version.should_set_active_mappings:
                     version.update_mappings_count()
 
-        if Toggle.get('CHECKSUMS_TOGGLE'):
-            instance.get_checksums()
-            for version in instance.versions:
-                version.get_checksums()
+        instance.get_checksums()
+        for version in instance.versions:
+            version.get_checksums()
 
         return instance
 

@@ -7,7 +7,6 @@ from django.db import models
 from pydash import get
 
 from core.common.utils import generic_sort
-from core.toggles.models import Toggle
 
 
 class ChecksumModel(models.Model):
@@ -23,15 +22,14 @@ class ChecksumModel(models.Model):
 
     def get_checksums(self, queue=False, recalculate=False):
         _checksums = None
-        if Toggle.get('CHECKSUMS_TOGGLE'):
-            if not recalculate and self.checksums and self.has_all_checksums():
-                _checksums = self.checksums
-            elif queue:
-                self.queue_checksum_calculation()
-                _checksums = self.checksums or {}
-            else:
-                self.set_checksums()
-                _checksums = self.checksums
+        if not recalculate and self.checksums and self.has_all_checksums():
+            _checksums = self.checksums
+        elif queue:
+            self.queue_checksum_calculation()
+            _checksums = self.checksums or {}
+        else:
+            self.set_checksums()
+            _checksums = self.checksums
         return _checksums
 
     def queue_checksum_calculation(self):
@@ -52,20 +50,18 @@ class ChecksumModel(models.Model):
         return self.SMART_CHECKSUM_KEY in self.checksums if self.SMART_CHECKSUM_KEY else True
 
     def set_checksums(self):
-        if Toggle.get('CHECKSUMS_TOGGLE'):
-            self.checksums = self._calculate_checksums()
-            self.__class__.objects.filter(id=self.id).update(checksums=self.checksums)
+        self.checksums = self._calculate_checksums()
+        self.__class__.objects.filter(id=self.id).update(checksums=self.checksums)
 
     @property
     def checksum(self):
         """Returns the checksum of the model instance or standard only checksum."""
         _checksum = None
-        if Toggle.get('CHECKSUMS_TOGGLE'):
-            if get(self, f'checksums.{self.STANDARD_CHECKSUM_KEY}'):
-                _checksum = self.checksums[self.STANDARD_CHECKSUM_KEY]
-            else:
-                self.get_checksums()
-                _checksum = self.checksums.get(self.STANDARD_CHECKSUM_KEY)
+        if get(self, f'checksums.{self.STANDARD_CHECKSUM_KEY}'):
+            _checksum = self.checksums[self.STANDARD_CHECKSUM_KEY]
+        else:
+            self.get_checksums()
+            _checksum = self.checksums.get(self.STANDARD_CHECKSUM_KEY)
         return _checksum
 
     def get_checksum_fields(self):
@@ -78,13 +74,11 @@ class ChecksumModel(models.Model):
         return {}
 
     def get_all_checksums(self):
-        checksums = None
-        if Toggle.get('CHECKSUMS_TOGGLE'):
-            checksums = {}
-            if self.STANDARD_CHECKSUM_KEY:
-                checksums[self.STANDARD_CHECKSUM_KEY] = self._calculate_standard_checksum()
-            if self.SMART_CHECKSUM_KEY:
-                checksums[self.SMART_CHECKSUM_KEY] = self._calculate_smart_checksum()
+        checksums = {}
+        if self.STANDARD_CHECKSUM_KEY:
+            checksums[self.STANDARD_CHECKSUM_KEY] = self._calculate_standard_checksum()
+        if self.SMART_CHECKSUM_KEY:
+            checksums[self.SMART_CHECKSUM_KEY] = self._calculate_smart_checksum()
         return checksums
 
     @staticmethod

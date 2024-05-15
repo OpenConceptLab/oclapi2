@@ -41,7 +41,6 @@ from core.concepts.serializers import (
     ConceptChildrenSerializer, ConceptParentsSerializer, ConceptLookupListSerializer)
 from core.mappings.serializers import MappingListSerializer
 from core.tasks.models import Task
-from core.toggles.models import Toggle
 
 TRUTHY = get_truthy_values()
 
@@ -293,10 +292,9 @@ class ConceptRetrieveUpdateDestroyView(ConceptBaseView, RetrieveAPIView, UpdateA
 
         self.check_object_permissions(self.request, instance)
 
-        if Toggle.get('CHECKSUMS_TOGGLE'):
-            instance.get_checksums()
-            for version in instance.versions:
-                version.get_checksums()
+        instance.get_checksums()
+        for version in instance.versions:
+            version.get_checksums()
 
         return instance
 
