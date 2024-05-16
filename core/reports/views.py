@@ -35,13 +35,21 @@ class ResourcesReportJobView(APIView):  # pragma: no cover
                     description='YYYY-MM-DD (default: 1st of current month)',
                     default=timezone.now().replace(day=1).strftime('%Y-%m-%d')
                 ),
+                'email': openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description='foo@bar.com (default: REPORTS_EMAIL)',
+                    default='REPORTS_EMAIL'
+                ),
             }
         )
     )
     def post(request):
         task = Task.new(queue='default', user=request.user, name=resources_report.__name__)
         resources_report.apply_async(
-            (request.data.get('start_date'), request.data.get('end_date')), queue=task.queue, task_id=task.id)
+            (request.data.get('start_date'), request.data.get('end_date'), request.data.get('email')),
+            queue=task.queue,
+            task_id=task.id
+        )
 
         task.refresh_from_db()
 
