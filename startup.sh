@@ -27,5 +27,6 @@ if [[ "$ENVIRONMENT" = "development" ]]; then
   python manage.py runserver 0.0.0.0:${API_PORT:-8000}
 else
   echo "Starting up the production server"
-  gunicorn core.wsgi:application --bind 0.0.0.0:${API_PORT:-8000} --capture-output --workers 4 --timeout 60 --keep-alive 60 #match ALB
+  gunicorn core.wsgi:application --bind 0.0.0.0:${API_PORT:-8000} --capture-output --workers 4 --timeout 240
+  --keep-alive 240 #match ALB
 fi
