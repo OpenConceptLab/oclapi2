@@ -53,14 +53,14 @@ def delete(target, secret):
 
 def get(target, secret):
     headers = {'Authorization': f'Token {secret}'}
-    response = requests.get(target, headers=headers, timeout=120)
+    response = requests.get(target, headers=headers, timeout=600)
     logging.debug(f'GET {target} {response_summary(response)}')
     return response
 
 
 def post(target, secret, json):
     headers = {'Authorization': f'Token {secret}'}
-    return requests.post(target, json=json, headers=headers, timeout=120)
+    return requests.post(target, json=json, headers=headers, timeout=600)
 
 
 def update_json(json_input, path, value):
