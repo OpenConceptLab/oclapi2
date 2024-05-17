@@ -47,6 +47,7 @@ class ValueSetTest(OCLAPITestCase):
         response = self.client.get('/fhir/ValueSet/?url=http://c1.com')
 
         self.assertEqual(len(response.data['entry']), 1)
+        self.assertEqual(response.data['total'], 1)
 
         resource = response.data['entry'][0]['resource']
 

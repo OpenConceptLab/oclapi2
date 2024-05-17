@@ -72,6 +72,7 @@ class ConceptMapTest(OCLTestCase):
         response = self.client.get('/fhir/ConceptMap/?url=/some/url')
 
         self.assertEqual(len(response.data['entry']), 1)
+        self.assertEqual(response.data['total'], 1)
 
         resource = response.data['entry'][0]['resource']
         self.assertEqual(
@@ -94,6 +95,8 @@ class ConceptMapTest(OCLTestCase):
         response = self.client.get('/fhir/ConceptMap/?url=/some/url', HTTP_AUTHORIZATION='Token ' + self.user_token)
 
         self.assertEqual(len(response.data['entry']), 2)
+        self.assertEqual(response.data['total'], 2)
+
         resource = response.data['entry'][0]['resource']
         self.assertEqual(
             resource['identifier'][0]['value'],

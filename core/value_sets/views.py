@@ -25,7 +25,7 @@ class ValueSetListView(CollectionListView):
     @staticmethod
     def bundle_response(data, paginator):
         bundle = FHIRBundleSerializer(
-            {'meta': {}, 'type': 'searchset', 'entry': FHIRBundleSerializer.convert_to_entry(data)},
+            {'meta': {}, 'total': len(data), 'type': 'searchset', 'entry': FHIRBundleSerializer.convert_to_entry(data)},
             context={'paginator': paginator}
         )
         return bundle.data
