@@ -136,7 +136,7 @@ class CodeSystemValidateCodeView(ConceptRetrieveUpdateDestroyView):
         code = parameters.get('code')
         version = parameters.get('version')
         display = parameters.get('display')
-
+        source = None
         if url:
             source = Source.objects.filter(canonical_url=url)
             if not source:
