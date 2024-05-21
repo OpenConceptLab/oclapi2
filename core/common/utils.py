@@ -106,7 +106,10 @@ def reverse_resource(resource, viewname, args=None, kwargs=None, **extra):
             if head:
                 kwargs.update({head.get_url_kwarg(): head.mnemonic})
 
-            kwargs.update({parent.get_url_kwarg(): parent.version})
+            version = parent.version if is_url_encoded_string(
+                parent.version) else encode_string(parent.version, safe=' ')
+
+            kwargs.update({parent.get_url_kwarg(): version})
             parent_resource_url_kwarg = parent.get_resource_url_kwarg()
             if parent_resource_url_kwarg not in kwargs:
                 kwargs.update({parent_resource_url_kwarg: parent.mnemonic})
@@ -137,8 +140,8 @@ def reverse_resource_version(resource, viewname, args=None, kwargs=None, **extra
     kwargs = kwargs or {}
     if head:
         kwargs.update({head.get_url_kwarg(): head.mnemonic})
-
-    kwargs.update({resource.get_url_kwarg(): resource.version})
+    version = resource.version if is_url_encoded_string(resource.version) else encode_string(resource.version, safe=' ')
+    kwargs.update({resource.get_url_kwarg(): version})
     resource_url_kwarg = resource.get_resource_url_kwarg()
 
     if resource_url_kwarg not in kwargs:

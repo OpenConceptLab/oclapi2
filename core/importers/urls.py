@@ -1,49 +1,44 @@
-from django.urls import re_path
+from django.urls import path
 
-from core.common.constants import NAMESPACE_PATTERN
 from core.importers import views
 
 urlpatterns = [
-    re_path(
-        r'^bulk-import-inline/$',  # DEPRECATED
+    path(
+        'bulk-import-inline/',  # DEPRECATED
         views.BulkImportInlineView.as_view(),
         name='bulk-import-inline'
     ),
-    re_path(
-        r'^bulk-import-parallel-inline/$',  # DEPRECATED
+    path(
+        'bulk-import-parallel-inline/',  # DEPRECATED
         views.BulkImportParallelInlineView.as_view(),
         name='bulk-import-inline'
     ),
-    re_path(
-        fr'^bulk-import-parallel-inline/(?P<import_queue>{NAMESPACE_PATTERN})/$',  # DEPRECATED
+    path(
+        'bulk-import-parallel-inline/<str:import_queue>/',  # DEPRECATED
         views.BulkImportParallelInlineView.as_view(),
         name='bulk-import-inline'
     ),
-    re_path(
-        r'^bulk-import/file-url/$',  # DEPRECATED
+    path(
+        'bulk-import/file-url/',  # DEPRECATED
         views.BulkImportFileURLView.as_view(),
         name='bulk-import-file-url'
     ),
-    re_path(
-        fr"^bulk-import/(?P<import_queue>{NAMESPACE_PATTERN})/file-url/$",  # DEPRECATED
+    path(
+        "bulk-import/<str:import_queue>/file-url/",  # DEPRECATED
         views.BulkImportFileURLView.as_view(),
         name='bulk-import-detail-file-url'
     ),
-    re_path(
-        r'^bulk-import/upload/$',  # DEPRECATED
+    path(
+        'bulk-import/upload/',  # DEPRECATED
         views.BulkImportFileUploadView.as_view(),
         name='bulk-import-file-upload'
     ),
-    re_path(
-        fr"^bulk-import/(?P<import_queue>{NAMESPACE_PATTERN})/upload/$",  # DEPRECATED
+    path(
+        "bulk-import/<str:import_queue>/upload/",  # DEPRECATED
         views.BulkImportFileUploadView.as_view(),
         name='bulk-import-detail-file-upload'
     ),
 
-    re_path(r'^bulk-import/$', views.ImportView.as_view(), name='bulk-import'),
-    re_path(
-        fr"^bulk-import/(?P<import_queue>{NAMESPACE_PATTERN})/$",
-        views.ImportView.as_view(),
-        name='bulk-import-detail'
-    ),
+    path('bulk-import/', views.ImportView.as_view(), name='bulk-import'),
+    path("bulk-import/<str:import_queue>/", views.ImportView.as_view(), name='bulk-import-detail'),
 ]

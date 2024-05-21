@@ -24,7 +24,6 @@ import core.mappings.views as mapping_views
 import core.reports.views as report_views
 from core import VERSION
 from core.collections.views import ReferenceExpressionResolveView
-from core.common.constants import NAMESPACE_PATTERN
 from core.common.utils import get_api_base_url
 from core.common.views import RootView, FeedbackView, APIVersionView, ChangeLogView, StandardChecksumView, \
     SmartChecksumView
@@ -50,27 +49,29 @@ urlpatterns = [
     path('changelog/', ChangeLogView.as_view(), name='changelog'),
     path('feedback/', FeedbackView.as_view(), name='feedback'),
     re_path(r'^swagger(?P<format>\.json|\.yaml)$', SchemaView.without_ui(cache_timeout=0), name='schema-json'),
-    re_path(r'^swagger/$', SchemaView.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui'),
-    re_path(r'^redoc/$', SchemaView.with_ui('redoc', cache_timeout=0), name='schema-redoc'),
+    path('swagger/', SchemaView.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui'),
+    path('redoc/', SchemaView.with_ui('redoc', cache_timeout=0), name='schema-redoc'),
     path('healthcheck/', include('core.common.healthcheck.urls')),
     path('admin/reports/authored/', report_views.AuthoredView.as_view(), name='authored-report'),
     path(
         'admin/reports/monthly-usage/job/', report_views.ResourcesReportJobView.as_view(), name='monthly-usage-job'),
     path('admin/concepts/amend-hierarchy/', ConceptsHierarchyAmendAdminView.as_view(), name='concepts-amend-hierarchy'),
-    re_path(r'^\$resolveReference/$', ReferenceExpressionResolveView.as_view(), name='$resolveReference'),
-    re_path(r'^\$checksum/standard/$', StandardChecksumView.as_view(), name='$checksum-standard'),
-    re_path(r'^\$checksum/smart/$', SmartChecksumView.as_view(), name='$checksum-smart'),
+    path('$resolveReference/', ReferenceExpressionResolveView.as_view(), name='$resolveReference'),
+    path('$checksum/standard/', StandardChecksumView.as_view(), name='$checksum-standard'),
+    path('$checksum/smart/', SmartChecksumView.as_view(), name='$checksum-smart'),
     path('users/', include('core.users.urls'), name='users_urls'),
     path('user/', include('core.users.user_urls'), name='current_user_urls'),
     path('orgs/', include('core.orgs.urls'), name='orgs_url'),
     path('sources/', include('core.sources.urls'), name='sources_url'),
     path('repos/', include('core.repos.urls'), name='repos_url'),
     path('url-registry/', include('core.url_registry.urls'), name='url_registry_url'),
-    #TODO: require FHIR subdomain
+
+    # TODO: require FHIR subdomain
     path('fhir/', include('core.fhir.urls'), name='fhir_urls'),
     path('fhir/CodeSystem/', include('core.code_systems.urls'), name='code_systems_urls'),
     path('fhir/ValueSet/', include('core.value_sets.urls'), name='value_sets_urls'),
     path('fhir/ConceptMap/', include('core.concept_maps.urls'), name='concept_maps_urls'),
+
     path('collections/', include('core.collections.urls'), name='collections_urls'),
     path('concepts/', concept_views.ConceptListView.as_view(), name='all_concepts_urls'),
     path('mappings/', mapping_views.MappingListView.as_view(), name='all_mappings_urls'),
@@ -87,8 +88,8 @@ urlpatterns = [
     ),
 
     # just for ocldev - DEPRECATED
-    re_path(
-        f'manage/bulkimport/(?P<import_queue>{NAMESPACE_PATTERN})/',
+    path(
+        'manage/bulkimport/<str:import_queue>/',
         BulkImportView.as_view(),
         name='bulk_import_detail_url'
     ),

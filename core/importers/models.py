@@ -495,7 +495,7 @@ class MappingImporter(BaseResourceImporter):
         }
         if from_concept_code:
             filters['from_concept_code'] = [
-                *Concept.get_mnemonic_variations_for_filter(from_concept_code), from_concept_code.replace(' ', '+')
+                *Concept.get_encoded_str_variations(from_concept_code), from_concept_code.replace(' ', '+')
             ]
 
         versionless_from_concept_url = drop_version(from_concept_url)
@@ -525,7 +525,7 @@ class MappingImporter(BaseResourceImporter):
 
         if to_concept_code:
             filters['to_concept_code__in'] = [
-                *Concept.get_mnemonic_variations_for_filter(to_concept_code), to_concept_code.replace(' ', '+')]
+                *Concept.get_encoded_str_variations(to_concept_code), to_concept_code.replace(' ', '+')]
 
         self.queryset = Mapping.objects.filter(**filters)
 

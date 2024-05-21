@@ -20,7 +20,7 @@ from core.common.tasks import update_collection_active_concepts_count, update_co
     delete_s3_objects
 from core.common.utils import reverse_resource, reverse_resource_version, parse_updated_since_param, drop_version, \
     to_parent_uri, is_canonical_uri, get_export_service, from_string_to_date, get_truthy_values, \
-    canonical_url_to_url_and_version, get_current_authorized_user
+    canonical_url_to_url_and_version, get_current_authorized_user, encode_string, decode_string
 from core.common.utils import to_owner_uri
 from core.settings import DEFAULT_LOCALE
 from .checksums import ChecksumModel
@@ -111,6 +111,13 @@ class BaseModel(models.Model):
             self.is_active = True
             self.save()
 
+    @staticmethod
+    def get_encoded_str_variations(value):
+        return [
+            value, encode_string(value, safe=' '), encode_string(value, safe='+'),
+            encode_string(value, safe='+%'), encode_string(value, safe='% +'),
+            decode_string(value), decode_string(value, False)
+        ]
     @property
     def is_versioned(self):
         return False
@@ -174,14 +181,14 @@ class BaseModel(models.Model):
         settings.ES_SYNC = state
 
     @staticmethod
-    def get_exact_or_criteria(attr, values):
+    def get_exact_or_criteria(attr, values, decode=False):
         criteria = Q()
 
         if isinstance(values, str):
             values = values.split(',')
 
         for value in values:
-            criteria = criteria | Q(**{f'{attr}': value})
+            criteria = criteria | Q(**{f'{attr}': decode_string(value) if decode else value})
 
         return criteria
 
@@ -495,7 +502,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         if org:
             queryset = queryset.filter(cls.get_exact_or_criteria('organization__mnemonic', org))
         if version:
-            queryset = queryset.filter(cls.get_exact_or_criteria('version', version))
+            queryset = queryset.filter(cls.get_exact_or_criteria('version', version, True))
         if is_latest:
             queryset = queryset.filter(is_latest_version=True)
         if updated_since:
@@ -984,7 +991,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
     def resolve_repo(cls, instance, version, is_canonical, resolution_url):
         if instance:
             if version:
-                instance = instance.versions.filter(version=version).first()
+                instance = instance.versions.filter(version=decode_string(version)).first()
             elif instance.is_head:
                 instance = instance.get_latest_released_version() or instance
 

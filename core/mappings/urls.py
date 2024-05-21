@@ -1,60 +1,56 @@
-from django.urls import re_path
+from django.urls import path
 
-from core.common.constants import NAMESPACE_PATTERN
 from . import views
 
 urlpatterns = [
-    re_path(r'^$', views.MappingListView.as_view(), name='mapping-list'),
-    re_path(
-        fr"^(?P<mapping>{NAMESPACE_PATTERN})/$",
+    path('', views.MappingListView.as_view(), name='mapping-list'),
+    path(
+        "<str:mapping>/",
         views.MappingRetrieveUpdateDestroyView.as_view(),
         name='mapping-detail'
     ),
-    re_path(
-        fr"^(?P<mapping>{NAMESPACE_PATTERN})/collection-versions/$",
+    path(
+        "<str:mapping>/collection-versions/",
         views.MappingCollectionMembershipView.as_view(),
         name='mapping-collection-versions'
     ),
-    re_path(
-        fr"^(?P<mapping>{NAMESPACE_PATTERN})/reactivate/$",
+    path(
+        "<str:mapping>/reactivate/",
         views.MappingReactivateView.as_view(),
         name='mapping-reactivate'
     ),
-    re_path(
-        fr"^(?P<mapping>{NAMESPACE_PATTERN})/versions/$",
+    path(
+        "<str:mapping>/versions/",
         views.MappingVersionsView.as_view(),
         name='mapping-version-list'
     ),
-    re_path(
-        fr'^(?P<mapping>{NAMESPACE_PATTERN})/extras/$',
+    path(
+        '<str:mapping>/extras/',
         views.MappingExtrasView.as_view(),
         name='mapping-extras'
     ),
-    re_path(
-        r'^(?P<mapping>{pattern})/extras/(?P<extra>{pattern})/$'.format(pattern=NAMESPACE_PATTERN),
+    path(
+        '<str:mapping>/extras/<str:extra>/',
         views.MappingExtraRetrieveUpdateDestroyView.as_view(),
         name='mapping-extra'
     ),
-    re_path(
-        r'^(?P<mapping>{pattern})/(?P<mapping_version>{pattern})/$'.format(pattern=NAMESPACE_PATTERN),
+    path(
+        '<str:mapping>/<str:mapping_version>/',
         views.MappingVersionRetrieveView.as_view(),
         name='mapping-version-detail'
     ),
-    re_path(
-        r'^(?P<mapping>{pattern})/(?P<mapping_version>{pattern})/collection-versions/$'.format(
-            pattern=NAMESPACE_PATTERN),
+    path(
+        '<str:mapping>/<str:mapping_version>/collection-versions/',
         views.MappingCollectionMembershipView.as_view(),
         name='mapping-version-collection-versions'
     ),
-    re_path(
-        r'^(?P<mapping>{pattern})/(?P<mapping_version>{pattern})/extras/$'.format(pattern=NAMESPACE_PATTERN),
+    path(
+        '<str:mapping>/<str:mapping_version>/extras/',
         views.MappingExtrasView.as_view(),
         name='mapping-extras'
     ),
-    re_path(
-        r'^(?P<mapping>{pattern})/(?P<mapping_version>{pattern})/extras/(?P<extra>{pattern})/$'.format(
-            pattern=NAMESPACE_PATTERN
-        ),
+    path(
+        '<str:mapping>/<str:mapping_version>/extras/<str:extra>/',
         views.MappingExtraRetrieveUpdateDestroyView.as_view(),
         name='mapping-extra'
     ),

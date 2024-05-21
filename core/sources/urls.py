@@ -1,6 +1,5 @@
-from django.urls import re_path, include, path
+from django.urls import include, path
 
-from core.common.constants import NAMESPACE_PATTERN
 from core.sources.feeds import SourceFeed
 from . import views
 
@@ -8,110 +7,106 @@ urlpatterns = [
     path('', views.SourceListView.as_view(), name='source-list'),
     path('$compare/', views.SourceVersionsComparisonView.as_view(), name='source-version-$compare'),
     path('$changelog/', views.SourceVersionsChangelogView.as_view(), name='source-version-$changelog'),
-    re_path(
-        fr"^(?P<source>{NAMESPACE_PATTERN})/$",
+    path(
+        "<str:source>/",
         views.SourceRetrieveUpdateDestroyView.as_view(),
         name='source-detail'
     ),
-    re_path(
-        fr"^(?P<source>{NAMESPACE_PATTERN})/client-configs/$",
+    path(
+        "<str:source>/client-configs/",
         views.SourceClientConfigsView.as_view(),
         name='source-client-configs'
     ),
-    re_path(
-        fr"^(?P<source>{NAMESPACE_PATTERN})/mapped-sources/$",
+    path(
+        "<str:source>/mapped-sources/",
         views.SourceMappedSourcesListView.as_view(),
         name='source-mapped-sources'
     ),
-    re_path(
-        fr"^(?P<source>{NAMESPACE_PATTERN})/summary/$",
+    path(
+        "<str:source>/summary/",
         views.SourceSummaryView.as_view(),
         name='source-summary'
     ),
-    re_path(
-        fr"^(?P<source>{NAMESPACE_PATTERN})/hierarchy/$",
+    path(
+        "<str:source>/hierarchy/",
         views.SourceHierarchyView.as_view(),
         name='source-hierarchy'
     ),
-    re_path(
-        fr"^(?P<source>{NAMESPACE_PATTERN})/logo/$",
+    path(
+        "<str:source>/logo/",
         views.SourceLogoView.as_view(),
         name='source-logo'
     ),
-    re_path(fr'^(?P<source>{NAMESPACE_PATTERN})/atom/$', SourceFeed()),
-    re_path(
-        fr"^(?P<source>{NAMESPACE_PATTERN})/versions/$",
+    path('<str:source>/atom/', SourceFeed()),
+    path(
+        "<str:source>/versions/",
         views.SourceVersionListView.as_view(),
         name='source-version-list'
     ),
-    re_path(
-        fr'^(?P<source>{NAMESPACE_PATTERN})/latest/$',
+    path(
+        '<str:source>/latest/',
         views.SourceLatestVersionRetrieveUpdateView.as_view(),
         name='sourceversion-latest-detail'
     ),
-    re_path(
-        fr'^(?P<source>{NAMESPACE_PATTERN})/latest/summary/$',
+    path(
+        '<str:source>/latest/summary/',
         views.SourceLatestVersionSummaryView.as_view(),
         name='sourceversion-latest-summary'
     ),
-    re_path(
-        fr'^(?P<source>{NAMESPACE_PATTERN})/latest/export/$',
+    path(
+        '<str:source>/latest/export/',
         views.SourceVersionExportView.as_view(),
         name='sourceversion-latest-export-detail'
     ),
-    re_path(fr"^(?P<source>{NAMESPACE_PATTERN})/concepts/\$clone/", views.SourceConceptsCloneView.as_view()),
-    re_path(fr"^(?P<source>{NAMESPACE_PATTERN})/concepts/indexes/", views.SourceConceptsIndexView.as_view()),
-    re_path(fr"^(?P<source>{NAMESPACE_PATTERN})/mappings/indexes/", views.SourceMappingsIndexView.as_view()),
-    re_path(fr"^(?P<source>{NAMESPACE_PATTERN})/concepts/", include('core.concepts.urls')),
-    re_path(fr"^(?P<source>{NAMESPACE_PATTERN})/mappings/", include('core.mappings.urls')),
-    re_path(
-        fr"^(?P<source>{NAMESPACE_PATTERN})/extras/$",
+    path("<str:source>/concepts/$clone/", views.SourceConceptsCloneView.as_view()),
+    path("<str:source>/concepts/indexes/", views.SourceConceptsIndexView.as_view()),
+    path("<str:source>/mappings/indexes/", views.SourceMappingsIndexView.as_view()),
+    path("<str:source>/concepts/", include('core.concepts.urls')),
+    path("<str:source>/mappings/", include('core.mappings.urls')),
+    path(
+        "<str:source>/extras/",
         views.SourceExtrasView.as_view(),
         name='source-extras'
     ),
-    re_path(
-        r'^(?P<source>{pattern})/(?P<version>{pattern})/$'.format(pattern=NAMESPACE_PATTERN),
+    path(
+        "<str:source>/<str:version>/",
         views.SourceVersionRetrieveUpdateDestroyView.as_view(),
         name='source-version-detail'
     ),
-    re_path(
-        r'^(?P<source>{pattern})/(?P<version>{pattern})/summary/$'.format(pattern=NAMESPACE_PATTERN),
+    path(
+        '<str:source>/<str:version>/summary/',
         views.SourceVersionSummaryView.as_view(),
         name='source-version-summary'
     ),
-    re_path(
-        r"^(?P<source>{pattern})/extras/(?P<extra>{pattern})/$".format(pattern=NAMESPACE_PATTERN),
+    path(
+        "<str:source>/extras/<str:extra>/",
         views.SourceExtraRetrieveUpdateDestroyView.as_view(),
         name='source-extra'
     ),
-    re_path(
-        r'^(?P<source>{pattern})/(?P<version>{pattern})/export/$'.format(pattern=NAMESPACE_PATTERN),
+    path(
+        '<str:source>/<str:version>/export/',
         views.SourceVersionExportView.as_view(), name='sourceversion-export'
     ),
-    re_path(
-        r"^(?P<source>{pattern})/(?P<version>{pattern})/extras/$".format(pattern=NAMESPACE_PATTERN),
+    path(
+        "<str:source>/<str:version>/extras/",
         views.SourceVersionExtrasView.as_view(),
         name='sourceversion-extras'
     ),
-    re_path(
-        r"^(?P<source>{pattern})/(?P<version>{pattern})/concepts/".format(
-            pattern=NAMESPACE_PATTERN
-        ),
+    path(
+        "<str:source>/<str:version>/concepts/",
         include('core.concepts.urls')
     ),
-    re_path(
-        r"^(?P<source>{pattern})/(?P<version>{pattern})/mappings/".format(
-            pattern=NAMESPACE_PATTERN
-        ),
+    path(
+        "<str:source>/<str:version>/mappings/",
         include('core.mappings.urls')
     ),
-    re_path(
-        r'^(?P<source>{pattern})/(?P<version>{pattern})/processing/$'.format(pattern=NAMESPACE_PATTERN),
+    path(
+        '<str:source>/<str:version>/processing/',
         views.SourceVersionProcessingView.as_view(),
         name='sourceversion-processing'
     ),
-    re_path(
-        r'^(?P<source>{pattern})/(?P<version>{pattern})/resources-checksums/$'.format(pattern=NAMESPACE_PATTERN),
+    path(
+        '<str:source>/<str:version>/resources-checksums/',
         views.SourceVersionResourcesChecksumGenerateView.as_view(),
         name='sourceversion-resource-checksums-generate'
     ),

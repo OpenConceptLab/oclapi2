@@ -29,7 +29,7 @@ from core.common.swagger_parameters import q_param, limit_param, sort_desc_param
     canonical_url_param
 from core.common.tasks import export_source, index_source_concepts, index_source_mappings, delete_source, \
     generate_source_resources_checksums, source_version_compare
-from core.common.utils import parse_boolean_query_param, compact_dict_by_values, to_parent_uri
+from core.common.utils import parse_boolean_query_param, compact_dict_by_values, to_parent_uri, decode_string
 from core.common.views import BaseAPIView, BaseLogoView, ConceptContainerExtraRetrieveUpdateDestroyView
 from core.sources.constants import DELETE_FAILURE, DELETE_SUCCESS, VERSION_ALREADY_EXISTS
 from core.sources.documents import SourceDocument
@@ -468,7 +468,7 @@ class SourceVersionExtrasView(SourceBaseView, ListAPIView):
     serializer_class = SourceDetailSerializer
 
     def list(self, request, *args, **kwargs):
-        instance = get_object_or_404(self.get_queryset(), version=self.kwargs['version'])
+        instance = get_object_or_404(self.get_queryset(), version=decode_string(self.kwargs['version']))
         return Response(get(instance, 'extras', {}))
 
 
@@ -477,7 +477,7 @@ class SourceVersionResourcesChecksumGenerateView(SourceBaseView, TaskMixin):  # 
     permission_classes = (IsAdminUser,)
 
     def get(self, request, *args, **kwargs):  # pylint: disable=unused-argument
-        instance = get_object_or_404(self.get_queryset(), version=self.kwargs['version'])
+        instance = get_object_or_404(self.get_queryset(), version=decode_string(self.kwargs['version']))
         result = self.perform_task(generate_source_resources_checksums, (instance.id, ))
         return result if isinstance(result, Response) else Response(status=status.HTTP_200_OK)
 

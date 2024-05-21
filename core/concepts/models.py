@@ -13,7 +13,7 @@ from core.common.models import VersionedModel, ConceptContainerModel
 from core.common.tasks import process_hierarchy_for_new_concept, process_hierarchy_for_concept_version, \
     process_hierarchy_for_new_parent_concept_version, update_mappings_concept
 from core.common.utils import generate_temp_version, drop_version, \
-    encode_string, decode_string, startswith_temp_version, is_versioned_uri
+    startswith_temp_version, is_versioned_uri, decode_string
 from core.concepts.constants import CONCEPT_TYPE, LOCALES_FULLY_SPECIFIED, LOCALES_SHORT, LOCALES_SEARCH_INDEX_TERM, \
     CONCEPT_WAS_RETIRED, CONCEPT_IS_ALREADY_RETIRED, CONCEPT_IS_ALREADY_NOT_RETIRED, CONCEPT_WAS_UNRETIRED, \
     ALREADY_EXISTS, CONCEPT_REGEX, MAX_LOCALES_LIMIT, \
@@ -517,19 +517,11 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             )
 
         if concept:
-            queryset = queryset.filter(mnemonic__in=cls.get_mnemonic_variations_for_filter(concept))
+            queryset = queryset.filter(mnemonic__in=cls.get_encoded_str_variations(concept))
         if concept_version:
             queryset = queryset.filter(version=concept_version)
 
         return cls.apply_attribute_based_filters(queryset, params)
-
-    @staticmethod
-    def get_mnemonic_variations_for_filter(mnemonic):
-        return [
-            mnemonic, encode_string(mnemonic, safe=' '), encode_string(mnemonic, safe='+'),
-            encode_string(mnemonic, safe='+%'), encode_string(mnemonic, safe='% +'),
-            decode_string(mnemonic), decode_string(mnemonic, False)
-        ]
 
     def clone(self):
         concept_version = Concept(
@@ -1102,7 +1094,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             return result if include_self else empty_result
 
         if isinstance(repo_version, str):  # assumes its cascaded under source version, usage via collection-reference
-            source_versions = self.sources.filter(version=repo_version)
+            source_versions = self.sources.filter(version=decode_string(repo_version))
             if source_versions.count() != 1:
                 return result if include_self else empty_result
             repo_version = source_versions.first()
@@ -1170,7 +1162,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             return self
 
         if isinstance(repo_version, str):  # assumes its cascaded under source version, may never happen
-            source_versions = self.sources.filter(version=repo_version)
+            source_versions = self.sources.filter(version=decode_string(repo_version))
             if source_versions.count() != 1:
                 return self
             repo_version = source_versions.first()

@@ -24,7 +24,7 @@ from core.common.permissions import HasPrivateAccess, HasOwnership, CanViewConce
 from .checksums import ChecksumModel, Checksum
 from .utils import write_csv_to_s3, get_csv_from_s3, get_query_params_from_url_string, compact_dict_by_values, \
     to_owner_uri, parse_updated_since_param, get_export_service, to_int, get_truthy_values, generate_temp_version, \
-    canonical_url_to_url_and_version
+    canonical_url_to_url_and_version, decode_string
 from ..concepts.constants import PERSIST_CLONE_ERROR
 from ..toggles.models import Toggle
 
@@ -451,7 +451,7 @@ class SourceContainerMixin:
         if not queryset.exists():
             queryset = self.collection_set.filter(canonical_url=url)
         if version:
-            queryset = queryset.filter(version=version)
+            queryset = queryset.filter(version=decode_string(version))
         return queryset.first()
 
     @staticmethod
