@@ -168,7 +168,10 @@ class TextField(ReadSerializerMixin, serializers.Serializer):
         return dict(validated_data)
 
     def to_representation(self, instance):
-        obj = ast.literal_eval(instance)
+        try:
+            obj = ast.literal_eval(instance)
+        except:  # pylint: disable=bare-except
+            obj = instance
         return super().to_representation(obj)
 
 
