@@ -34,6 +34,7 @@ class CodeSystemListView(SourceListView):
 
     def apply_query_filters(self, queryset):
         query_fields = list(self.serializer_class.Meta.fields)
+        query_fields.extend(['code'])
         queryset = translate_fhir_query(query_fields, self.request.query_params, queryset)
         return queryset
 
