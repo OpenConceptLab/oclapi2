@@ -107,11 +107,9 @@ class CodeSystemTest(OCLTestCase):
         self.assertEqual(resource['version'], 'v2')
 
     def test_find_by_non_supported_param(self):
-        with self.assertRaises(Exception) as context:
-            self.client.get('/fhir/CodeSystem/?non_supported_param=' + self.concept_1.mnemonic)
+        response = self.client.get('/fhir/CodeSystem/?non_supported_param=' + self.concept_1.mnemonic)
 
-        self.assertEqual(str(context.exception), 'The following query params are not supported: {'
-                                                 '"non_supported_param": "' + self.concept_1.mnemonic + '"}')
+        self.assertEqual(response.status_code, 400)
 
     def test_private_can_list(self):
         response = self.client.get('/fhir/CodeSystem/', HTTP_AUTHORIZATION='Token ' + self.user_token)
