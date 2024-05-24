@@ -3,9 +3,9 @@ import json
 import traceback
 import uuid
 
+from celery import Task as CeleryTask
 from celery.result import AsyncResult
 from celery.states import PENDING, ALL_STATES, FAILURE, RETRY, SUCCESS, REJECTED, REVOKED, STARTED
-from celery import Task as CeleryTask
 from celery.worker.request import Request
 from celery_once import QueueOnce, AlreadyQueued
 from django.contrib.postgres.fields import ArrayField
@@ -49,7 +49,7 @@ class Task(models.Model):
         if self.result:
             try:
                 return json.loads(json.dumps(ast.literal_eval(self.result)))
-            except json.JSONDecodeError:
+            except Exception:  # pylint: disable=broad-except
                 return self.result
         return self.result
 
