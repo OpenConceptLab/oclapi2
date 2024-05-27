@@ -817,9 +817,11 @@ class SourceChildMixin(ChecksumModel):
                             self.set_checksums()
                         if Toggle.get(
                                 'PREVENT_DUPLICATE_VERSION_TOGGLE'
-                        ) and not _hierarchy_processing and self.checksums.get(
+                        ) and not _hierarchy_processing and (
+                                prev_latest.checksums and 'standard' in prev_latest.checksums
+                        ) and self.checksums.get(
                             'standard'
-                        ) == prev_latest.get_checksums(recalculate=True).get('standard'):
+                        ) == prev_latest.checksums['standard']:
                             raise ValidationError(self.get_standard_checksum_error())
                         if not self._index:
                             self.prev_latest_version_id = prev_latest.id
