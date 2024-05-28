@@ -478,7 +478,8 @@ class SourceVersionResourcesChecksumGenerateView(SourceBaseView, TaskMixin):  # 
 
     def get(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         instance = get_object_or_404(self.get_queryset(), version=decode_string(self.kwargs['version']))
-        result = self.perform_task(generate_source_resources_checksums, (instance.id, ))
+        only_latest = self.request.query_params.get('only_latest', False)
+        result = self.perform_task(generate_source_resources_checksums, (instance.id, only_latest))
         return result if isinstance(result, Response) else Response(status=status.HTTP_200_OK)
 
 

@@ -735,7 +735,7 @@ def calculate_checksums(resource_type, resource_id):
 
 
 @app.task(ignore_result=True)
-def generate_source_resources_checksums(repo_id):  # pragma: no cover
+def generate_source_resources_checksums(repo_id, only_latest=False):  # pragma: no cover
     from core.sources.models import Source
     repo = Source.objects.filter(id=repo_id).first()
 
@@ -746,8 +746,14 @@ def generate_source_resources_checksums(repo_id):  # pragma: no cover
             for resource in page.object_list:
                 resource.set_checksums()
 
-    set_checksums(repo.get_concepts_queryset())
-    set_checksums(repo.get_mappings_queryset())
+    if repo.is_head and only_latest:
+        from core.concepts.models import Concept
+        from core.mappings.models import Mapping
+        set_checksums(Concept.objects.filter(is_latest_version=True, parent=repo))
+        set_checksums(Mapping.objects.filter(is_latest_version=True, parent=repo))
+    else:
+        set_checksums(repo.get_concepts_queryset())
+        set_checksums(repo.get_mappings_queryset())
 
 
 @app.task(ignore_result=True)
