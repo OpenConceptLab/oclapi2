@@ -785,7 +785,7 @@ class SourceChildMixin(ChecksumModel):
     def is_standard_checksum_error(cls, errors):
         return errors == cls.get_standard_checksum_error()
 
-    def save_as_new_version(self, user, **kwargs):  # pylint: disable=too-many-branches,too-many-statements
+    def save_as_new_version(self, user, **kwargs):  # pylint: disable=too-many-branches,too-many-statements,too-many-locals
         cls = self.__class__
         create_parent_version = kwargs.pop('create_parent_version', True)
         parent_concept_uris = kwargs.pop('parent_concept_uris', None)
@@ -817,12 +817,12 @@ class SourceChildMixin(ChecksumModel):
                             self.set_checksums()
                         if Toggle.get(
                                 'PREVENT_DUPLICATE_VERSION_TOGGLE'
-                        ) and not _hierarchy_processing and (
-                                prev_latest.checksums and 'standard' in prev_latest.checksums
-                        ) and self.checksums.get(
-                            'standard'
-                        ) == prev_latest.checksums['standard']:
-                            raise ValidationError(self.get_standard_checksum_error())
+                        ) and not _hierarchy_processing:
+                            standard_checksum = prev_latest.checksums.get('standard')
+                            if not standard_checksum:
+                                standard_checksum = prev_latest.get_checksums(recalculate=True).get('standard')
+                            if standard_checksum and self.checksums.get('standard') == standard_checksum:
+                                raise ValidationError(self.get_standard_checksum_error())
                         if not self._index:
                             self.prev_latest_version_id = prev_latest.id
                         prev_latest.unmark_latest_version(self._index, parent)
