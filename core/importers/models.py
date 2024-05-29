@@ -716,7 +716,18 @@ class BulkImportInline(BaseImporter):
 
     def notify_progress(self):
         if self.task:  # pragma: no cover
-            self.task.summary = {'processed': self.processed, 'total': self.total}
+            self.task.summary = {
+                'total': self.total,
+                'processed': self.processed,
+                'created': len(self.created),
+                'updated': len(self.updated),
+                'invalid': len(self.invalid),
+                'failed': len(self.failed),
+                'deleted': len(self.deleted),
+                'not_found': len(self.not_found),
+                'permission_denied': len(self.permission_denied),
+                'unchanged': len(self.unchanged),
+            }
             self.task.save()
 
     def run(self):  # pylint: disable=too-many-branches,too-many-statements,too-many-locals
