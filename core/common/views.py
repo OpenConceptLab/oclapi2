@@ -959,6 +959,8 @@ class RootView(BaseAPIView):  # pragma: no cover
     def get(self, _):
         from core.urls import urlpatterns
         data = {'version': __version__, 'routes': {}}
+        main_host_url = self.get_host_url()
+
         for pattern in urlpatterns:
             name = getattr(pattern, 'name', None) or getattr(pattern, 'app_name', None)
             if name in ['admin']:
@@ -970,10 +972,16 @@ class RootView(BaseAPIView):  # pragma: no cover
                 if route.startswith('^\\'):
                     route = route.replace('^\\', '')
             if route and name is None:
-                name = route.split('/', maxsplit=1)[0] + '_urls'
-                if name == 'user_urls':
-                    name = 'current_user_urls'
-            data['routes'][name] = self.get_host_url() + '/' + route
+                name = ('_'.join(route.split('/')[:2])).replace('__', '_').lower()
+                if name.endswith('_'):
+                    name = name[:-1]
+                if name == 'user':
+                    name = 'current_user'
+            if name == 'core.toggles':
+                name = 'toggles'
+
+            host_url = main_host_url.replace('://api.', '://fhir.') if 'fhir' in name else main_host_url
+            data['routes'][name] = host_url + '/' + route
 
         data['routes'].pop('root')
 
