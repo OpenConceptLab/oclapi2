@@ -1954,8 +1954,8 @@ class SourceVersionsComparisonViewTest(OCLAPITestCase):
         response = self.client.post(
             '/sources/$compare/?inline=true',
             {
-                'version1': source_v2.uri,
-                'version2': source_v1.uri,
+                'version2': source_v2.uri,
+                'version1': source_v1.uri,
                 'verbosity': 2
             },
             HTTP_AUTHORIZATION=f'Token {token}',
@@ -1967,12 +1967,12 @@ class SourceVersionsComparisonViewTest(OCLAPITestCase):
             response.data,
             {
                 'meta': {
-                    'version1': {
+                    'version2': {
                         'uri': source_v2.uri,
                         'concepts': 4,  # active count
                         'mappings': 4
                     },
-                    'version2': {
+                    'version1': {
                         'uri': source_v1.uri,
                         'concepts': 5,
                         'mappings': 5
@@ -2110,8 +2110,8 @@ class SourceVersionsChangelogViewTest(OCLAPITestCase):
         response = self.client.post(
             '/sources/$changelog/?inline=true',
             {
-                'version1': source_v2.uri,
-                'version2': source_v1.uri,
+                'version1': source_v1.uri,
+                'version2': source_v2.uri,
                 'verbosity': 2
             },
             HTTP_AUTHORIZATION=f'Token {token}',
@@ -2123,12 +2123,12 @@ class SourceVersionsChangelogViewTest(OCLAPITestCase):
             response.data,
             {
                 'meta': {
-                    'version1': {
+                    'version2': {
                         'uri': source_v2.uri,
                         'concepts': 5,
                         'mappings': 5
                     },
-                    'version2': {
+                    'version1': {
                         'uri': source_v1.uri,
                         'concepts': 6,
                         'mappings': 6

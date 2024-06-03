@@ -164,8 +164,8 @@ class Checksum:
 
 class ChecksumDiff:
     def __init__(self, resources1, resources2, identity='mnemonic', verbosity=0):  # pylint: disable=too-many-arguments
-        self.resources1 = resources1
-        self.resources2 = resources2
+        self.resources1 = resources1  # older version resources
+        self.resources2 = resources2  # newer version resources
         self.identity = identity
         self.verbosity = verbosity
         self.same_standard = {}
@@ -264,24 +264,24 @@ class ChecksumDiff:
 
     @property
     def new(self):
-        return {key: self.resources1_map[key] for key in self.resources1_set - self.resources2_set}
+        return {key: self.resources2_map[key] for key in self.resources2_set - self.resources1_set}
 
     @property
     def deleted(self):
-        diff_set = self.resources2_set - self.resources1_set
-        return {key: self.resources2_map[key] for key in diff_set if key not in self.retired}
+        diff_set = self.resources1_set - self.resources2_set
+        return {key: self.resources1_map[key] for key in diff_set if key not in self.retired}
 
     @property
     def retired(self):
         if self._retired is not None:
             return self._retired
         self._retired = {
-            key: self.resources1_map_retired[key] for key in self.resources1_set_retired - self.resources2_set_retired}
+            key: self.resources2_map_retired[key] for key in self.resources2_set_retired - self.resources1_set_retired}
         return self._retired
 
     @property
     def common(self):
-        return {key: self.resources1_map[key] for key in self.resources1_set & self.resources2_set}
+        return {key: self.resources2_map[key] for key in self.resources1_set & self.resources2_set}
 
     @property
     def is_verbose(self):
@@ -372,17 +372,15 @@ class ChecksumDiff:
     def get_db_id_for(self, diff_key, identity):
         if diff_key == 'retired':
             return get(
-                self.resources1_map_retired, f'{identity}.id'
-            ) or self.resources2_map_retired[identity]['id']
+                self.resources2_map_retired, f'{identity}.id'
+            ) or self.resources1_map_retired[identity]['id']
         return get(
-            self.resources1_map, f'{identity}.id'
-        ) or self.resources2_map[identity]['id']
+            self.resources2_map, f'{identity}.id'
+        ) or self.resources1_map[identity]['id']
 
 
 class ChecksumChangelog:
-    def __init__(self, version1, version2, concepts_diff, mappings_diff, identity='mnemonic'):  # pylint: disable=too-many-arguments
-        self.version1 = version1
-        self.version2 = version2
+    def __init__(self, concepts_diff, mappings_diff, identity='mnemonic'):  # pylint: disable=too-many-arguments
         self.concepts_diff = concepts_diff
         self.mappings_diff = mappings_diff
         self.identity = identity

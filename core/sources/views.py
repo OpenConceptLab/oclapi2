@@ -608,8 +608,8 @@ class AbstractSourceVersionsDiffView(BaseAPIView, TaskMixin):
     changelog = False
 
     def get_objects(self):
-        version1_uri = self.request.data.get('version1')
-        version2_uri = self.request.data.get('version2')
+        version1_uri = self.request.data.get('version1')  # older version
+        version2_uri = self.request.data.get('version2')  # newer version
         version1 = get_object_or_404(Source.objects.filter(uri=version1_uri))
         version2 = get_object_or_404(Source.objects.filter(uri=version2_uri))
         self.check_object_permissions(self.request, version1)

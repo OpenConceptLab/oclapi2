@@ -786,6 +786,10 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
 
     @staticmethod
     def compare(version1, version2, verbosity=0):
+        """
+        version1 is the older version
+        version2 is the newer version
+        """
         from core.common.checksums import ChecksumDiff
         concepts_diff = ChecksumDiff(
             resources1=version1.get_concepts_queryset().only('mnemonic', 'checksums', 'retired'),
@@ -818,6 +822,10 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
 
     @staticmethod
     def changelog(version1, version2, verbosity=0):
+        """
+        version1 is the older version
+        version2 is the newer version
+        """
         from core.common.checksums import ChecksumDiff
         concepts_diff = ChecksumDiff(
             resources1=version1.get_concepts_queryset().only('mnemonic', 'checksums', 'retired'),
@@ -831,7 +839,7 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         )
         concepts_diff.process()
         mappings_diff.process()
-        log = ChecksumChangelog(version1, version2, concepts_diff, mappings_diff)
+        log = ChecksumChangelog(concepts_diff, mappings_diff)
         log.process()
         result = {
             'meta': {
