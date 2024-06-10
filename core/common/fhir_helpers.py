@@ -1,6 +1,6 @@
 import json
 
-from django.core.exceptions import BadRequest
+from core.common.exceptions import Http400
 
 
 def translate_fhir_query(fhir_query_fields, query_params, queryset):
@@ -44,7 +44,7 @@ def translate_fhir_query(fhir_query_fields, query_params, queryset):
             queryset = queryset.filter(**kwargs)
 
     if remaining_query_params:
-        raise BadRequest('The following query params are not supported: ' + json.dumps(remaining_query_params))
+        raise Http400('The following query params are not supported: ' + json.dumps(remaining_query_params))
 
     return queryset
 
