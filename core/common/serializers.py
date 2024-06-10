@@ -97,7 +97,7 @@ class IdentifierSerializer(ReadSerializerMixin, Serializer):
     @staticmethod
     def convert_ocl_uri_to_fhir_url(uri, resource_type):
         resource_type_uri = f"/{resource_type}/"
-        if uri.startswith('/orgs/') or uri.startswith('/users/'):
+        if uri and (uri.startswith('/orgs/') or uri.startswith('/users/')):
             # Recognize OCL API relative URI
             uri = uri.replace('/sources/', resource_type_uri).replace('/collections/', resource_type_uri)
             uri = uri.strip('/')

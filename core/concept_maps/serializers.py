@@ -50,7 +50,7 @@ class ConceptMapGroupField(serializers.Field):
         mappings = value.get_mappings_queryset().order_by('id')[:limit]
         groups = {}
         for mapping in mappings:
-            key = mapping.from_source_url + mapping.to_source_url
+            key = (mapping.from_source_url or '') + (mapping.to_source_url or '')
             group = groups.get(key)
             if not group:
                 if mapping.from_source and mapping.from_source.canonical_url:
