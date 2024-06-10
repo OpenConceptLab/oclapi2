@@ -1900,7 +1900,7 @@ class SourceConceptsCloneViewTest(OCLAPITestCase):
 
 
 class SourceVersionsComparisonViewTest(OCLAPITestCase):
-    def test_post_200(self):  # pylint: disable=too-many-locals
+    def test_post_200(self):  # pylint: disable=too-many-locals,too-many-statements
         source = OrganizationSourceFactory()
         source_v1 = OrganizationSourceFactory(mnemonic=source.mnemonic, organization=source.organization, version='v1')
         source_v2 = OrganizationSourceFactory(mnemonic=source.mnemonic, organization=source.organization, version='v2')
@@ -1956,7 +1956,7 @@ class SourceVersionsComparisonViewTest(OCLAPITestCase):
             {
                 'version2': source_v2.uri,
                 'version1': source_v1.uri,
-                'verbosity': 2
+                'verbosity': 3
             },
             HTTP_AUTHORIZATION=f'Token {token}',
             format='json'
@@ -2035,6 +2035,185 @@ class SourceVersionsComparisonViewTest(OCLAPITestCase):
                         'total': 1,
                         'mnemonic': ['mapping1']
                     }
+                }
+            }
+        )
+
+        response = self.client.post(
+            '/sources/$compare/?inline=true',
+            {
+                'version2': source_v2.uri,
+                'version1': source_v1.uri,
+                'verbosity': 2
+            },
+            HTTP_AUTHORIZATION=f'Token {token}',
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data,
+            {
+                'meta': {
+                    'version2': {
+                        'uri': source_v2.uri,
+                        'concepts': 4,  # active count
+                        'mappings': 4
+                    },
+                    'version1': {
+                        'uri': source_v1.uri,
+                        'concepts': 5,
+                        'mappings': 5
+                    }
+                },
+                'concepts': {
+                    'new': {
+                        'total': 1,
+                        'mnemonic': ['concept6']
+                    },
+                    'removed': {
+                        'total': 1,
+                        'mnemonic': ['concept5']
+                    },
+                    'changed_total': 3,
+                    'changed_retired': {
+                        'total': 1,
+                        'mnemonic': ['concept3']
+                    },
+                    'changed_major': {
+                        'total': 1,
+                        'mnemonic': ['concept2']
+                    },
+                    'changed_minor': {
+                        'total': 1,
+                        'mnemonic': ['concept4']
+                    },
+                    'same_total': 1,
+                    'same_minor': 0,
+                    'same_major': 1
+                },
+                'mappings': {
+                    'new': {
+                        'total': 1,
+                        'mnemonic': ['mapping6']
+                    },
+                    'removed': {
+                        'total': 1,
+                        'mnemonic': ['mapping5']
+                    },
+                    'changed_total': 3,
+                    'changed_retired': {
+                        'total': 1,
+                        'mnemonic': ['mapping3']
+                    },
+                    'changed_major': {
+                        'total': 1,
+                        'mnemonic': ['mapping2']
+                    },
+                    'changed_minor': {
+                        'total': 1,
+                        'mnemonic': ['mapping4']
+                    },
+                    'same_total': 1,
+                    'same_minor': 0,
+                    'same_major': 1
+                }
+            }
+        )
+
+        response = self.client.post(
+            '/sources/$compare/?inline=true',
+            {
+                'version2': source_v2.uri,
+                'version1': source_v1.uri,
+                'verbosity': 1
+            },
+            HTTP_AUTHORIZATION=f'Token {token}',
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data,
+            {
+                'meta': {
+                    'version2': {
+                        'uri': source_v2.uri,
+                        'concepts': 4,  # active count
+                        'mappings': 4
+                    },
+                    'version1': {
+                        'uri': source_v1.uri,
+                        'concepts': 5,
+                        'mappings': 5
+                    }
+                },
+                'concepts': {
+                    'new': 1,
+                    'removed': 1,
+                    'changed_total': 3,
+                    'changed_retired': 1,
+                    'changed_major': 1,
+                    'changed_minor': 1,
+                    'same_total': 1,
+                    'same_minor': 0,
+                    'same_major': 1
+                },
+                'mappings': {
+                    'new': 1,
+                    'removed': 1,
+                    'changed_total': 3,
+                    'changed_retired': 1,
+                    'changed_major': 1,
+                    'changed_minor': 1,
+                    'same_total': 1,
+                    'same_minor': 0,
+                    'same_major': 1
+                }
+            }
+        )
+
+        response = self.client.post(
+            '/sources/$compare/?inline=true',
+            {
+                'version2': source_v2.uri,
+                'version1': source_v1.uri,
+            },
+            HTTP_AUTHORIZATION=f'Token {token}',
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data,
+            {
+                'meta': {
+                    'version2': {
+                        'uri': source_v2.uri,
+                        'concepts': 4,  # active count
+                        'mappings': 4
+                    },
+                    'version1': {
+                        'uri': source_v1.uri,
+                        'concepts': 5,
+                        'mappings': 5
+                    }
+                },
+                'concepts': {
+                    'new': 1,
+                    'removed': 1,
+                    'changed_total': 3,
+                    'changed_retired': 1,
+                    'changed_major': 1,
+                    'changed_minor': 1,
+                },
+                'mappings': {
+                    'new': 1,
+                    'removed': 1,
+                    'changed_total': 3,
+                    'changed_retired': 1,
+                    'changed_major': 1,
+                    'changed_minor': 1,
                 }
             }
         )

@@ -285,15 +285,26 @@ class ChecksumDiff:
 
     @property
     def is_verbose(self):
+        # include same stats, count only
         return self.verbosity >= 1
 
     @property
     def is_very_verbose(self):
-        return self.verbosity == 2
+        # include IDS of new/changed/removed/retired
+        return self.verbosity >= 2
 
     @property
-    def include_same(self):
+    def is_very_very_verbose(self):
+        # include IDS of same
+        return self.verbosity >= 3
+
+    @property
+    def include_same_stats(self):
         return self.is_verbose
+
+    @property
+    def include_same_details(self):
+        return self.is_very_very_verbose
 
     def populate_diff_from_common(self):
         common = self.common
@@ -307,14 +318,15 @@ class ChecksumDiff:
                 self.changed_smart[key] = info
             elif checksums1['standard'] != checksums2['standard']:
                 self.changed_standard[key] = info
-            elif self.include_same and checksums1['smart'] == checksums2['smart']:
+            elif self.include_same_stats and checksums1['smart'] == checksums2['smart']:
                 self.same_smart[key] = info
-            elif self.include_same and checksums1['standard'] == checksums2['standard']:
+            elif self.include_same_stats and checksums1['standard'] == checksums2['standard']:
                 self.same_standard[key] = info
 
-    def get_struct(self, values):
+    def get_struct(self, values, is_same=False):
         total = len(values or [])
-        if self.is_very_verbose:
+        include_ids = self.is_very_very_verbose if is_same else self.is_very_verbose
+        if include_ids:
             if values:
                 return {'total': total, self.identity: list(values.keys())}
             return total
@@ -330,10 +342,10 @@ class ChecksumDiff:
             'changed_major': self.get_struct(self.changed_smart),
             'changed_minor': self.get_struct(self.changed_standard),
         }
-        if self.include_same:
+        if self.include_same_stats:
             self.result['same_total'] = len(self.same_standard or []) + len(self.same_smart or [])
-            self.result['same_minor'] = self.get_struct(self.same_standard)
-            self.result['same_major'] = self.get_struct(self.same_smart)
+            self.result['same_minor'] = self.get_struct(self.same_standard, True)
+            self.result['same_major'] = self.get_struct(self.same_smart, True)
 
     def set_concise_result(self):
         self.result_concise = {

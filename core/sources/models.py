@@ -830,12 +830,12 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         concepts_diff = ChecksumDiff(
             resources1=version1.get_concepts_queryset().only('mnemonic', 'checksums', 'retired'),
             resources2=version2.get_concepts_queryset().only('mnemonic', 'checksums', 'retired'),
-            verbosity=2
+            verbosity=3
         )
         mappings_diff = ChecksumDiff(
             resources1=version1.get_mappings_queryset().only('mnemonic', 'checksums', 'retired'),
             resources2=version2.get_mappings_queryset().only('mnemonic', 'checksums', 'retired'),
-            verbosity=2
+            verbosity=3
         )
         concepts_diff.process()
         mappings_diff.process()
