@@ -172,6 +172,10 @@ class TextField(ReadSerializerMixin, serializers.Serializer):
             obj = ast.literal_eval(instance)
         except:  # pylint: disable=bare-except
             obj = instance
+
+        if isinstance(obj, str) or not isinstance(obj, dict):
+            obj = {'status': 'generated', 'div': obj}
+
         return super().to_representation(obj)
 
 
