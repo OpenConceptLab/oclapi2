@@ -776,10 +776,16 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             self.total_count = es_search.total - offset
             return es_search.queryset, es_search.scores, es_search.max_score, es_search.highlights
         except RequestError as ex:  # pragma: no cover
-            if get(ex, 'info.error.caused_by.reason', '').startswith('Result window is too large'):
-                raise Http400(detail='Only 10000 results are available. Please apply additional filters'
-                                     ' or fine tune your query to get more accurate results.') from ex
-            raise ex
+            reason = get(
+                ex, 'info.error.caused_by.reason', ''
+            ) or get(ex, 'info.error.root_cause.0.reason', '')
+            if reason.startswith('Result window is too large'):
+                reason = 'Only 10000 results are available. Please apply additional filters or fine tune your query '\
+                         ' to get more accurate results.'
+            elif 'input automaton is too large' in reason:
+                reason = 'Input value is too large.'
+
+            raise Http400(detail=reason or get(ex, 'info') or get(ex, 'error') or str(ex)) from ex
         except TransportError as ex:  # pragma: no cover
             raise Http400(detail=get(ex, 'info') or get(ex, 'error') or str(ex)) from ex
 
