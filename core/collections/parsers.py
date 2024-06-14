@@ -174,7 +174,8 @@ class CollectionReferenceExpandedStructureParser(CollectionReferenceAbstractPars
         code = get(expression, 'code')
         if not concept and not mapping:
             if not code and not system and not system_version and not valueset and 'expression' in expression:
-                parser = CollectionReferenceExpressionStringParser(expression['expression'], self.transform, self.cascade, self.user)
+                parser = CollectionReferenceExpressionStringParser(
+                    expression['expression'], self.transform, self.cascade, self.user)
                 parser.parse()
                 parser.to_reference_structure()
                 self.references += parser.references
