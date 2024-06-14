@@ -119,6 +119,9 @@ class CollectionReferenceExpandedStructureParser(CollectionReferenceAbstractPars
             return self.references
         concept = expression.get('concept', None)
         mapping = expression.get('mapping', None)
+        system = get(expression, 'system') or get(expression, 'url')
+        system_version = get(expression, 'version')
+        valueset = get(expression, 'valueset') or get(expression, 'valueSet')
         if concept:
             if not isinstance(concept, list):
                 concept = [concept]
@@ -130,10 +133,10 @@ class CollectionReferenceExpandedStructureParser(CollectionReferenceAbstractPars
                     {
                         'expression': None,
                         'namespace': get(expression, 'namespace'),
-                        'system': get(expression, 'system') or get(expression, 'url'),
-                        'version': get(expression, 'version'),
+                        'system': system,
+                        'version': system_version,
                         'reference_type': 'concepts',
-                        'valueset': get(expression, 'valueset') or get(expression, 'valueSet'),
+                        'valueset': valueset,
                         'cascade': get(expression, 'cascade') or self.cascade,
                         'filter': get(expression, 'filter'),
                         'code': code,
@@ -154,10 +157,10 @@ class CollectionReferenceExpandedStructureParser(CollectionReferenceAbstractPars
                     {
                         'expression': None,
                         'namespace': get(expression, 'namespace'),
-                        'system': get(expression, 'system') or get(expression, 'url'),
-                        'version': get(expression, 'version'),
+                        'system': system,
+                        'version': system_version,
                         'reference_type': 'mappings',
-                        'valueset': get(expression, 'valueset') or get(expression, 'valueSet'),
+                        'valueset': valueset,
                         'cascade': get(expression, 'cascade') or self.cascade,
                         'filter': get(expression, 'filter'),
                         'code': code,
@@ -168,23 +171,30 @@ class CollectionReferenceExpandedStructureParser(CollectionReferenceAbstractPars
                         'include': self.get_include_value(expression)
                     }
                 )
+        code = get(expression, 'code')
         if not concept and not mapping:
-            self.references.append({
-                                       'expression': get(expression, 'expression', None),
-                                       'namespace': get(expression, 'namespace'),
-                                       'system': get(expression, 'system') or get(expression, 'url'),
-                                       'version': get(expression, 'version'),
-                                       'reference_type': get(expression, 'reference_type', 'concepts'),
-                                       'valueset': get(expression, 'valueset') or get(expression, 'valueSet'),
-                                       'cascade': get(expression, 'cascade') or self.cascade,
-                                       'filter': get(expression, 'filter'),
-                                       'code': get(expression, 'code'),
-                                       'resource_version': get(expression, 'resource_version'),
-                                       'transform': get(expression, 'transform'),
-                                       'created_by': self.user,
-                                       'display': get(expression, 'display'),
-                                       'include': self.get_include_value(expression)
-                                   })
+            if not code and not system and not system_version and not valueset and 'expression' in expression:
+                parser = CollectionReferenceExpressionStringParser(expression['expression'], self.transform, self.cascade, self.user)
+                parser.parse()
+                parser.to_reference_structure()
+                self.references += parser.references
+            else:
+                self.references.append({
+                                           'expression': get(expression, 'expression', None),
+                                           'namespace': get(expression, 'namespace'),
+                                           'system': system,
+                                           'version': system_version,
+                                           'reference_type': get(expression, 'reference_type', 'concepts'),
+                                           'valueset': valueset,
+                                           'cascade': get(expression, 'cascade') or self.cascade,
+                                           'filter': get(expression, 'filter'),
+                                           'code': code,
+                                           'resource_version': get(expression, 'resource_version'),
+                                           'transform': get(expression, 'transform'),
+                                           'created_by': self.user,
+                                           'display': get(expression, 'display'),
+                                           'include': self.get_include_value(expression)
+                                       })
         return self.references
 
 
