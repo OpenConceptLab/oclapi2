@@ -481,7 +481,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         return None
 
     @classmethod
-    def persist_new(cls, data, user):
+    def persist_new(cls, data, user):  # pylint: disable=too-many-statements
         related_fields = ['from_concept_url', 'to_concept_url', 'to_source_url', 'from_source_url']
         field_data = {k: v for k, v in data.items() if k not in related_fields}
         url_params = {k: v for k, v in data.items() if k in related_fields}
