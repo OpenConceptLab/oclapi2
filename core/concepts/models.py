@@ -802,7 +802,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             if concept.id:
                 concept.delete()
             concept.errors.update(ex.message_dict)
-        except IntegrityError as ex:
+        except (IntegrityError, ValueError) as ex:
             if concept.id:
                 concept.delete()
             concept.errors.update({'__all__': ex.args})

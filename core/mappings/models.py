@@ -529,8 +529,12 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
                 parent.update_mappings_count()
                 mapping.index_from_concept()
         except ValidationError as ex:
+            if mapping.id:
+                mapping.delete()
             mapping.errors.update(ex.message_dict)
-        except IntegrityError as ex:
+        except (IntegrityError, ValueError) as ex:
+            if mapping.id:
+                mapping.delete()
             mapping.errors.update({'__all__': ex.args})
 
         return mapping
