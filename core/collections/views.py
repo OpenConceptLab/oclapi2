@@ -469,7 +469,10 @@ class CollectionReferencesView(
         collection = self.get_object()
         cascade = request.data.get('cascade', None) or self.request.query_params.get('cascade', '').lower()
         transform = self.request.query_params.get('transformReferences', '').lower()
-        task_args = (self.request.user.id, request.data.get('data'), collection.id, cascade, transform)
+        data = request.data.get('data')
+        if isinstance(data, dict) and all(not data.get(key) for key in data.keys() if key not in ['exclude']):
+            return Response(status=status.HTTP_400_BAD_REQUEST)
+        task_args = (self.request.user.id, data, collection.id, cascade, transform)
 
         result = self.perform_task(add_references, task_args)
         if isinstance(result, Response):

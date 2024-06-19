@@ -1423,6 +1423,20 @@ class CollectionReferencesViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data, [])
 
+        response = self.client.put(
+            self.collection.uri + 'references/',
+            {
+                "data": {
+                    "concepts": [],
+                    "mappings": [],
+                    "exclude": True
+                }
+            },
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+        self.assertEqual(response.status_code, 400)
+
 
 class CollectionVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
     def setUp(self):
