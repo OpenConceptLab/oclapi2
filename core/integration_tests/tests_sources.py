@@ -1545,10 +1545,31 @@ class SourceSummaryViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['uuid'], str(self.source.id))
         self.assertEqual(response.data['id'], self.source.mnemonic)
-
         self.assertEqual(
             response.data['distribution']['from_sources_map_type'],
             [{
+                'id': 'HEAD',
+                'version_url': self.source.url,
+                'type': 'Source Version',
+                'short_code': self.source.mnemonic,
+                'released': False,
+                'distribution': {
+                    'total': 2,
+                    'retired': 0,
+                    'active': 2,
+                    'map_types': [{
+                        'map_type': self.random_key,
+                        'total': 1,
+                        'retired': 0,
+                        'active': 1
+                    }, {
+                        'map_type': f'foobar-{self.random_key}',
+                        'total': 1,
+                        'retired': 0,
+                        'active': 1
+                    }]
+                }
+            }, {
                 'id': 'HEAD',
                 'version_url': random_source2.url,
                 'type': 'Source Version',
@@ -1559,11 +1580,11 @@ class SourceSummaryViewTest(OCLAPITestCase):
                     'retired': 0,
                     'active': 1,
                     'map_types': [{
-                                      'map_type': f'foobar-{self.random_key}',
-                                      'total': 1,
-                                      'retired': 0,
-                                      'active': 1
-                                  }]
+                        'map_type': f'foobar-{self.random_key}',
+                        'total': 1,
+                        'retired': 0,
+                        'active': 1
+                    }]
                 }
             }]
         )
@@ -1577,6 +1598,28 @@ class SourceSummaryViewTest(OCLAPITestCase):
         self.assertEqual(
             response.data['distribution']['to_sources_map_type'],
             [{
+                'id': 'HEAD',
+                'version_url': self.source.url,
+                'type': 'Source Version',
+                'short_code': self.source.mnemonic,
+                'released': False,
+                'distribution': {
+                    'total': 2,
+                    'retired': 0,
+                    'active': 2,
+                    'map_types': [{
+                        'map_type': self.random_key,
+                        'total': 1,
+                        'retired': 0,
+                        'active': 1
+                    }, {
+                        'map_type': f'foobar-{self.random_key}',
+                        'total': 1,
+                        'retired': 0,
+                        'active': 1
+                    }]
+                }
+            }, {
                 'id': 'HEAD',
                 'version_url': random_source1.url,
                 'type': 'Source Version',

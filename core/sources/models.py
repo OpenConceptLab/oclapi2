@@ -729,16 +729,10 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         return sorted(distribution, key=lambda dist: dist['distribution']['total'], reverse=True)
 
     def referenced_from_sources(self):
-        return Source.objects.exclude(
-            organization_id=self.organization_id, user_id=self.user_id,
-            mnemonic=self.mnemonic
-        ).filter(id__in=self.get_mappings_queryset().values_list('from_source_id', flat=True))
+        return Source.objects.filter(id__in=self.get_mappings_queryset().values_list('from_source_id', flat=True))
 
     def referenced_to_sources(self):
-        return Source.objects.exclude(
-            organization_id=self.organization_id, user_id=self.user_id,
-            mnemonic=self.mnemonic
-        ).filter(id__in=self.get_mappings_queryset().values_list('to_source_id', flat=True))
+        return Source.objects.filter(id__in=self.get_mappings_queryset().values_list('to_source_id', flat=True))
 
     def get_concepts_queryset(self):
         if self.is_head:
