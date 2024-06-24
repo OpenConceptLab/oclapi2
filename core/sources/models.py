@@ -765,8 +765,8 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
             'active': self.active_mappings,
             'retired': self.retired_mappings_count,
             'map_type': self._to_clean_facets(facets.mapType or []),
-            'to_concept_source': self._to_clean_facets(facets.toConceptSource or [], True),
-            'from_concept_source': self._to_clean_facets(facets.fromConceptSource or [], True),
+            'to_concept_source': self._to_clean_facets(facets.toConceptSource or []),
+            'from_concept_source': self._to_clean_facets(facets.fromConceptSource or []),
             'contributors': self._to_clean_facets(facets.updatedBy or [])
         }
 
