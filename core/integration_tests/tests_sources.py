@@ -1453,8 +1453,8 @@ class SourceSummaryViewTest(OCLAPITestCase):
                 'active': 1,
                 'retired': 0,
                 'map_type': [(self.random_key, 1)],
-                'from_concept_source': [],
-                'to_concept_source': [],
+                'from_concept_source': [(self.random_key, 1)],
+                'to_concept_source': [(self.random_key, 1)],
             }
         )
 
@@ -1484,8 +1484,8 @@ class SourceSummaryViewTest(OCLAPITestCase):
                 'active': 1,
                 'retired': 0,
                 'map_type': [(self.random_key, 1)],
-                'from_concept_source': [],
-                'to_concept_source': [],
+                'from_concept_source': [(self.random_key, 1)],
+                'to_concept_source': [(self.random_key, 1)],
                 'contributors': [('ocladmin', 1)]
             }
         )
@@ -1535,8 +1535,8 @@ class SourceSummaryViewTest(OCLAPITestCase):
                 'active': 3,
                 'retired': 0,
                 'map_type': [(f'foobar-{self.random_key}', 2), (self.random_key, 1)],
-                'from_concept_source': [(random_source2.mnemonic, 1)],
-                'to_concept_source': [(random_source1.mnemonic, 1)],
+                'from_concept_source': [(self.random_key, 2), (random_source2.mnemonic, 1)],
+                'to_concept_source': [(self.random_key, 2), (random_source1.mnemonic, 1)],
             }
         )
         response = self.client.get(
