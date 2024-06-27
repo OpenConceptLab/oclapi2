@@ -116,7 +116,10 @@ class CustomESSearch:
                 criterion |= CustomESSearch.get_match_phrase_criteria(attr, search_str, 5)
 
         for field, meta in match_word_fields_map.items():
-            criteria = CustomESSearch.get_match_criteria(field, search_str, meta['boost'])
+            if ' or ' in search_str.lower():
+                criteria = CustomESSearch.get_or_match_criteria(field, search_str, meta['boost'])
+            else:
+                criteria = CustomESSearch.get_match_criteria(field, search_str, meta['boost'])
             criterion = criteria if criterion is None else criterion | criteria
         return criterion
 
@@ -147,6 +150,20 @@ class CustomESSearch:
                     'boost': boost,
                     'auto_generate_synonyms_phrase_query': False,
                     'operator': 'AND'
+                }
+            }
+        )
+
+    @staticmethod
+    def get_or_match_criteria(field, search_str, boost):
+        return Q(
+            'match',
+            **{
+                field: {
+                    'query': search_str,
+                    'boost': boost,
+                    'auto_generate_synonyms_phrase_query': False,
+                    'operator': 'OR'
                 }
             }
         )
