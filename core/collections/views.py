@@ -904,7 +904,7 @@ class CollectionVersionConceptRetrieveView(CollectionBaseView, RetrieveAPIView):
         count = concepts.count()
         if count == 0:
             raise Http404()
-        if count > 1 and not uri_param:
+        if count > 1:
             raise Http409()
 
         return concepts.first()
@@ -932,7 +932,7 @@ class CollectionVersionExpansionConceptRetrieveView(CollectionBaseView, Retrieve
         count = concepts.count()
         if count == 0:
             raise Http404()
-        if count > 1 and not uri_param:
+        if count > 1:
             raise Http409()
 
         return concepts.first()

@@ -16,7 +16,7 @@ from core.bundles.serializers import BundleSerializer
 from core.collections.documents import CollectionDocument
 from core.common.constants import (
     HEAD, INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_RETIRED_PARAM, ACCESS_TYPE_NONE)
-from core.common.exceptions import Http400, Http403
+from core.common.exceptions import Http400, Http403, Http409
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryMixin
 from core.common.swagger_parameters import (
     q_param, limit_param, sort_desc_param, page_param, sort_asc_param, verbose_param,
@@ -379,6 +379,12 @@ class ConceptCascadeView(ConceptBaseView):
         queryset = self.get_queryset()
         if 'concept_version' not in self.kwargs and 'version' not in self.kwargs and 'collection' not in self.kwargs:
             queryset = queryset.filter(id=F('versioned_object_id'))
+        uri_param = self.request.query_params.dict().get('uri')
+        if uri_param:
+            queryset = queryset.filter(**Concept.get_parent_and_owner_filters_from_uri(uri_param))
+
+        if queryset.count() > 1:
+            raise Http409()
 
         instance = queryset.first()
 
