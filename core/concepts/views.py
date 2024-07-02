@@ -383,7 +383,7 @@ class ConceptCascadeView(ConceptBaseView):
         if uri_param:
             queryset = queryset.filter(**Concept.get_parent_and_owner_filters_from_uri(uri_param))
 
-        if queryset.count() > 1:
+        if queryset.count() > 1 and 'collection' in self.kwargs:
             raise Http409()
 
         instance = queryset.first()
