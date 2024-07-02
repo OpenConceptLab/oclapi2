@@ -1,7 +1,6 @@
 from django.urls import path
 
 from core.collections.feeds import CollectionFeed
-from core.concepts.views import ConceptCascadeView
 from . import views
 
 urlpatterns = [
@@ -53,14 +52,14 @@ urlpatterns = [
         name='concept-mappings'
     ),
     path(
+        "<str:collection>/concepts/<str:concept>/$cascade/",
+        views.CollectionVersionConceptCascadeView.as_view(),
+        name='concept-cascade'
+    ),
+    path(
         "<str:collection>/concepts/<str:concept>/<str:concept_version>/mappings/",
         views.CollectionVersionConceptMappingsView.as_view(),
         name='concept-version-mappings'
-    ),
-    path(
-        "<str:collection>/concepts/<str:concept>/$cascade/",
-        ConceptCascadeView.as_view(),
-        name='concept-cascade'
     ),
     path(
         "<str:collection>/concepts/<str:concept>/<str:concept_version>/",
@@ -139,17 +138,17 @@ urlpatterns = [
     ),
     path(
         "<str:collection>/<str:version>/expansions/<str:expansion>/concepts/<str:concept>/mappings/",
-        views.CollectionVersionExpansionConceptMappingsView.as_view(),
+        views.CollectionVersionConceptMappingsView.as_view(),
         name='concept-mappings'
     ),
     path(
         "<str:collection>/<str:version>/expansions/<str:expansion>/concepts/<str:concept>/<str:concept_version>/mappings/",  # pylint: disable=line-too-long
-        views.CollectionVersionExpansionConceptMappingsView.as_view(),
+        views.CollectionVersionConceptMappingsView.as_view(),
         name='concept-version-mappings'
     ),
     path(
         "<str:collection>/<str:version>/expansions/<str:expansion>/concepts/<str:concept>/$cascade/",
-        ConceptCascadeView.as_view(),
+        views.CollectionVersionConceptCascadeView.as_view(),
         name='concept-cascade'
     ),
     path(
@@ -159,17 +158,17 @@ urlpatterns = [
     ),
     path(
         "<str:collection>/<str:version>/expansions/<str:expansion>/concepts/<str:concept>/<str:concept_version>/",
-        views.CollectionVersionExpansionConceptRetrieveView.as_view(),
+        views.CollectionVersionConceptRetrieveView.as_view(),
         name='concept-version-detail'
     ),
     path(
         "<str:collection>/<str:version>/expansions/<str:expansion>/concepts/<str:concept>/",
-        views.CollectionVersionExpansionConceptRetrieveView.as_view(),
+        views.CollectionVersionConceptRetrieveView.as_view(),
         name='concept-detail'
     ),
     path(
         "<str:collection>/<str:version>/expansions/<str:expansion>/mappings/<str:mapping>/<str:mapping_version>/",
-        views.CollectionVersionExpansionMappingRetrieveView.as_view(),
+        views.CollectionVersionMappingRetrieveView.as_view(),
         name='mapping-version-detail'
     ),
     path(
@@ -179,7 +178,7 @@ urlpatterns = [
     ),
     path(
         "<str:collection>/<str:version>/expansions/<str:expansion>/mappings/<str:mapping>/",
-        views.CollectionVersionExpansionMappingRetrieveView.as_view(),
+        views.CollectionVersionMappingRetrieveView.as_view(),
         name='mapping-detail'
     ),
     path(
@@ -208,7 +207,7 @@ urlpatterns = [
     ),
     path(
         "<str:collection>/<str:version>/concepts/<str:concept>/$cascade/",
-        ConceptCascadeView.as_view(),
+        views.CollectionVersionConceptCascadeView.as_view(),
         name='concept-$cascade'
     ),
     path(
