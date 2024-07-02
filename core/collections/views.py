@@ -911,7 +911,7 @@ class CollectionVersionResourceRetrieveView(CollectionBaseView):
         count = queryset.count()
         if count == 0:
             raise Http404()
-        if count > 1:
+        if count > 1 and not uri_param:
             raise Http409()
         return queryset
 
