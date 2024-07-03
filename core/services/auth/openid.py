@@ -30,6 +30,15 @@ class OpenIDAuthService(AbstractAuthService):
                f"redirect_uri={redirect_uri}"
 
     @staticmethod
+    def get_reset_password_redirect_url(client_id, redirect_uri):
+        return f"{settings.OIDC_OP_AUTHORIZATION_ENDPOINT}?" \
+               f"scope=openid&" \
+               f"kc_action=UPDATE_PASSWORD&" \
+               f"response_type=code&" \
+               f"client_id={client_id}&" \
+               f"redirect_uri={redirect_uri}"
+
+    @staticmethod
     def get_registration_redirect_url(client_id, redirect_uri, state, nonce):
         return f"{settings.OIDC_OP_REGISTRATION_ENDPOINT}?" \
                f"response_type=code id_token&" \

@@ -329,6 +329,17 @@ class UserEmailVerificationView(UserBaseView):
 class UserPasswordResetView(UserBaseView):
     permission_classes = (AllowAny, )
 
+    @staticmethod
+    def get(request):
+        if AuthService.is_sso_enabled():
+            return redirect(
+                OpenIDAuthService.get_reset_password_redirect_url(
+                    request.query_params.get('client_id'),
+                    request.query_params.get('redirect_uri'),
+                )
+            )
+        return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
+
     def post(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         """Sends reset password mail"""
 
