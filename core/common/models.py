@@ -723,7 +723,9 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
         queue_schema_update_task = obj.is_validation_necessary()
         is_source = cls.__name__ == 'Source'
-        should_reindex_resources = is_source and obj.released != cls.objects.filter(id=obj.id).first().released
+        original_source = cls.objects.filter(id=obj.id).first()
+        should_reindex_resources = is_source and obj.released != original_source.released
+        obj.should_update_public_access = is_source and obj.public_access != original_source.public_access
 
         try:
             obj.full_clean()

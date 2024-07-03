@@ -6,7 +6,7 @@ from core.sources.models import Source
 
 @receiver(post_save, sender=Source)
 def propagate_parent_attributes(sender, instance=None, created=False, **kwargs):  # pylint: disable=unused-argument
-    if not created and instance:
+    if not created and instance and getattr(instance, 'should_update_public_access'):
         updated_concepts = 0
         updated_mappings = 0
         updated_concepts += instance.concepts_set.exclude(
