@@ -725,8 +725,8 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         is_source = cls.__name__ == 'Source'
         original_source = cls.objects.filter(id=obj.id).first()
         should_reindex_resources = is_source and obj.released != original_source.released
-        obj._should_update_public_access = is_source and obj.public_access != original_source.public_access
-        obj._should_update_is_active = is_source and obj.is_active != original_source.is_active
+        obj._should_update_public_access = is_source and obj.public_access != original_source.public_access  # pylint: disable=protected-access
+        obj._should_update_is_active = is_source and obj.is_active != original_source.is_active  # pylint: disable=protected-access
 
         try:
             obj.full_clean()

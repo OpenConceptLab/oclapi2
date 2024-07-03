@@ -358,7 +358,7 @@ class SourceTest(OCLTestCase):
         concept = ConceptFactory(parent=source, is_active=True)
 
         source.is_active = False
-        source._should_update_is_active = True
+        source._should_update_is_active = True  # pylint: disable=protected-access
         source.save()
         concept.refresh_from_db()
 
@@ -366,7 +366,7 @@ class SourceTest(OCLTestCase):
         self.assertFalse(concept.is_active)
 
         source.is_active = True
-        source._should_update_is_active = True
+        source._should_update_is_active = True  # pylint: disable=protected-access
         source.save()
         concept.refresh_from_db()
 

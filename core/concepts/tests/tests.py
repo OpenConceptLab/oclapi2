@@ -917,7 +917,7 @@ class ConceptTest(OCLTestCase):
         self.assertEqual(concept.public_access, ACCESS_TYPE_EDIT)
 
         source.public_access = ACCESS_TYPE_VIEW
-        source._should_update_public_access = True
+        source._should_update_public_access = True  # pylint: disable=protected-access
         source.save()
         concept.refresh_from_db()
 
