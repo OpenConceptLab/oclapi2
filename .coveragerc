@@ -20,4 +20,5 @@ omit =
     core/middlewares/*
     *.css
     *.html
+    generate_checksum.py
 concurrency=multiprocessing

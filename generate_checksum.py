@@ -30,7 +30,7 @@ def _serialize(obj):
 
 def _cleanup(fields):
     result = fields
-    if isinstance(fields, dict):
+    if isinstance(fields, dict):  # pylint: disable=too-many-nested-blocks
         result = {}
         for key, value in fields.items():
             if value is None:
@@ -174,9 +174,13 @@ def generate(resource, data, checksum_type='standard'):
 
 def main():
     parser = argparse.ArgumentParser(description='Generate checksum for resource data.')
-    parser.add_argument('resource', type=str, choices=['concept', 'mapping'], help='The type of resource (concept, mapping)')
-    parser.add_argument('data', type=str, help='The data for which checksum needs to be generated')
-    parser.add_argument('checksum_type', type=str, default='standard', choices=['standard', 'smart'], help='The type of checksum to generate (default: standard)')
+    parser.add_argument(
+        'resource', type=str, choices=['concept', 'mapping'], help='The type of resource (concept, mapping)')
+    parser.add_argument(
+        'data', type=str, help='The data for which checksum needs to be generated')
+    parser.add_argument(
+        'checksum_type', type=str, default='standard', choices=['standard', 'smart'],
+        help='The type of checksum to generate (default: standard)')
 
     args = parser.parse_args()
 
