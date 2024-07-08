@@ -167,7 +167,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
                     'sort_weight',
                     'from_source_url',
                     'from_source_version',
-                    'to_source_url'
+                    'to_source_url',
                     'to_source_version'
                 ]
             }
