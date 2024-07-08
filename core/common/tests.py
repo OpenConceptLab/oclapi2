@@ -1337,7 +1337,8 @@ class ChecksumViewTest(OCLAPITestCase):
                     'from_concept_name': 'fooName',
                     'to_concept_name': 'barName',
                     'extras': {'foo': 'bar'},
-                    'external_id': 'EX123'
+                    'external_id': 'EX123',
+                    'to_source_url': '/bar/'
                 }),
                 call({
                     'map_type': 'foobarbara',
@@ -1346,7 +1347,8 @@ class ChecksumViewTest(OCLAPITestCase):
                     'from_concept_name': 'foobaraName',
                     'to_concept_name': 'barbaraName',
                     'extras': {'foo': 'barbara'},
-                    'retired': True
+                    'retired': True,
+                    'to_source_url': '/barbara/',
                 }),
                 call(['checksum1', 'checksum2'])
             ]
