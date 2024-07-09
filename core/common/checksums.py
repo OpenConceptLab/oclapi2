@@ -90,6 +90,9 @@ class ChecksumModel(models.Model):
 
     @staticmethod
     def generate_checksum_from_many(data):
+        print("****before cleanup fields***")
+        from pprint import pprint as p
+        p(data)
         checksums = [
             Checksum.generate(ChecksumModel._cleanup(_data)) for _data in data
         ] if isinstance(data, list) else [

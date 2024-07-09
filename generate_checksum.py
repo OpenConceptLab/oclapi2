@@ -161,6 +161,8 @@ def generate(resource, data, checksum_type='standard'):
     elif resource == 'mapping':
         data = [get_mapping_fields(_data, checksum_type) for _data in flatten([data])]
     from pprint import pprint as p
+    print("\n")
+    print("Fields for Checksum:")
     p(data)
     checksums = [
         _generate(_cleanup(_data)) for _data in data
@@ -188,7 +190,7 @@ def main():
     try:
         result = generate(args.resource, json.loads(args.data), args.checksum_type)
         print("\n")
-        print(f'{args.checksum_type} checksum: {result}')
+        print(f'{args.checksum_type.title()} Checksum: {result}')
     except Exception as e:
         print(e)
         print()
