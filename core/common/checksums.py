@@ -90,8 +90,8 @@ class ChecksumModel(models.Model):
 
     @staticmethod
     def generate_checksum_from_many(data):
-        print("****before cleanup fields***")
         from pprint import pprint as p
+        print("****before cleanup fields***")
         p(data)
         checksums = [
             Checksum.generate(ChecksumModel._cleanup(_data)) for _data in data
@@ -122,6 +122,9 @@ class ChecksumModel(models.Model):
                     continue
                 if key in ['is_active'] and value:
                     continue
+                if isinstance(value, (int, float)):
+                    if int(value) == float(value):
+                        value = int(value)
                 if key in ['extras']:
                     if not value:
                         continue

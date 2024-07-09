@@ -2,6 +2,7 @@ import argparse
 import hashlib
 import json
 from uuid import UUID
+from pprint import pprint
 
 
 def generic_sort(_list):
@@ -39,6 +40,9 @@ def _cleanup(fields):
                 continue
             if key in ['is_active'] and value:
                 continue
+            if isinstance(value, (int, float)):
+                if int(value) == float(value):
+                    value = int(value)
             if key in ['extras']:
                 if not value:
                     continue
@@ -160,10 +164,9 @@ def generate(resource, data, checksum_type='standard'):
         data = [get_concept_fields(_data, checksum_type) for _data in flatten([data])]
     elif resource == 'mapping':
         data = [get_mapping_fields(_data, checksum_type) for _data in flatten([data])]
-    from pprint import pprint as p
     print("\n")
     print("Fields for Checksum:")
-    p(data)
+    pprint(data)
     checksums = [
         _generate(_cleanup(_data)) for _data in data
     ] if isinstance(data, list) else [
