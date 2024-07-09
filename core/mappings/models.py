@@ -160,7 +160,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
     def get_standard_checksum_fields_for_resource(data):
         return {
             **Mapping.get_smart_checksum_fields_for_resource(data),
-            'sort_weight': float(get(data, 'sort_weight', 0)) or None,
+            'sort_weight': float(get(data, 'sort_weight') or 0) or None,
             **{
                 field: get(data, field) or None for field in [
                     'extras',
