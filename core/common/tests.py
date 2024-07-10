@@ -1276,10 +1276,6 @@ class ChecksumViewTest(OCLAPITestCase):
         checksum_generate_mock.assert_called_once_with(
             {
                 'concept_class': 'foobar',
-                'names': [],
-                'descriptions': [],
-                'child_concept_urls': [],
-                'parent_concept_urls': []
             }
         )
 
