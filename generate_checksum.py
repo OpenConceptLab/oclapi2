@@ -36,7 +36,9 @@ def _cleanup(fields):
         for key, value in fields.items():
             if value is None:
                 continue
-            if key in ['retired'] and not value:
+            if key in [
+                'retired', 'parent_concept_urls', 'child_concept_urls', 'descriptions', 'extras', 'names'
+            ] and not value:
                 continue
             if key in ['is_active'] and value:
                 continue
@@ -44,8 +46,6 @@ def _cleanup(fields):
                 if int(value) == float(value):
                     value = int(value)
             if key in ['extras']:
-                if not value:
-                    continue
                 if isinstance(value, dict) and any(key.startswith('__') for key in value):
                     value_copied = value.copy()
                     for extra_key in value:
@@ -64,6 +64,9 @@ def _locales_for_checksums(data, relation, fields, predicate_func):
 def _generate(obj, hash_algorithm='MD5'):
     # hex encoding is used to make the hash more readable
     serialized_obj = _serialize(obj).encode('utf-8')
+    print("\n")
+    print("After Serialization")
+    print(serialized_obj.decode())
     hash_func = hashlib.new(hash_algorithm)
     hash_func.update(serialized_obj)
 
@@ -167,6 +170,11 @@ def generate(resource, data, checksum_type='standard'):
     print("\n")
     print("Fields for Checksum:")
     pprint(data)
+
+    print("\n")
+    print("After Cleanup:")
+    pprint([_cleanup(_data) for _data in data])
+
     checksums = [
         _generate(_cleanup(_data)) for _data in data
     ] if isinstance(data, list) else [
@@ -180,12 +188,12 @@ def generate(resource, data, checksum_type='standard'):
 def main():
     parser = argparse.ArgumentParser(description='Generate checksum for resource data.')
     parser.add_argument(
-        'resource', type=str, choices=['concept', 'mapping'], help='The type of resource (concept, mapping)')
+        '-r', '--resource', type=str, choices=['concept', 'mapping'], help='The type of resource (concept, mapping)')
     parser.add_argument(
-        'data', type=str, help='The data for which checksum needs to be generated')
-    parser.add_argument(
-        'checksum_type', type=str, default='standard', choices=['standard', 'smart'],
+        '-c', '--checksum_type', type=str, default='standard', choices=['standard', 'smart'],
         help='The type of checksum to generate (default: standard)')
+    parser.add_argument(
+        '-d', '--data', type=str, help='The data for which checksum needs to be generated')
 
     args = parser.parse_args()
 
@@ -193,7 +201,8 @@ def main():
     try:
         result = generate(args.resource, json.loads(args.data), args.checksum_type)
         print("\n")
-        print(f'{args.checksum_type.title()} Checksum: {result}')
+        print('\x1b[6;30;42m' + f'{args.checksum_type.title()} Checksum: {result}' + '\x1b[0m')
+        print("\n")
     except Exception as e:
         print(e)
         print()

@@ -118,7 +118,9 @@ class ChecksumModel(models.Model):
             for key, value in fields.items():
                 if value is None:
                     continue
-                if key in ['retired'] and not value:
+                if key in [
+                    'retired', 'parent_concept_urls', 'child_concept_urls', 'descriptions', 'extras', 'names'
+                ] and not value:
                     continue
                 if key in ['is_active'] and value:
                     continue
@@ -126,8 +128,6 @@ class ChecksumModel(models.Model):
                     if int(value) == float(value):
                         value = int(value)
                 if key in ['extras']:
-                    if not value:
-                        continue
                     if isinstance(value, dict) and any(key.startswith('__') for key in value):
                         value_copied = value.copy()
                         for extra_key in value:

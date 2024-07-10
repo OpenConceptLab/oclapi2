@@ -34,7 +34,7 @@ class AbstractLocalizedText(ChecksumModel):
     locale_preferred = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
-    CHECKSUM_INCLUSIONS = ['locale', 'locale_preferred']
+    CHECKSUM_INCLUSIONS = ['locale', 'locale_preferred', 'external_id']
     SMART_CHECKSUM_KEY = None
 
     def to_dict(self):
