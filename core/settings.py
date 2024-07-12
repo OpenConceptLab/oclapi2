@@ -209,7 +209,7 @@ ES_SCHEME = os.environ.get('ES_SCHEME', 'http')
 ES_VERIFY_CERTS = os.environ.get('ES_VERIFY_CERTS', str(ES_SCHEME == 'https'))
 ES_USER = os.environ.get('ES_USER', None)
 ES_PASSWORD = os.environ.get('ES_PASSWORD', None)
-ES_ENABLE_SNIFFING = os.environ.get('ES_ENABLE_SNIFFING', True)
+ES_ENABLE_SNIFFING = os.environ.get('ES_ENABLE_SNIFFING', True) in ['TRUE', True]
 http_auth = None
 if ES_USER and ES_PASSWORD:
     http_auth = (ES_USER, ES_PASSWORD)
