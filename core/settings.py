@@ -209,6 +209,7 @@ ES_SCHEME = os.environ.get('ES_SCHEME', 'http')
 ES_VERIFY_CERTS = os.environ.get('ES_VERIFY_CERTS', str(ES_SCHEME == 'https'))
 ES_USER = os.environ.get('ES_USER', None)
 ES_PASSWORD = os.environ.get('ES_PASSWORD', None)
+ES_ENABLE_SNIFFING = os.environ.get('ES_ENABLE_SNIFFING', True)
 http_auth = None
 if ES_USER and ES_PASSWORD:
     http_auth = (ES_USER, ES_PASSWORD)
@@ -219,8 +220,8 @@ ELASTICSEARCH_DSL = {
         'http_auth': http_auth,
         'use_ssl': ES_SCHEME == 'https',
         'verify_certs': ES_VERIFY_CERTS.lower() == 'true',
-        'sniff_on_connection_fail': True,
-        'sniff_on_start': True,
+        'sniff_on_connection_fail': ES_ENABLE_SNIFFING,
+        'sniff_on_start': ES_ENABLE_SNIFFING,
         'sniffer_timeout': 60,
         'sniff_timeout': 10,
         'max_retries': 3,
