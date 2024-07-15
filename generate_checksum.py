@@ -83,8 +83,8 @@ def is_fully_specified_type(_type):
 
 
 def get_concept_fields(data, checksum_type):
-    name_fields = ['locale', 'locale_preferred', 'name', 'name_type']
-    description_fields = ['locale', 'locale_preferred', 'description', 'description_type']
+    name_fields = ['locale', 'locale_preferred', 'name', 'name_type', 'external_id']
+    description_fields = ['locale', 'locale_preferred', 'description', 'description_type', 'external_id']
     if checksum_type == 'standard':
         return {
             'concept_class': data.get('concept_class', None),
