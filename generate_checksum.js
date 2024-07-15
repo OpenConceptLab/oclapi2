@@ -2,12 +2,20 @@ const crypto = require('crypto');
 const { program } = require('commander');
 
 function genericSort(list) {
-  return list.sort((a, b) => {
-    if (typeof a === 'string' || typeof b === 'string') {
-      return a.localeCompare(b);
+    function compare(item) {
+        if (typeof item === 'number' || typeof item === 'string' || typeof item === 'boolean') {
+            return item;
+        }
+        return JSON.stringify(item); // Convert objects to their string representation
     }
-    return a - b;
-  });
+
+    return list.sort((a, b) => {
+        const aValue = compare(a);
+        const bValue = compare(b);
+        if (aValue < bValue) return -1;
+        if (aValue > bValue) return 1;
+        return 0;
+    });
 }
 
 function jsonStringifyWithSpaces(obj) {
@@ -28,6 +36,12 @@ function formatArrayWithSpaces(array) {
   return `[${array.map(item => `"${item}"`).join(', ')}]`;
 }
 
+function unicodeEscape(str) {
+    return str.replace(/[^\0-~]/g, ch => {
+      return '\\u' + ('000' + ch.charCodeAt().toString(16)).slice(-4);
+    });
+}
+
 function serialize(obj) {
   if (Array.isArray(obj) && obj.length === 1) {
     obj = obj[0];
@@ -44,9 +58,9 @@ function serialize(obj) {
     return `${acc}}`;
   }
   if (typeof obj === 'string' && obj.match(/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/)) {
-    return JSON.stringify(obj);
+    return JSON.stringify(obj, (key, value) => typeof value === 'string' ? unicodeEscape(value) : value).replace(/\\\\u/g, '\\u');
   }
-  return JSON.stringify(obj);
+  return JSON.stringify(obj, (key, value) => typeof value === 'string' ? unicodeEscape(value) : value).replace(/\\\\u/g, '\\u');
 }
 
 function cleanup(fields) {
@@ -56,7 +70,7 @@ function cleanup(fields) {
     for (const key in fields) {
       let value = fields[key];
       if (value === null) continue;
-      if (['retired', 'parent_concept_urls', 'child_concept_urls', 'descriptions', 'extras', 'names'].includes(key) && !value)
+      if (['retired', 'parent_concept_urls', 'child_concept_urls', 'descriptions', 'extras', 'names'].includes(key) && (!value || (Array.isArray(value) && value.length === 0)))
        continue;
       if (key === 'is_active' && value) continue;
       if(typeof(value) === 'number' && parseInt(value) === parseFloat(value))
@@ -78,22 +92,30 @@ function cleanup(fields) {
   return result;
 }
 
+function toHexString(byteArray) {
+    return Array.from(byteArray, byte => {
+        return ('0' + (byte & 0xFF).toString(16)).slice(-2);
+    }).join('');
+}
+
 function localesForChecksums(data, relation, fields, predicateFunc) {
   const locales = data[relation] || [];
   return locales.map(locale => {
     const result = {};
     fields.forEach(field => {
-      result[field] = locale[field] || null;
+      result[field] = locale[field];
     });
     return predicateFunc(locale) ? result : null;
   }).filter(locale => locale !== null);
 }
 
 function generate(obj, hashAlgorithm = 'md5') {
-  const serializedObj = serialize(obj);
+  let serializedObj = serialize(obj);
+  serializedObj = new TextEncoder().encode(serializedObj);
   console.log()
   console.log("After Serialization:")
-  console.log(serializedObj)
+  console.log(new TextDecoder().decode(serializedObj))
+
   const hash = crypto.createHash(hashAlgorithm);
   hash.update(serializedObj);
   return hash.digest('hex');
@@ -114,8 +136,8 @@ function convertEmptyObjectToNull(obj) {
 }
 
 function getConceptFields(data, checksumType) {
-  const nameFields = ['locale', 'locale_preferred', 'name', 'name_type'];
-  const descriptionFields = ['locale', 'locale_preferred', 'description', 'description_type'];
+  const nameFields = ['locale', 'locale_preferred', 'name', 'name_type', 'external_id'];
+  const descriptionFields = ['locale', 'locale_preferred', 'description', 'description_type', 'external_id'];
 
   if (checksumType === 'standard') {
     return {
@@ -176,7 +198,7 @@ function flatten(inputList, depth = 1) {
   }, []);
 }
 
-function generateChecksum(resource, data, checksumType = 'standard') {
+function generateChecksum(resource, data, checksumType = 'standard', verbosity=0) {
   if (!resource || !['concept', 'mapping'].includes(resource.toLowerCase())) {
     throw new Error(`Invalid resource: ${resource}`);
   }
@@ -190,13 +212,15 @@ function generateChecksum(resource, data, checksumType = 'standard') {
     data = flatten([data]).map(d => getMappingFields(d, checksumType));
   }
 
-  console.log()
-  console.log("Fields for Checksum:")
-  console.log(data)
+  if(verbosity > 0) {
+    console.log()
+    console.log("Fields for Checksum:")
+    console.log(JSON.stringify(data, null, 2))
 
-  console.log()
-  console.log("After Cleanup:")
-  console.log(data.map(d => cleanup(d)))
+    console.log()
+    console.log("After Cleanup:")
+    console.log(JSON.stringify(data.map(d => cleanup(d)), null, 2))
+  }
 
 
   const checksums = Array.isArray(data)
@@ -215,6 +239,7 @@ program
   .requiredOption('-r, --resource <type>', 'The type of resource (concept, mapping)')
   .requiredOption('-c, --checksum_type <type>', 'The type of checksum to generate (default: standard)', 'standard')
   .requiredOption('-d, --data <json>', 'The data for which checksum needs to be generated')
+  .requiredOption('-v, --verbosity <int>', 'Verbosity level (default: 0)', 0)
 
 program.parse(process.argv);
 
@@ -222,10 +247,15 @@ const options = program.opts();
 
 try {
   const data = JSON.parse(options.data);
-  const checksum = generateChecksum(options.resource, data, options.checksum_type);
+  const checksum = generateChecksum(options.resource, data, options.checksum_type, options.verbosity);
   console.log()
   console.log('\x1b[6;30;42m' + `${options.checksum_type.charAt(0).toUpperCase() + options.checksum_type.slice(1)} Checksum: ${checksum}` + '\x1b[0m');
   console.log()
 } catch (error) {
   console.error('Error:', error.message);
+}
+
+function usage() {
+  console.log("Use this as:")
+  console.log("node generate_checksum.js -r <concept|mapping> -c <standard|smart> -d '{...json...}'")
 }
