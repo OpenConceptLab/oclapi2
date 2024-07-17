@@ -94,13 +94,22 @@ class CustomESSearch:
     def get_wildcard_match_criterion(search_str, fields):
         cls = CustomESSearch
         criterion = None
-        code_fields = ['id', 'same_as_map_codes', 'other_map_codes']
+        code_fields = ['id', 'same_as_map_codes', 'other_map_codes', 'mnemonic']
         _fields = {k: v for k, v in fields.items() if k not in code_fields} if ' ' in search_str else fields
-        for attr, meta in fields.items():
+        _code_fields = {k: v for k, v in fields.items() if k in code_fields}
+        for attr, meta in _fields.items():
             lower = meta['lower'] if 'lower' in meta else True
             decode = meta['decode'] if 'decode' in meta else True
             _search_str = cls.get_wildcard_search_string(
                 cls.get_search_string(search_str, decode=decode, lower=lower)
+            )
+            criteria = cls.get_wildcard_criteria(attr, _search_str, meta['boost'])
+            criterion = criteria if criterion is None else criterion | criteria
+        for attr, meta in _code_fields.items():
+            lower = meta['lower'] if 'lower' in meta else True
+            decode = meta['decode'] if 'decode' in meta else True
+            _search_str = cls.get_wildcard_search_string(
+                cls.get_search_string(f"*{search_str}", decode=decode, lower=lower)
             )
             criteria = cls.get_wildcard_criteria(attr, _search_str, meta['boost'])
             criterion = criteria if criterion is None else criterion | criteria
