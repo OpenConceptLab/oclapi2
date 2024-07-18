@@ -468,9 +468,9 @@ class CollectionReferencesView(
 
     def update(self, request, *args, **kwargs):  # pylint: disable=too-many-locals,unused-argument # Fixme: Sny
         collection = self.get_object()
-        cascade = request.data.get('cascade', None) or self.request.query_params.get('cascade', '').lower()
+        cascade = get(request, 'data.cascade', None) or self.request.query_params.get('cascade', '').lower()
         transform = self.request.query_params.get('transformReferences', '').lower()
-        data = request.data.get('data')
+        data = get(request.data, 'data')
         if isinstance(data, dict) and all(not data.get(key) for key in data.keys() if key not in ['exclude']):
             return Response(status=status.HTTP_400_BAD_REQUEST)
         task_args = (self.request.user.id, data, collection.id, cascade, transform)
