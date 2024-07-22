@@ -70,8 +70,17 @@ function cleanup(fields) {
     for (const key in fields) {
       let value = fields[key];
       if (value === null) continue;
-      if (['retired', 'parent_concept_urls', 'child_concept_urls', 'descriptions', 'extras', 'names'].includes(key) && (!value || (Array.isArray(value) && value.length === 0)))
+      if (
+          [
+            'retired', 'parent_concept_urls', 'child_concept_urls', 'descriptions', 'extras',
+            'names', 'locale_preferred', 'name_type', 'description_type'
+          ].includes(key) && (!value || (Array.isArray(value) && value.length === 0))
+      )
        continue;
+      if(['names', 'descriptions'].includes(key)) {
+        for (const val in value)
+            value = value.map(cleanup);
+      }
       if (key === 'is_active' && value) continue;
       if(typeof(value) === 'number' && parseInt(value) === parseFloat(value))
         value = parseInt(value);
