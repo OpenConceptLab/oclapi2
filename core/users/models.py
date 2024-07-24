@@ -37,6 +37,7 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
     verified = models.BooleanField(default=True)
     verification_token = models.TextField(null=True, blank=True)
     deactivated_at = models.DateTimeField(null=True, blank=True)
+    bio = models.TextField(null=True, blank=True)
     mnemonic_attr = 'username'
 
     es_fields = {

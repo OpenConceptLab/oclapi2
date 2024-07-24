@@ -57,6 +57,7 @@ class UserCreateSerializer(serializers.ModelSerializer):
     password = serializers.CharField(required=False, write_only=True)
     company = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     location = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    bio = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     preferred_locale = serializers.CharField(required=False)
     orgs = serializers.IntegerField(read_only=True, source='orgs_count')
     created_on = serializers.DateTimeField(source='created_at', read_only=True)
@@ -71,7 +72,7 @@ class UserCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = UserProfile
         fields = (
-            'type', 'uuid', 'username', 'name', 'email', 'company', 'location', 'preferred_locale', 'orgs',
+            'type', 'uuid', 'username', 'name', 'email', 'company', 'location', 'bio', 'preferred_locale', 'orgs',
             'public_collections', 'public_sources', 'created_on', 'updated_on', 'created_by', 'updated_by',
             'url', 'extras', 'password', 'token', 'verified', 'first_name', 'last_name', 'website'
         )
@@ -93,6 +94,7 @@ class UserCreateSerializer(serializers.ModelSerializer):
             email=validated_data.get('email'),
             company=validated_data.get('company', None),
             location=validated_data.get('location', None),
+            bio=validated_data.get('bio', None),
             extras=validated_data.get('extras', None),
             preferred_locale=validated_data.get('preferred_locale', None),
             first_name=validated_data.get('name', None) or validated_data.get('first_name'),
@@ -134,6 +136,7 @@ class UserDetailSerializer(AbstractResourceSerializer):
     company = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     website = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     location = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    bio = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     preferred_locale = serializers.CharField(required=False)
     orgs = serializers.IntegerField(read_only=True, source='orgs_count')
     owned_orgs = serializers.IntegerField(read_only=True, source='owned_orgs_count')
@@ -158,7 +161,7 @@ class UserDetailSerializer(AbstractResourceSerializer):
             'url', 'organizations_url', 'extras', 'sources_url', 'collections_url', 'website', 'last_login',
             'logo_url', 'subscribed_orgs', 'is_superuser', 'is_staff', 'first_name', 'last_name', 'verified',
             'verification_token', 'date_joined', 'auth_groups', 'status', 'deactivated_at',
-            'sources', 'collections', 'owned_orgs', 'bookmarks', 'pins'
+            'sources', 'collections', 'owned_orgs', 'bookmarks', 'pins', 'bio'
         )
 
     def __init__(self, *args, **kwargs):
@@ -203,6 +206,7 @@ class UserDetailSerializer(AbstractResourceSerializer):
         instance.company = validated_data.get('company', instance.company)
         instance.website = validated_data.get('website', instance.website)
         instance.location = validated_data.get('location', instance.location)
+        instance.bio = validated_data.get('bio', instance.bio)
         instance.preferred_locale = validated_data.get('preferred_locale', instance.preferred_locale)
         instance.extras = validated_data.get('extras', instance.extras)
         instance.updated_by = request_user
