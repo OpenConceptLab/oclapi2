@@ -12,7 +12,8 @@ from ocldev.oclfleximporter import OclFlexImporter
 from pydash import compact, get
 
 from core.celery import app
-from core.collections.models import Collection
+from core.collections.models import Collection, CollectionReference
+from core.collections.parsers import CollectionReferenceParser
 from core.common.constants import HEAD
 from core.common.tasks import bulk_import_parts_inline, delete_organization, batch_index_resources, \
     post_import_update_resource_counts
@@ -645,7 +646,56 @@ class ReferenceImporter(BaseResourceImporter):
 
                 return CREATED
             return PERMISSION_DENIED
-        return FAILED
+        return NOT_FOUND
+
+    def delete(self):  # pylint: disable=too-many-locals,too-many-branches
+        collection = self.get_queryset().first()
+        if collection:  # pylint: disable=too-many-nested-blocks
+            if collection.has_edit_access(self.user):
+                parser = CollectionReferenceParser(
+                    self.get('data'), self.get('transform'), self.get('__cascade', False), self.user)
+                parser.parse()
+                parser.to_reference_structure()
+                references = parser.to_objects()
+                to_delete = []
+                to_exclude = []
+                total_references = []
+                for reference in references:
+                    reference.expression = reference.build_expression()
+                    total_references += reference.generate_references()
+                total_references = CollectionReference.dedupe_by_expression(total_references)
+                for reference in total_references:
+                    reference.collection = collection
+                    reference.evaluate()
+                    for concept in reference._concepts:  # pylint: disable=protected-access
+                        concept_references = concept.references.filter(collection=collection, include=True)
+                        for concept_reference in concept_references:
+                            if concept_reference.concepts.count() == 1 and concept_reference.mappings.count() == 0:
+                                to_delete.append(concept_reference)
+                            else:
+                                to_exclude.append(concept.uri)
+                    for mapping in reference._mappings:  # pylint: disable=protected-access
+                        mapping_references = mapping.references.filter(collection=collection, include=True)
+                        for mapping_reference in mapping_references:
+                            if mapping_reference.mappings.count() == 0:
+                                to_delete.append(mapping_reference)
+                            else:
+                                to_exclude.append(mapping.uri)
+
+                if to_delete:
+                    references = collection.references.filter(id__in=[ref.id for ref in to_delete])
+                    if collection.expansion_uri:
+                        collection.expansion.delete_references(references)
+                    references.delete()
+                references_to_be_excluded = [
+                    CollectionReference(
+                        expression=expression, collection=collection, include=False) for expression in to_exclude]
+                _, errors = collection.add_references(references_to_be_excluded, self.user)
+                if errors:
+                    return {'errors': errors}
+                return DELETED
+            return PERMISSION_DENIED
+        return NOT_FOUND
 
 
 class BulkImportInline(BaseImporter):
@@ -803,8 +853,9 @@ class BulkImportInline(BaseImporter):
                 self.handle_item_import_result(_result, original_item)
                 continue
             if item_type == 'reference':
+                reference_importer = ReferenceImporter(item, self.user, self.update_if_exists)
                 self.handle_item_import_result(
-                    ReferenceImporter(item, self.user, self.update_if_exists).run(), original_item
+                    reference_importer.delete() if action == 'delete' else reference_importer.run(), original_item
                 )
                 continue
 
