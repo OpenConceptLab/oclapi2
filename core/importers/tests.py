@@ -575,6 +575,7 @@ class BulkImportInlineTest(OCLTestCase):
         self.assertEqual(collection.references.count(), 4)
         batch_index_resources_mock.apply_async.assert_called()
 
+    @patch('core.collections.models.batch_index_resources', Mock())
     @patch('core.importers.models.batch_index_resources')
     def test_reference_import_with_delete(self, batch_index_resources_mock):
         importer = BulkImportInline(
