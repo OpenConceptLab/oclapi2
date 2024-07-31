@@ -34,7 +34,7 @@ from core.sources.models import Source
 from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
 from .backends import OCLOIDCAuthenticationBackend
-from .checksums import Checksum, ChecksumModel
+from .checksums import Checksum
 from .fhir_helpers import translate_fhir_query
 from .serializers import IdentifierSerializer
 from .validators import URIValidator
@@ -1190,38 +1190,6 @@ class ChecksumTest(OCLTestCase):
         self.assertIsNotNone(Checksum.generate(uuid.uuid4()))
         self.assertNotEqual(
             Checksum.generate({'a': {'b': [1, 2, 3], 'c': 'd'}}), Checksum.generate({'a': {'c': [1, 2, 3], 'b': 'd'}}))
-
-
-class ChecksumModelTest(OCLTestCase):
-    def test_generate_checksum(self):
-        self.assertEqual(
-            ChecksumModel.generate_checksum({'extras': {'foo': 'bar'}}),
-            ChecksumModel.generate_checksum({'extras': {'foo': 'bar', '__bar': 'foo'}}),
-        )
-        self.assertEqual(
-            ChecksumModel.generate_checksum({'extras': {'foo': 'bar'}}),
-            ChecksumModel.generate_checksum({'extras': {'foo': 'bar', '__foo': 'foo'}}),
-        )
-        self.assertEqual(
-            ChecksumModel.generate_checksum({'extras': {}, 'foo': 'bar'}),
-            ChecksumModel.generate_checksum({'foo': 'bar'}),
-        )
-        self.assertEqual(
-            ChecksumModel.generate_checksum({'retired': False, 'foo': 'bar'}),
-            ChecksumModel.generate_checksum({'foo': 'bar'}),
-        )
-        self.assertNotEqual(
-            ChecksumModel.generate_checksum({'retired': True, 'foo': 'bar'}),
-            ChecksumModel.generate_checksum({'foo': 'bar'}),
-        )
-        self.assertEqual(
-            ChecksumModel.generate_checksum({'is_active': True, 'foo': 'bar'}),
-            ChecksumModel.generate_checksum({'foo': 'bar'}),
-        )
-        self.assertNotEqual(
-            ChecksumModel.generate_checksum({'is_active': False, 'foo': 'bar'}),
-            ChecksumModel.generate_checksum({'foo': 'bar'}),
-        )
 
 
 class ChecksumViewTest(OCLAPITestCase):
