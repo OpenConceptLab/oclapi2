@@ -554,7 +554,7 @@ class SourceVersionSummaryView(SummaryMixin, SourceVersionBaseView, RetrieveAPIV
         return SourceVersionSummaryDetailSerializer
 
 
-class SourceLatestVersionSummaryView(SourceVersionBaseView, RetrieveAPIView, UpdateAPIView):
+class SourceLatestVersionSummaryView(SourceVersionBaseView, RetrieveAPIView):
     serializer_class = SourceVersionSummaryDetailSerializer
     permission_classes = (CanViewConceptDictionary,)
 

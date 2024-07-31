@@ -65,6 +65,7 @@ from core.concepts.views import ConceptCascadeView
 from core.mappings.documents import MappingDocument
 from core.mappings.models import Mapping
 from core.mappings.search import MappingFacetedSearch
+from core.sources.mixins import SummaryMixin
 from core.tasks.mixins import TaskMixin
 from core.tasks.models import Task
 from core.tasks.serializers import TaskListSerializer
@@ -1047,7 +1048,7 @@ class CollectionVersionExportView(ConceptContainerExportMixin, CollectionVersion
             return status.HTTP_409_CONFLICT
 
 
-class CollectionSummaryView(CollectionBaseView, RetrieveAPIView, CreateAPIView):
+class CollectionSummaryView(SummaryMixin, CollectionBaseView, RetrieveAPIView):
     serializer_class = CollectionSummaryDetailSerializer
     permission_classes = (CanViewConceptDictionary,)
 
@@ -1058,20 +1059,8 @@ class CollectionSummaryView(CollectionBaseView, RetrieveAPIView, CreateAPIView):
             return CollectionSummaryVerboseSerializer
         return CollectionSummaryDetailSerializer
 
-    def get_object(self, queryset=None):
-        instance = get_object_or_404(self.get_queryset())
-        self.check_object_permissions(self.request, instance)
-        return instance
 
-    def put(self, request, **kwargs):  # pylint: disable=unused-argument
-        instance = self.get_object()
-        if instance.has_edit_access(request.user):
-            instance.update_children_counts()
-            return Response(status=status.HTTP_202_ACCEPTED)
-        raise PermissionDenied()
-
-
-class CollectionVersionSummaryView(CollectionBaseView, RetrieveAPIView):
+class CollectionVersionSummaryView(SummaryMixin, CollectionBaseView, RetrieveAPIView):
     serializer_class = CollectionVersionSummaryDetailSerializer
     permission_classes = (CanViewConceptDictionary,)
 
@@ -1082,20 +1071,8 @@ class CollectionVersionSummaryView(CollectionBaseView, RetrieveAPIView):
             return CollectionVersionSummaryVerboseSerializer
         return CollectionVersionSummaryDetailSerializer
 
-    def get_object(self, queryset=None):
-        instance = get_object_or_404(self.get_queryset())
-        self.check_object_permissions(self.request, instance)
-        return instance
 
-    def put(self, request, **kwargs):  # pylint: disable=unused-argument
-        instance = self.get_object()
-        if instance.has_edit_access(request.user):
-            instance.update_children_counts()
-            return Response(status=status.HTTP_202_ACCEPTED)
-        raise PermissionDenied()
-
-
-class CollectionLatestVersionSummaryView(CollectionVersionBaseView, RetrieveAPIView, UpdateAPIView):
+class CollectionLatestVersionSummaryView(CollectionVersionBaseView, RetrieveAPIView):
     serializer_class = CollectionVersionSummaryDetailSerializer
     permission_classes = (CanViewConceptDictionary,)
 
