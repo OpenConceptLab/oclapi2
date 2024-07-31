@@ -599,8 +599,7 @@ class BulkImportInlineTest(OCLTestCase):
         self.assertEqual(collection.expansions.count(), 1)
         self.assertEqual(collection.expansion.concepts.count(), 2)
         self.assertEqual(collection.expansion.mappings.count(), 0)
-        self.assertEqual(collection.references.filter(include=True).count(), 2)
-        self.assertEqual(collection.references.filter(include=False).count(), 0)
+        self.assertEqual(collection.references.count(), 2)
         batch_index_resources_mock.apply_async.assert_called()
 
     @patch('core.sources.models.index_source_mappings', Mock())

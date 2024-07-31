@@ -12,8 +12,7 @@ from ocldev.oclfleximporter import OclFlexImporter
 from pydash import compact, get
 
 from core.celery import app
-from core.collections.models import Collection, CollectionReference
-from core.collections.parsers import CollectionReferenceParser
+from core.collections.models import Collection
 from core.common.constants import HEAD
 from core.common.tasks import bulk_import_parts_inline, delete_organization, batch_index_resources, \
     post_import_update_resource_counts
@@ -652,48 +651,26 @@ class ReferenceImporter(BaseResourceImporter):
         collection = self.get_queryset().first()
         if collection:  # pylint: disable=too-many-nested-blocks
             if collection.has_edit_access(self.user):
-                parser = CollectionReferenceParser(
-                    self.get('data'), self.get('transform'), self.get('__cascade', False), self.user)
-                parser.parse()
-                parser.to_reference_structure()
-                references = parser.to_objects()
+                expressions = self.get('data').get('expressions', [])
+                cascade = self.get('__cascade', False)
+                transform = self.get('transform', False)
                 to_delete = []
-                to_exclude = []
-                total_references = []
-                for reference in references:
-                    reference.expression = reference.build_expression()
-                    total_references += reference.generate_references()
-                total_references = CollectionReference.dedupe_by_expression(total_references)
-                for reference in total_references:
-                    reference.collection = collection
-                    reference.evaluate()
-                    for concept in reference._concepts:  # pylint: disable=protected-access
-                        concept_references = concept.references.filter(collection=collection, include=True)
-                        for concept_reference in concept_references:
-                            if concept_reference.concepts.count() == 1 and concept_reference.mappings.count() == 0:
-                                to_delete.append(concept_reference)
-                            else:
-                                to_exclude.append(concept.uri)
-                    for mapping in reference._mappings:  # pylint: disable=protected-access
-                        mapping_references = mapping.references.filter(collection=collection, include=True)
-                        for mapping_reference in mapping_references:
-                            if mapping_reference.mappings.count() == 0:
-                                to_delete.append(mapping_reference)
-                            else:
-                                to_exclude.append(mapping.uri)
+                if isinstance(expressions, list):
+                    for expression in expressions:
+                        references = collection.references.filter(expression=expression)
+                        if cascade:
+                            references = references.filter(cascade=cascade)
+                        if transform:
+                            references = references.filter(transform=transform)
+                        to_delete += references
 
                 if to_delete:
                     references = collection.references.filter(id__in=[ref.id for ref in to_delete])
                     if collection.expansion_uri:
                         collection.expansion.delete_references(references)
                     references.delete()
-                references_to_be_excluded = [
-                    CollectionReference(
-                        expression=expression, collection=collection, include=False) for expression in to_exclude]
-                _, errors = collection.add_references(references_to_be_excluded, self.user)
-                if errors:
-                    return {'errors': errors}
-                return DELETED
+                    return DELETED
+                return NOT_FOUND
             return PERMISSION_DENIED
         return NOT_FOUND
 
