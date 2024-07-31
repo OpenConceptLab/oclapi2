@@ -32,25 +32,25 @@ If `OIDC_SERVER_URL` and `OIDC_REALM` are not provided then the Django Auth is e
 (use the `docker exec` command in a service started with `docker-compose up -d`)
 1. Pylint (pep8):
    
-   `docker exec -it oclapi2_api_1 pylint -j2 core` 
+   `docker exec -it oclapi2-api-1 pylint -j2 core` 
 
     or
 
    `docker-compose -f docker-compose.yml -f docker-compose.ci.yml run --rm api pylint -j0 core`
 2. Coverage
 
-   `docker exec -it oclapi2_api_1 bash coverage.sh`
+   `docker exec -it oclapi2-api-1 bash coverage.sh`
 
    or
 
    `docker-compose -f docker-compose.yml -f docker-compose.ci.yml run --rm api bash coverage.sh`
 3. Tests
 
-    `docker exec -it oclapi2_api_1  python manage.py test --keepdb -v3` 
+    `docker exec -it oclapi2-api-1  python manage.py test --keepdb -v3` 
 
     or
 
-    `docker exec -it oclapi2_api_1  python manage.py test --keepdb -v3 -- core.sources.tests.tests.SourceTest` 
+    `docker exec -it oclapi2-api-1  python manage.py test --keepdb -v3 -- core.sources.tests.tests.SourceTest` 
 
     or
 
@@ -95,7 +95,7 @@ Run api with:
 
 In order to import FHIR resources run:
 
-`docker-compose run --no-deps --rm -v $(pwd)/../fhir_imports:/fhir api python tools/import.py -f /fhir -t http://api:8000/orgs/test -s 891b4b17feab99f3ff7e5b5d04ccc5da7aa96da6 -c http://api:8000/orgs/test
+`docker-compose run --no-deps --rm -v $(pwd)/../fhir_imports:/fhir api python tools/import.py -f /fhir -t http://api:8000/orgs/test -s 891b4b17feab99f3ff7e5b5d04ccc5da7aa96da6 -c http://api:8000/orgs/test`
 
 For help run:
 
