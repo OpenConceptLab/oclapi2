@@ -10,6 +10,7 @@ from django.http import HttpResponseForbidden, Http404
 from django.shortcuts import get_object_or_404
 from django.urls import resolve, Resolver404
 from django.utils.functional import cached_property
+from ocldev.checksum import Checksum
 from pydash import compact, get
 from rest_framework import status
 from rest_framework.mixins import ListModelMixin, CreateModelMixin
@@ -21,7 +22,7 @@ from core.common.constants import HEAD, ACCESS_TYPE_NONE, INCLUDE_FACETS, \
     CHECKSUM_SMART_HEADER, SEARCH_LATEST_REPO_VERSION, SAME_STANDARD_CHECKSUM_ERROR
 from core.common.permissions import HasPrivateAccess, HasOwnership, CanViewConceptDictionary, \
     CanViewConceptDictionaryVersion
-from .checksums import ChecksumModel, Checksum
+from .checksums import ChecksumModel
 from .utils import write_csv_to_s3, get_csv_from_s3, get_query_params_from_url_string, compact_dict_by_values, \
     to_owner_uri, parse_updated_since_param, get_export_service, to_int, get_truthy_values, generate_temp_version, \
     canonical_url_to_url_and_version, decode_string
@@ -132,8 +133,8 @@ class CustomPaginator:
                 smart.append(get(result.checksums, 'smart'))
         standard = compact(standard)
         smart = compact(smart)
-        standard = Checksum.generate(standard) if len(standard) > 1 else get(standard, '0')
-        smart = Checksum.generate(smart) if len(smart) > 1 else get(smart, '0')
+        standard = Checksum(None, standard).generate() if len(standard) > 1 else get(standard, '0')
+        smart = Checksum(None, smart).generate() if len(smart) > 1 else get(smart, '0')
         return standard, smart
 
 

@@ -22,10 +22,6 @@ from core.sources.constants import SOURCE_TYPE, SOURCE_VERSION_TYPE, HIERARCHY_R
 
 class Source(DirtyFieldsMixin, ConceptContainerModel):
     DEFAULT_AUTO_ID_START_FROM = 1
-    CHECKSUM_INCLUSIONS = ConceptContainerModel.CHECKSUM_INCLUSIONS + [
-        'hierarchy_meaning',
-        'source_type'
-    ]
 
     es_fields = {
         'source_type': {'sortable': True, 'filterable': True, 'facet': True, 'exact': True},
@@ -106,36 +102,6 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
 
     OBJECT_TYPE = SOURCE_TYPE
     OBJECT_VERSION_TYPE = SOURCE_VERSION_TYPE
-
-    def get_standard_checksum_fields(self):
-        return self.get_standard_checksum_fields_for_resource(self)
-
-    def get_smart_checksum_fields(self):
-        return self.get_smart_checksum_fields_for_resource(self)
-
-    @staticmethod
-    def get_standard_checksum_fields_for_resource(data):
-        return {
-            'source_type': get(data, 'source_type'),
-            'canonical_url': get(data, 'canonical_url'),
-            'custom_validation_schema': get(data, 'custom_validation_schema'),
-            'default_locale': get(data, 'default_locale'),
-            'supported_locales': get(data, 'supported_locales'),
-            'website': get(data, 'website'),
-            'hierarchy_meaning': get(data, 'hierarchy_meaning'),
-            'extras': get(data, 'extras'),
-        }
-
-    @staticmethod
-    def get_smart_checksum_fields_for_resource(data):
-        return {
-            'source_type': get(data, 'source_type'),
-            'canonical_url': get(data, 'canonical_url'),
-            'custom_validation_schema': get(data, 'custom_validation_schema'),
-            'default_locale': get(data, 'default_locale'),
-            'released': get(data, 'released'),
-            'retired': get(data, 'retired'),
-        }
 
     @property
     def is_sequential_concept_mnemonic(self):

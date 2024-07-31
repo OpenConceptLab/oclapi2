@@ -54,41 +54,6 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
         'is_admin': {'sortable': False, 'filterable': False, 'exact': False, 'facet': True}
     }
 
-    STANDARD_CHECKSUM_INCLUSIONS = [
-        'first_name', 'last_name', 'username', 'company', 'location', 'website', 'preferred_locale', 'extras']
-    SMART_CHECKSUM_INCLUSIONS = [
-        'first_name', 'last_name', 'username', 'company', 'location', 'website', 'is_active']
-
-    def get_standard_checksum_fields(self):
-        return self.get_standard_checksum_fields_for_resource(self)
-
-    def get_smart_checksum_fields(self):
-        return self.get_smart_checksum_fields_for_resource(self)
-
-    @staticmethod
-    def get_standard_checksum_fields_for_resource(data):
-        return {
-            'first_name': get(data, 'first_name'),
-            'last_name': get(data, 'last_name'),
-            'username': get(data, 'username'),
-            'company': get(data, 'company'),
-            'location': get(data, 'location'),
-            'website': get(data, 'website'),
-            'preferred_locale': get(data, 'preferred_locale'),
-            'extras': get(data, 'extras')
-        }
-
-    @staticmethod
-    def get_smart_checksum_fields_for_resource(data):
-        return {
-            'first_name': get(data, 'first_name'),
-            'last_name': get(data, 'last_name'),
-            'username': get(data, 'username'),
-            'company': get(data, 'company'),
-            'location': get(data, 'location'),
-            'is_active': get(data, 'is_active')
-        }
-
     def calculate_uri(self):
         return f"/users/{self.username}/"
 

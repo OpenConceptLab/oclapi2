@@ -5,8 +5,7 @@ from uuid import UUID
 from django.conf import settings
 from django.db import models
 from pydash import get
-
-from core.common.utils import generic_sort
+from ocldev.checksum import Checksum as ChecksumBase
 
 
 class ChecksumModel(models.Model):
@@ -15,10 +14,16 @@ class ChecksumModel(models.Model):
 
     checksums = models.JSONField(null=True, blank=True, default=dict)
 
-    CHECKSUM_EXCLUSIONS = []
-    CHECKSUM_INCLUSIONS = []
     STANDARD_CHECKSUM_KEY = 'standard'
     SMART_CHECKSUM_KEY = 'smart'
+
+    def get_checksum_base(self, resource=None, data=None, checksum_type='standard'):
+        resource_name = resource or self.__class__.__name__.lower()
+        if resource_name == 'userprofile':
+            resource_name = 'user'
+        if resource_name == 'org':
+            resource_name = 'organization'
+        return ChecksumBase(resource_name, data or self, checksum_type)
 
     def get_checksums(self, queue=False, recalculate=False):
         _checksums = None
@@ -67,15 +72,6 @@ class ChecksumModel(models.Model):
             _checksum = self.checksums.get(self.STANDARD_CHECKSUM_KEY)
         return _checksum
 
-    def get_checksum_fields(self):
-        return {field: getattr(self, field) for field in self.CHECKSUM_INCLUSIONS}
-
-    def get_standard_checksum_fields(self):
-        return self.get_checksum_fields()
-
-    def get_smart_checksum_fields(self):
-        return {}
-
     def get_all_checksums(self):
         checksums = {}
         if self.STANDARD_CHECKSUM_KEY:
@@ -84,61 +80,19 @@ class ChecksumModel(models.Model):
             checksums[self.SMART_CHECKSUM_KEY] = self._calculate_smart_checksum()
         return checksums
 
-    @staticmethod
-    def generate_checksum(data):
-        return Checksum.generate(ChecksumModel._cleanup(data))
+    def generate_checksum(self, checksum_type='standard'):
+        checksum_base = self.get_checksum_base(checksum_type=checksum_type)
+        return checksum_base.generate()
 
     @staticmethod
-    def generate_checksum_from_many(data):
-        from pprint import pprint as p
-        print("****before cleanup fields***")
-        p(data)
-        checksums = [
-            Checksum.generate(ChecksumModel._cleanup(_data)) for _data in data
-        ] if isinstance(data, list) else [
-            Checksum.generate(ChecksumModel._cleanup(data))
-        ]
-        if len(checksums) == 1:
-            return checksums[0]
-        return Checksum.generate(checksums)
+    def generate_checksum_from_many(resource, data, checksum_type='standard'):
+        return ChecksumBase(resource, data, checksum_type).generate()
 
     def _calculate_standard_checksum(self):
-        fields = self.get_standard_checksum_fields()
-        return None if fields is None else self.generate_checksum(fields)
+        return self.generate_checksum('standard')
 
     def _calculate_smart_checksum(self):
-        fields = self.get_smart_checksum_fields()
-        return self.generate_checksum(fields) if fields else None
-
-    @staticmethod
-    def _cleanup(fields):
-        result = fields
-        if isinstance(fields, dict):  # pylint: disable=too-many-nested-blocks
-            result = {}
-            for key, value in fields.items():
-                if value is None:
-                    continue
-                if key in [
-                    'retired', 'parent_concept_urls', 'child_concept_urls', 'descriptions', 'extras', 'names',
-                    'locale_preferred', 'name_type', 'description_type'
-                ] and not value:
-                    continue
-                if key in ['names', 'descriptions']:
-                    value = [ChecksumModel._cleanup(val) for val in value]
-                if key in ['is_active'] and value:
-                    continue
-                if not isinstance(value, bool) and isinstance(value, (int, float)):
-                    if int(value) == float(value):
-                        value = int(value)
-                if key in ['extras']:
-                    if isinstance(value, dict) and any(key.startswith('__') for key in value):
-                        value_copied = value.copy()
-                        for extra_key in value:
-                            if extra_key.startswith('__'):
-                                value_copied.pop(extra_key)
-                        value = value_copied
-                result[key] = value
-        return result
+        return self.generate_checksum('standard')
 
     def _calculate_checksums(self):
         return self.get_all_checksums()
@@ -146,29 +100,8 @@ class ChecksumModel(models.Model):
 
 class Checksum:
     @classmethod
-    def generate(cls, obj, hash_algorithm='MD5'):
-        # hex encoding is used to make the hash more readable
-        serialized_obj = cls._serialize(obj).encode('utf-8')
-        hash_func = hashlib.new(hash_algorithm)
-        hash_func.update(serialized_obj)
-
-        return hash_func.hexdigest()
-
-    @classmethod
-    def _serialize(cls, obj):
-        if isinstance(obj, list) and len(obj) == 1:
-            obj = obj[0]
-        if isinstance(obj, list):
-            return f"[{','.join(map(cls._serialize, generic_sort(obj)))}]"
-        if isinstance(obj, dict):
-            keys = generic_sort(obj.keys())
-            acc = f"{{{json.dumps(keys)}"
-            for key in keys:
-                acc += f"{cls._serialize(obj[key])},"
-            return f"{acc}}}"
-        if isinstance(obj, UUID):
-            return json.dumps(str(obj))
-        return json.dumps(obj)
+    def generate(cls, obj):
+        return ChecksumBase(None, obj).generate()
 
 
 class ChecksumDiff:

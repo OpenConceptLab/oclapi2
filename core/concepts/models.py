@@ -34,7 +34,6 @@ class AbstractLocalizedText(ChecksumModel):
     locale_preferred = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
-    CHECKSUM_INCLUSIONS = ['locale', 'locale_preferred', 'external_id']
     SMART_CHECKSUM_KEY = None
 
     def to_dict(self):
@@ -96,8 +95,6 @@ class AbstractLocalizedText(ChecksumModel):
 
 
 class ConceptDescription(AbstractLocalizedText):
-    CHECKSUM_INCLUSIONS = AbstractLocalizedText.CHECKSUM_INCLUSIONS + ['description', 'description_type']
-
     concept = models.ForeignKey('concepts.Concept', on_delete=models.CASCADE, related_name='descriptions')
 
     class Meta:
@@ -129,8 +126,6 @@ class ConceptDescription(AbstractLocalizedText):
 
 
 class ConceptName(AbstractLocalizedText):
-    CHECKSUM_INCLUSIONS = AbstractLocalizedText.CHECKSUM_INCLUSIONS + ['name', 'name_type']
-
     concept = models.ForeignKey(
         'concepts.Concept', on_delete=models.CASCADE, related_name='names')
 
@@ -276,59 +271,6 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         'same_as_map_codes': {'sortable': False, 'filterable': True, 'facet': False, 'exact': True},
         'other_map_codes': {'sortable': False, 'filterable': True, 'facet': False, 'exact': True},
     }
-
-    def get_standard_checksum_fields(self):
-        return self.get_standard_checksum_fields_for_resource(self)
-
-    def get_smart_checksum_fields(self):
-        return self.get_smart_checksum_fields_for_resource(self)
-
-    @staticmethod
-    def _locales_for_checksums(data, relation, fields, predicate_func):
-        locales = get(data, relation).filter() if isinstance(data, Concept) else get(data, relation, [])
-        return [{field: get(locale, field) for field in fields} for locale in locales if predicate_func(locale)]
-
-    @staticmethod
-    def get_standard_checksum_fields_for_resource(data):
-        return {
-            'concept_class': get(data, 'concept_class'),
-            'datatype': get(data, 'datatype'),
-            'retired': get(data, 'retired'),
-            'external_id': get(data, 'external_id') or None,
-            'extras': get(data, 'extras') or None,
-            'names': Concept._locales_for_checksums(
-                data,
-                'names',
-                ConceptName.CHECKSUM_INCLUSIONS,
-                lambda _: True
-            ),
-            'descriptions': Concept._locales_for_checksums(
-                data,
-                'descriptions',
-                ConceptDescription.CHECKSUM_INCLUSIONS,
-                lambda _: True
-            ),
-            'parent_concept_urls': get(
-                data, '_unsaved_parent_concept_uris', []
-            ) or get(data, 'parent_concept_urls', []),
-            'child_concept_urls': get(
-                data, '_unsaved_child_concept_uris', []
-            ) or get(data, 'child_concept_urls', []),
-        }
-
-    @staticmethod
-    def get_smart_checksum_fields_for_resource(data):
-        return {
-            'concept_class': get(data, 'concept_class'),
-            'datatype': get(data, 'datatype'),
-            'retired': get(data, 'retired'),
-            'names': Concept._locales_for_checksums(
-                data,
-                'names',
-                ConceptName.CHECKSUM_INCLUSIONS,
-                lambda locale: ConceptName.is_fully_specified_type(get(locale, 'name_type'))
-            ),
-        }
 
     @staticmethod
     def get_search_document():

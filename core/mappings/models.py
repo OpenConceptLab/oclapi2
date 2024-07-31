@@ -150,41 +150,6 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         'external_id': {'sortable': False, 'filterable': True, 'facet': False, 'exact': True},
     }
 
-    def get_standard_checksum_fields(self):
-        return self.get_standard_checksum_fields_for_resource(self)
-
-    def get_smart_checksum_fields(self):
-        return self.get_smart_checksum_fields_for_resource(self)
-
-    @staticmethod
-    def get_standard_checksum_fields_for_resource(data):
-        return {
-            **Mapping.get_smart_checksum_fields_for_resource(data),
-            'sort_weight': float(get(data, 'sort_weight') or 0) or None,
-            **{
-                field: get(data, field) or None for field in [
-                    'extras',
-                    'external_id',
-                    'sort_weight',
-                    'from_source_url',
-                    'from_source_version',
-                    'to_source_url',
-                    'to_source_version'
-                ]
-            }
-        }
-
-    @staticmethod
-    def get_smart_checksum_fields_for_resource(data):
-        return {
-            'map_type': get(data, 'map_type'),
-            'from_concept_code': get(data, 'from_concept_code'),
-            'to_concept_code': get(data, 'to_concept_code'),
-            'from_concept_name': get(data, 'from_concept_name'),
-            'to_concept_name': get(data, 'to_concept_name'),
-            'retired': get(data, 'retired')
-        }
-
     @staticmethod
     def get_search_document():
         from core.mappings.documents import MappingDocument

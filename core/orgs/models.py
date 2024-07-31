@@ -42,32 +42,6 @@ class Organization(BaseResourceModel, SourceContainerMixin, ChecksumModel):
     text = models.TextField(null=True, blank=True)  # for about description (markup)
     overview = models.JSONField(default=dict)
 
-    def get_standard_checksum_fields(self):
-        return self.get_standard_checksum_fields_for_resource(self)
-
-    def get_smart_checksum_fields(self):
-        return self.get_smart_checksum_fields_for_resource(self)
-
-    @staticmethod
-    def get_standard_checksum_fields_for_resource(data):
-        return {
-            'name': get(data, 'name'),
-            'company': get(data, 'company'),
-            'location': get(data, 'location'),
-            'website': get(data, 'website'),
-            'extras': get(data, 'extras'),
-        }
-
-    @staticmethod
-    def get_smart_checksum_fields_for_resource(data):
-        return {
-            'name': get(data, 'name'),
-            'company': get(data, 'company'),
-            'location': get(data, 'location'),
-            'website': get(data, 'website'),
-            'is_active': get(data, 'is_active')
-        }
-
     def calculate_uri(self):
         return f"/orgs/{self.mnemonic}/"
 

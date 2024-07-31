@@ -395,13 +395,6 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         'url_registry.URLRegistry', object_id_field='repo_id', content_type_field='repo_type'
     )
 
-    CHECKSUM_INCLUSIONS = [
-        'canonical_url',
-        'extras', 'released', 'retired',
-        'default_locale', 'supported_locales',
-        'website', 'custom_validation_schema',
-    ]
-
     class Meta:
         abstract = True
         indexes = [

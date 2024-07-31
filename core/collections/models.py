@@ -43,9 +43,6 @@ FALSEY = get_falsy_values()
 class Collection(DirtyFieldsMixin, ConceptContainerModel):
     OBJECT_TYPE = COLLECTION_TYPE
     OBJECT_VERSION_TYPE = COLLECTION_VERSION_TYPE
-    CHECKSUM_INCLUSIONS = ConceptContainerModel.CHECKSUM_INCLUSIONS + [
-        'collection_type'
-    ]
 
     es_fields = {
         'collection_type': {'sortable': True, 'filterable': True, 'facet': True, 'exact': True},
@@ -102,35 +99,6 @@ class Collection(DirtyFieldsMixin, ConceptContainerModel):
     autoexpand_head = models.BooleanField(default=True, null=True)
     autoexpand = models.BooleanField(default=True, null=True)
     expansion_uri = models.TextField(null=True, blank=True)
-
-    def get_standard_checksum_fields(self):
-        return self.get_standard_checksum_fields_for_resource(self)
-
-    def get_smart_checksum_fields(self):
-        return self.get_smart_checksum_fields_for_resource(self)
-
-    @staticmethod
-    def get_standard_checksum_fields_for_resource(data):
-        return {
-            'collection_type': get(data, 'collection_type'),
-            'canonical_url': get(data, 'canonical_url'),
-            'custom_validation_schema': get(data, 'custom_validation_schema'),
-            'default_locale': get(data, 'default_locale'),
-            'supported_locales': get(data, 'supported_locales'),
-            'website': get(data, 'website'),
-            'extras': get(data, 'extras'),
-        }
-
-    @staticmethod
-    def get_smart_checksum_fields_for_resource(data):
-        return {
-            'collection_type': get(data, 'collection_type'),
-            'canonical_url': get(data, 'canonical_url'),
-            'custom_validation_schema': get(data, 'custom_validation_schema'),
-            'default_locale': get(data, 'default_locale'),
-            'released': get(data, 'released'),
-            'retired': get(data, 'retired'),
-        }
 
     def set_active_concepts(self):
         expansion = self.expansion

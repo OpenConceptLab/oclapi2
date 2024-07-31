@@ -19,6 +19,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from core import __version__
+from core.common.checksums import ChecksumModel
 from core.common.constants import SEARCH_PARAM, LIST_DEFAULT_LIMIT, CSV_DEFAULT_LIMIT, \
     LIMIT_PARAM, NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY, INCLUDE_RETIRED_PARAM, VERBOSE_PARAM, HEAD, LATEST, \
     BRIEF_PARAM, ES_REQUEST_TIMEOUT, INCLUDE_INACTIVE, FHIR_LIMIT_PARAM, RAW_PARAM, SEARCH_MAP_CODES_PARAM, \
@@ -1123,19 +1124,7 @@ class AbstractChecksumView(APIView):
         if not resource or not data:
             return Response({'error': 'resource and data are both required.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        klass = get_resource_class_from_resource_name(resource)
-
-        if not klass:
-            return Response({'error': 'Invalid resource.'}, status=status.HTTP_400_BAD_REQUEST)
-
-        method = 'get_smart_checksum_fields_for_resource' if self.smart else 'get_standard_checksum_fields_for_resource'
-        func = get(klass, method)
-
-        if not func:
-            return Response(
-                {'error': 'Checksums for this resource is not yet implemented.'}, status=status.HTTP_400_BAD_REQUEST)
-
-        return Response(klass.generate_checksum_from_many([func(_data) for _data in flatten([data])]))
+        return Response(ChecksumModel.generate_checksum_from_many(resource, request.data, 'smart' if self.smart else 'standard'))
 
 
 class StandardChecksumView(AbstractChecksumView):
