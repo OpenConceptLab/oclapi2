@@ -11,7 +11,7 @@ from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
 from elasticsearch import RequestError, TransportError
 from elasticsearch_dsl import Q
-from pydash import get, compact, flatten
+from pydash import get, compact
 from rest_framework import response, generics, status
 from rest_framework.generics import ListAPIView, RetrieveUpdateDestroyAPIView
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -31,8 +31,7 @@ from core.common.search import CustomESSearch
 from core.common.serializers import RootSerializer
 from core.common.swagger_parameters import all_resource_query_param
 from core.common.utils import compact_dict_by_values, to_snake_case, parse_updated_since_param, \
-    to_int, get_falsy_values, get_truthy_values, get_resource_class_from_resource_name, \
-    format_url_for_search
+    to_int, get_falsy_values, get_truthy_values, format_url_for_search
 from core.concepts.permissions import CanViewParentDictionary, CanEditParentDictionary
 from core.orgs.constants import ORG_OBJECT_TYPE
 from core.users.constants import USER_OBJECT_TYPE
@@ -1124,7 +1123,8 @@ class AbstractChecksumView(APIView):
         if not resource or not data:
             return Response({'error': 'resource and data are both required.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        return Response(ChecksumModel.generate_checksum_from_many(resource, request.data, 'smart' if self.smart else 'standard'))
+        return Response(
+            ChecksumModel.generate_checksum_from_many(resource, request.data, 'smart' if self.smart else 'standard'))
 
 
 class StandardChecksumView(AbstractChecksumView):

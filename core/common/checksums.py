@@ -1,11 +1,7 @@
-import hashlib
-import json
-from uuid import UUID
-
 from django.conf import settings
 from django.db import models
-from pydash import get
 from ocldev.checksum import Checksum as ChecksumBase
+from pydash import get
 
 
 class ChecksumModel(models.Model):
