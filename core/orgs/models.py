@@ -1,7 +1,6 @@
 from django.contrib.contenttypes.fields import GenericRelation
 from django.core.validators import RegexValidator
 from django.db import models, transaction
-from pydash import get
 
 from core.client_configs.models import ClientConfig
 from core.common.checksums import ChecksumModel
