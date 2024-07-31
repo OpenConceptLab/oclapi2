@@ -10,7 +10,6 @@ from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
 from pydash import get
 from rest_framework import status
-from rest_framework.exceptions import PermissionDenied
 from rest_framework.generics import (
     RetrieveAPIView, DestroyAPIView, UpdateAPIView, ListAPIView,
     CreateAPIView)
