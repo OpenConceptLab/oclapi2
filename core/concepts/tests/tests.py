@@ -389,14 +389,14 @@ class ConceptTest(OCLTestCase):
     def test_hierarchy(self):  # pylint: disable=too-many-statements
         # Av1
         parent_concept = ConceptFactory(
-            names=[ConceptNameFactory.build(locale='en', name='English', locale_preferred=True)])
+            mnemonic='A', names=[ConceptNameFactory.build(locale='en', name='Av1', locale_preferred=True)])
         self.assertEqual(parent_concept.versions.count(), 1)
         source = parent_concept.parent
 
         # Av1 -> None and Av2 -> Bv1
         child_concept = Concept.persist_new({
-            **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'c1', 'parent': source,
-            'names': [ConceptNameFactory.build(locale='en', name='English', locale_preferred=True)],
+            **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'B', 'parent': source,
+            'names': [ConceptNameFactory.build(locale='en', name='Bv1', locale_preferred=True)],
             'parent_concept_urls': [parent_concept.uri]
         })
 
@@ -413,8 +413,8 @@ class ConceptTest(OCLTestCase):
 
         # Av1 -> None and Av2 -> Bv1,Bv2 and Bv2 -> Cv1
         child_child_concept = Concept.persist_new({
-            **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'c2', 'parent': source,
-            'names': [ConceptNameFactory.build(locale='en', name='English', locale_preferred=True)],
+            **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'C', 'parent': source,
+            'names': [ConceptNameFactory.build(locale='en', name='Cv1', locale_preferred=True)],
             'parent_concept_urls': [child_concept.uri]
         })
 
@@ -436,7 +436,7 @@ class ConceptTest(OCLTestCase):
             instance=child_child_concept.clone(),
             data={
                 'parent_concept_urls': [parent_concept.uri],
-                'names': [{'locale': 'en', 'name': 'English', 'locale_preferred': True}]
+                'names': [{'locale': 'en', 'name': 'Cv2', 'locale_preferred': True}]
             },
             user=child_child_concept.created_by
         )
@@ -473,7 +473,7 @@ class ConceptTest(OCLTestCase):
             instance=child_child_concept.clone(),
             data={
                 'parent_concept_urls': [child_concept.uri],
-                'names': [{'locale': 'en', 'name': 'English', 'locale_preferred': True}]
+                'names': [{'locale': 'en', 'name': 'Cv3', 'locale_preferred': True}]
             },
             user=child_child_concept.created_by
         )
@@ -534,7 +534,7 @@ class ConceptTest(OCLTestCase):
             instance=child_child_concept.clone(),
             data={
                 'parent_concept_urls': [],
-                'names': [{'locale': 'en', 'name': 'English', 'locale_preferred': True}]
+                'names': [{'locale': 'en', 'name': 'Cv4', 'locale_preferred': True}]
             },
             user=child_child_concept.created_by
         )
@@ -597,16 +597,16 @@ class ConceptTest(OCLTestCase):
 
     def test_hierarchy_without_multiple_parent_versions(self):  # pylint: disable=too-many-statements
         # Av1
-        parent_concept = ConceptFactory(
-            names=[ConceptNameFactory.build(locale='en', name='English', locale_preferred=True)])
+        parent_concept = ConceptFactory(mnemonic='A',
+            names=[ConceptNameFactory.build(locale='en', name='Av1', locale_preferred=True)])
         self.assertEqual(parent_concept.versions.count(), 1)
         self.assertEqual(list(parent_concept.get_latest_version().child_concept_urls), [])
         source = parent_concept.parent
 
         # Av1 to Av1 -> Bv1
         child_concept = Concept.persist_new(data={
-            **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'c1', 'parent': source,
-            'names': [ConceptNameFactory.build(locale='en', name='English', locale_preferred=True)],
+            **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'B', 'parent': source,
+            'names': [ConceptNameFactory.build(locale='en', name='Bv1', locale_preferred=True)],
             'parent_concept_urls': [parent_concept.uri]
         }, create_parent_version=False)
 
@@ -622,8 +622,8 @@ class ConceptTest(OCLTestCase):
 
         # Av1 to Av1 -> Bv1 to Av1 -> Bv1 -> Cv1
         child_child_concept = Concept.persist_new(data={
-            **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'c2', 'parent': source,
-            'names': [ConceptNameFactory.build(locale='en', name='English', locale_preferred=True)],
+            **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'C', 'parent': source,
+            'names': [ConceptNameFactory.build(locale='en', name='Cv1', locale_preferred=True)],
             'parent_concept_urls': [child_concept.uri]
         }, create_parent_version=False)
 
@@ -646,7 +646,7 @@ class ConceptTest(OCLTestCase):
             instance=child_child_concept.clone(),
             data={
                 'parent_concept_urls': [parent_concept.uri],
-                'names': [{'locale': 'en', 'name': 'English', 'locale_preferred': True}]
+                'names': [{'locale': 'en', 'name': 'Cv2', 'locale_preferred': True}]
             },
             user=child_child_concept.created_by,
             create_parent_version=False
@@ -681,7 +681,7 @@ class ConceptTest(OCLTestCase):
             instance=child_child_concept.clone(),
             data={
                 'parent_concept_urls': [child_concept.uri],
-                'names': [{'locale': 'en', 'name': 'English', 'locale_preferred': True}]
+                'names': [{'locale': 'en', 'name': 'Cv3', 'locale_preferred': True}]
             },
             user=child_child_concept.created_by,
             create_parent_version=False
@@ -727,7 +727,7 @@ class ConceptTest(OCLTestCase):
             instance=child_child_concept.clone(),
             data={
                 'parent_concept_urls': [],
-                'names': [{'locale': 'en', 'name': 'English', 'locale_preferred': True}]
+                'names': [{'locale': 'en', 'name': 'Cv4', 'locale_preferred': True}]
             },
             user=child_child_concept.created_by,
             create_parent_version=False
@@ -1341,7 +1341,7 @@ class ConceptTest(OCLTestCase):
             root.url
         )
 
-    @patch('core.common.checksums.Checksum.generate')
+    @patch('core.common.checksums.ChecksumBase.generate')
     def test_checksum(self, checksum_generate_mock):
         checksum_generate_mock.side_effect = [
             'standard-checksum', 'smart-checksum'

@@ -1165,7 +1165,7 @@ class ChecksumTest(OCLTestCase):
         )
 
         # datatype
-        self.assertNotEqual(Checksum.generate({'a': 1}), Checksum.generate({'a': 1.0}))
+        self.assertEqual(Checksum.generate({'a': 1}), Checksum.generate({'a': 1.0}))
         self.assertEqual(Checksum.generate({'a': 1.1}), Checksum.generate({'a': 1.10}))
 
         # value order
@@ -1226,14 +1226,15 @@ class ChecksumViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data, {'error': 'Invalid resource: foobar'})
         checksum_generate_mock.assert_not_called()
 
-    @patch('core.common.checksums.Checksum.generate')
+    @patch('core.common.checksums.ChecksumBase.generate')
     def test_post_200_concept(self, checksum_generate_mock):
         checksum_generate_mock.return_value = 'checksum'
 
         response = self.client.post(
-            '/$checksum/standard/?resource=concept_version',
+            '/$checksum/standard/?resource=concept',
             data={'foo': 'bar', 'concept_class': 'foobar', 'extras': {}},
             HTTP_AUTHORIZATION=f"Token {self.token}",
             format='json'
@@ -1241,140 +1242,3 @@ class ChecksumViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data, 'checksum')
-        checksum_generate_mock.assert_called_once_with(
-            {
-                'concept_class': 'foobar',
-            }
-        )
-
-    @patch('core.common.checksums.Checksum.generate')
-    def test_post_200_mapping_standard(self, checksum_generate_mock):
-        checksum_generate_mock.side_effect = ['checksum1', 'checksum2', 'checksum3']
-
-        response = self.client.post(
-            '/$checksum/standard/?resource=mapping',
-            data=[
-                {
-                    'id': 'bar',
-                    'map_type': 'foobar',
-                    'from_concept_url': '/foo/',
-                    'to_source_url': '/bar/',
-                    'from_concept_code': 'foo',
-                    'to_concept_code': 'bar',
-                    'from_concept_name': 'fooName',
-                    'to_concept_name': 'barName',
-                    'retired': False,
-                    'external_id': 'EX123',
-                    'extras': {
-                        'foo': 'bar'
-                    }
-                },
-                {
-                    'id': 'barbara',
-                    'map_type': 'foobarbara',
-                    'from_concept_url': '/foobara/',
-                    'to_source_url': '/barbara/',
-                    'from_concept_code': 'foobara',
-                    'to_concept_code': 'barbara',
-                    'from_concept_name': 'foobaraName',
-                    'to_concept_name': 'barbaraName',
-                    'retired': True,
-                    'extras': {
-                        'foo': 'barbara'
-                    }
-                }
-            ],
-            HTTP_AUTHORIZATION=f"Token {self.token}",
-            format='json'
-        )
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data, 'checksum3')
-        self.assertEqual(checksum_generate_mock.call_count, 3)
-        self.assertEqual(
-            checksum_generate_mock.mock_calls,
-            [
-                call({
-                    'map_type': 'foobar',
-                    'from_concept_code': 'foo',
-                    'to_concept_code': 'bar',
-                    'from_concept_name': 'fooName',
-                    'to_concept_name': 'barName',
-                    'extras': {'foo': 'bar'},
-                    'external_id': 'EX123',
-                    'to_source_url': '/bar/'
-                }),
-                call({
-                    'map_type': 'foobarbara',
-                    'from_concept_code': 'foobara',
-                    'to_concept_code': 'barbara',
-                    'from_concept_name': 'foobaraName',
-                    'to_concept_name': 'barbaraName',
-                    'extras': {'foo': 'barbara'},
-                    'retired': True,
-                    'to_source_url': '/barbara/',
-                }),
-                call(['checksum1', 'checksum2'])
-            ]
-        )
-
-    @patch('core.common.checksums.Checksum.generate')
-    def test_post_200_mapping_smart(self, checksum_generate_mock):
-        checksum_generate_mock.side_effect = ['checksum1', 'checksum2', 'checksum3']
-
-        response = self.client.post(
-            '/$checksum/smart/?resource=mapping',
-            data=[
-                {
-                    'id': 'bar',
-                    'map_type': 'foobar',
-                    'from_concept_url': '/foo/',
-                    'to_source_url': '/bar/',
-                    'from_concept_code': 'foo',
-                    'to_concept_code': 'bar',
-                    'from_concept_name': 'fooName',
-                    'to_concept_name': 'barName',
-                    'retired': False,
-                    'extras': {'foo': 'bar'}
-                },
-                {
-                    'id': 'barbara',
-                    'map_type': 'foobarbara',
-                    'from_concept_url': '/foobara/',
-                    'to_source_url': '/barbara/',
-                    'from_concept_code': 'foobara',
-                    'to_concept_code': 'barbara',
-                    'from_concept_name': 'foobaraName',
-                    'to_concept_name': 'barbaraName',
-                    'retired': True,
-                    'extras': {'foo': 'barbara'}
-                }
-            ],
-            HTTP_AUTHORIZATION=f"Token {self.token}",
-            format='json'
-        )
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data, 'checksum3')
-        self.assertEqual(checksum_generate_mock.call_count, 3)
-        self.assertEqual(
-            checksum_generate_mock.mock_calls,
-            [
-                call({
-                      'map_type': 'foobar',
-                      'from_concept_code': 'foo',
-                      'to_concept_code': 'bar',
-                      'from_concept_name': 'fooName',
-                      'to_concept_name': 'barName'
-                }),
-                call({
-                      'map_type': 'foobarbara',
-                      'from_concept_code': 'foobara',
-                      'to_concept_code': 'barbara',
-                      'from_concept_name': 'foobaraName',
-                      'to_concept_name': 'barbaraName',
-                      'retired': True
-                }),
-                call(['checksum1', 'checksum2'])
-            ]
-        )

@@ -88,7 +88,7 @@ class ChecksumModel(models.Model):
         return self.generate_checksum('standard')
 
     def _calculate_smart_checksum(self):
-        return self.generate_checksum('standard')
+        return self.generate_checksum('smart')
 
     def _calculate_checksums(self):
         return self.get_all_checksums()

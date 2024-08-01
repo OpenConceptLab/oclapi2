@@ -1123,8 +1123,12 @@ class AbstractChecksumView(APIView):
         if not resource or not data:
             return Response({'error': 'resource and data are both required.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        return Response(
-            ChecksumModel.generate_checksum_from_many(resource, request.data, 'smart' if self.smart else 'standard'))
+        try:
+            checksum = ChecksumModel.generate_checksum_from_many(
+                resource, request.data, 'smart' if self.smart else 'standard')
+        except ValueError as ex:
+            return Response({'error': str(ex)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(checksum)
 
 
 class StandardChecksumView(AbstractChecksumView):
