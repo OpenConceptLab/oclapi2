@@ -491,6 +491,35 @@ class BulkImportInlineTest(OCLTestCase):
         self.assertEqual(len(importer.updated), 1)
         self.assertEqual(importer.failed, [])
         self.assertTrue(importer.elapsed_seconds > 0)
+        self.assertFalse(mapping.retired)
+        self.assertFalse(mapping.get_latest_version().retired)
+
+        data = {
+            "to_concept_url": "/orgs/DemoOrg/sources/DemoSource/concepts/Corn/",
+            "from_concept_url": "/orgs/DemoOrg/sources/DemoSource/concepts/Vegetable/",
+            "type": "Mapping", "source": "DemoSource",
+            "extras": {"foo": "bar"}, "owner": "DemoOrg", "map_type": "Has Child", "owner_type": "Organization",
+            "external_id": None, "retired": True
+        }
+
+        importer = BulkImportInline(json.dumps(data), 'ocladmin', True)
+        importer.run()
+
+        mapping = Mapping.objects.filter(map_type='Has Child', id=F('versioned_object_id')).first()
+        self.assertEqual(mapping.versions.count(), 3)
+        self.assertTrue(mapping.retired)
+        self.assertTrue(mapping.get_latest_version().retired)
+        batch_index_resources_mock.apply_async.assert_called_with(
+            ('mapping', {'id__in': ANY}, True), queue='indexing', permanent=False)
+        self.assertEqual(
+            sorted(batch_index_resources_mock.apply_async.mock_calls[2][1][0][1]['id__in']),
+            sorted([mapping.id, mapping.get_latest_version().prev_version.id, mapping.get_latest_version().id])
+        )
+        self.assertEqual(importer.processed, 1)
+        self.assertEqual(len(importer.created), 0)
+        self.assertEqual(len(importer.updated), 1)
+        self.assertEqual(importer.failed, [])
+        self.assertTrue(importer.elapsed_seconds > 0)
 
     @patch('core.importers.models.batch_index_resources')
     def test_mapping_import_with_autoid_assignment(self, batch_index_resources_mock):
