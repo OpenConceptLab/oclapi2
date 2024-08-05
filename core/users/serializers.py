@@ -7,12 +7,13 @@ from django.core.validators import RegexValidator
 from pydash import get
 from rest_framework import serializers
 from rest_framework.fields import IntegerField
+from rest_framework.serializers import ModelSerializer
 from rest_framework.validators import UniqueValidator
 
 from core.common.constants import NAMESPACE_REGEX, INCLUDE_SUBSCRIBED_ORGS, INCLUDE_VERIFICATION_TOKEN, \
-    INCLUDE_AUTH_GROUPS, INCLUDE_PINS
+    INCLUDE_AUTH_GROUPS, INCLUDE_PINS, INCLUDE_FOLLOWERS, INCLUDE_FOLLOWING
 from core.users.constants import INVALID_AUTH_GROUP_NAME
-from .models import UserProfile
+from .models import UserProfile, Follower
 from ..common.serializers import AbstractResourceSerializer
 from ..common.utils import get_truthy_values
 
@@ -125,6 +126,32 @@ class UserCreateSerializer(serializers.ModelSerializer):
         return user
 
 
+class FollowerSerializer(ModelSerializer):
+    username = serializers.CharField(source='follower.username', required=True)
+    name = serializers.CharField(source='follower.name', required=True)
+    url = serializers.CharField(source='follower.uri', read_only=True)
+    logo_url = serializers.CharField(source='follower.logo_url', read_only=True)
+
+    class Meta:
+        model = Follower
+        fields = (
+            'username', 'name', 'url', 'logo_url', 'follow_date',
+        )
+
+
+class FollowedSerializer(ModelSerializer):
+    username = serializers.CharField(source='followed.username', required=True)
+    name = serializers.CharField(source='followed.name', required=True)
+    url = serializers.CharField(source='followed.uri', read_only=True)
+    logo_url = serializers.CharField(source='followed.logo_url', read_only=True)
+
+    class Meta:
+        model = Follower
+        fields = (
+            'username', 'name', 'url', 'logo_url', 'follow_date',
+        )
+
+
 class UserDetailSerializer(AbstractResourceSerializer):
     type = serializers.CharField(source='resource_type', read_only=True)
     uuid = serializers.CharField(source='id', read_only=True)
@@ -152,6 +179,8 @@ class UserDetailSerializer(AbstractResourceSerializer):
     auth_groups = serializers.ListField(required=False, allow_null=True, allow_empty=True)
     deactivated_at = serializers.DateTimeField(read_only=True)
     pins = serializers.SerializerMethodField()
+    followers = FollowerSerializer(many=True, read_only=True, source='follower_queryset')
+    following = FollowedSerializer(many=True, read_only=True, source='following_queryset')
 
     class Meta:
         model = UserProfile
@@ -161,7 +190,7 @@ class UserDetailSerializer(AbstractResourceSerializer):
             'url', 'organizations_url', 'extras', 'sources_url', 'collections_url', 'website', 'last_login',
             'logo_url', 'subscribed_orgs', 'is_superuser', 'is_staff', 'first_name', 'last_name', 'verified',
             'verification_token', 'date_joined', 'auth_groups', 'status', 'deactivated_at',
-            'sources', 'collections', 'owned_orgs', 'bookmarks', 'pins', 'bio'
+            'sources', 'collections', 'owned_orgs', 'bookmarks', 'pins', 'bio', 'followers', 'following'
         )
 
     def __init__(self, *args, **kwargs):
@@ -171,6 +200,8 @@ class UserDetailSerializer(AbstractResourceSerializer):
         self.include_verification_token = self.query_params.get(INCLUDE_VERIFICATION_TOKEN) in TRUTHY
         self.include_auth_groups = self.query_params.get(INCLUDE_AUTH_GROUPS) in TRUTHY
         self.include_pins = self.query_params.get(INCLUDE_PINS) in TRUTHY
+        self.include_followers = self.query_params.get(INCLUDE_FOLLOWERS) in TRUTHY
+        self.include_following = self.query_params.get(INCLUDE_FOLLOWING) in TRUTHY
 
         if not self.include_subscribed_orgs:
             self.fields.pop('subscribed_orgs')
@@ -180,6 +211,10 @@ class UserDetailSerializer(AbstractResourceSerializer):
             self.fields.pop('auth_groups')
         if not self.include_pins:
             self.fields.pop('pins')
+        if not self.include_followers:
+            self.fields.pop('followers')
+        if not self.include_following:
+            self.fields.pop('following')
 
         super().__init__(*args, **kwargs)
 

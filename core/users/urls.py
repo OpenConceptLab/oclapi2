@@ -23,6 +23,8 @@ urlpatterns = [
     path('<str:user>/logo/', views.UserLogoView.as_view(), name='userprofile-logo'),
     path('<str:user>/reactivate/', views.UserReactivateView.as_view(), name='userprofile-reactivate'),
     path('<str:user>/staff/', views.UserStaffToggleView.as_view(), name='userprofile-reactivate'),
+    path('<str:user>/followers/', views.UserFollowersView.as_view(), name='userprofile-followers'),
+    path('<str:user>/following/', views.UserFollowingView.as_view(), name='userprofile-following'),
     path('<str:user>/orgs/', org_views.OrganizationListView.as_view(), name='userprofile-orgs'),
     path('<str:user>/extras/', views.UserExtrasView.as_view(), name='user-extras'),
     path(

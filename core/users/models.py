@@ -37,6 +37,7 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
     verification_token = models.TextField(null=True, blank=True)
     deactivated_at = models.DateTimeField(null=True, blank=True)
     bio = models.TextField(null=True, blank=True)
+    followers = models.ManyToManyField('self', through='Follower', symmetrical=False, related_name='following')
     mnemonic_attr = 'username'
 
     es_fields = {
@@ -213,3 +214,25 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
         self.is_active = True
         self.save()
         self.set_checksums()
+
+    @property
+    def follower_queryset(self):
+        return self.followers.through.objects.filter(followed=self)
+
+    @property
+    def following_queryset(self):
+        return self.followers.through.objects.filter(follower=self)
+
+
+class Follower(models.Model):
+    class Meta:
+        db_table = 'followers'
+        unique_together = ('follower', 'followed')
+
+    followed = models.ForeignKey(UserProfile, on_delete=models.CASCADE, related_name='follower_set')
+    follower = models.ForeignKey(UserProfile, on_delete=models.CASCADE, related_name='following_set',)
+    follow_date = models.DateTimeField(auto_now_add=True)
+
+    def clean(self):
+        if self.follower == self.followed:
+            raise ValidationError("User cannot follow themselves.")

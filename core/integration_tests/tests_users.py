@@ -1,4 +1,4 @@
-from unittest.mock import Mock
+from unittest.mock import Mock, ANY
 
 from mock import patch
 from rest_framework.authtoken.models import Token
@@ -1039,3 +1039,161 @@ class OIDCLogoutViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response.headers['Location'], 'http://logout-redirect.com')
         get_logout_url_mock.assert_called_once_with('id-token-hint', 'http://post-logout-url')
+
+
+class UserFollowersViewTest(OCLAPITestCase):
+    def test_get(self):
+        follower = UserProfileFactory(username='follower')
+        followed = UserProfileFactory(username='followed')
+        follower_token = follower.get_token()
+        followed_token = followed.get_token()
+        followed.followers.add(follower)
+
+        response = self.client.get(
+            f'/users/{follower.username}/followers/',
+            HTTP_AUTHORIZATION='Token ' + follower_token,
+            format='json'
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 0)
+
+        response = self.client.get(
+            f'/users/{followed.username}/followers/',
+            HTTP_AUTHORIZATION='Token ' + followed_token,
+            format='json'
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(
+            dict(response.data[0]),
+            {
+                'username': follower.user,
+                'name': follower.name,
+                'url': follower.url,
+                'logo_url': None,
+                'follow_date': ANY
+            }
+        )
+
+        response = self.client.get(
+            f'/users/{followed.username}/followers/',
+            HTTP_AUTHORIZATION='Token ' + follower_token,  #anyone can see anyone's followers/followed
+            format='json'
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(
+            dict(response.data[0]),
+            {
+                'username': follower.user,
+                'name': follower.name,
+                'url': follower.url,
+                'logo_url': None,
+                'follow_date': ANY
+            }
+        )
+
+
+class UserFollowingViewTest(OCLAPITestCase):
+    def test_get(self):
+        follower = UserProfileFactory(username='follower')
+        followed = UserProfileFactory(username='followed')
+        follower_token = follower.get_token()
+        followed_token = followed.get_token()
+        followed.followers.add(follower)
+
+        response = self.client.get(
+            f'/users/{follower.username}/following/',
+            HTTP_AUTHORIZATION='Token ' + follower_token,
+            format='json'
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(
+            dict(response.data[0]),
+            {
+                'username': followed.user,
+                'name': followed.name,
+                'url': followed.url,
+                'logo_url': None,
+                'follow_date': ANY
+            }
+        )
+
+        response = self.client.get(
+            f'/users/{follower.username}/following/',
+            HTTP_AUTHORIZATION='Token ' + followed_token,  #anyone can see anyone's followers/followed
+            format='json'
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(
+            dict(response.data[0]),
+            {
+                'username': followed.user,
+                'name': followed.name,
+                'url': followed.url,
+                'logo_url': None,
+                'follow_date': ANY
+            }
+        )
+
+        response = self.client.get(
+            f'/users/{followed.username}/following/',  # not to-way following
+            HTTP_AUTHORIZATION='Token ' + followed_token,
+            format='json'
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 0)
+
+    def test_post(self):
+        follower = UserProfileFactory(username='follower')
+        followed = UserProfileFactory(username='followed')
+        follower_token = follower.get_token()
+        followed_token = followed.get_token()
+
+        response = self.client.post(
+            f'/users/{follower.username}/following/',
+            {},
+            HTTP_AUTHORIZATION='Token ' + follower_token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(followed.followers.count(), 0)
+
+        response = self.client.post(
+            f'/users/{follower.username}/following/',
+            {'follow': 'foobar'},
+            HTTP_AUTHORIZATION='Token ' + follower_token,
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(followed.followers.count(), 0)
+
+        response = self.client.post(
+            f'/users/{follower.username}/following/',
+            {'follow': follower.username},
+            HTTP_AUTHORIZATION='Token ' + followed_token,
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(followed.followers.count(), 0)
+
+        response = self.client.post(
+            f'/users/{follower.username}/following/',
+            {'follow': follower.username},
+            HTTP_AUTHORIZATION='Token ' + follower_token,
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+        response = self.client.post(
+            f'/users/{follower.username}/following/',
+            {'follow': followed.username},
+            HTTP_AUTHORIZATION='Token ' + follower_token,
+        )
+
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(followed.followers.count(), 1)
+        self.assertEqual(followed.followers.first(), follower)

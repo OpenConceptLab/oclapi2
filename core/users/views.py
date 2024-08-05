@@ -13,7 +13,8 @@ from rest_framework import mixins, status
 from rest_framework.authtoken.serializers import AuthTokenSerializer
 from rest_framework.authtoken.views import ObtainAuthToken
 from rest_framework.exceptions import PermissionDenied
-from rest_framework.generics import RetrieveAPIView, UpdateAPIView, DestroyAPIView, RetrieveUpdateDestroyAPIView
+from rest_framework.generics import RetrieveAPIView, UpdateAPIView, DestroyAPIView, RetrieveUpdateDestroyAPIView, \
+    ListAPIView
 from rest_framework.permissions import IsAdminUser, IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -32,7 +33,8 @@ from core.services.auth.openid import OpenIDAuthService
 from core.users.constants import VERIFICATION_TOKEN_MISMATCH, VERIFY_EMAIL_MESSAGE, REACTIVATE_USER_MESSAGE
 from core.users.documents import UserProfileDocument
 from core.users.search import UserProfileFacetedSearch
-from core.users.serializers import UserDetailSerializer, UserCreateSerializer, UserListSerializer, UserSummarySerializer
+from core.users.serializers import UserDetailSerializer, UserCreateSerializer, UserListSerializer, \
+    UserSummarySerializer, FollowedSerializer, FollowerSerializer
 from .models import UserProfile
 from ..common import ERRBIT_LOGGER
 
@@ -524,3 +526,58 @@ class UserExtraRetrieveUpdateDestroyView(UserExtrasBaseView, RetrieveUpdateDestr
             return Response(status=status.HTTP_204_NO_CONTENT)
 
         return Response({'detail': NOT_FOUND}, status=status.HTTP_404_NOT_FOUND)
+
+
+class AbstractFollowerFollowedView(UserBaseView, ListAPIView):
+    permission_classes = (AllowAny, )
+    default_qs_sort_attr = '-follow_date'
+
+    def get_object(self, queryset=None):
+        if self.user_is_self:
+            user = self.request.user
+        else:
+            user = UserProfile.objects.filter(username=self.kwargs['user'], is_active=True).first()
+        if not user:
+            raise Http404()
+
+        is_self_user = self.user_is_self or self.request.user.username == self.kwargs['user']
+
+        if self.request.method == 'GET' or is_self_user:
+            return user
+
+        raise PermissionDenied()
+
+
+class UserFollowersView(AbstractFollowerFollowedView):
+    """ A User's followers list """
+    serializer_class = FollowerSerializer
+
+    def get_queryset(self):
+        return self.get_object().follower_queryset
+
+
+class UserFollowingView(AbstractFollowerFollowedView):
+    """ A User's following list """
+    serializer_class = FollowedSerializer
+
+    def get_queryset(self):
+        return self.get_object().following_queryset
+
+    def post(self, request, *args, **kwargs):  # pylint: disable=unused-argument
+        follower = self.get_object()
+        followed = self.get_following_user()
+        if followed.username == follower.username:
+            raise Http400('User cannot follow themselves')
+        followed.followers.add(follower)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    def get_following_user(self):
+        follow = self.request.data.get('follow', None)
+        if not follow:
+            raise Http400('followed is mandatory')
+        follow = UserProfile.objects.filter(username=follow).first()
+        if not follow:
+            raise Http400('Invalid followed')
+        if not follow.is_active:
+            raise Http404('Subject is not active')
+        return follow
