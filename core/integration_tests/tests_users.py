@@ -1197,3 +1197,38 @@ class UserFollowingViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 204)
         self.assertEqual(followed.followers.count(), 1)
         self.assertEqual(followed.followers.first(), follower)
+
+
+class UserFollowingView(OCLAPITestCase):
+    def test_delete(self):
+        follower = UserProfileFactory(username='follower')
+        followed = UserProfileFactory(username='followed')
+        follower_token = follower.get_token()
+        followed_token = followed.get_token()
+        followed.followers.add(follower)
+
+        self.assertEqual(followed.followers.count(), 1)
+
+        response = self.client.delete(
+            '/users/follower/following/followed/',
+            HTTP_AUTHORIZATION='Token ' + followed_token,
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(followed.followers.count(), 1)
+
+        response = self.client.delete(
+            '/users/follower/following/foobar/',
+            HTTP_AUTHORIZATION='Token ' + follower_token,
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(followed.followers.count(), 1)
+
+        response = self.client.delete(
+            '/users/follower/following/followed/',
+            HTTP_AUTHORIZATION='Token ' + follower_token,
+        )
+
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(followed.followers.count(), 0)
