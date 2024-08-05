@@ -1199,7 +1199,7 @@ class UserFollowingViewTest(OCLAPITestCase):
         self.assertEqual(followed.followers.first(), follower)
 
 
-class UserFollowingView(OCLAPITestCase):
+class UserFollowingViewTest(OCLAPITestCase):
     def test_delete(self):
         follower = UserProfileFactory(username='follower')
         followed = UserProfileFactory(username='followed')
