@@ -1041,7 +1041,7 @@ class OIDCLogoutViewTest(OCLAPITestCase):
         get_logout_url_mock.assert_called_once_with('id-token-hint', 'http://post-logout-url')
 
 
-class UserFollowersViewTest(OCLAPITestCase):
+class UserFollowerListViewTest(OCLAPITestCase):
     def test_get(self):
         follower = UserProfileFactory(username='follower')
         followed = UserProfileFactory(username='followed')
@@ -1094,7 +1094,7 @@ class UserFollowersViewTest(OCLAPITestCase):
         )
 
 
-class UserFollowingViewTest(OCLAPITestCase):
+class UserFollowingListViewTest(OCLAPITestCase):
     def test_get(self):
         follower = UserProfileFactory(username='follower')
         followed = UserProfileFactory(username='followed')
