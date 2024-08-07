@@ -65,7 +65,9 @@ def import_response(request, import_queue, data, threads=None, inline=False, dep
 
 class ImportRetrieveDestroyMixin(BaseAPIView):
     def get_serializer_class(self):
-        return TaskDetailSerializer if self.is_verbose() and self.request.GET.get('task') else TaskListSerializer
+        if self.request.GET.get('task'):
+            return TaskDetailSerializer
+        return TaskListSerializer
 
     @swagger_auto_schema(
         manual_parameters=[task_param, username_param, verbose_param],

@@ -45,13 +45,29 @@ class Task(models.Model):
     children = ArrayField(models.TextField(), null=True, blank=True, default=list)
 
     @property
-    def json_result(self):
+    def result_all(self):
         if self.result:
             try:
-                return json.loads(json.dumps(ast.literal_eval(self.result)))
+                return json.loads(self.result)
             except Exception:  # pylint: disable=broad-except
-                return self.result
+                try:
+                    return json.loads(json.dumps(ast.literal_eval(self.result)))
+                except Exception:  # pylint: disable=broad-except
+                    return self.result
         return self.result
+
+    @property
+    def summary_result(self):
+        return get(self.result_all, 'detailed_summary') or self.summary
+
+    @property
+    def report_result(self):
+        return get(self.result_all, 'report') or self.summary
+
+    @property
+    def json_result(self):
+        result = self.result_all
+        return get(result, 'json') or result
 
     def is_finished(self):
         return self.state in (SUCCESS, FAILURE)

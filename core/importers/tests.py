@@ -1143,7 +1143,8 @@ class BulkImportViewTest(OCLAPITestCase):
                  'finished_at': None,
                  'runtime': None,
                  'summary': None,
-                 'children': []
+                 'children': [],
+                 'result': None
              }]
         )
 
@@ -1168,7 +1169,8 @@ class BulkImportViewTest(OCLAPITestCase):
                 'finished_at': None,
                 'runtime': None,
                 'summary': None,
-                'children': []
+                'children': [],
+                'result': None
             }, {
                 'id': task_id3,
                 'task': task_id3,
@@ -1181,7 +1183,8 @@ class BulkImportViewTest(OCLAPITestCase):
                 'finished_at': None,
                 'runtime': None,
                 'summary': None,
-                'children': []
+                'children': [],
+                'result': None
             }], key= lambda x: x['id'])
         )
 
@@ -1206,7 +1209,8 @@ class BulkImportViewTest(OCLAPITestCase):
                 'finished_at': None,
                 'runtime': None,
                 'summary': None,
-                'children': []
+                'children': [],
+                'result': None
             }]
         )
 
@@ -1254,7 +1258,12 @@ class BulkImportViewTest(OCLAPITestCase):
                 'finished_at': None,
                 'runtime': None,
                 'summary': None,
-                'children': []
+                'children': [],
+                'result': None,
+                'kwargs': None,
+                'error_message': None,
+                'traceback': None,
+                'retry': 0
             })
 
     def test_post_400(self):
@@ -1319,7 +1328,8 @@ class BulkImportViewTest(OCLAPITestCase):
                 'finished_at': None,
                 'runtime': None,
                 'summary': None,
-                'children': []
+                'children': [],
+                'result': None
             }
         )
         self.assertTrue(DEPRECATED_API_HEADER not in response)
@@ -1353,7 +1363,8 @@ class BulkImportViewTest(OCLAPITestCase):
                 'finished_at': None,
                 'runtime': None,
                 'summary': None,
-                'children': []
+                'children': [],
+                'result': None
             }
         )
         self.assertEqual(bulk_import_mock.apply_async.call_count, 2)
@@ -1386,7 +1397,8 @@ class BulkImportViewTest(OCLAPITestCase):
                 'finished_at': None,
                 'runtime': None,
                 'summary': None,
-                'children': []
+                'children': [],
+                'result': None
             }
         )
         self.assertEqual(bulk_import_mock.apply_async.call_count, 3)
@@ -1461,7 +1473,8 @@ class BulkImportViewTest(OCLAPITestCase):
                 'finished_at': None,
                 'runtime': None,
                 'summary': None,
-                'children': []
+                'children': [],
+                'result': None
             })
         self.assertTrue(DEPRECATED_API_HEADER in response)
         self.assertEqual(response[DEPRECATED_API_HEADER], 'True')
@@ -1494,7 +1507,8 @@ class BulkImportViewTest(OCLAPITestCase):
                 'finished_at': None,
                 'runtime': None,
                 'summary': None,
-                'children': []
+                'children': [],
+                'result': None
             })
         self.assertEqual(bulk_import_mock.apply_async.call_count, 1)
         self.assertEqual(bulk_import_mock.apply_async.call_args[0], (('{"key": "value"}', 'ocladmin', True),))
