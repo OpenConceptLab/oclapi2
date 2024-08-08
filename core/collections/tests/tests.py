@@ -3165,7 +3165,7 @@ class ExpansionConceptsIndexViewTest(OCLAPITestCase):
                 'runtime': None,
                 'summary': None,
                 'children': [],
-                'result': None
+                'message': None
             }
         )
         index_expansion_concepts_task_mock.apply_async.assert_called_once_with(
@@ -3204,7 +3204,7 @@ class ExpansionMappingsIndexViewTest(OCLAPITestCase):
                 'runtime': None,
                 'summary': None,
                 'children': [],
-                'result': None
+                'message': None
             }
         )
         index_expansion_mappings_task_mock.apply_async.assert_called_once_with(

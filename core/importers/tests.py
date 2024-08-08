@@ -1144,7 +1144,7 @@ class BulkImportViewTest(OCLAPITestCase):
                  'runtime': None,
                  'summary': None,
                  'children': [],
-                 'result': None
+                 'message': None
              }]
         )
 
@@ -1170,7 +1170,7 @@ class BulkImportViewTest(OCLAPITestCase):
                 'runtime': None,
                 'summary': None,
                 'children': [],
-                'result': None
+                'message': None
             }, {
                 'id': task_id3,
                 'task': task_id3,
@@ -1184,7 +1184,7 @@ class BulkImportViewTest(OCLAPITestCase):
                 'runtime': None,
                 'summary': None,
                 'children': [],
-                'result': None
+                'message': None
             }], key= lambda x: x['id'])
         )
 
@@ -1210,7 +1210,7 @@ class BulkImportViewTest(OCLAPITestCase):
                 'runtime': None,
                 'summary': None,
                 'children': [],
-                'result': None
+                'message': None
             }]
         )
 
@@ -1259,11 +1259,43 @@ class BulkImportViewTest(OCLAPITestCase):
                 'runtime': None,
                 'summary': None,
                 'children': [],
-                'result': None,
+                'message': None,
                 'kwargs': None,
                 'error_message': None,
                 'traceback': None,
-                'retry': 0
+                'retry': 0,
+                'report': None
+            }
+        )
+
+        response = self.client.get(
+            f'/importers/bulk-import/?task={task_id}&result=json',
+            HTTP_AUTHORIZATION='Token ' + foobar_user.get_token(),
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data, {
+                'id': task_id,
+                'task': task_id,
+                'state': 'PENDING',
+                'name': 'core.common.tasks.bulk_import_parallel_inline',
+                'queue': 'normal',
+                'username': 'foobar',
+                'created_at': ANY,
+                'started_at': None,
+                'finished_at': None,
+                'runtime': None,
+                'summary': None,
+                'children': [],
+                'message': None,
+                'kwargs': None,
+                'error_message': None,
+                'traceback': None,
+                'retry': 0,
+                'report': None,
+                'result': None
             })
 
     def test_post_400(self):
@@ -1329,7 +1361,7 @@ class BulkImportViewTest(OCLAPITestCase):
                 'runtime': None,
                 'summary': None,
                 'children': [],
-                'result': None
+                'message': None
             }
         )
         self.assertTrue(DEPRECATED_API_HEADER not in response)
@@ -1364,7 +1396,7 @@ class BulkImportViewTest(OCLAPITestCase):
                 'runtime': None,
                 'summary': None,
                 'children': [],
-                'result': None
+                'message': None
             }
         )
         self.assertEqual(bulk_import_mock.apply_async.call_count, 2)
@@ -1398,7 +1430,7 @@ class BulkImportViewTest(OCLAPITestCase):
                 'runtime': None,
                 'summary': None,
                 'children': [],
-                'result': None
+                'message': None
             }
         )
         self.assertEqual(bulk_import_mock.apply_async.call_count, 3)
@@ -1474,7 +1506,7 @@ class BulkImportViewTest(OCLAPITestCase):
                 'runtime': None,
                 'summary': None,
                 'children': [],
-                'result': None
+                'message': None
             })
         self.assertTrue(DEPRECATED_API_HEADER in response)
         self.assertEqual(response[DEPRECATED_API_HEADER], 'True')
@@ -1508,7 +1540,7 @@ class BulkImportViewTest(OCLAPITestCase):
                 'runtime': None,
                 'summary': None,
                 'children': [],
-                'result': None
+                'message': None
             })
         self.assertEqual(bulk_import_mock.apply_async.call_count, 1)
         self.assertEqual(bulk_import_mock.apply_async.call_args[0], (('{"key": "value"}', 'ocladmin', True),))

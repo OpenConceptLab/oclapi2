@@ -57,12 +57,12 @@ class Task(models.Model):
         return self.result
 
     @property
-    def summary_result(self):
-        return get(self.result_all, 'detailed_summary') or self.summary
+    def message(self):
+        return get(self.result_all, 'detailed_summary')
 
     @property
     def report_result(self):
-        return get(self.result_all, 'report') or self.summary
+        return get(self.result_all, 'report')
 
     @property
     def json_result(self):

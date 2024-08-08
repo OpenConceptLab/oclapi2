@@ -25,38 +25,45 @@ class TaskBriefSerializer(ModelSerializer):
 
 
 class TaskListSerializer(TaskBriefSerializer):
+    class Meta:
+        model = Task
+        fields = TaskBriefSerializer.Meta.fields + (
+            'created_at', 'started_at', 'finished_at', 'runtime', 'summary', 'children', 'message'
+        )
+
+
+class TaskDetailSerializer(TaskListSerializer):
     result = SerializerMethodField()
+    report = JSONField(read_only=True, source='report_result')
+
+    class Meta:
+        model = Task
+        fields = TaskListSerializer.Meta.fields + (
+            'report', 'result', 'kwargs', 'error_message', 'traceback', 'retry'
+        )
 
     def __init__(self, *args, **kwargs):  # pylint: disable=too-many-branches
         request = get(kwargs, 'context.request')
         params = get(request, 'query_params')
         self.query_params = params.dict() if params else {}
-        self.result_type = self.query_params.get('result', None) or 'summary'
+        self.result_type = self.query_params.get('result', None)
 
         super().__init__(*args, **kwargs)
 
-    class Meta:
-        model = Task
-        fields = TaskBriefSerializer.Meta.fields + (
-            'created_at', 'started_at', 'finished_at', 'runtime', 'summary', 'children', 'result'
-        )
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+
+        if self.result_type not in ['json', 'all']:
+            data.pop('result', None)
+
+        return data
 
     def get_result(self, obj):
         if self.result_type == 'json':
             return obj.json_result
-        if self.result_type == 'report':
-            return obj.report_result
         if self.result_type == 'all':
             return obj.result_all
-        return obj.summary_result
-
-
-class TaskDetailSerializer(TaskListSerializer):
-    class Meta:
-        model = Task
-        fields = TaskListSerializer.Meta.fields + (
-            'kwargs', 'error_message', 'traceback', 'retry'
-        )
+        return None
 
 
 class TaskResultSerializer(TaskDetailSerializer):
