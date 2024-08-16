@@ -1366,3 +1366,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
         from core.concepts.serializers import ConceptDetailSerializer, ConceptListSerializer
         return ConceptDetailSerializer if verbose else ConceptListSerializer
+
+    @staticmethod
+    def get_brief_serializer():
+        return Concept.get_serializer_class(brief=True)

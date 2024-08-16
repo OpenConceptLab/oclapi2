@@ -601,3 +601,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
 
         from core.mappings.serializers import MappingDetailSerializer, MappingListSerializer
         return MappingDetailSerializer if verbose else MappingListSerializer
+
+    @staticmethod
+    def get_brief_serializer():
+        return Mapping.get_serializer_class(brief=True)

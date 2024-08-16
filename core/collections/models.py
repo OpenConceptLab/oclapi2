@@ -454,6 +454,11 @@ class Collection(DirtyFieldsMixin, ConceptContainerModel):
 
         return {**_filters, **(filters or {})}
 
+    @staticmethod
+    def get_brief_serializer():
+        from core.collections.serializers import CollectionVersionMinimalSerializer
+        return CollectionVersionMinimalSerializer
+
 
 class ReferencedConcept(models.Model):
     reference = models.ForeignKey('collections.CollectionReference', on_delete=models.CASCADE)

@@ -31,12 +31,14 @@ from core.concepts.views import ConceptsHierarchyAmendAdminView
 from core.importers.views import BulkImportView
 from core.settings import ENV
 
-SchemaView = get_schema_view(
-    openapi.Info(
+api_info = openapi.Info(
         title="OCL API",
         default_version=VERSION,
         description=f"OCL API ({VERSION})",
-    ),
+    )
+
+SchemaView = get_schema_view(
+    api_info,
     public=True,
     permission_classes=(permissions.AllowAny,),
     url=get_api_base_url()

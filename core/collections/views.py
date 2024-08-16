@@ -91,19 +91,7 @@ class CollectionBaseView(BaseAPIView):
                 raise Http404()
 
     def set_parent_resource(self):
-        from core.orgs.models import Organization
-        from core.users.models import UserProfile
-        org = self.kwargs.get('org', None)
-        user = self.kwargs.get('user', None)
-        if not user and self.user_is_self:
-            user = self.request.user.username
-        parent_resource = None
-        if org:
-            parent_resource = Organization.objects.filter(mnemonic=org).first()
-        if user:
-            parent_resource = UserProfile.objects.filter(username=user).first()
-
-        self.kwargs['parent_resource'] = self.parent_resource = parent_resource
+        self.kwargs['parent_resource'] = self.parent_resource = self.get_owner_from_kwargs()
 
     def get_serializer_context(self):
         context = super().get_serializer_context()

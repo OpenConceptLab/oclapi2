@@ -824,3 +824,8 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
                 'mappings': mappings_diff.result_concise,
             }
         return result
+
+    @staticmethod
+    def get_brief_serializer():
+        from core.sources.serializers import SourceVersionMinimalSerializer
+        return SourceVersionMinimalSerializer

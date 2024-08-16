@@ -62,6 +62,11 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
         from core.users.documents import UserProfileDocument
         return UserProfileDocument
 
+    @staticmethod
+    def get_brief_serializer():
+        from core.users.serializers import UserListSerializer
+        return UserListSerializer
+
     @property
     def status(self):
         if not self.is_active:
@@ -77,7 +82,10 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
 
     @property
     def name(self):
-        return f"{self.first_name} {self.last_name}"
+        name = self.first_name.strip()
+        if self.last_name:
+            name += f" {self.last_name.strip()}"
+        return name
 
     @property
     def full_name(self):
@@ -214,6 +222,9 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
         self.is_active = True
         self.save()
         self.set_checksums()
+
+    def is_member_of_org(self, org_mnemonic):
+        return self.organizations.filter(mnemonic=org_mnemonic).exists()
 
     @property
     def follower_queryset(self):

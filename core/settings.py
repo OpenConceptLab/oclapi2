@@ -11,16 +11,17 @@ https://docs.djangoproject.com/en/3.0/ref/settings/
 """
 
 import os
-# Build paths inside the project like this: os.path.join(BASE_DIR, ...)
 
 from corsheaders.defaults import default_headers
 from elasticsearch import RequestsHttpConnection
 from kombu import Queue, Exchange
 from redis.backoff import ExponentialBackoff
-from redis.retry import Retry
 from redis.exceptions import ConnectionError  # pylint: disable=redefined-builtin
+from redis.retry import Retry
 
 from core import __version__
+
+# Build paths inside the project like this: os.path.join(BASE_DIR, ...)
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -103,6 +104,7 @@ INSTALLED_APPS = [
     'core.toggles',
     'core.repos',
     'core.url_registry',
+    'core.events',
 ]
 REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': (
@@ -141,6 +143,7 @@ SWAGGER_SETTINGS = {
         }
     },
     'DOC_EXPANSION': 'none',
+    'DEFAULT_INFO': 'core.urls.api_info',
 }
 
 REDOC_SETTINGS = {

@@ -828,6 +828,22 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             self.get_extras_exact_fields_from_query_params()
         )
 
+    def get_owner_from_kwargs(self):
+        from core.orgs.models import Organization
+        from core.users.models import UserProfile
+        org = self.kwargs.get('org', None)
+        user = self.kwargs.get('user', None)
+
+        if not user and self.user_is_self:
+            user = self.request.user.username
+
+        if org:
+            return Organization.objects.filter(mnemonic=org).first()
+        if user:
+            return UserProfile.objects.filter(username=user).first()
+
+        return None
+
 
 class SourceChildCommonBaseView(BaseAPIView):
     lookup_field = None

@@ -44,6 +44,7 @@ urlpatterns = [
     path('<str:user>/sources/', include('core.sources.urls')),
     path('<str:user>/collections/', include('core.collections.urls')),
     path('<str:user>/pins/', include('core.pins.urls')),
+    path('<str:user>/events/', include('core.events.urls')),
 
     # TODO: require FHIR subdomain
     path('<str:user>/CodeSystem/', include('core.code_systems.urls'), name='code_systems_urls'),

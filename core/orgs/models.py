@@ -102,3 +102,8 @@ class Organization(BaseResourceModel, SourceContainerMixin, ChecksumModel):
         Pin.objects.filter(resource_type__model='organization', resource_id=self.id).delete()
         # deletes pins for this org
         self.pins.all().delete()
+
+    @staticmethod
+    def get_brief_serializer():
+        from core.orgs.serializers import OrganizationListSerializer
+        return OrganizationListSerializer

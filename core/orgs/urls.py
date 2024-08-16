@@ -26,4 +26,5 @@ urlpatterns = [
     path('<str:org>/ConceptMap/', include('core.concept_maps.urls'), name='concept_maps_urls'),
     path('<str:org>/collections/', include('core.collections.urls')),
     path('<str:org>/pins/', include('core.pins.urls')),
+    path('<str:org>/events/', include('core.events.urls')),
 ]
