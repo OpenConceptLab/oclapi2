@@ -16,17 +16,17 @@ class EventFactory(factory.django.DjangoModelFactory):
 
     @factory.post_generation
     def referenced_object(self, create, extracted):
-        if not create or self.referenced_object_url:
+        if not create or self.referenced_object_url:  # pylint: disable=access-member-before-definition
             return
 
         if extracted:
             self.referenced_object_url = get(extracted, 'url')
         else:
-            self.referenced_object_url = OrganizationFactory().url
+            self.referenced_object_url = OrganizationFactory().url  # pylint: disable=access-member-before-definition
 
     @factory.post_generation
     def object(self, create, extracted):
-        if not create or self.object_url:
+        if not create or self.object_url:  # pylint: disable=access-member-before-definition
             return
 
         if extracted:
