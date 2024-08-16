@@ -525,6 +525,10 @@ class CollectionReference(models.Model):
         return COLLECTION_REFERENCE_TYPE
 
     @property
+    def parent(self):
+        return self.collection
+
+    @property
     def can_compute_against_other_system_version(self):
         return (not self.system or not self.version) and not self.resource_version
 
@@ -1021,6 +1025,10 @@ class Expansion(BaseResourceModel):
     @staticmethod
     def get_url_kwarg():
         return 'expansion'
+
+    @property
+    def parent(self):
+        return self.collection_version
 
     @property
     def is_default(self):

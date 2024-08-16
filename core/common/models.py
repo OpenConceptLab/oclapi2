@@ -210,6 +210,23 @@ class BaseModel(models.Model):
         for obj in queryset.filter():
             obj.delete()
 
+    def record_create_event(self):
+        from core.events.models import Event
+        self.record_event(Event.CREATED)
+
+    def record_event(self, event_type):
+        from core.events.models import Event
+        Event.record(self, event_type)
+
+    def __repr__(self):
+        parts = []
+        current = self
+        while current is not None:
+            parts.append(f"{current.resource_type}:{current.mnemonic}")
+            current = get(current, 'parent')
+
+        return "/".join(reversed(parts))
+
 
 class CommonLogoModel(models.Model):
     logo_path = models.TextField(null=True, blank=True)

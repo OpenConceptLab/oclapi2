@@ -15,6 +15,8 @@ def stamp_uri(sender, instance, **kwargs):  # pylint: disable=unused-argument
 @receiver(post_save, sender=Organization)
 @receiver(post_save, sender=UserProfile)
 def propagate_owner_status(sender, instance=None, created=False, **kwargs):  # pylint: disable=unused-argument
+    if created and instance.__class__ == Organization and instance.id != 1:
+        instance.record_create_event()
     if not created and instance:
         updated_sources = 0
         updated_collections = 0

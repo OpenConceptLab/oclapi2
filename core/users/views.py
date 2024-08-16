@@ -568,7 +568,9 @@ class UserFollowingListView(AbstractFollowerFollowedView, ListAPIView):
         followed = self.get_following_user()
         if followed.username == follower.username:
             raise Http400('User cannot follow themselves')
-        follower.following.add(followed)
+
+        follower.follow(followed)
+
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     def get_following_user(self):
@@ -589,7 +591,7 @@ class UserFollowingView(AbstractFollowerFollowedView):
     def delete(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         follower = self.get_object()
         followed = self.get_following_user()
-        follower.following.remove(followed)
+        follower.unfollow(followed)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     def get_following_user(self):

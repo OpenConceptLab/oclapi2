@@ -1,13 +1,18 @@
 from django.db import models
+from pydash import has
 
 
 class Event(models.Model):
     object_url = models.CharField(max_length=255)
     referenced_object_url = models.CharField(max_length=255)
     event_type = models.CharField(max_length=255)
-    actor = models.ForeignKey('users.UserProfile', on_delete=models.DO_NOTHING, related_name='creator_events')
+    actor = models.ForeignKey('users.UserProfile', on_delete=models.DO_NOTHING, related_name='events')
     created_at = models.DateTimeField(auto_now_add=True)
     public = models.BooleanField(default=True)  # private events are shown to creator/staff/org members only
+
+    CREATED = 'Created'
+    FOLLOWED = 'Followed'
+    UNFOLLOWED = 'Unfollowed'
 
     @property
     def type(self):
@@ -59,9 +64,7 @@ class Event(models.Model):
 
     @staticmethod
     def get_object_repr(object_instance):
-        if object_instance:
-            return f"{object_instance.__class__.__name__}:{object_instance.mnemonic}"
-        return None
+        return repr(object_instance) if object_instance else None
 
     @property
     def description(self):
@@ -73,3 +76,12 @@ class Event(models.Model):
         if self.public is None:
             self.public = False
         super().clean_fields(exclude=exclude)
+
+    @classmethod
+    def record(cls, instance, event_type=CREATED):
+        if instance.id:
+            public_can_view = instance.public_can_view if has(instance, 'public_can_view') else True
+            cls.objects.create(
+                object_url=instance.created_by.url, event_type=event_type, actor=instance.created_by,
+                referenced_object_url=instance.url, public=public_can_view
+            )

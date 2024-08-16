@@ -7,6 +7,8 @@ from core.sources.models import Source
 
 @receiver(post_save, sender=Source)
 def propagate_parent_attributes(sender, instance=None, created=False, **kwargs):  # pylint: disable=unused-argument
+    if created:
+        instance.record_create_event()
     if not created and instance:
         updated_concepts = 0
         updated_mappings = 0

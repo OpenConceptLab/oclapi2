@@ -234,6 +234,28 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
     def following_queryset(self):
         return self.followers.through.objects.filter(follower=self)
 
+    def follow(self, following):
+        self.following.add(following)
+
+        from core.events.models import Event
+        self.events.create(
+            actor=self,
+            event_type=Event.FOLLOWED,
+            object_url=self.url,
+            referenced_object_url=following.url,
+        )
+
+    def unfollow(self, following):
+        self.following.remove(following)
+
+        from core.events.models import Event
+        self.events.create(
+            actor=self,
+            event_type=Event.UNFOLLOWED,
+            object_url=self.url,
+            referenced_object_url=following.url,
+        )
+
 
 class Follower(models.Model):
     class Meta:
