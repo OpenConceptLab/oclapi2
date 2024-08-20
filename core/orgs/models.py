@@ -90,6 +90,8 @@ class Organization(BaseResourceModel, SourceContainerMixin, ChecksumModel):
                 collection.delete(force=True)
             self.delete_pins()
             self.delete_client_configs()
+            from core.events.models import Event
+            self.record_event(Event.DELETED)
 
             return super().delete(using=using, keep_parents=keep_parents)
 

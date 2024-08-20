@@ -161,6 +161,8 @@ class OrganizationDetailView(OrganizationBaseView, mixins.UpdateModelMixin, mixi
 
     def destroy(self, request, *args, **kwargs):
         obj = self.get_object()
+        obj.updated_by = request.user
+        obj.save(update_fields=['updated_by'])
 
         result = self.perform_task(delete_organization, (obj.id, ))
 

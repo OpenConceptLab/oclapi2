@@ -11,6 +11,7 @@ class Event(models.Model):
     public = models.BooleanField(default=True)  # private events are shown to creator/staff/org members only
 
     CREATED = 'Created'
+    DELETED = 'Deleted'
     FOLLOWED = 'Followed'
     UNFOLLOWED = 'Unfollowed'
 
@@ -68,9 +69,7 @@ class Event(models.Model):
 
     @property
     def description(self):
-        description = f"{self.object_repr} {self.event_type} {self.referenced_object_repr}"
-        description += f" by {self.actor.name} at {self.created_at}"
-        return description
+        return f"{self.event_type} {self.referenced_object_repr}"
 
     def clean_fields(self, exclude=None):
         if self.public is None:
@@ -82,6 +81,6 @@ class Event(models.Model):
         if instance.id:
             public_can_view = instance.public_can_view if has(instance, 'public_can_view') else True
             cls.objects.create(
-                object_url=instance.created_by.url, event_type=event_type, actor=instance.created_by,
+                object_url=instance.updated_by.url, event_type=event_type, actor=instance.updated_by,
                 referenced_object_url=instance.url, public=public_can_view
             )

@@ -222,7 +222,10 @@ class BaseModel(models.Model):
         parts = []
         current = self
         while current is not None:
-            parts.append(f"{current.resource_type}:{current.mnemonic}")
+            if current.is_versioned and not current.is_head:
+                parts.append(f"{current.resource_version_type}:{current.mnemonic}:{current.version}")
+            else:
+                parts.append(f"{current.resource_type}:{current.mnemonic}")
             current = get(current, 'parent')
 
         return "/".join(reversed(parts))

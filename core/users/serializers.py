@@ -21,10 +21,12 @@ TRUTHY = get_truthy_values()
 
 
 class UserListSerializer(AbstractResourceSerializer):
+    type = serializers.CharField(source='resource_type', read_only=True)
+
     class Meta:
         model = UserProfile
         fields = AbstractResourceSerializer.Meta.fields + (
-            'username', 'name', 'url', 'logo_url'
+            'username', 'name', 'url', 'logo_url', 'type'
         )
 
 

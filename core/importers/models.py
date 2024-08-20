@@ -212,6 +212,8 @@ class OrganizationImporter(BaseResourceImporter):
         if self.exists():
             org = self.get_queryset().first()
             if self.user and (self.user.is_staff or org.is_member(self.user)):
+                org.updated_by = self.user
+                org.save(update_fields=['updated_by'])
                 delete_organization(org.id)
                 return DELETED
             return PERMISSION_DENIED

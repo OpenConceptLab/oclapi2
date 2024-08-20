@@ -454,10 +454,9 @@ class Collection(DirtyFieldsMixin, ConceptContainerModel):
 
         return {**_filters, **(filters or {})}
 
-    @staticmethod
-    def get_brief_serializer():
-        from core.collections.serializers import CollectionVersionMinimalSerializer
-        return CollectionVersionMinimalSerializer
+    def get_brief_serializer(self):
+        from core.collections.serializers import CollectionVersionMinimalSerializer, CollectionMinimalSerializer
+        return CollectionMinimalSerializer if self.is_head else CollectionVersionMinimalSerializer
 
 
 class ReferencedConcept(models.Model):

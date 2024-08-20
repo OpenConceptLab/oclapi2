@@ -825,7 +825,6 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
             }
         return result
 
-    @staticmethod
-    def get_brief_serializer():
-        from core.sources.serializers import SourceVersionMinimalSerializer
-        return SourceVersionMinimalSerializer
+    def get_brief_serializer(self):
+        from core.sources.serializers import SourceVersionMinimalSerializer, SourceMinimalSerializer
+        return SourceMinimalSerializer if self.is_head else SourceVersionMinimalSerializer

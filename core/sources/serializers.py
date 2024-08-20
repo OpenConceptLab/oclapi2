@@ -23,10 +23,11 @@ TRUTHY = get_truthy_values()
 
 class SourceMinimalSerializer(AbstractResourceSerializer):
     id = CharField(source='mnemonic')
+    type = CharField(source='resource_type')
 
     class Meta:
         model = Source
-        fields = AbstractResourceSerializer.Meta.fields + ('id', 'url')
+        fields = AbstractResourceSerializer.Meta.fields + ('id', 'url', 'type')
 
 
 class SourceVersionMinimalSerializer(ModelSerializer):
