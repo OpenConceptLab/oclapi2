@@ -98,14 +98,10 @@ class EventTest(OCLTestCase):
         OrganizationFactory(mnemonic='waynecorp', name='Wayne Enterprises')
 
         self.user_event.referenced_object_url = '/orgs/waynecorp/'
-        self.assertEqual(
-            self.user_event.description,
-            f"User:batman Joined Organization:waynecorp by Alfred Pennyworth at {self.now}")
+        self.assertEqual(self.user_event.description, "Joined Organization:waynecorp")
 
         self.org_event.referenced_object_url = batman.uri
-        self.assertEqual(
-            self.org_event.description,
-            f"Organization:waynecorp Subscribed User:batman by Alfred Pennyworth at {self.now}")
+        self.assertEqual(self.org_event.description, "Subscribed User:batman")
 
     def test_clean_fields(self):
         self.user_event.referenced_object_url = '/orgs/waynecorp/'

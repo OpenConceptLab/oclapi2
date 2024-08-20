@@ -90,7 +90,7 @@ class SourceListViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 1)
-        self.assertEqual(response.data[0], {'id': source.mnemonic, 'url': source.uri})
+        self.assertEqual(response.data[0], {'id': source.mnemonic, 'url': source.uri, 'type': 'Source'})
 
     def test_get_200_zip(self):
         response = self.client.get(
