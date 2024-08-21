@@ -19,9 +19,10 @@ class EventSerializer(serializers.ModelSerializer):
     @staticmethod
     def get_referenced_object(obj):
         referenced_object = obj.referenced_object
-        data = None
         if referenced_object:
             data = referenced_object.get_brief_serializer()(referenced_object).data
+        else:
+            data = obj._referenced_object
         return data
 
     @staticmethod

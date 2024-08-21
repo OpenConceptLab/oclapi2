@@ -9,6 +9,7 @@ class Event(models.Model):
     actor = models.ForeignKey('users.UserProfile', on_delete=models.DO_NOTHING, related_name='events')
     created_at = models.DateTimeField(auto_now_add=True)
     public = models.BooleanField(default=True)  # private events are shown to creator/staff/org members only
+    _referenced_object = models.JSONField(null=True, blank=True)
 
     CREATED = 'Created'
     DELETED = 'Deleted'
@@ -57,7 +58,7 @@ class Event(models.Model):
 
     @property
     def referenced_object_repr(self):
-        return self.get_object_repr(self.referenced_object)
+        return self.get_object_repr(self.referenced_object or self._referenced_object)
 
     @property
     def object_repr(self):
@@ -65,6 +66,8 @@ class Event(models.Model):
 
     @staticmethod
     def get_object_repr(object_instance):
+        if isinstance(object_instance, dict):
+            return f"{object_instance.get('type', None)}:{object_instance.get('id', None)}"
         return repr(object_instance) if object_instance else None
 
     @property
@@ -82,5 +85,6 @@ class Event(models.Model):
             public_can_view = instance.public_can_view if has(instance, 'public_can_view') else True
             cls.objects.create(
                 object_url=instance.updated_by.url, event_type=event_type, actor=instance.updated_by,
-                referenced_object_url=instance.url, public=public_can_view
+                referenced_object_url=instance.url, public=public_can_view,
+                _referenced_object=instance.get_brief_serializer()(instance).data
             )
