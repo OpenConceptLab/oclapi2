@@ -41,7 +41,7 @@ def delete_organization(org_id):
 
     try:
         logger.info('Found org %s.  Beginning purge...', org.mnemonic)
-        org.delete()
+        org.delete(sync=True)
         logger.info('Purge complete!')
     except Exception as ex:
         logger.info('Org delete failed for %s with exception %s', org.mnemonic, ex.args)

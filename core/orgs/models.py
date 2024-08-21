@@ -79,15 +79,15 @@ class Organization(BaseResourceModel, SourceContainerMixin, ChecksumModel):
             if self.updated_by_id:
                 self.members.add(self.updated_by)
 
-    def delete(self, using=None, keep_parents=False):
+    def delete(self, using=None, keep_parents=False, sync=False):   # pylint: disable=arguments-differ
         with transaction.atomic():
             for source in self.source_set.all():
                 self.batch_delete(source.concepts_set)
                 self.batch_delete(source.mappings_set)
-                source.delete(force=True)
+                source.delete(force=True, sync=sync)
             for collection in self.collection_set.all():
                 self.batch_delete(collection.references)
-                collection.delete(force=True)
+                collection.delete(force=True, sync=sync)
             self.delete_pins()
             self.delete_client_configs()
             from core.events.models import Event

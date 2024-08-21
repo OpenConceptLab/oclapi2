@@ -565,7 +565,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
             organization_id=self.organization_id, user_id=self.user_id
         ).order_by('-created_at')
 
-    def delete(self, using=None, keep_parents=False, force=False):  # pylint: disable=arguments-differ
+    def delete(self, using=None, keep_parents=False, force=False, sync=False):  # pylint: disable=arguments-differ
         if self.is_head:
             self.versions.exclude(id=self.id).delete()
         elif self.is_latest_version:
@@ -580,7 +580,10 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
         export_path = self.get_version_export_path(suffix=None)
         super().delete(using=using, keep_parents=keep_parents)
-        delete_s3_objects.apply_async((export_path,), queue='default', permanent=False)
+        if sync:
+            delete_s3_objects(export_path)
+        else:
+            delete_s3_objects.apply_async((export_path,), queue='default', permanent=False)
         self.post_delete_actions()
 
     def post_delete_actions(self):
