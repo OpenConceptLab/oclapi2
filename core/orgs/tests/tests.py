@@ -166,7 +166,7 @@ class OrganizationTest(OCLTestCase):
         self.assertFalse(Mapping.objects.filter(mnemonic='to-be-deleted-mapping').exists())
         self.assertEqual(CollectionReference.objects.count(), 0)
         self.assertEqual(Expansion.objects.count(), 0)
-        delete_s3_objects_mock.apply_async.assert_called()
+        delete_s3_objects_mock.assert_called()
 
     def test_logo_url(self):
         self.assertIsNone(Organization(logo_path=None).logo_url)
