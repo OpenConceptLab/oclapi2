@@ -1877,17 +1877,17 @@ class ImporterTest(OCLTestCase):
         importer = Importer('1', 'path', 'root', 'users', 'root')
         resources = {}
         with open(ImporterTest.get_absolute_path('tests/fhir_resources_01.json')) as json_file:
-            importer.categorize_resources(json_file, '/path/', 'json', ['CodeSystem', 'ValueSet'], resources)
+            importer.categorize_resources(json_file, '/path', 'json', ['CodeSystem', 'ValueSet'], resources)
 
         self.assertEqual(list(resources.keys()), ['CodeSystem', 'ValueSet'])
-        self.assertEqual(resources.get('CodeSystem'),  {'/path//json': 2})
-        self.assertEqual(resources.get('ValueSet'),  {'/path//json': 2})
+        self.assertEqual(resources.get('CodeSystem'),  {'/path/json': 2})
+        self.assertEqual(resources.get('ValueSet'),  {'/path/json': 2})
 
     def test_categorize_resources_none_from_file(self):
         importer = Importer('1', 'path', 'root', 'users', 'root')
         resources = {}
         with open(ImporterTest.get_absolute_path('tests/fhir_resources_01.json')) as json_file:
-            importer.categorize_resources(json_file, '/path/', 'json', ['ConceptMap'], resources)
+            importer.categorize_resources(json_file, '/path', 'json', ['ConceptMap'], resources)
 
         self.assertEqual(list(resources.keys()), ['ConceptMap'])
         self.assertEqual(resources.get('ConceptMap'), {})
@@ -1896,19 +1896,19 @@ class ImporterTest(OCLTestCase):
         importer = Importer('1', 'path', 'root', 'users', 'root')
         resources = {}
         with open(ImporterTest.get_absolute_path('tests/fhir_resources_01.json')) as json_file:
-            importer.categorize_resources(json_file, '/path/', 'json', ['CodeSystem'], resources)
+            importer.categorize_resources(json_file, '/path', 'json', ['CodeSystem'], resources)
 
         self.assertEqual(list(resources.keys()), ['CodeSystem'])
-        self.assertEqual(resources.get('CodeSystem'), {'/path//json': 2})
+        self.assertEqual(resources.get('CodeSystem'), {'/path/json': 2})
 
     def test_categorize_resources_for_npm_file(self):
         importer = Importer('1', 'path', 'root', 'users', 'root', 'npm')
         resources = {}
         with open(ImporterTest.get_absolute_path('tests/fhir_resources_01.json')) as json_file:
-            importer.categorize_resources(json_file, '/path/', 'json', ['ValueSet', 'CodeSystem'], resources)
+            importer.categorize_resources(json_file, '/path', 'json', ['ValueSet', 'CodeSystem'], resources)
 
         self.assertEqual(list(resources.keys()), ['ValueSet', 'CodeSystem'])
-        self.assertEqual(resources.get('ValueSet'), {'/path//json': 1})
+        self.assertEqual(resources.get('ValueSet'), {'/path/json': 1})
         self.assertEqual(resources.get('CodeSystem'), {})
 
     def test_prepare_tasks(self):
@@ -1923,29 +1923,29 @@ class ImporterTest(OCLTestCase):
             # Executed in sequence
             [  # Executed in parallel
                 {'path': '/package2', 'username': 'root', 'owner_type': 'users', 'owner': 'root',
-                 'resource_type': 'ValueSet', 'files': [{'filepath': '/path3', 'start_index': 0, 'end_index': 50}]}
+                 'resource_type': 'ValueSet', 'files': [{'filepath': 'path3', 'start_index': 0, 'end_index': 50}]}
             ], [  # Executed in parallel
                 {'path': '/package2', 'username': 'root', 'owner_type': 'users', 'owner': 'root',
-                 'resource_type': 'ConceptMap', 'files': [{'filepath': '/path5', 'start_index': 0, 'end_index': 100}]},
+                 'resource_type': 'ConceptMap', 'files': [{'filepath': 'path5', 'start_index': 0, 'end_index': 100}]},
                 {'path': '/package2', 'username': 'root', 'owner_type': 'users', 'owner': 'root',
-                 'resource_type': 'ConceptMap', 'files': [{'filepath': '/path5', 'start_index': 100,
+                 'resource_type': 'ConceptMap', 'files': [{'filepath': 'path5', 'start_index': 100,
                                                            'end_index': 200}]},
                 {'path': '/package2', 'username': 'root', 'owner_type': 'users', 'owner': 'root',
-                 'resource_type': 'ConceptMap', 'files': [{'filepath': '/path5', 'start_index': 200, 'end_index': 250}]}
+                 'resource_type': 'ConceptMap', 'files': [{'filepath': 'path5', 'start_index': 200, 'end_index': 250}]}
             ], [  # Executed in parallel
                 {'path': '/package1', 'username': 'root', 'owner_type': 'users', 'owner': 'root',
-                 'resource_type': 'CodeSystem', 'files': [{'filepath': '/path4:', 'start_index': 0, 'end_index': 10}]}
+                 'resource_type': 'CodeSystem', 'files': [{'filepath': 'path4:', 'start_index': 0, 'end_index': 10}]}
             ], [  # Executed in parallel
                 {'path': '/package1', 'username': 'root', 'owner_type': 'users', 'owner': 'root',
-                 'resource_type': 'ValueSet', 'files': [{'filepath': '/path1', 'start_index': 0, 'end_index': 100}]},
+                 'resource_type': 'ValueSet', 'files': [{'filepath': 'path1', 'start_index': 0, 'end_index': 100}]},
                 {'path': '/package1', 'username': 'root', 'owner_type': 'users', 'owner': 'root',
-                 'resource_type': 'ValueSet', 'files': [{'filepath': '/path1', 'start_index': 100, 'end_index': 101}]},
+                 'resource_type': 'ValueSet', 'files': [{'filepath': 'path1', 'start_index': 100, 'end_index': 101}]},
                 {'path': '/package1', 'username': 'root', 'owner_type': 'users', 'owner': 'root',
-                 'resource_type': 'ValueSet', 'files': [{'filepath': '/path2', 'start_index': 0, 'end_index': 100}]},
+                 'resource_type': 'ValueSet', 'files': [{'filepath': 'path2', 'start_index': 0, 'end_index': 100}]},
                 {'path': '/package1', 'username': 'root', 'owner_type': 'users', 'owner': 'root',
-                 'resource_type': 'ValueSet', 'files': [{'filepath': '/path2', 'start_index': 100, 'end_index': 200}]},
+                 'resource_type': 'ValueSet', 'files': [{'filepath': 'path2', 'start_index': 100, 'end_index': 200}]},
                 {'path': '/package1', 'username': 'root', 'owner_type': 'users', 'owner': 'root',
-                 'resource_type': 'ValueSet', 'files': [{'filepath': '/path2', 'start_index': 200,
+                 'resource_type': 'ValueSet', 'files': [{'filepath': 'path2', 'start_index': 200,
                                                          'end_index': 299}]}
             ]])
 
@@ -2045,7 +2045,7 @@ class ImporterTest(OCLTestCase):
                           content_type='application/json', stream=True)
             importer.prepare_resources('http://fetch/json', ['CodeSystem', 'ValueSet'], [], [], resources)
 
-        self.assertEqual(resources, {'CodeSystem': {'http://fetch/json/': 2}, 'ValueSet': {'http://fetch/json/': 2}})
+        self.assertEqual(resources, {'CodeSystem': {'http://fetch/json': 2}, 'ValueSet': {'http://fetch/json': 2}})
 
 
 class ImporterSubtaskTest(OCLTestCase):

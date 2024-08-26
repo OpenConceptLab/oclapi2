@@ -325,6 +325,7 @@ class Importer:
                             # If a file contains more than batch resources then split in multiple tasks in batches.
                             end_index = start_index + batch_size
                         filepath = filepath.removeprefix(package)
+                        filepath = filepath.removeprefix('/')
                         files.append({"filepath": filepath, "start_index": start_index, "end_index": end_index})
 
                         batch_size -= end_index - start_index
@@ -377,7 +378,10 @@ class Importer:
                     if value in resource_types:
                         resource_type = resources.get(value)
                         # Remember count of resources of the given type within a file
-                        path_key = path + '/' + file_path
+                        if file_path:
+                            path_key = path + '/' + file_path
+                        else:
+                            path_key = path
                         resource_type.update({path_key: resource_type.get(path_key, 0) + 1})
 
                     if self.is_npm_import():  # Expect only one resource per file for npm
