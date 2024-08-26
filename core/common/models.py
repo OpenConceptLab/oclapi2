@@ -722,8 +722,6 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
         if obj.id:
             obj.sibling_versions.update(is_latest_version=False)
-            if obj.released:
-                obj.index_resources_for_self_as_latest_released()
 
         return errors
 

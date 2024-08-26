@@ -380,9 +380,8 @@ def seed_children_to_new_version(self, resource, obj_id, export=True, sync=False
         task_id = self.request.id
 
         index = not export
-        if is_source and instance.released:  # will index in new version creation at the end
+        if is_source and instance.released:
             index = False
-            async_indexing = False
 
         try:
             instance.add_processing(task_id)
@@ -398,14 +397,13 @@ def seed_children_to_new_version(self, resource, obj_id, export=True, sync=False
                 task = Task.new(queue='default', username=instance.updated_by, name=export_task.__name__)
                 export_task.apply_async((obj_id,), queue=task.queue, task_id=task.id)
                 if autoexpand:
-                    if async_indexing and is_source:
+                    if is_source and instance.released:
+                        instance.index_resources_for_self_as_latest_released()
+                    elif is_source and async_indexing:
                         index_source_concepts.apply_async((obj_id,), queue='indexing')
                         index_source_mappings.apply_async((obj_id,), queue='indexing')
                     else:
-                        if is_source and instance.released:
-                            pass
-                        else:
-                            instance.index_children()
+                        instance.index_children()
         finally:
             instance.remove_processing(task_id)
 
