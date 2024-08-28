@@ -710,6 +710,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
         if obj.id:
             obj.get_checksums(recalculate=True)
+            obj.sibling_versions.update(is_latest_version=False)
 
         is_test_mode = get(settings, 'TEST_MODE', False)
         if is_test_mode or sync:
@@ -718,10 +719,11 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
             from core.tasks.models import Task
             task = Task.new(queue='default', user=user, name=seed_children_to_new_version.__name__)
             seed_children_to_new_version.apply_async(
-                (obj.resource_type.lower(), obj.id, True, sync, async_indexing), task_id=task.id, queue='default')
-
-        if obj.id:
-            obj.sibling_versions.update(is_latest_version=False)
+                (obj.resource_type.lower(), obj.id, True, sync, async_indexing),
+                task_id=task.id,
+                queue='default',
+                persist_args=True
+            )
 
         return errors
 

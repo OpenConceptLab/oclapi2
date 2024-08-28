@@ -417,76 +417,6 @@ class SourceVersionListViewTest(OCLAPITestCase):
         self.assertEqual(response.data['version'], 'v1')
         self.assertEqual(self.source.versions.count(), 2)
 
-    @patch('core.sources.models.index_source_mappings')
-    @patch('core.sources.models.index_source_concepts')
-    def test_new_first_released_version_should_index_children(
-            self, index_source_concepts_task_mock, index_source_mappings_task_mock
-    ):
-        response = self.client.post(
-            f'/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}/versions/',
-            {
-                'id': 'v1',
-                'description': 'Version 1',
-                'released': True
-            },
-            HTTP_AUTHORIZATION='Token ' + self.token,
-            format='json'
-        )
-
-        self.assertEqual(response.status_code, 201)
-        self.assertEqual(response.data['version'], 'v1')
-        self.assertEqual(self.source.versions.count(), 2)
-        version = self.source.get_latest_released_version()
-        self.assertEqual(version.version, 'v1')
-        self.assertEqual(version.released, True)
-        self.assertEqual(version.get_prev_released_version(), None)
-        index_source_concepts_task_mock.apply_async.assert_called_once_with(
-            (version.id,), queue='indexing', permanent=False)
-        index_source_mappings_task_mock.apply_async.assert_called_once_with(
-            (version.id,), queue='indexing', permanent=False)
-
-    @patch('core.sources.models.index_source_mappings')
-    @patch('core.sources.models.index_source_concepts')
-    def test_new_second_released_version_should_index_children_of_new_and_prev_released_version(
-            self, index_source_concepts_task_mock, index_source_mappings_task_mock
-    ):
-        source_v1 = OrganizationSourceFactory(
-            organization=self.organization, mnemonic=self.source.mnemonic, version='v1', released=True
-        )
-        response = self.client.post(
-            f'/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}/versions/',
-            {
-                'id': 'v2',
-                'description': 'Version 2',
-                'released': True
-            },
-            HTTP_AUTHORIZATION='Token ' + self.token,
-            format='json'
-        )
-
-        self.assertEqual(response.status_code, 201)
-        self.assertEqual(response.data['version'], 'v2')
-        self.assertEqual(self.source.versions.count(), 3)
-        version = self.source.get_latest_released_version()
-        self.assertNotEqual(version.id, source_v1.id)
-        self.assertEqual(version.version, 'v2')
-        self.assertEqual(version.released, True)
-        self.assertEqual(version.get_prev_released_version().id, source_v1.id)
-        self.assertEqual(index_source_concepts_task_mock.apply_async.call_count, 2)
-        self.assertEqual(index_source_mappings_task_mock.apply_async.call_count, 2)
-        self.assertEqual(
-            index_source_concepts_task_mock.apply_async.mock_calls,
-            [
-                call((source_v1.id,), queue='indexing', permanent=False),
-                call((version.id,), queue='indexing', permanent=False)
-            ])
-        self.assertEqual(
-            index_source_mappings_task_mock.apply_async.mock_calls,
-            [
-                call((source_v1.id,), queue='indexing', permanent=False),
-                call((version.id,), queue='indexing', permanent=False)
-            ])
-
     def test_post_409(self):
         OrganizationSourceFactory(version='v1', organization=self.organization, mnemonic=self.source.mnemonic)
         with transaction.atomic():
@@ -747,6 +677,9 @@ class SourceVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
     def test_version_updated_to_released_should_index_children(
             self, index_source_concepts_task_mock, index_source_mappings_task_mock
     ):
+        index_source_concepts_task_mock.__name__ = 'index_source_concepts'
+        index_source_mappings_task_mock.__name__ = 'index_source_mappings'
+
         self.assertFalse(self.source_v1.released)
         self.assertEqual(self.source.get_latest_released_version(), None)
 
@@ -764,9 +697,9 @@ class SourceVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(version.id, self.source_v1.id)
         self.assertTrue(version.is_latest_released)
         index_source_concepts_task_mock.apply_async.assert_called_once_with(
-            (version.id,), queue='indexing', permanent=False)
+            (version.id,), queue='indexing', persist_args=True, task_id=ANY)
         index_source_mappings_task_mock.apply_async.assert_called_once_with(
-            (version.id,), queue='indexing', permanent=False)
+            (version.id,), queue='indexing', persist_args=True, task_id=ANY)
 
     @patch('core.sources.models.index_source_mappings')
     @patch('core.sources.models.index_source_concepts')
@@ -797,6 +730,9 @@ class SourceVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
     def test_released_version_updated_to_unreleased_should_reindex_children(
             self, index_source_concepts_task_mock, index_source_mappings_task_mock
     ):
+        index_source_concepts_task_mock.__name__ = 'index_source_concepts'
+        index_source_mappings_task_mock.__name__ = 'index_source_mappings'
+
         self.source_v1.released = True
         self.source_v1.save()
 
@@ -814,15 +750,18 @@ class SourceVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.source_v1.refresh_from_db()
         self.assertFalse(self.source_v1.released)
         index_source_concepts_task_mock.apply_async.assert_called_once_with(
-            (self.source_v1.id,), queue='indexing', permanent=False)
+            (self.source_v1.id,), queue='indexing', persist_args=True, task_id=ANY)
         index_source_mappings_task_mock.apply_async.assert_called_once_with(
-            (self.source_v1.id,), queue='indexing', permanent=False)
+            (self.source_v1.id,), queue='indexing', persist_args=True, task_id=ANY)
 
     @patch('core.sources.models.index_source_mappings')
     @patch('core.sources.models.index_source_concepts')
     def test_released_version_updated_to_unreleased_should_reindex_children_of_this_and_prev_released_version(
             self, index_source_concepts_task_mock, index_source_mappings_task_mock
     ):
+        index_source_concepts_task_mock.__name__ = 'index_source_concepts'
+        index_source_mappings_task_mock.__name__ = 'index_source_mappings'
+
         self.source_v1.released = True
         self.source_v1.save()
 
@@ -854,15 +793,15 @@ class SourceVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(
             index_source_concepts_task_mock.apply_async.mock_calls,
             [
-                call((source_v2.id,), queue='indexing', permanent=False),
-                call((self.source_v1.id,), queue='indexing', permanent=False)
+                call((source_v2.id,), queue='indexing', persist_args=True, task_id=ANY),
+                call((self.source_v1.id,), queue='indexing', persist_args=True, task_id=ANY)
             ]
         )
         self.assertEqual(
             index_source_mappings_task_mock.apply_async.mock_calls,
             [
-                call((source_v2.id,), queue='indexing', permanent=False),
-                call((self.source_v1.id,), queue='indexing', permanent=False)
+                call((source_v2.id,), queue='indexing', persist_args=True, task_id=ANY),
+                call((self.source_v1.id,), queue='indexing', persist_args=True, task_id=ANY)
             ]
         )
 
@@ -871,6 +810,9 @@ class SourceVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
     def test_unreleased_version_updated_to_released_should_reindex_children_of_this_and_prev_released_version(
             self, index_source_concepts_task_mock, index_source_mappings_task_mock
     ):
+        index_source_concepts_task_mock.__name__ = 'index_source_concepts'
+        index_source_mappings_task_mock.__name__ = 'index_source_mappings'
+
         self.source_v1.released = True
         self.source_v1.save()
 
@@ -902,15 +844,15 @@ class SourceVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(
             index_source_concepts_task_mock.apply_async.mock_calls,
             [
-                call((self.source_v1.id,), queue='indexing', permanent=False),
-                call((source_v2.id,), queue='indexing', permanent=False)
+                call((self.source_v1.id,), queue='indexing', persist_args=True, task_id=ANY),
+                call((source_v2.id,), queue='indexing', persist_args=True, task_id=ANY)
             ]
         )
         self.assertEqual(
             index_source_mappings_task_mock.apply_async.mock_calls,
             [
-                call((self.source_v1.id,), queue='indexing', permanent=False),
-                call((source_v2.id,), queue='indexing', permanent=False)
+                call((self.source_v1.id,), queue='indexing', persist_args=True, task_id=ANY),
+                call((source_v2.id,), queue='indexing', persist_args=True, task_id=ANY)
             ]
         )
 

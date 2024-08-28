@@ -63,7 +63,7 @@ class TaskView(AbstractTaskView, DestroyAPIView):
     def perform_destroy(self, instance):
         if not instance.has_access(self.request.user):
             self.permission_denied(self.request)
-        if instance.is_finished():
+        if instance.is_finished:
             raise Http400('Task is already finished.')
         try:
             instance.revoke()

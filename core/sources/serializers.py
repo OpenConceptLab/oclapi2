@@ -9,7 +9,7 @@ from rest_framework.serializers import ModelSerializer
 
 from core.client_configs.serializers import ClientConfigSerializer
 from core.common.constants import DEFAULT_ACCESS_TYPE, NAMESPACE_REGEX, ACCESS_TYPE_CHOICES, HEAD, \
-    INCLUDE_SUMMARY, INCLUDE_CLIENT_CONFIGS, INCLUDE_HIERARCHY_ROOT
+    INCLUDE_SUMMARY, INCLUDE_CLIENT_CONFIGS, INCLUDE_HIERARCHY_ROOT, INCLUDE_STATES, INCLUDE_TASKS
 from core.common.serializers import AbstractRepoResourcesSerializer, AbstractResourceSerializer
 from core.common.utils import get_truthy_values
 from core.orgs.models import Organization
@@ -449,6 +449,8 @@ class SourceVersionDetailSerializer(SourceCreateOrUpdateSerializer, AbstractRepo
     url = CharField(source='versioned_object_url')
     previous_version_url = CharField(source='prev_version_uri')
     summary = SerializerMethodField()
+    states = SerializerMethodField()
+    tasks = SerializerMethodField()
     hierarchy_root_url = CharField(source='hierarchy_root.url', required=False, allow_blank=True, allow_null=True)
 
     class Meta:
@@ -463,19 +465,27 @@ class SourceVersionDetailSerializer(SourceCreateOrUpdateSerializer, AbstractRepo
             'canonical_url', 'identifier', 'publisher', 'contact', 'jurisdiction', 'purpose', 'copyright',
             'content_type', 'revision_date', 'summary', 'text', 'meta',
             'experimental', 'case_sensitive', 'collection_reference', 'hierarchy_meaning', 'compositional',
-            'version_needed', 'hierarchy_root_url', 'checksums'
+            'version_needed', 'hierarchy_root_url', 'checksums', 'states', 'tasks'
         ) + AbstractRepoResourcesSerializer.Meta.fields
 
     def __init__(self, *args, **kwargs):
         params = get(kwargs, 'context.request.query_params')
         self.include_summary = False
+        self.include_states = False
+        self.include_tasks = False
         if params:
             self.query_params = params.dict()
             self.include_summary = self.query_params.get(INCLUDE_SUMMARY) in TRUTHY
+            self.include_states = self.query_params.get(INCLUDE_STATES) in TRUTHY
+            self.include_tasks = self.query_params.get(INCLUDE_TASKS) in TRUTHY
 
         try:
             if not self.include_summary:
                 self.fields.pop('summary', None)
+            if not self.include_states:
+                self.fields.pop('states', None)
+            if not self.include_tasks:
+                self.fields.pop('tasks', None)
         except:  # pylint: disable=bare-except
             pass
 
@@ -488,6 +498,22 @@ class SourceVersionDetailSerializer(SourceCreateOrUpdateSerializer, AbstractRepo
             summary = SourceVersionSummarySerializer(obj).data
 
         return summary
+
+    def get_states(self, obj):
+        states = None
+
+        if self.include_states:
+            states = obj.states
+
+        return states
+
+    def get_tasks(self, obj):
+        tasks = None
+
+        if self.include_tasks:
+            tasks = obj.get_tasks_info()
+
+        return tasks
 
 
 class SourceVersionExportSerializer(SourceVersionDetailSerializer):

@@ -342,7 +342,7 @@ class Collection(DirtyFieldsMixin, ConceptContainerModel):
 
         return expansion
 
-    def index_children(self):
+    def index_children(self, sync=True, user=None):  # pylint: disable=unused-argument
         if self.expansion_uri:
             expansion = self.expansion
             if not expansion:

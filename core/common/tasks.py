@@ -395,15 +395,12 @@ def seed_children_to_new_version(self, resource, obj_id, export=True, sync=False
             if export:
                 from core.tasks.models import Task
                 task = Task.new(queue='default', username=instance.updated_by, name=export_task.__name__)
-                export_task.apply_async((obj_id,), queue=task.queue, task_id=task.id)
+                export_task.apply_async((obj_id,), queue=task.queue, task_id=task.id, persist_args=True)
                 if autoexpand:
                     if is_source and instance.released:
                         instance.index_resources_for_self_as_latest_released()
-                    elif is_source and async_indexing:
-                        index_source_concepts.apply_async((obj_id,), queue='indexing')
-                        index_source_mappings.apply_async((obj_id,), queue='indexing')
                     else:
-                        instance.index_children()
+                        instance.index_children(sync=not async_indexing, user=instance.created_by)
         finally:
             instance.remove_processing(task_id)
 

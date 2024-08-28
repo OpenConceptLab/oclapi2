@@ -18,6 +18,7 @@ from core.concepts.models import ConceptName, Concept
 from core.services.storages.postgres import PostgresQL
 from core.sources.constants import SOURCE_TYPE, SOURCE_VERSION_TYPE, HIERARCHY_ROOT_MUST_BELONG_TO_SAME_SOURCE, \
     HIERARCHY_MEANINGS, AUTO_ID_CHOICES, AUTO_ID_SEQUENTIAL, AUTO_ID_UUID, LOCALE_EXTERNAL_AUTO_ID_CHOICES
+from core.tasks.models import Task
 
 
 class Source(DirtyFieldsMixin, ConceptContainerModel):
@@ -287,12 +288,13 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         3. indexes this new released version's concepts and mappings
         """
         if self.is_latest_released:
+            user = self.created_by
+
             prev_released_version = self.get_prev_released_version()
             if prev_released_version:
-                index_source_concepts.apply_async((prev_released_version.id,), queue='indexing', permanent=False)
-                index_source_mappings.apply_async((prev_released_version.id,), queue='indexing', permanent=False)
-            index_source_concepts.apply_async((self.id,), queue='indexing', permanent=False)
-            index_source_mappings.apply_async((self.id,), queue='indexing', permanent=False)
+                prev_released_version.index_children_async(user)
+
+            self.index_children_async(user)
 
     def index_resources_for_self_as_unreleased(self):
         """
@@ -301,12 +303,12 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         3. indexes latest released version's (if exists) concepts and mappings
         """
         if not self.released:
-            index_source_concepts.apply_async((self.id,), queue='indexing', permanent=False)
-            index_source_mappings.apply_async((self.id,), queue='indexing', permanent=False)
+            user = self.updated_by
+            self.index_children_async(user)
+
             latest_released = self.get_latest_released_version()
             if latest_released:
-                index_source_concepts.apply_async((latest_released.id,), queue='indexing', permanent=False)
-                index_source_mappings.apply_async((latest_released.id,), queue='indexing', permanent=False)
+                latest_released.index_children_async(user)
 
     def seed_concepts(self, index=True):
         head = self.head
@@ -325,12 +327,78 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
                 from core.mappings.documents import MappingDocument
                 self.batch_index(self.mappings, MappingDocument)
 
-    def index_children(self):
-        from core.concepts.documents import ConceptDocument
-        from core.mappings.documents import MappingDocument
+    def index_children(self, sync=True, user=None):
+        if sync:
+            from core.concepts.documents import ConceptDocument
+            from core.mappings.documents import MappingDocument
 
-        self.batch_index(self.concepts, ConceptDocument)
-        self.batch_index(self.mappings, MappingDocument)
+            self.batch_index(self.concepts, ConceptDocument)
+            self.batch_index(self.mappings, MappingDocument)
+        else:
+            self.index_children_async(user)
+
+    def index_children_async(self, user=None):
+        user = user or self.updated_by
+
+        self.index_concepts_async(user)
+        self.index_mappings_async(user)
+
+    def index_mappings_async(self, user):
+        user = user or self.updated_by
+
+        task = Task.new(queue='indexing', user=user, name=index_source_mappings.__name__)
+        index_source_mappings.apply_async((self.id,), queue='indexing', persist_args=True, task_id=task.id)
+
+    def index_concepts_async(self, user):
+        user = user or self.updated_by
+
+        task = Task.new(queue='indexing', user=user, name=index_source_concepts.__name__)
+        index_source_concepts.apply_async((self.id,), queue='indexing', persist_args=True, task_id=task.id)
+
+    def get_export_task(self):
+        return Task.find(name__iendswith='export_source', args__contains=[self.id])
+
+    def get_index_concepts_task(self):
+        return Task.find(name__iendswith='index_source_concepts', args__contains=[self.id])
+
+    def get_index_mappings_task(self):
+        return Task.find(name__iendswith='index_source_mappings', args__contains=[self.id])
+
+    def get_seed_new_version_task(self):
+        return Task.find(name__iendswith='seed_children_to_new_version', args__contains=['source', self.id])
+
+    @property
+    def states(self):
+        return self.get_tasks_info('state')
+
+    @property
+    def tasks(self):
+        return self.get_tasks_info('id')
+
+    def get_tasks_info(self, attribute=None):
+        from core.tasks.serializers import TaskListSerializer
+        tasks = self.get_tasks()
+
+        result = {}
+        for task_name, task in tasks.items():
+            if task:
+                result[task_name] = (get(task, attribute) or None) if attribute else TaskListSerializer(task).data
+
+        return result
+
+    def get_tasks(self):
+        seed_task = self.get_seed_new_version_task()
+        index_concepts_task = self.get_index_concepts_task()
+        index_mappings_task = self.get_index_mappings_task()
+        export_task = self.get_export_task()
+
+        return {
+            'seeded_concepts': seed_task,
+            'seeded_mappings': seed_task,
+            'indexed_concepts': index_concepts_task,
+            'indexed_mappings': index_mappings_task,
+            'exported': export_task,
+        }
 
     def __get_resource_db_sequence_prefix(self):
         return self.uri.replace('/', '_').replace('-', '_').replace('.', '_').replace('@', '_')

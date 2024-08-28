@@ -1170,7 +1170,8 @@ class TasksTest(OCLTestCase):
         expansion = collection_v1.expansions.first()
         self.assertEqual(expansion.concepts.count(), 1)
         self.assertEqual(expansion.mappings.count(), 1)
-        export_collection_task.apply_async.assert_called_once_with((collection_v1.id,), queue='default', task_id=ANY)
+        export_collection_task.apply_async.assert_called_once_with(
+            (collection_v1.id,), queue='default', task_id=ANY, persist_args=True)
         index_children_mock.assert_called_once()
 
     def test_update_collection_active_mappings_count(self):

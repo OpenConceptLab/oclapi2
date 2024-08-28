@@ -24,6 +24,7 @@ class Task(models.Model):
     id = models.TextField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=1000)
     kwargs = models.JSONField(null=True, blank=True)
+    args = models.JSONField(null=True, blank=True)  # Django ArrayField cant be mixed datatype
     state = models.CharField(max_length=255, default=PENDING, choices=STATE_CHOICES)
     result = models.TextField(null=True, blank=True)
     summary = models.JSONField(null=True, blank=True)
@@ -68,8 +69,13 @@ class Task(models.Model):
         result = self.result_all
         return get(result, 'json') or result
 
+    @property
     def is_finished(self):
         return self.state in (SUCCESS, FAILURE)
+
+    @property
+    def is_success(self):
+        return self.state == SUCCESS
 
     @property
     def user_queue(self):
@@ -199,8 +205,12 @@ class Task(models.Model):
     def children_still_playing(self):
         return self.child_tasks.exclude(state__in=(SUCCESS, FAILURE, REVOKED))
 
+    @property
+    def celery_result(self):
+        return AsyncResult(self.id)
+
     def revoke(self):
-        result = AsyncResult(self.id)
+        result = self.celery_result
 
         for child in self.children_still_playing():
             child.revoke()
@@ -267,6 +277,10 @@ class Task(models.Model):
     def queue_criteria(queue):
         return models.Q(queue=queue) | models.Q(id__endswith=f'~{queue}')
 
+    @classmethod
+    def find(cls, **kwargs):
+        return cls.objects.filter(**kwargs).order_by('-created_at').first()
+
 
 class WorkerRequest(Request):
     def on_failure(self, exc_info, send_failed_event=True, return_ok=False):
@@ -299,8 +313,10 @@ class AsyncTask(CeleryTask):  # pylint: disable=abstract-method
 
     def apply_async(self, args=None, kwargs=None, task_id=None, producer=None,  # pylint: disable=too-many-arguments
                     link=None, link_error=None, shadow=None, **options):
-        if task_id and self.name and kwargs and kwargs.get('permanent', None) is not False:
-            Task.objects.filter(id=task_id).update(name=self.name)
+        persist_args = options.pop('persist_args', False) if options else False
+        should_persist = get(kwargs, 'permanent', None) is not False
+        if task_id and self.name and should_persist:
+            Task.objects.filter(id=task_id).update(name=self.name, args=args if persist_args else None)
         return super().apply_async(args, kwargs, task_id, producer, link, link_error, shadow, **options)
 
 

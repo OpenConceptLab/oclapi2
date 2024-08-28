@@ -2,6 +2,7 @@ import factory
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from mock import patch, Mock, ANY, PropertyMock
+from mock.mock import call
 
 from core.collections.models import Collection
 from core.collections.tests.factories import OrganizationCollectionFactory
@@ -1260,8 +1261,84 @@ class TasksTest(OCLTestCase):
 
         self.assertEqual(source_v1.concepts.count(), 1)
         self.assertEqual(source_v1.mappings.count(), 1)
-        export_source_task.apply_async.assert_called_once_with((source_v1.id,), task_id=ANY, queue='default')
+        export_source_task.apply_async.assert_called_once_with(
+            (source_v1.id,), task_id=ANY, queue='default', persist_args=True)
         index_children_mock.assert_called_once()
+
+    @patch('core.common.tasks.export_source')
+    @patch('core.sources.models.index_source_mappings')
+    @patch('core.sources.models.index_source_concepts')
+    def test_seed_children_to_first_released_version_should_index_children(
+            self, index_source_concepts_task_mock, index_source_mappings_task_mock, export_source_task_mock
+    ):
+        export_source_task_mock.__name__ = 'export_source'
+        index_source_concepts_task_mock.__name__ = 'index_source_concepts'
+        index_source_mappings_task_mock.__name__ = 'index_source_mappings'
+
+        source = OrganizationSourceFactory()
+        ConceptFactory(parent=source)
+        MappingFactory(parent=source)
+
+        source_v1 = OrganizationSourceFactory(
+            organization=source.organization, version='v1', mnemonic=source.mnemonic, released=True)
+
+        self.assertEqual(source_v1.concepts.count(), 0)
+        self.assertEqual(source_v1.mappings.count(), 0)
+
+        seed_children_to_new_version('source', source_v1.id)  # pylint: disable=no-value-for-parameter
+
+        self.assertEqual(source_v1.concepts.count(), 1)
+        self.assertEqual(source_v1.mappings.count(), 1)
+
+        export_source_task_mock.apply_async.assert_called_once_with(
+            (source_v1.id,), queue='default', persist_args=True, task_id=ANY)
+        index_source_concepts_task_mock.apply_async.assert_called_once_with(
+            (source_v1.id,), queue='indexing', persist_args=True, task_id=ANY)
+        index_source_mappings_task_mock.apply_async.assert_called_once_with(
+            (source_v1.id,), queue='indexing', persist_args=True, task_id=ANY)
+
+    @patch('core.common.tasks.export_source')
+    @patch('core.sources.models.index_source_mappings')
+    @patch('core.sources.models.index_source_concepts')
+    def test_seed_children_to_new_second_released_version_should_index_children_of_new_and_prev_released_version(
+            self, index_source_concepts_task_mock, index_source_mappings_task_mock, export_source_task_mock
+    ):
+        export_source_task_mock.__name__ = 'export_source'
+        index_source_concepts_task_mock.__name__ = 'index_source_concepts'
+        index_source_mappings_task_mock.__name__ = 'index_source_mappings'
+
+        source = OrganizationSourceFactory()
+        ConceptFactory(parent=source)
+        MappingFactory(parent=source)
+
+        source_v1 = OrganizationSourceFactory(
+            organization=source.organization, version='v1', mnemonic=source.mnemonic, released=True)
+
+        source_v2 = OrganizationSourceFactory(
+            organization=source.organization, version='v2', mnemonic=source.mnemonic, released=True)
+
+        self.assertEqual(source_v2.concepts.count(), 0)
+        self.assertEqual(source_v2.mappings.count(), 0)
+
+        seed_children_to_new_version('source', source_v2.id)  # pylint: disable=no-value-for-parameter
+
+        self.assertEqual(source_v2.concepts.count(), 1)
+        self.assertEqual(source_v2.mappings.count(), 1)
+
+        export_source_task_mock.apply_async.assert_called_once_with(
+            (source_v2.id,), queue='default', persist_args=True, task_id=ANY)
+        self.assertEqual(
+            index_source_concepts_task_mock.apply_async.mock_calls,
+            [
+                call((source_v1.id,), queue='indexing', persist_args=True, task_id=ANY),
+                call((source_v2.id,), queue='indexing', persist_args=True, task_id=ANY)
+            ])
+        self.assertEqual(
+            index_source_mappings_task_mock.apply_async.mock_calls,
+            [
+                call((source_v1.id,), queue='indexing', persist_args=True, task_id=ANY),
+                call((source_v2.id,), queue='indexing', persist_args=True, task_id=ANY)
+            ])
 
     def test_update_source_active_mappings_count(self):
         source = OrganizationSourceFactory()
