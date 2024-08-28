@@ -8,6 +8,7 @@ from core.common.constants import NAMESPACE_REGEX, ACCESS_TYPE_VIEW, ACCESS_TYPE
 from core.common.mixins import SourceContainerMixin
 from core.common.models import BaseResourceModel
 from core.orgs.constants import ORG_OBJECT_TYPE
+from core.users.models import Follow
 
 
 class Organization(BaseResourceModel, SourceContainerMixin, ChecksumModel):
@@ -38,6 +39,7 @@ class Organization(BaseResourceModel, SourceContainerMixin, ChecksumModel):
     )
     description = models.TextField(null=True, blank=True)
     client_configs = GenericRelation(ClientConfig, object_id_field='resource_id', content_type_field='resource_type')
+    followers = GenericRelation(Follow, object_id_field='following_id', content_type_field='following_type')
     text = models.TextField(null=True, blank=True)  # for about description (markup)
     overview = models.JSONField(default=dict)
 

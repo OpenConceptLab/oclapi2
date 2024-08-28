@@ -3,6 +3,8 @@ from datetime import datetime
 
 from django.contrib.auth.models import AbstractUser
 from django.contrib.auth.password_validation import validate_password
+from django.contrib.contenttypes.fields import GenericForeignKey, GenericRelation
+from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
 from django.db import models
 from rest_framework.authtoken.models import Token
@@ -14,6 +16,26 @@ from core.common.utils import web_url
 from core.users.constants import AUTH_GROUPS
 from .constants import USER_OBJECT_TYPE
 from ..common.checksums import ChecksumModel
+
+
+class Follow(models.Model):
+    class Meta:
+        db_table = 'follows'
+        unique_together = ('follower', 'following_id', 'following_type')
+
+    follower = models.ForeignKey('users.UserProfile', on_delete=models.CASCADE, related_name='following')
+    follow_date = models.DateTimeField(auto_now_add=True)
+    following_id = models.PositiveIntegerField()
+    following_type = models.ForeignKey(ContentType, on_delete=models.CASCADE)
+    following = GenericForeignKey('following_type', 'following_id')
+
+    def clean(self):
+        if self.follower == self.following:
+            raise ValidationError("User cannot follow themselves.")
+
+    @property
+    def uri(self):
+        return f"/users/{self.follower.username}/following/{self.id}/"
 
 
 class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin, ChecksumModel):
@@ -36,8 +58,9 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
     verified = models.BooleanField(default=True)
     verification_token = models.TextField(null=True, blank=True)
     deactivated_at = models.DateTimeField(null=True, blank=True)
+    followers = GenericRelation(Follow, object_id_field='following_id', content_type_field='following_type')
     bio = models.TextField(null=True, blank=True)
-    followers = models.ManyToManyField('self', through='Follower', symmetrical=False, related_name='following')
+
     mnemonic_attr = 'username'
 
     es_fields = {
@@ -226,16 +249,8 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
     def is_member_of_org(self, org_mnemonic):
         return self.organizations.filter(mnemonic=org_mnemonic).exists()
 
-    @property
-    def follower_queryset(self):
-        return self.followers.through.objects.filter(followed=self)
-
-    @property
-    def following_queryset(self):
-        return self.followers.through.objects.filter(follower=self)
-
     def follow(self, following):
-        self.following.add(following)
+        self.following.create(following_id=following.id, following_type=ContentType.objects.get_for_model(following))
 
         from core.events.models import Event
         self.events.create(
@@ -246,7 +261,8 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
         )
 
     def unfollow(self, following):
-        self.following.remove(following)
+        self.following.filter(
+            following_id=following.id, following_type=ContentType.objects.get_for_model(following)).delete()
 
         from core.events.models import Event
         self.events.create(
@@ -255,17 +271,3 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
             object_url=self.url,
             referenced_object_url=following.url,
         )
-
-
-class Follower(models.Model):
-    class Meta:
-        db_table = 'followers'
-        unique_together = ('follower', 'followed')
-
-    followed = models.ForeignKey(UserProfile, on_delete=models.CASCADE, related_name='follower_set')
-    follower = models.ForeignKey(UserProfile, on_delete=models.CASCADE, related_name='following_set',)
-    follow_date = models.DateTimeField(auto_now_add=True)
-
-    def clean(self):
-        if self.follower == self.followed:
-            raise ValidationError("User cannot follow themselves.")

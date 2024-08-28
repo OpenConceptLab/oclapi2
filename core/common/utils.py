@@ -591,6 +591,39 @@ def get_resource_class_from_resource_name(resource):  # pylint: disable=too-many
     return None
 
 
+def get_resource_class_from_resource_uri(uri):  # pylint: disable=too-many-return-statements
+    if not uri:
+        return uri
+
+    name = uri.lower()
+    if '/concepts/' in name:
+        from core.concepts.models import Concept
+        return Concept
+    if '/mappings/' in name:
+        from core.mappings.models import Mapping
+        return Mapping
+    if '/expansions/' in name:
+        from core.collections.models import Expansion
+        return Expansion
+    if '/references/' in name:
+        from core.collections.models import CollectionReference
+        return CollectionReference
+    if '/sources/' in name:
+        from core.sources.models import Source
+        return Source
+    if '/collections/' in name:
+        from core.collections.models import Collection
+        return Collection
+    if name.startswith('/users/'):
+        from core.users.models import UserProfile
+        return UserProfile
+    if name.startswith('/orgs/'):
+        from core.orgs.models import Organization
+        return Organization
+
+    return None
+
+
 def get_content_type_from_resource_name(resource):
     content_type = None
 

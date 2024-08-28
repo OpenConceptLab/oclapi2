@@ -27,7 +27,7 @@ from core.common.utils import (
     get_resource_class_from_resource_name, flatten_dict, is_csv_file, is_url_encoded_string, to_parent_uri_from_kwargs,
     set_current_user, get_current_user, set_request_url, get_request_url, nested_dict_values, chunks, api_get,
     split_list_by_condition, is_zip_file, get_date_range_label, get_prev_month, from_string_to_date, get_end_of_month,
-    get_start_of_month, es_id_in, web_url, get_queue_task_names)
+    get_start_of_month, es_id_in, web_url, get_queue_task_names, get_resource_class_from_resource_uri)
 from core.concepts.models import Concept
 from core.orgs.models import Organization
 from core.sources.models import Source
@@ -627,6 +627,7 @@ class UtilsTest(OCLTestCase):
     def test_get_resource_class_from_resource_name(self):
         self.assertEqual(get_resource_class_from_resource_name(None), None)
         self.assertEqual(get_resource_class_from_resource_name('mappings').__name__, 'Mapping')
+        self.assertEqual(get_resource_class_from_resource_name('concepts').__name__, 'Concept')
         self.assertEqual(get_resource_class_from_resource_name('sources').__name__, 'Source')
         self.assertEqual(get_resource_class_from_resource_name('source').__name__, 'Source')
         self.assertEqual(get_resource_class_from_resource_name('collections').__name__, 'Collection')
@@ -637,6 +638,53 @@ class UtilsTest(OCLTestCase):
             self.assertEqual(get_resource_class_from_resource_name(name).__name__, 'Organization')
         for name in ['user', 'USer', 'user_profile', 'USERS']:
             self.assertEqual(get_resource_class_from_resource_name(name).__name__, 'UserProfile')
+
+    def test_get_resource_class_from_resource_uri(self):
+        self.assertEqual(get_resource_class_from_resource_uri(None), None)
+        self.assertEqual(
+            get_resource_class_from_resource_uri(
+                '/orgs/org/sources/source/mappings/mapping/').__name__, 'Mapping'
+        )
+        self.assertEqual(
+            get_resource_class_from_resource_uri(
+                '/orgs/org/sources/source/concepts/concept/').__name__, 'Concept'
+        )
+        self.assertEqual(
+            get_resource_class_from_resource_uri(
+                '/orgs/org/collections/collection/concepts/concept/').__name__, 'Concept'
+        )
+        self.assertEqual(
+            get_resource_class_from_resource_uri(
+                '/orgs/org/collections/collection/expansions/expansion/concepts/concept/').__name__, 'Concept'
+        )
+        self.assertEqual(
+            get_resource_class_from_resource_uri(
+                '/orgs/org/collections/collection/expansions/expansion/').__name__, 'Expansion'
+        )
+        self.assertEqual(
+            get_resource_class_from_resource_uri(
+                '/orgs/org/collections/collection/references/ref/').__name__, 'CollectionReference'
+        )
+        self.assertEqual(
+            get_resource_class_from_resource_uri(
+                '/orgs/org/collections/collection/1/').__name__, 'Collection'
+        )
+        self.assertEqual(
+            get_resource_class_from_resource_uri(
+                '/orgs/org/collections/collection/').__name__, 'Collection'
+        )
+        self.assertEqual(
+            get_resource_class_from_resource_uri(
+                '/orgs/org/sources/source/').__name__, 'Source'
+        )
+        self.assertEqual(
+            get_resource_class_from_resource_uri(
+                '/orgs/org/blah').__name__, 'Organization'
+        )
+        self.assertEqual(
+            get_resource_class_from_resource_uri(
+                '/users/user/orgs/').__name__, 'UserProfile'
+        )
 
     def test_flatten_dict(self):
         self.assertEqual(flatten_dict({'foo': 'bar'}), {'foo': 'bar'})

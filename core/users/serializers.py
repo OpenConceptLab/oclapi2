@@ -13,7 +13,7 @@ from rest_framework.validators import UniqueValidator
 from core.common.constants import NAMESPACE_REGEX, INCLUDE_SUBSCRIBED_ORGS, INCLUDE_VERIFICATION_TOKEN, \
     INCLUDE_AUTH_GROUPS, INCLUDE_PINS, INCLUDE_FOLLOWERS, INCLUDE_FOLLOWING
 from core.users.constants import INVALID_AUTH_GROUP_NAME
-from .models import UserProfile, Follower
+from .models import UserProfile, Follow
 from ..common.serializers import AbstractResourceSerializer
 from ..common.utils import get_truthy_values
 
@@ -128,30 +128,30 @@ class UserCreateSerializer(serializers.ModelSerializer):
         return user
 
 
-class FollowerSerializer(ModelSerializer):
-    username = serializers.CharField(source='follower.username', required=True)
-    name = serializers.CharField(source='follower.name', required=True)
-    url = serializers.CharField(source='follower.uri', read_only=True)
-    logo_url = serializers.CharField(source='follower.logo_url', read_only=True)
+class AbstractFollowerSerializer(ModelSerializer):
+    url = serializers.CharField(source='uri', read_only=True)
+    type = serializers.CharField(default='Follow', read_only=True)
+    object = serializers.SerializerMethodField()
 
     class Meta:
-        model = Follower
+        model = Follow
         fields = (
-            'username', 'name', 'url', 'logo_url', 'follow_date',
+            'id', 'follow_date', 'object', 'url', 'type'
         )
 
 
-class FollowedSerializer(ModelSerializer):
-    username = serializers.CharField(source='followed.username', required=True)
-    name = serializers.CharField(source='followed.name', required=True)
-    url = serializers.CharField(source='followed.uri', read_only=True)
-    logo_url = serializers.CharField(source='followed.logo_url', read_only=True)
+class FollowerSerializer(AbstractFollowerSerializer):
+    @staticmethod
+    def get_object(obj):
+        following = obj.following
+        return following.get_brief_serializer()(following).data
 
-    class Meta:
-        model = Follower
-        fields = (
-            'username', 'name', 'url', 'logo_url', 'follow_date',
-        )
+
+class FollowingSerializer(AbstractFollowerSerializer):
+    @staticmethod
+    def get_object(obj):
+        following = obj.following
+        return following.get_brief_serializer()(following).data
 
 
 class UserDetailSerializer(AbstractResourceSerializer):
@@ -181,8 +181,8 @@ class UserDetailSerializer(AbstractResourceSerializer):
     auth_groups = serializers.ListField(required=False, allow_null=True, allow_empty=True)
     deactivated_at = serializers.DateTimeField(read_only=True)
     pins = serializers.SerializerMethodField()
-    followers = FollowerSerializer(many=True, read_only=True, source='follower_queryset')
-    following = FollowedSerializer(many=True, read_only=True, source='following_queryset')
+    followers = FollowerSerializer(many=True, read_only=True)
+    following = FollowingSerializer(many=True, read_only=True)
 
     class Meta:
         model = UserProfile

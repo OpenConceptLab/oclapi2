@@ -25,7 +25,8 @@ from core.common.exceptions import Http400
 from core.common.mixins import ListWithHeadersMixin
 from core.common.swagger_parameters import last_login_before_param, last_login_since_param, updated_since_param, \
     date_joined_since_param, date_joined_before_param
-from core.common.utils import parse_updated_since_param, from_string_to_date, get_truthy_values
+from core.common.utils import parse_updated_since_param, from_string_to_date, get_truthy_values, \
+    get_resource_class_from_resource_uri
 from core.common.views import BaseAPIView, BaseLogoView
 from core.orgs.models import Organization
 from core.services.auth.core import AuthService
@@ -34,8 +35,8 @@ from core.users.constants import VERIFICATION_TOKEN_MISMATCH, VERIFY_EMAIL_MESSA
 from core.users.documents import UserProfileDocument
 from core.users.search import UserProfileFacetedSearch
 from core.users.serializers import UserDetailSerializer, UserCreateSerializer, UserListSerializer, \
-    UserSummarySerializer, FollowedSerializer, FollowerSerializer
-from .models import UserProfile
+    UserSummarySerializer, FollowingSerializer
+from .models import UserProfile, Follow
 from ..common import ERRBIT_LOGGER
 
 TRUTHY = get_truthy_values()
@@ -547,56 +548,48 @@ class AbstractFollowerFollowedView(UserBaseView):
 
         raise PermissionDenied()
 
-
-class UserFollowerListView(AbstractFollowerFollowedView, ListAPIView):
-    """ A User's followers list """
-    serializer_class = FollowerSerializer
-
-    def get_queryset(self):
-        return self.get_object().follower_queryset
+    def get_following(self):
+        follow = self.request.data.get('follow', None)
+        if not follow:
+            raise Http400('follow and follow_type are mandatory')
+        klass = get_resource_class_from_resource_uri(follow)
+        if not klass:
+            raise Http400('Invalid follow uri')
+        follow = klass.objects.filter(uri=follow).first()
+        if not follow:
+            raise Http400('Invalid follow uri')
+        if not follow.is_active:
+            raise Http404('Follow instance is not active')
+        return follow
 
 
 class UserFollowingListView(AbstractFollowerFollowedView, ListAPIView):
     """ A User's following list """
-    serializer_class = FollowedSerializer
+    serializer_class = FollowingSerializer
 
     def get_queryset(self):
-        return self.get_object().following_queryset
+        return self.get_object().following.filter()
 
     def post(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         follower = self.get_object()
-        followed = self.get_following_user()
-        if followed.username == follower.username:
+        if follower.uri == self.request.data.get('follow', None):
             raise Http400('User cannot follow themselves')
-
+        followed = self.get_following()
         follower.follow(followed)
 
         return Response(status=status.HTTP_204_NO_CONTENT)
 
-    def get_following_user(self):
-        follow = self.request.data.get('follow', None)
-        if not follow:
-            raise Http400('followed is mandatory')
-        follow = UserProfile.objects.filter(username=follow).first()
-        if not follow:
-            raise Http400('Invalid followed')
-        if not follow.is_active:
-            raise Http404('Subject is not active')
-        return follow
 
-
-class UserFollowingView(AbstractFollowerFollowedView):
+class UserFollowingView(DestroyAPIView):
     permission_classes = (IsAuthenticated, )
+    lookup_url_kwarg = 'id'
+    lookup_field = 'id'
+    queryset = Follow.objects.filter()
 
-    def delete(self, request, *args, **kwargs):  # pylint: disable=unused-argument
-        follower = self.get_object()
-        followed = self.get_following_user()
-        follower.unfollow(followed)
+    def perform_destroy(self, instance):
+        follower = instance.follower
+        if follower != self.request.user:
+            raise PermissionDenied()
+        follower.unfollow(instance.following)
+
         return Response(status=status.HTTP_204_NO_CONTENT)
-
-    def get_following_user(self):
-        followed = self.kwargs.get('followed', None)
-        followed = UserProfile.objects.filter(username=followed).first()
-        if not followed:
-            raise Http404()
-        return followed

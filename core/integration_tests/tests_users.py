@@ -1041,66 +1041,15 @@ class OIDCLogoutViewTest(OCLAPITestCase):
         get_logout_url_mock.assert_called_once_with('id-token-hint', 'http://post-logout-url')
 
 
-class UserFollowerListViewTest(OCLAPITestCase):
-    def test_get(self):
-        follower = UserProfileFactory(username='follower')
-        followed = UserProfileFactory(username='followed')
-        follower_token = follower.get_token()
-        followed_token = followed.get_token()
-        followed.followers.add(follower)
-
-        response = self.client.get(
-            f'/users/{follower.username}/followers/',
-            HTTP_AUTHORIZATION='Token ' + follower_token,
-            format='json'
-        )
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.data), 0)
-
-        response = self.client.get(
-            f'/users/{followed.username}/followers/',
-            HTTP_AUTHORIZATION='Token ' + followed_token,
-            format='json'
-        )
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.data), 1)
-        self.assertEqual(
-            dict(response.data[0]),
-            {
-                'username': follower.user,
-                'name': follower.name,
-                'url': follower.url,
-                'logo_url': None,
-                'follow_date': ANY
-            }
-        )
-
-        response = self.client.get(
-            f'/users/{followed.username}/followers/',
-            HTTP_AUTHORIZATION='Token ' + follower_token,  #anyone can see anyone's followers/followed
-            format='json'
-        )
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.data), 1)
-        self.assertEqual(
-            dict(response.data[0]),
-            {
-                'username': follower.user,
-                'name': follower.name,
-                'url': follower.url,
-                'logo_url': None,
-                'follow_date': ANY
-            }
-        )
-
-
 class UserFollowingListViewTest(OCLAPITestCase):
     def test_get(self):
         follower = UserProfileFactory(username='follower')
-        followed = UserProfileFactory(username='followed')
+        user_followed = UserProfileFactory(username='user-followed')
+        org_followed = OrganizationFactory(mnemonic='org-followed')
         follower_token = follower.get_token()
-        followed_token = followed.get_token()
-        followed.followers.add(follower)
+        followed_token = user_followed.get_token()
+        follower.follow(user_followed)
+        follower.follow(org_followed)
 
         response = self.client.get(
             f'/users/{follower.username}/following/',
@@ -1108,38 +1057,51 @@ class UserFollowingListViewTest(OCLAPITestCase):
             format='json'
         )
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.data), 1)
+        self.assertEqual(len(response.data), 2)
+        follwers_following = response.data
         self.assertEqual(
-            dict(response.data[0]),
+            dict(follwers_following[0]),
             {
-                'username': followed.user,
-                'name': followed.name,
-                'url': followed.url,
-                'logo_url': None,
-                'follow_date': ANY
+                'object': {
+                    'id': 'org-followed',
+                    'name': org_followed.name,
+                    'url': org_followed.url,
+                    'logo_url': None,
+                    'type': 'Organization',
+                },
+                'id': follower.following.last().id,
+                'follow_date': ANY,
+                'type': 'Follow',
+                'url': f'/users/follower/following/{follower.following.last().id}/',
+            }
+        )
+        self.assertEqual(
+            dict(follwers_following[1]),
+            {
+                'object': {
+                    'username': 'user-followed',
+                    'name': user_followed.name,
+                    'url': user_followed.url,
+                    'logo_url': None,
+                    'type': 'User',
+                },
+                'id': follower.following.first().id,
+                'follow_date': ANY,
+                'type': 'Follow',
+                'url': f'/users/follower/following/{follower.following.first().id}/',
             }
         )
 
         response = self.client.get(
             f'/users/{follower.username}/following/',
-            HTTP_AUTHORIZATION='Token ' + followed_token,  #anyone can see anyone's followers/followed
+            HTTP_AUTHORIZATION='Token ' + followed_token,  # anyone can see anyone's followers/followed
             format='json'
         )
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.data), 1)
-        self.assertEqual(
-            dict(response.data[0]),
-            {
-                'username': followed.user,
-                'name': followed.name,
-                'url': followed.url,
-                'logo_url': None,
-                'follow_date': ANY
-            }
-        )
+        self.assertEqual(response.data, follwers_following)
 
         response = self.client.get(
-            f'/users/{followed.username}/following/',  # not to-way following
+            f'/users/{user_followed.username}/following/',  # not two-way following
             HTTP_AUTHORIZATION='Token ' + followed_token,
             format='json'
         )
@@ -1149,6 +1111,7 @@ class UserFollowingListViewTest(OCLAPITestCase):
     def test_post(self):
         follower = UserProfileFactory(username='follower')
         followed = UserProfileFactory(username='followed')
+        org_followed = OrganizationFactory(mnemonic='org-followed')
         follower_token = follower.get_token()
         followed_token = followed.get_token()
 
@@ -1173,12 +1136,13 @@ class UserFollowingListViewTest(OCLAPITestCase):
 
         response = self.client.post(
             f'/users/{follower.username}/following/',
-            {'follow': follower.username},
+            {'uri': follower.uri},
             HTTP_AUTHORIZATION='Token ' + followed_token,
         )
 
         self.assertEqual(response.status_code, 403)
         self.assertEqual(followed.followers.count(), 0)
+        self.assertEqual(follower.following.count(), 0)
 
         response = self.client.post(
             f'/users/{follower.username}/following/',
@@ -1190,13 +1154,27 @@ class UserFollowingListViewTest(OCLAPITestCase):
 
         response = self.client.post(
             f'/users/{follower.username}/following/',
-            {'follow': followed.username},
+            {'follow': followed.uri},
             HTTP_AUTHORIZATION='Token ' + follower_token,
         )
 
         self.assertEqual(response.status_code, 204)
         self.assertEqual(followed.followers.count(), 1)
-        self.assertEqual(followed.followers.first(), follower)
+        self.assertEqual(followed.followers.first().follower, follower)
+        self.assertEqual(follower.following.count(), 1)
+        self.assertEqual(follower.following.first().following, followed)
+
+        response = self.client.post(
+            f'/users/{follower.username}/following/',
+            {'follow': org_followed.uri},
+            HTTP_AUTHORIZATION='Token ' + follower_token,
+        )
+
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(org_followed.followers.count(), 1)
+        self.assertEqual(org_followed.followers.first().follower, follower)
+        self.assertEqual(follower.following.count(), 2)
+        self.assertEqual(follower.following.last().following, org_followed)
 
 
 class UserFollowingViewTest(OCLAPITestCase):
@@ -1205,17 +1183,20 @@ class UserFollowingViewTest(OCLAPITestCase):
         followed = UserProfileFactory(username='followed')
         follower_token = follower.get_token()
         followed_token = followed.get_token()
-        followed.followers.add(follower)
+
+        follower.follow(followed)
 
         self.assertEqual(followed.followers.count(), 1)
+        self.assertEqual(follower.following.count(), 1)
 
         response = self.client.delete(
-            '/users/follower/following/followed/',
+            f'/users/follower/following/{follower.following.first().id}/',
             HTTP_AUTHORIZATION='Token ' + followed_token,
         )
 
         self.assertEqual(response.status_code, 403)
         self.assertEqual(followed.followers.count(), 1)
+        self.assertEqual(follower.following.count(), 1)
 
         response = self.client.delete(
             '/users/follower/following/foobar/',
@@ -1224,11 +1205,13 @@ class UserFollowingViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 404)
         self.assertEqual(followed.followers.count(), 1)
+        self.assertEqual(follower.following.count(), 1)
 
         response = self.client.delete(
-            '/users/follower/following/followed/',
+            follower.following.first().uri,
             HTTP_AUTHORIZATION='Token ' + follower_token,
         )
 
         self.assertEqual(response.status_code, 204)
         self.assertEqual(followed.followers.count(), 0)
+        self.assertEqual(follower.following.count(), 0)

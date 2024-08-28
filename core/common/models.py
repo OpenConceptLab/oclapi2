@@ -414,6 +414,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
     url_registry_entries = GenericRelation(
         'url_registry.URLRegistry', object_id_field='repo_id', content_type_field='repo_type'
     )
+    followers = GenericRelation('users.Follow', object_id_field='following_id', content_type_field='following_type')
 
     class Meta:
         abstract = True
