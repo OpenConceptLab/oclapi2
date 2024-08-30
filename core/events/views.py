@@ -19,7 +19,10 @@ class EventsView(BaseAPIView, ListWithHeadersMixin):
         if not owner:
             raise Http404()
 
-        queryset = Event.objects.filter(object_url=owner.uri)
+        if owner.__class__.__name__ == 'UserProfile':
+            queryset = Event.objects.filter(object_url=owner.uri)
+        else:
+            queryset = Event.objects.filter(Event.object_criteria(owner.uri))
 
         permission = HasOwnership()
         if not permission.has_object_permission(self.request, self, owner):

@@ -94,4 +94,10 @@ class EventsViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data, [])
+        wayne_corp_events = response.data
+        self.assertEqual(len(wayne_corp_events), 3)
+        self.assertEqual(wayne_corp_events[2]['event_type'], 'Created')
+        self.assertEqual(wayne_corp_events[2]['object']['url'], wayne_corp.created_by.uri)
+        self.assertEqual(wayne_corp_events[2]['referenced_object']['url'], wayne_corp.uri)
+        self.assertEqual(wayne_corp_events[1]['id'], bruce_joined_wayne_corp_event.id)
+        self.assertEqual(wayne_corp_events[0]['id'], alfred_subscribed_wayne_corp_event.id)

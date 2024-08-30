@@ -16,6 +16,10 @@ class Event(models.Model):
     FOLLOWED = 'Followed'
     UNFOLLOWED = 'Unfollowed'
 
+    @staticmethod
+    def object_criteria(url):
+        return models.Q(object_url=url) | models.Q(referenced_object_url=url)
+
     @property
     def type(self):
         return 'Event'
