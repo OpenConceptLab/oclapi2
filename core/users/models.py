@@ -29,6 +29,10 @@ class Follow(models.Model):
     following_type = models.ForeignKey(ContentType, on_delete=models.CASCADE)
     following = GenericForeignKey('following_type', 'following_id')
 
+    @property
+    def type(self):
+        return 'Follow'
+
     def clean(self):
         if self.follower == self.following:
             raise ValidationError("User cannot follow themselves.")

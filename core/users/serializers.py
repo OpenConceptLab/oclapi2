@@ -130,7 +130,6 @@ class UserCreateSerializer(serializers.ModelSerializer):
 
 class AbstractFollowerSerializer(ModelSerializer):
     url = serializers.CharField(source='uri', read_only=True)
-    type = serializers.CharField(default='Follow', read_only=True)
     object = serializers.SerializerMethodField()
 
     class Meta:
