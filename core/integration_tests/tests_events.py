@@ -5,7 +5,7 @@ from core.users.tests.factories import UserProfileFactory
 
 
 class EventsViewTest(OCLAPITestCase):
-    def test_get(self):  # pylint:disable=too-many-statements
+    def test_get(self):  # pylint:disable=too-many-statements,too-many-locals
         alfred = UserProfileFactory(username='alfred', first_name='Alfred', last_name='Pennyworth')
         bruce = UserProfileFactory(username='bruce', first_name='Bruce', last_name='Wayne')
         joker = UserProfileFactory(username='joker', first_name='Joker', last_name='The Clown')
