@@ -16,6 +16,8 @@ from core.users.tests.factories import UserProfileFactory
 class ConceptMapTest(OCLTestCase):
     maxDiff = None
 
+    @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
+    @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
     def setUp(self):
         super().setUp()
         self.org = OrganizationFactory()
@@ -196,6 +198,8 @@ class ConceptMapTest(OCLTestCase):
         self.assertEqual(source.canonical_url, 'http://localhost/url')
         self.assertEqual(source.name, 'test')
 
+    @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
+    @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
     def test_put_concept_map_without_mappings(self):
         response = self.client.put(
             f'/users/{self.user.mnemonic}/ConceptMap/{self.user_source.mnemonic}/',
@@ -241,6 +245,8 @@ class ConceptMapTest(OCLTestCase):
         self.assertEqual(source.retired, False)
         self.assertEqual(source.name, 'test')
 
+    @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
+    @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
     def test_post_concept_map_with_mappings(self):
         response = self.client.post(
             f'/users/{self.user.mnemonic}/ConceptMap/',
@@ -296,6 +302,8 @@ class ConceptMapTest(OCLTestCase):
         self.assertEqual(source.name, 'test')
         self.assertEqual(len(source.get_mappings_queryset().all()), 3)
 
+    @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
+    @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
     def test_post_concept_map_with_mappings_without_canonicals(self):
         response = self.client.post(
             f'/users/{self.user.mnemonic}/ConceptMap/',
@@ -351,6 +359,8 @@ class ConceptMapTest(OCLTestCase):
         self.assertEqual(source.name, 'test')
         self.assertEqual(len(source.get_mappings_queryset().all()), 3)
 
+    @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
+    @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
     def test_put_concept_map_with_all_new_concepts(self):
         response = self.putConceptMap()
         self.assertEqual(response.data['id'], self.user_source.mnemonic)
@@ -386,6 +396,8 @@ class ConceptMapTest(OCLTestCase):
         self.assertEqual(mapping.from_concept_code, 'concept_B_1')
         self.assertEqual(mapping.to_concept_code, 'concept_1')
 
+    @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
+    @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
     def test_translate_positive(self):
         self.putConceptMap()
 
@@ -439,6 +451,8 @@ class ConceptMapTest(OCLTestCase):
                 ]
             })
 
+    @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
+    @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
     def test_public_translate_negative(self):
         self.putConceptMap()
 
@@ -486,6 +500,8 @@ class ConceptMapTest(OCLTestCase):
         self.assertEqual(response.status_code, 200)
         return response
 
+    @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
+    @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
     def test_translate_negative(self):
         self.putConceptMap()
 
@@ -501,6 +517,8 @@ class ConceptMapTest(OCLTestCase):
                 [('name', 'result'), ('valueBoolean', False)]
             )]})
 
+    @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
+    @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
     def test_translate_with_target(self):
         self.putConceptMap()
 
@@ -555,6 +573,8 @@ class ConceptMapTest(OCLTestCase):
             }
         )
 
+    @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
+    @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
     def test_translate_with_target_negative(self):
         self.putConceptMap()
 

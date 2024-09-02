@@ -401,6 +401,8 @@ class SourceVersionListViewTest(OCLAPITestCase):
         self.assertEqual(response.data[0]['version'], 'HEAD')
         self.assertEqual(response.data[0]['concepts_url'], self.source.concepts_url)
 
+    @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
+    @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
     def test_post_201(self):
         response = self.client.post(
             f'/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}/versions/',

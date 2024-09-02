@@ -1,3 +1,5 @@
+from mock.mock import patch, Mock
+
 from core.collections.models import CollectionReference, Collection
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
 from core.common.tests import OCLAPITestCase
@@ -11,6 +13,8 @@ from core.value_sets.serializers import ValueSetDetailSerializer
 
 
 class ValueSetTest(OCLAPITestCase):
+    @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
+    @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
     def setUp(self):
         super().setUp()
         self.org = OrganizationFactory()

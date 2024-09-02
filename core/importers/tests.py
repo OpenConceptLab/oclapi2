@@ -2263,6 +2263,8 @@ class ImporterSubtaskTest(OCLTestCase):
 
 class ResourceImporterTest(OCLAPITestCase):
 
+    @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
+    @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
     def test_import_code_system(self):
         ResourceImporter().import_resource(
             {"resourceType": "CodeSystem", "id": "fr-core-cs-identifier-type",

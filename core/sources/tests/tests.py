@@ -239,6 +239,8 @@ class SourceTest(OCLTestCase):
         )
         self.assertEqual(source2.num_versions, 2)
 
+    @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
+    @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
     def test_persist_new_version(self):
         source = OrganizationSourceFactory(version=HEAD)
         concept = ConceptFactory(mnemonic='concept1', parent=source)
@@ -262,6 +264,8 @@ class SourceTest(OCLTestCase):
         self.assertEqual(version1.concepts.first(), source.concepts.filter(is_latest_version=True).first())
         self.assertEqual(version1.concepts_set.count(), 0)  # no direct child
 
+    @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
+    @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
     @patch('core.common.models.delete_s3_objects', Mock())
     def test_source_version_delete(self):
         source = OrganizationSourceFactory(version=HEAD)
@@ -311,6 +315,8 @@ class SourceTest(OCLTestCase):
         self.assertEqual(source.last_concept_update, concept.updated_at)
         self.assertEqual(source.last_child_update, source.last_concept_update)
 
+    @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
+    @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
     def test_new_version_should_not_affect_last_child_update(self):
         source = OrganizationSourceFactory(version=HEAD)
         source_updated_at = source.updated_at

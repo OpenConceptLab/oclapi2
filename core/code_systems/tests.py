@@ -1,6 +1,7 @@
 import json
 
 from fhir.resources.codesystem import CodeSystem
+from mock.mock import patch, Mock
 from rest_framework.test import APIClient
 
 from core.code_systems.converter import CodeSystemConverter
@@ -16,6 +17,8 @@ from core.users.tests.factories import UserProfileFactory
 
 
 class CodeSystemTest(OCLTestCase):
+    @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
+    @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
     def setUp(self):
         super().setUp()
         self.org = OrganizationFactory()
@@ -244,6 +247,8 @@ class CodeSystemTest(OCLTestCase):
                 {'name': 'version', 'valueString': self.org_source_v2.version},
                 {'name': 'display', 'valueString': self.concept_1.display_name}]}))
 
+    @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
+    @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
     def test_post_code_system_without_concepts(self):
         response = self.client.post(
             f'/users/{self.user.mnemonic}/CodeSystem/',
@@ -288,6 +293,8 @@ class CodeSystemTest(OCLTestCase):
         self.assertEqual(source.retired, True)
         self.assertEqual(source.name, 'test')
 
+    @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
+    @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
     def test_put_code_system_without_concepts(self):
         response = self.client.put(
             f'/users/{self.user.mnemonic}/CodeSystem/{self.user_source.mnemonic}/',
@@ -334,6 +341,8 @@ class CodeSystemTest(OCLTestCase):
         self.assertEqual(source.retired, False)
         self.assertEqual(source.name, 'test')
 
+    @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
+    @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
     def test_post_code_system_with_concepts(self):
         response = self.client.post(
             f'/users/{self.user.mnemonic}/CodeSystem/',
@@ -409,6 +418,8 @@ class CodeSystemTest(OCLTestCase):
         self.assertEqual(concept.is_head, False)
         self.assertEqual(len(concept.names.all()), 2)
 
+    @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
+    @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
     def test_put_code_system_with_all_new_concepts(self):
         response = self.client.put(
             f'/users/{self.user.mnemonic}/CodeSystem/{self.user_source.mnemonic}/',
@@ -478,6 +489,8 @@ class CodeSystemTest(OCLTestCase):
         self.assertEqual(concept.is_head, False)
         self.assertEqual(len(concept.names.all()), 1)
 
+    @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
+    @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
     def test_put_code_system_with_existing_concepts(self):
         response = self.client.put(
             f'/users/{self.user.mnemonic}/CodeSystem/{self.user_source.mnemonic}/',
