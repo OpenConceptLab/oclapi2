@@ -1232,8 +1232,12 @@ class Expansion(BaseResourceModel):
 
         for reference in include_refs:
             concepts, mappings = get_ref_results(reference)
-            index_concepts = self.__include_resources(self.concepts, concepts, True)
-            index_mappings = self.__include_resources(self.mappings, mappings, False)
+            concepts_results = self.__include_resources(self.concepts, concepts, True)
+            if not index_concepts:
+                index_concepts = concepts_results
+            mappings_results = self.__include_resources(self.mappings, mappings, False)
+            if not index_mappings:
+                index_mappings = mappings_results
 
         for reference in exclude_refs:
             concepts, mappings = get_ref_results(reference)

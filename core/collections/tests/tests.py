@@ -1131,11 +1131,14 @@ class TasksTest(OCLTestCase):
         export_collection_task.apply_async.assert_not_called()
         index_children_mock.assert_not_called()
 
-    @patch('core.collections.models.Collection.index_children')
+    @patch('core.collections.models.index_expansion_mappings')
+    @patch('core.collections.models.index_expansion_concepts')
     @patch('core.common.tasks.export_collection')
-    def test_seed_children_task_with_export(self, export_collection_task, index_children_mock):
+    def test_seed_children_task_with_export(
+            self, export_collection_task, index_expansion_concepts_task, index_expansion_mappings_task):
         export_collection_task.__name__ = 'export_collection'
-        index_children_mock.__name__ = 'index_children'
+        index_expansion_concepts_task.__name__ = 'index_expansion_concepts'
+        index_expansion_mappings_task.__name__ = 'index_expansion_mappings'
         collection = OrganizationCollectionFactory()
         expansion = ExpansionFactory(collection_version=collection)
         collection.expansion_uri = expansion.uri
@@ -1172,7 +1175,9 @@ class TasksTest(OCLTestCase):
         self.assertEqual(expansion.mappings.count(), 1)
         export_collection_task.apply_async.assert_called_once_with(
             (collection_v1.id,), queue='default', task_id=ANY, persist_args=True)
-        index_children_mock.assert_called_once()
+
+        index_expansion_concepts_task.assert_called()
+        index_expansion_mappings_task.assert_called()
 
     def test_update_collection_active_mappings_count(self):
         mapping1 = MappingFactory()

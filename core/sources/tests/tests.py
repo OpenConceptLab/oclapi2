@@ -1241,8 +1241,8 @@ class TasksTest(OCLTestCase):
 
         self.assertEqual(source_v1.concepts.count(), 1)
         self.assertEqual(source_v1.mappings.count(), 1)
-        export_source_task.delay.assert_not_called()
-        index_children_mock.assert_not_called()
+        export_source_task.apply_async.assert_not_called()
+        index_children_mock.assert_called_once_with(sync=False, user=source_v1.created_by)
 
     @patch('core.sources.models.Source.index_children')
     @patch('core.common.tasks.export_source')

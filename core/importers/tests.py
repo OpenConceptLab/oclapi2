@@ -152,8 +152,8 @@ class BulkImportInlineTest(OCLTestCase):
         self.assertEqual(importer.failed[0], {**data, 'errors': {'parent': 'Parent resource cannot be None.'}})
         self.assertTrue(importer.elapsed_seconds > 0)
 
-    @patch('core.sources.models.index_source_mappings', Mock())
-    @patch('core.sources.models.index_source_concepts', Mock())
+    @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
+    @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
     def test_source_and_version_import(self):
         OrganizationFactory(mnemonic='DemoOrg')
         self.assertFalse(Source.objects.filter(mnemonic='DemoSource').exists())
@@ -634,8 +634,8 @@ class BulkImportInlineTest(OCLTestCase):
         self.assertEqual(collection.references.count(), 2)
         batch_index_resources_mock.apply_async.assert_called()
 
-    @patch('core.sources.models.index_source_mappings', Mock())
-    @patch('core.sources.models.index_source_concepts', Mock())
+    @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
+    @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
     @patch('core.importers.models.batch_index_resources')
     def test_sample_import(self, batch_index_resources_mock):
         importer = BulkImportInline(
@@ -860,8 +860,8 @@ class BulkImportInlineTest(OCLTestCase):
         self.assertEqual(len(importer.permission_denied), 0)
         batch_index_resources_mock.apply_async.assert_called()
 
-    @patch('core.sources.models.index_source_mappings', Mock())
-    @patch('core.sources.models.index_source_concepts', Mock())
+    @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
+    @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
     @patch('core.importers.models.batch_index_resources')
     def test_pepfar_import(self, batch_index_resources_mock):
         importer = BulkImportInline(

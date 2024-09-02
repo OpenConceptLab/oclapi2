@@ -97,8 +97,8 @@ class CodeSystemsTest(OCLAPITestCase):
                 unique_concepts.append(concept)
         json_file.update({'concept': unique_concepts})
 
-    @patch('core.sources.models.index_source_mappings', Mock())
-    @patch('core.sources.models.index_source_concepts', Mock())
+    @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
+    @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
     def test_posting_code_systems(self):
         test_files = ['code_systems_who_core.json', 'code_systems_who_fp.json', 'code_systems_who_sti.json',
                       'code_systems_who_ddcc_category_codes.json']
@@ -120,8 +120,8 @@ class CodeSystemsTest(OCLAPITestCase):
 
             Source.objects.filter(canonical_url=json_response.get('url')).delete()
 
-    @patch('core.sources.models.index_source_mappings', Mock())
-    @patch('core.sources.models.index_source_concepts', Mock())
+    @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
+    @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
     def test_posting_code_systems_specific_json(self):
         response = self.post(
             f"/orgs/{self.organization.mnemonic}/CodeSystem/",

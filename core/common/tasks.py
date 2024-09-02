@@ -359,48 +359,41 @@ def send_user_reset_password_email(user_id):
 
 
 @app.task(bind=True)
-def seed_children_to_new_version(self, resource, obj_id, export=True, sync=False, async_indexing=False):  # pylint: disable=too-many-arguments,too-many-locals,too-many-branches
-    instance = None
+def seed_children_to_new_version(self, resource, obj_id, export=True, sync=False):  # pylint: disable=too-many-arguments,too-many-locals,too-many-branches
     export_task = None
     autoexpand = True
+
     is_source = resource == 'source'
     is_collection = resource == 'collection'
 
+    klass = get_resource_class_from_resource_name(resource)
+    instance = klass.objects.filter(id=obj_id).first()
+
     if is_source:
-        from core.sources.models import Source
-        instance = Source.objects.filter(id=obj_id).first()
         export_task = export_source
-    if is_collection:
-        from core.collections.models import Collection
-        instance = Collection.objects.filter(id=obj_id).first()
+    elif is_collection:
         export_task = export_collection
         autoexpand = instance.should_auto_expand
 
     if instance:  # pylint: disable=too-many-nested-blocks
         task_id = self.request.id
-
-        index = not export
-        if is_source and instance.released:
-            index = False
-
         try:
             instance.add_processing(task_id)
             instance.seed_references()
             if is_source:
-                instance.seed_concepts(index=index)
-                instance.seed_mappings(index=index)
+                instance.seed_concepts(index=False)
+                instance.seed_mappings(index=False)
+                if instance.released:
+                    instance.index_resources_for_self_as_latest_released()
+                else:
+                    instance.index_children(sync=False, user=instance.created_by)
             elif autoexpand:
-                instance.cascade_children_to_expansion(index=index, sync=sync)
+                instance.cascade_children_to_expansion(index=True, sync=sync)
 
             if export:
                 from core.tasks.models import Task
                 task = Task.new(queue='default', username=instance.updated_by, name=export_task.__name__)
                 export_task.apply_async((obj_id,), queue=task.queue, task_id=task.id, persist_args=True)
-                if autoexpand:
-                    if is_source and instance.released:
-                        instance.index_resources_for_self_as_latest_released()
-                    else:
-                        instance.index_children(sync=not async_indexing, user=instance.created_by)
         finally:
             instance.remove_processing(task_id)
 

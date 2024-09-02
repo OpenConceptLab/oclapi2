@@ -309,7 +309,7 @@ class CodeSystemDetailSerializer(serializers.ModelSerializer):
 
         source.id = None  # pylint: disable=invalid-name
         # Make it synchronous for now so that the list of concepts is included in the response
-        errors = Source.persist_new_version(source, user, sync=True, async_indexing=True)
+        errors = Source.persist_new_version(source, user, sync=True)
         self._errors.update(errors)
         return source
 
