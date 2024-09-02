@@ -142,8 +142,8 @@ class AbstractFollowerSerializer(ModelSerializer):
 class FollowerSerializer(AbstractFollowerSerializer):
     @staticmethod
     def get_object(obj):
-        following = obj.following
-        return following.get_brief_serializer()(following).data
+        follower = obj.follower
+        return follower.get_brief_serializer()(follower).data
 
 
 class FollowingSerializer(AbstractFollowerSerializer):
