@@ -2,6 +2,7 @@ import json
 import os
 import urllib.parse
 from jsonpath_ng import parse
+from mock.mock import patch, Mock
 
 from core.collections.models import Collection
 from core.common.tests import OCLAPITestCase
@@ -104,6 +105,8 @@ class ValueSetsTest(OCLAPITestCase):
                 unique_concepts.append(concept)
         json_file.update({'concept': unique_concepts})
 
+    @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
+    @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
     def test_posting_value_sets(self):
         test_files = ['value_sets/value_sets_who_core_payment.json']
         #               'value_sets/value_sets_who_core_contraceptive.json',
