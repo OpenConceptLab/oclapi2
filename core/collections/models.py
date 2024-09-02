@@ -458,6 +458,44 @@ class Collection(DirtyFieldsMixin, ConceptContainerModel):
         from core.collections.serializers import CollectionVersionMinimalSerializer, CollectionMinimalSerializer
         return CollectionMinimalSerializer if self.is_head else CollectionVersionMinimalSerializer
 
+    def get_export_task(self):
+        return Task.find(name__iendswith='export_collection', args__contains=[self.id])
+
+    def get_index_concepts_task(self):
+        expansion = self.expansion
+        task = None
+        if expansion:
+            task = Task.find(name__iendswith='index_expansion_concepts', args__contains=[expansion.id])
+        return task
+
+    def get_index_mappings_task(self):
+        expansion = self.expansion
+        task = None
+        if expansion:
+            task = Task.find(name__iendswith='index_expansion_mappings', args__contains=[expansion.id])
+        return task
+
+    def get_seed_new_version_task(self):
+        expansion = self.expansion
+        task = None
+        if expansion:
+            task = Task.find(name__iendswith='seed_children_to_expansion', args__contains=[self.id])
+        return task
+
+    def get_tasks(self):
+        seed_task = self.get_seed_new_version_task()
+        index_concepts_task = self.get_index_concepts_task()
+        index_mappings_task = self.get_index_mappings_task()
+        export_task = self.get_export_task()
+
+        return {
+            'seeded_concepts': seed_task,
+            'seeded_mappings': seed_task,
+            'indexed_concepts': index_concepts_task,
+            'indexed_mappings': index_mappings_task,
+            'exported': export_task,
+        }
+
 
 class ReferencedConcept(models.Model):
     reference = models.ForeignKey('collections.CollectionReference', on_delete=models.CASCADE)
@@ -1064,7 +1102,8 @@ class Expansion(BaseResourceModel):
                         queue='indexing', user=get_current_authorized_user() or self.updated_by,
                         name=index_expansion_concepts.__name__
                     )
-                    index_expansion_concepts.apply_async((self.id, ), task_id=task.id, queue=task.queue)
+                    index_expansion_concepts.apply_async(
+                        (self.id, ), task_id=task.id, queue=task.queue, persist_args=True)
                 except AlreadyQueued:
                     if task:
                         task.delete()
@@ -1080,7 +1119,8 @@ class Expansion(BaseResourceModel):
                         queue='indexing', user=get_current_authorized_user() or self.updated_by,
                         name=index_expansion_mappings.__name__
                     )
-                    index_expansion_mappings.apply_async((self.id, ), task_id=task.id, queue=task.queue)
+                    index_expansion_mappings.apply_async(
+                        (self.id, ), task_id=task.id, queue=task.queue, persist_args=True)
                 except AlreadyQueued:
                     if task:
                         task.delete()
@@ -1321,10 +1361,12 @@ class Expansion(BaseResourceModel):
             expansion.mnemonic = expansion.id
             expansion.save()
 
+        task = Task.new(queue='indexing', username=expansion.created_by, name=seed_children_to_expansion.__name__)
         if get(settings, 'TEST_MODE', False) or sync:
             seed_children_to_expansion(expansion.id, index)
         else:
-            seed_children_to_expansion.apply_async((expansion.id, index), queue='indexing', permanent=False)
+            seed_children_to_expansion.apply_async(
+                (expansion.id, index), queue=task.queue, task_id=task.id, persist_args=True)
 
         return expansion
 

@@ -367,38 +367,6 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
     def get_seed_new_version_task(self):
         return Task.find(name__iendswith='seed_children_to_new_version', args__contains=['source', self.id])
 
-    @property
-    def states(self):
-        return self.get_tasks_info('state')
-
-    @property
-    def tasks(self):
-        return self.get_tasks_info('id')
-
-    def get_tasks_info(self, attribute=None):
-        from core.tasks.serializers import TaskListSerializer
-        tasks = self.get_tasks()
-
-        result = {}
-        for task_name, task in tasks.items():
-            if task:
-                result[task_name] = (get(task, attribute) or None) if attribute else TaskListSerializer(task).data
-
-        return result
-
-    def get_tasks(self):
-        seed_task = self.get_seed_new_version_task()
-        index_concepts_task = self.get_index_concepts_task()
-        index_mappings_task = self.get_index_mappings_task()
-        export_task = self.get_export_task()
-
-        return {
-            'seeded_concepts': seed_task,
-            'seeded_mappings': seed_task,
-            'indexed_concepts': index_concepts_task,
-            'indexed_mappings': index_mappings_task,
-            'exported': export_task,
-        }
 
     def __get_resource_db_sequence_prefix(self):
         return self.uri.replace('/', '_').replace('-', '_').replace('.', '_').replace('@', '_')

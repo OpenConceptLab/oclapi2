@@ -1160,6 +1160,39 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
                 _facets.append(_facet)
         return _facets
 
+    @property
+    def states(self):
+        return self.get_tasks_info('state')
+
+    @property
+    def tasks(self):
+        return self.get_tasks_info('id')
+
+    def get_tasks_info(self, attribute=None):
+        from core.tasks.serializers import TaskListSerializer
+        tasks = self.get_tasks()
+
+        result = {}
+        for task_name, task in tasks.items():
+            if task:
+                result[task_name] = (get(task, attribute) or None) if attribute else TaskListSerializer(task).data
+
+        return result
+
+    def get_tasks(self):
+        seed_task = self.get_seed_new_version_task()
+        index_concepts_task = self.get_index_concepts_task()
+        index_mappings_task = self.get_index_mappings_task()
+        export_task = self.get_export_task()
+
+        return {
+            'seeded_concepts': seed_task,
+            'seeded_mappings': seed_task,
+            'indexed_concepts': index_concepts_task,
+            'indexed_mappings': index_mappings_task,
+            'exported': export_task,
+        }
+
 
 class CelerySignalProcessor(RealTimeSignalProcessor):
     def handle_save(self, sender, instance, **kwargs):

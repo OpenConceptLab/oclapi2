@@ -1217,6 +1217,7 @@ class TasksTest(OCLTestCase):
 class ExpansionTest(OCLTestCase):
     @patch('core.collections.models.seed_children_to_expansion')
     def test_persist_without_mnemonic(self, seed_children_to_expansion_mock):
+        seed_children_to_expansion_mock.__name__ = 'seed_children_to_expansion'
         collection = OrganizationCollectionFactory()
 
         expansion = Expansion.persist(index=False, collection_version=collection)
@@ -1228,6 +1229,7 @@ class ExpansionTest(OCLTestCase):
 
     @patch('core.collections.models.seed_children_to_expansion')
     def test_persist_with_mnemonic(self, seed_children_to_expansion_mock):
+        seed_children_to_expansion_mock.__name__ = 'seed_children_to_expansion'
         collection = OrganizationCollectionFactory()
 
         expansion = Expansion.persist(index=True, mnemonic='e1', collection_version=collection)
