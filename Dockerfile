@@ -1,4 +1,4 @@
-FROM python:3.10.0-alpine as builder
+FROM python:3.10.0-alpine AS builder
 ENV PYTHONUNBUFFERED 1
 ENV PYTHONDONTWRITEBYTECODE 1
 
@@ -21,9 +21,9 @@ RUN addgroup -S ocl && adduser -S ocl -G ocl
 
 ENV APP_HOME=/code
 
-RUN mkdir -p $APP_HOME /temp /staticfiles
+RUN mkdir -p $APP_HOME /temp /staticfiles /uploads
 
-RUN chown -R ocl:ocl $APP_HOME /temp /staticfiles
+RUN chown -R ocl:ocl $APP_HOME /temp /staticfiles /uploads
 
 WORKDIR $APP_HOME
 

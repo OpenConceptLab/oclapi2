@@ -170,6 +170,7 @@ class ValueSetDetailSerializer(serializers.ModelSerializer):
         collection = CollectionCreateOrUpdateSerializer().prepare_object(validated_data)
         collection_version = collection.version if collection.version != HEAD else '0.1'
         collection.version = HEAD
+        collection.collection_type = 'ValueSet'
 
         parent_klass = Organization if ident['owner_type'] == 'orgs' else UserProfile
         collection.set_parent(parent_klass.objects.filter(**{parent_klass.mnemonic_attr: ident['owner_id']}).first())

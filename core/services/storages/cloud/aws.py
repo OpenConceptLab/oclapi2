@@ -29,7 +29,9 @@ class S3(CloudStorageServiceInterface):
         """Uploads file object"""
         read_directive = 'rb' if binary else 'r'
         file_path = file_path if file_path else key
-        return self._upload(key, open(file_path, read_directive).read(), headers, metadata)
+        with open(file_path, read_directive) as file:
+            # upload as a stream instead of reading and loading the whole file in memory
+            return self.upload(key, file, headers, metadata)
 
     def upload_base64(  # pylint: disable=too-many-arguments,inconsistent-return-statements
             self, doc_base64, file_name, append_extension=True, public_read=False, headers=None
@@ -55,10 +57,12 @@ class S3(CloudStorageServiceInterface):
             file_name_with_ext = file_name
 
         doc_data = ContentFile(base64.b64decode(_doc_string))
-        if public_read:
-            self._upload_public(file_name_with_ext, doc_data)
-        else:
-            self._upload(file_name_with_ext, doc_data, headers)
+        with doc_data.open() as file:
+            # pretend to use streaming
+            if public_read:
+                self._upload_public(file_name_with_ext, file)
+            else:
+                self.upload(file_name_with_ext, file, headers)
 
         return file_name_with_ext
 
@@ -145,9 +149,9 @@ class S3(CloudStorageServiceInterface):
 
         return None
 
-    def _upload(self, file_path, file_content, headers=None, metadata=None):
+    def upload(self, key, file_content, headers=None, metadata=None):
         """Uploads via file content with file_path as path + name"""
-        url = self._generate_signed_url(self.PUT, file_path, metadata)
+        url = self._generate_signed_url(self.PUT, key, metadata)
         result = None
         if url:
             res = requests.put(

@@ -58,6 +58,8 @@ services:
       - FHIR_VALIDATOR_URL=${FHIR_VALIDATOR_URL-http://fhir_validator:3500}
     healthcheck:
       test: "curl --silent --fail http://localhost:8000/version/ || exit 1"
+    volumes:
+      - upload-data:/code/uploads
   fhir_validator:
     image: openconceptlab/validator-wrapper:1.0.53-1deb1a4b
     restart: "always"
@@ -77,6 +79,8 @@ services:
       - DEBUG=${DEBUG-FALSE}
       - ERRBIT_URL
       - ERRBIT_KEY
+    volumes:
+      - upload-data:/code/uploads
   celery_beat:
     image: openconceptlab/oclapi2:${ENVIRONMENT-production}
     command: ["bash", "-c", "./start_celery_beat.sh"]
@@ -119,6 +123,8 @@ services:
       - DEBUG=${DEBUG-FALSE}
       - ERRBIT_URL
       - ERRBIT_KEY
+    volumes:
+      - upload-data:/code/uploads
   celery_bulk_import_0_1:
     image: openconceptlab/oclapi2:${ENVIRONMENT-production}
     command: ["bash", "-c", "CELERY_WORKER_NAME=bulk_import_0_1 ./start_celery_worker.sh -Q bulk_import_0,bulk_import_1 -c 1"]
@@ -131,6 +137,8 @@ services:
       - DEBUG=${DEBUG-FALSE}
       - ERRBIT_URL
       - ERRBIT_KEY
+    volumes:
+      - upload-data:/code/uploads
   celery_bulk_import_2_3:
     image: openconceptlab/oclapi2:${ENVIRONMENT-production}
     command: ["bash", "-c", "CELERY_WORKER_NAME=bulk_import_2_3 ./start_celery_worker.sh -Q bulk_import_2,bulk_import_3 -c 1"]
@@ -143,6 +151,8 @@ services:
       - DEBUG=${DEBUG-FALSE}
       - ERRBIT_URL
       - ERRBIT_KEY
+    volumes:
+      - upload-data:/code/uploads
   celery_bulk_import_root:
     image: openconceptlab/oclapi2:${ENVIRONMENT-production}
     command: ["bash", "-c", "CELERY_WORKER_NAME=bulk_import_root ./start_celery_worker.sh -Q bulk_import_root -c 1"]
@@ -155,6 +165,8 @@ services:
       - DEBUG=${DEBUG-FALSE}
       - ERRBIT_URL
       - ERRBIT_KEY
+    volumes:
+      - upload-data:/code/uploads
   flower:
     image: openconceptlab/oclapi2:${ENVIRONMENT-production}
     command: ["bash", "-c", "./start_flower.sh"]
@@ -197,3 +209,4 @@ volumes:
   postgres-data:
   es-data:
   redis-data:
+  upload-data:

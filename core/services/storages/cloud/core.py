@@ -6,6 +6,11 @@ class CloudStorageServiceInterface:
     def __init__(self):
         pass
 
+    def upload(self, key, file_content, headers=None, metadata=None):
+        """
+        Uploads file handle to key given key
+        """
+
     def upload_file(self, key, file_path=None, headers=None, binary=False, metadata=None):  # pylint: disable=too-many-arguments
         """
         Uploads binary file object to key given file_path

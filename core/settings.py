@@ -25,6 +25,8 @@ from core import __version__
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+MEDIA_ROOT = '/code/uploads'
+
 API_BASE_URL = os.environ.get('API_BASE_URL', 'http://localhost:8000')
 
 API_INTERNAL_BASE_URL = os.environ.get('API_INTERNAL_BASE_URL', 'http://api:8000')
@@ -501,8 +503,8 @@ FLOWER_PASSWORD = os.environ.get('FLOWER_PASSWORD', 'Root123')
 FLOWER_HOST = os.environ.get('FLOWER_HOST', 'flower')
 FLOWER_PORT = os.environ.get('FLOWER_PORT', 5555)
 FHIR_SUBDOMAIN = os.environ.get('FHIR_SUBDOMAIN', None)
-DATA_UPLOAD_MAX_MEMORY_SIZE = 200*1024*1024
-FILE_UPLOAD_MAX_MEMORY_SIZE = 200*1024*1024
+DATA_UPLOAD_MAX_MEMORY_SIZE = 200*1024*1024  # i.e. 200MBs before throwing RequestDataTooBig
+FILE_UPLOAD_MAX_MEMORY_SIZE = 3*1024*1024  # i.e. 3MBs before file is streamed directly to temp file
 
 # Mail settings
 EMAIL_HOST = os.environ.get('EMAIL_HOST', 'smtp.gmail.com')

@@ -1,5 +1,8 @@
 import json
 import logging
+import os
+import shutil
+import uuid
 from datetime import datetime
 import tarfile
 import tempfile
@@ -15,10 +18,12 @@ from ijson import JSONError
 from packaging.version import Version
 from pydantic import BaseModel, computed_field, PrivateAttr
 
+from core import settings
 from core.common.serializers import IdentifierSerializer
 from core.common.tasks import bulk_import_subtask
 from core.common.tasks import import_finisher
 from core.code_systems.converter import CodeSystemConverter
+from core.common.utils import get_export_service
 from core.importers.models import SourceImporter, SourceVersionImporter, ConceptImporter, OrganizationImporter, \
     CollectionImporter, CollectionVersionImporter, MappingImporter, ReferenceImporter, CREATED, UPDATED, FAILED, \
     DELETED, NOT_FOUND, PERMISSION_DENIED, UNCHANGED
@@ -36,11 +41,11 @@ logger = logging.getLogger('oclapi')
 class ImporterUtils:
 
     @staticmethod
-    def fetch_to_temp_file(remote_file, temp):
+    def fetch_to_file(remote_file, local_file):
         for rf_block in remote_file.iter_content(1024):
-            temp.write(rf_block)
-        temp.flush()
-        temp.seek(0)
+            local_file.write(rf_block)
+        local_file.flush()
+        local_file.seek(0)
 
     @staticmethod
     def is_zipped_or_tarred(temp):
@@ -199,14 +204,42 @@ class Importer:
     def is_npm_import(self) -> bool:
         return self.import_type == 'npm'
 
-    def run(self):
+    def run(self):  # pylint: disable=too-many-locals
         time_started = datetime.now()
         resource_types = ['CodeSystem', 'ValueSet', 'ConceptMap']
         resource_types.extend(ResourceImporter.get_resource_types())
 
+        if not self.path.startswith('/'):  # not local path
+            key = self.path
+            protocol_index = key.index('://')
+            if protocol_index:
+                key = key[:protocol_index+3]
+            key += f'{time_started.strftime("%Y%m%d_%H%M%S")}_{str(uuid.uuid4())[:8]}'
+            if settings.DEBUG:
+                file_url = os.path.join(settings.MEDIA_ROOT, 'import_uploads')
+                os.makedirs(file_url, exist_ok=True)
+                file_url = os.path.join(file_url, key)
+
+                with requests.get(self.path, stream=True) as import_file:
+                    if not import_file.ok:
+                        raise ImportError(f"Failed to GET {self.path}, responded with {import_file.status_code}")
+                    with open(file_url, 'wb') as temp:
+                        shutil.copyfileobj(import_file.raw, temp)
+                self.path = file_url
+            else:
+                upload_service = get_export_service()
+                if upload_service.exists(self.path):  # already uploaded by the view
+                    self.path = upload_service.url_for(self.path)
+                else:
+                    with requests.get(self.path, stream=True) as import_file:
+                        if not import_file.ok:
+                            raise ImportError(f"Failed to GET {self.path}, responded with {import_file.status_code}")
+                        upload_service.upload(key, import_file.raw,
+                                              metadata={'ContentType': 'application/octet-stream'},
+                                              headers={'content-type': 'application/octet-stream'})
+                    self.path = upload_service.url_for(key)
+
         resources = {}
-        if not self.path.endswith('/'):
-            self.path += '/'
         dependencies = []
 
         self.prepare_resources(self.path, resource_types, dependencies, [], resources)
@@ -233,9 +266,10 @@ class Importer:
 
     def prepare_resources(self, path, resource_types, dependencies, visited_dependencies, resources):
         # pylint: disable=too-many-locals
-        remote_file = requests.get(path, stream=True)
-        with tempfile.NamedTemporaryFile() as temp:
-            ImporterUtils.fetch_to_temp_file(remote_file, temp)
+        with open(path, 'rb') if path.startswith('/') else tempfile.NamedTemporaryFile() as temp:
+            if not path.startswith('/'):  # not local file
+                remote_file = requests.get(path, stream=True)
+                ImporterUtils.fetch_to_file(remote_file, temp)
 
             is_zipped, is_tarred = ImporterUtils.is_zipped_or_tarred(temp)
             if is_zipped:
@@ -519,12 +553,12 @@ class ImporterSubtask:
         results = []
 
         try:
-            remote_file = requests.get(self.path, stream=True)
-            if not remote_file.ok:
-                raise ImportError(f"Failed to GET {self.path}, responded with {remote_file.status_code}")
-
-            with tempfile.NamedTemporaryFile() as temp:
-                ImporterUtils.fetch_to_temp_file(remote_file, temp)
+            with open(self.path, 'rb') if self.path.startswith('/') else tempfile.NamedTemporaryFile() as temp:
+                if not self.path.startswith('/'):  # not local file
+                    remote_file = requests.get(self.path, stream=True)
+                    if not remote_file.ok:
+                        raise ImportError(f"Failed to GET {self.path}, responded with {remote_file.status_code}")
+                    ImporterUtils.fetch_to_file(remote_file, temp)
 
                 is_zipped, is_tarred = ImporterUtils.is_zipped_or_tarred(temp)
 

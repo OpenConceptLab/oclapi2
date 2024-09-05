@@ -23,7 +23,7 @@ class S3Test(TestCase):
         _conn = boto3.resource('s3', region_name='us-east-1')
         _conn.create_bucket(Bucket='oclapi2-dev')
 
-        S3()._upload('some/path', 'content')  # pylint: disable=protected-access
+        S3().upload('some/path', 'content')  # pylint: disable=protected-access
 
         self.assertEqual(
             _conn.Object(
@@ -40,7 +40,7 @@ class S3Test(TestCase):
         s3 = S3()
         self.assertFalse(s3.exists('some/path'))
 
-        s3._upload('some/path', 'content')  # pylint: disable=protected-access
+        s3.upload('some/path', 'content')  # pylint: disable=protected-access
 
         self.assertTrue(s3.exists('some/path'))
 
@@ -61,18 +61,19 @@ class S3Test(TestCase):
     def test_upload_file(self):
         with patch("builtins.open", mock_open(read_data="file-content")) as mock_file:
             s3 = S3()
-            s3._upload = Mock(return_value=200)  # pylint: disable=protected-access
+            s3.upload = Mock(return_value=200)  # pylint: disable=protected-access
             file_path = "path/to/file.ext"
             res = s3.upload_file(key=file_path, headers={'header1': 'val1'})
             self.assertEqual(res, 200)
-            s3._upload.assert_called_once_with(file_path, 'file-content', {'header1': 'val1'}, None)  # pylint: disable=protected-access
+            s3.upload.assert_called_once_with(file_path, ANY, {'header1': 'val1'}, None)  # pylint:
+            # disable=protected-access
             mock_file.assert_called_once_with(file_path, 'r')
 
     def test_upload_base64(self):
         file_content = base64.b64encode(b'file-content')
         s3 = S3()
         s3_upload_mock = Mock()
-        s3._upload = s3_upload_mock  # pylint: disable=protected-access
+        s3.upload = s3_upload_mock  # pylint: disable=protected-access
         uploaded_file_name_with_ext = s3.upload_base64(
             doc_base64='extension/ext;base64,' + file_content.decode(),
             file_name='some-file-name',
@@ -120,7 +121,7 @@ class S3Test(TestCase):
     def test_upload_base64_no_ext(self):
         s3_upload_mock = Mock()
         s3 = S3()
-        s3._upload = s3_upload_mock  # pylint: disable=protected-access
+        s3.upload = s3_upload_mock  # pylint: disable=protected-access
         file_content = base64.b64encode(b'file-content')
         uploaded_file_name_with_ext = s3.upload_base64(
             doc_base64='extension/ext;base64,' + file_content.decode(),
@@ -148,7 +149,7 @@ class S3Test(TestCase):
         conn.create_bucket(Bucket='oclapi2-dev')
 
         s3 = S3()
-        s3._upload('some/path', 'content')  # pylint: disable=protected-access
+        s3.upload('some/path', 'content')  # pylint: disable=protected-access
 
         self.assertEqual(
             conn.Object(
@@ -169,7 +170,7 @@ class S3Test(TestCase):
         _conn.create_bucket(Bucket='oclapi2-dev')
 
         s3 = S3()
-        s3._upload('some/path', 'content')  # pylint: disable=protected-access
+        s3.upload('some/path', 'content')  # pylint: disable=protected-access
         _url = s3.url_for('some/path')
 
         self.assertTrue(

@@ -1,6 +1,10 @@
 import csv
 import io
+import os
+import shutil
+import uuid
 
+from datetime import datetime
 import requests
 from celery_once import AlreadyQueued
 from django.db.models import Q
@@ -20,7 +24,8 @@ from core.common.views import BaseAPIView
 from core.common.tasks import bulk_import_new
 from core.common.swagger_parameters import update_if_exists_param, task_param, result_param, username_param, \
     file_upload_param, file_url_param, parallel_threads_param, verbose_param
-from core.common.utils import queue_bulk_import, is_csv_file, get_truthy_values, get_queue_task_names
+from core.common.utils import queue_bulk_import, is_csv_file, get_truthy_values, get_queue_task_names, \
+    get_export_service
 from core.importers.constants import ALREADY_QUEUED, INVALID_UPDATE_IF_EXISTS, NO_CONTENT_TO_IMPORT
 from core.importers.input_parsers import ImportContentParser
 from core.tasks.models import Task
@@ -138,7 +143,7 @@ class BulkImportParallelInlineView(APIView):
     def get_parsers(self):
         if 'application/json' in [self.request.META.get('CONTENT_TYPE')]:
             return [JSONParser()]
-        if self.request.method == 'POST':
+        if self.request.method == ' POST':
             return [MultiPartParser(), FormParser()]
         return super().get_parsers()
 
@@ -174,7 +179,24 @@ class ImportView(BulkImportParallelInlineView, ImportRetrieveDestroyMixin):
     )
     def post(self, request, import_queue=None):
         if 'import_type' in request.data:
-            file_url = request.data.get('file_url')
+            file_url = get(request.data, 'file_url')
+            file = get(request.data, 'file')
+            if file:
+                timestamp = datetime.now()
+                key = f'import_upload_{timestamp.strftime("%Y%m%d_%H%M%S")}_{str(uuid.uuid4())[:8]}'
+                from core import settings
+                if settings.DEBUG:
+                    dir_url = os.path.join(settings.MEDIA_ROOT, 'import_uploads')
+                    os.makedirs(dir_url, exist_ok=True)
+                    file_url = os.path.join(dir_url, key)
+                    shutil.copyfile(file, file_url)
+                else:
+                    upload_service = get_export_service()
+                    upload_service.upload(key, file,
+                                          metadata={'ContentType': 'application/octet-stream'},
+                                          headers={'content-type': 'application/octet-stream'})
+                    file_url = upload_service.url_for(key)
+
             task = get_queue_task_names(import_queue, self.request.user.username)
             new_task = bulk_import_new.apply_async(
                 (file_url, self.request.user.username,

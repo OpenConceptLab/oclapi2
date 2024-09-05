@@ -289,6 +289,7 @@ class CodeSystemDetailSerializer(serializers.ModelSerializer):
             owner = UserProfile.objects.filter(username=ident['owner_id']).first()
 
         source.set_parent(owner)
+        source.source_type = 'CodeSystem'
 
         user = self.context['request'].user
         version = source.version  # remember version if set

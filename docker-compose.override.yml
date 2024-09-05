@@ -37,6 +37,8 @@ services:
       - celery_bulk_import_0_1
       - celery_bulk_import_2_3
       - celery_bulk_import_root
+    environment:
+      - DEBUG=${DEBUG-TRUE}
   celery_beat:
     build: .
     volumes:
@@ -56,21 +58,29 @@ services:
     volumes:
       - .:/code:z
     restart: "no"
+    environment:
+      - DEBUG=${DEBUG-TRUE}
   celery_bulk_import_0_1:
     build: .
     volumes:
       - .:/code:z
     restart: "no"
+    environment:
+      - DEBUG=${DEBUG-TRUE}
   celery_bulk_import_2_3:
     build: .
     volumes:
       - .:/code:z
     restart: "no"
+    environment:
+      - DEBUG=${DEBUG-TRUE}
   celery_bulk_import_root:
     build: .
     volumes:
       - .:/code:z
     restart: "no"
+    environment:
+      - DEBUG=${DEBUG-TRUE}
   flower:
     build: .
     volumes:
