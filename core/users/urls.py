@@ -3,6 +3,7 @@ from django.urls import include, path
 from core.orgs import views as org_views
 from core.tasks import views as task_views
 from . import views
+from ..events.views import UserEventsView
 from ..repos.views import OrganizationRepoListView
 from ..url_registry.views import OrganizationURLRegistryListView
 
@@ -43,7 +44,7 @@ urlpatterns = [
     path('<str:user>/sources/', include('core.sources.urls')),
     path('<str:user>/collections/', include('core.collections.urls')),
     path('<str:user>/pins/', include('core.pins.urls')),
-    path('<str:user>/events/', include('core.events.urls')),
+    path('<str:user>/events/', UserEventsView.as_view(), name='user-events'),
 
     # TODO: require FHIR subdomain
     path('<str:user>/CodeSystem/', include('core.code_systems.urls'), name='code_systems_urls'),

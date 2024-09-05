@@ -100,6 +100,9 @@ class Organization(BaseResourceModel, SourceContainerMixin, ChecksumModel):
     def delete_client_configs(self):
         ClientConfig.objects.filter(resource_type__model='organization', resource_id=self.id).delete()
 
+    def delete_following(self):
+        Follow.objects.filter(following_type__model='organization', following_id=self.id).delete()
+
     def delete_pins(self):
         from core.pins.models import Pin
         # deletes pins where org is pinned

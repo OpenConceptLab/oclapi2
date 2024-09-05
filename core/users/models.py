@@ -81,6 +81,12 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
         'is_admin': {'sortable': False, 'filterable': False, 'exact': False, 'facet': True}
     }
 
+    @property
+    def events(self):
+        from core.events.models import Event
+        return Event.objects.filter(object_url=self.uri)
+
+
     def calculate_uri(self):
         return f"/users/{self.username}/"
 

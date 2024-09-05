@@ -6,7 +6,7 @@ class Event(models.Model):
     object_url = models.CharField(max_length=255)
     referenced_object_url = models.CharField(max_length=255)
     event_type = models.CharField(max_length=255)
-    actor = models.ForeignKey('users.UserProfile', on_delete=models.DO_NOTHING, related_name='events')
+    actor = models.ForeignKey('users.UserProfile', on_delete=models.DO_NOTHING, related_name='actor_events')
     created_at = models.DateTimeField(auto_now_add=True)
     public = models.BooleanField(default=True)  # private events are shown to creator/staff/org members only
     _referenced_object = models.JSONField(null=True, blank=True)
@@ -19,6 +19,35 @@ class Event(models.Model):
     @staticmethod
     def object_criteria(url):
         return models.Q(object_url=url) | models.Q(referenced_object_url=url)
+
+    @classmethod
+    def get_two_way_events_for(cls, object_url):
+        return cls.objects.filter(cls.object_criteria(object_url))
+
+    @classmethod
+    def get_user_following_events(cls, user, private=False):
+        queryset = cls.objects.none()
+        for following in user.following.filter():
+            events = following.following.events
+            if not private:
+                events = events.filter(public=True)
+            queryset = queryset.union(events)
+        return queryset
+
+    @classmethod
+    def get_user_organization_events(cls, user, private=False):
+        queryset = cls.objects.none()
+        for org in user.organizations.filter():
+            events = org.events
+            if not private:
+                events = events.filter(public=True)
+            queryset = queryset.union(events)
+        return queryset
+
+    @classmethod
+    def get_user_all_events(cls, user, private=False):
+        return cls.get_user_organization_events(user, private).union(
+            cls.get_user_following_events(user, private))
 
     @property
     def type(self):

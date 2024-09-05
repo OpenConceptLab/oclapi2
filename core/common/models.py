@@ -78,6 +78,11 @@ class BaseModel(models.Model):
     uri = models.TextField(null=True, blank=True)
     _index = True
 
+    @property
+    def events(self):
+        from core.events.models import Event
+        return Event.get_two_way_events_for(self.uri)
+
     def update_extras(self, key, value):
         self.extras = self.extras or {}
         self.extras[key] = value
@@ -578,6 +583,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
                 prev_version.save()
 
         self.delete_pins()
+        self.delete_following()
 
         export_path = self.get_version_export_path(suffix=None)
         super().delete(using=using, keep_parents=keep_parents)
@@ -594,6 +600,11 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         if self.is_head:
             from core.pins.models import Pin
             Pin.objects.filter(resource_type__model=self.resource_type.lower(), resource_id=self.id).delete()
+
+    def delete_following(self):
+        if self.is_head:
+            from core.users.models import Follow
+            Follow.objects.filter(following_type__model=self.resource_type.lower(), following_id=self.id).delete()
 
     def get_active_concepts(self):
         return self.get_concepts_queryset().filter(is_active=True, retired=False)
