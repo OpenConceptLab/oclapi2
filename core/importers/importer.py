@@ -79,7 +79,7 @@ class ImportTask(BaseModel):
     time_started: datetime = datetime.now()
     _time_finished: datetime = PrivateAttr(default=None)
     dependencies: list = []
-    initial_summary: ImportTaskSummary = ImportTaskSummary(dependencies=dependencies)
+    initial_summary: ImportTaskSummary = ImportTaskSummary()
     final_summary: ImportTaskSummary = None
 
     @staticmethod
@@ -260,9 +260,11 @@ class Importer:
                 for _, count in files.items():
                     result.initial_summary.total += count
 
+            result.initial_summary.dependencies = dependencies
             return result.model_dump(exclude={'summary', 'final_summary'})
 
         import_task = ImportTask(time_started=time_started, dependencies=dependencies)
+        import_task.initial_summary.dependencies = dependencies
         import_task.time_finished = datetime.now()
         return import_task
 
