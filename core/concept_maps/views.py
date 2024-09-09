@@ -2,6 +2,7 @@ import logging
 
 from django.core.exceptions import ValidationError
 from django.db.models import Q
+from django.http import Http404
 from pydash import get
 
 from core.bundles.serializers import FHIRBundleSerializer
@@ -58,8 +59,14 @@ class ConceptMapRetrieveUpdateView(SourceRetrieveUpdateDestroyView):
     def get_queryset(self):
         queryset = super().get_queryset()
         if self.request.method == 'DELETE':
-            return queryset  # Delete HEAD with all versions
+            return queryset  # Delete xHEAD with all versions
         return queryset.exclude(version=HEAD)
+
+    def get_object(self, queryset=None):
+        try:
+            return super().get_object(queryset)
+        except Http404:
+            return None
 
     def get_detail_serializer(self, obj):
         return ConceptMapDetailSerializer(obj)

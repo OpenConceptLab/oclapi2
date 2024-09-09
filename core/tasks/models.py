@@ -91,9 +91,13 @@ class Task(models.Model):
         elapsed_seconds = None
         start_at = self.started_at
         end_at = self.finished_at or self.updated_at
-        if start_at and end_at:
-            time_difference = end_at - start_at
+        if start_at:
+            if end_at:
+                time_difference = end_at - start_at
+            else:
+                time_difference = timezone.now() - start_at
             elapsed_seconds = time_difference.total_seconds()
+
         return elapsed_seconds
 
     @property

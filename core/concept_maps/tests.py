@@ -398,6 +398,153 @@ class ConceptMapTest(OCLTestCase):
 
     @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
     @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
+    def test_put_concept_map_with_modified_mappings(self):
+        response = self.client.put(
+            f'/users/{self.user.mnemonic}/ConceptMap/test2/',
+            HTTP_AUTHORIZATION='Token ' + self.user_token,
+            data=self.newConceptMap(self.user.mnemonic, 'test2', '1.0',
+                                    [{'source': self.org_source_B_v1.url,
+                                      'target': self.org_source.url,
+                                      'element': [
+                                           {'code': 'concept_B_1',
+                                            'target': [{'code': 'concept_1', 'equivalence': 'equivalent'}]},
+                                           {'code': 'concept_B_2',
+                                            'target': [{'code': 'concept_2', 'equivalence': 'equivalent'}]},
+                                           {'code': 'concept_B_2',
+                                            'target': [{'code': 'concept_1', 'equivalence': 'equivalent'}]}]}])
+            ,
+            format='json'
+        )
+        self.assertEqual(response.data['id'], 'test2')
+        self.assertEqual(response.data['version'], '1.0')
+        self.assertEqual(response.data['status'], 'draft')
+
+        response = self.client.put(
+            f'/users/{self.user.mnemonic}/ConceptMap/test2/',
+            HTTP_AUTHORIZATION='Token ' + self.user_token,
+            data=self.newConceptMap(self.user.mnemonic, 'test2', '1.1',
+                                    [{'source': self.org_source_B_v1.url,
+                                      'target': self.org_source.url,
+                                      'element': [
+                                       {'code': 'concept_B_1',
+                                        'target': [{'code': 'concept_1', 'equivalence': 'equivalent'}]},
+                                       {'code': 'concept_B_2',
+                                        'target': [{'code': 'concept_1', 'equivalence': 'equivalent'}]}]}]
+                                    ),
+            format='json'
+        )
+
+        # check if HEAD persisted
+        sources = Source.objects.filter(mnemonic='test2', version='HEAD', user=self.user)
+        self.assertEqual(len(sources), 1)
+        source = sources.first()
+        self.assertEqual(source.canonical_url, 'http://localhost/url')
+        self.assertEqual(source.retired, False)
+        self.assertEqual(source.name, 'test2')
+        mappings = source.get_mappings_queryset().filter(retired=False).order_by('id')
+        self.assertEqual(len(mappings), 2)
+        mapping = mappings[0]
+        self.assertEqual(mapping.is_head, True)
+        self.assertEqual(mapping.from_concept_code, 'concept_B_1')
+        self.assertEqual(mapping.to_concept_code, 'concept_1')
+        mapping = mappings[1]
+        self.assertEqual(mapping.is_head, True)
+        self.assertEqual(mapping.from_concept_code, 'concept_B_2')
+        self.assertEqual(mapping.to_concept_code, 'concept_1')
+        # check if version persisted
+        sources = Source.objects.filter(mnemonic='test2', version='1.1', user=self.user)
+        self.assertEqual(len(sources), 1)
+        source = sources.first()
+        self.assertEqual(source.canonical_url, 'http://localhost/url')
+        self.assertEqual(source.retired, False)
+        self.assertEqual(source.name, 'test2')
+        mappings = source.get_mappings_queryset().filter(retired=False).order_by('id')
+        self.assertEqual(len(mappings), 2)
+        mapping = mappings[0]
+        self.assertEqual(mapping.is_head, False)
+        self.assertEqual(mapping.from_concept_code, 'concept_B_1')
+        self.assertEqual(mapping.to_concept_code, 'concept_1')
+        mapping = mappings[1]
+        self.assertEqual(mapping.is_head, False)
+        self.assertEqual(mapping.from_concept_code, 'concept_B_2')
+        self.assertEqual(mapping.to_concept_code, 'concept_1')
+
+
+    @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
+    @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
+    def test_put_concept_map_overwriting_version(self):
+        response = self.client.put(
+            f'/users/{self.user.mnemonic}/ConceptMap/test2/',
+            HTTP_AUTHORIZATION='Token ' + self.user_token,
+            data=self.newConceptMap(self.user.mnemonic, 'test2', '1.0',
+                                    [{'source': self.org_source_B_v1.url,
+                                      'target': self.org_source.url,
+                                      'element': [
+                                          {'code': 'concept_B_1',
+                                           'target': [{'code': 'concept_1', 'equivalence': 'equivalent'}]},
+                                          {'code': 'concept_B_2',
+                                           'target': [{'code': 'concept_2', 'equivalence': 'equivalent'}]},
+                                          {'code': 'concept_B_2',
+                                           'target': [{'code': 'concept_1', 'equivalence': 'equivalent'}]}]}])
+            ,
+            format='json'
+        )
+        self.assertEqual(response.data['id'], 'test2')
+        self.assertEqual(response.data['version'], '1.0')
+        self.assertEqual(response.data['status'], 'draft')
+
+        response = self.client.put(
+            f'/users/{self.user.mnemonic}/ConceptMap/test2/',
+            HTTP_AUTHORIZATION='Token ' + self.user_token,
+            data=self.newConceptMap(self.user.mnemonic, 'test2', '1.0',
+                                    [{'source': self.org_source_B_v1.url,
+                                      'target': self.org_source.url,
+                                      'element': [
+                                          {'code': 'concept_B_1',
+                                           'target': [{'code': 'concept_1', 'equivalence': 'equivalent'}]},
+                                          {'code': 'concept_B_2',
+                                           'target': [{'code': 'concept_1', 'equivalence': 'equivalent'}]}]}]
+                                    ),
+            format='json'
+        )
+
+        # check if HEAD persisted
+        sources = Source.objects.filter(mnemonic='test2', version='HEAD', user=self.user)
+        self.assertEqual(len(sources), 1)
+        source = sources.first()
+        self.assertEqual(source.canonical_url, 'http://localhost/url')
+        self.assertEqual(source.retired, False)
+        self.assertEqual(source.name, 'test2')
+        mappings = source.get_mappings_queryset().filter(retired=False).order_by('id')
+        self.assertEqual(len(mappings), 2)
+        mapping = mappings[0]
+        self.assertEqual(mapping.is_head, True)
+        self.assertEqual(mapping.from_concept_code, 'concept_B_1')
+        self.assertEqual(mapping.to_concept_code, 'concept_1')
+        mapping = mappings[1]
+        self.assertEqual(mapping.is_head, True)
+        self.assertEqual(mapping.from_concept_code, 'concept_B_2')
+        self.assertEqual(mapping.to_concept_code, 'concept_1')
+        # check if version persisted
+        sources = Source.objects.filter(mnemonic='test2', version='1.0', user=self.user)
+        self.assertEqual(len(sources), 1)
+        source = sources.first()
+        self.assertEqual(source.canonical_url, 'http://localhost/url')
+        self.assertEqual(source.retired, False)
+        self.assertEqual(source.name, 'test2')
+        mappings = source.get_mappings_queryset().filter(retired=False).order_by('id')
+        self.assertEqual(len(mappings), 2)
+        mapping = mappings[0]
+        self.assertEqual(mapping.is_head, False)
+        self.assertEqual(mapping.from_concept_code, 'concept_B_1')
+        self.assertEqual(mapping.to_concept_code, 'concept_1')
+        mapping = mappings[1]
+        self.assertEqual(mapping.is_head, False)
+        self.assertEqual(mapping.from_concept_code, 'concept_B_2')
+        self.assertEqual(mapping.to_concept_code, 'concept_1')
+
+    @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
+    @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
     def test_translate_positive(self):
         self.putConceptMap()
 
@@ -465,6 +612,30 @@ class ConceptMapTest(OCLTestCase):
             'resourceType': 'Parameters',
             'parameter': [OrderedDict(
                 [('name', 'result'), ('valueBoolean', False)])]})
+
+    def newConceptMap(self, owner, identifier, version, group):
+        if not owner:
+            owner = self.user.mnemonic
+        return {
+            'url': 'http://localhost/url',
+            'title': 'test',
+            'language': 'en',
+            'identifier': [{
+                'value': f'/users/{owner}/ConceptMap/{identifier}/',
+                'type': {
+                    'coding': [{
+                        'code': 'ACSN',
+                        'system': 'http://hl7.org/fhir/v2/0203'
+                    }]
+                }
+            }],
+            'version': version,
+            'name': identifier,
+            'id': identifier,
+            'status': 'draft',
+            'group': group
+
+        }
 
     def putConceptMap(self):
         response = self.client.put(

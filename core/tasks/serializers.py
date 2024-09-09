@@ -2,6 +2,7 @@ from celery import states
 from pydash import get
 from rest_framework.fields import CharField, SerializerMethodField, JSONField
 from rest_framework.serializers import ModelSerializer
+from django.utils import timezone
 
 from core.importers.importer import ImportTask
 from core.tasks.models import Task
@@ -31,26 +32,22 @@ class TaskBriefSerializer(ModelSerializer):
         return None
 
     def to_representation(self, instance):
-        ret = super().to_representation(instance)
-        if instance.json_result:
-            import_task = ImportTask.import_task_from_json(instance.json_result)
-            if import_task:
-                # If using new bulk import check ImportTask for parents' results
-                if 'result' in ret:
-                    ret['result'] = import_task.json_dump
-                if 'finished_at' in ret:
-                    if ret['state'] is states.SUCCESS:
-                        ret['finished_at'] = import_task.time_finished
-                if import_task.time_finished is None:
-                    if ret['state'] is states.SUCCESS:
-                        ret['state'] = states.STARTED
-                else:
-                    ret['state'] = import_task.import_async_result.state
-                if 'runtime' in ret:
-                    ret['runtime'] = import_task.elapsed_seconds
-                if 'summary' in ret:
-                    ret['summary'] = import_task.summary
+        if instance.result_all:  # If the task completed, determine if there is an import task
+            import_task = ImportTask.import_task_from_json(instance.result_all)
+            if import_task:  # adjust results based on the import task
+                if instance.state in states.READY_STATES and instance.state not in states.EXCEPTION_STATES:
+                    instance.result = import_task.model_dump_json(include={'json', 'report', 'detailed_summary'})
+                    instance.state = import_task.import_async_result.state
+                    if instance.state is states.PENDING:
+                        instance.state = states.STARTED
+                    instance.finished_at = import_task.time_finished
+                    if not instance.finished_at:
+                        instance.updated_at = timezone.now()
+                    instance.summary = {'total': instance.json_result.get('summary').get('total'), 'processed':
+                                        instance.json_result.get('summary').get('processed'),
+                                        'dependencies': instance.json_result.get('summary').get('dependencies')}
 
+        ret = super().to_representation(instance)
         return ret
 
 

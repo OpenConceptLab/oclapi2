@@ -47,7 +47,7 @@ class ConceptMapGroupField(serializers.Field):
         # limit to 1000 mappings by default
         # TODO: support graphQL to go around the limit
         limit = self.get_limit()
-        mappings = value.get_mappings_queryset().order_by('id')[:limit]
+        mappings = value.get_mappings_queryset().filter(retired=False).order_by('id')[:limit]
         groups = {}
         for mapping in mappings:
             key = (mapping.from_source_url or '') + (mapping.to_source_url or '')
@@ -190,6 +190,19 @@ class ConceptMapDetailSerializer(serializers.ModelSerializer):
 
         return source
 
+    @staticmethod
+    def is_mapping_same(first, second):
+        if not isinstance(first, dict):
+            first = vars(first)
+        if not isinstance(second, dict):
+            print(second)
+            second = vars(second)
+        return first.get('from_source_url', None) == second.get('from_source_url', None) and \
+            first.get('to_source_url', None) == second.get('to_source_url', None) and \
+            first.get('from_concept_code', None) == second.get('from_concept_code', None) and \
+            first.get('to_concept_code', None) == second.get('to_concept_code', None) and \
+            first.get('map_type', None) == second.get('map_type', None)
+
     def update(self, instance, validated_data):
         mappings = validated_data.pop('mappings', [])
         source = SourceCreateOrUpdateSerializer().prepare_object(validated_data, instance)
@@ -214,17 +227,37 @@ class ConceptMapDetailSerializer(serializers.ModelSerializer):
             self._errors.update(errors)
             return source
 
-        for mapping in mappings:
-            # There's no way to determine if mapping existed or not, so we add it as new
-            mapping.update({'parent_id': source.id})
-            mapping_serializer = MappingDetailSerializer(data=mapping)
-            mapping_serializer.is_valid(raise_exception=True)
-            Mapping.persist_new(mapping_serializer.validated_data, user)
+        # Retire mapping if it does not exist in HEAD
+        for mapping in source.mappings.filter(retired=False):
+            found = False
+            for new_mapping in mappings:
+                if ConceptMapDetailSerializer.is_mapping_same(mapping, new_mapping):
+                    found = True
+            if not found:
+                mapping.retire(user, 'Deleted from ConceptMap resource')
 
-        # Create new version
+        source.refresh_from_db()
+
+        # Add a new mapping if it does not exist in HEAD
+        for new_mapping in mappings:
+            found = False
+            for mapping in source.mappings.filter(retired=False):
+                if ConceptMapDetailSerializer.is_mapping_same(mapping, new_mapping):
+                    found = True
+            if not found:
+                new_mapping.update({'parent_id': source.id})
+                new_mapping_serializer = MappingDetailSerializer(data=new_mapping)
+                new_mapping_serializer.is_valid(raise_exception=True)
+                Mapping.persist_new(new_mapping_serializer.validated_data, user)
+
+        existing_source_version = source.versions.filter(version=source_version)
+        if existing_source_version:
+            existing_source_version.delete()
+
+        source.id = None
         source.version = source_version
         source.released = source_released
-        source.id = None
+
         errors = Source.persist_new_version(source, user)
         self._errors.update(errors)
 

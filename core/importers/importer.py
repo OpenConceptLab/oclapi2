@@ -70,6 +70,7 @@ class ImportTaskSummary(BaseModel):
     permission_denied: int = 0
     unchanged: int = 0
     failures: list = []
+    dependencies: list = []
 
 
 class ImportTask(BaseModel):
@@ -78,7 +79,7 @@ class ImportTask(BaseModel):
     time_started: datetime = datetime.now()
     _time_finished: datetime = PrivateAttr(default=None)
     dependencies: list = []
-    initial_summary: ImportTaskSummary = ImportTaskSummary()
+    initial_summary: ImportTaskSummary = ImportTaskSummary(dependencies=dependencies)
     final_summary: ImportTaskSummary = None
 
     @staticmethod
@@ -158,8 +159,8 @@ class ImportTask(BaseModel):
         return summary
 
     @computed_field
-    def json_dump(self) -> str:
-        return self.model_dump(exclude={'import_task', 'initial_summary', 'final_summary'})
+    def json(self) -> str:  # pylint: disable=arguments-differ
+        return self.model_dump(exclude={'json', 'import_task', 'initial_summary', 'final_summary'})
 
     @computed_field
     def report(self) -> str:
@@ -178,7 +179,7 @@ class ImportTask(BaseModel):
                f"Created: {summary.created} | Updated: {summary.updated} | " \
                f"Deleted: {summary.deleted} | Existing: {summary.existing} | " \
                f"Permission Denied: {summary.permission_denied} | " \
-               f"Unchanged: {summary.unchanged} | " \
+               f"Unchanged: {summary.unchanged} | Dependencies: {summary.dependencies} | " \
                f"Time: {self.elapsed_seconds}secs"
 
 
@@ -213,8 +214,9 @@ class Importer:
             key = self.path
             protocol_index = key.index('://')
             if protocol_index:
-                key = key[:protocol_index+3]
-            key += f'{time_started.strftime("%Y%m%d_%H%M%S")}_{str(uuid.uuid4())[:8]}'
+                key = key[protocol_index+3:]
+            key = key.replace('/', '_')
+            key += f'_{time_started.strftime("%Y%m%d_%H%M%S")}_{str(uuid.uuid4())[:8]}'
             if settings.DEBUG:
                 file_url = os.path.join(settings.MEDIA_ROOT, 'import_uploads')
                 os.makedirs(file_url, exist_ok=True)
