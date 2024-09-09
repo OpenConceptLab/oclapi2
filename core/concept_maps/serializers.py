@@ -195,7 +195,6 @@ class ConceptMapDetailSerializer(serializers.ModelSerializer):
         if not isinstance(first, dict):
             first = vars(first)
         if not isinstance(second, dict):
-            print(second)
             second = vars(second)
         return first.get('from_source_url', None) == second.get('from_source_url', None) and \
             first.get('to_source_url', None) == second.get('to_source_url', None) and \

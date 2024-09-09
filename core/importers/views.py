@@ -143,7 +143,7 @@ class BulkImportParallelInlineView(APIView):
     def get_parsers(self):
         if 'application/json' in [self.request.META.get('CONTENT_TYPE')]:
             return [JSONParser()]
-        if self.request.method == ' POST':
+        if self.request.method == 'POST':
             return [MultiPartParser(), FormParser()]
         return super().get_parsers()
 
