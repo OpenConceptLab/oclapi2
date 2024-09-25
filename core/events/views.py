@@ -50,7 +50,14 @@ class UserEventsView(EventsView):
             queryset = queryset.union(Event.get_user_all_events(user, include_private))
         else:
             if 'following' in scopes:
-                queryset = queryset.union(Event.get_user_following_events(user, include_private))
+                queryset = queryset.union(Event.get_user_following_events(user, False))
             if 'orgs' in scopes:
                 queryset = queryset.union(Event.get_user_organization_events(user, include_private))
         return queryset
+
+
+class GuestEventsView(EventsView):
+    def get_queryset(self):
+        from core.users.models import UserProfile
+        admin = UserProfile.get_super_admin()
+        return Event.get_user_following_events(admin, False, event_type__in=[Event.CREATED, Event.RELEASED])

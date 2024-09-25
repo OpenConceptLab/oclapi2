@@ -674,6 +674,7 @@ class CollectionVersionRetrieveUpdateDestroyView(CollectionBaseView, RetrieveAPI
 
     def update(self, request, *args, **kwargs):
         self.object = self.get_object()
+        was_released = self.object.released
         head = self.object.head
         if not head:
             return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
@@ -683,6 +684,9 @@ class CollectionVersionRetrieveUpdateDestroyView(CollectionBaseView, RetrieveAPI
         if serializer.is_valid():
             self.object = serializer.save(force_update=True)
             if serializer.is_valid():
+                if self.object.released and not was_released:
+                    from core.events.models import Event
+                    self.object.record_event(Event.RELEASED)
                 return Response(serializer.data, status=status.HTTP_200_OK)
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)

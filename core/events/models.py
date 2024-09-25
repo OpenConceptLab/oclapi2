@@ -12,6 +12,7 @@ class Event(models.Model):
     _referenced_object = models.JSONField(null=True, blank=True)
 
     CREATED = 'Created'
+    RELEASED = 'Released'
     DELETED = 'Deleted'
     FOLLOWED = 'Followed'
     UNFOLLOWED = 'Unfollowed'
@@ -25,10 +26,14 @@ class Event(models.Model):
         return cls.objects.filter(cls.object_criteria(object_url))
 
     @classmethod
-    def get_user_following_events(cls, user, private=False):
+    def get_user_following_events(cls, user, private=False, **event_kwargs):
+        return cls.get_events_for_following(user.following.filter(), private, **event_kwargs)
+
+    @classmethod
+    def get_events_for_following(cls, following_queryset, private=False, **event_kwargs):
         queryset = cls.objects.none()
-        for following in user.following.filter():
-            events = following.following.events
+        for following in following_queryset:
+            events = following.following.events.filter(**event_kwargs)
             if not private:
                 events = events.filter(public=True)
             queryset = queryset.union(events)

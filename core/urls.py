@@ -28,6 +28,7 @@ from core.common.utils import get_api_base_url
 from core.common.views import RootView, FeedbackView, APIVersionView, ChangeLogView, StandardChecksumView, \
     SmartChecksumView
 from core.concepts.views import ConceptsHierarchyAmendAdminView
+from core.events.views import GuestEventsView
 from core.importers.views import BulkImportView
 from core.settings import ENV
 
@@ -81,6 +82,7 @@ urlpatterns = [
     path('indexes/', include('core.indexes.urls'), name='indexes_urls'),
     path('client-configs/', include('core.client_configs.urls'), name='client_config_urls'),
     path('tasks/', include('core.tasks.urls'), name='task_urls'),
+    path('events/', GuestEventsView.as_view(), name='guest_events'),
     path(
         'locales/',
         cache_page(
