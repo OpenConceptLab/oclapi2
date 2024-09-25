@@ -50,7 +50,7 @@ class UserEventsView(EventsView):
             queryset = queryset.union(Event.get_user_all_events(user, include_private))
         else:
             if 'following' in scopes:
-                queryset = queryset.union(Event.get_user_following_events(user, False))
+                queryset = queryset.union(Event.get_user_following_events(user, include_private))
             if 'orgs' in scopes:
                 queryset = queryset.union(Event.get_user_organization_events(user, include_private))
         return queryset
