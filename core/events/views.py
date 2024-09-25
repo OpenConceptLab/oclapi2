@@ -1,6 +1,8 @@
 from django.http import Http404
-from pydash import compact
+from pydash import compact, get
+from rest_framework import status
 from rest_framework.permissions import AllowAny
+from rest_framework.response import Response
 
 from core.common.mixins import ListWithHeadersMixin
 from core.common.permissions import HasOwnership
@@ -57,6 +59,13 @@ class UserEventsView(EventsView):
 
 
 class GuestEventsView(EventsView):
+    def get(self, request, *args, **kwargs):
+        if get(self.request, 'user.username'):
+            response = Response(status=status.HTTP_303_SEE_OTHER)
+            response['URL'] = self.request.user.uri + 'events/'
+            return response
+        return super().get(request, *args, **kwargs)
+
     def get_queryset(self):
         from core.users.models import UserProfile
         admin = UserProfile.get_super_admin()
