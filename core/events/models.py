@@ -16,6 +16,7 @@ class Event(models.Model):
     DELETED = 'Deleted'
     FOLLOWED = 'Followed'
     UNFOLLOWED = 'Unfollowed'
+    HIGHLIGHT_EVENT_TYPES = [CREATED, RELEASED, FOLLOWED]
 
     @staticmethod
     def object_criteria(url):

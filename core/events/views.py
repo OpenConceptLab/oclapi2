@@ -60,4 +60,5 @@ class GuestEventsView(EventsView):
     def get_queryset(self):
         from core.users.models import UserProfile
         admin = UserProfile.get_super_admin()
-        return Event.get_user_following_events(admin, False, event_type__in=[Event.CREATED, Event.RELEASED])
+        following_queryset = admin.following.exclude(following_type__model='userprofile')
+        return Event.get_events_for_following(following_queryset, False, event_type__in=Event.HIGHLIGHT_EVENT_TYPES)
