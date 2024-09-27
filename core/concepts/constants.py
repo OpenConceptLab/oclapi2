@@ -7,6 +7,8 @@ FULLY_SPECIFIED = "FULLY_SPECIFIED"
 LOCALES_FULLY_SPECIFIED = (FULLY_SPECIFIED, "Fully Specified")
 LOCALES_SHORT = (SHORT, "Short")
 LOCALES_SEARCH_INDEX_TERM = (INDEX_TERM, "Index Term")
+SYNONYM = 'SYNONYM'
+LOCALES_SYNONYM = (SYNONYM, "Synonym")
 
 OPENMRS_ONE_FULLY_SPECIFIED_NAME_PER_LOCALE = 'A concept may not have more than one fully specified name in any locale'
 OPENMRS_NO_MORE_THAN_ONE_SHORT_NAME_PER_LOCALE = 'A concept cannot have more than one short name in a locale'

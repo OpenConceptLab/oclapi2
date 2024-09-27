@@ -13,7 +13,7 @@ from core.concepts.constants import (
     OPENMRS_DESCRIPTION_LOCALE,
     LOCALES_SEARCH_INDEX_TERM, INDEX_TERM, FULLY_SPECIFIED, SHORT,
     OPENMRS_CONCEPT_EXTERNAL_ID_ERROR, OPENMRS_EXTERNAL_ID_LENGTH, OPENMRS_NAME_EXTERNAL_ID_ERROR,
-    OPENMRS_DESCRIPTION_EXTERNAL_ID_ERROR)
+    OPENMRS_DESCRIPTION_EXTERNAL_ID_ERROR, SYNONYM)
 from core.concepts.validators import BaseConceptValidator, message_with_name_details
 
 
@@ -105,7 +105,7 @@ class OpenMRSConceptValidator(BaseConceptValidator):
 
         return not self.repo.concepts_set.exclude(
             versioned_object_id=versioned_object_id
-        ).exclude(names__type__in=(*LOCALES_SHORT, *LOCALES_SEARCH_INDEX_TERM)).filter(
+        ).exclude(names__type__in=(*LOCALES_SHORT, *LOCALES_SEARCH_INDEX_TERM, *SYNONYM)).filter(
             is_active=True, retired=False, is_latest_version=True, names__locale=name.locale, names__name=name.name,
             **filters
         ).exists()
