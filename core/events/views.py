@@ -69,7 +69,7 @@ class GuestEventsView(EventsView):
 
     def get_queryset(self):
         from core.users.models import UserProfile
-        user = UserProfile.cls.objects.filter(username=settings.HIGHLIGHTED_EVENTS_FROM_USERNAME).first()
+        user = UserProfile.objects.filter(username=settings.HIGHLIGHTED_EVENTS_FROM_USERNAME).first()
         events = Event.objects.none()
         if user:
             following_queryset = user.following.exclude(following_type__model='userprofile')
