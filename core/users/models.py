@@ -281,8 +281,3 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
             object_url=self.url,
             referenced_object_url=following.url,
         )
-
-    @classmethod
-    def get_super_admin(cls):
-        queryset = cls.objects.filter(is_superuser=True, is_active=True)
-        return queryset.filter(username='ocladmin').first() or queryset.first()

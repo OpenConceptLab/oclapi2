@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.http import Http404
 from pydash import compact, get
 from rest_framework import status
@@ -68,6 +69,10 @@ class GuestEventsView(EventsView):
 
     def get_queryset(self):
         from core.users.models import UserProfile
-        admin = UserProfile.get_super_admin()
-        following_queryset = admin.following.exclude(following_type__model='userprofile')
-        return Event.get_events_for_following(following_queryset, False, event_type__in=Event.HIGHLIGHT_EVENT_TYPES)
+        user = UserProfile.cls.objects.filter(username=settings.HIGHLIGHTED_EVENTS_FROM_USERNAME).first()
+        events = Event.objects.none()
+        if user:
+            following_queryset = user.following.exclude(following_type__model='userprofile')
+            events = Event.get_events_for_following(
+                following_queryset, False, event_type__in=Event.HIGHLIGHT_EVENT_TYPES)
+        return events
