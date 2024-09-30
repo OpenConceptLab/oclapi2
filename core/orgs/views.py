@@ -1,5 +1,6 @@
 from django.db.models import Count
 from django.http import Http404
+from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
 from pydash import get
 from rest_framework import mixins, status, generics
@@ -30,10 +31,8 @@ from core.users.serializers import UserDetailSerializer
 
 TRUTHY = get_truthy_values()
 
-
-class OrganizationListView(BaseAPIView,
-                           ListWithHeadersMixin,
-                           mixins.CreateModelMixin):
+class OrganizationListView(BaseAPIView, ListWithHeadersMixin, mixins.CreateModelMixin):
+    
     model = Organization
     queryset = Organization.objects.filter(is_active=True)
     es_fields = Organization.es_fields
@@ -76,7 +75,15 @@ class OrganizationListView(BaseAPIView,
 
         return OrganizationListSerializer
 
-    @swagger_auto_schema(manual_parameters=[org_no_members_param])
+    @swagger_auto_schema(
+        manual_parameters=[
+            openapi.Parameter('user', openapi.IN_PATH, description="Filter by username", type=openapi.TYPE_STRING),
+            openapi.Parameter(NO_MEMBERS, openapi.IN_QUERY, description="Filter organizations with no members", type=openapi.TYPE_BOOLEAN),
+            openapi.Parameter('updated_since', openapi.IN_QUERY, description="Filter by update date", type=openapi.TYPE_STRING, format=openapi.FORMAT_DATETIME),
+            openapi.Parameter(UPDATED_BY_USERNAME_PARAM, openapi.IN_QUERY, description="Filter by username of user who updated", type=openapi.TYPE_STRING),
+        ],
+        responses={status.HTTP_200_OK: OrganizationListSerializer(many=True)}
+    )
     def get(self, request, *args, **kwargs):
         return self.list(request, *args, **kwargs)
 
@@ -106,7 +113,6 @@ class OrganizationBaseView(BaseAPIView, RetrieveAPIView, DestroyAPIView):
     model = Organization
     queryset = Organization.objects.filter(is_active=True)
 
-
 class OrganizationLogoView(OrganizationBaseView, BaseLogoView):
     serializer_class = OrganizationDetailSerializer
 
@@ -115,7 +121,15 @@ class OrganizationLogoView(OrganizationBaseView, BaseLogoView):
             return [HasPrivateAccess(), ]
 
         return [CanViewConceptDictionary(), ]
-
+    
+    @swagger_auto_schema(
+        manual_parameters=[
+            openapi.Parameter('org', openapi.IN_PATH, description="Organization mnemonic", type=openapi.TYPE_STRING, required=True),
+        ],
+        responses={status.HTTP_200_OK: "Logo image"}
+    )
+    def get(self, request, *args, **kwargs):
+        return super().get(request, *args, **kwargs)
 
 class OrganizationOverviewView(OrganizationBaseView, RetrieveAPIView, UpdateAPIView):
     serializer_class = OrganizationOverviewSerializer
@@ -128,7 +142,15 @@ class OrganizationOverviewView(OrganizationBaseView, RetrieveAPIView, UpdateAPIV
 
     def get_queryset(self):
         return super().get_queryset().filter(mnemonic=self.kwargs['org'])
-
+    
+    @swagger_auto_schema(
+        manual_parameters=[
+            openapi.Parameter('org', openapi.IN_PATH, description="Organization mnemonic", type=openapi.TYPE_STRING, required=True),
+        ],
+        responses={status.HTTP_200_OK: OrganizationOverviewSerializer()}
+    )
+    def get(self, request, *args, **kwargs):
+        return super().get(request, *args, **kwargs)
 
 class OrganizationDetailView(OrganizationBaseView, mixins.UpdateModelMixin, mixins.CreateModelMixin, TaskMixin):
     def get_permissions(self):
@@ -170,7 +192,15 @@ class OrganizationDetailView(OrganizationBaseView, mixins.UpdateModelMixin, mixi
             return result
 
         return Response(status=status.HTTP_204_NO_CONTENT)
-
+    
+    @swagger_auto_schema(
+        manual_parameters=[
+            openapi.Parameter('org', openapi.IN_PATH, description="Organization mnemonic", type=openapi.TYPE_STRING, required=True),
+        ],
+        responses={status.HTTP_200_OK: OrganizationDetailSerializer()}
+    )
+    def get(self, request, *args, **kwargs):
+        return super().get(request, *args, **kwargs)
 
 class OrganizationClientConfigsView(ResourceClientConfigsView):
     lookup_field = 'org'
@@ -178,6 +208,14 @@ class OrganizationClientConfigsView(ResourceClientConfigsView):
     queryset = Organization.objects.filter(is_active=True)
     permission_classes = (CanViewConceptDictionary, )
 
+    @swagger_auto_schema(
+        manual_parameters=[
+            openapi.Parameter('org', openapi.IN_PATH, description="Organization mnemonic", type=openapi.TYPE_STRING, required=True),
+        ],
+        responses={status.HTTP_200_OK: "Client configs"}
+    )
+    def get(self, request, *args, **kwargs):
+        return super().get(request, *args, **kwargs)
 
 class OrganizationMemberView(generics.GenericAPIView):
     userprofile = None
@@ -235,8 +273,22 @@ class OrganizationMemberView(generics.GenericAPIView):
         self.userprofile.save()
 
         return Response(status=status.HTTP_204_NO_CONTENT)
-
-
+    
+    
+    @swagger_auto_schema(
+        manual_parameters=[
+            openapi.Parameter('org', openapi.IN_PATH, description="Organization mnemonic", type=openapi.TYPE_STRING, required=True),
+            openapi.Parameter('user', openapi.IN_PATH, description="Username", type=openapi.TYPE_STRING, required=True),
+        ],
+        responses={
+            status.HTTP_204_NO_CONTENT: "User is a member",
+            status.HTTP_404_NOT_FOUND: "User is not a member",
+            status.HTTP_403_FORBIDDEN: "Permission denied"
+        }
+    )
+    def get(self, request, *args, **kwargs):
+        return super().get(request, *args, **kwargs)
+        
 class OrganizationResourceAbstractListView:
     def get_queryset(self):
         username = self.kwargs.get('user', None)
@@ -249,15 +301,12 @@ class OrganizationResourceAbstractListView:
 
         return self.queryset.filter(organization__in=user.organizations.all(), version=HEAD)
 
-
 class OrganizationSourceListView(OrganizationResourceAbstractListView, SourceListView):
     pass
-
-
+    
 class OrganizationCollectionListView(OrganizationResourceAbstractListView, CollectionListView):
     pass
-
-
+    
 class OrganizationExtrasBaseView(APIView):
     def get_object(self):
         instance = Organization.objects.filter(is_active=True, mnemonic=self.kwargs['org']).first()
@@ -265,18 +314,40 @@ class OrganizationExtrasBaseView(APIView):
         if not instance:
             raise Http404()
         return instance
-
-
+    
 class OrganizationExtrasView(OrganizationExtrasBaseView):
     serializer_class = OrganizationDetailSerializer
 
+    @swagger_auto_schema(
+        manual_parameters=[
+            openapi.Parameter('org', openapi.IN_PATH, description="Organization mnemonic", type=openapi.TYPE_STRING, required=True),
+        ],
+        responses={
+            status.HTTP_200_OK: openapi.Response(
+                description="Organization extras",
+                schema=openapi.Schema(type=openapi.TYPE_OBJECT, additional_properties=openapi.Schema(type=openapi.TYPE_STRING))
+            )
+        }
+    )
     def get(self, request, org):  # pylint: disable=unused-argument
         return Response(get(self.get_object(), 'extras', {}))
-
 
 class OrganizationExtraRetrieveUpdateDestroyView(OrganizationExtrasBaseView, RetrieveUpdateDestroyAPIView):
     serializer_class = OrganizationDetailSerializer
 
+    @swagger_auto_schema(
+        manual_parameters=[
+            openapi.Parameter('org', openapi.IN_PATH, description="Organization mnemonic", type=openapi.TYPE_STRING, required=True),
+            openapi.Parameter('extra', openapi.IN_PATH, description="Extra field key", type=openapi.TYPE_STRING, required=True),
+        ],
+        responses={
+            status.HTTP_200_OK: openapi.Response(
+                description="Extra field value",
+                schema=openapi.Schema(type=openapi.TYPE_OBJECT, properties={'extra_key': openapi.Schema(type=openapi.TYPE_STRING)})
+            ),
+            status.HTTP_404_NOT_FOUND: openapi.Response(description="Extra field not found")
+        }
+    )
     def retrieve(self, request, *args, **kwargs):
         key = kwargs.get('extra')
         instance = self.get_object()
@@ -286,6 +357,25 @@ class OrganizationExtraRetrieveUpdateDestroyView(OrganizationExtrasBaseView, Ret
 
         return Response({'detail': NOT_FOUND}, status=status.HTTP_404_NOT_FOUND)
 
+    @swagger_auto_schema(
+        manual_parameters=[
+            openapi.Parameter('org', openapi.IN_PATH, description="Organization mnemonic", type=openapi.TYPE_STRING, required=True),
+            openapi.Parameter('extra', openapi.IN_PATH, description="Extra field key", type=openapi.TYPE_STRING, required=True),
+        ],
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            properties={
+                'extra_key': openapi.Schema(type=openapi.TYPE_STRING, description="Value for the extra field")
+            }
+        ),
+        responses={
+            status.HTTP_200_OK: openapi.Response(
+                description="Updated extra field",
+                schema=openapi.Schema(type=openapi.TYPE_OBJECT, properties={'extra_key': openapi.Schema(type=openapi.TYPE_STRING)})
+            ),
+            status.HTTP_400_BAD_REQUEST: openapi.Response(description="Invalid input")
+        }
+    )
     def update(self, request, **kwargs):  # pylint: disable=arguments-differ
         key = kwargs.get('extra')
         value = request.data.get(key)
@@ -299,6 +389,16 @@ class OrganizationExtraRetrieveUpdateDestroyView(OrganizationExtrasBaseView, Ret
         instance.set_checksums()
         return Response({key: value})
 
+    @swagger_auto_schema(
+        manual_parameters=[
+            openapi.Parameter('org', openapi.IN_PATH, description="Organization mnemonic", type=openapi.TYPE_STRING, required=True),
+            openapi.Parameter('extra', openapi.IN_PATH, description="Extra field key", type=openapi.TYPE_STRING, required=True),
+        ],
+        responses={
+            status.HTTP_204_NO_CONTENT: openapi.Response(description="Extra field deleted"),
+            status.HTTP_404_NOT_FOUND: openapi.Response(description="Extra field not found")
+        }
+    )
     def delete(self, request, *args, **kwargs):
         key = kwargs.get('extra')
         instance = self.get_object()
