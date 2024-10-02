@@ -27,7 +27,7 @@ class SourceMinimalSerializer(AbstractResourceSerializer):
 
     class Meta:
         model = Source
-        fields = AbstractResourceSerializer.Meta.fields + ('id', 'url', 'type')
+        fields = AbstractResourceSerializer.Meta.fields + ('id', 'url', 'type', 'name', 'description')
 
 
 class SourceVersionMinimalSerializer(ModelSerializer):
@@ -38,7 +38,7 @@ class SourceVersionMinimalSerializer(ModelSerializer):
 
     class Meta:
         model = Source
-        fields = ('id', 'version_url', 'type', 'short_code', 'released')
+        fields = ('id', 'version_url', 'type', 'short_code', 'released', 'description', 'name')
 
 
 class SourceListSerializer(AbstractResourceSerializer):
