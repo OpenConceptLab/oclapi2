@@ -90,7 +90,16 @@ class SourceListViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 1)
-        self.assertEqual(response.data[0], {'id': source.mnemonic, 'url': source.uri, 'type': 'Source'})
+        self.assertEqual(
+            response.data[0],
+            {
+                'id': source.mnemonic,
+                'url': source.uri,
+                'type': 'Source',
+                'name': source.name,
+                'description': source.description
+            }
+        )
 
     def test_get_200_zip(self):
         response = self.client.get(
@@ -1497,6 +1506,8 @@ class SourceSummaryViewTest(OCLAPITestCase):
                 'type': 'Source Version',
                 'short_code': self.source.mnemonic,
                 'released': False,
+                'name': ANY,
+                'description': ANY,
                 'distribution': {
                     'total': 2,
                     'retired': 0,
@@ -1519,6 +1530,8 @@ class SourceSummaryViewTest(OCLAPITestCase):
                 'type': 'Source Version',
                 'short_code': random_source2.mnemonic,
                 'released': False,
+                'name': ANY,
+                'description': ANY,
                 'distribution': {
                     'total': 1,
                     'retired': 0,
@@ -1547,6 +1560,8 @@ class SourceSummaryViewTest(OCLAPITestCase):
                 'type': 'Source Version',
                 'short_code': self.source.mnemonic,
                 'released': False,
+                'name': ANY,
+                'description': ANY,
                 'distribution': {
                     'total': 2,
                     'retired': 0,
@@ -1569,6 +1584,8 @@ class SourceSummaryViewTest(OCLAPITestCase):
                 'type': 'Source Version',
                 'short_code': random_source1.mnemonic,
                 'released': False,
+                'name': ANY,
+                'description': ANY,
                 'distribution': {
                     'total': 1,
                     'retired': 0,

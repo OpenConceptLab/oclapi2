@@ -1068,6 +1068,7 @@ class UserFollowingListViewTest(OCLAPITestCase):
                     'url': org_followed.url,
                     'logo_url': None,
                     'type': 'Organization',
+                    'description': ANY
                 },
                 'id': follower.following.last().id,
                 'follow_date': ANY,
@@ -1084,6 +1085,7 @@ class UserFollowingListViewTest(OCLAPITestCase):
                     'url': user_followed.url,
                     'logo_url': None,
                     'type': 'User',
+                    'company': ANY
                 },
                 'id': follower.following.first().id,
                 'follow_date': ANY,

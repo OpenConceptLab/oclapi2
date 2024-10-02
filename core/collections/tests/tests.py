@@ -463,6 +463,8 @@ class CollectionTest(OCLTestCase):
                  'type': 'Source Version',
                  'short_code': source1.mnemonic,
                  'released': False,
+                 'description': ANY,
+                 'name': ANY,
                  'distribution': {
                      'include_reference': True,
                      'concepts': 1,
@@ -475,6 +477,8 @@ class CollectionTest(OCLTestCase):
                  'type': 'Source Version',
                  'short_code': source2.mnemonic,
                  'released': False,
+                 'description': ANY,
+                 'name': ANY,
                  'distribution': {
                      'include_reference': True,
                      'concepts': 1,
@@ -487,6 +491,8 @@ class CollectionTest(OCLTestCase):
                 'type': 'Source Version',
                 'short_code': source2.mnemonic,
                 'released': False,
+                'description': ANY,
+                'name': ANY,
                 'distribution': {
                     'include_reference': True,
                     'concepts': 1,
