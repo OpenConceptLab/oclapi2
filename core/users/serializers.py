@@ -124,6 +124,8 @@ class UserCreateSerializer(serializers.ModelSerializer):
         user.set_checksums()
         user.token = user.get_token()
         user.send_verification_email()
+        from core.events.models import Event
+        user.record_event(Event.JOINED)
 
         return user
 

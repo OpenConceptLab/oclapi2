@@ -222,6 +222,8 @@ class OrganizationMemberView(generics.GenericAPIView):
         # ES Index
         self.organization.save()
         self.userprofile.save()
+        from core.events.models import Event
+        Event.record(self.organization, Event.JOINED, self.userprofile, request.user)
 
         return Response(status=status.HTTP_204_NO_CONTENT)
 

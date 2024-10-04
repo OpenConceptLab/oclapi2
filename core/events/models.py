@@ -4,7 +4,7 @@ from pydash import has
 
 class Event(models.Model):
     object_url = models.CharField(max_length=255)
-    referenced_object_url = models.CharField(max_length=255)
+    referenced_object_url = models.CharField(max_length=255, null=True, blank=True)
     event_type = models.CharField(max_length=255)
     actor = models.ForeignKey('users.UserProfile', on_delete=models.DO_NOTHING, related_name='actor_events')
     created_at = models.DateTimeField(auto_now_add=True)
@@ -16,7 +16,12 @@ class Event(models.Model):
     DELETED = 'Deleted'
     FOLLOWED = 'Followed'
     UNFOLLOWED = 'Unfollowed'
+    JOINED = 'Joined'
     HIGHLIGHT_EVENT_TYPES = [CREATED, RELEASED, FOLLOWED]
+
+    @property
+    def is_joined_ocl(self):
+        return self.event_type == self.JOINED and not self.referenced_object_url
 
     @staticmethod
     def object_criteria(url):
@@ -75,6 +80,8 @@ class Event(models.Model):
 
     @property
     def referenced_object(self):  # pylint: disable=too-many-return-statements
+        if not self.referenced_object_url:
+            return None
         if '/mappings/' in self.referenced_object_url:
             from core.mappings.models import Mapping
             return Mapping.objects.filter(uri=self.referenced_object_url).first()
@@ -111,6 +118,8 @@ class Event(models.Model):
 
     @property
     def description(self):
+        if self.is_joined_ocl:
+            return self.event_type
         return f"{self.event_type} {self.referenced_object_repr}"
 
     def clean_fields(self, exclude=None):
@@ -119,11 +128,27 @@ class Event(models.Model):
         super().clean_fields(exclude=exclude)
 
     @classmethod
-    def record(cls, instance, event_type=CREATED):
-        if instance.id:
-            public_can_view = instance.public_can_view if has(instance, 'public_can_view') else True
-            cls.objects.create(
-                object_url=instance.updated_by.url, event_type=event_type, actor=instance.updated_by,
-                referenced_object_url=instance.url, public=public_can_view,
-                _referenced_object=instance.get_brief_serializer()(instance).data
+    def record(cls, reference_object, event_type=CREATED, object_instance=None, actor=None, **kwargs):
+        if reference_object.id:
+            if event_type == cls.JOINED and reference_object.__class__.__name__ == 'UserProfile':
+                cls.record_joined_ocl(reference_object)
+                return None
+            public_can_view = reference_object.public_can_view if has(
+                reference_object, 'public_can_view') else True
+            object_instance = object_instance or reference_object.updated_by
+            actor = actor or reference_object.updated_by
+            return cls.objects.create(
+                object_url=object_instance.url, event_type=event_type, actor=actor,
+                referenced_object_url=reference_object.url, public=public_can_view,
+                _referenced_object=reference_object.get_brief_serializer()(reference_object).data,
+                **kwargs
             )
+        return None
+
+    @classmethod
+    def record_joined_ocl(cls, user, **kwargs):
+        return cls.objects.create(
+            object_url=user.url, event_type=cls.JOINED, actor=user,
+            public=True,
+            **kwargs
+        )

@@ -223,6 +223,10 @@ class BaseModel(models.Model):
         from core.events.models import Event
         Event.record(self, event_type)
 
+    def record_joined_ocl_event(self):
+        from core.events.models import Event
+        self.record_event(Event.JOINED)
+
     def __repr__(self):
         parts = []
         current = self

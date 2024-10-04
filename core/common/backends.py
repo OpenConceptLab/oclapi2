@@ -65,6 +65,7 @@ class OCLOIDCAuthenticationBackend(OIDCAuthenticationBackend):
         )
         if user.id:
             user.set_checksums()
+        user.record_joined_ocl_event()
         return user
 
     def update_user(self, user, claims):

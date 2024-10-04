@@ -30,3 +30,6 @@ python manage.py import_lookup_values
 
 echo "Populating text from extras.about"
 python manage.py populate_text_from_extras_about
+
+echo "Seeding Events"
+python manage.py seed_events
