@@ -560,6 +560,8 @@ class CollectionTest(OCLTestCase):
                  'short_code': collection.mnemonic,
                  'released': False,
                  'autoexpand': True,
+                 'description': ANY,
+                 'name': ANY,
                  'distribution': {
                      'include_reference': True,
                      'concepts': 0,  # no expansion

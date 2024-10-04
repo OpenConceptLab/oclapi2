@@ -25,10 +25,11 @@ TRUTHY = get_truthy_values()
 
 class CollectionMinimalSerializer(AbstractResourceSerializer):
     id = CharField(source='mnemonic')
+    type = CharField(source='resource_type')
 
     class Meta:
         model = Collection
-        fields = AbstractResourceSerializer.Meta.fields + ('id', 'url')
+        fields = AbstractResourceSerializer.Meta.fields + ('id', 'url', 'type', 'name', 'description')
 
 
 class CollectionVersionMinimalSerializer(ModelSerializer):
@@ -40,7 +41,7 @@ class CollectionVersionMinimalSerializer(ModelSerializer):
 
     class Meta:
         model = Collection
-        fields = ('id', 'version_url', 'type', 'short_code', 'released', 'autoexpand')
+        fields = ('id', 'version_url', 'type', 'short_code', 'released', 'autoexpand', 'description', 'name')
 
     @staticmethod
     def get_autoexpand(obj):
