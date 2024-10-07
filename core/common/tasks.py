@@ -383,12 +383,14 @@ def seed_children_to_new_version(self, resource, obj_id, export=True, sync=False
             if is_source:
                 instance.seed_concepts(index=False)
                 instance.seed_mappings(index=False)
+                instance.update_children_counts(sync)
                 if instance.released:
                     instance.index_resources_for_self_as_latest_released()
                 else:
                     instance.index_children(sync=False, user=instance.created_by)
             elif autoexpand:
                 instance.cascade_children_to_expansion(index=True, sync=sync)
+                instance.update_children_counts(sync)
 
             if export:
                 from core.tasks.models import Task
