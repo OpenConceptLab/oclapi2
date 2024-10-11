@@ -240,8 +240,17 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                 current_result = None
                 if field in ['score', '_score', 'best_match', 'best match']:
                     current_result = {'_score': order_details}
-                if self.is_concept_document() and field == 'name':
+                if field == 'name':
                     current_result = {'_name': order_details}
+                if field == 'id' and self.is_source_child_document_model():
+                    current_result = {'id_lowercase': order_details}
+                if field in ['id', 'mnemonic'] and (
+                        self.is_org_document() or self.is_concept_container_document_model() or
+                        self.is_repo_document_model()
+                ):
+                    current_result = {'_mnemonic': order_details}
+                if field in ['username', 'id'] and self.is_user_document():
+                    current_result = {'_username': order_details}
                 if self.is_valid_sort(field):
                     current_result = {field: order_details}
                 if current_result is not None:
@@ -466,6 +475,10 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         from core.users.documents import UserProfileDocument
         return self.document_model == UserProfileDocument
 
+    def is_org_document(self):
+        from core.orgs.documents import OrganizationDocument
+        return self.document_model == OrganizationDocument
+
     def is_url_registry_document(self):
         from core.url_registry.documents import URLRegistryDocument
         return self.document_model == URLRegistryDocument
@@ -475,9 +488,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         return self.document_model == ConceptDocument
 
     def is_owner_document_model(self):
-        from core.orgs.documents import OrganizationDocument
-        from core.users.documents import UserProfileDocument
-        return self.document_model in [UserProfileDocument, OrganizationDocument]
+        return self.is_org_document() or self.is_user_document()
 
     def is_source_child_document_model(self):
         from core.concepts.documents import ConceptDocument

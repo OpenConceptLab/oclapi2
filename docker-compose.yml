@@ -22,7 +22,7 @@ services:
     volumes:
       - redis-data:/bitnami/redis/data
   api:
-    image: openconceptlab/oclapi2:${ENVIRONMENT-production}
+    build: .
     restart: "always"
     ports:
       - 8000:8000
@@ -68,7 +68,7 @@ services:
     healthcheck:
       test: "curl --silent --fail http://localhost:3500/ || exit 1"
   celery:
-    image: openconceptlab/oclapi2:${ENVIRONMENT-production}
+    build: .
     command: ["bash", "-c", "CELERY_WORKER_NAME=default ./start_celery_worker.sh -P prefork -Q default -c 2"]
     restart: "always"
     healthcheck:
@@ -100,7 +100,7 @@ services:
       - ERRBIT_URL
       - ERRBIT_KEY
   celery_indexing:
-    image: openconceptlab/oclapi2:${ENVIRONMENT-production}
+    build: .
     command: ["bash", "-c", "CELERY_WORKER_NAME=indexing ./start_celery_worker.sh -P prefork -Q indexing -c 2"]
     restart: "always"
     healthcheck:
@@ -112,8 +112,8 @@ services:
       - ERRBIT_URL
       - ERRBIT_KEY
   celery_concurrent:
-    image: openconceptlab/oclapi2:${ENVIRONMENT-production}
-    command: ["bash", "-c", "CELERY_WORKER_NAME=concurrent ./start_celery_worker.sh -P prefork -Q concurrent -c 2"]
+    build: .
+    command: ["bash", "-c", "CELERY_WORKER_NAME=concurrent ./start_celery_worker.sh -P prefork -Q concurrent -c 4"]
     restart: "always"
     healthcheck:
       test:  ["CMD-SHELL", "-c", "CELERY_WORKER_NAME=concurrent ./ping_celery_worker.sh"]
@@ -154,7 +154,7 @@ services:
     volumes:
       - upload-data:/code/uploads
   celery_bulk_import_root:
-    image: openconceptlab/oclapi2:${ENVIRONMENT-production}
+    build: .
     command: ["bash", "-c", "CELERY_WORKER_NAME=bulk_import_root ./start_celery_worker.sh -Q bulk_import_root -c 1"]
     restart: "always"
     healthcheck:
