@@ -669,7 +669,7 @@ def beat_healthcheck():  # pragma: no cover
     redis_service.set(settings.CELERYBEAT_HEALTHCHECK_KEY, str(datetime.now()), ex=120)
 
 
-@app.task(ignore_result=True)
+@app.task()
 def resources_report(start_date=None, end_date=None, email=None):  # pragma: no cover
     # runs on first of every month
     # reports usage of prev month
