@@ -680,13 +680,16 @@ def resources_report(start_date=None, end_date=None, email=None):  # pragma: no 
     buff, file_name = report.generate()
     date_range_label = get_date_range_label(report.start_date, report.end_date)
     env = settings.ENV.upper()
+    reports_email = email or settings.REPORTS_EMAIL
     mail = EmailMessage(
         subject=f"{env} Monthly Resources Report: {date_range_label}",
         body=f"Please find attached resources report of {env} for the period of {date_range_label}",
-        to=[email or settings.REPORTS_EMAIL]
+        to=[reports_email]
     )
     mail.attach(file_name, buff.getvalue(), 'text/csv')
-    return mail.send()
+    result = mail.send()
+    logger.info('Resources report sent to %s, result: %s', reports_email, result)
+    return result
 
 
 @app.task(ignore_result=True)
