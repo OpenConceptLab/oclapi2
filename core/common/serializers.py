@@ -199,8 +199,10 @@ class AbstractResourceSerializer(ModelSerializer):
         request = get(kwargs, 'context.request')
         params = get(request, 'query_params')
         self.query_params = (params or {}) if isinstance(params, dict) else (params.dict() if params else {})
-        self.include_search_meta = self.query_params.get(
-            INCLUDE_SEARCH_META_PARAM) in TRUTHY and self.query_params.get('q')
+        self.include_search_meta = (
+                                           self.query_params.get(
+                                               INCLUDE_SEARCH_META_PARAM) in TRUTHY and self.query_params.get('q')
+                                   ) or self.query_params.get('csv', False)
 
         try:
             if not self.include_search_meta:
