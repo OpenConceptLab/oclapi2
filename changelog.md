@@ -1,3 +1,553 @@
+##### 2.3.141 - Fri Oct 11 06:55:38 2024 +0000
+- Reverting local changes
+- Feedback | fixing sorting
+##### 2.3.140 - Fri Oct 11 04:36:11 2024 +0000
+- Importers | Test for partial concept (extras) update
+##### 2.3.139 - Fri Oct 11 02:40:19 2024 +0000
+- Errbit | fixing clone mapping
+##### 2.3.138 - Tue Oct 8 02:42:26 2024 +0000
+- Bug | Repo new version to also update children counts
+##### 2.3.137 - Mon Oct 7 01:54:54 2024 +0000
+- [OpenConceptLab/ocl_issues#1936](https://github.com/OpenConceptLab/ocl_issues/issues/1936) | Adding more things to Collection brief serializer
+- [OpenConceptLab/ocl_issues#1936](https://github.com/OpenConceptLab/ocl_issues/issues/1936) | Added OCL Joined and Org Joined events | management task to run on bootup to seed missed events
+- [OpenConceptLab/ocl_issues#1776](https://github.com/OpenConceptLab/ocl_issues/issues/1776) | fixing tests
+- [OpenConceptLab/ocl_issues#1776](https://github.com/OpenConceptLab/ocl_issues/issues/1776) | adding entity's description to events responses
+##### 2.3.136 - Mon Sep 30 06:34:22 2024 +0000
+- [OpenConceptLab/ocl_issues#1861](https://github.com/OpenConceptLab/ocl_issues/issues/1861) | fixing typo
+##### 2.3.135 - Mon Sep 30 05:19:30 2024 +0000
+- [OpenConceptLab/ocl_issues#1861](https://github.com/OpenConceptLab/ocl_issues/issues/1861) | env var for username to get highlighted events from
+##### 2.3.134 - Fri Sep 27 07:50:34 2024 +0000
+- [OpenConceptLab/ocl_issues#1921](https://github.com/OpenConceptLab/ocl_issues/issues/1921) | OpenMRS custom validation schema | excluding empty name type
+- Revert "OpenConceptLab/ocl_issues#1921 | OpenMRS custom validation schema | excluding Synonyms in uniq check"
+- [OpenConceptLab/ocl_issues#1921](https://github.com/OpenConceptLab/ocl_issues/issues/1921) | OpenMRS custom validation schema | excluding Synonyms in uniq check
+##### 2.3.133 - Thu Sep 26 07:56:40 2024 +0000
+- [OpenConceptLab/ocl_issues#1861](https://github.com/OpenConceptLab/ocl_issues/issues/1861) | Guest Events API to redirect to user's events API if requested by authenticated user
+- [OpenConceptLab/ocl_issues#1861](https://github.com/OpenConceptLab/ocl_issues/issues/1861) | Guest events are admin/superuser's non-user following's create/release/follow events
+- [OpenConceptLab/ocl_issues#1861](https://github.com/OpenConceptLab/ocl_issues/issues/1861) | fixing pylint and tests
+- [OpenConceptLab/ocl_issues#1861](https://github.com/OpenConceptLab/ocl_issues/issues/1861) | Anonymouse user events API | Repo version release event
+##### 2.3.132 - Thu Sep 19 04:21:01 2024 +0000
+- Fixing typo and removing print
+- [OpenConceptLab/ocl_issues#1791](https://github.com/OpenConceptLab/ocl_issues/issues/1791) Fix listing dependencies in progress
+- [OpenConceptLab/ocl_issues#1922](https://github.com/OpenConceptLab/ocl_issues/issues/1922) Fix overwriting ConceptMap version, OpenConceptLab/ocl_issues#1917 Add S3 storage support
+- [OpenConceptLab/ocl_issues#1917](https://github.com/OpenConceptLab/ocl_issues/issues/1917) Add S3 storage support for new bulk import
+- [OpenConceptLab/ocl_issues#1862](https://github.com/OpenConceptLab/ocl_issues/issues/1862) | User events API with different scopes
+- [OpenConceptLab/ocl_issues#1780](https://github.com/OpenConceptLab/ocl_issues/issues/1780) | fixing followers in user details view
+##### 2.3.131 - Wed Sep 4 02:54:19 2024 +0000
+- [OpenConceptLab/ocl_issues#1884](https://github.com/OpenConceptLab/ocl_issues/issues/1884) | fixing tests | mocking indexing job
+- [OpenConceptLab/ocl_issues#1884](https://github.com/OpenConceptLab/ocl_issues/issues/1884) | fixing tests | mocking indexing job
+- [OpenConceptLab/ocl_issues#1884](https://github.com/OpenConceptLab/ocl_issues/issues/1884) | new version for collection to mantain tasks
+- [OpenConceptLab/ocl_issues#1884](https://github.com/OpenConceptLab/ocl_issues/issues/1884) | refactoring seed new version task
+- [OpenConceptLab/ocl_issues#1780](https://github.com/OpenConceptLab/ocl_issues/issues/1780) | fixing pylint error
+- [OpenConceptLab/ocl_issues#1780](https://github.com/OpenConceptLab/ocl_issues/issues/1780) | User events vs org events criteria | org events includes where org is object or referenced object
+- [OpenConceptLab/ocl_issues#1780](https://github.com/OpenConceptLab/ocl_issues/issues/1780) | Follow model type
+##### 2.3.130 - Fri Aug 30 06:40:57 2024 +0000
+- [OpenConceptLab/ocl_issues#1780](https://github.com/OpenConceptLab/ocl_issues/issues/1780) | can follow any entity
+- [OpenConceptLab/ocl_issues#1884](https://github.com/OpenConceptLab/ocl_issues/issues/1884) | source version different states/tasks
+- [OpenConceptLab/ocl_issues#1884](https://github.com/OpenConceptLab/ocl_issues/issues/1884) | released source version creation indexing refactoring
+- [OpenConceptLab/ocl_issues#1791](https://github.com/OpenConceptLab/ocl_issues/issues/1791) Fixing paths for NPM support
+- [OpenConceptLab/ocl_issues#1780](https://github.com/OpenConceptLab/ocl_issues/issues/1780) | Event | saving referenced object in case it gets deleted
+##### 2.3.129 - Wed Aug 21 03:38:06 2024 +0000
+- Org delete | fixing test for sync delete S3 files
+- Org delete from importer to delete repos cached imports in sync
+- [OpenConceptLab/ocl_issues#1780](https://github.com/OpenConceptLab/ocl_issues/issues/1780) | fixing test
+- [OpenConceptLab/ocl_issues#1780](https://github.com/OpenConceptLab/ocl_issues/issues/1780) | events for different actions
+- [OpenConceptLab/ocl_issues#1780](https://github.com/OpenConceptLab/ocl_issues/issues/1780) | events creation on source/org create and user follow/unfollow and obj representation
+- [OpenConceptLab/ocl_issues#1780](https://github.com/OpenConceptLab/ocl_issues/issues/1780) | fixing pylint errors
+- [OpenConceptLab/ocl_issues#1780](https://github.com/OpenConceptLab/ocl_issues/issues/1780) | events model and API
+- bundles.__init__.py | added VERSION
+- [OpenConceptLab/ocl_issues#1791](https://github.com/OpenConceptLab/ocl_issues/issues/1791) Adding forgotten file
+- [OpenConceptLab/ocl_issues#1791](https://github.com/OpenConceptLab/ocl_issues/issues/1791) Add support for importing NPM packages
+##### 2.3.128 - Thu Aug 8 03:50:51 2024 +0000
+- [OpenConceptLab/ocl_issues#1912](https://github.com/OpenConceptLab/ocl_issues/issues/1912) | renamed detailed_summary to message | only json result
+- Pointing to specific ocldev release
+##### 2.3.127 - Wed Aug 7 05:38:05 2024 +0000
+- [OpenConceptLab/ocl_issues#1912](https://github.com/OpenConceptLab/ocl_issues/issues/1912) | Import result | responding with json/report/summary result | correcting serialization
+- [OpenConceptLab/ocl_issues#1780](https://github.com/OpenConceptLab/ocl_issues/issues/1780) | fixing pylint
+- [OpenConceptLab/ocl_issues#1780](https://github.com/OpenConceptLab/ocl_issues/issues/1780) | fixing pylint
+- [OpenConceptLab/ocl_issues#1780](https://github.com/OpenConceptLab/ocl_issues/issues/1780) | API for user unfollow
+- [OpenConceptLab/ocl_issues#1780](https://github.com/OpenConceptLab/ocl_issues/issues/1780) | APIs for user followers/following
+##### 2.3.126 - Mon Aug 5 04:35:21 2024 +0000
+- Test for importing existing mapping to mark it retired
+##### 2.3.125 - Thu Aug 1 03:35:23 2024 +0000
+- [OpenConceptLab/ocl_issues#1867](https://github.com/OpenConceptLab/ocl_issues/issues/1867) | fixing tests
+- [OpenConceptLab/ocl_issues#1867](https://github.com/OpenConceptLab/ocl_issues/issues/1867) | removed dead test
+- [OpenConceptLab/ocl_issues#1867](https://github.com/OpenConceptLab/ocl_issues/issues/1867) | fixing pylint
+- [OpenConceptLab/ocl_issues#1867](https://github.com/OpenConceptLab/ocl_issues/issues/1867) | fixing pylint
+- [OpenConceptLab/ocl_issues#1867](https://github.com/OpenConceptLab/ocl_issues/issues/1867) | using ocldev checksum to generate checksums
+- Update README.md (#733)
+- removed unused import
+- [OpenConceptLab/ocl_issues#1907](https://github.com/OpenConceptLab/ocl_issues/issues/1907)  | importer | reference delete with strict check
+- Repo summary view | Reusing mixins | removed unused base class
+- [OpenConceptLab/ocl_issues#1907](https://github.com/OpenConceptLab/ocl_issues/issues/1907)  | fixing tests
+- [OpenConceptLab/ocl_issues#1907](https://github.com/OpenConceptLab/ocl_issues/issues/1907)  | importer | reference delete
+##### 2.3.124 - Fri Jul 26 03:14:15 2024 +0000
+- [OpenConceptLab/ocl_issues#1617](https://github.com/OpenConceptLab/ocl_issues/issues/1617) | added bio field on user
+- [OpenConceptLab/ocl_issues#1867](https://github.com/OpenConceptLab/ocl_issues/issues/1867) | removed redundant python script
+- [OpenConceptLab/ocl_issues#1867](https://github.com/OpenConceptLab/ocl_issues/issues/1867) | Checksum | ignoring locale_preferred=false, name_type/description_type empty
+##### 2.3.123 - Fri Jul 19 04:18:14 2024 +0000
+- Collection references put | list request
+##### 2.3.122 - Wed Jul 17 06:25:10 2024 +0000
+- Search criteria to apply leading wildcard for code fields
+- [OpenConceptLab/ocl_issues#1867](https://github.com/OpenConceptLab/ocl_issues/issues/1867) | JS checksum generate | correcting sorting and encoding to match with python
+- [OpenConceptLab/ocl_issues#1867](https://github.com/OpenConceptLab/ocl_issues/issues/1867) | checksum to conder locale's external_id
+##### 2.3.121 - Mon Jul 15 02:14:16 2024 +0000
+- fix: update ES_ENABLE_SNIFFING environment variable (#732)
+- chore: add elastic search sniffing configuration option setting. (#731)
+##### 2.3.120 - Wed Jul 10 10:12:20 2024 +0000
+- [OpenConceptLab/ocl_issues#1867](https://github.com/OpenConceptLab/ocl_issues/issues/1867) | fixing test
+- [OpenConceptLab/ocl_issues#1867](https://github.com/OpenConceptLab/ocl_issues/issues/1867) | consider external_id from locale for checksum | remove empty object values from checksums | remove empty hierarchy from checksum
+- [OpenConceptLab/ocl_issues#1867](https://github.com/OpenConceptLab/ocl_issues/issues/1867) | cleanup fields to treat float and int same if there is no decimal value
+- [OpenConceptLab/ocl_issues#1867](https://github.com/OpenConceptLab/ocl_issues/issues/1867) | mapping sort weight to float for checksum generation
+- [OpenConceptLab/ocl_issues#1867](https://github.com/OpenConceptLab/ocl_issues/issues/1867) | mapping sort weight to float for checksum generation
+- [OpenConceptLab/ocl_issues#1867](https://github.com/OpenConceptLab/ocl_issues/issues/1867) | printing fields used for checksum
+- [OpenConceptLab/ocl_issues#1867](https://github.com/OpenConceptLab/ocl_issues/issues/1867) | fixing test
+- [OpenConceptLab/ocl_issues#1867](https://github.com/OpenConceptLab/ocl_issues/issues/1867) | script to generate concept/mapping standard/smart checksum
+- [OpenConceptLab/ocl_issues#1867](https://github.com/OpenConceptLab/ocl_issues/issues/1867) | script to generate concept/mapping standard/smart checksum
+- [OpenConceptLab/ocl_issues#1867](https://github.com/OpenConceptLab/ocl_issues/issues/1867) | fixing typo
+##### 2.3.119 - Mon Jul 8 07:03:40 2024 +0000
+- [OpenConceptLab/ocl_issues#1617](https://github.com/OpenConceptLab/ocl_issues/issues/1617) | API to redirect to SSO reset password url
+##### 2.3.118 - Wed Jul 3 06:00:38 2024 +0000
+- [OpenConceptLab/ocl_issues#1829](https://github.com/OpenConceptLab/ocl_issues/issues/1829) | fixing pylint
+- [OpenConceptLab/ocl_issues#1829](https://github.com/OpenConceptLab/ocl_issues/issues/1829) | Source update to only update is_active and public_access on children if it changed
+- [OpenConceptLab/ocl_issues#1829](https://github.com/OpenConceptLab/ocl_issues/issues/1829) | Source update to only update is_active on children if it changed
+- [OpenConceptLab/ocl_issues#1829](https://github.com/OpenConceptLab/ocl_issues/issues/1829) | Source update to only update is_active on children if it changed
+##### 2.3.117 - Tue Jul 2 10:09:20 2024 +0000
+- [OpenConceptLab/ocl_issues#1860](https://github.com/OpenConceptLab/ocl_issues/issues/1860) | expansion concept cascade view
+##### 2.3.116 - Tue Jul 2 06:23:48 2024 +0000
+- [OpenConceptLab/ocl_issues#1860](https://github.com/OpenConceptLab/ocl_issues/issues/1860) | expansion concept cascade view | fixing conflict with uri param
+- [OpenConceptLab/ocl_issues#1860](https://github.com/OpenConceptLab/ocl_issues/issues/1860) | expansion concept cascade view | refactoring and merging views
+- [OpenConceptLab/ocl_issues#1860](https://github.com/OpenConceptLab/ocl_issues/issues/1860) | expansion conflicting concepts
+- [OpenConceptLab/ocl_issues#1860](https://github.com/OpenConceptLab/ocl_issues/issues/1860) | expansion conflicting concepts resolution using uri param
+##### 2.3.115 - Thu Jun 27 03:48:12 2024 +0000
+- Can do OR search for exact match
+##### 2.3.114 - Mon Jun 24 04:59:56 2024 +0000
+- Source mappings summary | including self as to/from source
+##### 2.3.113 - Mon Jun 24 02:56:14 2024 +0000
+- Source mappings summary | fixing tests
+- Source mappings summary | not removing self
+- [OpenConceptLab/ocl_issues#1845](https://github.com/OpenConceptLab/ocl_issues/issues/1845) | fixing empty exclude references call
+##### 2.3.112 - Mon Jun 17 11:43:43 2024 +0000
+- fixing pylint
+- Errbit | handling ValueError in mapping create | to/mapping source set as collection
+##### 2.3.111 - Fri Jun 14 08:55:03 2024 +0000
+- [OpenConceptLab/ocl_issues#1850](https://github.com/OpenConceptLab/ocl_issues/issues/1850) | fixing pylint
+- [OpenConceptLab/ocl_issues#1850](https://github.com/OpenConceptLab/ocl_issues/issues/1850) | accepting expression in new format without system/valueset | reference can accept extras filters
+##### 2.3.110 - Wed Jun 12 09:30:06 2024 +0000
+- [OpenConceptLab/ocl_issues#1849](https://github.com/OpenConceptLab/ocl_issues/issues/1849) | handle too long input for search
+##### 2.3.109 - Mon Jun 10 09:40:38 2024 +0000
+- [OpenConceptLab/ocl_issues#1844](https://github.com/OpenConceptLab/ocl_issues/issues/1844) |  | expanding verbosity levels
+##### 2.3.108 - Mon Jun 10 08:22:30 2024 +0000
+- FHIR Errbit | unsupported query param to return http400 exception
+##### 2.3.107 - Mon Jun 10 04:07:23 2024 +0000
+- Errbit | CodeSystem List | text field serialization fix
+- Errbit | ConceptMap List | mappings without from/to-source-url fix
+##### 2.3.106 - Mon Jun 3 11:24:21 2024 +0000
+- [OpenConceptLab/ocl_issues#1844](https://github.com/OpenConceptLab/ocl_issues/issues/1844) | / | version1 is older and vesion2 is newer
+- Importer | save summary with more details
+##### 2.3.105 - Thu May 30 02:35:19 2024 +0000
+- [OpenConceptLab/ocl_issues#1842](https://github.com/OpenConceptLab/ocl_issues/issues/1842) | root view | correcting FHIR URLs
+##### 2.3.104 - Tue May 28 12:04:18 2024 +0000
+- [OpenConceptLab/ocl_issues#1844](https://github.com/OpenConceptLab/ocl_issues/issues/1844) | generate checksums for latest concept/mapping versions of repo
+##### 2.3.103 - Tue May 28 10:42:44 2024 +0000
+- [OpenConceptLab/ocl_issues#1844](https://github.com/OpenConceptLab/ocl_issues/issues/1844) | fixing checksum check and tests
+- [OpenConceptLab/ocl_issues#1844](https://github.com/OpenConceptLab/ocl_issues/issues/1844) | checksums comprison to prevent duplicate version creation fix
+- Import json result handling parse exception
+##### 2.3.102 - Tue May 21 12:08:05 2024 +0000
+- [OpenConceptLab/ocl_issues#1839](https://github.com/OpenConceptLab/ocl_issues/issues/1839) Add code searchParam for CodeSystem (fix)
+- [OpenConceptLab/ocl_issues#1839](https://github.com/OpenConceptLab/ocl_issues/issues/1839) Add code searchParam for CodeSystem
+##### 2.3.101 - Tue May 21 08:09:54 2024 +0000
+- Errbit | CodeSystem serializer text field | literal eval try catch
+- [OpenConceptLab/ocl_issues#1841](https://github.com/OpenConceptLab/ocl_issues/issues/1841) | not using any pattern for kwargs in url | repo version can accept special characters | uri will be encoded
+##### 2.3.100 - Mon May 20 10:38:46 2024 +0000
+- Code System validateCode | fixing errbit
+- [OpenConceptLab/ocl_issues#1840](https://github.com/OpenConceptLab/ocl_issues/issues/1840) CodeSystem listing should include total
+- [OpenConceptLab/ocl_issues#1833](https://github.com/OpenConceptLab/ocl_issues/issues/1833) Fix import read timeout
+##### 2.3.99 - Thu May 16 11:10:58 2024 +0000
+- [OpenConceptLab/ocl_issues#1833](https://github.com/OpenConceptLab/ocl_issues/issues/1833) 502 Bad Gateway for Large CodeSystem resources
+- Increase gunicorn request timeout (fix)
+- Increase gunicorn request timeout
+##### 2.3.98 - Thu May 16 02:57:00 2024 +0000
+Wed Mar 6 07:57:03 2024 +0530
+Mon Dec 11 15:18:33 2023 +0530
+Wed Aug 2 08:28:38 2023 +0530
+- monthly resource report can accept an email
+- [OpenConceptLab/ocl_issues#1237](https://github.com/OpenConceptLab/ocl_issues/issues/1237) FHIR Capability Statement
+##### 2.3.97 - Wed May 15 14:28:23 2024 +0000
+- [OpenConceptLab/ocl_issues#1237](https://github.com/OpenConceptLab/ocl_issues/issues/1237) FHIR Capability Statement
+- [OpenConceptLab/ocl_issues#1833](https://github.com/OpenConceptLab/ocl_issues/issues/1833) | refactoring code system create with concepts to do indexing async
+- Removed checksums toggle
+- Removed print
+- [OpenConceptLab/ocl_issues#1834](https://github.com/OpenConceptLab/ocl_issues/issues/1834) | Collection Reference filter 'property' to accept any value | reference evaluation to ignore random values
+- [OpenConceptLab/ocl_issues#1836](https://github.com/OpenConceptLab/ocl_issues/issues/1836) FHIR ConceptMap fails to import due to 'null' map_type
+- [OpenConceptLab/ocl_issues#1834](https://github.com/OpenConceptLab/ocl_issues/issues/1834) | Test for Valueset with just system and no filter in include
+##### 2.3.96 - Fri May 10 02:30:00 2024 +0000
+- [OpenConceptLab/ocl_issues#1814](https://github.com/OpenConceptLab/ocl_issues/issues/1814) | fixing typo
+- [OpenConceptLab/ocl_issues#1814](https://github.com/OpenConceptLab/ocl_issues/issues/1814) | fixing typo
+- [OpenConceptLab/ocl_issues#1814](https://github.com/OpenConceptLab/ocl_issues/issues/1814) | task list view cannot return result
+- [OpenConceptLab/ocl_issues#1814](https://github.com/OpenConceptLab/ocl_issues/issues/1814) | task result needs to be JSON
+##### 2.3.95 - Thu May 9 02:44:18 2024 +0000
+- [OpenConceptLab/ocl_issues#1814](https://github.com/OpenConceptLab/ocl_issues/issues/1814) | fixing pylint
+- [OpenConceptLab/ocl_issues#1815](https://github.com/OpenConceptLab/ocl_issues/issues/1815) | added missed migration
+- [OpenConceptLab/ocl_issues#1814](https://github.com/OpenConceptLab/ocl_issues/issues/1814) | changelog | using operations | refactoring and added tests
+##### 2.3.94 - Mon May 6 04:04:01 2024 +0000
+Wed Mar 6 07:57:03 2024 +0530
+Mon Dec 11 15:18:33 2023 +0530
+Wed Aug 2 08:28:38 2023 +0530
+- [OpenConceptLab/ocl_issues#1814](https://github.com/OpenConceptLab/ocl_issues/issues/1814) | fixing typo
+- [OpenConceptLab/ocl_issues#1814](https://github.com/OpenConceptLab/ocl_issues/issues/1814) | changelog | making it async
+- [OpenConceptLab/ocl_issues#1814](https://github.com/OpenConceptLab/ocl_issues/issues/1814) | changelog | updated result keys and added diff with verbosity
+- Refactoring method names
+- [OpenConceptLab/ocl_issues#1815](https://github.com/OpenConceptLab/ocl_issues/issues/1815) FHIR CodeSystem Fixes
+- [OpenConceptLab/ocl_issues#1814](https://github.com/OpenConceptLab/ocl_issues/issues/1814) | changelog | fixing duplicates
+##### 2.3.93 - Fri May 3 10:56:48 2024 +0000
+- [OpenConceptLab/ocl_issues#1814](https://github.com/OpenConceptLab/ocl_issues/issues/1814) | changelog | fixing pylint
+- [OpenConceptLab/ocl_issues#1814](https://github.com/OpenConceptLab/ocl_issues/issues/1814) | changelog | using smart changed before changed
+- [OpenConceptLab/ocl_issues#1814](https://github.com/OpenConceptLab/ocl_issues/issues/1814) | fixing task get view
+- [OpenConceptLab/ocl_issues#1814](https://github.com/OpenConceptLab/ocl_issues/issues/1814) | checksum save should not trigger indexing
+##### 2.3.92 - Thu May 2 11:46:11 2024 +0000
+- [OpenConceptLab/ocl_issues#1814](https://github.com/OpenConceptLab/ocl_issues/issues/1814) | fixing pylint
+- [OpenConceptLab/ocl_issues#1814](https://github.com/OpenConceptLab/ocl_issues/issues/1814) | fixing typo
+- [OpenConceptLab/ocl_issues#1814](https://github.com/OpenConceptLab/ocl_issues/issues/1814) | added task result serializer
+- [OpenConceptLab/ocl_issues#1814](https://github.com/OpenConceptLab/ocl_issues/issues/1814) | moving changelog/diff to async task
+- [OpenConceptLab/ocl_issues#1761](https://github.com/OpenConceptLab/ocl_issues/issues/1761) | fixing middleware and pylint
+- [OpenConceptLab/ocl_issues#1825](https://github.com/OpenConceptLab/ocl_issues/issues/1825) | fixing tests
+- [OpenConceptLab/ocl_issues#1825](https://github.com/OpenConceptLab/ocl_issues/issues/1825) | fixing pylint
+- [OpenConceptLab/ocl_issues#1825](https://github.com/OpenConceptLab/ocl_issues/issues/1825) | reference errors are more description with conflicting concept/name/reference
+- [OpenConceptLab/ocl_issues#1761](https://github.com/OpenConceptLab/ocl_issues/issues/1761) Add FHIR xml support
+- Fixing sort without search
+##### 2.3.91 - Tue Apr 30 04:08:33 2024 +0000
+- sort with search should work
+##### 2.3.90 - Mon Apr 29 05:39:07 2024 +0000
+Wed Mar 6 07:57:03 2024 +0530
+- [OpenConceptLab/ocl_issues#1777](https://github.com/OpenConceptLab/ocl_issues/issues/1777) | fixing pylint
+- [OpenConceptLab/ocl_issues#1777](https://github.com/OpenConceptLab/ocl_issues/issues/1777) | celery tasks cleanup job to remove any task older than 7 days
+- [OpenConceptLab/ocl_issues#1777](https://github.com/OpenConceptLab/ocl_issues/issues/1777) | celery tasks to not store args and store result as str and not json
+- [OpenConceptLab/ocl_issues#1814](https://github.com/OpenConceptLab/ocl_issues/issues/1814) | changelog to reflect correct mappings in concepts
+- [OpenConceptLab/ocl_issues#1814](https://github.com/OpenConceptLab/ocl_issues/issues/1814) | changelog to reflect concepts with only mappings changes
+- [OpenConceptLab/ocl_issues#1814](https://github.com/OpenConceptLab/ocl_issues/issues/1814) | changelog of two source versions
+##### 2.3.89 - Wed Apr 24 05:37:40 2024 +0000
+Wed Mar 6 07:57:03 2024 +0530
+Mon Dec 11 15:18:33 2023 +0530
+Wed Aug 2 08:28:38 2023 +0530
+- [OpenConceptLab/ocl_issues#1824](https://github.com/OpenConceptLab/ocl_issues/issues/1824) | Reference transform extensional
+- [OpenConceptLab/ocl_issues#1777](https://github.com/OpenConceptLab/ocl_issues/issues/1777) | fixing pylint
+- [OpenConceptLab/ocl_issues#1777](https://github.com/OpenConceptLab/ocl_issues/issues/1777) | added task post run signal to close db connections
+##### 2.3.88 - Tue Apr 23 02:59:09 2024 +0000
+Wed Mar 6 07:57:03 2024 +0530
+- [OpenConceptLab/ocl_issues#1777](https://github.com/OpenConceptLab/ocl_issues/issues/1777) | using SHA-256 to fix the queue for same user and import queue
+##### 2.3.87 - Thu Apr 4 05:42:46 2024 +0000
+Wed Mar 6 07:57:03 2024 +0530
+- [OpenConceptLab/ocl_issues#1777](https://github.com/OpenConceptLab/ocl_issues/issues/1777) | fixing queue filtering
+- Source/Collection | search by full_name and correcting other attributes
+- Upgrading to django 4.2.11
+##### 2.3.86 - Wed Apr 3 06:48:06 2024 +0000
+Wed Mar 6 07:57:03 2024 +0530
+- Merge branch 'dev'
+- [OpenConceptLab/ocl_issues#1817](https://github.com/OpenConceptLab/ocl_issues/issues/1817) | fixing pylint
+- [OpenConceptLab/ocl_issues#1817](https://github.com/OpenConceptLab/ocl_issues/issues/1817) | fixing test
+- [OpenConceptLab/ocl_issues#1777](https://github.com/OpenConceptLab/ocl_issues/issues/1777) | seralizing results of task
+- [OpenConceptLab/ocl_issues#1742](https://github.com/OpenConceptLab/ocl_issues/issues/1742) | resolve to return source/collection response for HEAD version
+- [OpenConceptLab/ocl_issues#1777](https://github.com/OpenConceptLab/ocl_issues/issues/1777) | removed unused flower task serializer
+- [OpenConceptLab/ocl_issues#1777](https://github.com/OpenConceptLab/ocl_issues/issues/1777) | task response should reflect user submitted queue and not actual queue
+- Revert "OpenConceptLab/ocl_issues#1777 | queue should be saved as user submitted"
+- [OpenConceptLab/ocl_issues#1777](https://github.com/OpenConceptLab/ocl_issues/issues/1777) | queue should be saved as user submitted
+- [OpenConceptLab/ocl_issues#1779](https://github.com/OpenConceptLab/ocl_issues/issues/1779) | streamed response should not have content-length header
+- [OpenConceptLab/ocl_issues#1777](https://github.com/OpenConceptLab/ocl_issues/issues/1777) | queue should not override
+- [OpenConceptLab/ocl_issues#1779](https://github.com/OpenConceptLab/ocl_issues/issues/1779) | export stream response to have content length header
+- [OpenConceptLab/ocl_issues#1819](https://github.com/OpenConceptLab/ocl_issues/issues/1819) | removed print | pylint fix
+- [OpenConceptLab/ocl_issues#1819](https://github.com/OpenConceptLab/ocl_issues/issues/1819) | batch delete to not use paginator/iterator
+- [OpenConceptLab/ocl_issues#1819](https://github.com/OpenConceptLab/ocl_issues/issues/1819) | using paginator in place of iterator (#645)
+- dropping coverage to 91
+- No coverage for azure
+- [OpenConceptLab/ocl_issues#1779](https://github.com/OpenConceptLab/ocl_issues/issues/1779) | exports download via streaming
+- [OpenConceptLab/ocl_issues#1777](https://github.com/OpenConceptLab/ocl_issues/issues/1777) | after_return to handle exception | added try catch in indexing
+- [OpenConceptLab/ocl_issues#1753](https://github.com/OpenConceptLab/ocl_issues/issues/1753) | added mappings in repo version diff with verbosity levels | admin API to calculate checksums of repo resources
+- [OpenConceptLab/ocl_issues#1777](https://github.com/OpenConceptLab/ocl_issues/issues/1777) | settting task state before start
+- [OpenConceptLab/ocl_issues#1777](https://github.com/OpenConceptLab/ocl_issues/issues/1777) | fixing tests
+- [OpenConceptLab/ocl_issues#1777](https://github.com/OpenConceptLab/ocl_issues/issues/1777) | fixing tests
+- [OpenConceptLab/ocl_issues#1777](https://github.com/OpenConceptLab/ocl_issues/issues/1777) | children tasks to be uniq
+- [OpenConceptLab/ocl_issues#1777](https://github.com/OpenConceptLab/ocl_issues/issues/1777) | fixing get task | added task which is same as id
+- [OpenConceptLab/ocl_issues#1777](https://github.com/OpenConceptLab/ocl_issues/issues/1777) | setting finished_at on success
+- fixing tests | merge conflicts
+- duplicate method | merge conflicts
+- [OpenConceptLab/ocl_issues#1777](https://github.com/OpenConceptLab/ocl_issues/issues/1777) | Async Task State Management using Postgres
+- fixing test
+- fixing test
+- Fixing merge conflicts
+- Merge branch 'master' into dev
+- [OpenConceptLab/ocl_issues#1635](https://github.com/OpenConceptLab/ocl_issues/issues/1635) | mapping serializers | added latest_source_version
+- [OpenConceptLab/ocl_issues#1635](https://github.com/OpenConceptLab/ocl_issues/issues/1635) | fixing tests
+- [OpenConceptLab/ocl_issues#1635](https://github.com/OpenConceptLab/ocl_issues/issues/1635) | source repo version release/unreleased to reindex resources
+- [OpenConceptLab/ocl_issues#1635](https://github.com/OpenConceptLab/ocl_issues/issues/1635) | Mapping search to have latest repo version field
+- [OpenConceptLab/ocl_issues#1635](https://github.com/OpenConceptLab/ocl_issues/issues/1635) | fixing tests for default version HEAD when not global search
+- [OpenConceptLab/ocl_issues#1635](https://github.com/OpenConceptLab/ocl_issues/issues/1635) | Search to use latest or latest released based on kwargs
+- [OpenConceptLab/ocl_issues#1635](https://github.com/OpenConceptLab/ocl_issues/issues/1635) | returning latest_source_version in version detail API
+- [OpenConceptLab/ocl_issues#1635](https://github.com/OpenConceptLab/ocl_issues/issues/1635) | fixing facets filters
+- [OpenConceptLab/ocl_issues#1635](https://github.com/OpenConceptLab/ocl_issues/issues/1635) | fixing search latest attr
+- [OpenConceptLab/ocl_issues#1635](https://github.com/OpenConceptLab/ocl_issues/issues/1635) | Concept search latest repo if search param there | return latest_source_version in list and detail only
+- [OpenConceptLab/ocl_issues#1635](https://github.com/OpenConceptLab/ocl_issues/issues/1635) | fixing merge conflicts
+- [OpenConceptLab/ocl_issues#1635](https://github.com/OpenConceptLab/ocl_issues/issues/1635) | removed auth group check
+- [OpenConceptLab/ocl_issues#1635](https://github.com/OpenConceptLab/ocl_issues/issues/1635) | search with latest released repo version
+- [OpenConceptLab/ocl_issues#1399](https://github.com/OpenConceptLab/ocl_issues/issues/1399) | not using atomic migrations | batching inserts/updates
+- [OpenConceptLab/ocl_issues#1399](https://github.com/OpenConceptLab/ocl_issues/issues/1399) | using SQL raw queries in migrations
+- Merge branch 'master' into dev
+- Merge branch 'master' into dev
+- [OpenConceptLab/ocl_issues#1399](https://github.com/OpenConceptLab/ocl_issues/issues/1399) | coverage to 92
+- [OpenConceptLab/ocl_issues#1399](https://github.com/OpenConceptLab/ocl_issues/issues/1399) | fixing pylint
+- Merge branch 'master' into dev
+- Merge remote-tracking branch 'origin/issue_1399' into dev
+- [OpenConceptLab/ocl_issues#1399](https://github.com/OpenConceptLab/ocl_issues/issues/1399) | updated coverage to 93
+- [OpenConceptLab/ocl_issues#1399](https://github.com/OpenConceptLab/ocl_issues/issues/1399) | names/descriptions migrations to split names and descriptions
+- [OpenConceptLab/ocl_issues#1338](https://github.com/OpenConceptLab/ocl_issues/issues/1338) | login/logout APIs to redirect to keycloak
+- OpenMRS mapping validation schema to ignore old retired versions of mappings
+- [OpenConceptLab/ocl_issues#1338](https://github.com/OpenConceptLab/ocl_issues/issues/1338) | added empty client id/secret vars
+- [OpenConceptLab/ocl_issues#1338](https://github.com/OpenConceptLab/ocl_issues/issues/1338) | removed client login/logout redirect URL env vars
+- [OpenConceptLab/ocl_issues#1338](https://github.com/OpenConceptLab/ocl_issues/issues/1338) | removed client id/secret as env vars
+- [OpenConceptLab/ocl_issues#1338](https://github.com/OpenConceptLab/ocl_issues/issues/1338) | added comments
+- [OpenConceptLab/ocl_issues#1338](https://github.com/OpenConceptLab/ocl_issues/issues/1338) | added comments
+- [OpenConceptLab/ocl_issues#1338](https://github.com/OpenConceptLab/ocl_issues/issues/1338) | correcting readme
+- [OpenConceptLab/ocl_issues#1338](https://github.com/OpenConceptLab/ocl_issues/issues/1338) | updated readme for dev setup with keycloak:
+- [OpenConceptLab/ocl_issues#1338](https://github.com/OpenConceptLab/ocl_issues/issues/1338) | separating keycloak docker-compose file
+- [OpenConceptLab/ocl_issues#1338](https://github.com/OpenConceptLab/ocl_issues/issues/1338) | removed dead code
+- Merge branch 'master' into dev
+- Fixing test | IntegrityError -> ValidationError
+- [OpenConceptLab/ocl_issues#1338](https://github.com/OpenConceptLab/ocl_issues/issues/1338) | removed unused code
+- [OpenConceptLab/ocl_issues#1338](https://github.com/OpenConceptLab/ocl_issues/issues/1338) | OID To Django Token API
+- [OpenConceptLab/ocl_issues#1338](https://github.com/OpenConceptLab/ocl_issues/issues/1338) | fixing imports
+- [OpenConceptLab/ocl_issues#1338](https://github.com/OpenConceptLab/ocl_issues/issues/1338) | custom auth/auth-backend to switch between django or OIDP | can use valid django token
+- Merge branch 'master' into dev
+- [OpenConceptLab/ocl_issues#1338](https://github.com/OpenConceptLab/ocl_issues/issues/1338) | API to migrate user from django to SSO
+- [OpenConceptLab/ocl_issues#1338](https://github.com/OpenConceptLab/ocl_issues/issues/1338) | removing local client secret
+- [OpenConceptLab/ocl_issues#1338](https://github.com/OpenConceptLab/ocl_issues/issues/1338) | logout from OIDP view
+- [OpenConceptLab/ocl_issues#1338](https://github.com/OpenConceptLab/ocl_issues/issues/1338) | API to exchange code with OID token
+- [OpenConceptLab/ocl_issues#1338](https://github.com/OpenConceptLab/ocl_issues/issues/1338) | settings for login redirect
+- [OpenConceptLab/ocl_issues#1338](https://github.com/OpenConceptLab/ocl_issues/issues/1338) | middleware to manage token from session or from headers
+- [OpenConceptLab/ocl_issues#1338](https://github.com/OpenConceptLab/ocl_issues/issues/1338) | OIDBackend | update user
+- [OpenConceptLab/ocl_issues#1338](https://github.com/OpenConceptLab/ocl_issues/issues/1338) | refactoring and extracting routes
+- [OpenConceptLab/ocl_issues#1338](https://github.com/OpenConceptLab/ocl_issues/issues/1338) | pylint fixes
+- [OpenConceptLab/ocl_issues#1338](https://github.com/OpenConceptLab/ocl_issues/issues/1338) | Migrate user from django auth to OIDP method
+- [OpenConceptLab/ocl_issues#1338](https://github.com/OpenConceptLab/ocl_issues/issues/1338) | user forgot password flow
+- [OpenConceptLab/ocl_issues#1338](https://github.com/OpenConceptLab/ocl_issues/issues/1338) | user signup and mark verified views
+- [OpenConceptLab/ocl_issues#1338](https://github.com/OpenConceptLab/ocl_issues/issues/1338) | temp enabling oidc endpoints
+- [OpenConceptLab/ocl_issues#1338](https://github.com/OpenConceptLab/ocl_issues/issues/1338) | user token view to use auth service
+- [OpenConceptLab/ocl_issues#1338](https://github.com/OpenConceptLab/ocl_issues/issues/1338) | auth service to inject django or OID provider auth
+- [OpenConceptLab/ocl_issues#1338](https://github.com/OpenConceptLab/ocl_issues/issues/1338) | user instance can figure out OIDC token
+- [OpenConceptLab/ocl_issues#1338](https://github.com/OpenConceptLab/ocl_issues/issues/1338) | refactoring views/mixins to have write import order
+- [OpenConceptLab/ocl_issues#1338](https://github.com/OpenConceptLab/ocl_issues/issues/1338) | oidc settings and package
+- [OpenConceptLab/ocl_issues#1338](https://github.com/OpenConceptLab/ocl_issues/issues/1338) | oidc overriden backend | to create and find user
+- [OpenConceptLab/ocl_issues#1338](https://github.com/OpenConceptLab/ocl_issues/issues/1338) | docker-compose | env vars
+- [OpenConceptLab/ocl_issues#1338](https://github.com/OpenConceptLab/ocl_issues/issues/1338) | KeyCloak service in docker-compose
+##### 2.3.85 - Tue Apr 2 09:24:46 2024 +0000
+- Errbit | handling URI generation for special characters in concept/mapping ID
+- Errbit | concept extras list API should raise 404 if concept not found
+- Errbit | handling URI generation for special characters in concept/mapping ID
+- [OpenConceptLab/ocl_issues#1814](https://github.com/OpenConceptLab/ocl_issues/issues/1814) | separated retired results
+##### 2.3.84 - Tue Apr 2 06:13:27 2024 +0000
+- Source compare allowed for logged in users only
+##### 2.3.83 - Mon Apr 1 11:21:40 2024 +0000
+- [OpenConceptLab/ocl_issues#1817](https://github.com/OpenConceptLab/ocl_issues/issues/1817) | fixing pylint
+- [OpenConceptLab/ocl_issues#1817](https://github.com/OpenConceptLab/ocl_issues/issues/1817) | fixing test
+- [OpenConceptLab/ocl_issues#1742](https://github.com/OpenConceptLab/ocl_issues/issues/1742) | fixing pylint
+- [OpenConceptLab/ocl_issues#1742](https://github.com/OpenConceptLab/ocl_issues/issues/1742) | url registry entry lookup to return entry relative URI
+##### 2.3.82 - Wed Mar 27 03:32:58 2024 +0000
+- [OpenConceptLab/ocl_issues#1806](https://github.com/OpenConceptLab/ocl_issues/issues/1806) | storing export time in version.extras | excluding extras.__<key> from checksums
+- [OpenConceptLab/ocl_issues#1819](https://github.com/OpenConceptLab/ocl_issues/issues/1819) | removed print | pylint fix
+- [OpenConceptLab/ocl_issues#1819](https://github.com/OpenConceptLab/ocl_issues/issues/1819) | batch delete to not use paginator/iterator
+- [OpenConceptLab/ocl_issues#1819](https://github.com/OpenConceptLab/ocl_issues/issues/1819) | using paginator in place of iterator (#645)
+- Story-OpenConceptLab/ocl_issues#1816 | URL Registry | search and facets
+##### 2.3.81 - Tue Mar 26 06:56:18 2024 +0000
+- [OpenConceptLab/ocl_issues#1816](https://github.com/OpenConceptLab/ocl_issues/issues/1816) | resolve to use lookup | lookup to handle version
+- [OpenConceptLab/ocl_issues#1816](https://github.com/OpenConceptLab/ocl_issues/issues/1816) | url registry entry to cache resolved repo | repo save to update entries
+##### 2.3.80 - Wed Mar 20 06:12:17 2024 +0000
+- [OpenConceptLab/ocl_issues#1753](https://github.com/OpenConceptLab/ocl_issues/issues/1753) | updated response structure
+##### 2.3.79 - Mon Mar 18 11:02:43 2024 +0000
+Wed Mar 6 07:57:03 2024 +0530
+Mon Dec 11 15:18:33 2023 +0530
+- [OpenConceptLab/ocl_issues#1753](https://github.com/OpenConceptLab/ocl_issues/issues/1753) | find total of resources cheaper way
+- [OpenConceptLab/ocl_issues#1753](https://github.com/OpenConceptLab/ocl_issues/issues/1753) | added mappings in repo version diff with verbosity levels | admin API to calculate checksums of repo resources
+##### 2.3.78 - Mon Mar 18 03:20:51 2024 +0000
+- [OpenConceptLab/ocl_issues#1809](https://github.com/OpenConceptLab/ocl_issues/issues/1809) | Mapping | added more fields to standard checksum
+- [OpenConceptLab/ocl_issues#1775](https://github.com/OpenConceptLab/ocl_issues/issues/1775) | User detail serializers can include pins
+- Enabling match search on users/orgs username/mnemonic attrs
+- [OpenConceptLab/ocl_issues#1746](https://github.com/OpenConceptLab/ocl_issues/issues/1746) | returning 208 when concept/mapping update is unchanged
+##### 2.3.77 - Tue Mar 12 07:22:24 2024 +0000
+- [OpenConceptLab/ocl_issues#1794](https://github.com/OpenConceptLab/ocl_issues/issues/1794) | added external id in match search
+##### 2.3.76 - Fri Mar 8 04:58:43 2024 +0000
+- [OpenConceptLab/ocl_issues#1760](https://github.com/OpenConceptLab/ocl_issues/issues/1760) | fixing cascade queryset for report
+- [OpenConceptLab/ocl_issues#1789](https://github.com/OpenConceptLab/ocl_issues/issues/1789) | fixing hyphen search
+##### 2.3.75 - Thu Mar 7 04:33:13 2024 +0000
+- [OpenConceptLab/ocl_issues#1788](https://github.com/OpenConceptLab/ocl_issues/issues/1788) | resolveReference operation to return resolved url registry entry relative URI as well
+- [OpenConceptLab/ocl_issues#1760](https://github.com/OpenConceptLab/ocl_issues/issues/1760) | ordering summary in report
+- [OpenConceptLab/ocl_issues#1760](https://github.com/OpenConceptLab/ocl_issues/issues/1760) | added more summaries in monthly usage report
+##### 2.3.74 - Wed Mar 6 03:31:07 2024 +0000
+- Merge pull request #644 from OpenConceptLab/contributor_start
+- Contribution doc with getting started process
+- Collection Reference Delete | Job to readd references to take less
+- Collection reference remove timing out
+- [OpenConceptLab/ocl_issues#1757](https://github.com/OpenConceptLab/ocl_issues/issues/1757) | added logo_url in users list response | removed redundant condition
+- [OpenConceptLab/ocl_issues#1764](https://github.com/OpenConceptLab/ocl_issues/issues/1764) | reference expression cascade within valueset context
+- Added 3 map types
+- Updated db index for concept/mapping repo resources query
+- Collection concepts/mappings view to set instance on request for references
+- [OpenConceptLab/ocl_issues#1756](https://github.com/OpenConceptLab/ocl_issues/issues/1756) | added logo url in org list response
+- [OpenConceptLab/ocl_issues#1760](https://github.com/OpenConceptLab/ocl_issues/issues/1760) | fixing sorting
+- [OpenConceptLab/ocl_issues#1760](https://github.com/OpenConceptLab/ocl_issues/issues/1760) | fixing monthly report mapping count
+- Migrations for indexes
+- [OpenConceptLab/ocl_issues#1756](https://github.com/OpenConceptLab/ocl_issues/issues/1756) | user summary to have bookmark count
+- Concept/Mapping Indexes for repo version listing
+- [OpenConceptLab/ocl_issues#1746](https://github.com/OpenConceptLab/ocl_issues/issues/1746) | fixing toggles fixtures
+- [OpenConceptLab/ocl_issues#1746](https://github.com/OpenConceptLab/ocl_issues/issues/1746) | concept/mapping new version creation error
+- [OpenConceptLab/ocl_issues#1746](https://github.com/OpenConceptLab/ocl_issues/issues/1746) | concept/mapping new version creation to compare checksum and fail if same
+- Errbit | fixing autoexand off collection summary
+- [OpenConceptLab/ocl_issues#1746](https://github.com/OpenConceptLab/ocl_issues/issues/1746) | Concepts/Mappings standard checksums | added external_id, retired and descriptions
+- [OpenConceptLab/ocl_issues#1746](https://github.com/OpenConceptLab/ocl_issues/issues/1746) | refactoring | extracting mapping/concept common method for version creation
+- [OpenConceptLab/ocl_issues#1746](https://github.com/OpenConceptLab/ocl_issues/issues/1746) | refactoring mappings version create method
+- [OpenConceptLab/ocl_issues#1746](https://github.com/OpenConceptLab/ocl_issues/issues/1746) | refactoring concepts version create method
+- [OpenConceptLab/ocl_issues#1747](https://github.com/OpenConceptLab/ocl_issues/issues/1747) | Mappings to use resolve operations
+- Update README.md
+- Update README.md
+- [OpenConceptLab/ocl_issues#1732](https://github.com/OpenConceptLab/ocl_issues/issues/1732) | added toggle for canonical resolution
+- Trying to address verify_certs=False not working
+- Follow up to adding ES_VERIFY_CERTS and proper handling of bool
+- Add ES_VERIFY_CERTS to support https traffic without configuring certificates
+- Merge pull request #643 from OpenConceptLab/issue-1729
+- [OpenConceptLab/ocl_issues#1729](https://github.com/OpenConceptLab/ocl_issues/issues/1729) | buffered file reading
+- [OpenConceptLab/ocl_issues#1729](https://github.com/OpenConceptLab/ocl_issues/issues/1729) | removed unused package
+- [OpenConceptLab/ocl_issues#1729](https://github.com/OpenConceptLab/ocl_issues/issues/1729) | Azure Blob Storage Class for exports/uploads
+- utils | removed unused methods and added missing tests
+- [OpenConceptLab/ocl_issues#1691](https://github.com/OpenConceptLab/ocl_issues/issues/1691) | checksums repo version diff | return new mnemonics
+- [OpenConceptLab/ocl_issues#1732](https://github.com/OpenConceptLab/ocl_issues/issues/1732) | removed redundant check
+- [OpenConceptLab/ocl_issues#1732](https://github.com/OpenConceptLab/ocl_issues/issues/1732) | refactoring entry and lookup methods
+- [OpenConceptLab/ocl_issues#1732](https://github.com/OpenConceptLab/ocl_issues/issues/1732) | raise 404 if owner is provided in request URL but not found
+- [OpenConceptLab/ocl_issues#1732](https://github.com/OpenConceptLab/ocl_issues/issues/1732) | lookup operation is not using resolve reference operation
+- Adding missing test coverage
+- Removed system/admin API to dedupe concept versions
+- [OpenConceptLab/ocl_issues#1732](https://github.com/OpenConceptLab/ocl_issues/issues/1732) | resolve reference operation to resolve canonical using new rules of url registry
+- [OpenConceptLab/ocl_issues#1691](https://github.com/OpenConceptLab/ocl_issues/issues/1691) | extract checksums diff class
+- [OpenConceptLab/ocl_issues#1732](https://github.com/OpenConceptLab/ocl_issues/issues/1732) | URL registry lookup operation | using owner entries or global not both
+- [OpenConceptLab/ocl_issues#1732](https://github.com/OpenConceptLab/ocl_issues/issues/1732) | URL registry lookup operation | fixing when repo not found
+- [OpenConceptLab/ocl_issues#1732](https://github.com/OpenConceptLab/ocl_issues/issues/1732) | URL registry lookup operation
+- [OpenConceptLab/ocl_issues#1691](https://github.com/OpenConceptLab/ocl_issues/issues/1691) | source compare is not swagger ready
+- [OpenConceptLab/ocl_issues#1732](https://github.com/OpenConceptLab/ocl_issues/issues/1732) | URL registry | updated type
+- [OpenConceptLab/ocl_issues#1732](https://github.com/OpenConceptLab/ocl_issues/issues/1732) | URL registry | search scopes and owner
+- [OpenConceptLab/ocl_issues#1691](https://github.com/OpenConceptLab/ocl_issues/issues/1691) | fixing pylint
+- [OpenConceptLab/ocl_issues#1691](https://github.com/OpenConceptLab/ocl_issues/issues/1691) | source version compare API using checksums
+- [OpenConceptLab/ocl_issues#1735](https://github.com/OpenConceptLab/ocl_issues/issues/1735) | version exports | fixing test
+- [OpenConceptLab/ocl_issues#1735](https://github.com/OpenConceptLab/ocl_issues/issues/1735) | version exports | added time taken
+- Turning on checksums toggle on staging/prod
+- [OpenConceptLab/ocl_issues#1732](https://github.com/OpenConceptLab/ocl_issues/issues/1732) | URL registry | fixing namespace and uniq clauses
+- [OpenConceptLab/ocl_issues#1732](https://github.com/OpenConceptLab/ocl_issues/issues/1732) | URL registry | fixing namespace and uniq clauses
+- [OpenConceptLab/ocl_issues#1732](https://github.com/OpenConceptLab/ocl_issues/issues/1732) | fixing pylint
+- [OpenConceptLab/ocl_issues#1732](https://github.com/OpenConceptLab/ocl_issues/issues/1732) | URL registry CRUD
+- [OpenConceptLab/ocl_issues#1732](https://github.com/OpenConceptLab/ocl_issues/issues/1732) | fixing uniq check
+- [OpenConceptLab/ocl_issues#1732](https://github.com/OpenConceptLab/ocl_issues/issues/1732) | fixing pylint
+- Collections | added search meta results
+- [OpenConceptLab/ocl_issues#1732](https://github.com/OpenConceptLab/ocl_issues/issues/1732) | Global/Org/User URL Registry List/Search/Create APIs
+- [OpenConceptLab/ocl_issues#1729](https://github.com/OpenConceptLab/ocl_issues/issues/1729) | Refactoring services | creating dir structure
+- [OpenConceptLab/ocl_issues#1729](https://github.com/OpenConceptLab/ocl_issues/issues/1729) | refactoring export service to have an interface for other cloud service to implement
+- [OpenConceptLab/ocl_issues#1728](https://github.com/OpenConceptLab/ocl_issues/issues/1728) Fixing test
+- [OpenConceptLab/ocl_issues#1728](https://github.com/OpenConceptLab/ocl_issues/issues/1728) Support db user, redis and es credentials
+- [OpenConceptLab/ocl_issues#957](https://github.com/OpenConceptLab/ocl_issues/issues/957) | fixing typo
+- [OpenConceptLab/ocl_issues#957](https://github.com/OpenConceptLab/ocl_issues/issues/957) | importers | indexing job to take a bigger batch and iterate using iterator
+- [OpenConceptLab/ocl_issues#957](https://github.com/OpenConceptLab/ocl_issues/issues/957) | importers | indexing current latest and version objects for concept/mapping
+- [OpenConceptLab/ocl_issues#957](https://github.com/OpenConceptLab/ocl_issues/issues/957) | importers | using pop more
+- [OpenConceptLab/ocl_issues#957](https://github.com/OpenConceptLab/ocl_issues/issues/957) | ES batch indexes | extract doc
+- [OpenConceptLab/ocl_issues#957](https://github.com/OpenConceptLab/ocl_issues/issues/957) | DB Indexes for source/collection/mapping/concept for ES indexing
+- removed ES strict mapping from concepts/mappings
+- [OpenConceptLab/ocl_issues#1720](https://github.com/OpenConceptLab/ocl_issues/issues/1720) | added logs for Openmrs validation schema collection conflicting name
+- [OpenConceptLab/ocl_issues#1682](https://github.com/OpenConceptLab/ocl_issues/issues/1682) | Added index
+- [OpenConceptLab/ocl_issues#1686](https://github.com/OpenConceptLab/ocl_issues/issues/1686) | Repos facets class
+- [OpenConceptLab/ocl_issues#1703](https://github.com/OpenConceptLab/ocl_issues/issues/1703) | removed unused facets
+- [OpenConceptLab/ocl_issues#1682](https://github.com/OpenConceptLab/ocl_issues/issues/1682) | Auto assign sort order based on max prev sort order
+- [OpenConceptLab/ocl_issues#1713](https://github.com/OpenConceptLab/ocl_issues/issues/1713) Fix reading DB_CURSOR_ON env
+- [OpenConceptLab/ocl_issues#1710](https://github.com/OpenConceptLab/ocl_issues/issues/1710) | facets exlusions for global scope
+- [OpenConceptLab/ocl_issues#1713](https://github.com/OpenConceptLab/ocl_issues/issues/1713) POST CodeSystem and ValueSet fails due to DB cursor being unsupported
+- [OpenConceptLab/ocl_issues#1710](https://github.com/OpenConceptLab/ocl_issues/issues/1710) | facets to not include source versions in global results
+- [OpenConceptLab/ocl_issues#1710](https://github.com/OpenConceptLab/ocl_issues/issues/1710) | added swagger header for latest repo search header
+- [OpenConceptLab/ocl_issues#1710](https://github.com/OpenConceptLab/ocl_issues/issues/1710) | include latest search by header
+- [OpenConceptLab/ocl_issues#937](https://github.com/OpenConceptLab/ocl_issues/issues/937) | updated Readme:
+- [OpenConceptLab/ocl_issues#937](https://github.com/OpenConceptLab/ocl_issues/issues/937) | disabling profiler by default in dev env
+- [OpenConceptLab/ocl_issues#937](https://github.com/OpenConceptLab/ocl_issues/issues/937) | django-silk profiler
+- [OpenConceptLab/ocl_issues#1709](https://github.com/OpenConceptLab/ocl_issues/issues/1709) | fixing pylint
+- [OpenConceptLab/ocl_issues#1683](https://github.com/OpenConceptLab/ocl_issues/issues/1683) | Source setting for autoid uuid for locales
+- [OpenConceptLab/ocl_issues#1709](https://github.com/OpenConceptLab/ocl_issues/issues/1709) | OpenMRS Validation schema to accept all different forms of index term and short name name types
+- Add ability to only clear org
+- [OpenConceptLab/ocl_issues#1415](https://github.com/OpenConceptLab/ocl_issues/issues/1415) Adjusting import script
+- [OpenConceptLab/ocl_issues#1702](https://github.com/OpenConceptLab/ocl_issues/issues/1702) | SSO registration url redirect API
+- Fixing swagger error
+- [OpenConceptLab/ocl_issues#1663](https://github.com/OpenConceptLab/ocl_issues/issues/1663) | fixing test
+- [OpenConceptLab/ocl_issues#1663](https://github.com/OpenConceptLab/ocl_issues/issues/1663) | added company and location to user from SSO claims
+- API/tasks to remove duplicate versions of concepts | adding logs
+- API/tasks to remove duplicate versions of concepts
+- Revert "Added default keycloak env var for local"
+- Added default keycloak env var for local
+- Removed retry policy
+- Never retry bulk import tasks
+- batch index to have single batch mode for source/collections of an org/user
+- fixing tests
+- batch index to use iterator in non test mode
+- batch index to use iterator on queryset and not limit offset
+- [OpenConceptLab/ocl_issues#1701](https://github.com/OpenConceptLab/ocl_issues/issues/1701) | search by canonical url
+- [OpenConceptLab/ocl_issues#1686](https://github.com/OpenConceptLab/ocl_issues/issues/1686) | removed unused import
+- [OpenConceptLab/ocl_issues#1686](https://github.com/OpenConceptLab/ocl_issues/issues/1686) | user org repo search API
+- [OpenConceptLab/ocl_issues#1686](https://github.com/OpenConceptLab/ocl_issues/issues/1686) | Repos search API
+- [OpenConceptLab/ocl_issues#1415](https://github.com/OpenConceptLab/ocl_issues/issues/1415) Fixing tests
+- [OpenConceptLab/ocl_issues#1415](https://github.com/OpenConceptLab/ocl_issues/issues/1415) Implement automated import scripts for FHIR HL7 content
+- Root View | URL to have correct HOST scheme
+- [OpenConceptLab/ocl_issues#1679](https://github.com/OpenConceptLab/ocl_issues/issues/1679) | removing ref concepts/mappings correctly
+- [OpenConceptLab/ocl_issues#1674](https://github.com/OpenConceptLab/ocl_issues/issues/1674) | Adding checksums to bundle response | checksums in all concept/mapping responses
+- [OpenConceptLab/ocl_issues#1674](https://github.com/OpenConceptLab/ocl_issues/issues/1674) | added checksums in export
+- [OpenConceptLab/ocl_issues#1674](https://github.com/OpenConceptLab/ocl_issues/issues/1674) | reafactoring and adding tests
+- [OpenConceptLab/ocl_issues#1674](https://github.com/OpenConceptLab/ocl_issues/issues/1674) | cleaning checksum model methods
+- [OpenConceptLab/ocl_issues#1674](https://github.com/OpenConceptLab/ocl_issues/issues/1674) | Adding checksums response headers
+- [OpenConceptLab/ocl_issues#1674](https://github.com/OpenConceptLab/ocl_issues/issues/1674) | Adding checksums calculations
+- [OpenConceptLab/ocl_issues#1674](https://github.com/OpenConceptLab/ocl_issues/issues/1674) | reverting algo back | added more test
+- [OpenConceptLab/ocl_issues#1674](https://github.com/OpenConceptLab/ocl_issues/issues/1674) | standard and smart checksums for orgs and users
+- [OpenConceptLab/ocl_issues#1674](https://github.com/OpenConceptLab/ocl_issues/issues/1674) | Checksum Algo | not using sorting in values
+- [OpenConceptLab/ocl_issues#1674](https://github.com/OpenConceptLab/ocl_issues/issues/1674) | fixing typo
+- [OpenConceptLab/ocl_issues#1674](https://github.com/OpenConceptLab/ocl_issues/issues/1674) | standard and smart checksums should ignore None and retired/is_active when its false
+- [OpenConceptLab/ocl_issues#1674](https://github.com/OpenConceptLab/ocl_issues/issues/1674) | standard and smart checksums for source/collections
+- [OpenConceptLab/ocl_issues#1674](https://github.com/OpenConceptLab/ocl_issues/issues/1674) | standard and smart checksums for concepts/mappings
+- Concepts/Mapping updated by dynamic string mapping for ES
+- Concepts/Mapping updated by dynamic string mapping for ES
+- [OpenConceptLab/ocl_issues#1675](https://github.com/OpenConceptLab/ocl_issues/issues/1675) | adding verbosity to exception
+- Removed data migration for updated by API/tasks
+- Revert "OpenConceptLab/ocl_issues#1664 | added logs for concept next valid ID"
+- [OpenConceptLab/ocl_issues#1664](https://github.com/OpenConceptLab/ocl_issues/issues/1664) | casting mnemonic to int
+- [OpenConceptLab/ocl_issues#1664](https://github.com/OpenConceptLab/ocl_issues/issues/1664) | added logs for concept next valid ID
+- pylint | remove unused import
+- Fixing batch index processing when filters are None
+- Fixing collection/verison hard delete failure | should delete references and expansions first
+- [OpenConceptLab/ocl_issues#1672](https://github.com/OpenConceptLab/ocl_issues/issues/1672) | remove duplicate lookup values
+- [OpenConceptLab/ocl_issues#1664](https://github.com/OpenConceptLab/ocl_issues/issues/1664) | mapping/concept create to verify parent autoid seq next valiud id
+- [OpenConceptLab/ocl_issues#1659](https://github.com/OpenConceptLab/ocl_issues/issues/1659) | Mapping initial version to have the right updated_by:
+- [OpenConceptLab/ocl_issues#1664](https://github.com/OpenConceptLab/ocl_issues/issues/1664) | clone process to verify auto id seq after excluding non-number IDs
+- [OpenConceptLab/ocl_issues#1664](https://github.com/OpenConceptLab/ocl_issues/issues/1664) | clone process to verify auto id for concept/mapping
+- [OpenConceptLab/ocl_issues#1670](https://github.com/OpenConceptLab/ocl_issues/issues/1670) | swagger request body for references delete
+- [OpenConceptLab/ocl_issues#1659](https://github.com/OpenConceptLab/ocl_issues/issues/1659) | using outer ref for mapping update by update
+- [OpenConceptLab/ocl_issues#1633](https://github.com/OpenConceptLab/ocl_issues/issues/1633) | updated lables/notes
+- [OpenConceptLab/ocl_issues#1659](https://github.com/OpenConceptLab/ocl_issues/issues/1659) | not using iterator | connection pool doesn't like it.
+- [OpenConceptLab/ocl_issues#1659](https://github.com/OpenConceptLab/ocl_issues/issues/1659) | reduced chunk size
+- [OpenConceptLab/ocl_issues#1633](https://github.com/OpenConceptLab/ocl_issues/issues/1633) | removed newline
+- [OpenConceptLab/ocl_issues#1633](https://github.com/OpenConceptLab/ocl_issues/issues/1633) | Updated/Refactored Resources usage report
+- [OpenConceptLab/ocl_issues#1659](https://github.com/OpenConceptLab/ocl_issues/issues/1659) | fixing mappings API for concepts
+- [OpenConceptLab/ocl_issues#1659](https://github.com/OpenConceptLab/ocl_issues/issues/1659) | ignoring coverage
+- [OpenConceptLab/ocl_issues#1659](https://github.com/OpenConceptLab/ocl_issues/issues/1659) | refactoring queryset for better lookup
+- [OpenConceptLab/ocl_issues#1659](https://github.com/OpenConceptLab/ocl_issues/issues/1659) | renaming var and not indexing
+- [OpenConceptLab/ocl_issues#1659](https://github.com/OpenConceptLab/ocl_issues/issues/1659) | using iterator and chunks for migration
+- [OpenConceptLab/ocl_issues#1659](https://github.com/OpenConceptLab/ocl_issues/issues/1659) | refactoring tasks
+- [OpenConceptLab/ocl_issues#1659](https://github.com/OpenConceptLab/ocl_issues/issues/1659) | refactoring tasks to be more efficient
+- [OpenConceptLab/ocl_issues#1659](https://github.com/OpenConceptLab/ocl_issues/issues/1659) | Concept/Mapping updated_by migration via API/task
+- [OpenConceptLab/ocl_issues#1659](https://github.com/OpenConceptLab/ocl_issues/issues/1659) | Concept/Mapping migration to update updated by
+- [OpenConceptLab/ocl_issues#1659](https://github.com/OpenConceptLab/ocl_issues/issues/1659) | Concept/Mapping version create should updated updated by on versioned object
+- [OpenConceptLab/ocl_issues#1659](https://github.com/OpenConceptLab/ocl_issues/issues/1659) | fixing pylint
+- [OpenConceptLab/ocl_issues#1659](https://github.com/OpenConceptLab/ocl_issues/issues/1659) | added updated by in indexes | Repo summary to have contributors | Facets to have updated by filters
+- [OpenConceptLab/ocl_issues#1415](https://github.com/OpenConceptLab/ocl_issues/issues/1415) Implement automated import scripts for FHIR HL7 content
+- Merge pull request #581 from IanMinash/codesystemlookup-fix
+- [OpenConceptLab/ocl_issues#1633](https://github.com/OpenConceptLab/ocl_issues/issues/1633) | fixing test
+- [OpenConceptLab/ocl_issues#1633](https://github.com/OpenConceptLab/ocl_issues/issues/1633) | Resource usage reports | updated swagger | can add custom dates
+- [OpenConceptLab/ocl_issues#1633](https://github.com/OpenConceptLab/ocl_issues/issues/1633) | Resource usage reports | feedbacks and refactoring
+- Switch body to OperationOutcome for empty queryset
 ##### 2.3.50 - Sat Oct 7 00:24:12 2023 +0000
 - Revert "OpenConceptLab/ocl_issues#1664 | added logs for concept next valid ID"
 - [OpenConceptLab/ocl_issues#1664](https://github.com/OpenConceptLab/ocl_issues/issues/1664) | casting mnemonic to int
