@@ -913,6 +913,20 @@ class CollectionReference(models.Model):
                         versions.append(version)
         return versions
 
+    @cached_property
+    def resolve_valueset_versions_with_unresolved(self):
+        versions = []
+        unresolved = []
+        if isinstance(self.valueset, list):
+            for valueset in self.valueset:  # pylint: disable=not-an-iterable
+                if valueset:
+                    version, _ = Collection.resolve_reference_expression(valueset, self.namespace)
+                    if version.id:
+                        versions.append(version)
+                    else:
+                        unresolved.append({'url': valueset, 'namespace': self.namespace, 'type': 'reference.valueset'})
+        return versions, unresolved
+
     def clean(self):
         if not self.is_valid_filter():
             raise ValidationError({'filter': ['Invalid filter schema.']})
@@ -1042,6 +1056,7 @@ class Expansion(BaseResourceModel):
         'collections.Collection', related_name='expansions_resolved_collection_versions_set')
     resolved_source_versions = models.ManyToManyField(
         'sources.Source', related_name='expansions_resolved_source_versions_set')
+    unresolved_repo_versions = ArrayField(models.JSONField(), default=list, null=True, blank=True)
 
     @property
     def is_auto_generated(self):
@@ -1194,10 +1209,11 @@ class Expansion(BaseResourceModel):
             batch_index_resources.apply_async(('concept', concepts_filters), queue='indexing', permanent=False)
             batch_index_resources.apply_async(('mapping', mappings_filters), queue='indexing', permanent=False)
 
-    def add_references(self, references, index=True, is_adding_all=False, attempt_reevaluate=True):  # pylint: disable=too-many-locals,too-many-statements
+    def add_references(self, references, index=True, is_adding_all=False, attempt_reevaluate=True):  # pylint: disable=too-many-locals,too-many-statements,too-many-branches
         include_refs, exclude_refs = self.to_ref_list_separated(references)
         resolved_valueset_versions = []
         resolved_system_versions = []
+        unresolved_repo_versions = []
         _system_version_cache = {}
 
         if not is_adding_all:
@@ -1223,6 +1239,8 @@ class Expansion(BaseResourceModel):
                 _system_version_cache[_cache_key] = version
                 if version.id:
                     include_system_versions.append(version)
+                else:
+                    unresolved_repo_versions.append({'url': _system, 'type': 'expansion.parameters.system-version'})
 
         def get_ref_system_version(ref):
             if ref.system:
@@ -1235,7 +1253,10 @@ class Expansion(BaseResourceModel):
         def get_ref_results(ref):
             nonlocal resolved_valueset_versions
             nonlocal resolved_system_versions
-            resolved_valueset_versions += ref.resolve_valueset_versions
+            nonlocal unresolved_repo_versions
+            _resolved_valueset_versions, _unresolved_valueset_versions = ref.resolve_valueset_versions_with_unresolved
+            resolved_valueset_versions += _resolved_valueset_versions
+            unresolved_repo_versions += _unresolved_valueset_versions
             ref_system_versions = []
             should_use_ref_system_version = True
             for _system_version in include_system_versions:
@@ -1247,6 +1268,15 @@ class Expansion(BaseResourceModel):
                 _system_version = get_ref_system_version(ref)
                 if _system_version:
                     ref_system_versions.append(_system_version)
+                elif ref.system:
+                    unresolved_repo_versions.append(
+                        {
+                            'url': ref.system,
+                            'namespace': ref.namespace,
+                            'version': ref.version,
+                            'type': 'reference.system'
+                        }
+                    )
             if ref_system_versions:
                 ref_system_versions = list(set(ref_system_versions))
 
@@ -1286,6 +1316,9 @@ class Expansion(BaseResourceModel):
 
         self.resolved_collection_versions.add(*compact(resolved_valueset_versions))
         self.resolved_source_versions.add(*compact(resolved_system_versions))
+        if unresolved_repo_versions:
+            self.unresolved_repo_versions = unresolved_repo_versions
+            self.save()
         self.dedupe_resources()
         if index:
             self.index_resources(index_concepts, index_mappings)
@@ -1344,6 +1377,8 @@ class Expansion(BaseResourceModel):
     def clean(self):
         if not self.parameters:
             self.parameters = default_expansion_parameters()
+        if not self.unresolved_repo_versions:
+            self.unresolved_repo_versions = []
 
         super().clean()
 

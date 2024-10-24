@@ -1080,6 +1080,7 @@ class TasksTest(OCLTestCase):
             collection.id,
             'sourcemappings'
         )
+
         self.assertEqual(len(added_references), 4)
         self.assertEqual(errors, {})
         self.assertListEqual(
@@ -1098,6 +1099,65 @@ class TasksTest(OCLTestCase):
         self.assertEqual(
             sorted(list(expansion.mappings.values_list('uri', flat=True))),
             sorted([mapping1.url, mapping2.get_latest_version().url])
+        )
+        self.assertEqual(expansion.unresolved_repo_versions, [])
+        self.assertEqual(expansion.resolved_collection_versions.count(), 0)
+        self.assertEqual(expansion.resolved_source_versions.count(), 3)
+        self.assertEqual(
+            sorted(list(expansion.resolved_source_versions.values_list('uri', flat=True))),
+            sorted([concept1.parent.uri, concept2.parent.uri, mapping2.parent.uri])
+        )
+
+        added_references, errors = add_references(
+            collection.created_by.id,
+            [
+                {'system': 'http://foo-system.com', 'namespace': 'barbar', 'code': 'bar'},
+                {'system': 'http://foo-system2.com|v1',
+                 'valueset': ['http://foo-valueset.com', '/orgs/Org/collections/Collection/123/'],
+                 'code': 'bar'},
+            ],
+            collection.id,
+            'sourcemappings'
+        )
+        expansion.refresh_from_db()
+
+        self.assertEqual(len(added_references), 2)
+        self.assertEqual(errors, {})
+        self.assertListEqual(
+            sorted(list(
+                collection.references.values_list('expression', flat=True)
+            )),
+            sorted([
+                concept1.get_latest_version().url,
+                concept2.get_latest_version().url,
+                mapping1.url,
+                mapping2.get_latest_version().url,
+                'http://foo-system.com/concepts/bar/',
+                'http://foo-system2.com|v1/concepts/bar/'
+            ])
+        )
+        self.assertEqual(
+            sorted(list(expansion.concepts.values_list('uri', flat=True))),
+            sorted([concept1.get_latest_version().url, concept2.get_latest_version().url])
+        )
+        self.assertEqual(
+            sorted(list(expansion.mappings.values_list('uri', flat=True))),
+            sorted([mapping1.url, mapping2.get_latest_version().url])
+        )
+        self.assertEqual(
+            expansion.unresolved_repo_versions,
+            [
+                {'url': 'http://foo-system.com', 'type': 'reference.system', 'version': None, 'namespace': 'barbar'},
+                {'url': 'http://foo-valueset.com', 'type': 'reference.valueset', 'namespace': None},
+                {'url': '/orgs/Org/collections/Collection/123/', 'type': 'reference.valueset', 'namespace': None},
+                {'url': 'http://foo-system2.com|v1', 'type': 'reference.system', 'version': None, 'namespace': None}
+            ]
+        )
+        self.assertEqual(expansion.resolved_collection_versions.count(), 0)
+        self.assertEqual(expansion.resolved_source_versions.count(), 3)
+        self.assertEqual(
+            sorted(list(expansion.resolved_source_versions.values_list('uri', flat=True))),
+            sorted([concept1.parent.uri, concept2.parent.uri, mapping2.parent.uri])
         )
 
     @patch('core.collections.models.Collection.index_children')

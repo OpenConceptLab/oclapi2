@@ -590,7 +590,7 @@ class ExpansionDetailSerializer(ModelSerializer):
         model = Expansion
         fields = (
             'mnemonic', 'id', 'parameters', 'canonical_url', 'url', 'summary', 'created_on', 'created_by',
-            'is_processing', 'resolved_collection_versions', 'resolved_source_versions'
+            'is_processing', 'resolved_collection_versions', 'resolved_source_versions', 'unresolved_repo_versions'
         )
 
     def __init__(self, *args, **kwargs):
