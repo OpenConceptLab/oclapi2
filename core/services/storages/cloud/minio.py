@@ -25,7 +25,7 @@ class MinIO(CloudStorageServiceInterface):
         if not self.client.bucket_exists(self.bucket_name):
             self.client.make_bucket(self.bucket_name)
 
-    def upload_file(self, key, file_path=None, headers=None, binary=False, metadata=None):
+    def upload_file(self, key, file_path=None, headers=None, binary=False, metadata=None):  # pylint: disable=too-many-arguments
         """
         Uploads a file to MinIO.
         """
@@ -34,9 +34,9 @@ class MinIO(CloudStorageServiceInterface):
                                              metadata=metadata)
             return result.object_name
         except S3Error as e:
-            raise Exception(f"Could not upload file {key} to MinIO. Error: {e}")
+            raise Exception(f"Could not upload file {key} to MinIO. Error: {e}") from e  # pylint: disable=broad-exception-raised
 
-    def upload_base64(self, doc_base64, file_name, append_extension=True, public_read=False, headers=None):
+    def upload_base64(self, doc_base64, file_name, append_extension=True, public_read=False, headers=None):  # pylint: disable=too-many-arguments
         """
         Uploads via base64 content with file name
         """
@@ -48,7 +48,7 @@ class MinIO(CloudStorageServiceInterface):
             pass
 
         if not _format or not _doc_string:  # pragma: no cover
-            return
+            return None
 
         if append_extension:
             file_name_with_ext = file_name + "." + _format.split('/')[-1]
@@ -74,7 +74,7 @@ class MinIO(CloudStorageServiceInterface):
                                    )
             return file_name_with_ext
         except S3Error as e:
-            raise Exception(f"Could not upload base64 file {file_name_with_ext} to MinIO. Error: {e}")
+            raise Exception(f"Could not upload base64 file {file_name_with_ext} to MinIO. Error: {e}") from e  # pylint: disable=broad-exception-raised
 
     def url_for(self, file_path):
         """
@@ -84,7 +84,7 @@ class MinIO(CloudStorageServiceInterface):
             return self.client.get_presigned_url(method='GET', bucket_name=self.bucket_name, object_name=file_path) \
                 if file_path else None
         except S3Error as e:
-            raise Exception(f"Could not generate presigned URL for file {file_path}. Error: {e}")
+            raise Exception(f"Could not generate presigned URL for file {file_path}. Error: {e}") from e  # pylint: disable=broad-exception-raised
 
     def public_url_for(self, file_path):
         """
@@ -97,7 +97,7 @@ class MinIO(CloudStorageServiceInterface):
                 url = url.replace('http://', 'https://')
             return url
         except S3Error as e:
-            raise Exception(f"Could not generate public URL for file {file_path}. Error: {e}")
+            raise Exception(f"Could not generate public URL for file {file_path}. Error: {e}") from e  # pylint: disable=broad-exception-raised
 
     def exists(self, key):
         """
@@ -106,7 +106,7 @@ class MinIO(CloudStorageServiceInterface):
         try:
             self.client.stat_object(bucket_name=self.bucket_name, object_name=key)
             return True
-        except:
+        except:  # pylint: disable=bare-except
             return False
 
     def has_path(self, prefix='/', delimiter='/'):
@@ -122,7 +122,7 @@ class MinIO(CloudStorageServiceInterface):
                                                                                                                '0')
             return get(key, 'Key')
         except S3Error as e:
-            raise Exception(f"Could not fetch last key from path {prefix}. Error: {e}")
+            raise Exception(f"Could not fetch last key from path {prefix}. Error: {e}") from e  # pylint: disable=broad-exception-raised
 
     def delete_objects(self, path):
         """
@@ -136,9 +136,9 @@ class MinIO(CloudStorageServiceInterface):
             errors = self.client.remove_objects(bucket_name=self.bucket_name, delete_object_list=delete_object_list)
 
             for error in errors:
-                raise Exception(f"Could not delete object {error.code}. {error.message}. Error: {error}")
+                raise Exception(f"Could not delete object {error.code}. {error.message}. Error: {error}")  # pylint: disable=broad-exception-raised
         except S3Error as e:
-            raise Exception(f"Error occurred during delete operation. Error: {e}")
+            raise Exception(f"Error occurred during delete operation. Error: {e}") from e  # pylint: disable=broad-exception-raised
 
     def remove(self, key):
         """
@@ -147,7 +147,7 @@ class MinIO(CloudStorageServiceInterface):
         try:
             self.client.remove_object(bucket_name=self.bucket_name, object_name=key)
         except S3Error as e:
-            raise Exception(f"Could not delete file {key} from MinIO. Error: {e}")
+            raise Exception(f"Could not delete file {key} from MinIO. Error: {e}") from e  # pylint: disable=broad-exception-raised
 
     def __fetch_keys(self, prefix, delimiter):
         """
@@ -159,7 +159,7 @@ class MinIO(CloudStorageServiceInterface):
             objects = self.client.list_objects(bucket_name=self.bucket_name, prefix=prefix, recursive=True)
             return [{'Key': k} for k in [obj.object_name for obj in objects]]
         except S3Error as e:
-            raise Exception(f"Could not fetch keys from bucket {self.bucket_name}. Error: {e}")
+            raise Exception(f"Could not fetch keys from bucket {self.bucket_name}. Error: {e}") from e  # pylint: disable=broad-exception-raised
 
     def get_object(self, key):
         """
@@ -181,7 +181,7 @@ class MinIO(CloudStorageServiceInterface):
             streaming_http_response['Content-Disposition'] = f'attachment; filename={key.split("/")[-1]}'
             return streaming_http_response
         except S3Error as e:
-            raise FileNotFoundError(f"File {key} not found in bucket {self.bucket_name}. Error: {e}")
+            raise FileNotFoundError(f"File {key} not found in bucket {self.bucket_name}. Error: {e}") from e
 
     @staticmethod
     def file_iterator(file_obj, chunk_size=8192):

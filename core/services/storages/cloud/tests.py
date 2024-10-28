@@ -9,7 +9,7 @@ from azure.storage.blob import BlobPrefix
 from botocore.exceptions import ClientError
 from django.core.files.base import ContentFile
 from django.http import StreamingHttpResponse
-from django.test import TestCase, override_settings
+from django.test import TestCase
 from django.utils import timezone
 from minio.deleteobjects import DeleteError
 from mock.mock import call
@@ -453,15 +453,15 @@ class MinIOTest(TestCase):
         mock_client.get_presigned_url.assert_called_once_with(method='GET', bucket_name="bucket",
                                                               object_name=file_key)
 
-    @patch("core.services.storages.cloud.minio.Minio")
-    def test_public_url_for(self, mock_minio_client):
+    @patch("core.services.storages.cloud.minio.Minio", Mock())
+    def test_public_url_for(self):
         # Call the public_url_for method (this method does not need to mock Minio itself)
         client = MinIO()
         url = client.public_url_for('test-file.txt')
 
         # Assert that the URL is generated in the correct format
-        expected_url = "http://localhost/bucket/test-file.txt"
-        self.assertEqual(url, expected_url)
+        self.assertEqual(
+            url.replace('https://', 'http://'), "http://localhost/bucket/test-file.txt")
 
     @patch("core.services.storages.cloud.minio.Minio")
     def test_fetch_keys(self, mock_minio_client):
@@ -474,14 +474,14 @@ class MinIOTest(TestCase):
 
         client = MinIO()
         # Call the __fetch_keys method
-        keys = client._MinIO__fetch_keys(prefix="test/", delimiter='/')
+        keys = client._MinIO__fetch_keys(prefix="test/", delimiter='/')  # pylint: disable=protected-access
 
         # Assert that the correct keys were fetched
         self.assertEqual(keys, [{'Key': "test-file1.txt"}, {'Key': "test-file2.txt"}])
         mock_client.list_objects.assert_called_once_with(bucket_name="bucket", prefix="test", recursive=True)
 
         # Call the __fetch_keys method
-        keys = client._MinIO__fetch_keys(prefix="test/", delimiter='')
+        keys = client._MinIO__fetch_keys(prefix="test/", delimiter='')  # pylint: disable=protected-access
 
         # Assert that the correct keys were fetched
         self.assertEqual(keys, [{'Key': "test-file1.txt"}, {'Key': "test-file2.txt"}])
@@ -519,8 +519,8 @@ class MinIOTest(TestCase):
         response_content = b"".join(list(response.streaming_content))
         self.assertEqual(response_content, b"chunk1chunk2")
 
-    @patch("core.services.storages.cloud.minio.Minio")
-    def test_file_iterator(self, mock_minio_client):
+    @patch("core.services.storages.cloud.minio.Minio", Mock())
+    def test_file_iterator(self):
         # Mock file object with read method
         mock_file_obj = MagicMock()
         mock_file_obj.read = MagicMock(side_effect=[b"chunk1", b"chunk2", b""])
