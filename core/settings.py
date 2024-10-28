@@ -580,3 +580,10 @@ if ENV == 'development':
     # MIDDLEWARE = [*MIDDLEWARE, "silk.middleware.SilkyMiddleware"]
     # SILKY_PYTHON_PROFILER = True
     # SILKY_PYTHON_PROFILER_RESULT_PATH = '/code/core/'
+
+# MINIO storage settings
+MINIO_ENDPOINT = os.environ.get('MINIO_ENDPOINT', '')
+MINIO_ACCESS_KEY = os.environ.get('MINIO_ACCESS_KEY', '')
+MINIO_SECRET_KEY = os.environ.get('MINIO_SECRET_KEY', '')
+MINIO_BUCKET_NAME = os.environ.get('MINIO_BUCKET_NAME', '')
+MINIO_SECURE = os.environ.get('MINIO_SECURE') == 'TRUE'

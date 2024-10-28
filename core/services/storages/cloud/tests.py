@@ -2,19 +2,22 @@ import base64
 import io
 import os
 from datetime import timedelta
-from unittest.mock import Mock, patch, mock_open, ANY
+from unittest.mock import Mock, patch, mock_open, ANY, MagicMock
 
 import boto3
 from azure.storage.blob import BlobPrefix
 from botocore.exceptions import ClientError
 from django.core.files.base import ContentFile
-from django.test import TestCase
+from django.http import StreamingHttpResponse
+from django.test import TestCase, override_settings
 from django.utils import timezone
+from minio.deleteobjects import DeleteError
 from mock.mock import call
 from moto import mock_s3
 
 from core.services.storages.cloud.aws import S3
 from core.services.storages.cloud.azure import BlobStorage
+from core.services.storages.cloud.minio import MinIO
 
 
 class S3Test(TestCase):
@@ -391,3 +394,155 @@ class BlobStorageTest(TestCase):
 
         container_client_mock.get_blob_client.assert_called_once_with(blob='foo/bar/foobar.json')
         client_mock.delete_blob.assert_called_once()
+
+
+@patch("core.services.storages.cloud.minio.settings.MINIO_ENDPOINT", "localhost")
+@patch("core.services.storages.cloud.minio.settings.MINIO_ACCESS_KEY", "access_key")
+@patch("core.services.storages.cloud.minio.settings.MINIO_SECRET_KEY", "secret_key")
+@patch("core.services.storages.cloud.minio.settings.MINIO_BUCKET_NAME", "bucket")
+class MinIOTest(TestCase):
+
+    @patch("core.services.storages.cloud.minio.Minio")
+    def test_minio_client_instantiated_with_env_vars(self, mock_minio_client):
+        """
+        Test if MinIO correctly picks up and instantiates
+        the MinIO client using environment variables.
+        """
+        # Initialize MinIO without passing in credentials directly,
+        # assuming that the class reads them from environment variables.
+        client = MinIO()
+
+        # Assert that the MinIO client was instantiated with the values from os.environ
+        mock_minio_client.assert_called_once_with(
+            endpoint="localhost",
+            access_key="access_key",
+            secret_key="secret_key",
+            secure=False  # Assuming your class uses secure connections; adjust if needed
+        )
+
+        # Verify that the bucket name was set correctly from the environment variables
+        self.assertEqual(client.bucket_name, "bucket")
+
+    @patch("core.services.storages.cloud.minio.Minio")
+    def test_upload_base64(self, mock_minio_client):
+        # Mock put_object method
+        mock_client = mock_minio_client.return_value
+        mock_client.put_object = MagicMock()
+        client = MinIO()
+
+        # Call the upload_base64 method
+        base64_data = base64.b64encode(b'test content')  # "test content" in base64
+        client.upload_base64(file_name='test-file', doc_base64='extension/ext;base64,' + base64_data.decode())
+
+        # Assert that the put_object method was called with correct parameters
+        mock_client.put_object.assert_called_once()
+
+    @patch("core.services.storages.cloud.minio.Minio")
+    def test_url_for(self, mock_minio_client):
+        mock_client = mock_minio_client.return_value
+        mock_client.get_presigned_url = MagicMock(return_value="http://mock_url")
+
+        client = MinIO()
+        file_key = "test-file.txt"
+
+        # Call the url_for method
+        url = client.url_for(file_key)
+
+        # Assert that the URL is generated correctly
+        self.assertEqual(url, "http://mock_url")
+        mock_client.get_presigned_url.assert_called_once_with(method='GET', bucket_name="bucket",
+                                                              object_name=file_key)
+
+    @patch("core.services.storages.cloud.minio.Minio")
+    def test_public_url_for(self, mock_minio_client):
+        # Call the public_url_for method (this method does not need to mock Minio itself)
+        client = MinIO()
+        url = client.public_url_for('test-file.txt')
+
+        # Assert that the URL is generated in the correct format
+        expected_url = "http://localhost/bucket/test-file.txt"
+        self.assertEqual(url, expected_url)
+
+    @patch("core.services.storages.cloud.minio.Minio")
+    def test_fetch_keys(self, mock_minio_client):
+        # Mock list_objects method
+        mock_client = mock_minio_client.return_value
+        mock_client.list_objects = MagicMock(return_value=[
+            MagicMock(object_name="test-file1.txt"),
+            MagicMock(object_name="test-file2.txt")
+        ])
+
+        client = MinIO()
+        # Call the __fetch_keys method
+        keys = client._MinIO__fetch_keys(prefix="test/", delimiter='/')
+
+        # Assert that the correct keys were fetched
+        self.assertEqual(keys, [{'Key': "test-file1.txt"}, {'Key': "test-file2.txt"}])
+        mock_client.list_objects.assert_called_once_with(bucket_name="bucket", prefix="test", recursive=True)
+
+        # Call the __fetch_keys method
+        keys = client._MinIO__fetch_keys(prefix="test/", delimiter='')
+
+        # Assert that the correct keys were fetched
+        self.assertEqual(keys, [{'Key': "test-file1.txt"}, {'Key': "test-file2.txt"}])
+        mock_client.list_objects.assert_called_with(bucket_name="bucket", prefix="test/", recursive=True)
+
+    @patch("core.services.storages.cloud.minio.Minio")
+    def test_delete_objects(self, mock_minio_client):
+        # Mock remove_objects method
+        mock_client = mock_minio_client.return_value
+        mock_client.remove_objects = MagicMock(return_value=[])
+
+        client = MinIO()
+        # Call the delete_objects method
+        client.delete_objects(['test-file1.txt'])
+
+        # Assert that remove_objects was called with the correct file keys
+        mock_client.remove_objects.assert_called_once()
+
+    @patch("core.services.storages.cloud.minio.Minio")
+    def test_get_streaming_response(self, mock_minio_client):
+        # Mock get_object method
+        mock_client = mock_minio_client.return_value
+        mock_file_obj = MagicMock()
+        mock_file_obj.read = MagicMock(side_effect=[b"chunk1", b"chunk2", b""])
+        mock_client.get_object = MagicMock(return_value=mock_file_obj)
+        MinIO.file_iterator(mock_file_obj)
+
+        client = MinIO()
+        # Call the get_streaming_response method
+        response = client.get_streaming_response('test-file1.txt')
+
+        # Assert that the response is a StreamingHttpResponse
+        self.assertIsInstance(response, StreamingHttpResponse)
+        # Convert response content into a list for easier assertion
+        response_content = b"".join(list(response.streaming_content))
+        self.assertEqual(response_content, b"chunk1chunk2")
+
+    @patch("core.services.storages.cloud.minio.Minio")
+    def test_file_iterator(self, mock_minio_client):
+        # Mock file object with read method
+        mock_file_obj = MagicMock()
+        mock_file_obj.read = MagicMock(side_effect=[b"chunk1", b"chunk2", b""])
+
+        # Call the file_iterator method
+        iterator = MinIO.file_iterator(mock_file_obj)
+        content = b"".join(list(iterator))
+
+        # Assert that the file_iterator yields the correct content
+        self.assertEqual(content, b"chunk1chunk2")
+        mock_file_obj.read.assert_called()
+
+    @patch("core.services.storages.cloud.minio.Minio")
+    def test_delete_objects_with_errors(self, mock_minio_client):
+        # Mock remove_objects method to raise DeleteError
+        mock_client = mock_minio_client.return_value
+        error = DeleteError("test-file.txt", Exception("Deletion failed"), '', '')
+        mock_client.remove_objects = MagicMock(return_value=[error])
+
+        client = MinIO()
+        # Assert that delete_objects raises an exception when there are errors
+        with self.assertRaises(Exception) as context:
+            client.delete_objects(['test-file.txt'])
+
+        self.assertIn("Could not delete object test-file.txt", str(context.exception))
