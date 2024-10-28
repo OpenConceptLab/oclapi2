@@ -2,12 +2,10 @@ version: '3.4'
 
 services:
   db:
-    image: postgres:14.4-alpine
     ports:
       - 5432:5432
     restart: "no"
   redis:
-    image: redis:6.0.6-alpine
     ports:
       - 6379:6379
     restart: "no"
@@ -94,7 +92,6 @@ services:
       - celery
       - redis
   es:
-    image: elasticsearch:7.17.1
     ports:
       - 9200:9200
     restart: "no"
