@@ -56,6 +56,11 @@ services:
       - AZURE_STORAGE_CONTAINER_NAME
       - AZURE_STORAGE_CONNECTION_STRING
       - FHIR_VALIDATOR_URL=${FHIR_VALIDATOR_URL-http://fhir_validator:3500}
+      - MINIO_ACCESS_KEY
+      - MINIO_BUCKET_NAME
+      - MINIO_ENDPOINT
+      - MINIO_SECRET_KEY
+      - MINIO_SECURE
     healthcheck:
       test: "curl --silent --fail http://localhost:8000/version/ || exit 1"
     volumes:

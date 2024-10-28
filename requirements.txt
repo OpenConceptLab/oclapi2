@@ -43,3 +43,4 @@ fhir.resources==7.1.0
 ijson==3.2.3
 responses==0.25.0
 pydantic==2.6.4
+minio==7.2.9
