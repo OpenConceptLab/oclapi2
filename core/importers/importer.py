@@ -191,6 +191,7 @@ class Importer:
     owner: str
     import_type: str = 'default'
     BATCH_SIZE: int = 100
+    IMPORT_CACHE: str = "import_cache/"
 
     # pylint: disable=too-many-arguments
     def __init__(self, task_id, path, username, owner_type, owner, import_type='default'):
@@ -229,9 +230,11 @@ class Importer:
                         shutil.copyfileobj(import_file.raw, temp)
                 self.path = file_url
             else:
+                if not key.startswith(self.IMPORT_CACHE):
+                    key = self.IMPORT_CACHE + self.path
                 upload_service = get_export_service()
-                if upload_service.exists(self.path):  # already uploaded by the view
-                    self.path = upload_service.url_for(self.path)
+                if upload_service.exists(key):  # already uploaded by the view
+                    self.path = key
                 else:
                     with requests.get(self.path, stream=True) as import_file:
                         if not import_file.ok:
@@ -239,7 +242,7 @@ class Importer:
                         upload_service.upload(key, import_file.raw,
                                               metadata={'ContentType': 'application/octet-stream'},
                                               headers={'content-type': 'application/octet-stream'})
-                    self.path = upload_service.url_for(key)
+                    self.path = key
 
         resources = {}
         dependencies = []
@@ -271,8 +274,11 @@ class Importer:
     def prepare_resources(self, path, resource_types, dependencies, visited_dependencies, resources):
         # pylint: disable=too-many-locals
         with open(path, 'rb') if path.startswith('/') else tempfile.NamedTemporaryFile() as temp:
+            request_path = path
             if not path.startswith('/'):  # not local file
-                remote_file = requests.get(path, stream=True)
+                if path.startswith(self.IMPORT_CACHE):
+                    request_path = get_export_service().url_for(path)
+                remote_file = requests.get(request_path, stream=True)
                 ImporterUtils.fetch_to_file(remote_file, temp)
 
             is_zipped, is_tarred = ImporterUtils.is_zipped_or_tarred(temp)
@@ -559,9 +565,12 @@ class ImporterSubtask:
         try:
             with open(self.path, 'rb') if self.path.startswith('/') else tempfile.NamedTemporaryFile() as temp:
                 if not self.path.startswith('/'):  # not local file
-                    remote_file = requests.get(self.path, stream=True)
+                    request_path = self.path
+                    if self.path.startswith(Importer.IMPORT_CACHE):
+                        request_path = get_export_service().url_for(self.path)
+                    remote_file = requests.get(request_path, stream=True)
                     if not remote_file.ok:
-                        raise ImportError(f"Failed to GET {self.path}, responded with {remote_file.status_code}")
+                        raise ImportError(f"Failed to GET {request_path}, responded with {remote_file.status_code}")
                     ImporterUtils.fetch_to_file(remote_file, temp)
 
                 is_zipped, is_tarred = ImporterUtils.is_zipped_or_tarred(temp)
