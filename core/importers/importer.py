@@ -272,7 +272,7 @@ class Importer:
         return import_task
 
     def prepare_resources(self, path, resource_types, dependencies, visited_dependencies, resources):
-        # pylint: disable=too-many-locals
+        # pylint: disable=too-many-locals,too-many-branches
         with open(path, 'rb') if path.startswith('/') else tempfile.NamedTemporaryFile() as temp:
             request_path = path
             if not path.startswith('/'):  # not local file
