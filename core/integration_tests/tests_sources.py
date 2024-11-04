@@ -1919,11 +1919,15 @@ class SourceVersionsComparisonViewTest(OCLAPITestCase):
         concept6 = ConceptFactory(parent=source, mnemonic='concept6')
         mapping1 = MappingFactory(parent=source, mnemonic='mapping1')
         mapping2 = MappingFactory(parent=source, mnemonic='mapping2')
-        mapping2_v2 = MappingFactory(parent=source, mnemonic=mapping2.mnemonic, version='v2', map_type='Foobar')
+        mapping2_v2 = MappingFactory(
+            parent=source, mnemonic=mapping2.mnemonic, version='v2', map_type='Foobar',
+            to_concept=mapping2.to_concept, from_concept=mapping2.from_concept)
         mapping3 = MappingFactory(parent=source, mnemonic='mapping3')
-        mapping3_v2 = MappingFactory(parent=source, mnemonic=mapping3.mnemonic, version='v2', retired=True)
+        mapping3_v2 = MappingFactory(parent=source, mnemonic=mapping3.mnemonic, version='v2', retired=True,
+                                     to_concept=mapping3.to_concept, from_concept=mapping3.from_concept)
         mapping4 = MappingFactory(parent=source, mnemonic='mapping4')
-        mapping4_v2 = MappingFactory(parent=source, mnemonic=mapping4.mnemonic, version='v2', extras={'foo': 'bar'})
+        mapping4_v2 = MappingFactory(parent=source, mnemonic=mapping4.mnemonic, version='v2', extras={'foo': 'bar'},
+                                     to_concept=mapping4.to_concept, from_concept=mapping4.from_concept)
         mapping5 = MappingFactory(parent=source, mnemonic='mapping5')
         mapping6 = MappingFactory(parent=source, mnemonic='mapping6')
         source_v1.concepts.add(concept1)
