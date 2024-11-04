@@ -231,7 +231,7 @@ class Importer:
                 self.path = file_url
             else:
                 if not key.startswith(self.IMPORT_CACHE):
-                    key = self.IMPORT_CACHE + self.path
+                    key = self.IMPORT_CACHE + key
                 upload_service = get_export_service()
                 if upload_service.exists(key):  # already uploaded by the view
                     self.path = key
