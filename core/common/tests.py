@@ -1261,8 +1261,8 @@ class ChecksumTest(OCLTestCase):
             mapping1.checksums['standard']
         )
         self.assertEqual(
-            ChecksumBase('mapping', mapping_data, 'special').generate(),
-            mapping1.checksums['special']
+            ChecksumBase('mapping', mapping_data, 'smart').generate(),
+            mapping1.checksums['smart']
         )
 
 
