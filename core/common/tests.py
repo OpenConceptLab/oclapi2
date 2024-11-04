@@ -27,7 +27,7 @@ from core.common.utils import (
     get_resource_class_from_resource_name, flatten_dict, is_csv_file, is_url_encoded_string, to_parent_uri_from_kwargs,
     set_current_user, get_current_user, set_request_url, get_request_url, nested_dict_values, chunks, api_get,
     split_list_by_condition, is_zip_file, get_date_range_label, get_prev_month, from_string_to_date, get_end_of_month,
-    get_start_of_month, es_id_in, web_url, get_queue_task_names, get_resource_class_from_resource_uri)
+    get_start_of_month, es_id_in, web_url, get_queue_task_names, get_resource_class_from_resource_uri, encode_string)
 from core.concepts.models import Concept
 from core.orgs.models import Organization
 from core.sources.models import Source
@@ -39,7 +39,10 @@ from .fhir_helpers import translate_fhir_query
 from .serializers import IdentifierSerializer
 from .validators import URIValidator
 from ..code_systems.serializers import CodeSystemDetailSerializer
+from ..concepts.serializers import ConceptDetailSerializer
 from ..concepts.tests.factories import ConceptFactory, ConceptNameFactory
+from ..mappings.serializers import MappingDetailSerializer
+from ..mappings.tests.factories import MappingFactory
 from ..sources.tests.factories import OrganizationSourceFactory
 
 
@@ -1238,6 +1241,29 @@ class ChecksumTest(OCLTestCase):
         self.assertIsNotNone(Checksum.generate(uuid.uuid4()))
         self.assertNotEqual(
             Checksum.generate({'a': {'b': [1, 2, 3], 'c': 'd'}}), Checksum.generate({'a': {'c': [1, 2, 3], 'b': 'd'}}))
+
+        concept1 = ConceptFactory(mnemonic=encode_string('Foo/bar', safe=' '))
+
+        from ocldev.checksum import Checksum as ChecksumBase
+        self.assertEqual(
+            ChecksumBase('concept', ConceptDetailSerializer(concept1).data, 'standard').generate(),
+            concept1.checksums['standard']
+        )
+        concept2 = ConceptFactory(mnemonic=encode_string('bar/bar', safe=' '))
+        mapping1 = MappingFactory(
+            from_concept=concept1, to_concept=concept2,
+            from_concept_code=concept1.mnemonic, to_concept_code=concept2.mnemonic
+        )
+
+        mapping_data = MappingDetailSerializer(mapping1).data
+        self.assertEqual(
+            ChecksumBase('mapping', mapping_data, 'standard').generate(),
+            mapping1.checksums['standard']
+        )
+        self.assertEqual(
+            ChecksumBase('mapping', mapping_data, 'special').generate(),
+            mapping1.checksums['special']
+        )
 
 
 class ChecksumViewTest(OCLAPITestCase):
