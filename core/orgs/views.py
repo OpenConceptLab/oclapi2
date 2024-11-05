@@ -178,14 +178,6 @@ class OrganizationDetailView(OrganizationBaseView, mixins.UpdateModelMixin, mixi
 
         return Response(status=status.HTTP_204_NO_CONTENT)
     
-    @swagger_auto_schema(
-        manual_parameters=[
-            openapi.Parameter('org', openapi.IN_PATH, description="Organization mnemonic", type=openapi.TYPE_STRING, required=True),
-        ],
-        responses={status.HTTP_200_OK: OrganizationDetailSerializer()}
-    )
-    def get(self, request, *args, **kwargs):
-        return super().get(request, *args, **kwargs)
 
 class OrganizationClientConfigsView(ResourceClientConfigsView):
     lookup_field = 'org'
