@@ -184,7 +184,8 @@ class OrganizationClientConfigsView(ResourceClientConfigsView):
     model = Organization
     queryset = Organization.objects.filter(is_active=True)
     permission_classes = (CanViewConceptDictionary, )
- 
+    
+
 class OrganizationMemberView(generics.GenericAPIView):
     userprofile = None
     user_in_org = False
@@ -231,6 +232,7 @@ class OrganizationMemberView(generics.GenericAPIView):
 
         return Response(status=status.HTTP_204_NO_CONTENT)
 
+    
     def delete(self, request, **kwargs):  # pylint: disable=unused-argument
         if not request.user.is_staff and not self.user_in_org:
             return Response(status=status.HTTP_403_FORBIDDEN)
@@ -254,12 +256,14 @@ class OrganizationResourceAbstractListView:
 
         return self.queryset.filter(organization__in=user.organizations.all(), version=HEAD)
 
+
 class OrganizationSourceListView(OrganizationResourceAbstractListView, SourceListView):
     pass
     
 class OrganizationCollectionListView(OrganizationResourceAbstractListView, CollectionListView):
     pass
-    
+
+
 class OrganizationExtrasBaseView(APIView):
     def get_object(self):
         instance = Organization.objects.filter(is_active=True, mnemonic=self.kwargs['org']).first()
@@ -267,17 +271,18 @@ class OrganizationExtrasBaseView(APIView):
         if not instance:
             raise Http404()
         return instance
-    
+
+
 class OrganizationExtrasView(OrganizationExtrasBaseView):
     serializer_class = OrganizationDetailSerializer
 
     def get(self, request, org):  # pylint: disable=unused-argument
         return Response(get(self.get_object(), 'extras', {}))
 
+
 class OrganizationExtraRetrieveUpdateDestroyView(OrganizationExtrasBaseView, RetrieveUpdateDestroyAPIView):
     serializer_class = OrganizationDetailSerializer
 
-    
     def retrieve(self, request, *args, **kwargs):
         key = kwargs.get('extra')
         instance = self.get_object()
