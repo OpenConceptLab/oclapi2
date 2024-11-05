@@ -184,8 +184,7 @@ class OrganizationClientConfigsView(ResourceClientConfigsView):
     model = Organization
     queryset = Organization.objects.filter(is_active=True)
     permission_classes = (CanViewConceptDictionary, )
-
-    
+ 
 class OrganizationMemberView(generics.GenericAPIView):
     userprofile = None
     user_in_org = False
@@ -242,11 +241,6 @@ class OrganizationMemberView(generics.GenericAPIView):
         self.userprofile.save()
 
         return Response(status=status.HTTP_204_NO_CONTENT)
-    
-    
-    
-    def get(self, request, *args, **kwargs):
-        return super().get(request, *args, **kwargs)
         
 class OrganizationResourceAbstractListView:
     def get_queryset(self):
@@ -294,7 +288,6 @@ class OrganizationExtraRetrieveUpdateDestroyView(OrganizationExtrasBaseView, Ret
         return Response({'detail': NOT_FOUND}, status=status.HTTP_404_NOT_FOUND)
 
 
-    )
     def update(self, request, **kwargs):  # pylint: disable=arguments-differ
         key = kwargs.get('extra')
         value = request.data.get(key)
@@ -308,7 +301,6 @@ class OrganizationExtraRetrieveUpdateDestroyView(OrganizationExtrasBaseView, Ret
         instance.set_checksums()
         return Response({key: value})
 
-    
     def delete(self, request, *args, **kwargs):
         key = kwargs.get('extra')
         instance = self.get_object()
