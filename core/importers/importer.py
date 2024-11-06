@@ -217,7 +217,6 @@ class Importer:
             if protocol_index:
                 key = key[protocol_index+3:]
             key = key.replace('/', '_')
-            key += f'_{time_started.strftime("%Y%m%d_%H%M%S")}_{str(uuid.uuid4())[:8]}'
             if settings.DEBUG:
                 file_url = os.path.join(settings.MEDIA_ROOT, 'import_uploads')
                 os.makedirs(file_url, exist_ok=True)

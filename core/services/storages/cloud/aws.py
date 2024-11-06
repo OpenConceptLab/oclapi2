@@ -151,15 +151,13 @@ class S3(CloudStorageServiceInterface):
 
     def upload(self, key, file_content, headers=None, metadata=None):
         """Uploads via file content with file_path as path + name"""
-        url = self._generate_signed_url(self.PUT, key, metadata)
-        result = None
-        if url:
-            res = requests.put(
-                url, data=file_content, headers=headers
-            ) if headers else requests.put(url, data=file_content)
-            result = res.status_code
-
-        return result
+        self.__get_connection().upload_fileobj(
+            file_content,
+            settings.AWS_STORAGE_BUCKET_NAME,
+            key,
+            ExtraArgs=metadata
+        )
+        return 204  # Success, no content
 
     def _upload_public(self, file_path, file_content):
         try:
