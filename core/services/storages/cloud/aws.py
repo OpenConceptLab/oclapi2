@@ -1,7 +1,6 @@
 import base64
 
 import boto3
-import requests
 from botocore.config import Config
 from botocore.exceptions import ClientError, NoCredentialsError
 from django.conf import settings
