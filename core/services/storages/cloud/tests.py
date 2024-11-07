@@ -26,7 +26,7 @@ class S3Test(TestCase):
         _conn = boto3.resource('s3', region_name='us-east-1')
         _conn.create_bucket(Bucket='oclapi2-dev')
 
-        S3().upload('some/path', 'content')  # pylint: disable=protected-access
+        S3().upload('some/path', io.BytesIO('content'.encode()))  # pylint: disable=protected-access
 
         self.assertEqual(
             _conn.Object(
@@ -43,7 +43,7 @@ class S3Test(TestCase):
         s3 = S3()
         self.assertFalse(s3.exists('some/path'))
 
-        s3.upload('some/path', 'content')  # pylint: disable=protected-access
+        s3.upload('some/path', io.BytesIO('content'.encode()))  # pylint: disable=protected-access
 
         self.assertTrue(s3.exists('some/path'))
 
@@ -52,10 +52,11 @@ class S3Test(TestCase):
 
         s3 = S3()
         s3._S3__get_connection = Mock(return_value=conn_mock)  # pylint: disable=protected-access
-        self.assertEqual(s3._upload_public('some/path', 'content'), 'success')  # pylint: disable=protected-access
+        content = io.BytesIO('content'.encode())
+        self.assertEqual(s3._upload_public('some/path', content), 'success')  # pylint: disable=protected-access
 
         conn_mock.upload_fileobj.assert_called_once_with(
-            'content',
+            content,
             'oclapi2-dev',
             'some/path',
             ExtraArgs={'ACL': 'public-read'},
@@ -152,7 +153,7 @@ class S3Test(TestCase):
         conn.create_bucket(Bucket='oclapi2-dev')
 
         s3 = S3()
-        s3.upload('some/path', 'content')  # pylint: disable=protected-access
+        s3.upload('some/path', io.BytesIO('content'.encode()))  # pylint: disable=protected-access
 
         self.assertEqual(
             conn.Object(
@@ -173,7 +174,7 @@ class S3Test(TestCase):
         _conn.create_bucket(Bucket='oclapi2-dev')
 
         s3 = S3()
-        s3.upload('some/path', 'content')  # pylint: disable=protected-access
+        s3.upload('some/path', io.BytesIO('content'.encode()))  # pylint: disable=protected-access
         _url = s3.url_for('some/path')
 
         self.assertTrue(
