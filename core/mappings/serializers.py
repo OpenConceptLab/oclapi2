@@ -177,7 +177,7 @@ class MappingMinimalSerializer(AbstractMappingSerializer):
             'id', 'type', 'map_type', 'url', 'version_url', 'to_concept_code', 'to_concept_url',
             'cascade_target_concept_code', 'cascade_target_concept_url', 'cascade_target_source_owner',
             'cascade_target_source_name', 'cascade_target_concept_name', 'retired', 'sort_weight',
-            'from_concept_code'
+            'from_concept_code', 'from_concept_url'
         )
 
     @staticmethod
