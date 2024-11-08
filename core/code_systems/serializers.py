@@ -3,6 +3,7 @@ import logging
 from collections import OrderedDict
 
 from rest_framework import serializers
+from rest_framework.exceptions import ValidationError
 from rest_framework.fields import CharField, BooleanField, SerializerMethodField, ChoiceField, \
     DateTimeField
 
@@ -287,6 +288,9 @@ class CodeSystemDetailSerializer(serializers.ModelSerializer):
             owner = Organization.objects.filter(mnemonic=ident['owner_id']).first()
         else:
             owner = UserProfile.objects.filter(username=ident['owner_id']).first()
+
+        if not owner:
+            raise ValidationError(f"Cannot find owner of type {ident['owner_type']} and id {ident['owner_id']}")
 
         source.set_parent(owner)
         source.source_type = 'CodeSystem'

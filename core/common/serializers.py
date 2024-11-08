@@ -112,7 +112,7 @@ class IdentifierSerializer(ReadSerializerMixin, Serializer):
     @staticmethod
     def convert_fhir_url_to_ocl_uri(uri, resource_type):
         resource_type_uri = f"/{resource_type}/"
-        if uri.startswith('/orgs/') or uri.startswith('/users/'):
+        if uri and (uri.startswith('/orgs/') or uri.startswith('/users/')):
             # Recognize OCL FHIR relative URI
             uri = uri.replace('/ConceptMap/', resource_type_uri).replace('/CodeSystem/', resource_type_uri) \
                 .replace('/ValueSet/', resource_type_uri)
