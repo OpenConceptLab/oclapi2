@@ -58,13 +58,13 @@ class ConceptDocument(Document):
     def get_exact_match_attrs():
         return {
             'id': {
-                'boost': 40
+                'boost': 50
             },
             'name': {
                 'boost': 15
             },
             'external_id': {
-                'boost': 10
+                'boost': 6
             },
             'same_as_map_codes': {
                 'boost': 5.5,
@@ -78,7 +78,7 @@ class ConceptDocument(Document):
     def get_wildcard_search_attrs():
         return {
             'id': {
-                'boost': 25
+                'boost': 35
             },
             'name': {
                 'boost': 23
