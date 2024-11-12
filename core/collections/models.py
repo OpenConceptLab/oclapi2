@@ -748,7 +748,7 @@ class CollectionReference(models.Model):
         return references
 
     def should_generate_multiple_references(self):
-        return self.include and self.cascade and self.transform
+        return self.include and self.cascade and self.transform and self.code
 
     @staticmethod
     def transform_to_latest_version(queryset, klass):
@@ -931,6 +931,10 @@ class CollectionReference(models.Model):
         if not self.is_valid_filter():
             raise ValidationError({'filter': ['Invalid filter schema.']})
 
+        if not self.is_valid_cascade():
+            raise ValidationError(
+                {'cascade': ['Invalid cascade schema. Either "code" or "filter" must be provided']})
+
         self.original_expression = str(self.expression)
         if not self.is_static_transform and not self.is_extensional_transform:
             self.transform = None
@@ -956,6 +960,13 @@ class CollectionReference(models.Model):
                 queries.append(f'{filter_def["property"]}={value}')
             return '&'.join(queries)
         return None
+
+    def is_valid_cascade(self):
+        if not self.cascade:
+            return True
+        if self.cascade and not (self.code or self.filter):
+            return False
+        return True
 
     def is_valid_filter(self):
         if not self.filter:

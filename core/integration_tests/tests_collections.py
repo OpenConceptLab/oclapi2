@@ -962,6 +962,37 @@ class CollectionReferencesViewTest(OCLAPITestCase):
             ])
         )
 
+        random_concept = ConceptFactory()
+
+        response = self.client.put(
+            self.collection.uri + 'references/?transformReferences=extensional',
+            {
+                'data': {'expression': random_concept.parent.uri},
+                'cascade': {
+                    'method': 'sourcetoconcepts',
+                    'cascade levels': '*',
+                    'map types': 'Q AND A,CONCEPT SET',
+                    'return map types': '*'
+                }
+            },
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data,
+            [{
+                 'added': False,
+                 'expression': random_concept.parent.uri,
+                 'message': [
+                     'This field cannot be null.',
+                     'Invalid cascade schema. Either "code" or "filter" must be provided'
+                 ]
+             }]
+        )
+
+
     def test_put_expression_transform_to_latest_version(self):
         concept2 = ConceptFactory()
         concept2_latest_version = concept2.get_latest_version()
