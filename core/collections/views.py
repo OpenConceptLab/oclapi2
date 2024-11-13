@@ -39,7 +39,7 @@ from core.collections.serializers import (
 from core.collections.utils import is_version_specified
 from core.common.constants import (
     HEAD, RELEASED_PARAM, PROCESSING_PARAM, OK_MESSAGE,
-    ACCESS_TYPE_NONE, INCLUDE_RETIRED_PARAM, INCLUDE_INVERSE_MAPPINGS_PARAM, ALL)
+    ACCESS_TYPE_NONE, INCLUDE_RETIRED_PARAM, INCLUDE_INVERSE_MAPPINGS_PARAM, ALL, LATEST)
 from core.common.exceptions import Http409, Http405
 from core.common.mixins import (
     ConceptDictionaryCreateMixin, ListWithHeadersMixin, ConceptDictionaryUpdateMixin,
@@ -107,6 +107,13 @@ class CollectionBaseView(BaseAPIView):
         version = query_params.get('version', None) or self.kwargs.get('version', None)
         if not version and default_version_to_head:
             version = HEAD
+        if version == LATEST:
+            version = Collection.find_latest_released_version_by(
+                {
+                    **{'user__username': self.kwargs.get('user'), 'organization__mnemonic': self.kwargs.get('org')},
+                    'mnemonic': self.kwargs['collection']
+                })
+            version = get(version, 'version')
 
         kwargs = self.kwargs.copy()
         if self.user_is_self and self.request.user.is_authenticated:
