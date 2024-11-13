@@ -17,7 +17,7 @@ class Event(models.Model):
     FOLLOWED = 'Followed'
     UNFOLLOWED = 'Unfollowed'
     JOINED = 'Joined'
-    HIGHLIGHT_EVENT_TYPES = [CREATED, RELEASED, FOLLOWED]
+    HIGHLIGHT_EVENT_TYPES = [CREATED, RELEASED]
 
     @property
     def is_joined_ocl(self):
@@ -49,16 +49,17 @@ class Event(models.Model):
     def get_user_organization_events(cls, user, private=False):
         queryset = cls.objects.none()
         for org in user.organizations.filter():
-            events = org.events
-            if not private:
-                events = events.filter(public=True)
-            queryset = queryset.union(events)
+            queryset = queryset.union(
+                org.events.filter(public=True) if private else org.events
+            ).union(org.get_repo_events(private))
+
         return queryset
 
     @classmethod
     def get_user_all_events(cls, user, private=False):
         return cls.get_user_organization_events(user, private).union(
-            cls.get_user_following_events(user, private))
+            cls.get_user_following_events(user, private)
+        ).union(user.get_repo_events(private))
 
     @property
     def type(self):

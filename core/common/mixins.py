@@ -19,7 +19,7 @@ from rest_framework.response import Response
 from core.common.constants import HEAD, ACCESS_TYPE_NONE, INCLUDE_FACETS, \
     LIST_DEFAULT_LIMIT, HTTP_COMPRESS_HEADER, CSV_DEFAULT_LIMIT, FACETS_ONLY, INCLUDE_RETIRED_PARAM, \
     SEARCH_STATS_ONLY, INCLUDE_SEARCH_STATS, UPDATED_BY_USERNAME_PARAM, CHECKSUM_STANDARD_HEADER, \
-    CHECKSUM_SMART_HEADER, SEARCH_LATEST_REPO_VERSION, SAME_STANDARD_CHECKSUM_ERROR
+    CHECKSUM_SMART_HEADER, SEARCH_LATEST_REPO_VERSION, SAME_STANDARD_CHECKSUM_ERROR, ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT
 from core.common.permissions import HasPrivateAccess, HasOwnership, CanViewConceptDictionary, \
     CanViewConceptDictionaryVersion
 from .checksums import ChecksumModel
@@ -507,6 +507,26 @@ class SourceContainerMixin:
     @property
     def collections_url(self):
         return self.uri + 'collections/'
+
+    def get_repo_events(self, private=False):
+        def get_events_for(entity):
+            return entity.events.filter(public=True) if private else entity.events
+
+        queryset = self.__class__.objects.none()
+
+        sources = self.source_set.filter(is_active=True)
+        collections = self.collection_set.filter(is_active=True)
+
+        if not private:
+            sources = self.source_set.filter(public_access__in=[ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT])
+            collections = self.collection_set.filter(public_access__in=[ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT])
+
+        for source in sources:
+            queryset = queryset.union(get_events_for(source))
+        for collection in collections:
+            queryset = queryset.union(get_events_for(collection))
+
+        return queryset
 
 
 class SourceChildMixin(ChecksumModel):
