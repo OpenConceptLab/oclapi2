@@ -992,6 +992,29 @@ class CollectionReferencesViewTest(OCLAPITestCase):
              }]
         )
 
+        expr = random_concept.parent.uri + 'v1/concepts/excludeWildcard=true&excludeFuzzy=true&includeSearchMETA=true'
+        response = self.client.put(
+            self.collection.uri + 'references/?cascade=sourcemappings',
+            {
+                'data': [{
+                    'expression': expr
+                }]
+            },
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data,
+            [{
+                 'added': False,
+                 'expression': expr,
+                 'message': [
+                     'Invalid cascade schema. Either "code" or "filter" must be provided'
+                 ]
+             }]
+        )
 
     def test_put_expression_transform_to_latest_version(self):
         concept2 = ConceptFactory()
