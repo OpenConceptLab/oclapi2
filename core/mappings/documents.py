@@ -49,7 +49,7 @@ class MappingDocument(Document):
 
     @staticmethod
     def get_match_phrase_attrs():
-        return ['from_concept', 'to_concept', 'external_id']
+        return ['from_concept', 'to_concept']
 
     @staticmethod
     def get_exact_match_attrs():

@@ -52,7 +52,7 @@ class ConceptDocument(Document):
 
     @staticmethod
     def get_match_phrase_attrs():
-        return ['_name', 'external_id']
+        return ['_name']
 
     @staticmethod
     def get_exact_match_attrs():
