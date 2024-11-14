@@ -508,12 +508,8 @@ class SourceContainerMixin:
     def collections_url(self):
         return self.uri + 'collections/'
 
-    def get_repo_events(self, private=False):
-        def get_events_for(entity):
-            return entity.events.filter(public=True) if private else entity.events
-
-        queryset = self.__class__.objects.none()
-
+    def get_repo_events_criteria(self, private=False):
+        criteria = None
         sources = self.source_set.filter(is_active=True)
         collections = self.collection_set.filter(is_active=True)
 
@@ -522,11 +518,25 @@ class SourceContainerMixin:
             collections = self.collection_set.filter(public_access__in=[ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT])
 
         for source in sources:
-            queryset = queryset.union(get_events_for(source))
+            if criteria is None:
+                criteria = Q(referenced_object_url=source.uri)
+            else:
+                criteria |= Q(referenced_object_url=source.uri)
         for collection in collections:
-            queryset = queryset.union(get_events_for(collection))
+            if criteria is None:
+                criteria = Q(referenced_object_url=collection.uri)
+            else:
+                criteria |= Q(referenced_object_url=collection.uri)
 
-        return queryset
+        return criteria
+
+    def get_repo_events(self, private=False):
+        from core.events.models import Event
+        criteria = self.get_repo_events_criteria(private)
+        if criteria is None:
+            return Event.objects.none()
+        queryset = Event.objects.filter(criteria)
+        return queryset if private else queryset.filter(public=True)
 
 
 class SourceChildMixin(ChecksumModel):

@@ -47,13 +47,20 @@ class Event(models.Model):
 
     @classmethod
     def get_user_organization_events(cls, user, private=False):
-        queryset = cls.objects.none()
+        criterion = None
         for org in user.organizations.filter():
-            queryset = queryset.union(
-                org.events.filter(public=True) if private else org.events
-            ).union(org.get_repo_events(private))
+            criteria = Event.object_criteria(org.uri)
+            repo_events_criteria = org.get_repo_events_criteria(private)
+            if repo_events_criteria is not None:
+                criteria |= repo_events_criteria
+            if criterion is None:
+                criterion = criteria
+            else:
+                criterion |= criteria
 
-        return queryset
+        queryset = Event.objects.filter(criterion)
+
+        return queryset if private else queryset.filter(public=True)
 
     @classmethod
     def get_user_all_events(cls, user, private=False):
