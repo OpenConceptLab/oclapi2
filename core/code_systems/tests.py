@@ -345,7 +345,7 @@ class CodeSystemTest(OCLTestCase):
     @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
     def test_post_code_system_with_concepts(self):
         response = self.client.post(
-            f'/users/{self.user.mnemonic}/CodeSystem/',
+            f'/users/{self.user.mnemonic}/CodeSystem',
             HTTP_AUTHORIZATION='Token ' + self.user_token,
             data={
                 'url': 'http://localhost/url',

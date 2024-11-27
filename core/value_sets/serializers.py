@@ -165,7 +165,7 @@ class ValueSetDetailSerializer(serializers.ModelSerializer):
                   'immutable', 'text', 'compose')
 
     def create(self, validated_data):
-        uri = self.context['request'].path + validated_data['mnemonic']
+        uri = '/'.join([self.context['request'].path.rstrip('/'), validated_data['mnemonic']])
         ident = IdentifierSerializer.include_ocl_identifier(uri, RESOURCE_TYPE, validated_data)
         collection = CollectionCreateOrUpdateSerializer().prepare_object(validated_data)
         collection_version = collection.version if collection.version != HEAD else '0.1'

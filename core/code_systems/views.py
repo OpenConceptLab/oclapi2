@@ -77,6 +77,9 @@ class CodeSystemListLookupView(ConceptRetrieveUpdateDestroyView):
     def is_container_version_specified(self):
         return True
 
+    def verify_scope(self):
+        pass
+
     def get_queryset(self):
         queryset = super().get_queryset()
         code = self.request.query_params.get('code')

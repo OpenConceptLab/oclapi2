@@ -48,6 +48,9 @@ urlpatterns = [
 
     # TODO: require FHIR subdomain
     path('<str:user>/CodeSystem/', include('core.code_systems.urls'), name='code_systems_urls'),
+    path('<str:user>/CodeSystem', include('core.code_systems.urls'), name='code_systems_urls_no_slash'),
     path('<str:user>/ValueSet/', include('core.value_sets.urls'), name='value_sets_urls'),
+    path('<str:user>/ValueSet', include('core.value_sets.urls'), name='value_sets_urls_no_slash'),
     path('<str:user>/ConceptMap/', include('core.concept_maps.urls'), name='concept_maps_urls'),
+    path('<str:user>/ConceptMap', include('core.concept_maps.urls'), name='concept_maps_urls_no_slash'),
 ]

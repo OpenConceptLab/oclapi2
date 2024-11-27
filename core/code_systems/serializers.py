@@ -280,7 +280,7 @@ class CodeSystemDetailSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         concepts = validated_data.pop('concepts', [])
-        uri = self.context['request'].path + validated_data['mnemonic']
+        uri = '/'.join([self.context['request'].path.rstrip('/'), validated_data['mnemonic']])
         ident = IdentifierSerializer.include_ocl_identifier(uri, RESOURCE_TYPE, validated_data)
         source = SourceCreateOrUpdateSerializer().prepare_object(validated_data)
 

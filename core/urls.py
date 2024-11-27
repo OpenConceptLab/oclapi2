@@ -72,8 +72,11 @@ urlpatterns = [
     # TODO: require FHIR subdomain
     path('fhir/', include('core.fhir.urls'), name='fhir_urls'),
     path('fhir/CodeSystem/', include('core.code_systems.urls'), name='code_systems_urls'),
+    path('fhir/CodeSystem', include('core.code_systems.urls'), name='code_systems_urls_no_slash'),
     path('fhir/ValueSet/', include('core.value_sets.urls'), name='value_sets_urls'),
+    path('fhir/ValueSet', include('core.value_sets.urls'), name='value_sets_urls_no_slash'),
     path('fhir/ConceptMap/', include('core.concept_maps.urls'), name='concept_maps_urls'),
+    path('fhir/ConceptMap', include('core.concept_maps.urls'), name='concept_maps_urls_no_slash'),
 
     path('collections/', include('core.collections.urls'), name='collections_urls'),
     path('concepts/', concept_views.ConceptListView.as_view(), name='all_concepts_urls'),
