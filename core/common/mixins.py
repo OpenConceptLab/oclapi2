@@ -153,7 +153,7 @@ class ListWithHeadersMixin(ListModelMixin):
         res['num_found'] = get(self, 'total_count') or queryset.count()
         return res
 
-    def list(self, request, *args, **kwargs):  # pylint:disable=too-many-locals
+    def list(self, request, *args, **kwargs):  # pylint:disable=too-many-locals,too-many-branches
         query_params = request.query_params.dict()
         is_csv = query_params.get('csv', False)
         search_string = query_params.get('type', None)
