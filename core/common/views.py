@@ -24,7 +24,7 @@ from core.common.constants import SEARCH_PARAM, LIST_DEFAULT_LIMIT, CSV_DEFAULT_
     LIMIT_PARAM, NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY, INCLUDE_RETIRED_PARAM, VERBOSE_PARAM, HEAD, LATEST, \
     BRIEF_PARAM, ES_REQUEST_TIMEOUT, INCLUDE_INACTIVE, FHIR_LIMIT_PARAM, RAW_PARAM, SEARCH_MAP_CODES_PARAM, \
     INCLUDE_SEARCH_META_PARAM, EXCLUDE_FUZZY_SEARCH_PARAM, EXCLUDE_WILDCARD_SEARCH_PARAM, UPDATED_BY_USERNAME_PARAM, \
-    CANONICAL_URL_REQUEST_PARAM
+    CANONICAL_URL_REQUEST_PARAM, CHECKSUMS_PARAM
 from core.common.exceptions import Http400
 from core.common.mixins import PathWalkerMixin
 from core.common.search import CustomESSearch
@@ -96,6 +96,9 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
     def is_brief(self):
         return self.request.query_params.get(BRIEF_PARAM, False) in TRUTHY
+
+    def is_checksums(self):
+        return self.request.query_params.get(CHECKSUMS_PARAM, False) in TRUTHY
 
     def is_hard_delete_requested(self):
         return self.request.query_params.get('hardDelete', None) in TRUTHY

@@ -20,6 +20,7 @@ OCL_ORG_ID = 1
 VERBOSE_PARAM = 'verbose'
 RAW_PARAM = 'raw'
 BRIEF_PARAM = 'brief'
+CHECKSUMS_PARAM = 'checksums'
 UPDATED_SINCE_PARAM = 'updatedSince'
 UPDATED_BY_USERNAME_PARAM = 'updatedBy'
 LAST_LOGIN_SINCE_PARAM = 'lastLoginSince'

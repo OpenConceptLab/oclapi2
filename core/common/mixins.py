@@ -188,9 +188,14 @@ class ListWithHeadersMixin(ListModelMixin):
         headers = {}
         results = sorted_list
         paginator = None
+
         if not compress:
             if not self.limit or int(self.limit) == 0 or int(self.limit) > 1000:
-                self.limit = LIST_DEFAULT_LIMIT
+                if self.is_brief() and self.is_checksums() and self.kwargs.get('source') and get(
+                        self, 'model.__name__') in ['Concept', 'Mapping']:
+                    self.limit = 20000  # for checksums
+                else:
+                    self.limit = LIST_DEFAULT_LIMIT
             paginator = CustomPaginator(
                 request=request, queryset=sorted_list, page_size=self.limit, total_count=self.total_count,
                 is_sliced=self.should_perform_es_search(), max_score=get(self, '_max_score'),

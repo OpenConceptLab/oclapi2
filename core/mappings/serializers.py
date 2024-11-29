@@ -159,6 +159,18 @@ class MappingVersionListSerializer(MappingListSerializer):
         super().__init__(*args, **kwargs)
 
 
+class MappingChecksumSerializer(AbstractResourceSerializer):
+    id = CharField(source='mnemonic', read_only=True)
+    type = CharField(source='resource_type', read_only=True)
+    url = CharField(source='uri', read_only=True)
+
+    class Meta:
+        model = Mapping
+        fields = AbstractResourceSerializer.Meta.fields + (
+            'checksums', 'from_concept_url', 'to_concept_url', 'id', 'type', 'url', 'map_type'
+        )
+
+
 class MappingMinimalSerializer(AbstractMappingSerializer):
     id = CharField(source='mnemonic', read_only=True)
     type = CharField(source='resource_type', read_only=True)

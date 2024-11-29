@@ -23,7 +23,7 @@ from core.mappings.documents import MappingDocument
 from core.mappings.models import Mapping
 from core.mappings.search import MappingFacetedSearch
 from core.mappings.serializers import MappingDetailSerializer, MappingListSerializer, MappingVersionListSerializer, \
-    MappingVersionDetailSerializer, MappingMinimalSerializer
+    MappingVersionDetailSerializer, MappingMinimalSerializer, MappingChecksumSerializer
 
 
 class MappingBaseView(SourceChildCommonBaseView):
@@ -55,6 +55,8 @@ class MappingListView(MappingBaseView, ListWithHeadersMixin, CreateModelMixin):
         method = self.request.method
         is_get = method == 'GET'
         if is_get and self.is_brief():
+            if self.is_checksums():
+                return MappingChecksumSerializer
             return MappingMinimalSerializer
 
         if (is_get and self.is_verbose()) or method == 'POST':

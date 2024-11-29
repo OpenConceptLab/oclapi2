@@ -351,6 +351,16 @@ class ConceptMinimalSerializer(ConceptAbstractSerializer):
         fields = ConceptAbstractSerializer.Meta.fields + ('id', 'type', 'url', 'version_url', 'retired')
 
 
+class ConceptChecksumSerializer(AbstractResourceSerializer):
+    id = EncodedDecodedCharField(source='mnemonic', read_only=True)
+    type = CharField(source='resource_type', read_only=True)
+    url = CharField(source='uri', read_only=True)
+
+    class Meta:
+        model = Concept
+        fields = AbstractResourceSerializer.Meta.fields + ('id', 'type', 'url', 'checksums')
+
+
 class ConceptCascadeMinimalSerializer(ConceptMinimalSerializer):
     class Meta:
         model = Concept

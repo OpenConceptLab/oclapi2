@@ -38,7 +38,7 @@ from core.concepts.serializers import (
     ConceptDetailSerializer, ConceptListSerializer, ConceptDescriptionSerializer, ConceptNameSerializer,
     ConceptVersionDetailSerializer,
     ConceptVersionListSerializer, ConceptSummarySerializer, ConceptMinimalSerializer,
-    ConceptChildrenSerializer, ConceptParentsSerializer, ConceptLookupListSerializer)
+    ConceptChildrenSerializer, ConceptParentsSerializer, ConceptLookupListSerializer, ConceptChecksumSerializer)
 from core.mappings.serializers import MappingListSerializer
 from core.tasks.models import Task
 
@@ -141,6 +141,8 @@ class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
         is_get = method == 'GET'
 
         if is_get and self.is_brief():
+            if self.is_checksums():
+                return ConceptChecksumSerializer
             return ConceptMinimalSerializer
         if (is_get and self.is_verbose()) or method == 'POST':
             return ConceptDetailSerializer
