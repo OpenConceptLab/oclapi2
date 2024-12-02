@@ -30,6 +30,11 @@ class MappingListViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 1)
 
+        response = self.client.get('/mappings/?brief=true&checksums=true', format='json')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+
         response = self.client.get(mapping.parent.mappings_url, format='json')
 
         self.assertEqual(response.status_code, 200)
