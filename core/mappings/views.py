@@ -89,6 +89,8 @@ class MappingListView(MappingBaseView, ListWithHeadersMixin, CreateModelMixin):
                 queryset = queryset.exclude(public_access=ACCESS_TYPE_NONE)
             elif not get(user, 'is_staff'):
                 queryset = Mapping.apply_user_criteria(queryset, user)
+        if self.is_brief() and self.is_checksums():
+            queryset = queryset.select_related('from_concept', 'to_concept')
 
         return queryset
 
