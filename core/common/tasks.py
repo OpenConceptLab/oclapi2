@@ -684,8 +684,7 @@ def resources_report(start_date=None, end_date=None, email=None):  # pragma: no 
     mail = EmailMessage(
         subject=f"{env} Monthly Resources Report: {date_range_label}",
         body=f"Please find attached resources report of {env} for the period of {date_range_label}",
-        to=[reports_email],
-        headers={'Return-Path': settings.EMAIL_HOST_USER}
+        to=[reports_email]
     )
     mail.attach(file_name, buff.getvalue(), 'text/csv')
     result = mail.send()
