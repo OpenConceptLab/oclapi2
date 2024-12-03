@@ -17,7 +17,8 @@ from core.collections.documents import CollectionDocument
 from core.common.constants import (
     HEAD, INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_RETIRED_PARAM, ACCESS_TYPE_NONE)
 from core.common.exceptions import Http400, Http403, Http409
-from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryMixin
+from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryMixin, CustomPaginator
+from core.common.search import CustomESSearch
 from core.common.swagger_parameters import (
     q_param, limit_param, sort_desc_param, page_param, sort_asc_param, verbose_param,
     include_facets_header, updated_since_param, include_inverse_mappings_param, include_retired_param,
@@ -26,14 +27,14 @@ from core.common.swagger_parameters import (
     cascade_levels_param, cascade_direction_param, cascade_view_hierarchy, return_map_types_param,
     omit_if_exists_in_param, equivalency_map_types_param, search_from_latest_repo_header)
 from core.common.tasks import delete_concept, make_hierarchy
-from core.common.utils import to_parent_uri_from_kwargs, generate_temp_version, get_truthy_values
+from core.common.utils import to_parent_uri_from_kwargs, generate_temp_version, get_truthy_values, to_int
 from core.common.views import SourceChildCommonBaseView, SourceChildExtrasView, \
     SourceChildExtraRetrieveUpdateDestroyView, BaseAPIView
 from core.concepts.constants import PARENT_VERSION_NOT_LATEST_CANNOT_UPDATE_CONCEPT
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept, ConceptName
 from core.concepts.permissions import CanViewParentDictionary, CanEditParentDictionary
-from core.concepts.search import ConceptFacetedSearch
+from core.concepts.search import ConceptFacetedSearch, ConceptFuzzySearch
 from core.concepts.serializers import (
     ConceptDetailSerializer, ConceptListSerializer, ConceptDescriptionSerializer, ConceptNameSerializer,
     ConceptVersionDetailSerializer,
@@ -743,3 +744,60 @@ class ConceptsHierarchyAmendAdminView(APIView):  # pragma: no cover
             },
             status=status.HTTP_202_ACCEPTED
         )
+
+
+class MetadataToConceptsListView(BaseAPIView, ListWithHeadersMixin):  # pragma: no cover
+    default_limit = 5
+    serializer_class = ConceptListSerializer
+    permission_classes = (IsAuthenticatedOrReadOnly,)
+
+    def get_serializer_class(self):
+        if self.is_brief():
+            return ConceptMinimalSerializer
+        if self.is_verbose():
+            return ConceptDetailSerializer
+
+        return ConceptListSerializer
+
+    def filter_queryset(self, _=None):
+        row = self.request.data.get('row')
+        target_repo_url = self.request.data.get('target_repo_url')
+        if not row or not target_repo_url:
+            raise Http400()
+        offset = max(to_int(self.request.GET.get('offset'), 0), 0)
+        self.limit = int(self.limit) or self.default_limit
+        page = max(to_int(self.request.GET.get('page'), 1), 1)
+        start = offset or (page - 1) * self.limit
+        end = start + self.limit
+
+        search = ConceptFuzzySearch.search(row, target_repo_url)
+        es_search = CustomESSearch(search[start:end], ConceptDocument)
+        es_search.to_queryset()
+        self.total_count = es_search.total - offset
+        self._scores = es_search.scores
+        self._max_score = es_search.max_score
+        self._highlights = es_search.highlights
+        return es_search.queryset
+
+    def post(self, request, **kwargs):  # pylint: disable=unused-argument
+        self.limit = self.default_limit
+        self.object_list = self.filter_queryset()
+        sorted_list = self.object_list
+
+        if not self.limit or int(self.limit) == 0 or int(self.limit) > 1000:
+            self.limit = self.default_limit
+        paginator = CustomPaginator(
+            request=request, queryset=self.object_list, page_size=self.limit, total_count=self.total_count,
+            is_sliced=True, max_score=get(self, '_max_score'),
+            search_scores=get(self, '_scores'), highlights=get(self, '_highlights')
+        )
+        headers = paginator.headers
+        results = paginator.current_page_results
+        data = self.serialize_list(results, paginator)
+
+        response = Response(data)
+        for key, value in headers.items():
+            response[key] = value
+        if not headers:
+            response['num_found'] = len(sorted_list)
+        return response

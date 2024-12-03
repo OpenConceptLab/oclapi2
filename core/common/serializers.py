@@ -203,7 +203,7 @@ class AbstractResourceSerializer(ModelSerializer):
         self.include_search_meta = (
                                            self.query_params.get(
                                                INCLUDE_SEARCH_META_PARAM) in TRUTHY and self.query_params.get('q')
-                                   ) or is_csv
+                                   ) or is_csv or (get(request, 'path') and '/concepts/$match' in request.path)
 
         try:
             if not self.include_search_meta:

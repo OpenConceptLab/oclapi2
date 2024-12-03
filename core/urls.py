@@ -79,6 +79,7 @@ urlpatterns = [
     path('fhir/ConceptMap', include('core.concept_maps.urls'), name='concept_maps_urls_no_slash'),
 
     path('collections/', include('core.collections.urls'), name='collections_urls'),
+    path('concepts/$match/', concept_views.MetadataToConceptsListView.as_view(), name='$match-concepts'),
     path('concepts/', concept_views.ConceptListView.as_view(), name='all_concepts_urls'),
     path('mappings/', mapping_views.MappingListView.as_view(), name='all_mappings_urls'),
     path('importers/', include('core.importers.urls'), name='importer_urls'),
