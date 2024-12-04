@@ -287,6 +287,12 @@ def bulk_import_subtask(path, username, owner_type, owner, resource_type, files)
     return ImporterSubtask(path, username, owner_type, owner, resource_type, files).run()
 
 
+@app.task(retry_kwargs={'max_retries': 0})
+def bulk_import_subtask_empty():
+    """Used if group has only one task to prevent celery from converting the group to a single task"""
+    return []
+
+
 @app.task
 def import_finisher(task_id):
     """Persist final import results so that they can be retrieved instantly"""
@@ -294,18 +300,18 @@ def import_finisher(task_id):
     from core.tasks.models import Task
     task = Task.objects.filter(id=task_id).first()
     if task:
-        if task.json_result:
-            import_task = ImportTask.import_task_from_json(task.json_result)
+        if task.result_all:
+            import_task = ImportTask.import_task_from_json(task.result_all)
             if import_task:
                 # Persist final results
                 import_task.final_summary = import_task.summary
-                import_task.time_finished = datetime.now()
+                import_task.time_finished = timezone.now()
                 return import_task.model_dump(exclude={'summary'})
 
-            task.json_result['time_finished'] = datetime.now()
+            task.json_result['time_finished'] = timezone.now()
             return task.json_result
 
-    return {'time_finished': datetime.now()}
+    return {'time_finished': timezone.now()}
 
 
 @app.task(bind=True, retry_kwargs={'max_retries': 0})

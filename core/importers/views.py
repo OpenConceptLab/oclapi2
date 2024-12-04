@@ -179,23 +179,29 @@ class ImportView(BulkImportParallelInlineView, ImportRetrieveDestroyMixin):
     )
     def post(self, request, import_queue=None):
         if 'import_type' in request.data:
-            file_url = get(request.data, 'file_url')
-            file = get(request.data, 'file')
-            if file:
-                timestamp = datetime.now()
-                key = f'import_upload_{timestamp.strftime("%Y%m%d_%H%M%S")}_{str(uuid.uuid4())[:8]}'
-                from core import settings
-                if settings.DEBUG:
-                    dir_url = os.path.join(settings.MEDIA_ROOT, 'import_uploads')
-                    os.makedirs(dir_url, exist_ok=True)
-                    file_url = os.path.join(dir_url, key)
-                    shutil.copyfile(file, file_url)
+            file_url = get(request.data, 'file_url')  # importing as url to a file
+            if not file_url:
+                data = get(request.data, 'file')  # importing by posting as text
+                if data:
+                    file = io.StringIO(data)
                 else:
-                    upload_service = get_export_service()
-                    upload_service.upload(key, file,
-                                          metadata={'ContentType': 'application/octet-stream'},
-                                          headers={'content-type': 'application/octet-stream'})
-                    file_url = upload_service.url_for(key)
+                    file = get(request.data, 'data')  # importing by uploading a file with multipart/form-data
+                if file:
+                    timestamp = datetime.now()
+                    key = f'import_upload_{timestamp.strftime("%Y%m%d_%H%M%S")}_{str(uuid.uuid4())[:8]}'
+                    from core import settings
+                    if settings.DEBUG:
+                        dir_url = os.path.join(settings.MEDIA_ROOT, 'import_uploads')
+                        os.makedirs(dir_url, exist_ok=True)
+                        file_url = os.path.join(dir_url, key)
+                        with open(file_url, 'wb') as f:
+                            shutil.copyfileobj(file, f)
+                    else:
+                        upload_service = get_export_service()
+                        upload_service.upload(key, file,
+                                              metadata={'ContentType': 'application/octet-stream'},
+                                              headers={'content-type': 'application/octet-stream'})
+                        file_url = upload_service.url_for(key)
 
             task = get_queue_task_names(import_queue, self.request.user.username)
             new_task = bulk_import_new.apply_async(

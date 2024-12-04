@@ -79,6 +79,11 @@ services:
     environment:
       - REDIS_HOST=${REDIS_HOST-redis}
       - REDIS_PORT=${REDIS_PORT-6379}
+      - DB_HOST=${DB_HOST-db}
+      - DB_PORT=${DB_PORT-5432}
+      - DB_PASSWORD=${DB_PASSWORD-Postgres123}
+      - ES_HOSTS=${ES_HOSTS-es:9200}
+      - ES_SCHEME=${ES_SCHEME-http}
       - DEBUG=${DEBUG-FALSE}
       - ERRBIT_URL
       - ERRBIT_KEY
@@ -99,10 +104,6 @@ services:
     environment:
       - API_HOST=${API_HOST-api}
       - API_PORT=${API_PORT-8000}
-      - DB_HOST=${DB_HOST-db}
-      - DB_PORT=${DB_PORT-5432}
-      - REDIS_HOST=${REDIS_HOST-redis}
-      - REDIS_PORT=${REDIS_PORT-6379}
       - DEBUG=${DEBUG-FALSE}
       - ERRBIT_URL
       - ERRBIT_KEY
@@ -119,6 +120,11 @@ services:
     environment:
       - REDIS_HOST=${REDIS_HOST-redis}
       - REDIS_PORT=${REDIS_PORT-6379}
+      - DB_HOST=${DB_HOST-db}
+      - DB_PORT=${DB_PORT-5432}
+      - DB_PASSWORD=${DB_PASSWORD-Postgres123}
+      - ES_HOSTS=${ES_HOSTS-es:9200}
+      - ES_SCHEME=${ES_SCHEME-http}
       - DEBUG=${DEBUG-FALSE}
       - ERRBIT_URL
       - ERRBIT_KEY
@@ -135,6 +141,11 @@ services:
     environment:
       - REDIS_HOST=${REDIS_HOST-redis}
       - REDIS_PORT=${REDIS_PORT-6379}
+      - DB_HOST=${DB_HOST-db}
+      - DB_PORT=${DB_PORT-5432}
+      - DB_PASSWORD=${DB_PASSWORD-Postgres123}
+      - ES_HOSTS=${ES_HOSTS-es:9200}
+      - ES_SCHEME=${ES_SCHEME-http}
       - DEBUG=${DEBUG-FALSE}
       - ERRBIT_URL
       - ERRBIT_KEY
@@ -153,6 +164,11 @@ services:
     environment:
       - REDIS_HOST=${REDIS_HOST-redis}
       - REDIS_PORT=${REDIS_PORT-6379}
+      - DB_HOST=${DB_HOST-db}
+      - DB_PORT=${DB_PORT-5432}
+      - DB_PASSWORD=${DB_PASSWORD-Postgres123}
+      - ES_HOSTS=${ES_HOSTS-es:9200}
+      - ES_SCHEME=${ES_SCHEME-http}
       - DEBUG=${DEBUG-FALSE}
       - ERRBIT_URL
       - ERRBIT_KEY
@@ -171,6 +187,11 @@ services:
     environment:
       - REDIS_HOST=${REDIS_HOST-redis}
       - REDIS_PORT=${REDIS_PORT-6379}
+      - DB_HOST=${DB_HOST-db}
+      - DB_PORT=${DB_PORT-5432}
+      - DB_PASSWORD=${DB_PASSWORD-Postgres123}
+      - ES_HOSTS=${ES_HOSTS-es:9200}
+      - ES_SCHEME=${ES_SCHEME-http}
       - DEBUG=${DEBUG-FALSE}
       - ERRBIT_URL
       - ERRBIT_KEY
@@ -189,6 +210,11 @@ services:
     environment:
       - REDIS_HOST=${REDIS_HOST-redis}
       - REDIS_PORT=${REDIS_PORT-6379}
+      - DB_HOST=${DB_HOST-db}
+      - DB_PORT=${DB_PORT-5432}
+      - DB_PASSWORD=${DB_PASSWORD-Postgres123}
+      - ES_HOSTS=${ES_HOSTS-es:9200}
+      - ES_SCHEME=${ES_SCHEME-http}
       - DEBUG=${DEBUG-FALSE}
       - ERRBIT_URL
       - ERRBIT_KEY

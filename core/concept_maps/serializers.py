@@ -187,6 +187,7 @@ class ConceptMapDetailSerializer(serializers.ModelSerializer):
 
         # Create new version
         source.version = '0.1' if version == HEAD else version
+        source.is_latest_version = True
 
         source.id = None  # pylint: disable=invalid-name
         errors = Source.persist_new_version(source, user)
@@ -260,6 +261,7 @@ class ConceptMapDetailSerializer(serializers.ModelSerializer):
         source.id = None
         source.version = source_version
         source.released = source_released
+        source.is_latest_version = True
 
         errors = Source.persist_new_version(source, user)
         self._errors.update(errors)

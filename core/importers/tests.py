@@ -2205,6 +2205,8 @@ class ImporterSubtaskTest(OCLTestCase):
     @patch.object(ResourceImporter, 'import_resource')
     @responses.activate
     def test_run(self, mocked_import_resource):
+        mocked_import_resource.return_value = 1
+
         path = 'http://fetch/npm/package'
         importer = ImporterSubtask(path, 'root', 'user', 'root', 'ValueSet', [
             {'filepath': 'package/ValueSet-fr-core-vs-location-type.json', 'start_index': 0, 'end_index': 1},
@@ -2303,6 +2305,8 @@ class ImporterSubtaskTest(OCLTestCase):
     @patch.object(ResourceImporter, 'import_resource')
     @responses.activate
     def test_run_with_start_index(self, mocked_import_resource):
+        mocked_import_resource.return_value = 1
+
         path = 'http://fetch/npm/package'
         importer = ImporterSubtask(path, 'root', 'user', 'root', 'ValueSet', [
             {'filepath': '/', 'start_index': 0, 'end_index': 1},
@@ -2387,10 +2391,10 @@ class ImporterSubtaskTest(OCLTestCase):
             mocked_import_resource.side_effect = ImportError('Failed to save')
             results = importer.run()
 
-        self.assertEqual(results, [['Failed to import resource with id fr-core-vs-email-type from '
-                                    'http://fetch/npm/package// to user/root by root due to: Failed to save'],
-                                   ['Failed to import resource with id fr-core-vs-encounter-class from '
-                                    'http://fetch/npm/package// to user/root by root due to: Failed to save']])
+        self.assertEqual(results, ['Failed to import resource with id fr-core-vs-email-type from '
+                                    'http://fetch/npm/package// to user/root by root due to: Failed to save',
+                                   'Failed to import resource with id fr-core-vs-encounter-class from '
+                                    'http://fetch/npm/package// to user/root by root due to: Failed to save'])
 
     @patch.object(ResourceImporter, 'import_resource')
     @responses.activate

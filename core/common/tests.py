@@ -1083,7 +1083,7 @@ class TaskTest(OCLTestCase):
         self.assertEqual(res, 1)
         call_args = email_message_mock.call_args[1]
         self.assertTrue("Monthly Resources Report" in call_args['subject'])
-        self.assertEqual(call_args['to'], ['reports@openconceptlab.org'])
+        self.assertEqual(call_args['to'], ['admin@openconceptlab.org'])
         self.assertTrue('Please find attached resources report of' in call_args['body'])
         self.assertTrue('for the period of' in call_args['body'])
 

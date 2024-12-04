@@ -3,13 +3,15 @@ import logging
 import os
 import shutil
 from datetime import datetime
+from functools import cached_property
+
 import tarfile
 import tempfile
 import zipfile
 from zipfile import ZipFile
 
 from celery.result import AsyncResult, result_from_tuple
-from celery import group
+from celery import group, chain
 
 import ijson
 import requests
@@ -17,9 +19,11 @@ from ijson import JSONError
 from packaging.version import Version
 from pydantic import BaseModel, computed_field, PrivateAttr
 
+from django.utils import timezone
+
 from core import settings
 from core.common.serializers import IdentifierSerializer
-from core.common.tasks import bulk_import_subtask
+from core.common.tasks import bulk_import_subtask, bulk_import_subtask_empty
 from core.common.tasks import import_finisher
 from core.code_systems.converter import CodeSystemConverter
 from core.common.utils import get_export_service
@@ -75,7 +79,7 @@ class ImportTaskSummary(BaseModel):
 class ImportTask(BaseModel):
     import_task: tuple = ()
     _import_async_result: AsyncResult = PrivateAttr(default=None)
-    time_started: datetime = datetime.now()
+    time_started: datetime = timezone.now()
     _time_finished: datetime = PrivateAttr(default=None)
     dependencies: list = []
     initial_summary: ImportTaskSummary = ImportTaskSummary()
@@ -83,7 +87,7 @@ class ImportTask(BaseModel):
 
     @staticmethod
     def import_task_from_async_result(async_result: AsyncResult):
-        if async_result.state == 'SUCCESS' and async_result.result.get('import_task', None):
+        if async_result and async_result.state == 'SUCCESS' and async_result.result.get('import_task', None):
             return ImportTask(**async_result.result)
         return None
 
@@ -98,8 +102,10 @@ class ImportTask(BaseModel):
         if self._import_async_result:
             return self._import_async_result
 
-        self._import_async_result = result_from_tuple(self.import_task)
-        return self._import_async_result
+        if self.import_task:
+            self._import_async_result = result_from_tuple(self.import_task)
+            return self._import_async_result
+        return None
 
     def revoke(self):
         import_group = self.import_async_result
@@ -110,14 +116,15 @@ class ImportTask(BaseModel):
     @import_async_result.setter
     def import_async_result(self, import_async_result):
         self._import_async_result = import_async_result
-        self.import_task = import_async_result.as_tuple()
+        if import_async_result:
+            self.import_task = import_async_result.as_tuple()
 
     @computed_field
     @property
     def time_finished(self) -> datetime:
         if self._time_finished:
             return self._time_finished
-        if self.import_async_result.ready():
+        if self.import_async_result and self.import_async_result.ready():
             self._time_finished = self.import_async_result.result.get('time_finished')
             return self._time_finished
         return None
@@ -127,13 +134,22 @@ class ImportTask(BaseModel):
         self._time_finished = value
 
     @computed_field
-    def summary(self) -> ImportTaskSummary:
-        if self.import_async_result.ready():
-            return self.import_async_result.result.get('final_summary')
+    @cached_property
+    def summary(self) -> ImportTaskSummary:  # pylint: disable=too-many-branches
+        if self.import_async_result and self.import_async_result.ready():
+            return ImportTaskSummary(**self.import_async_result.result.get('final_summary'))
         summary = self.initial_summary.copy()
+
+        if not self.import_async_result:
+            return summary
+
         import_group = self.import_async_result
+        import_groups = []
         while import_group.parent is not None:
             import_group = import_group.parent
+            import_groups = [import_group] + import_groups
+
+        for import_group in import_groups:
             for child in import_group.children:
                 if child.ready():
                     results = child.result
@@ -155,6 +171,8 @@ class ImportTask(BaseModel):
                         else:
                             summary.failed += 1
                             summary.failures.append(result)
+            if not import_group.ready():
+                break  # inspect next group only if the current one is ready
         return summary
 
     @computed_field
@@ -169,17 +187,24 @@ class ImportTask(BaseModel):
     def elapsed_seconds(self) -> int:
         if self.time_finished:
             return (self.time_finished - self.time_started).total_seconds()
-        return (datetime.now() - self.time_started).total_seconds()
+        return (timezone.now() - self.time_started).total_seconds()
 
     @computed_field
     def detailed_summary(self) -> str:
         summary = self.summary
+        failures = ''
+        count = 1
+        for failure in summary.failures:
+            failures += f" {count}) {failure}"
+            count += 1
         return f"Started: {self.time_started} | Processed: {summary.processed}/{summary.total} | " \
                f"Created: {summary.created} | Updated: {summary.updated} | " \
                f"Deleted: {summary.deleted} | Existing: {summary.existing} | " \
                f"Permission Denied: {summary.permission_denied} | " \
                f"Unchanged: {summary.unchanged} | Dependencies: {summary.dependencies} | " \
-               f"Time: {self.elapsed_seconds}secs"
+               f"Failed: {summary.failed} | " \
+               f"Time: {self.elapsed_seconds}secs | " \
+               f"Failures: {failures} "
 
 
 class Importer:
@@ -206,7 +231,7 @@ class Importer:
         return self.import_type == 'npm'
 
     def run(self):  # pylint: disable=too-many-locals
-        time_started = datetime.now()
+        time_started = timezone.now()
         resource_types = ['CodeSystem', 'ValueSet', 'ConceptMap']
         resource_types.extend(ResourceImporter.get_resource_types())
 
@@ -266,8 +291,8 @@ class Importer:
 
         import_task = ImportTask(time_started=time_started, dependencies=dependencies)
         import_task.initial_summary.dependencies = dependencies
-        import_task.time_finished = datetime.now()
-        return import_task
+        import_task.time_finished = timezone.now()
+        return import_task.model_dump()
 
     def prepare_resources(self, path, resource_types, dependencies, visited_dependencies, resources):
         # pylint: disable=too-many-locals,too-many-branches
@@ -310,6 +335,9 @@ class Importer:
                                 self.categorize_resources(json_file, path, file_path, resource_types, resources)
             else:
                 self.categorize_resources(temp, path, '', resource_types, resources)
+
+            if not dependencies:
+                dependencies.append(path)
 
     # pylint: disable=too-many-locals
     def traverse_dependencies(self, package_file, path, resource_types, dependencies, visited_dependencies, resources):
@@ -384,7 +412,7 @@ class Importer:
         return tasks
 
     def schedule_tasks(self, tasks):
-        chained_tasks = None
+        chained_tasks = chain()
         for task in tasks:
             group_tasks = []
             for group_task in task:
@@ -393,12 +421,11 @@ class Importer:
                                                           group_task['owner_type'], group_task['owner'],
                                                           group_task['resource_type'], group_task['files'])
                                    .set(queue='concurrent'))
-            if not chained_tasks:
-                chained_tasks = group(group_tasks)
-            else:
-                chained_tasks = chained_tasks | group(group_tasks)
-        chained_tasks = chained_tasks | import_finisher.si(self.task_id)
-        final_task = chained_tasks()
+            if len(group_tasks) == 1:  # Prevent celery from converting group to a single task
+                group_tasks.append(bulk_import_subtask_empty.si())
+            chained_tasks |= group(group_tasks)
+        chained_tasks |= import_finisher.si(self.task_id).set(queue='concurrent')
+        final_task = chained_tasks.apply_async()
         return final_task
 
     def is_importable_file(self, file_name):
@@ -658,7 +685,7 @@ class ImporterSubtask:
         logger.exception(error)
         results.extend([error] * count)
 
-    def import_resource(self, json_file, filepath, start_index, end_index):
+    def import_resource(self, json_file, filepath, start_index, end_index):  # pylint: disable=too-many-branches
         parse = self.move_to_start_index(json_file, start_index)
 
         if end_index:
@@ -673,6 +700,9 @@ class ImporterSubtask:
 
             if resource.get('resourceType', None) == self.resource_type \
                     or resource.get('type', None) == self.resource_type:
+
+                error = f'Failed to import resource with id {resource.get("id", None)} from {self.path}/' \
+                        f'{filepath} to {self.owner_type}/{self.owner} by {self.username}'
                 try:
                     if self.resource_type.lower() in ['source', 'collection']:
                         if 'owner_type' not in resource:
@@ -680,12 +710,13 @@ class ImporterSubtask:
                         if 'owner' not in resource:
                             resource['owner'] = self.owner
                     result = ResourceImporter().import_resource(resource, self.username, self.owner_type, self.owner)
-                    results.append(result)
+                    if isinstance(result, int):
+                        results.append(result)
+                    else:
+                        results.append(f'{error} due to: {result}')
                 except Exception as e:
-                    error = f'Failed to import resource with id {resource.get("id", None)} from {self.path}/' \
-                            f'{filepath} to {self.owner_type}/{self.owner} by {self.username}'
                     logger.exception(error)
-                    results.append([f'{error} due to: {str(e)}'])
+                    results.append(f'{error} due to: {str(e)}')
                 if count is not None:
                     count -= 1
                     if count <= 0:
