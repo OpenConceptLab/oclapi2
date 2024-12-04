@@ -521,7 +521,7 @@ ACCOUNT_EMAIL_SUBJECT_PREFIX = os.environ.get('ACCOUNT_EMAIL_SUBJECT_PREFIX', '[
 ADMINS = (
     ('Jonathan Payne', 'paynejd@gmail.com'),
 )
-REPORTS_EMAIL = os.environ.get('REPORTS_EMAIL', 'reports@openconceptlab.org')
+REPORTS_EMAIL = os.environ.get('REPORTS_EMAIL', 'admin@openconceptlab.org')
 
 if ENV and ENV != 'development':
     # Serving swagger static files (inserted after SecurityMiddleware)
