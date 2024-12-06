@@ -172,7 +172,7 @@ class ValueSetDetailSerializer(serializers.ModelSerializer):
         collection.version = HEAD
         collection.collection_type = 'ValueSet'
 
-        parent_klass = Organization if ident['owner_type'] in ['orgs', 'Organization'] else UserProfile
+        parent_klass = Organization if ident['owner_type'].lower() in ['orgs', 'organization'] else UserProfile
         collection.set_parent(parent_klass.objects.filter(**{parent_klass.mnemonic_attr: ident['owner_id']}).first())
 
         user = self.context['request'].user

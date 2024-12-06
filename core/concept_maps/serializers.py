@@ -160,7 +160,7 @@ class ConceptMapDetailSerializer(serializers.ModelSerializer):
         ident = IdentifierSerializer.include_ocl_identifier(uri, RESOURCE_TYPE, validated_data)
         source = SourceCreateOrUpdateSerializer().prepare_object(validated_data)
 
-        if ident['owner_type'] in ['orgs', 'Organization']:
+        if ident['owner_type'].lower() in ['orgs', 'organization']:
             owner = Organization.objects.filter(mnemonic=ident['owner_id']).first()
         else:
             owner = UserProfile.objects.filter(username=ident['owner_id']).first()
