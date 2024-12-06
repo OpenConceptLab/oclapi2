@@ -200,13 +200,14 @@ class ValueSetDetailSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         # Find HEAD first
         head_collection = instance.head
+        new_version = validated_data.get('version')
+
+        if instance.version == new_version:
+            self._errors.update({'version': f'Version {new_version} already exists for CodeSystem'
+                                            f' {instance.mnemonic}.'})
+            return instance
 
         collection = CollectionCreateOrUpdateSerializer().prepare_object(validated_data, instance)
-
-        if instance.version == collection.version:
-            self._errors.update({'version': f'Version {collection.version} already exists for ValueSet'
-                                            f' {collection.mnemonic}.'})
-            return collection
 
         # Preserve version specific values
         collection_version = collection.version

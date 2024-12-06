@@ -320,12 +320,14 @@ class CodeSystemDetailSerializer(serializers.ModelSerializer):
 
     def update(self, instance, validated_data):
         concepts = validated_data.pop('concepts', [])
-        source = SourceCreateOrUpdateSerializer().prepare_object(validated_data, instance)
+        new_version = validated_data.get('version')
 
-        if instance.version == source.version:
-            self._errors.update({'version': f'Version {source.version} already exists for CodeSystem'
-                                            f' {source.mnemonic}.'})
-            return source
+        if instance.version == new_version:
+            self._errors.update({'version': f'Version {new_version} already exists for CodeSystem'
+                                            f' {instance.mnemonic}.'})
+            return instance
+
+        source = SourceCreateOrUpdateSerializer().prepare_object(validated_data, instance)
 
         # Preserve version specific values
         source_version = source.version

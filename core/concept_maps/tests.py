@@ -508,40 +508,9 @@ class ConceptMapTest(OCLTestCase):
             format='json'
         )
 
-        # check if HEAD persisted
-        sources = Source.objects.filter(mnemonic='test2', version='HEAD', user=self.user)
-        self.assertEqual(len(sources), 1)
-        source = sources.first()
-        self.assertEqual(source.canonical_url, 'http://localhost/url')
-        self.assertEqual(source.retired, False)
-        self.assertEqual(source.name, 'test2')
-        mappings = source.get_mappings_queryset().filter(retired=False).order_by('id')
-        self.assertEqual(len(mappings), 2)
-        mapping = mappings[0]
-        self.assertEqual(mapping.is_head, True)
-        self.assertEqual(mapping.from_concept_code, 'concept_B_1')
-        self.assertEqual(mapping.to_concept_code, 'concept_1')
-        mapping = mappings[1]
-        self.assertEqual(mapping.is_head, True)
-        self.assertEqual(mapping.from_concept_code, 'concept_B_2')
-        self.assertEqual(mapping.to_concept_code, 'concept_1')
-        # check if version persisted
-        sources = Source.objects.filter(mnemonic='test2', version='1.0', user=self.user)
-        self.assertEqual(len(sources), 1)
-        source = sources.first()
-        self.assertEqual(source.canonical_url, 'http://localhost/url')
-        self.assertEqual(source.retired, False)
-        self.assertEqual(source.name, 'test2')
-        mappings = source.get_mappings_queryset().filter(retired=False).order_by('id')
-        self.assertEqual(len(mappings), 2)
-        mapping = mappings[0]
-        self.assertEqual(mapping.is_head, False)
-        self.assertEqual(mapping.from_concept_code, 'concept_B_1')
-        self.assertEqual(mapping.to_concept_code, 'concept_1')
-        mapping = mappings[1]
-        self.assertEqual(mapping.is_head, False)
-        self.assertEqual(mapping.from_concept_code, 'concept_B_2')
-        self.assertEqual(mapping.to_concept_code, 'concept_1')
+        # check if bad request
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data, {'version': 'Version 1.0 already exists for CodeSystem test2.'})
 
     @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
     @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))

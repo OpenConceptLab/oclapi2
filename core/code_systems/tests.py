@@ -437,7 +437,7 @@ class CodeSystemTest(OCLTestCase):
                                                   }]
                                    }
                                }],
-                'version': '1.0',
+                'version': '2.0',
                 'name': 'test',
                 'id': self.user_source.mnemonic,
                 'status': 'draft',
@@ -459,7 +459,7 @@ class CodeSystemTest(OCLTestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['id'], self.user_source.mnemonic)
-        self.assertEqual(response.data['version'], '1.0')
+        self.assertEqual(response.data['version'], '2.0')
         self.assertEqual(response.data['status'], 'draft')
 
         # check if HEAD persisted
@@ -476,7 +476,7 @@ class CodeSystemTest(OCLTestCase):
         self.assertEqual(concept.display_name, 'Test')
         self.assertEqual(len(concept.names.all()), 1)
         # check if version persisted
-        sources = Source.objects.filter(mnemonic=self.user_source.mnemonic, version='1.0', user=self.user)
+        sources = Source.objects.filter(mnemonic=self.user_source.mnemonic, version='2.0', user=self.user)
         self.assertEqual(len(sources), 1)
         source = sources.first()
         self.assertEqual(source.canonical_url, 'http://localhost/url')
@@ -508,7 +508,7 @@ class CodeSystemTest(OCLTestCase):
                         }]
                     }
                 }],
-                'version': '1.0',
+                'version': '2.0',
                 'name': 'test',
                 'id': self.user_source.mnemonic,
                 'status': 'draft',
@@ -548,7 +548,7 @@ class CodeSystemTest(OCLTestCase):
                                                   }]
                                    }
                                }],
-                'version': '2.0',
+                'version': '3.0',
                 'name': 'test',
                 'id': self.user_source.mnemonic,
                 'status': 'draft',
@@ -579,8 +579,9 @@ class CodeSystemTest(OCLTestCase):
         )
 
         self.assertEqual(response.status_code, 200)
+
         self.assertEqual(response.data['id'], self.user_source.mnemonic)
-        self.assertEqual(response.data['version'], '2.0')
+        self.assertEqual(response.data['version'], '3.0')
 
         # check if HEAD persisted
         sources = Source.objects.filter(mnemonic=self.user_source.mnemonic, version='HEAD', user=self.user)
@@ -600,7 +601,7 @@ class CodeSystemTest(OCLTestCase):
         self.assertEqual(concepts[1].display_name, 'Test2')
         self.assertEqual(len(concepts[1].names.all()), 1)
         # check if version persisted
-        sources = Source.objects.filter(mnemonic=self.user_source.mnemonic, version='2.0', user=self.user)
+        sources = Source.objects.filter(mnemonic=self.user_source.mnemonic, version='3.0', user=self.user)
         self.assertEqual(len(sources), 1)
         source = sources.first()
         self.assertEqual(source.canonical_url, 'http://localhost/url')
