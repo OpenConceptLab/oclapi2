@@ -43,7 +43,8 @@ class ConceptFuzzySearch:  # pragma: no cover
         ['name', 8],
         ['synonyms', 6],
         ['same_as_mapped_codes', 5],
-        ['other_map_codes', 3]
+        ['other_map_codes', 3],
+        ['concept_class', 'datatype', 3],
     ]
     fuzzy_fields = ['name', 'synonyms']
 
