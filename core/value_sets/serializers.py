@@ -172,7 +172,7 @@ class ValueSetDetailSerializer(serializers.ModelSerializer):
         collection.version = HEAD
         collection.collection_type = 'ValueSet'
 
-        parent_klass = Organization if ident['owner_type'] == 'orgs' else UserProfile
+        parent_klass = Organization if ident['owner_type'] in ['orgs', 'Organization'] else UserProfile
         collection.set_parent(parent_klass.objects.filter(**{parent_klass.mnemonic_attr: ident['owner_id']}).first())
 
         user = self.context['request'].user
@@ -202,6 +202,11 @@ class ValueSetDetailSerializer(serializers.ModelSerializer):
         head_collection = instance.head
 
         collection = CollectionCreateOrUpdateSerializer().prepare_object(validated_data, instance)
+
+        if instance.version == collection.version:
+            self._errors.update({'version': f'Version {collection.version} already exists for ValueSet'
+                                            f' {collection.mnemonic}.'})
+            return collection
 
         # Preserve version specific values
         collection_version = collection.version

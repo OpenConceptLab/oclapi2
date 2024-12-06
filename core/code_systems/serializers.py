@@ -284,7 +284,7 @@ class CodeSystemDetailSerializer(serializers.ModelSerializer):
         ident = IdentifierSerializer.include_ocl_identifier(uri, RESOURCE_TYPE, validated_data)
         source = SourceCreateOrUpdateSerializer().prepare_object(validated_data)
 
-        if ident['owner_type'] == 'orgs':
+        if ident['owner_type'] in ['orgs', 'Organization']:
             owner = Organization.objects.filter(mnemonic=ident['owner_id']).first()
         else:
             owner = UserProfile.objects.filter(username=ident['owner_id']).first()
@@ -321,6 +321,11 @@ class CodeSystemDetailSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         concepts = validated_data.pop('concepts', [])
         source = SourceCreateOrUpdateSerializer().prepare_object(validated_data, instance)
+
+        if instance.version == source.version:
+            self._errors.update({'version': f'Version {source.version} already exists for CodeSystem'
+                                            f' {source.mnemonic}.'})
+            return source
 
         # Preserve version specific values
         source_version = source.version

@@ -160,7 +160,7 @@ class ConceptMapDetailSerializer(serializers.ModelSerializer):
         ident = IdentifierSerializer.include_ocl_identifier(uri, RESOURCE_TYPE, validated_data)
         source = SourceCreateOrUpdateSerializer().prepare_object(validated_data)
 
-        if ident['owner_type'] == 'orgs':
+        if ident['owner_type'] in ['orgs', 'Organization']:
             owner = Organization.objects.filter(mnemonic=ident['owner_id']).first()
         else:
             owner = UserProfile.objects.filter(username=ident['owner_id']).first()
@@ -211,6 +211,11 @@ class ConceptMapDetailSerializer(serializers.ModelSerializer):
         mappings = validated_data.pop('mappings', [])
         source = SourceCreateOrUpdateSerializer().prepare_object(validated_data, instance)
 
+        if instance.version == source.version:
+            self._errors.update({'version': f'Version {source.version} already exists for ConceptMa'
+                                            f'p {source.mnemonic}.'})
+            return source
+
         # Preserve version specific values
         source_version = source.version
         source_released = source.released
@@ -253,10 +258,6 @@ class ConceptMapDetailSerializer(serializers.ModelSerializer):
                 new_mapping_serializer = MappingDetailSerializer(data=new_mapping)
                 new_mapping_serializer.is_valid(raise_exception=True)
                 Mapping.persist_new(new_mapping_serializer.validated_data, user)
-
-        existing_source_version = source.versions.filter(version=source_version)
-        if existing_source_version:
-            existing_source_version.delete()
 
         source.id = None
         source.version = source_version
