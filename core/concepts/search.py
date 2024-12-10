@@ -1,5 +1,5 @@
 from elasticsearch_dsl import TermsFacet, Q
-from pydash import flatten
+from pydash import flatten, is_number
 
 from core.common.constants import FACET_SIZE
 from core.common.search import CustomESFacetedSearch, CustomESSearch
@@ -79,12 +79,14 @@ class ConceptFuzzySearch:  # pragma: no cover
                 }))
 
     @classmethod
-    def search(cls, data, repo_url):  # pylint: disable=too-many-locals, too-many-branches
+    def search(cls, data, repo_url, include_retired=False):  # pylint: disable=too-many-locals, too-many-branches
         from core.concepts.documents import ConceptDocument
         search = ConceptDocument.search()
         repo_params = cls.get_target_repo_params(repo_url)
         for field, value in repo_params.items():
             search = search.query('match', **{field: value})
+        if not include_retired:
+            search = search.query('match', retired=False)
         for field in cls.filter_fields:
             value = data.get(field, None)
             if value:
@@ -118,7 +120,8 @@ class ConceptFuzzySearch:  # pragma: no cover
             criterion = criteria if criterion is None else criterion | criteria
         if criterion is not None:
             search = search.query(criterion)
-        search = search.highlight(*flatten([*cls.fuzzy_fields, *cls.priority_fields]))
+        highlight = [field for field in flatten([*cls.fuzzy_fields, *cls.priority_fields]) if not is_number(field)]
+        search = search.highlight(*highlight)
         return search.sort({'_score': {'order': 'desc'}})
 
     @classmethod

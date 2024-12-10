@@ -192,8 +192,11 @@ class ConceptAbstractSerializer(AbstractResourceSerializer):
         return None
 
     def get_mappings(self, obj):
-        from core.mappings.serializers import MappingDetailSerializer
+        from core.mappings.serializers import MappingDetailSerializer, MappingMinimalSerializer
         context = get(self, 'context')
+        request = get(context, 'request')
+        is_mapping_brief = request.query_params.get('mappingBrief', None) in TRUTHY
+        serializer_class = MappingMinimalSerializer if is_mapping_brief else MappingDetailSerializer
         is_collection = 'collection' in self.view_kwargs
         collection_version = self.view_kwargs.get('version', HEAD) if is_collection else None
         parent_uri = to_parent_uri_from_kwargs(self.view_kwargs) if is_collection else None
@@ -201,11 +204,11 @@ class ConceptAbstractSerializer(AbstractResourceSerializer):
             mappings = obj.get_bidirectional_mappings_for_collection(
                 parent_uri, collection_version
             ) if is_collection else obj.get_bidirectional_mappings()
-            return MappingDetailSerializer(mappings, many=True, context=context).data
+            return serializer_class(mappings, many=True, context=context).data
         if self.include_direct_mappings:
             mappings = obj.get_unidirectional_mappings_for_collection(
                 parent_uri, collection_version) if is_collection else obj.get_unidirectional_mappings()
-            return MappingDetailSerializer(mappings, many=True, context=context).data
+            return serializer_class(mappings, many=True, context=context).data
 
         return []
 

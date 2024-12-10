@@ -762,6 +762,7 @@ class MetadataToConceptsListView(BaseAPIView, ListWithHeadersMixin):  # pragma: 
     def filter_queryset(self, _=None):
         row = self.request.data.get('row')
         target_repo_url = self.request.data.get('target_repo_url')
+        include_retired = self.request.query_params.get(INCLUDE_RETIRED_PARAM) in get_truthy_values()
         if not row or not target_repo_url:
             raise Http400()
         offset = max(to_int(self.request.GET.get('offset'), 0), 0)
@@ -770,7 +771,7 @@ class MetadataToConceptsListView(BaseAPIView, ListWithHeadersMixin):  # pragma: 
         start = offset or (page - 1) * self.limit
         end = start + self.limit
 
-        search = ConceptFuzzySearch.search(row, target_repo_url)
+        search = ConceptFuzzySearch.search(row, target_repo_url, include_retired)
         es_search = CustomESSearch(search[start:end], ConceptDocument)
         es_search.to_queryset()
         self.total_count = es_search.total - offset
