@@ -1322,8 +1322,8 @@ class Expansion(BaseResourceModel):
 
         for reference in exclude_refs:
             concepts, mappings = get_ref_results(reference)
-            index_concepts = self.__exclude_resources(reference, self.concepts, concepts)
-            index_mappings = self.__exclude_resources(reference, self.mappings, mappings)
+            index_concepts = self.__exclude_resources(reference, self.concepts, concepts, Concept)
+            index_mappings = self.__exclude_resources(reference, self.mappings, mappings, Mapping)
 
         self.resolved_collection_versions.add(*compact(resolved_valueset_versions))
         self.resolved_source_versions.add(*compact(resolved_system_versions))
@@ -1351,13 +1351,17 @@ class Expansion(BaseResourceModel):
         return should_index
 
     @staticmethod
-    def __exclude_resources(ref, rel, resources):
+    def __exclude_resources(ref, rel, resources, klass):
         should_index = resources.exists()
         if should_index:
             if ref.resource_version:
                 rel.remove(*resources)
             else:
-                rel.set(rel.exclude(versioned_object_id__in=resources.values_list('versioned_object_id', flat=True)))
+                rel.remove(
+                    *klass.objects.filter(
+                        versioned_object_id__in=resources.values_list('versioned_object_id', flat=True)
+                    )
+                )
         return should_index
 
     def index_resources(self, concepts, mappings):
