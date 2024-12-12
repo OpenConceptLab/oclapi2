@@ -1,4 +1,4 @@
-from pydash import get
+from pydash import get, compact
 from rest_framework.fields import CharField, DateTimeField, BooleanField, URLField, JSONField, SerializerMethodField, \
     UUIDField, ListField, IntegerField, ReadOnlyField
 from rest_framework.serializers import ModelSerializer
@@ -196,6 +196,7 @@ class ConceptAbstractSerializer(AbstractResourceSerializer):
         context = get(self, 'context')
         request = get(context, 'request')
         is_mapping_brief = request.query_params.get('mappingBrief', None) in TRUTHY
+        map_types = compact((request.query_params.get('mapTypes', '') or '').split(','))
         serializer_class = MappingMinimalSerializer if is_mapping_brief else MappingDetailSerializer
         is_collection = 'collection' in self.view_kwargs
         collection_version = self.view_kwargs.get('version', HEAD) if is_collection else None
@@ -208,6 +209,8 @@ class ConceptAbstractSerializer(AbstractResourceSerializer):
         if self.include_direct_mappings:
             mappings = obj.get_unidirectional_mappings_for_collection(
                 parent_uri, collection_version) if is_collection else obj.get_unidirectional_mappings()
+            if map_types:
+                mappings = mappings.filter(map_type__in=map_types)
             return serializer_class(mappings, many=True, context=context).data
 
         return []
