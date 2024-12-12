@@ -39,12 +39,12 @@ class ConceptFacetedSearch(CustomESFacetedSearch):
 class ConceptFuzzySearch:  # pragma: no cover
     filter_fields = []
     priority_fields = [
-        ['id', 10],
-        ['name', 8],
-        ['synonyms', 6],
-        ['same_as_mapped_codes', 5],
-        ['other_map_codes', 3],
-        ['concept_class', 'datatype', 3],
+        ['id', 0.3],
+        ['name', 0.3],
+        ['synonyms', 0.1],
+        ['same_as_mapped_codes', 0.1],
+        ['other_map_codes', 0.1],
+        ['concept_class', 'datatype', 0.1],
     ]
     fuzzy_fields = ['name', 'synonyms']
 
@@ -69,12 +69,12 @@ class ConceptFuzzySearch:  # pragma: no cover
         return {}
 
     @staticmethod
-    def get_exact_and_contains_criteria(field, value, boost=0):
+    def get_exact_and_contains_criteria(field, value, boost=0, add_boost=True):
         return (CustomESSearch.get_match_criteria(field, value, boost) |
                 Q('match_phrase', **{
                     field: {
                         'query': value,
-                        'boost': 1 + boost
+                        'boost': 1 + boost if add_boost else boost
                     }
                 }))
 
@@ -99,9 +99,9 @@ class ConceptFuzzySearch:  # pragma: no cover
                 if value:
                     if isinstance(value, list):
                         for val in value:
-                            priority_fields_criteria.append(cls.get_exact_and_contains_criteria(field, val, boost))
+                            priority_fields_criteria.append(CustomESSearch.get_match_criteria(field, val, boost))
                     else:
-                        priority_fields_criteria.append(cls.get_exact_and_contains_criteria(field, value, boost))
+                        priority_fields_criteria.append(CustomESSearch.get_match_criteria(field, value, boost))
         for field in cls.fuzzy_fields:
             value = data.get(field, None)
             if value:
@@ -111,7 +111,7 @@ class ConceptFuzzySearch:  # pragma: no cover
                     _search_str = CustomESSearch.get_wildcard_search_string(
                         CustomESSearch.get_search_string(val, decode=True, lower=True)
                     )
-                    wildcard_criteria = CustomESSearch.get_wildcard_criteria(field, _search_str, 1)
+                    wildcard_criteria = CustomESSearch.get_wildcard_criteria(field, _search_str, 0.01)
                     priority_fields_criteria.append(wildcard_criteria)
                     criteria = CustomESSearch.fuzzy_criteria(val, field, 0, 3)
                     priority_fields_criteria.append(criteria)
