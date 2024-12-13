@@ -181,11 +181,11 @@ class ImportView(BulkImportParallelInlineView, ImportRetrieveDestroyMixin):
         if 'import_type' in request.data:
             file_url = get(request.data, 'file_url')  # importing as url to a file
             if not file_url:
-                data = get(request.data, 'file')  # importing by posting as text
+                data = get(request.data, 'data')  # importing by posting as text
                 if data:
                     file = io.StringIO(data)
                 else:
-                    file = get(request.data, 'data')  # importing by uploading a file with multipart/form-data
+                    file = get(request.data, 'file')  # importing by uploading a file with multipart/form-data
                 if file:
                     timestamp = datetime.now()
                     key = f'import_upload_{timestamp.strftime("%Y%m%d_%H%M%S")}_{str(uuid.uuid4())[:8]}'
