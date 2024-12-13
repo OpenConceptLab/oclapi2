@@ -322,7 +322,7 @@ class CodeSystemDetailSerializer(serializers.ModelSerializer):
         concepts = validated_data.pop('concepts', [])
         new_version = validated_data.get('version')
 
-        if instance.version == new_version:
+        if instance.active_versions.filter(version=new_version):
             self._errors.update({'version': f'Version {new_version} already exists for CodeSystem'
                                             f' {instance.mnemonic}.'})
             return instance

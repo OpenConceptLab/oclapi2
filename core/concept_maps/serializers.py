@@ -211,7 +211,7 @@ class ConceptMapDetailSerializer(serializers.ModelSerializer):
         mappings = validated_data.pop('mappings', [])
         new_version = validated_data.get('version')
 
-        if instance.version == new_version:
+        if instance.active_versions.filter(version=new_version):
             self._errors.update({'version': f'Version {new_version} already exists for CodeSystem'
                                             f' {instance.mnemonic}.'})
             return instance
