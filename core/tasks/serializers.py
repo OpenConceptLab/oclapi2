@@ -45,6 +45,7 @@ class TaskBriefSerializer(ModelSerializer):
                         instance.updated_at = timezone.now()
                     instance.summary = {'total': instance.json_result.get('summary').get('total'), 'processed':
                                         instance.json_result.get('summary').get('processed'),
+                                        'failed': instance.json_result.get('summary').get('failed'),
                                         'dependencies': instance.json_result.get('summary').get('dependencies')}
 
         ret = super().to_representation(instance)
