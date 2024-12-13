@@ -201,7 +201,7 @@ class ImportView(BulkImportParallelInlineView, ImportRetrieveDestroyMixin):
                         upload_service.upload(key, file,
                                               metadata={'ContentType': 'application/octet-stream'},
                                               headers={'content-type': 'application/octet-stream'})
-                        file_url = upload_service.url_for(key)
+                        file_url = key
 
             task = get_queue_task_names(import_queue, self.request.user.username)
             new_task = bulk_import_new.apply_async(
