@@ -27,6 +27,7 @@ from core.common.swagger_parameters import update_if_exists_param, task_param, r
 from core.common.utils import queue_bulk_import, is_csv_file, get_truthy_values, get_queue_task_names, \
     get_export_service
 from core.importers.constants import ALREADY_QUEUED, INVALID_UPDATE_IF_EXISTS, NO_CONTENT_TO_IMPORT
+from core.importers.importer import Importer
 from core.importers.input_parsers import ImportContentParser
 from core.tasks.models import Task
 from core.tasks.serializers import TaskDetailSerializer, TaskListSerializer
@@ -197,6 +198,8 @@ class ImportView(BulkImportParallelInlineView, ImportRetrieveDestroyMixin):
                         with open(file_url, 'wb') as f:
                             shutil.copyfileobj(file, f)
                     else:
+                        if not key.startswith(Importer.IMPORT_CACHE):
+                            key = Importer.IMPORT_CACHE + key
                         upload_service = get_export_service()
                         upload_service.upload(key, file,
                                               metadata={'ContentType': 'application/octet-stream'},
