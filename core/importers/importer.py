@@ -239,7 +239,7 @@ class Importer:
 
         if not self.path.startswith('/'):  # not local path
             key = self.path
-            protocol_index = key.index('://')
+            protocol_index = key.find('://')
             if protocol_index:
                 key = key[protocol_index+3:]
             key = key.replace('/', '_')
