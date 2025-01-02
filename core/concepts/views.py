@@ -17,7 +17,7 @@ from core.collections.documents import CollectionDocument
 from core.common.constants import (
     HEAD, INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_RETIRED_PARAM, ACCESS_TYPE_NONE)
 from core.common.exceptions import Http400, Http403, Http409
-from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryMixin, CustomPaginator
+from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryMixin
 from core.common.search import CustomESSearch
 from core.common.swagger_parameters import (
     q_param, limit_param, sort_desc_param, page_param, sort_asc_param, verbose_param,
@@ -779,13 +779,13 @@ class MetadataToConceptsListView(BaseAPIView):
             es_search.to_queryset(False)
             result = {'row': row, 'results': []}
             for concept in es_search.queryset:
-                concept._highlight = es_search.highlights.get(concept.id, {})
-                concept._score = es_search.scores.get(concept.id, {})
-                concept._match_type = 'low'
-                if concept._score > self.score_threshold:
-                    concept._match_type = 'high'
-                    if concept._highlight.get('name', None):
-                        concept._match_type = 'very_high'
+                concept._highlight = es_search.highlights.get(concept.id, {})  # pylint:disable=protected-access
+                concept._score = es_search.scores.get(concept.id, {})  # pylint:disable=protected-access
+                concept._match_type = 'low'  # pylint:disable=protected-access
+                if concept._score > self.score_threshold:  # pylint:disable=protected-access
+                    concept._match_type = 'high'  # pylint:disable=protected-access
+                    if concept._highlight.get('name', None):  # pylint:disable=protected-access
+                        concept._match_type = 'very_high'  # pylint:disable=protected-access
                 result['results'].append(ConceptMinimalSerializer(concept, context={'request': self.request}).data)
             results.append(result)
 
