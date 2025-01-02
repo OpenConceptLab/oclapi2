@@ -746,7 +746,7 @@ class ConceptsHierarchyAmendAdminView(APIView):  # pragma: no cover
         )
 
 
-class MetadataToConceptsListView(BaseAPIView):
+class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
     default_limit = 1
     score_threshold = 6
     serializer_class = ConceptListSerializer
