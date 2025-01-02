@@ -171,12 +171,21 @@ class IdentifierSerializer(ReadSerializerMixin, Serializer):
 
 
 class SearchResultSerializer(Serializer):  # pylint: disable=abstract-method
+    match_type = CharField(source='_match_type', allow_null=True, allow_blank=True)
     search_score = FloatField(source='_score', allow_null=True)
     search_confidence = CharField(source='_confidence', allow_null=True, allow_blank=True)
     search_highlight = SerializerMethodField()
 
     class Meta:
-        fields = ('search_score', 'search_confidence', 'search_highlight')
+        fields = ('search_score', 'search_confidence', 'search_highlight', 'match_type')
+
+    def to_representation(self, instance):
+        rep = super().to_representation(instance)
+
+        if not rep.get('match_type', None):
+            rep.pop('match_type', None)
+
+        return rep
 
     @staticmethod
     def get_search_highlight(obj):

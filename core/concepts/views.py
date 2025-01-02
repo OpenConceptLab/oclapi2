@@ -746,8 +746,9 @@ class ConceptsHierarchyAmendAdminView(APIView):  # pragma: no cover
         )
 
 
-class MetadataToConceptsListView(BaseAPIView, ListWithHeadersMixin):  # pragma: no cover
-    default_limit = 5
+class MetadataToConceptsListView(BaseAPIView):
+    default_limit = 1
+    score_threshold = 6
     serializer_class = ConceptListSerializer
     permission_classes = (IsAuthenticatedOrReadOnly,)
 
@@ -760,45 +761,35 @@ class MetadataToConceptsListView(BaseAPIView, ListWithHeadersMixin):  # pragma: 
         return ConceptListSerializer
 
     def filter_queryset(self, _=None):
-        row = self.request.data.get('row')
+        rows = self.request.data.get('rows')
         target_repo_url = self.request.data.get('target_repo_url')
+        target_repo_params = self.request.data.get('target_repo')
         include_retired = self.request.query_params.get(INCLUDE_RETIRED_PARAM) in get_truthy_values()
-        if not row or not target_repo_url:
+        if not rows or (not target_repo_url and not target_repo_params):
             raise Http400()
         offset = max(to_int(self.request.GET.get('offset'), 0), 0)
-        self.limit = int(self.limit) or self.default_limit
+        limit = max(to_int(self.request.GET.get('limit'), 0), 0) or self.default_limit
         page = max(to_int(self.request.GET.get('page'), 1), 1)
-        start = offset or (page - 1) * self.limit
-        end = start + self.limit
+        start = offset or (page - 1) * limit
+        end = start + limit
+        results = []
+        for row in rows:
+            search = ConceptFuzzySearch.search(row, target_repo_url, target_repo_params, include_retired)
+            es_search = CustomESSearch(search[start:end], ConceptDocument)
+            es_search.to_queryset(False)
+            result = {'row': row, 'results': []}
+            for concept in es_search.queryset:
+                concept._highlight = es_search.highlights.get(concept.id, {})
+                concept._score = es_search.scores.get(concept.id, {})
+                concept._match_type = 'low'
+                if concept._score > self.score_threshold:
+                    concept._match_type = 'high'
+                    if concept._highlight.get('name', None):
+                        concept._match_type = 'very_high'
+                result['results'].append(ConceptMinimalSerializer(concept, context={'request': self.request}).data)
+            results.append(result)
 
-        search = ConceptFuzzySearch.search(row, target_repo_url, include_retired)
-        es_search = CustomESSearch(search[start:end], ConceptDocument)
-        es_search.to_queryset()
-        self.total_count = es_search.total - offset
-        self._scores = es_search.scores
-        self._max_score = es_search.max_score
-        self._highlights = es_search.highlights
-        return es_search.queryset
+        return results
 
     def post(self, request, **kwargs):  # pylint: disable=unused-argument
-        self.limit = self.default_limit
-        self.object_list = self.filter_queryset()
-        sorted_list = self.object_list
-
-        if not self.limit or int(self.limit) == 0 or int(self.limit) > 1000:
-            self.limit = self.default_limit
-        paginator = CustomPaginator(
-            request=request, queryset=self.object_list, page_size=self.limit, total_count=self.total_count,
-            is_sliced=True, max_score=get(self, '_max_score'),
-            search_scores=get(self, '_scores'), highlights=get(self, '_highlights')
-        )
-        headers = paginator.headers
-        results = paginator.current_page_results
-        data = self.serialize_list(results, paginator)
-
-        response = Response(data)
-        for key, value in headers.items():
-            response[key] = value
-        if not headers:
-            response['num_found'] = len(sorted_list)
-        return response
+        return Response(self.filter_queryset())

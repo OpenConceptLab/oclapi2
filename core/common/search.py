@@ -225,7 +225,10 @@ class CustomESSearch:
             ])
         else:
             pks = [result.meta.id for result in s]
-            qs = self._dsl_search._model.objects.filter(pk__in=pks)  # pylint: disable=protected-access
+            if len(pks) == 1:
+                qs = self._dsl_search._model.objects.filter(pk=pks[0])  # pylint: disable=protected-access
+            else:
+                qs = self._dsl_search._model.objects.filter(pk__in=pks)  # pylint: disable=protected-access
             if keep_order:
                 preserved_order = Case(
                     *[When(pk=pk, then=pos) for pos, pk in enumerate(pks)],

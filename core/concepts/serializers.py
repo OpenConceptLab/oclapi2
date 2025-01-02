@@ -159,7 +159,7 @@ class ConceptAbstractSerializer(AbstractResourceSerializer):
                 self.fields.pop('child_concepts', None)
             if not self.include_child_concept_urls:
                 self.fields.pop('child_concept_urls')
-            if not self.include_parent_concept_urls and (not get(request, 'method') or get(request, 'method') == 'GET'):
+            if not self.include_parent_concept_urls:
                 self.fields.pop('parent_concept_urls')
             if not self.include_hierarchy_path:
                 self.fields.pop('hierarchy_path', None)
@@ -205,13 +205,13 @@ class ConceptAbstractSerializer(AbstractResourceSerializer):
             mappings = obj.get_bidirectional_mappings_for_collection(
                 parent_uri, collection_version
             ) if is_collection else obj.get_bidirectional_mappings()
-            return serializer_class(mappings, many=True, context=context).data
+            return serializer_class(mappings, many=True).data
         if self.include_direct_mappings:
             mappings = obj.get_unidirectional_mappings_for_collection(
                 parent_uri, collection_version) if is_collection else obj.get_unidirectional_mappings()
             if map_types:
                 mappings = mappings.filter(map_type__in=map_types)
-            return serializer_class(mappings, many=True, context=context).data
+            return serializer_class(mappings, many=True).data
 
         return []
 

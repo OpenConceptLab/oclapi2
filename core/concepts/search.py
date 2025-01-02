@@ -79,10 +79,10 @@ class ConceptFuzzySearch:  # pragma: no cover
                 }))
 
     @classmethod
-    def search(cls, data, repo_url, include_retired=False):  # pylint: disable=too-many-locals, too-many-branches
+    def search(cls, data, repo_url, repo_params=None, include_retired=False):  # pylint: disable=too-many-locals, too-many-branches
         from core.concepts.documents import ConceptDocument
         search = ConceptDocument.search()
-        repo_params = cls.get_target_repo_params(repo_url)
+        repo_params = repo_params or cls.get_target_repo_params(repo_url)
         for field, value in repo_params.items():
             search = search.query('match', **{field: value})
         if not include_retired:
