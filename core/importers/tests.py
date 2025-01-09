@@ -999,10 +999,10 @@ class BulkImportInlineTest(OCLTestCase):
         importer = BulkImportInline(data, 'ocladmin', True)
         importer.run()
         self.assertEqual(importer.processed, 31)
-        self.assertEqual(len(importer.created), 21)
+        self.assertEqual(len(importer.created), 28)
         self.assertEqual(len(importer.updated), 0)
         self.assertEqual(len(importer.invalid), 0)
-        self.assertEqual(len(importer.failed), 10)
+        self.assertEqual(len(importer.failed), 3)
         self.assertEqual(len(importer.permission_denied), 0)
         batch_index_resources_mock.apply_async.assert_called()
 
