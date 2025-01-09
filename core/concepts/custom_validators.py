@@ -170,7 +170,10 @@ class OpenMRSConceptValidator(BaseConceptValidator):
             short_names_per_locale[name.locale] = True
 
     def concept_class_should_be_valid_attribute(self, concept):
-        if concept.concept_class not in self.reference_values['Classes']:
+        if not concept.concept_class or (
+                concept.concept_class not in self.reference_values['Classes'] and
+                concept.concept_class.replace('-', ' ') not in self.reference_values['Classes']
+        ):
             raise ValidationError({'concept_class': [OPENMRS_CONCEPT_CLASS]})
 
     def data_type_should_be_valid_attribute(self, concept):
