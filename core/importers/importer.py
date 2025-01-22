@@ -9,9 +9,8 @@ import tarfile
 import tempfile
 import zipfile
 from zipfile import ZipFile
-
 from celery.result import AsyncResult, result_from_tuple
-from celery import group, chain, chord
+from celery import group, chain
 
 import ijson
 import requests
@@ -216,7 +215,7 @@ class Importer:
     owner_type: str
     owner: str
     import_type: str = 'default'
-    BATCH_SIZE: int = 100
+    MIN_BATCH_SIZE: int = 50
     IMPORT_CACHE: str = "import_cache/"
 
     # pylint: disable=too-many-arguments
@@ -376,6 +375,16 @@ class Importer:
 
     def prepare_tasks(self, resource_types, packages, resources):
         tasks = []
+        # Count all items to determine batch size
+        all_count = 0
+        for resource, item in resources.items():
+            for filepath, count in item.items():
+                all_count += count
+        if all_count > 50000:
+            task_batch_size = (all_count / 1000)
+        else:
+            task_batch_size = self.MIN_BATCH_SIZE
+
         # Import in groups in order. Resources within groups are imported in parallel.
         for package in packages:
             # Import dependencies in order.
@@ -383,7 +392,7 @@ class Importer:
                 # Import resource types in order.
                 files = []
                 groups = []
-                batch_size = self.BATCH_SIZE
+                batch_size = task_batch_size
                 for filepath, count in resources.get(resource_type).items():
                     if not filepath.startswith(package):
                         continue
@@ -403,11 +412,16 @@ class Importer:
                         batch_size -= end_index - start_index
                         start_index = end_index
 
-                        if batch_size <= 0 or start_index == end_index:
+                        if batch_size <= 0:
                             groups.append({"path": package, "username": self.username, "owner_type": self.owner_type,
                                            "owner": self.owner, "resource_type": resource_type, "files": files})
                             files = []
-                            batch_size = self.BATCH_SIZE
+                            batch_size = task_batch_size
+
+                if files:
+                    # Append last task to the group
+                    groups.append({"path": package, "username": self.username, "owner_type": self.owner_type,
+                                   "owner": self.owner, "resource_type": resource_type, "files": files})
 
                 if groups:
                     tasks.append(groups)
@@ -426,7 +440,7 @@ class Importer:
             if len(group_tasks) == 1:  # Prevent celery from converting group to a single task
                 group_tasks.append(bulk_import_subtask_empty.si().set(queue='concurrent'))
 
-            chained_tasks |= chord(group(group_tasks), bulk_import_subtask_empty.si().set(queue='concurrent'))
+            chained_tasks |= group(group_tasks)
         chained_tasks |= import_finisher.si(self.task_id).set(queue='concurrent')
 
         final_task = chained_tasks.apply_async(queue='concurrent')

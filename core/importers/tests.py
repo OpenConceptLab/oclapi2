@@ -2064,36 +2064,38 @@ class ImporterTest(OCLTestCase):
                                    'CodeSystem': {'/package1/path4:': 10},
                                    'ConceptMap': {'/package2/path5': 250}
                                })
-
         self.assertEqual(tasks, [
-            # Executed in sequence
-            [  # Executed in parallel
-                {'path': '/package2', 'username': 'root', 'owner_type': 'users', 'owner': 'root',
-                 'resource_type': 'ValueSet', 'files': [{'filepath': 'path3', 'start_index': 0, 'end_index': 50}]}
-            ], [  # Executed in parallel
-                {'path': '/package2', 'username': 'root', 'owner_type': 'users', 'owner': 'root',
-                 'resource_type': 'ConceptMap', 'files': [{'filepath': 'path5', 'start_index': 0, 'end_index': 100}]},
-                {'path': '/package2', 'username': 'root', 'owner_type': 'users', 'owner': 'root',
-                 'resource_type': 'ConceptMap', 'files': [{'filepath': 'path5', 'start_index': 100,
-                                                           'end_index': 200}]},
-                {'path': '/package2', 'username': 'root', 'owner_type': 'users', 'owner': 'root',
-                 'resource_type': 'ConceptMap', 'files': [{'filepath': 'path5', 'start_index': 200, 'end_index': 250}]}
-            ], [  # Executed in parallel
-                {'path': '/package1', 'username': 'root', 'owner_type': 'users', 'owner': 'root',
-                 'resource_type': 'CodeSystem', 'files': [{'filepath': 'path4:', 'start_index': 0, 'end_index': 10}]}
-            ], [  # Executed in parallel
-                {'path': '/package1', 'username': 'root', 'owner_type': 'users', 'owner': 'root',
-                 'resource_type': 'ValueSet', 'files': [{'filepath': 'path1', 'start_index': 0, 'end_index': 100}]},
-                {'path': '/package1', 'username': 'root', 'owner_type': 'users', 'owner': 'root',
-                 'resource_type': 'ValueSet', 'files': [{'filepath': 'path1', 'start_index': 100, 'end_index': 101}]},
-                {'path': '/package1', 'username': 'root', 'owner_type': 'users', 'owner': 'root',
-                 'resource_type': 'ValueSet', 'files': [{'filepath': 'path2', 'start_index': 0, 'end_index': 100}]},
-                {'path': '/package1', 'username': 'root', 'owner_type': 'users', 'owner': 'root',
-                 'resource_type': 'ValueSet', 'files': [{'filepath': 'path2', 'start_index': 100, 'end_index': 200}]},
-                {'path': '/package1', 'username': 'root', 'owner_type': 'users', 'owner': 'root',
-                 'resource_type': 'ValueSet', 'files': [{'filepath': 'path2', 'start_index': 200,
-                                                         'end_index': 299}]}
-            ]])
+            [{'path': '/package2', 'username': 'root', 'owner_type': 'users', 'owner': 'root',
+             'resource_type': 'ValueSet', 'files': [{'filepath': 'path3', 'start_index': 0, 'end_index': 50}]}],
+            [{'path': '/package2', 'username': 'root', 'owner_type': 'users', 'owner': 'root',
+              'resource_type': 'ConceptMap', 'files': [{'filepath': 'path5', 'start_index': 0, 'end_index': 50}]},
+             {'path': '/package2', 'username': 'root', 'owner_type': 'users', 'owner': 'root',
+              'resource_type': 'ConceptMap', 'files': [{'filepath': 'path5', 'start_index': 50, 'end_index': 100}]},
+             {'path': '/package2', 'username': 'root', 'owner_type': 'users', 'owner': 'root',
+              'resource_type': 'ConceptMap', 'files': [{'filepath': 'path5', 'start_index': 100, 'end_index': 150}]},
+             {'path': '/package2', 'username': 'root', 'owner_type': 'users', 'owner': 'root',
+              'resource_type': 'ConceptMap', 'files': [{'filepath': 'path5', 'start_index': 150, 'end_index': 200}]},
+             {'path': '/package2', 'username': 'root', 'owner_type': 'users', 'owner': 'root',
+              'resource_type': 'ConceptMap', 'files': [{'filepath': 'path5', 'start_index': 200, 'end_index': 250}]}],
+            [{'path': '/package1', 'username': 'root', 'owner_type': 'users', 'owner': 'root',
+              'resource_type': 'CodeSystem', 'files': [{'filepath': 'path4:', 'start_index': 0, 'end_index': 10}]}],
+            [{'path': '/package1', 'username': 'root', 'owner_type': 'users', 'owner': 'root',
+              'resource_type': 'ValueSet', 'files': [{'filepath': 'path1', 'start_index': 0, 'end_index': 50}]},
+             {'path': '/package1', 'username': 'root', 'owner_type': 'users', 'owner': 'root',
+              'resource_type': 'ValueSet', 'files': [{'filepath': 'path1', 'start_index': 50, 'end_index': 100}]},
+             {'path': '/package1', 'username': 'root', 'owner_type': 'users', 'owner': 'root',
+              'resource_type': 'ValueSet', 'files': [{'filepath': 'path1', 'start_index': 100, 'end_index': 101},
+                                                     {'filepath': 'path2', 'start_index': 0, 'end_index': 49}]},
+             {'path': '/package1', 'username': 'root', 'owner_type': 'users', 'owner': 'root',
+              'resource_type': 'ValueSet', 'files': [{'filepath': 'path2', 'start_index': 49, 'end_index': 99}]},
+             {'path': '/package1', 'username': 'root', 'owner_type': 'users', 'owner': 'root',
+              'resource_type': 'ValueSet', 'files': [{'filepath': 'path2', 'start_index': 99, 'end_index': 149}]},
+             {'path': '/package1', 'username': 'root', 'owner_type': 'users', 'owner': 'root',
+              'resource_type': 'ValueSet', 'files': [{'filepath': 'path2', 'start_index': 149, 'end_index': 199}]},
+             {'path': '/package1', 'username': 'root', 'owner_type': 'users', 'owner': 'root',
+              'resource_type': 'ValueSet', 'files': [{'filepath': 'path2', 'start_index': 199, 'end_index': 249}]},
+             {'path': '/package1', 'username': 'root', 'owner_type': 'users', 'owner': 'root',
+              'resource_type': 'ValueSet', 'files': [{'filepath': 'path2', 'start_index': 249, 'end_index': 299}]}]])
 
     hl7_fhir_fr_core_resources = {
         'CodeSystem': {'http://fetch/npm/package/package/CodeSystem-fr-core-cs-circonstances-sortie.json': 1,
