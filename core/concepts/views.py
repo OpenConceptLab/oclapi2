@@ -42,6 +42,7 @@ from core.concepts.serializers import (
     ConceptChildrenSerializer, ConceptParentsSerializer, ConceptLookupListSerializer, ConceptChecksumSerializer)
 from core.mappings.serializers import MappingListSerializer
 from core.tasks.models import Task
+from core.toggles.models import Toggle
 
 TRUTHY = get_truthy_values()
 
@@ -749,6 +750,7 @@ class ConceptsHierarchyAmendAdminView(APIView):  # pragma: no cover
 class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
     default_limit = 1
     score_threshold = 6
+    score_threshold_semantic_very_high = 9
     serializer_class = ConceptListSerializer
     permission_classes = (IsAuthenticatedOrReadOnly,)
 
@@ -773,8 +775,13 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
         start = offset or (page - 1) * limit
         end = start + limit
         results = []
+        is_semantic = self.request.query_params.get('semantic', None) == 'true' and Toggle.get('SEMANTIC_SEARCH_TOGGLE')
+        best_match = self.request.query_params.get('bestMatch', None) == 'true'
+        score_threshold = self.score_threshold_semantic_very_high if is_semantic else self.score_threshold
+
         for row in rows:
             search = ConceptFuzzySearch.search(row, target_repo_url, target_repo_params, include_retired)
+            search = search.params(min_score=score_threshold if best_match else 0)
             es_search = CustomESSearch(search[start:end], ConceptDocument)
             es_search.to_queryset(False)
             result = {'row': row, 'results': []}
@@ -786,7 +793,12 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
                     concept._match_type = 'high'  # pylint:disable=protected-access
                     if concept._highlight.get('name', None):  # pylint:disable=protected-access
                         concept._match_type = 'very_high'  # pylint:disable=protected-access
-                result['results'].append(ConceptMinimalSerializer(concept, context={'request': self.request}).data)
+                    if is_semantic and concept._score > self.score_threshold_semantic_very_high:
+                        concept._match_type = 'very_high'  # pylint:disable=protected-access
+                if not best_match or concept._match_type == 'very_high':
+                    serializer = ConceptDetailSerializer if self.is_verbose() else ConceptMinimalSerializer
+                    result['results'].append(
+                        serializer(concept, context={'request': self.request}).data)
             results.append(result)
 
         return results

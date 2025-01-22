@@ -258,6 +258,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         'datatype': {'sortable': True, 'filterable': True, 'facet': True, 'exact': False},
         'locale': {'sortable': False, 'filterable': True, 'facet': True, 'exact': False},
         'synonyms': {'sortable': False, 'filterable': True, 'facet': False, 'exact': True},
+        'description': {'sortable': False, 'filterable': True, 'facet': False, 'exact': False},
         'retired': {'sortable': False, 'filterable': True, 'facet': True},
         'source': {'sortable': True, 'filterable': True, 'facet': True, 'exact': False},
         'collection': {'sortable': False, 'filterable': True, 'facet': True},

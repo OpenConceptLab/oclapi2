@@ -350,7 +350,7 @@ class ConceptSummarySerializer(ModelSerializer):
 class ConceptMinimalSerializer(ConceptAbstractSerializer):
     id = EncodedDecodedCharField(source='mnemonic', read_only=True)
     type = CharField(source='resource_type', read_only=True)
-    url = CharField(source='uri', read_only=True)
+    url = CharField(source='versioned_object_url', read_only=True)
 
     class Meta:
         model = Concept

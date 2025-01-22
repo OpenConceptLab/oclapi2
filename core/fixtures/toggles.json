@@ -40,5 +40,14 @@
       "dev": true,
       "qa": true
     }
+  },
+  {
+    "pk": 6,
+    "model": "toggles.toggle",
+    "fields": {
+      "is_active": true,
+      "name": "SEMANTIC_SEARCH_TOGGLE",
+      "dev": true
+    }
   }
 ]

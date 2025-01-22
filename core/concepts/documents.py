@@ -40,6 +40,7 @@ class ConceptDocument(Document):
     created_by = fields.KeywordField(attr='created_by.username')
     name_types = fields.ListField(fields.KeywordField())
     description_types = fields.ListField(fields.KeywordField())
+    description = fields.TextField()
     same_as_map_codes = fields.ListField(fields.KeywordField())
     other_map_codes = fields.ListField(fields.KeywordField())
 
@@ -97,6 +98,11 @@ class ConceptDocument(Document):
                 'boost': 0.1,
                 'wildcard': True,
                 'lower': True
+            },
+            'description': {
+                'boost': 0,
+                'wildcard': True,
+                'lower': False
             },
         }
 
@@ -166,6 +172,10 @@ class ConceptDocument(Document):
     @staticmethod
     def prepare_description_types(instance):
         return compact(set(instance.descriptions.values_list('type', flat=True)))
+
+    @staticmethod
+    def prepare_description(instance):
+        return '. '.join(compact(set(instance.descriptions.values_list('name', flat=True))))
 
     def prepare(self, instance):
         data = super().prepare(instance)
