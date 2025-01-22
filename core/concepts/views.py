@@ -762,7 +762,7 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
 
         return ConceptListSerializer
 
-    def filter_queryset(self, _=None):
+    def filter_queryset(self, _=None):  # pylint:disable=too-many-locals
         rows = self.request.data.get('rows')
         target_repo_url = self.request.data.get('target_repo_url')
         target_repo_params = self.request.data.get('target_repo')
@@ -793,9 +793,9 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
                     concept._match_type = 'high'  # pylint:disable=protected-access
                     if concept._highlight.get('name', None):  # pylint:disable=protected-access
                         concept._match_type = 'very_high'  # pylint:disable=protected-access
-                    if is_semantic and concept._score > self.score_threshold_semantic_very_high:
+                    if is_semantic and concept._score > self.score_threshold_semantic_very_high:  # pylint:disable=protected-access,line-too-long
                         concept._match_type = 'very_high'  # pylint:disable=protected-access
-                if not best_match or concept._match_type == 'very_high':
+                if not best_match or concept._match_type == 'very_high':  # pylint:disable=protected-access
                     serializer = ConceptDetailSerializer if self.is_verbose() else ConceptMinimalSerializer
                     result['results'].append(
                         serializer(concept, context={'request': self.request}).data)
