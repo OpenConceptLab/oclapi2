@@ -375,15 +375,7 @@ class Importer:
 
     def prepare_tasks(self, resource_types, packages, resources):
         tasks = []
-        # Count all items to determine batch size
-        all_count = 0
-        for resource, item in resources.items():
-            for filepath, count in item.items():
-                all_count += count
-        if all_count > 50000:
-            task_batch_size = (all_count / 1000)
-        else:
-            task_batch_size = self.MIN_BATCH_SIZE
+        task_batch_size = self.calculate_batch_size(resources)
 
         # Import in groups in order. Resources within groups are imported in parallel.
         for package in packages:
@@ -426,6 +418,18 @@ class Importer:
                 if groups:
                     tasks.append(groups)
         return tasks
+
+    def calculate_batch_size(self, resources):
+        # Count all items to determine batch size
+        all_count = 0
+        for _, item in resources.items():
+            for _, count in item.items():
+                all_count += count
+        if all_count > 50000:
+            task_batch_size = all_count / 1000
+        else:
+            task_batch_size = self.MIN_BATCH_SIZE
+        return task_batch_size
 
     def schedule_tasks(self, tasks):
         chained_tasks = chain()
