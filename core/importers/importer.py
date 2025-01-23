@@ -10,7 +10,7 @@ import tempfile
 import zipfile
 from zipfile import ZipFile
 from celery.result import AsyncResult, result_from_tuple
-from celery import group, chain, chord
+from celery import group, chain
 
 import ijson
 import requests
