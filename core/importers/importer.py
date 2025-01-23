@@ -366,6 +366,12 @@ class Importer:
                 if dependency_path in visited_dependencies:
                     # Found circular dependency... Ignore and continue.
                     continue
+
+                if dependency_path == 'https://packages.simplifier.net/hl7.fhir.r4.core/4.0.1/':
+                    # Do not import the core package if it's on the list of dependencies
+                    visited_dependencies.append(dependency_path)
+                    dependencies.append(dependency_path)
+                    continue
                 self.prepare_resources(dependency_path, resource_types, dependencies, visited_dependencies, resources)
 
         dependencies.append(path)
