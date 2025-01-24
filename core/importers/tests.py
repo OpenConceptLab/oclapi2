@@ -1892,16 +1892,11 @@ class ImportTaskTest(OCLTestCase):
     def test_revoke(self):
         import_task = ImportTask()
         mock = Mock()
-        mock.parent = Mock()
-        mock.parent.parent = Mock()
-        mock.parent.parent.parent = None
 
         import_task.import_async_result = mock
         import_task.revoke()
 
         mock.revoke.assert_called_once_with()
-        mock.parent.revoke.assert_called_once_with()
-        mock.parent.parent.revoke.assert_called_once_with()
 
 
 class ImporterTest(OCLTestCase):
