@@ -1926,11 +1926,15 @@ class ImporterTest(OCLTestCase):
             with open('/dev/null') as package_file:
                 importer.traverse_dependencies(package_file, '/', [], [], [], {})
                 mocked_prepare_resources.assert_has_calls([
-                    call('https://packages.simplifier.net/hl7.fhir.r4.core/4.0.1/', [], ['/'], ['/'], {}),
-                    call('https://packages.simplifier.net/hl7.terminology.r4/5.3.0/', [], ['/'], ['/'], {}),
-                    call('https://packages.simplifier.net/hl7.fhir.uv.extensions.r4/1.0.0/', [], ['/'], ['/'], {}),
-                    call('https://packages.simplifier.net/ans.fr.nos/1.2.0/', [], ['/'], ['/'], {})
-                ])
+                    call('https://packages.simplifier.net/hl7.terminology.r4/5.3.0/', [],
+                         ['https://packages.simplifier.net/hl7.fhir.r4.core/4.0.1/', '/'],
+                         ['/', 'https://packages.simplifier.net/hl7.fhir.r4.core/4.0.1/'], {}),
+                    call('https://packages.simplifier.net/hl7.fhir.uv.extensions.r4/1.0.0/', [],
+                         ['https://packages.simplifier.net/hl7.fhir.r4.core/4.0.1/', '/'],
+                         ['/', 'https://packages.simplifier.net/hl7.fhir.r4.core/4.0.1/'], {}),
+                    call('https://packages.simplifier.net/ans.fr.nos/1.2.0/', [],
+                         ['https://packages.simplifier.net/hl7.fhir.r4.core/4.0.1/', '/'],
+                         ['/', 'https://packages.simplifier.net/hl7.fhir.r4.core/4.0.1/'], {})])
 
     @patch.object(Importer, 'prepare_resources')
     def test_traverse_dependencies_with_circuit(self, mocked_prepare_resources):
@@ -1947,12 +1951,14 @@ class ImporterTest(OCLTestCase):
                 visited_dependencies = ['https://packages.simplifier.net/hl7.fhir.uv.extensions.r4/1.0.0/']
                 importer.traverse_dependencies(package_file, '/', [], [], visited_dependencies, {})
                 mocked_prepare_resources.assert_has_calls([
-                    call('https://packages.simplifier.net/hl7.fhir.r4.core/4.0.1/', [], ['/'],
-                         ['https://packages.simplifier.net/hl7.fhir.uv.extensions.r4/1.0.0/', '/'], {}),
-                    call('https://packages.simplifier.net/hl7.terminology.r4/5.3.0/', [], ['/'],
-                         ['https://packages.simplifier.net/hl7.fhir.uv.extensions.r4/1.0.0/', '/'], {}),
-                    call('https://packages.simplifier.net/ans.fr.nos/1.2.0/', [], ['/'], [
-                        'https://packages.simplifier.net/hl7.fhir.uv.extensions.r4/1.0.0/', '/'], {})])
+                    call('https://packages.simplifier.net/hl7.terminology.r4/5.3.0/', [],
+                         ['https://packages.simplifier.net/hl7.fhir.r4.core/4.0.1/', '/'],
+                         ['https://packages.simplifier.net/hl7.fhir.uv.extensions.r4/1.0.0/', '/',
+                          'https://packages.simplifier.net/hl7.fhir.r4.core/4.0.1/'], {}),
+                    call('https://packages.simplifier.net/ans.fr.nos/1.2.0/', [],
+                         ['https://packages.simplifier.net/hl7.fhir.r4.core/4.0.1/', '/'],
+                         ['https://packages.simplifier.net/hl7.fhir.uv.extensions.r4/1.0.0/', '/',
+                          'https://packages.simplifier.net/hl7.fhir.r4.core/4.0.1/'], {})])
 
     @responses.activate
     @patch.object(Importer, 'prepare_resources')
@@ -1982,11 +1988,15 @@ class ImporterTest(OCLTestCase):
                               content_type='application/json', stream=True)
                 importer.traverse_dependencies(package_file, '/', [], [], [], {})
                 mocked_prepare_resources.assert_has_calls([
-                    call('https://packages.simplifier.net/hl7.fhir.r4.core/4.0.1/', [], ['/'], ['/'], {}),
-                    call('https://packages.simplifier.net/hl7.terminology.r4/5.3.0/', [], ['/'], ['/'], {}),
-                    call('https://packages.simplifier.net/hl7.fhir.uv.extensions.r4/1.0.0/', [], ['/'], ['/'], {}),
-                    call('https://packages.simplifier.net/ans.fr.nos/1.1.0/', [], ['/'], ['/'], {})
-                ])
+                    call('https://packages.simplifier.net/hl7.terminology.r4/5.3.0/', [],
+                         ['https://packages.simplifier.net/hl7.fhir.r4.core/4.0.1/', '/'],
+                         ['/', 'https://packages.simplifier.net/hl7.fhir.r4.core/4.0.1/'], {}),
+                    call('https://packages.simplifier.net/hl7.fhir.uv.extensions.r4/1.0.0/', [],
+                         ['https://packages.simplifier.net/hl7.fhir.r4.core/4.0.1/', '/'],
+                         ['/', 'https://packages.simplifier.net/hl7.fhir.r4.core/4.0.1/'], {}),
+                    call('https://packages.simplifier.net/ans.fr.nos/1.1.0/', [],
+                         ['https://packages.simplifier.net/hl7.fhir.r4.core/4.0.1/', '/'],
+                         ['/', 'https://packages.simplifier.net/hl7.fhir.r4.core/4.0.1/'], {})])
 
     @responses.activate
     @patch.object(Importer, 'prepare_resources')
