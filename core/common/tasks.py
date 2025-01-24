@@ -4,6 +4,7 @@ from datetime import datetime
 from json import JSONDecodeError
 
 from billiard.exceptions import WorkerLostError
+from celery import chord
 from celery.utils.log import get_task_logger
 from dateutil.relativedelta import relativedelta
 from django.apps import apps
@@ -285,6 +286,12 @@ def bulk_import_new(self, path, username, owner_type, owner, import_type='defaul
 def bulk_import_subtask(path, username, owner_type, owner, resource_type, files):
     from core.importers.importer import ImporterSubtask
     return ImporterSubtask(path, username, owner_type, owner, resource_type, files).run()
+
+
+@app.task(retry_kwargs={'max_retries': 0}, compression='gzip')
+def bulk_import_queue(task_queue):
+    tasks = task_queue.pop(0)
+    return chord(tasks, bulk_import_queue.si(task_queue)).apply_async(queue='concurrent')
 
 
 @app.task(retry_kwargs={'max_retries': 0})

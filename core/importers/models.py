@@ -116,7 +116,7 @@ class BaseResourceImporter:
 
     @classmethod
     def can_handle(cls, obj):
-        return isinstance(obj, dict) and obj.get('type', '').lower() == cls.get_resource_type()
+        return isinstance(obj, dict) and obj.get('type', '').lower() == cls.get_resource_type().lower()
 
     @staticmethod
     def get_resource_type():
@@ -187,7 +187,7 @@ class OrganizationImporter(BaseResourceImporter):
 
     @staticmethod
     def get_resource_type():
-        return 'organization'
+        return 'Organization'
 
     def exists(self):
         return self.get_queryset().exists()
@@ -232,7 +232,7 @@ class SourceImporter(BaseResourceImporter):
 
     @staticmethod
     def get_resource_type():
-        return 'source'
+        return 'Source'
 
     def exists(self):
         return self.get_queryset().exists()
@@ -285,7 +285,7 @@ class SourceVersionImporter(BaseResourceImporter):
 
     @staticmethod
     def get_resource_type():
-        return 'source version'
+        return 'Source Version'
 
     def exists(self):
         return Source.objects.filter(
@@ -323,7 +323,7 @@ class CollectionImporter(BaseResourceImporter):
 
     @staticmethod
     def get_resource_type():
-        return 'collection'
+        return 'Collection'
 
     def exists(self):
         return self.get_queryset().exists()
@@ -376,7 +376,7 @@ class CollectionVersionImporter(BaseResourceImporter):
 
     @staticmethod
     def get_resource_type():
-        return 'collection version'
+        return 'Collection Version'
 
     def exists(self):
         return Collection.objects.filter(
@@ -412,7 +412,7 @@ class ConceptImporter(BaseResourceImporter):
 
     @staticmethod
     def get_resource_type():
-        return 'concept'
+        return 'Concept'
 
     def __init__(self, data, user, update_if_exists):
         super().__init__(data, user, update_if_exists)
@@ -506,7 +506,7 @@ class MappingImporter(BaseResourceImporter):
 
     @staticmethod
     def get_resource_type():
-        return 'mapping'
+        return 'Mapping'
 
     def __init__(self, data, user, update_if_exists):
         super().__init__(data, user, update_if_exists)
@@ -645,7 +645,7 @@ class ReferenceImporter(BaseResourceImporter):
 
     @staticmethod
     def get_resource_type():
-        return 'reference'
+        return 'Reference'
 
     def exists(self):
         return False

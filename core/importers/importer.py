@@ -10,7 +10,7 @@ import tempfile
 import zipfile
 from zipfile import ZipFile
 from celery.result import AsyncResult, result_from_tuple
-from celery import group, chain
+from celery import group
 
 import ijson
 import requests
@@ -24,7 +24,7 @@ from rest_framework.exceptions import ValidationError
 
 from core import settings
 from core.common.serializers import IdentifierSerializer
-from core.common.tasks import bulk_import_subtask, bulk_import_subtask_empty
+from core.common.tasks import bulk_import_subtask, bulk_import_subtask_empty, bulk_import_queue
 from core.common.tasks import import_finisher
 from core.code_systems.converter import CodeSystemConverter
 from core.common.utils import get_export_service
@@ -111,10 +111,11 @@ class ImportTask(BaseModel):
         return None
 
     def revoke(self):
-        import_group = self.import_async_result
-        while import_group is not None:
-            import_group.revoke()  # Revokes all tasks in a group
-            import_group = import_group.parent
+        import_final_task = self.import_async_result
+        import_final_task.revoke()
+        for task_id in self.subtask_ids:
+            child = AsyncResult(task_id)
+            child.revoke()
 
     @import_async_result.setter
     def import_async_result(self, import_async_result):
@@ -231,7 +232,6 @@ class Importer:
         time_started = timezone.now()
         resource_types = ['CodeSystem', 'ValueSet', 'ConceptMap']
         resource_types.extend(ResourceImporter.get_resource_types())
-
         if not self.path.startswith('/'):  # not local path
             key = self.path
             protocol_index = key.find('://')
@@ -429,14 +429,14 @@ class Importer:
             for _, count in item.items():
                 all_count += count
         if all_count > 50000:
-            task_batch_size = all_count / 1000
+            task_batch_size = round(all_count / 1000)
         else:
             task_batch_size = self.MIN_BATCH_SIZE
         return task_batch_size
 
     def schedule_tasks(self, tasks):
         subtask_ids = []
-        chained_tasks = chain()
+        group_queue = []
         for task in tasks:
             group_tasks = []
             for group_task in task:
@@ -446,14 +446,21 @@ class Importer:
                 group_tasks.append(bulk_import_subtask.si(group_task['path'], group_task['username'],
                                                           group_task['owner_type'], group_task['owner'],
                                                           group_task['resource_type'], group_task['files'])
-                                   .set(queue='concurrent', task_id=subtask_id))
+                                   .set(task_id=subtask_id))
             if len(group_tasks) == 1:  # Prevent celery from converting group to a single task
-                group_tasks.append(bulk_import_subtask_empty.si().set(queue='concurrent'))
+                group_tasks.append(bulk_import_subtask_empty.si())
 
-            chained_tasks |= group(group_tasks)
-        chained_tasks |= import_finisher.si(self.task_id).set(queue='concurrent')
+            group_queue.append(group(group_tasks))
 
-        final_task = chained_tasks.apply_async(queue='concurrent')
+        final_task_id = uuid()
+        group_queue.append(import_finisher.si(self.task_id).set(task_id=final_task_id))
+
+        # Celery cannot handle chain of groups that have hundreds of tasks thus we use a task that schedules
+        # a group of tasks once the previous group is done.
+        bulk_import_queue.si(group_queue).apply_async(queue='concurrent')
+
+        # We pass the final task id to be able to track the end of execution and track progress.
+        final_task = AsyncResult(final_task_id)
         return final_task, subtask_ids
 
     def is_importable_file(self, file_name):
