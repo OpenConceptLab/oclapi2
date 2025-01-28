@@ -65,9 +65,9 @@ class CustomESSearch:
     @staticmethod
     def get_search_string(search_str, lower=True, decode=True):
         if lower:
-            search_str = search_str.lower()
+            search_str = str(search_str).lower()
         if decode:
-            search_str = search_str.replace('**', '*')
+            search_str = str(search_str).replace('**', '*')
             starts_with_asterisk = search_str.startswith('*')
             ends_with_asterisk = search_str.endswith('*')
             if starts_with_asterisk:
