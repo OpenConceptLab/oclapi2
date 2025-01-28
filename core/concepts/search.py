@@ -109,6 +109,8 @@ class ConceptFuzzySearch:  # pragma: no cover
                 if not isinstance(value, list):
                     value = [value]
                 for val in value:
+                    if val:
+                        val = str(val)
                     _search_str = CustomESSearch.get_wildcard_search_string(
                         CustomESSearch.get_search_string(val, decode=True, lower=True)
                     )
