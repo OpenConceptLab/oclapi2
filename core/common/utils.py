@@ -911,3 +911,15 @@ def format_url_for_search(url):
 
 def clean_term(term):
     return term.lower().replace(' ', '').replace('-', '').replace('_', '')
+
+
+def get_embeddings(txt):
+    from core.toggles.models import Toggle
+    if not Toggle.get('SEMANTIC_SEARCH_TOGGLE'):
+        return
+    model = settings.LM
+    if not model:
+        from sentence_transformers import SentenceTransformer
+        model = SentenceTransformer('all-MiniLM-L6-v2')
+    return model.encode(str(txt))
+

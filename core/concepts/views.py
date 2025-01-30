@@ -749,8 +749,8 @@ class ConceptsHierarchyAmendAdminView(APIView):  # pragma: no cover
 
 class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
     default_limit = 1
-    score_threshold = 6
-    score_threshold_semantic_very_high = 9
+    score_threshold = 4
+    score_threshold_semantic_very_high = 4
     serializer_class = ConceptListSerializer
     permission_classes = (IsAuthenticatedOrReadOnly,)
 
@@ -775,12 +775,12 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
         start = offset or (page - 1) * limit
         end = start + limit
         results = []
-        is_semantic = self.request.query_params.get('semantic', None) == 'true' and Toggle.get('SEMANTIC_SEARCH_TOGGLE')
-        best_match = self.request.query_params.get('bestMatch', None) == 'true'
+        is_semantic = self.request.query_params.get('semantic', None) in get_truthy_values() and Toggle.get('SEMANTIC_SEARCH_TOGGLE')
+        best_match = self.request.query_params.get('bestMatch', None) in get_truthy_values()
         score_threshold = self.score_threshold_semantic_very_high if is_semantic else self.score_threshold
 
         for row in rows:
-            search = ConceptFuzzySearch.search(row, target_repo_url, target_repo_params, include_retired)
+            search = ConceptFuzzySearch.search(row, target_repo_url, target_repo_params, include_retired, is_semantic)
             search = search.params(min_score=score_threshold if best_match else 0)
             es_search = CustomESSearch(search[start:end], ConceptDocument)
             es_search.to_queryset(False)

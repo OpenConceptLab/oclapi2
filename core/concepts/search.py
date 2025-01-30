@@ -1,8 +1,9 @@
 from elasticsearch_dsl import TermsFacet, Q
-from pydash import flatten, is_number
+from pydash import flatten, is_number, get, compact
 
 from core.common.constants import FACET_SIZE
 from core.common.search import CustomESFacetedSearch, CustomESSearch
+from core.common.utils import get_embeddings
 from core.concepts.models import Concept
 
 
@@ -47,6 +48,12 @@ class ConceptFuzzySearch:  # pragma: no cover
         ['concept_class', 'datatype', 0.1],
         ['description', 0]
     ]
+    semantic_priority_fields = [
+        ['id', 0.3],
+        ['same_as_mapped_codes', 0.1],
+        ['other_map_codes', 0.1],
+        ['concept_class', 'datatype', 0.1],
+    ]
     fuzzy_fields = ['name', 'synonyms']
 
     @staticmethod
@@ -80,7 +87,7 @@ class ConceptFuzzySearch:  # pragma: no cover
                 }))
 
     @classmethod
-    def search(cls, data, repo_url, repo_params=None, include_retired=False):  # pylint: disable=too-many-locals, too-many-branches
+    def search(cls, data, repo_url, repo_params=None, include_retired=False, is_semantic=False):  # pylint: disable=too-many-locals, too-many-branches
         from core.concepts.documents import ConceptDocument
         search = ConceptDocument.search()
         repo_params = repo_params or cls.get_target_repo_params(repo_url)
@@ -93,36 +100,65 @@ class ConceptFuzzySearch:  # pragma: no cover
             if value:
                 search = search.query('match', **{field: value})
         priority_fields_criteria = []
-        for field_set in cls.priority_fields:
+        fields = cls.semantic_priority_fields if is_semantic else cls.priority_fields
+        for field_set in fields:
             boost = field_set[-1]
             for field in field_set[:-1]:
                 value = data.get(field, None)
                 if value:
                     if isinstance(value, list):
                         for val in value:
+                            val = val or ""
                             priority_fields_criteria.append(CustomESSearch.get_match_criteria(field, val, boost))
                     else:
                         priority_fields_criteria.append(CustomESSearch.get_match_criteria(field, value, boost))
-        for field in cls.fuzzy_fields:
-            value = data.get(field, None)
-            if value:
-                if not isinstance(value, list):
-                    value = [value]
-                for val in value:
-                    if val:
-                        val = str(val)
-                    _search_str = CustomESSearch.get_wildcard_search_string(
-                        CustomESSearch.get_search_string(val, decode=True, lower=True)
-                    )
-                    wildcard_criteria = CustomESSearch.get_wildcard_criteria(field, _search_str, 0.01)
-                    priority_fields_criteria.append(wildcard_criteria)
-                    criteria = CustomESSearch.fuzzy_criteria(val, field, 0, 3)
-                    priority_fields_criteria.append(criteria)
+
+        if not is_semantic:
+            for field in cls.fuzzy_fields:
+                value = data.get(field, None)
+                if value:
+                    if not isinstance(value, list):
+                        value = compact([value])
+                    for val in value:
+                        val = str(val) if val else ""
+                        _search_str = CustomESSearch.get_wildcard_search_string(
+                            CustomESSearch.get_search_string(val, decode=True, lower=True)
+                        )
+                        wildcard_criteria = CustomESSearch.get_wildcard_criteria(field, _search_str, 0.01)
+                        priority_fields_criteria.append(wildcard_criteria)
+                        criteria = CustomESSearch.fuzzy_criteria(val, field, 0, 3)
+                        priority_fields_criteria.append(criteria)
         criterion = None
         for criteria in priority_fields_criteria:
             criterion = criteria if criterion is None else criterion | criteria
         if criterion is not None:
             search = search.query(criterion)
+
+        if is_semantic:
+            filters = get(search.to_dict(), 'query.bool.must', [])
+            name = data.get('name', None)
+            synonyms = data.get('synonyms', None) or []
+            if name:
+                search = search.knn(
+                    field='_embeddings.vector',
+                    query_vector=get_embeddings(name),
+                    k=5,
+                    num_candidates=5000,
+                    filter=filters,
+                    boost=5
+                )
+            if synonyms and not isinstance(synonyms, list):
+                synonyms = [synonyms]
+            for synonym in synonyms:
+                search = search.knn(
+                    field='_embeddings.vector',
+                    query_vector=get_embeddings(synonym),
+                    k=5,
+                    num_candidates=5000,
+                    filter=filters,
+                    boost=1
+                )
+
         highlight = [field for field in flatten([*cls.fuzzy_fields, *cls.priority_fields]) if not is_number(field)]
         search = search.highlight(*highlight)
         return search.sort({'_score': {'order': 'desc'}})

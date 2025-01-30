@@ -1,8 +1,9 @@
 from django_elasticsearch_dsl import Document, fields
 from django_elasticsearch_dsl.registries import registry
+from elasticsearch_dsl import DenseVector
 from pydash import compact
 
-from core.common.utils import jsonify_safe, flatten_dict
+from core.common.utils import jsonify_safe, flatten_dict, get_embeddings
 from core.concepts.models import Concept
 
 
@@ -43,6 +44,7 @@ class ConceptDocument(Document):
     description = fields.TextField()
     same_as_map_codes = fields.ListField(fields.KeywordField())
     other_map_codes = fields.ListField(fields.KeywordField())
+    _embeddings = fields.NestedField(properties={"vector": {"type": "dense_vector"}, "type": {"type": "text"}})
 
     class Django:
         model = Concept
@@ -188,7 +190,10 @@ class ConceptDocument(Document):
         data['_name'] = name.lower()
         data['name'] = name.replace('-', '_')
         data['synonyms'] = compact(set(instance.names.exclude(name=name).values_list('name', flat=True)))
-
+        data['_embeddings'] = [
+            {'vector': get_embeddings(name), 'type': 'name'},
+            *[{'vector': get_embeddings(s), 'type': 'synonym'} for s in data['synonyms']]
+        ]
         return data
 
     @staticmethod

@@ -13,7 +13,9 @@ https://docs.djangoproject.com/en/3.0/ref/settings/
 import os
 
 from corsheaders.defaults import default_headers
-from elasticsearch import RequestsHttpConnection
+# from elastic_transport import RequestsHttpNode
+# from elasticsearch import RequestsHttpConnection
+
 from kombu import Queue, Exchange
 from redis.backoff import ExponentialBackoff
 from redis.exceptions import ConnectionError  # pylint: disable=redefined-builtin
@@ -221,9 +223,12 @@ if ES_USER and ES_PASSWORD:
 
 ELASTICSEARCH_DSL = {
     'default': {
-        'hosts': ES_HOSTS.split(',') if ES_HOSTS else [ES_HOST + ':' + ES_PORT],
+        # 'hosts': ES_HOSTS.split(',') if ES_HOSTS else [ES_HOST + ':' + ES_PORT],
+        'hosts': [
+            f"elasticsearch://{host}" for host in ES_HOSTS.split(',')
+        ] if ES_HOSTS else [f'elasticsearch://{ES_HOST}:{ES_PORT}'],
         'http_auth': http_auth,
-        'use_ssl': ES_SCHEME == 'https',
+        # 'use_ssl': ES_SCHEME == 'https',
         'verify_certs': ES_VERIFY_CERTS.lower() == 'true',
         'sniff_on_connection_fail': ES_ENABLE_SNIFFING,
         'sniff_on_start': ES_ENABLE_SNIFFING,
@@ -231,7 +236,7 @@ ELASTICSEARCH_DSL = {
         'sniff_timeout': 10,
         'max_retries': 3,
         'retry_on_timeout': True,
-        'connection_class': RequestsHttpConnection # Needed for verify_certs=False to work
+        # 'connection_class': RequestsHttpNode  # Needed for verify_certs=False to work
     },
 }
 
@@ -587,3 +592,7 @@ MINIO_ACCESS_KEY = os.environ.get('MINIO_ACCESS_KEY', '')
 MINIO_SECRET_KEY = os.environ.get('MINIO_SECRET_KEY', '')
 MINIO_BUCKET_NAME = os.environ.get('MINIO_BUCKET_NAME', '')
 MINIO_SECURE = os.environ.get('MINIO_SECURE') == 'TRUE'
+
+
+from sentence_transformers import SentenceTransformer
+LM = SentenceTransformer('all-MiniLM-L6-v2')
