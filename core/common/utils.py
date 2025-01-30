@@ -920,6 +920,6 @@ def get_embeddings(txt):
     model = settings.LM
     if not model:
         from sentence_transformers import SentenceTransformer
-        model = SentenceTransformer('all-MiniLM-L6-v2')
+        model = SentenceTransformer(settings.LM_MODEL_NAME)
     return model.encode(str(txt))
 

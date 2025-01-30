@@ -593,6 +593,6 @@ MINIO_SECRET_KEY = os.environ.get('MINIO_SECRET_KEY', '')
 MINIO_BUCKET_NAME = os.environ.get('MINIO_BUCKET_NAME', '')
 MINIO_SECURE = os.environ.get('MINIO_SECURE') == 'TRUE'
 
-
+LM_MODEL_NAME = 'all-MiniLM-L6-v2'
 from sentence_transformers import SentenceTransformer
-LM = SentenceTransformer('all-MiniLM-L6-v2')
+LM = SentenceTransformer(LM_MODEL_NAME)
