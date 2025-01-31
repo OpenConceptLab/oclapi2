@@ -73,6 +73,8 @@ urlpatterns = [
         views.SourceVersionRetrieveUpdateDestroyView.as_view(),
         name='source-version-detail'
     ),
+    path("<str:source>/<str:version>/concepts/indexes/", views.SourceConceptsIndexView.as_view()),
+    path("<str:source>/<str:version>/mappings/indexes/", views.SourceMappingsIndexView.as_view()),
     path(
         '<str:source>/<str:version>/summary/',
         views.SourceVersionSummaryView.as_view(),
