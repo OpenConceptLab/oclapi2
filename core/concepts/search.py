@@ -87,7 +87,10 @@ class ConceptFuzzySearch:  # pragma: no cover
                 }))
 
     @classmethod
-    def search(cls, data, repo_url, repo_params=None, include_retired=False, is_semantic=False):  # pylint: disable=too-many-locals, too-many-branches
+    def search(  # pylint: disable=too-many-locals
+            cls, data, repo_url, repo_params=None, include_retired=False,
+            is_semantic=False, num_candidates=5000, k_nearest=5
+    ):
         from core.concepts.documents import ConceptDocument
         search = ConceptDocument.search()
         repo_params = repo_params or cls.get_target_repo_params(repo_url)
@@ -143,9 +146,9 @@ class ConceptFuzzySearch:  # pragma: no cover
                     field='_embeddings.vector',
                     query_vector=get_embeddings(name),
                     k=5,
-                    num_candidates=5000,
+                    num_candidates=num_candidates,
                     filter=filters,
-                    boost=5
+                    boost=k_nearest
                 )
             if synonyms and not isinstance(synonyms, list):
                 synonyms = [synonyms]
@@ -153,8 +156,8 @@ class ConceptFuzzySearch:  # pragma: no cover
                 search = search.knn(
                     field='_embeddings.vector',
                     query_vector=get_embeddings(synonym),
-                    k=5,
-                    num_candidates=5000,
+                    k=k_nearest,
+                    num_candidates=num_candidates,
                     filter=filters,
                     boost=1
                 )

@@ -762,11 +762,13 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
 
         return ConceptListSerializer
 
-    def filter_queryset(self, _=None):  # pylint:disable=too-many-locals
+    def filter_queryset(self, _=None):  # pylint:disable=too-many-locals,too-many-arguments,too-many-branches
         rows = self.request.data.get('rows')
         target_repo_url = self.request.data.get('target_repo_url')
         target_repo_params = self.request.data.get('target_repo')
         include_retired = self.request.query_params.get(INCLUDE_RETIRED_PARAM) in get_truthy_values()
+        num_candidates = min(to_int(self.request.query_params.get('numCandidates', 0), 5000), 5000)
+        k_nearest = min(to_int(self.request.query_params.get('kNearest', 0), 5), 10)
         if not rows or (not target_repo_url and not target_repo_params):
             raise Http400()
         offset = max(to_int(self.request.GET.get('offset'), 0), 0)
@@ -775,12 +777,16 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
         start = offset or (page - 1) * limit
         end = start + limit
         results = []
-        is_semantic = self.request.query_params.get('semantic', None) in get_truthy_values() and Toggle.get('SEMANTIC_SEARCH_TOGGLE')
+        is_semantic = self.request.query_params.get('semantic', None) in get_truthy_values() and Toggle.get(
+            'SEMANTIC_SEARCH_TOGGLE')
         best_match = self.request.query_params.get('bestMatch', None) in get_truthy_values()
         score_threshold = self.score_threshold_semantic_very_high if is_semantic else self.score_threshold
 
         for row in rows:
-            search = ConceptFuzzySearch.search(row, target_repo_url, target_repo_params, include_retired, is_semantic)
+            search = ConceptFuzzySearch.search(
+                row, target_repo_url, target_repo_params, include_retired,
+                is_semantic, num_candidates, k_nearest
+            )
             search = search.params(min_score=score_threshold if best_match else 0)
             es_search = CustomESSearch(search[start:end], ConceptDocument)
             es_search.to_queryset(False)
