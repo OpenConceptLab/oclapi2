@@ -762,7 +762,7 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
 
         return ConceptListSerializer
 
-    def filter_queryset(self, _=None):  # pylint:disable=too-many-locals,too-many-arguments,too-many-branches
+    def filter_queryset(self, _=None):  # pylint:disable=too-many-locals
         rows = self.request.data.get('rows')
         target_repo_url = self.request.data.get('target_repo_url')
         target_repo_params = self.request.data.get('target_repo')
