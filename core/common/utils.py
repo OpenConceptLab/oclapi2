@@ -916,10 +916,9 @@ def clean_term(term):
 def get_embeddings(txt):
     from core.toggles.models import Toggle
     if not Toggle.get('SEMANTIC_SEARCH_TOGGLE'):
-        return
+        return None
     model = settings.LM
     if not model:
         from sentence_transformers import SentenceTransformer
         model = SentenceTransformer(settings.LM_MODEL_NAME)
     return model.encode(str(txt))
-

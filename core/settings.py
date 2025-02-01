@@ -13,15 +13,16 @@ https://docs.djangoproject.com/en/3.0/ref/settings/
 import os
 
 from corsheaders.defaults import default_headers
-# from elastic_transport import RequestsHttpNode
-# from elasticsearch import RequestsHttpConnection
-
 from kombu import Queue, Exchange
 from redis.backoff import ExponentialBackoff
 from redis.exceptions import ConnectionError  # pylint: disable=redefined-builtin
 from redis.retry import Retry
+from sentence_transformers import SentenceTransformer
 
 from core import __version__
+
+# from elastic_transport import RequestsHttpNode
+# from elasticsearch import RequestsHttpConnection
 
 # Build paths inside the project like this: os.path.join(BASE_DIR, ...)
 
@@ -594,5 +595,4 @@ MINIO_BUCKET_NAME = os.environ.get('MINIO_BUCKET_NAME', '')
 MINIO_SECURE = os.environ.get('MINIO_SECURE') == 'TRUE'
 
 LM_MODEL_NAME = 'all-MiniLM-L6-v2'
-from sentence_transformers import SentenceTransformer
 LM = SentenceTransformer(LM_MODEL_NAME)
