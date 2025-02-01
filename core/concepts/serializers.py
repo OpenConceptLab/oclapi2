@@ -354,7 +354,7 @@ class ConceptMinimalSerializer(ConceptAbstractSerializer):
 
     class Meta:
         model = Concept
-        fields = ConceptAbstractSerializer.Meta.fields + ('id', 'type', 'url', 'version_url', 'retired')
+        fields = ConceptAbstractSerializer.Meta.fields + ('id', 'type', 'url', 'version_url', 'retired', 'display_name')
 
 
 class ConceptChecksumSerializer(AbstractResourceSerializer):
