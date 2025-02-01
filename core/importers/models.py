@@ -113,6 +113,7 @@ class BaseResourceImporter:
         self.data = data
         self.update_if_exists = update_if_exists
         self.queryset = None
+        self.index_resources = False
 
     @classmethod
     def can_handle(cls, obj):
@@ -671,7 +672,7 @@ class ReferenceImporter(BaseResourceImporter):
                 (added_references, _) = collection.add_expressions(
                     self.get('data'), self.user, self.get('__cascade', False)
                 )
-                if not get(settings, 'TEST_MODE', False):  # pragma: no cover
+                if self.index_resources and not get(settings, 'TEST_MODE', False):  # pragma: no cover
                     concept_ids = []
                     mapping_ids = []
                     for ref in added_references:
@@ -743,6 +744,7 @@ class BulkImportInline(BaseImporter):
         self.total = len(self.input_list)
         self.start_time = time.time()
         self.elapsed_seconds = 0
+        self.index_resources = False
 
     def set_task(self):
         self.task = Task.objects.filter(id=self.self_task_id).first()
@@ -846,7 +848,7 @@ class BulkImportInline(BaseImporter):
             if item_type == 'concept':
                 concept_importer = ConceptImporter(item, self.user, self.update_if_exists)
                 _result = concept_importer.delete() if action == 'delete' else concept_importer.run()
-                if get(concept_importer.instance, 'id'):
+                if self.index_resources and get(concept_importer.instance, 'id'):
                     new_concept_ids.update(set(compact(
                         [
                             concept_importer.instance.versioned_object_id,
@@ -860,7 +862,7 @@ class BulkImportInline(BaseImporter):
             if item_type == 'mapping':
                 mapping_importer = MappingImporter(item, self.user, self.update_if_exists)
                 _result = mapping_importer.delete() if action == 'delete' else mapping_importer.run()
-                if get(mapping_importer.instance, 'id'):
+                if self.index_resources and get(mapping_importer.instance, 'id'):
                     new_mapping_ids.update(set(compact(
                         [
                             mapping_importer.instance.versioned_object_id,
