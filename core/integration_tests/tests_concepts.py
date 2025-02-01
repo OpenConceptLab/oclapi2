@@ -737,7 +737,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
             sorted(response.data[0].keys()),
-            sorted(['uuid', 'id', 'url', 'version_url', 'type', 'retired', 'checksums'])
+            sorted(['uuid', 'id', 'url', 'version_url', 'type', 'retired', 'checksums', 'display_name'])
         )
 
     def test_get_200_with_mappings(self):
