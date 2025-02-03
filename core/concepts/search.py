@@ -144,7 +144,7 @@ class ConceptFuzzySearch:  # pragma: no cover
             if name:
                 search = search.knn(
                     field='_embeddings.vector',
-                    query_vector=get_embeddings(name),
+                    query_vector=get_embeddings(name).tolist(),
                     k=5,
                     num_candidates=num_candidates,
                     filter=filters,
@@ -155,7 +155,7 @@ class ConceptFuzzySearch:  # pragma: no cover
             for synonym in synonyms:
                 search = search.knn(
                     field='_embeddings.vector',
-                    query_vector=get_embeddings(synonym),
+                    query_vector=get_embeddings(synonym).tolist(),
                     k=k_nearest,
                     num_candidates=num_candidates,
                     filter=filters,
@@ -163,6 +163,9 @@ class ConceptFuzzySearch:  # pragma: no cover
                 )
 
         highlight = [field for field in flatten([*cls.fuzzy_fields, *cls.priority_fields]) if not is_number(field)]
+        import json
+        print("****Match Query***")
+        print(json.dumps(search.to_dict()))
         search = search.highlight(*highlight)
         return search.sort({'_score': {'order': 'desc'}})
 
