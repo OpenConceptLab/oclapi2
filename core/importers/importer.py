@@ -250,12 +250,12 @@ class Importer:
                         shutil.copyfileobj(import_file.raw, temp)
                 self.path = file_url
             else:
-                if not key.startswith(self.IMPORT_CACHE):
-                    key = self.IMPORT_CACHE + key
                 upload_service = get_export_service()
-                if upload_service.exists(key):  # already uploaded by the view
-                    self.path = key
-                else:
+                if not (self.path.startswith(self.IMPORT_CACHE) and upload_service.exists(self.path)):
+                    # if not already uploaded by the view
+                    if not key.startswith(self.IMPORT_CACHE):
+                        key = self.IMPORT_CACHE + key
+
                     with requests.get(self.path, stream=True) as import_file:
                         if not import_file.ok:
                             raise ImportError(f"Failed to GET {self.path}, responded with {import_file.status_code}")
