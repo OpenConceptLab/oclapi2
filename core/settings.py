@@ -226,8 +226,8 @@ ELASTICSEARCH_DSL = {
     'default': {
         # 'hosts': ES_HOSTS.split(',') if ES_HOSTS else [ES_HOST + ':' + ES_PORT],
         'hosts': [
-            f"elasticsearch://{host}" for host in ES_HOSTS.split(',')
-        ] if ES_HOSTS else [f'elasticsearch://{ES_HOST}:{ES_PORT}'],
+            f"{ES_SCHEME}://{host}" for host in ES_HOSTS.split(',')
+        ] if ES_HOSTS else [f'{ES_SCHEME}://{ES_HOST}:{ES_PORT}'],
         'http_auth': http_auth,
         # 'use_ssl': ES_SCHEME == 'https',
         'verify_certs': ES_VERIFY_CERTS.lower() == 'true',
