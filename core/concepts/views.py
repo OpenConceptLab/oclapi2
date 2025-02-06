@@ -778,9 +778,12 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
         is_semantic = self.request.query_params.get('semantic', None) == 'true' and Toggle.get('SEMANTIC_SEARCH_TOGGLE')
         best_match = self.request.query_params.get('bestMatch', None) == 'true'
         score_threshold = self.score_threshold_semantic_very_high if is_semantic else self.score_threshold
+        repo_params = target_repo_params or ConceptFuzzySearch.get_target_repo_params(target_repo_url)
+        if not repo_params:
+            raise Http400(f'Unable to resolve "target_repo_url": "{target_repo_url}"')
 
         for row in rows:
-            search = ConceptFuzzySearch.search(row, target_repo_url, target_repo_params, include_retired)
+            search = ConceptFuzzySearch.search(row, target_repo_url, repo_params, include_retired)
             search = search.params(min_score=score_threshold if best_match else 0)
             es_search = CustomESSearch(search[start:end], ConceptDocument)
             es_search.to_queryset(False)
