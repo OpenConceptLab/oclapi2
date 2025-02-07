@@ -749,7 +749,7 @@ class ConceptsHierarchyAmendAdminView(APIView):  # pragma: no cover
 
 class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
     default_limit = 1
-    score_threshold = 4
+    score_threshold = 5
     score_threshold_semantic_very_high = 5
     serializer_class = ConceptListSerializer
     permission_classes = (IsAuthenticatedOrReadOnly,)
