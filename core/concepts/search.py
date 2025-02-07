@@ -163,9 +163,6 @@ class ConceptFuzzySearch:  # pragma: no cover
                 )
 
         highlight = [field for field in flatten([*cls.fuzzy_fields, *cls.priority_fields]) if not is_number(field)]
-        import json
-        print("****Match Query***")
-        print(json.dumps(search.to_dict()))
         search = search.highlight(*highlight)
         return search.sort({'_score': {'order': 'desc'}})
 
