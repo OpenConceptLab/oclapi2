@@ -31,10 +31,9 @@ from core.common.search import CustomESSearch
 from core.common.serializers import RootSerializer
 from core.common.swagger_parameters import all_resource_query_param
 from core.common.utils import compact_dict_by_values, to_snake_case, parse_updated_since_param, \
-    to_int, get_falsy_values, get_truthy_values, format_url_for_search, get_embeddings
+    to_int, get_falsy_values, get_truthy_values, format_url_for_search
 from core.concepts.permissions import CanViewParentDictionary, CanEditParentDictionary
 from core.orgs.constants import ORG_OBJECT_TYPE
-from core.toggles.models import Toggle
 from core.users.constants import USER_OBJECT_TYPE
 
 TRUTHY = get_truthy_values()
@@ -662,46 +661,42 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         return criteria
 
     def __get_search_results(self, ignore_retired_filter=False, sort=True, highlight=True, force=False):  # pylint: disable=too-many-branches,too-many-locals,too-many-statements
-        is_semantic = (Toggle.get('SEMANTIC_SEARCH_TOGGLE') and
-                       self.is_concept_document() and self.request.query_params.get('semantic', None) == 'true')
         results = self.__apply_common_search_filters(ignore_retired_filter, force)
         if results is None:
             return results
-        fields = []
-        if not is_semantic:
-            exclude_fuzzy = self.request.query_params.get(EXCLUDE_FUZZY_SEARCH_PARAM) in TRUTHY
-            exclude_wildcard = self.request.query_params.get(EXCLUDE_WILDCARD_SEARCH_PARAM) in TRUTHY
+        exclude_fuzzy = self.request.query_params.get(EXCLUDE_FUZZY_SEARCH_PARAM) in TRUTHY
+        exclude_wildcard = self.request.query_params.get(EXCLUDE_WILDCARD_SEARCH_PARAM) in TRUTHY
 
-            extras_fields = self.get_extras_searchable_fields_from_query_params()
-            extras_fields_exact = self.get_extras_exact_fields_from_query_params()
-            extras_fields_exists = self.get_extras_fields_exists_from_query_params()
-            criterion, fields = self.get_exact_search_criterion()
+        extras_fields = self.get_extras_searchable_fields_from_query_params()
+        extras_fields_exact = self.get_extras_exact_fields_from_query_params()
+        extras_fields_exists = self.get_extras_fields_exists_from_query_params()
+        criterion, fields = self.get_exact_search_criterion()
 
-            if not exclude_wildcard:
-                wildcard_search_criterion, wildcard_search_fields = self.get_wildcard_search_criterion()
-                criterion |= wildcard_search_criterion
-                fields += wildcard_search_fields
-            if not exclude_fuzzy:
-                criterion |= self.get_fuzzy_search_criterion(boost_divide_by=10000, expansions=2)
-            results = results.query(criterion)
+        if not exclude_wildcard:
+            wildcard_search_criterion, wildcard_search_fields = self.get_wildcard_search_criterion()
+            criterion |= wildcard_search_criterion
+            fields += wildcard_search_fields
+        if not exclude_fuzzy:
+            criterion |= self.get_fuzzy_search_criterion(boost_divide_by=10000, expansions=2)
+        results = results.query(criterion)
 
-            must_not_have_criterion = self.get_mandatory_exclude_words_criteria()
-            must_have_criterion = self.get_mandatory_words_criteria()
-            results = results.filter(must_have_criterion) if must_have_criterion is not None else results
-            results = results.filter(~must_not_have_criterion) if must_not_have_criterion is not None else results  # pylint: disable=invalid-unary-operand-type
+        must_not_have_criterion = self.get_mandatory_exclude_words_criteria()
+        must_have_criterion = self.get_mandatory_words_criteria()
+        results = results.filter(must_have_criterion) if must_have_criterion is not None else results
+        results = results.filter(~must_not_have_criterion) if must_not_have_criterion is not None else results  # pylint: disable=invalid-unary-operand-type
 
-            if extras_fields:
-                fields += list(extras_fields.keys())
-                for field, value in extras_fields.items():
-                    results = results.filter("query_string", query=value, fields=[field])
-            if extras_fields_exists:
-                fields += list(extras_fields_exists)
-                for field in extras_fields_exists:
-                    results = results.query("exists", field=f"extras.{field}")
-            if extras_fields_exact:
-                fields += list(extras_fields_exact.keys())
-                for field, value in extras_fields_exact.items():
-                    results = results.query("match", **{field: value}, _expand__to_dot=False)
+        if extras_fields:
+            fields += list(extras_fields.keys())
+            for field, value in extras_fields.items():
+                results = results.filter("query_string", query=value, fields=[field])
+        if extras_fields_exists:
+            fields += list(extras_fields_exists)
+            for field in extras_fields_exists:
+                results = results.query("exists", field=f"extras.{field}")
+        if extras_fields_exact:
+            fields += list(extras_fields_exact.keys())
+            for field, value in extras_fields_exact.items():
+                results = results.query("match", **{field: value}, _expand__to_dot=False)
 
         user = self.request.user
         is_authenticated = user.is_authenticated
@@ -750,26 +745,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             else:
                 results = results.query('match', **{attr: value})
 
-        if is_semantic:
-            filters = get(results.to_dict(), 'query.bool.must', [])
-            embeddings = get_embeddings(self.get_search_string())
-            results = results.knn(
-                field='_embeddings.vector',
-                query_vector=embeddings,
-                k=5,
-                num_candidates=10,
-                filter=filters,
-                boost=5
-            )
-            results = results.knn(
-                field='_embeddings.vector',
-                query_vector=embeddings,
-                k=5,
-                num_candidates=10,
-                filter=filters,
-                boost=1
-            )
-        elif fields and highlight and self.request.query_params.get(INCLUDE_SEARCH_META_PARAM) in get_truthy_values():
+        if fields and highlight and self.request.query_params.get(INCLUDE_SEARCH_META_PARAM) in get_truthy_values():
             results = results.highlight(*self.clean_fields_for_highlight(fields))
         return results.sort(*self._get_sort_attribute()) if sort else results
 
