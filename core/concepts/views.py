@@ -808,6 +808,9 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
                     serializer = ConceptDetailSerializer if self.is_verbose() else ConceptMinimalSerializer
                     result['results'].append(
                         serializer(concept, context={'request': self.request}).data)
+            if 'results' in result:
+                result['results'] = sorted(
+                    result['results'], key=lambda res: get(res, 'search_meta.search_score'), reverse=True)
             results.append(result)
 
         return results
