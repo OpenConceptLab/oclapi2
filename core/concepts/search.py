@@ -145,10 +145,10 @@ class ConceptFuzzySearch:  # pragma: no cover
                 search = search.knn(
                     field='_embeddings.vector',
                     query_vector=get_embeddings(name).tolist(),
-                    k=5,
+                    k=k_nearest,
                     num_candidates=num_candidates,
                     filter=filters,
-                    boost=k_nearest
+                    boost=5
                 )
             if synonyms and not isinstance(synonyms, list):
                 synonyms = [synonyms]
