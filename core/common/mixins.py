@@ -190,6 +190,7 @@ class ListWithHeadersMixin(ListModelMixin):
         paginator = None
 
         if not compress:
+            self.limit = to_int(self.limit, LIST_DEFAULT_LIMIT)
             if not self.limit or int(self.limit) == 0 or int(self.limit) > 1000:
                 if self.is_brief() and self.is_checksums() and self.kwargs.get('source') and get(
                         self, 'model.__name__') in ['Concept', 'Mapping']:
