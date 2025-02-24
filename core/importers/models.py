@@ -136,7 +136,7 @@ class BaseResourceImporter:
         return self.mandatory_fields.issubset(self.data.keys())
 
     def get_owner_type(self):
-        return self.get('owner_type', '').lower()
+        return (self.get('owner_type', '') or '').lower()
 
     def is_user_owner(self):
         return self.get_owner_type() == 'user'
