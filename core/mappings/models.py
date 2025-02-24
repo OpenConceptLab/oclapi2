@@ -424,6 +424,8 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
             self.errors.update(ex.message_dict)
         except IntegrityError as ex:
             self.errors.update({'__all__': ex.args})
+        except Exception as ex:  # pylint: disable=broad-except
+            self.errors.update({'__all__': str(ex)})
 
     def index_from_concept(self):
         if self.from_concept_id:
