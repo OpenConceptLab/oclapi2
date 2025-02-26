@@ -585,20 +585,29 @@ class SourceChildMixin(ChecksumModel):
 
     @staticmethod
     def apply_attribute_based_filters(queryset, params):
+        filters = SourceChildMixin.get_filters_for_criterion(params)
+        if filters:
+            queryset = queryset.filter(**filters)
+        return queryset
+
+    @staticmethod
+    def get_filters_for_criterion(params, prefix=None):
+        filters = {}
+        prefix = (prefix + '__') if prefix and not prefix.startswith('__') else ''
         is_latest = params.get('is_latest', None) in TRUTHY
         include_retired = params.get(INCLUDE_RETIRED_PARAM, None) in TRUTHY
         updated_since = parse_updated_since_param(params)
         updated_by = params.get(UPDATED_BY_USERNAME_PARAM, None)
         if is_latest:
-            queryset = queryset.filter(is_latest_version=True)
+            filters[prefix + 'is_latest_version'] = True
         if not include_retired and not params.get('concept', None) and not params.get('mapping', None):
-            queryset = queryset.filter(retired=False)
+            filters[prefix + 'retired'] = False
         if updated_since:
-            queryset = queryset.filter(updated_at__gte=updated_since)
+            filters[prefix + 'updated_at__gte'] = updated_since
         if updated_by:
-            queryset = queryset.filter(updated_by__username=updated_by)
+            filters[prefix + 'updated_by__username'] = updated_by
 
-        return queryset
+        return filters
 
     @property
     def source_versions(self):

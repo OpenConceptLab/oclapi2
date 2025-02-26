@@ -84,16 +84,23 @@ class MappingListView(MappingBaseView, ListWithHeadersMixin, CreateModelMixin):
         if parent:
             if parent.is_head:
                 queryset = parent.mappings_set
+                queryset = Mapping.apply_attribute_based_filters(
+                    queryset, self.params).filter(is_active=True)
             else:
                 limit = to_int(self.params.get(LIMIT_PARAM), LIST_DEFAULT_LIMIT)
                 page = to_int(self.params.get('page'), 1)
                 offset = (page - 1) * limit
                 through_qs = Mapping.sources.through.objects.filter(source_id=parent.id)
+                filters = Mapping.get_filters_for_criterion(
+                    {k: v for k, v in self.params.items() if k not in ['is_latest']}, 'mapping')
+                exclude_retired = 'mapping__retired' in filters  # filters will have it false to exclude
+                self.total_count = through_qs.filter(
+                    mapping__retired=False, mapping__is_active=True).count() if exclude_retired else through_qs.count()
                 queryset = Mapping.objects.filter(
-                    id__in=through_qs.values_list('mapping_id', flat=True).order_by('-mapping_id')[offset:offset+limit]
+                    id__in=through_qs.filter(
+                        **filters, mapping__is_active=True
+                    ).values_list('mapping_id', flat=True).order_by('-mapping_id')[offset:offset+limit]
                 )
-                self.total_count = through_qs.count()
-            queryset = Mapping.apply_attribute_based_filters(queryset, self.params).filter(is_active=True)
         else:
             queryset = super().get_queryset()
 
