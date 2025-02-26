@@ -15,8 +15,9 @@ from core.bundles.models import Bundle
 from core.bundles.serializers import BundleSerializer
 from core.collections.documents import CollectionDocument
 from core.common.constants import (
-    HEAD, INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_RETIRED_PARAM, ACCESS_TYPE_NONE)
+    HEAD, INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_RETIRED_PARAM, ACCESS_TYPE_NONE, LIMIT_PARAM)
 from core.common.exceptions import Http400, Http403, Http409
+from core.common.feeds import DEFAULT_LIMIT
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryMixin
 from core.common.search import CustomESSearch
 from core.common.swagger_parameters import (
@@ -151,13 +152,31 @@ class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
 
         return ConceptListSerializer
 
+    def is_sliced(self):
+        result = super().is_sliced()
+        if result:
+            return result
+        parent = get(self, 'parent_resource')
+
+        return 'source' in self.kwargs and parent and not parent.is_head
+
     def get_queryset(self):
         is_latest_version = 'collection' not in self.kwargs and (
                 'version' not in self.kwargs or get(self.kwargs, 'version') == HEAD
         )
         parent = get(self, 'parent_resource')
         if parent:
-            queryset = parent.concepts_set if parent.is_head else parent.concepts
+            if parent.is_head:
+                queryset = parent.concepts_set
+            else:
+                limit = to_int(self.params.get(LIMIT_PARAM), DEFAULT_LIMIT)
+                page = to_int(self.params.get('page'), 1)
+                offset = (page - 1) * limit
+                through_qs = Concept.sources.through.objects.filter(source_id=parent.id)
+                queryset = Concept.objects.filter(
+                    id__in=through_qs.values_list('concept_id', flat=True).order_by('-concept_id')[offset:offset+limit]
+                )
+                self.total_count = through_qs.count()
             queryset = Concept.apply_attribute_based_filters(queryset, self.params).filter(is_active=True)
         else:
             queryset = super().get_queryset()

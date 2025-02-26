@@ -8,13 +8,15 @@ from rest_framework.mixins import CreateModelMixin
 from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
 
-from core.common.constants import HEAD, ACCESS_TYPE_NONE
+from core.common.constants import HEAD, ACCESS_TYPE_NONE, LIMIT_PARAM
 from core.common.exceptions import Http400
+from core.common.feeds import DEFAULT_LIMIT
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryMixin
 from core.common.swagger_parameters import (
     q_param, limit_param, sort_desc_param, page_param, sort_asc_param, verbose_param,
     include_facets_header, updated_since_param, include_retired_param,
     compress_header, include_source_versions_param, include_collection_versions_param, search_from_latest_repo_header)
+from core.common.utils import to_int
 from core.common.views import SourceChildCommonBaseView, SourceChildExtrasView, \
     SourceChildExtraRetrieveUpdateDestroyView
 from core.concepts.permissions import CanEditParentDictionary, CanViewParentDictionary
@@ -67,13 +69,31 @@ class MappingListView(MappingBaseView, ListWithHeadersMixin, CreateModelMixin):
     def apply_filters(self, queryset):
         return queryset
 
+    def is_sliced(self):
+        result = super().is_sliced()
+        if result:
+            return result
+        parent = get(self, 'parent_resource')
+
+        return 'source' in self.kwargs and parent and not parent.is_head
+
     def get_queryset(self):
         is_latest_version = 'collection' not in self.kwargs and (
                 'version' not in self.kwargs or get(self.kwargs, 'version') == HEAD
         )
         parent = get(self, 'parent_resource')
         if parent:
-            queryset = parent.mappings_set if parent.is_head else parent.mappings
+            if parent.is_head:
+                queryset = parent.mappings_set
+            else:
+                limit = to_int(self.params.get(LIMIT_PARAM), DEFAULT_LIMIT)
+                page = to_int(self.params.get('page'), 1)
+                offset = (page - 1) * limit
+                through_qs = Mapping.sources.through.objects.filter(source_id=parent.id)
+                queryset = Mapping.objects.filter(
+                    id__in=through_qs.values_list('mapping_id', flat=True).order_by('-mapping_id')[offset:offset+limit]
+                )
+                self.total_count = through_qs.count()
             queryset = Mapping.apply_attribute_based_filters(queryset, self.params).filter(is_active=True)
         else:
             queryset = super().get_queryset()

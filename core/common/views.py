@@ -828,6 +828,9 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                 (bool(sort_field) and sort_field != '_score')
         ) or (SEARCH_PARAM in self.request.query_params.dict() and self.should_search_latest_repo())
 
+    def is_sliced(self):
+        return self.should_perform_es_search()
+
     def should_search_latest_repo(self):
         return self.is_source_child_document_model() and (
                 'version' not in self.kwargs and 'collection' not in self.kwargs
