@@ -166,17 +166,23 @@ class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
         parent = get(self, 'parent_resource')
         if parent:
             if parent.is_head:
-                queryset = parent.concepts_set
+                queryset = Concept.apply_attribute_based_filters(
+                    parent.concepts_set, self.params).filter(is_active=True)
             else:
                 limit = to_int(self.params.get(LIMIT_PARAM), LIST_DEFAULT_LIMIT)
                 page = to_int(self.params.get('page'), 1)
                 offset = (page - 1) * limit
                 through_qs = Concept.sources.through.objects.filter(source_id=parent.id)
+                filters = Concept.get_filters_for_criterion(
+                    {k: v for k, v in self.params.items() if k not in ['is_latest']}, 'concept')
+                exclude_retired = 'concept__retired' in filters  # filters will have it false to exclude
+                self.total_count = through_qs.filter(
+                    concept__retired=False, concept__is_active=True).count() if exclude_retired else through_qs.count()
                 queryset = Concept.objects.filter(
-                    id__in=through_qs.values_list('concept_id', flat=True).order_by('-concept_id')[offset:offset+limit]
+                    id__in=through_qs.filter(
+                        **filters, concept__is_active=True
+                    ).values_list('concept_id', flat=True).order_by('-concept_id')[offset:offset+limit]
                 )
-                self.total_count = through_qs.count()
-            queryset = Concept.apply_attribute_based_filters(queryset, self.params).filter(is_active=True)
         else:
             queryset = super().get_queryset()
 
