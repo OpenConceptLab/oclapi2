@@ -8,9 +8,8 @@ from rest_framework.mixins import CreateModelMixin
 from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
 
-from core.common.constants import HEAD, ACCESS_TYPE_NONE, LIMIT_PARAM
+from core.common.constants import HEAD, ACCESS_TYPE_NONE, LIMIT_PARAM, LIST_DEFAULT_LIMIT
 from core.common.exceptions import Http400
-from core.common.feeds import DEFAULT_LIMIT
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryMixin
 from core.common.swagger_parameters import (
     q_param, limit_param, sort_desc_param, page_param, sort_asc_param, verbose_param,
@@ -86,7 +85,7 @@ class MappingListView(MappingBaseView, ListWithHeadersMixin, CreateModelMixin):
             if parent.is_head:
                 queryset = parent.mappings_set
             else:
-                limit = to_int(self.params.get(LIMIT_PARAM), DEFAULT_LIMIT)
+                limit = to_int(self.params.get(LIMIT_PARAM), LIST_DEFAULT_LIMIT)
                 page = to_int(self.params.get('page'), 1)
                 offset = (page - 1) * limit
                 through_qs = Mapping.sources.through.objects.filter(source_id=parent.id)
