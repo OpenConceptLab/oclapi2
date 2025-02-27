@@ -819,6 +819,10 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         ).get_aggregations(self.is_verbose(), self.is_raw())
 
     def should_perform_es_search(self):
+        if self.is_source_child_document_model() and self.kwargs and 'source' in self.kwargs:
+            parent = get(self, 'parent_resource')
+            if parent and not parent.is_head:
+                return True
         sort_field, _ = self.get_sort_and_desc()
         return (
                 self.is_only_searchable or
