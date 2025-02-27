@@ -58,7 +58,7 @@ class Event(models.Model):
             else:
                 criterion |= criteria
 
-        queryset = Event.objects.filter(criterion)
+        queryset = Event.objects.none() if criterion is None else Event.objects.filter(criterion)
 
         return queryset if private else queryset.filter(public=True)
 
