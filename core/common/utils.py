@@ -915,8 +915,9 @@ def clean_term(term):
 
 def get_embeddings(txt):
     from core.toggles.models import Toggle
-    if not Toggle.get('SEMANTIC_SEARCH_TOGGLE'):
+    if not Toggle.get('SEMANTIC_SEARCH_TOGGLE') or settings.ENV == 'ci':
         return None
+
     model = settings.LM
     if not model:
         from sentence_transformers import SentenceTransformer
