@@ -803,7 +803,10 @@ class UserRateLimitViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(
             response.data,
-            {'detail': ErrorDetail(string='"rate_plan" needs to be one of "guest", "lite" or "premium"', code='bad_request')}
+            {
+                'detail': ErrorDetail(
+                    string='"rate_plan" needs to be one of "guest", "lite" or "premium"', code='bad_request')
+            }
         )
 
         user.refresh_from_db()
