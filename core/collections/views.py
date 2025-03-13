@@ -55,6 +55,7 @@ from core.common.swagger_parameters import q_param, compress_header, page_param,
     canonical_url_param
 from core.common.tasks import add_references, export_collection, delete_collection, index_expansion_concepts, \
     index_expansion_mappings
+from core.common.throttling import ThrottleUtil
 from core.common.utils import compact_dict_by_values, parse_boolean_query_param
 from core.common.views import BaseAPIView, BaseLogoView, ConceptContainerExtraRetrieveUpdateDestroyView
 from core.concepts.documents import ConceptDocument
@@ -1102,6 +1103,9 @@ class CollectionClientConfigsView(CollectionBaseView, ResourceClientConfigsView)
 
 class ReferenceExpressionResolveView(APIView):
     serializer_class = ReferenceExpressionResolveSerializer
+
+    def get_throttles(self):
+        return ThrottleUtil.get_throttles_by_user_plan(self.request.user)
 
     def get_results(self):
         data = self.request.data

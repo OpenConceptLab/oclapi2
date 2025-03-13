@@ -5,12 +5,16 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from core import settings
+from core.common.throttling import ThrottleUtil
 
 logger = logging.getLogger('oclapi')
 
 
 class CapabilityStatementView(APIView):
     permission_classes = (AllowAny,)
+
+    def get_throttles(self):
+        return ThrottleUtil.get_throttles_by_user_plan(self.request.user)
 
     def get(self, request):
         mode = request.query_params.get('mode')

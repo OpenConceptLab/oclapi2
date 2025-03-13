@@ -27,6 +27,7 @@ from core.common.swagger_parameters import (
     cascade_levels_param, cascade_direction_param, cascade_view_hierarchy, return_map_types_param,
     omit_if_exists_in_param, equivalency_map_types_param, search_from_latest_repo_header)
 from core.common.tasks import delete_concept, make_hierarchy
+from core.common.throttling import ThrottleUtil
 from core.common.utils import to_parent_uri_from_kwargs, generate_temp_version, get_truthy_values, to_int
 from core.common.views import SourceChildCommonBaseView, SourceChildExtrasView, \
     SourceChildExtraRetrieveUpdateDestroyView, BaseAPIView
@@ -751,6 +752,9 @@ class ConceptExtraRetrieveUpdateDestroyView(SourceChildExtraRetrieveUpdateDestro
 class ConceptsHierarchyAmendAdminView(APIView):  # pragma: no cover
     swagger_schema = None
     permission_classes = (IsAdminUser, )
+
+    def get_throttles(self):
+        return ThrottleUtil.get_throttles_by_user_plan(self.request.user)
 
     @staticmethod
     def post(request):

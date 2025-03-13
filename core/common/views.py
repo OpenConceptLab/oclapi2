@@ -30,6 +30,7 @@ from core.common.mixins import PathWalkerMixin
 from core.common.search import CustomESSearch
 from core.common.serializers import RootSerializer
 from core.common.swagger_parameters import all_resource_query_param
+from core.common.throttling import ThrottleUtil
 from core.common.utils import compact_dict_by_values, to_snake_case, parse_updated_since_param, \
     to_int, get_falsy_values, get_truthy_values, format_url_for_search
 from core.concepts.permissions import CanViewParentDictionary, CanEditParentDictionary
@@ -58,6 +59,9 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     default_qs_sort_attr = '-updated_at'
     facet_class = None
     total_count = 0
+
+    def get_throttles(self):
+        return ThrottleUtil.get_throttles_by_user_plan(self.request.user)
 
     def has_no_kwargs(self):
         return len(self.kwargs.values()) == 0
@@ -913,6 +917,9 @@ class SourceChildCommonBaseView(BaseAPIView):
 class SourceChildExtrasBaseView:
     default_qs_sort_attr = '-created_at'
 
+    def get_throttles(self):
+        return ThrottleUtil.get_throttles_by_user_plan(self.request.user)
+
     def get_object(self):
         queryset = self.get_queryset()
 
@@ -980,6 +987,9 @@ class APIVersionView(APIView):  # pragma: no cover
     permission_classes = (AllowAny,)
     swagger_schema = None
 
+    def get_throttles(self):
+        return ThrottleUtil.get_throttles_by_user_plan(self.request.user)
+
     @staticmethod
     def get(_):
         return Response(__version__)
@@ -988,6 +998,9 @@ class APIVersionView(APIView):  # pragma: no cover
 class ChangeLogView(APIView):  # pragma: no cover
     permission_classes = (AllowAny, )
     swagger_schema = None
+
+    def get_throttles(self):
+        return ThrottleUtil.get_throttles_by_user_plan(self.request.user)
 
     @staticmethod
     def get(_):
@@ -1042,6 +1055,9 @@ class BaseLogoView:
 
 class FeedbackView(APIView):  # pragma: no cover
     permission_classes = (AllowAny, )
+
+    def get_throttles(self):
+        return ThrottleUtil.get_throttles_by_user_plan(self.request.user)
 
     @staticmethod
     @swagger_auto_schema(request_body=openapi.Schema(
@@ -1140,6 +1156,9 @@ class ConceptContainerExtraRetrieveUpdateDestroyView(RetrieveUpdateDestroyAPIVie
 class AbstractChecksumView(APIView):
     permission_classes = (IsAuthenticated,)
     smart = False
+
+    def get_throttles(self):
+        return ThrottleUtil.get_throttles_by_user_plan(self.request.user)
 
     @swagger_auto_schema(
         manual_parameters=[all_resource_query_param],

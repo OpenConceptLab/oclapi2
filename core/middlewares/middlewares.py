@@ -3,10 +3,13 @@ import time
 
 import requests
 from django.http import HttpResponseNotFound, HttpResponse
+from django.utils.deprecation import MiddlewareMixin
 from request_logging.middleware import LoggingMiddleware
+from rest_framework.views import APIView
 
 from core.common.constants import VERSION_HEADER, REQUEST_USER_HEADER, RESPONSE_TIME_HEADER, REQUEST_URL_HEADER, \
     REQUEST_METHOD_HEADER
+from core.common.throttling import ThrottleUtil
 from core.common.utils import set_current_user, set_request_url
 from core.services.auth.core import AuthService
 
@@ -132,5 +135,18 @@ class FhirMiddleware(BaseMiddleware):
                 response = HttpResponse(xml_response, content_type=accept_content_type)
         else:
             response = self.get_response(request)
+
+        return response
+
+
+class ThrottleHeadersMiddleware(MiddlewareMixin):
+    def process_response(self, request, response):
+        if request.path.rstrip("/") not in ['', '/swagger', '/redoc', '/version']:
+            view = APIView()
+            throttles = ThrottleUtil.get_throttles_by_user_plan(request.user)
+            minute_limit = ThrottleUtil.get_limit_remaining(throttles[0], request, view)
+            if minute_limit is not None:
+                response['X-LimitRemaining-Minute'] = minute_limit
+                response['X-LimitRemaining-Day'] = ThrottleUtil.get_limit_remaining(throttles[1], request, view)
 
         return response

@@ -785,6 +785,76 @@ class UserReactivateViewTest(OCLAPITestCase):
         self.assertTrue(inactive_user.is_active)
 
 
+class UserRateLimitViewTest(OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.superuser = UserProfile.objects.get(username='ocladmin')
+
+    def test_put_bad_request(self):
+        user = UserProfileFactory()
+        self.assertEqual(user.api_rate_limit.rate_plan, 'lite')
+
+        response = self.client.put(
+            f'/users/{user.username}/rate-limit/',
+            {},
+            HTTP_AUTHORIZATION='Token ' + self.superuser.get_token(),
+            format='json'
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.data,
+            {'detail': ErrorDetail(string='"rate_plan" needs to be one of "guest", "lite" or "premium"', code='bad_request')}
+        )
+
+        user.refresh_from_db()
+        self.assertEqual(user.api_rate_limit.rate_plan, 'lite')
+
+        response = self.client.put(
+            f'/users/{user.username}/rate-limit/',
+            {'rate_plan': 'blah'},
+            HTTP_AUTHORIZATION='Token ' + self.superuser.get_token(),
+            format='json'
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data, {'rate_plan': ["Value 'blah' is not a valid choice."]})
+
+        self.assertEqual(user.api_rate_limit.rate_plan, 'lite')
+
+        response = self.client.put(
+            f'/users/{user.username}/rate-limit/',
+            {'rate_plan': 'blah'},
+            HTTP_AUTHORIZATION='Token ' + user.get_token(),
+            format='json'
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_put_204(self):
+        user = UserProfileFactory()
+        self.assertEqual(user.api_rate_limit.rate_plan, 'lite')
+
+        response = self.client.put(
+            f'/users/{user.username}/rate-limit/',
+            {'rate_plan': 'guest'},
+            HTTP_AUTHORIZATION='Token ' + self.superuser.get_token(),
+            format='json'
+        )
+        self.assertEqual(response.status_code, 204)
+
+        user.refresh_from_db()
+        self.assertEqual(user.api_rate_limit.rate_plan, 'guest')
+
+        response = self.client.put(
+            f'/users/{user.username}/rate-limit/',
+            {'rate_plan': 'premium'},
+            HTTP_AUTHORIZATION='Token ' + self.superuser.get_token(),
+            format='json'
+        )
+        self.assertEqual(response.status_code, 204)
+
+        user.refresh_from_db()
+        self.assertEqual(user.api_rate_limit.rate_plan, 'premium')
+
+
 class UserStaffToggleViewTest(OCLAPITestCase):
     def setUp(self):
         super().setUp()

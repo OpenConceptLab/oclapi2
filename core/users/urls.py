@@ -15,6 +15,7 @@ urlpatterns = [
     path('logout/', views.OIDCLogoutView.as_view(), name='user-logout'),
     path('signup/', views.UserSignup.as_view(), name='user-signup'),
     path('<str:user>/', views.UserDetailView.as_view(), name='userprofile-detail'),
+    path('<str:user>/rate-limit/', views.UserRateLimitView.as_view(), name='userprofile-rate-limit-detail'),
     path('<str:user>/sso-migrate/', views.SSOMigrateView.as_view(), name='userprofile-sso-migrate'),
     path('<str:user>/tasks/', task_views.UserTaskListView.as_view(), name='user-tasks-list'),
     path(

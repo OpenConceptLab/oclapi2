@@ -39,6 +39,12 @@ SECRET_KEY = '=q1%fd62$x!35xzzlc3lix3g!s&!2%-1d@5a=rm!n4lu74&6)p'
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.environ.get('DEBUG') == 'TRUE'
+ENV = os.environ.get('ENVIRONMENT', 'development')
+
+if not ENV or ENV in ['ci', 'dev', 'development']:
+    ENABLE_THROTTLING = False
+else:
+    ENABLE_THROTTLING = os.environ.get('ENABLE_THROTTLING', False) in ['true', 'True', 'TRUE', True]
 
 ALLOWED_HOSTS = ['*']
 
@@ -172,6 +178,18 @@ MIDDLEWARE = [
     'core.middlewares.middlewares.FhirMiddleware'
 ]
 
+if ENABLE_THROTTLING:
+    REST_FRAMEWORK['DEFAULT_THROTTLE_RATES'] = {
+        'guest_minute': '400/minute',
+        'guest_day': '10000/day',
+        'lite_minute': '500/minute',
+        'lite_day': '20000/day',
+        'premium_minute': '1000/minute',
+        'premium_day': '50000/day',
+    }
+    MIDDLEWARE = [*MIDDLEWARE, 'core.middlewares.middlewares.ThrottleHeadersMiddleware']
+
+
 ROOT_URLCONF = 'core.urls'
 
 TEMPLATES = [
@@ -235,7 +253,6 @@ ELASTICSEARCH_DSL = {
     },
 }
 
-ENV = os.environ.get('ENVIRONMENT', 'development')
 CID_GENERATE = True
 CID_RESPONSE_HEADER = None
 if ENV and ENV not in ['ci', 'development']:

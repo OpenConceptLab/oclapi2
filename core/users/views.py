@@ -36,19 +36,24 @@ from core.users.documents import UserProfileDocument
 from core.users.search import UserProfileFacetedSearch
 from core.users.serializers import UserDetailSerializer, UserCreateSerializer, UserListSerializer, \
     UserSummarySerializer, FollowingSerializer
-from .models import UserProfile, Follow
+from .models import UserProfile, Follow, UserRateLimit
 from ..common import ERRBIT_LOGGER
+from ..common.throttling import ThrottleUtil
 
 TRUTHY = get_truthy_values()
 
 
 class OCLOIDCAuthenticationCallbackView(OIDCAuthenticationCallbackView):
-    pass
+    def get_throttles(self):
+        return ThrottleUtil.get_throttles_by_user_plan(self.request.user)
 
 
 class OIDCodeExchangeView(APIView):
     """API to exchange OIDP one-time authorization_code with token"""
     permission_classes = (AllowAny, )
+
+    def get_throttles(self):
+        return ThrottleUtil.get_throttles_by_user_plan(self.request.user)
 
     @staticmethod
     def post(request):
@@ -68,6 +73,9 @@ class OIDCodeExchangeView(APIView):
 # This API is only to migrate users from Django to OID, requires OID admin credentials in payload
 class SSOMigrateView(APIView):  # pragma: no cover
     permission_classes = (AllowAny, )
+
+    def get_throttles(self):
+        return ThrottleUtil.get_throttles_by_user_plan(self.request.user)
 
     def get_object(self):
         username = self.kwargs.get('user')
@@ -92,6 +100,9 @@ class SSOMigrateView(APIView):  # pragma: no cover
 class TokenExchangeView(APIView):
     permission_classes = (IsAuthenticated, )
 
+    def get_throttles(self):
+        return ThrottleUtil.get_throttles_by_user_plan(self.request.user)
+
     @staticmethod
     def get(request):
         return Response({'token': request.user.get_token()})
@@ -99,6 +110,9 @@ class TokenExchangeView(APIView):
 
 class OIDCLogoutView(APIView):
     permission_classes = (AllowAny,)
+
+    def get_throttles(self):
+        return ThrottleUtil.get_throttles_by_user_plan(self.request.user)
 
     @staticmethod
     def get(request):
@@ -114,6 +128,9 @@ class OIDCLogoutView(APIView):
 
 class TokenAuthenticationView(ObtainAuthToken):
     """Implementation of ObtainAuthToken with last_login update"""
+
+    def get_throttles(self):
+        return ThrottleUtil.get_throttles_by_user_plan(self.request.user)
 
     @staticmethod
     def get(request):
@@ -447,6 +464,25 @@ class UserDetailView(UserBaseView, RetrieveAPIView, DestroyAPIView, mixins.Updat
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
+class UserRateLimitView(UserBaseView, UpdateAPIView):
+    permission_classes = (IsAdminUser, )
+    queryset = UserProfile.objects.filter()
+
+    def get_queryset(self):
+        return self.queryset
+
+    def update(self, request, *args, **kwargs):
+        rate_plan = self.request.data.get('rate_plan', None)
+
+        if not rate_plan:
+            raise Http400('"rate_plan" needs to be one of "guest", "lite" or "premium"')
+        try:
+            UserRateLimit.upsert(self.get_object(), rate_plan, request.user)
+        except ValidationError as ex:
+            return Response(ex.message_dict, status=status.HTTP_400_BAD_REQUEST)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
 class UserReactivateView(UserBaseView, UpdateAPIView):
     permission_classes = (IsAdminUser, )
     queryset = UserProfile.objects.filter(is_active=False)
@@ -478,6 +514,9 @@ class UserStaffToggleView(UserBaseView, UpdateAPIView):
 
 class UserExtrasBaseView(APIView):
     serializer_class = UserDetailSerializer
+
+    def get_throttles(self):
+        return ThrottleUtil.get_throttles_by_user_plan(self.request.user)
 
     def get_object(self):
         instance = self.request.user if self.kwargs.get('user_is_self') else UserProfile.objects.filter(
@@ -585,6 +624,9 @@ class UserFollowingView(DestroyAPIView):
     lookup_url_kwarg = 'id'
     lookup_field = 'id'
     queryset = Follow.objects.filter()
+
+    def get_throttles(self):
+        return ThrottleUtil.get_throttles_by_user_plan(self.request.user)
 
     def perform_destroy(self, instance):
         follower = instance.follower
