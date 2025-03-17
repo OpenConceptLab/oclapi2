@@ -805,7 +805,7 @@ class UserRateLimitViewTest(OCLAPITestCase):
             response.data,
             {
                 'detail': ErrorDetail(
-                    string='"rate_plan" needs to be one of "guest", "lite" or "premium"', code='bad_request')
+                    string='"rate_plan" needs to be one of "guest" or "lite"', code='bad_request')
             }
         )
 
@@ -845,17 +845,6 @@ class UserRateLimitViewTest(OCLAPITestCase):
 
         user.refresh_from_db()
         self.assertEqual(user.api_rate_limit.rate_plan, 'guest')
-
-        response = self.client.put(
-            f'/users/{user.username}/rate-limit/',
-            {'rate_plan': 'premium'},
-            HTTP_AUTHORIZATION='Token ' + self.superuser.get_token(),
-            format='json'
-        )
-        self.assertEqual(response.status_code, 204)
-
-        user.refresh_from_db()
-        self.assertEqual(user.api_rate_limit.rate_plan, 'premium')
 
 
 class UserStaffToggleViewTest(OCLAPITestCase):

@@ -19,14 +19,6 @@ class LiteDayThrottle(UserRateThrottle):
     scope = 'lite_day'
 
 
-class PremiumDayThrottle(UserRateThrottle):
-    scope = 'premium_day'
-
-
-class PremiumMinuteThrottle(UserRateThrottle):
-    scope = 'premium_minute'
-
-
 class ThrottleUtil:
     @staticmethod
     def get_limit_remaining(throttle, request, view):
@@ -48,8 +40,6 @@ class ThrottleUtil:
         if not settings.ENABLE_THROTTLING:
             return []
         # order is important, first one has to be minute throttle
-        if get(user, 'api_rate_limit.is_premium'):
-            return [PremiumMinuteThrottle(), PremiumDayThrottle()]
         if get(user, 'api_rate_limit.is_guest') or not get(user, 'is_authenticated'):
             return [GuestMinuteThrottle(), GuestDayThrottle()]
         return [LiteMinuteThrottle(), LiteDayThrottle()]

@@ -44,7 +44,6 @@ class Follow(models.Model):
 
 
 class UserRateLimit(BaseModel):
-    PREMIUM_PLAN = 'premium'
     LITE_PLAN = 'lite'
     GUEST_PLAN = 'guest'
 
@@ -52,7 +51,6 @@ class UserRateLimit(BaseModel):
         db_table = 'user_api_rate_limits'
 
     RATE_PLANS = (
-        (PREMIUM_PLAN, PREMIUM_PLAN),
         (LITE_PLAN, LITE_PLAN),
         (GUEST_PLAN, GUEST_PLAN),
     )
@@ -62,10 +60,6 @@ class UserRateLimit(BaseModel):
     public_access = None
     uri = None
     extras = None
-
-    @property
-    def is_premium(self):
-        return self.rate_plan == self.PREMIUM_PLAN
 
     @property
     def is_lite(self):
