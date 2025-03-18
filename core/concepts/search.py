@@ -141,26 +141,22 @@ class ConceptFuzzySearch:  # pragma: no cover
             filters = get(search.to_dict(), 'query.bool.must', [])
             name = data.get('name', None)
             synonyms = data.get('synonyms', None) or []
+
+            def get_kwargs_for_knn(_field, _value, _boost):
+                return {
+                    'field': _field,
+                    'query_vector': get_embeddings(_value),
+                    'k': k_nearest,
+                    'num_candidates': num_candidates,
+                    'filter': [*filters, {"match": {"name": {"query": _value, "fuzziness": "AUTO"}}}],
+                    'boost': _boost
+                }
             if name:
-                search = search.knn(
-                    field='_embeddings.vector',
-                    query_vector=get_embeddings(name).tolist(),
-                    k=k_nearest,
-                    num_candidates=num_candidates,
-                    filter=filters,
-                    boost=5
-                )
+                search = search.knn(**get_kwargs_for_knn('_embeddings.vector', name, 5))
             if synonyms and not isinstance(synonyms, list):
                 synonyms = [synonyms]
-            for synonym in synonyms:
-                search = search.knn(
-                    field='_embeddings.vector',
-                    query_vector=get_embeddings(synonym).tolist(),
-                    k=k_nearest,
-                    num_candidates=num_candidates,
-                    filter=filters,
-                    boost=1
-                )
+            for synonym in {name, *synonyms}:
+                search = search.knn(**get_kwargs_for_knn('_synonyms_embeddings.vector', synonym, 1))
 
         highlight = [field for field in flatten([*cls.fuzzy_fields, *cls.priority_fields]) if not is_number(field)]
         search = search.highlight(*highlight)

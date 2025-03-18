@@ -1,7 +1,7 @@
 from django_elasticsearch_dsl import Document, fields
 from django_elasticsearch_dsl.registries import registry
 from elasticsearch_dsl import DenseVector
-from pydash import compact
+from pydash import compact, get
 
 from core.common.utils import jsonify_safe, flatten_dict, get_embeddings
 from core.concepts.models import Concept
@@ -44,7 +44,26 @@ class ConceptDocument(Document):
     description = fields.TextField()
     same_as_map_codes = fields.ListField(fields.KeywordField())
     other_map_codes = fields.ListField(fields.KeywordField())
-    _embeddings = fields.NestedField(properties={"vector": {"type": "dense_vector"}, "type": {"type": "text"}})
+    _embeddings = fields.NestedField(
+        properties={
+            "vector": {
+                "type": "dense_vector",
+            },
+            "type": {
+                "type": "text"
+            }
+        }
+    )
+    _synonyms_embeddings = fields.NestedField(
+        properties={
+            "vector": {
+                "type": "dense_vector",
+            },
+            "type": {
+                "type": "text"
+            }
+        }
+    )
 
     class Django:
         model = Concept
@@ -186,13 +205,24 @@ class ConceptDocument(Document):
         data['same_as_map_codes'] = same_as_mapped_codes
         data['other_map_codes'] = other_mapped_codes
 
-        name = instance.display_name or ''
+        preferred_locale = instance.preferred_locale
+        name = get(preferred_locale, 'name') or ''
         data['_name'] = name.lower()
         data['name'] = name.replace('-', '_')
-        data['synonyms'] = compact(set(instance.names.exclude(name=name).values_list('name', flat=True)))
-        data['_embeddings'] = [
-            {'vector': get_embeddings(name), 'type': 'name'},
-            *[{'vector': get_embeddings(s), 'type': 'synonym'} for s in data['synonyms']]
+        data['_embeddings'] = {
+            'vector': get_embeddings(name),
+            'type': get(preferred_locale, 'type'),
+            'locale': get(preferred_locale, 'locale')
+        }
+
+        synonyms = instance.names.exclude(name=name).exclude(name='')
+        data['synonyms'] = compact(set(synonyms.values_list('name', flat=True)))
+        data['_synonyms_embeddings'] = [
+            {
+                'vector': get_embeddings(s.name),
+                'type': get(s, 'type'),
+                'locale': get(s, 'locale')
+            } for s in synonyms
         ]
         return data
 
