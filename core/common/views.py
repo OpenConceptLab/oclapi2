@@ -988,7 +988,7 @@ class APIVersionView(APIView):  # pragma: no cover
     swagger_schema = None
 
     def get_throttles(self):
-        return ThrottleUtil.get_throttles_by_user_plan(self.request.user)
+        return []
 
     @staticmethod
     def get(_):
@@ -1000,7 +1000,7 @@ class ChangeLogView(APIView):  # pragma: no cover
     swagger_schema = None
 
     def get_throttles(self):
-        return ThrottleUtil.get_throttles_by_user_plan(self.request.user)
+        return []
 
     @staticmethod
     def get(_):
@@ -1011,6 +1011,9 @@ class ChangeLogView(APIView):  # pragma: no cover
 class RootView(BaseAPIView):  # pragma: no cover
     permission_classes = (AllowAny,)
     serializer_class = RootSerializer
+
+    def get_throttles(self):
+        return []
 
     def get(self, _):
         from core.urls import urlpatterns
