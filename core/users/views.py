@@ -475,7 +475,7 @@ class UserRateLimitView(UserBaseView, UpdateAPIView):
         rate_plan = self.request.data.get('rate_plan', None)
 
         if not rate_plan:
-            raise Http400('"rate_plan" needs to be one of "guest" or "lite"')
+            raise Http400('"rate_plan" needs to be one of "guest" or "standard"')
         try:
             UserRateLimit.upsert(self.get_object(), rate_plan, request.user)
         except ValidationError as ex:

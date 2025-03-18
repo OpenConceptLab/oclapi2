@@ -11,12 +11,12 @@ class GuestDayThrottle(UserRateThrottle):
     scope = 'guest_day'
 
 
-class LiteMinuteThrottle(UserRateThrottle):
-    scope = 'lite_minute'
+class StandardMinuteThrottle(UserRateThrottle):
+    scope = 'standard_minute'
 
 
-class LiteDayThrottle(UserRateThrottle):
-    scope = 'lite_day'
+class StandardDayThrottle(UserRateThrottle):
+    scope = 'standard_day'
 
 
 class ThrottleUtil:
@@ -42,4 +42,4 @@ class ThrottleUtil:
         # order is important, first one has to be minute throttle
         if get(user, 'api_rate_limit.is_guest') or not get(user, 'is_authenticated'):
             return [GuestMinuteThrottle(), GuestDayThrottle()]
-        return [LiteMinuteThrottle(), LiteDayThrottle()]
+        return [StandardMinuteThrottle(), StandardDayThrottle()]

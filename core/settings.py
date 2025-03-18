@@ -182,8 +182,8 @@ if ENABLE_THROTTLING:
     REST_FRAMEWORK['DEFAULT_THROTTLE_RATES'] = {
         'guest_minute': '400/minute',
         'guest_day': '10000/day',
-        'lite_minute': '500/minute',
-        'lite_day': '20000/day',
+        'standard_minute': '500/minute',
+        'standard_day': '20000/day',
     }
     MIDDLEWARE = [*MIDDLEWARE, 'core.middlewares.middlewares.ThrottleHeadersMiddleware']
 

@@ -44,26 +44,26 @@ class Follow(models.Model):
 
 
 class UserRateLimit(BaseModel):
-    LITE_PLAN = 'lite'
+    STANDARD_PLAN = 'standard'
     GUEST_PLAN = 'guest'
 
     class Meta:
         db_table = 'user_api_rate_limits'
 
     RATE_PLANS = (
-        (LITE_PLAN, LITE_PLAN),
+        (STANDARD_PLAN, STANDARD_PLAN),
         (GUEST_PLAN, GUEST_PLAN),
     )
 
     user = models.OneToOneField('users.UserProfile', on_delete=models.CASCADE, related_name='api_rate_limit')
-    rate_plan = models.CharField(choices=RATE_PLANS, max_length=100, default=LITE_PLAN)
+    rate_plan = models.CharField(choices=RATE_PLANS, max_length=100, default=STANDARD_PLAN)
     public_access = None
     uri = None
     extras = None
 
     @property
-    def is_lite(self):
-        return self.rate_plan == self.LITE_PLAN
+    def is_standard(self):
+        return self.rate_plan == self.STANDARD_PLAN
 
     @property
     def is_guest(self):
@@ -71,7 +71,7 @@ class UserRateLimit(BaseModel):
 
     def clean(self):
         if not self.rate_plan:
-            self.rate_plan = self.LITE_PLAN
+            self.rate_plan = self.STANDARD_PLAN
         super().clean()
 
     @classmethod

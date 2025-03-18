@@ -792,7 +792,7 @@ class UserRateLimitViewTest(OCLAPITestCase):
 
     def test_put_bad_request(self):
         user = UserProfileFactory()
-        self.assertEqual(user.api_rate_limit.rate_plan, 'lite')
+        self.assertEqual(user.api_rate_limit.rate_plan, 'standard')
 
         response = self.client.put(
             f'/users/{user.username}/rate-limit/',
@@ -805,12 +805,12 @@ class UserRateLimitViewTest(OCLAPITestCase):
             response.data,
             {
                 'detail': ErrorDetail(
-                    string='"rate_plan" needs to be one of "guest" or "lite"', code='bad_request')
+                    string='"rate_plan" needs to be one of "guest" or "standard"', code='bad_request')
             }
         )
 
         user.refresh_from_db()
-        self.assertEqual(user.api_rate_limit.rate_plan, 'lite')
+        self.assertEqual(user.api_rate_limit.rate_plan, 'standard')
 
         response = self.client.put(
             f'/users/{user.username}/rate-limit/',
@@ -821,7 +821,7 @@ class UserRateLimitViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.data, {'rate_plan': ["Value 'blah' is not a valid choice."]})
 
-        self.assertEqual(user.api_rate_limit.rate_plan, 'lite')
+        self.assertEqual(user.api_rate_limit.rate_plan, 'standard')
 
         response = self.client.put(
             f'/users/{user.username}/rate-limit/',
@@ -833,7 +833,7 @@ class UserRateLimitViewTest(OCLAPITestCase):
 
     def test_put_204(self):
         user = UserProfileFactory()
-        self.assertEqual(user.api_rate_limit.rate_plan, 'lite')
+        self.assertEqual(user.api_rate_limit.rate_plan, 'standard')
 
         response = self.client.put(
             f'/users/{user.username}/rate-limit/',
