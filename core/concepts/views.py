@@ -774,7 +774,7 @@ class ConceptsHierarchyAmendAdminView(APIView):  # pragma: no cover
 class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
     default_limit = 1
     score_threshold = 5
-    score_threshold_semantic_very_high = 5
+    score_threshold_semantic_very_high = 1.3
     serializer_class = ConceptListSerializer
     permission_classes = (IsAuthenticatedOrReadOnly,)
 
@@ -822,7 +822,7 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
                 concept._highlight = es_search.highlights.get(concept.id, {})  # pylint:disable=protected-access
                 concept._score = es_search.scores.get(concept.id, {})  # pylint:disable=protected-access
                 concept._match_type = 'low'  # pylint:disable=protected-access
-                if concept._score > self.score_threshold:  # pylint:disable=protected-access
+                if concept._score > score_threshold:  # pylint:disable=protected-access
                     concept._match_type = 'high'  # pylint:disable=protected-access
                     if concept._highlight.get('name', None):  # pylint:disable=protected-access
                         concept._match_type = 'very_high'  # pylint:disable=protected-access
