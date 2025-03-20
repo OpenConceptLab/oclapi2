@@ -159,6 +159,7 @@ class ConceptFuzzySearch:  # pragma: no cover
             for synonym in synonyms:
                 if synonym is not None:
                     search = search.knn(**get_kwargs_for_knn('_synonyms_embeddings.vector', synonym, 0.1))
+                    search = search.knn(**get_kwargs_for_knn('_embeddings.vector', synonym, 0.15))
 
         highlight = [field for field in flatten([*cls.fuzzy_fields, *cls.priority_fields]) if not is_number(field)]
         search = search.highlight(*highlight)
