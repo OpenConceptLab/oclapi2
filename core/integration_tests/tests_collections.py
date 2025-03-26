@@ -7,7 +7,7 @@ from mock import patch, Mock, ANY
 from rest_framework.exceptions import ErrorDetail
 
 from core.collections.models import CollectionReference, Collection
-from core.collections.serializers import CollectionVersionExportSerializer, CollectionReferenceSerializer
+from core.collections.serializers import CollectionVersionExportSerializer, CollectionReferenceDetailSerializer
 from core.collections.tests.factories import OrganizationCollectionFactory, UserCollectionFactory, ExpansionFactory
 from core.common.tasks import export_collection
 from core.common.tests import OCLAPITestCase
@@ -2142,7 +2142,7 @@ class ExportCollectionTaskTest(OCLAPITestCase):
         )
 
         exported_references = exported_data['references']
-        expected_references = CollectionReferenceSerializer(collection.references.all(), many=True).data
+        expected_references = CollectionReferenceDetailSerializer(collection.references.all(), many=True).data
 
         self.assertEqual(len(exported_references), 3)
         self.assertIn(exported_references[0], expected_references)
