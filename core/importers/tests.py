@@ -30,7 +30,7 @@ from core.orgs.models import Organization
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.constants import AUTO_ID_UUID
 from core.sources.models import Source
-from core.sources.tests.factories import OrganizationSourceFactory
+from core.sources.tests.factories import OrganizationSourceFactory, UserSourceFactory
 from core.tasks.models import Task
 from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
@@ -669,6 +669,22 @@ class BulkImportInlineTest(OCLTestCase):
         self.assertEqual(len(importer.updated), 1)
         self.assertEqual(importer.failed, [])
         self.assertTrue(importer.elapsed_seconds > 0)
+
+        user = UserProfileFactory(username='jon')
+        UserSourceFactory(user=user, mnemonic='test', version='HEAD')
+        data = {
+            "type": "Mapping",
+            "map_type": "SAME-AS",
+            "from_concept_url": "/orgs/SwissTPH/sources/CHE/Concepts/CHE.A.DE04/",
+            "to_source_url": "http://snomed.info/sct|International-Edition-2021-07-31",
+            "to_concept_code": "184096005",
+            "source": "test",
+            "owner": "jon",
+            "owner_type": "User"
+        }
+        importer = BulkImportInline(json.dumps(data), 'ocladmin', True)
+        importer.run()
+        self.assertEqual(len(importer.created), 1)
 
     @patch('core.importers.models.batch_index_resources')
     def test_mapping_import_with_autoid_assignment(self, batch_index_resources_mock):

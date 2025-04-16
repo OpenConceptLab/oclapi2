@@ -324,7 +324,11 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
             concept = Concept.objects.filter(
                 uri=expr).first() or Concept.objects.filter(uri=encode_string(expr, safe='/')).first()
 
-            return concept or {'mnemonic': expr.replace(to_parent_uri(expr), '').replace('concepts/', '').split('/')[0]}
+            return concept or {
+                'mnemonic': expr.replace(
+                    to_parent_uri(expr), ''
+                ).replace('concepts/', '').replace('Concepts/', '').split('/')[0]
+            }
 
         def get_source(url):
             source, _ = Source.resolve_reference_expression(url, None, HEAD)
@@ -349,7 +353,6 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
                 from_concept_code or self.from_concept_code):
             from_concept_code = from_concept_code or self.from_concept_code
             from_concept_url = self.from_source_url + 'concepts/' + from_concept_code + '/'
-
         from_concept = get_concept(from_concept_url) if from_concept_url else get(self, 'from_concept')
         to_concept = get_concept(to_concept_url) if to_concept_url else get(self, 'to_concept')
 
