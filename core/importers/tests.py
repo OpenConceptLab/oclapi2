@@ -573,7 +573,7 @@ class BulkImportInlineTest(OCLTestCase):
         self.assertEqual(importer.permission_denied, [data])
 
     @patch('core.importers.models.batch_index_resources')
-    def test_mapping_import(self, batch_index_resources_mock):  # pylint: disable=too-many-statements
+    def test_mapping_import(self, batch_index_resources_mock):
         batch_index_resources_mock.__name__ = 'batch_index_resources'
         self.assertEqual(Mapping.objects.count(), 0)
 
