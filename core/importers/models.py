@@ -453,8 +453,10 @@ class ConceptImporter(BaseResourceImporter):
 
     def process(self):
         parent = self.data.get('parent')
+        errors = {}
         if not parent:
-            return FAILED
+            errors['source'] = 'Not Found'
+            return errors
         if parent.has_edit_access(self.user):
             if self.version:
                 self.instance = self.get_queryset().first().clone()
@@ -475,7 +477,7 @@ class ConceptImporter(BaseResourceImporter):
                 data={**self.data, '_counted': None, '_index': False}, user=self.user, create_parent_version=False)
             if self.instance.id:
                 return CREATED
-            return self.instance.errors or FAILED
+            return self.instance.errors or errors or FAILED
 
         return PERMISSION_DENIED
 
@@ -597,8 +599,10 @@ class MappingImporter(BaseResourceImporter):
 
     def process(self):
         parent = self.data.get('parent')
+        errors = {}
         if not parent:
-            return FAILED
+            errors['source'] = 'Not Found'
+            return errors
         if parent.has_edit_access(self.user):
             if self.version:
                 queryset = self.get_queryset()
@@ -617,7 +621,7 @@ class MappingImporter(BaseResourceImporter):
             self.instance = Mapping.persist_new({**self.data, '_counted': None, '_index': False}, self.user)
             if self.instance.id:
                 return CREATED
-            return self.instance.errors or FAILED
+            return self.instance.errors or errors or FAILED
 
         return PERMISSION_DENIED
 

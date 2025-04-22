@@ -670,6 +670,27 @@ class BulkImportInlineTest(OCLTestCase):
         self.assertEqual(importer.failed, [])
         self.assertTrue(importer.elapsed_seconds > 0)
 
+        data = {
+            "to_concept_url": "/orgs/DemoOrg/sources/DemoSource/concepts/Corn/",
+            "from_concept_url": "/orgs/DemoOrg/sources/DemoSource/concepts/Vegetable/",
+            "type": "Mapping", "source": "DemoSourceNotExisting",
+            "extras": {"foo": "bar"}, "owner": "DemoOrg", "map_type": "Has Child", "owner_type": "Organization",
+            "external_id": None, "retired": True
+        }
+
+        importer = BulkImportInline(json.dumps(data), 'ocladmin', True)
+        importer.run()
+
+        self.assertEqual(mapping.versions.count(), 3)
+        self.assertTrue(mapping.retired)
+        self.assertTrue(mapping.get_latest_version().retired)
+        self.assertEqual(importer.processed, 1)
+        self.assertEqual(len(importer.created), 0)
+        self.assertEqual(len(importer.updated), 0)
+        self.assertEqual(len(importer.failed), 1)
+        self.assertEqual(importer.failed[0]['errors'], {'source': 'Not Found'})
+        self.assertTrue(importer.elapsed_seconds > 0)
+
     @patch('core.importers.models.batch_index_resources')
     def test_mapping_import_with_autoid_assignment(self, batch_index_resources_mock):
         self.assertEqual(Mapping.objects.count(), 0)
