@@ -789,6 +789,8 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
         except IntegrityError as ex:
             errors.update({'__all__': ex.args})
+        except AlreadyQueued as ex:
+            errors.update({'__all__': 'Already Queued'})
 
         return errors
 
