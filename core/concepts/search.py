@@ -50,9 +50,11 @@ class ConceptFuzzySearch:  # pragma: no cover
     ]
     semantic_priority_fields = [
         ['id', 0.3],
+        ['name', 0],
+        ['synonyms', 0],
         ['same_as_mapped_codes', 0.1],
         ['other_map_codes', 0.1],
-        ['concept_class', 'datatype', 0.1],
+        ['concept_class', 'datatype', 0.01],
     ]
     fuzzy_fields = ['name', 'synonyms']
 
@@ -148,7 +150,7 @@ class ConceptFuzzySearch:  # pragma: no cover
                     'query_vector': get_embeddings(_value),
                     'k': k_nearest,
                     'num_candidates': num_candidates,
-                    'filter': [*filters, {"match": {"name": {"query": _value, "fuzziness": "AUTO"}}}],
+                    'filter': filters,
                     'boost': _boost
                 }
             if synonyms and not isinstance(synonyms, list):
