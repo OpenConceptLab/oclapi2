@@ -114,9 +114,9 @@ class ConceptFuzzySearch:  # pragma: no cover
                     if isinstance(value, list):
                         for val in value:
                             val = val or ""
-                            priority_fields_criteria.append(CustomESSearch.get_match_criteria(field, val, boost))
+                            priority_fields_criteria.append(CustomESSearch.get_or_match_criteria(field, val, boost))
                     else:
-                        priority_fields_criteria.append(CustomESSearch.get_match_criteria(field, value, boost))
+                        priority_fields_criteria.append(CustomESSearch.get_or_match_criteria(field, value, boost))
 
         if not is_semantic:
             for field in cls.fuzzy_fields:
