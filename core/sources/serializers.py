@@ -357,7 +357,7 @@ class SourceDetailSerializer(SourceCreateOrUpdateSerializer, AbstractRepoResourc
     updated_on = DateTimeField(source='updated_at')
     supported_locales = ListField(required=False, allow_empty=True)
     created_by = CharField(source='created_by.username', read_only=True)
-    updated_by = DateTimeField(source='updated_by.username', read_only=True)
+    updated_by = CharField(source='updated_by.username', read_only=True)
     summary = SerializerMethodField()
     client_configs = SerializerMethodField()
     hierarchy_root = SerializerMethodField()
