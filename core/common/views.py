@@ -5,6 +5,7 @@ import markdown
 import requests
 from django.conf import settings
 from django.core.mail import EmailMessage
+from django.db import models
 from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404
 from drf_yasg import openapi
@@ -24,7 +25,7 @@ from core.common.constants import SEARCH_PARAM, LIST_DEFAULT_LIMIT, CSV_DEFAULT_
     LIMIT_PARAM, NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY, INCLUDE_RETIRED_PARAM, VERBOSE_PARAM, HEAD, LATEST, \
     BRIEF_PARAM, ES_REQUEST_TIMEOUT, INCLUDE_INACTIVE, FHIR_LIMIT_PARAM, RAW_PARAM, SEARCH_MAP_CODES_PARAM, \
     INCLUDE_SEARCH_META_PARAM, EXCLUDE_FUZZY_SEARCH_PARAM, EXCLUDE_WILDCARD_SEARCH_PARAM, UPDATED_BY_USERNAME_PARAM, \
-    CANONICAL_URL_REQUEST_PARAM, CHECKSUMS_PARAM
+    CANONICAL_URL_REQUEST_PARAM, CHECKSUMS_PARAM, ACCESS_TYPE_NONE
 from core.common.exceptions import Http400
 from core.common.mixins import PathWalkerMixin
 from core.common.search import CustomESSearch
@@ -173,6 +174,29 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             elif isinstance(self.default_qs_sort_attr, list):
                 _queryset = _queryset.order_by(*self.default_qs_sort_attr)
         return _queryset
+
+    def filter_queryset_by_owner(self, queryset):
+        if 'user' in self.kwargs:
+            return queryset.filter(user__username=self.kwargs['user'])
+        if 'org' in self.kwargs:
+            return queryset.filter(organization__mnemonic=self.kwargs['org'])
+
+        return queryset
+
+    def filter_queryset_by_public_access(self, queryset):
+        user = self.request.user
+
+        if get(user, 'is_anonymous'):
+            return queryset.exclude(public_access=ACCESS_TYPE_NONE)
+        if user.is_staff:
+            return queryset
+
+        public_queryset = queryset.exclude(public_access=ACCESS_TYPE_NONE)
+        private_queryset = queryset.filter(public_access=ACCESS_TYPE_NONE)
+        private_queryset = private_queryset.filter(
+            models.Q(user_id=user.id) | models.Q(organization__members__id=user.id))
+
+        return public_queryset.union(private_queryset)
 
     def get_sort_and_desc(self):
         query_params = self.request.query_params.dict()

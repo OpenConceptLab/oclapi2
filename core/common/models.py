@@ -545,13 +545,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
     @property
     def parent(self):
-        parent = None
-        if self.organization_id:
-            parent = self.organization
-        if self.user_id:
-            parent = self.user
-
-        return parent
+        return self.organization if self.organization_id else self.user
 
     @property
     def parent_id(self):

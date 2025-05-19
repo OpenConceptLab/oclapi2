@@ -4,6 +4,7 @@ from core.orgs import views as org_views
 from core.tasks import views as task_views
 from . import views
 from ..events.views import UserEventsView
+from ..orgs.views import OrganizationMapProjectListView
 from ..repos.views import OrganizationRepoListView
 from ..url_registry.views import OrganizationURLRegistryListView
 
@@ -38,6 +39,9 @@ urlpatterns = [
     path(
         '<str:user>/orgs/url-registry/',
         OrganizationURLRegistryListView.as_view(), name='userprofile-organization-url-registry-list',),
+    path(
+        '<str:user>/orgs/map-projects/',
+        OrganizationMapProjectListView.as_view(), name='userprofile-organization-map-project-list',),
     path("<str:user>/extras/<str:extra>/", views.UserExtraRetrieveUpdateDestroyView.as_view(), name='user-extra'),
     path('<str:user>/repos/', include('core.repos.urls')),
     path('<str:user>/url-registry/', include('core.url_registry.urls')),
@@ -45,6 +49,7 @@ urlpatterns = [
     path('<str:user>/collections/', include('core.collections.urls')),
     path('<str:user>/pins/', include('core.pins.urls')),
     path('<str:user>/events/', UserEventsView.as_view(), name='user-events'),
+    path('<str:user>/map-projects/', include('core.map_projects.urls')),
 
     # TODO: require FHIR subdomain
     path('<str:user>/CodeSystem/', include('core.code_systems.urls'), name='code_systems_urls'),

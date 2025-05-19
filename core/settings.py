@@ -110,6 +110,7 @@ INSTALLED_APPS = [
     'core.repos',
     'core.url_registry',
     'core.events',
+    'core.map_projects'
 ]
 REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': (
