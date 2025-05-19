@@ -421,7 +421,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
                 if self.from_concept_id:
                     self.index_from_concept()
         except ValidationError as ex:
-            self.errors.update(ex.message_dict)
+            self.errors.update(get(ex, 'message_dict', {}) or get(ex, 'error_dict', {}))
         except IntegrityError as ex:
             self.errors.update({'__all__': ex.args})
         except Exception as ex:  # pylint: disable=broad-except
@@ -499,7 +499,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         except ValidationError as ex:
             if mapping.id:
                 mapping.delete()
-            mapping.errors.update(ex.message_dict)
+            mapping.errors.update(get(ex, 'message_dict', {}) or get(ex, 'error_dict', {}))
         except (IntegrityError, ValueError) as ex:
             if mapping.id:
                 mapping.delete()

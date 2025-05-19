@@ -883,7 +883,7 @@ class SourceChildMixin(ChecksumModel):
 
                 transaction.on_commit(lambda: self._index_on_new_version_creation(prev_latest))
         except ValidationError as err:
-            errors.update(err.message_dict)
+            errors.update(get(err, 'message_dict') or get(err, 'error_dict'))
         finally:
             cls.resume_indexing()
             if not persisted:

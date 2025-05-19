@@ -664,7 +664,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         except ValidationError as ex:
             if self.id:
                 self.delete()
-            self.errors.update(ex.message_dict)
+            self.errors.update(get(ex, 'message_dict', {}) or get(ex, 'error_dict', {}))
         except IntegrityError as ex:
             if self.id:
                 self.delete()
@@ -744,7 +744,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         except ValidationError as ex:
             if concept.id:
                 concept.delete()
-            concept.errors.update(ex.message_dict)
+            concept.errors.update(get(ex, 'message_dict', {}) or get(ex, 'error_dict', {}))
         except (IntegrityError, ValueError) as ex:
             if concept.id:
                 concept.delete()
