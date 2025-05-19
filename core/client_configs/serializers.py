@@ -38,7 +38,7 @@ class ClientConfigAbstractSerializer(serializers.ModelSerializer):
             if instance.id and instance.is_default:
                 instance.siblings.filter(is_default=True).update(is_default=False)
         except ValidationError as ex:
-            self._errors.update(ex.message_dict)
+            self._errors.update(get(ex, 'message_dict', {}) or get(ex, 'error_dict', {}))
 
         if self._errors:
             raise serializers.ValidationError(self._errors)
@@ -77,7 +77,7 @@ class ClientConfigSerializer(ClientConfigAbstractSerializer):
             if instance.id and instance.is_default:
                 instance.siblings.filter(is_default=True).update(is_default=False)
         except ValidationError as ex:
-            self._errors.update(ex.message_dict)
+            self._errors.update(get(ex, 'message_dict', {}) or get(ex, 'error_dict', {}))
 
         if self._errors:
             raise serializers.ValidationError(self._errors)

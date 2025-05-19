@@ -677,7 +677,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         try:
             obj.full_clean()
         except ValidationError as ex:
-            errors.update(ex.message_dict)
+            errors.update(get(ex, 'message_dict', {}) or get(ex, 'error_dict', {}))
         if errors:
             return errors
 
@@ -756,7 +756,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         try:
             obj.full_clean()
         except ValidationError as ex:
-            errors.update(ex.message_dict)
+            errors.update(get(ex, 'message_dict', {}) or get(ex, 'error_dict', {}))
 
         if errors:
             return errors
@@ -806,7 +806,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
                 concept_validation_error = {
                     'mnemonic': concept.mnemonic,
                     'url': concept.url,
-                    'errors': validation_error.message_dict
+                    'errors': get(validation_error, 'message_dict') or get(validation_error, 'error_dict'),
                 }
                 failed_concept_validations.append(concept_validation_error)
 
