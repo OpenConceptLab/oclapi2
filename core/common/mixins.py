@@ -165,7 +165,7 @@ class ListWithHeadersMixin(ListModelMixin):
 
     def __can_cache(self):
         return self.should_perform_es_search() and self.is_repo_version_children_request_without_any_search() and \
-            get(self, 'parent_resource.is_latest_version', False)
+            not self.only_facets() and get(self, 'parent_resource.is_latest_version', False)
 
     def list(self, request, *args, **kwargs):  # pylint:disable=too-many-locals,too-many-branches
         cache_key_body = None
