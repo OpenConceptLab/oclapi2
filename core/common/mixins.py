@@ -2,6 +2,7 @@ import logging
 from math import ceil
 from urllib import parse
 
+from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
 from django.db import transaction
@@ -153,58 +154,87 @@ class ListWithHeadersMixin(ListModelMixin):
         res['num_found'] = get(self, 'total_count') or queryset.count()
         return res
 
+    def __get_cached_data_if_any(self, request):
+        base_path = request.path
+        parent = self.parent_resource
+
+        key_body, key_headers = parent.get_concepts_cache_keys() if '/concepts' in base_path else (
+            parent.get_mappings_cache_keys())
+
+        return key_body, cache.get(key_body) or None, key_headers, cache.get(key_headers) or None
+
+    def __can_cache(self):
+        return self.should_perform_es_search() and self.is_repo_version_children_request_without_any_search() and \
+            get(self, 'parent_resource.is_latest_version', False)
+
     def list(self, request, *args, **kwargs):  # pylint:disable=too-many-locals,too-many-branches
+        cache_key_body = None
+        cache_key_headers = None
+        data = None
+        headers = {}
+        sorted_list = []
         query_params = request.query_params.dict()
         is_csv = query_params.get('csv', False)
-        search_string = query_params.get('type', None)
-        search_term = query_params.get('q', None)
-        if is_csv:
-            pattern = search_term
-            if pattern:
-                query_params._mutable = True  # pylint: disable=protected-access
-                query_params['q'] = "*" + search_term + "*"
 
-        if is_csv and not search_string:
-            return self.get_csv(request)
+        if not is_csv and request.method == 'GET' and self.__can_cache():
+            cache_key_body, data, cache_key_headers, headers = self.__get_cached_data_if_any(request)
 
-        if self.only_facets():
-            return Response({'facets': {'fields': self.get_facets()}})
-        if self.only_search_stats() and search_term:
-            return Response(self.get_search_stats(get(self, '_source_versions', []), get(self, '_extra_filters', None)))
+        if not data:
+            search_string = query_params.get('type', None)
+            search_term = query_params.get('q', None)
+            if is_csv:
+                pattern = search_term
+                if pattern:
+                    query_params._mutable = True  # pylint: disable=protected-access
+                    query_params['q'] = "*" + search_term + "*"
 
-        if self.object_list is None:
-            self.object_list = self.filter_queryset()
+            if is_csv and not search_string:
+                return self.get_csv(request)
 
-        if is_csv and search_string:
-            klass = type(self.object_list[0])
-            queryset = klass.objects.filter(id__in=self.get_object_ids())
-            return self.get_csv(request, queryset)
+            if self.only_facets():
+                return Response({'facets': {'fields': self.get_facets()}})
+            if self.only_search_stats() and search_term:
+                return Response(
+                    self.get_search_stats(
+                        get(self, '_source_versions', []), get(self, '_extra_filters', None)))
 
-        # Skip pagination if compressed results are requested
-        compress = self.should_compress()
+            if self.object_list is None:
+                self.object_list = self.filter_queryset()
 
-        sorted_list = self.object_list
+            if is_csv and search_string:
+                klass = type(self.object_list[0])
+                queryset = klass.objects.filter(id__in=self.get_object_ids())
+                return self.get_csv(request, queryset)
 
-        headers = {}
-        results = sorted_list
-        paginator = None
+            # Skip pagination if compressed results are requested
+            compress = self.should_compress()
 
-        if not compress:
-            self.limit = to_int(self.limit, LIST_DEFAULT_LIMIT)
-            if not self.limit or int(self.limit) == 0 or int(self.limit) > 1000:
-                if self.is_brief() and self.is_checksums() and self.kwargs.get('source') and get(
-                        self, 'model.__name__') in ['Concept', 'Mapping']:
-                    self.limit = 20000  # for checksums
-                else:
-                    self.limit = LIST_DEFAULT_LIMIT
-            paginator = CustomPaginator(
-                request=request, queryset=sorted_list, page_size=self.limit, total_count=self.total_count,
-                is_sliced=self.is_sliced(), max_score=get(self, '_max_score'),
-                search_scores=get(self, '_scores'), highlights=get(self, '_highlights')
-            )
-            headers = paginator.headers
-            results = paginator.current_page_results
-        data = self.serialize_list(results, paginator)
+            sorted_list = self.object_list
+
+            headers = {}
+            results = sorted_list
+            paginator = None
+
+            if not compress:
+                self.limit = to_int(self.limit, LIST_DEFAULT_LIMIT)
+                if not self.limit or int(self.limit) == 0 or int(self.limit) > 1000:
+                    if self.is_brief() and self.is_checksums() and self.kwargs.get('source') and get(
+                            self, 'model.__name__') in ['Concept', 'Mapping']:
+                        self.limit = 20000  # for checksums
+                    else:
+                        self.limit = LIST_DEFAULT_LIMIT
+                paginator = CustomPaginator(
+                    request=request, queryset=sorted_list, page_size=self.limit, total_count=self.total_count,
+                    is_sliced=self.is_sliced(), max_score=get(self, '_max_score'),
+                    search_scores=get(self, '_scores'), highlights=get(self, '_highlights')
+                )
+                headers = paginator.headers
+                results = paginator.current_page_results
+            data = self.serialize_list(results, paginator)
+            if cache_key_body is not None:
+                timeout = 60 * 5
+                cache.set(cache_key_body, data, timeout=timeout)
+                cache.set(cache_key_headers, headers, timeout=timeout)
 
         response = Response(data)
         for key, value in headers.items():

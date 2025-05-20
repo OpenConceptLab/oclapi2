@@ -3,6 +3,7 @@ from celery_once import AlreadyQueued
 from django.conf import settings
 from django.contrib.contenttypes.fields import GenericRelation
 from django.contrib.postgres.fields import ArrayField
+from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
 from django.core.validators import RegexValidator
@@ -597,8 +598,29 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
             delete_s3_objects.apply_async((export_path,), queue='default', permanent=False)
         self.post_delete_actions()
 
+    def get_concepts_cache_keys(self):
+        return self.__get_resources_cache_keys('concepts')
+
+    def get_mappings_cache_keys(self):
+        return self.__get_resources_cache_keys('mappings')
+
+    def __get_resources_cache_keys(self, resources):
+        return f'repo_cache:body:{self.uri}{resources}/', f'repo_cache:headers:{self.uri}{resources}/'
+
     def post_delete_actions(self):
-        pass
+        return self.__clear_cache()
+
+    def __clear_cache(self):
+        try:
+            concepts_body_key, concepts_headers_key = self.get_concepts_cache_keys()
+            mappings_body_key, mappings_headers_key = self.get_mappings_cache_keys()
+            return cache.client.get_client().delete(*[
+                cache.make_key(key) for key in [
+                    concepts_body_key, mappings_body_key, concepts_headers_key, mappings_headers_key
+                ]
+            ])
+        except:  # pylint: disable=bare-except
+            return False
 
     def delete_pins(self):
         if self.is_head:

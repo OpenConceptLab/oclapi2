@@ -481,6 +481,8 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
             PostgresQL.drop_seq(self.mappings_mnemonic_seq_name)
             PostgresQL.drop_seq(self.mappings_external_id_seq_name)
 
+        super().post_delete_actions()
+
     def post_create_actions(self):
         if get(settings, 'TEST_MODE', False):
             update_mappings_source(self.id)

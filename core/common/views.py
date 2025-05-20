@@ -822,11 +822,29 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             source_versions, other_filters
         ).get_aggregations(self.is_verbose(), self.is_raw())
 
-    def should_perform_es_search(self):
+    def is_repo_version_children_request(self):
         if self.is_source_child_document_model() and self.kwargs and 'source' in self.kwargs:
             parent = get(self, 'parent_resource')
             if parent and not parent.is_head:
                 return True
+        return False
+
+    def is_repo_version_children_request_without_any_search(self):
+        # used for caching repo versions concepts/mappings first page
+        if self.is_repo_version_children_request() and not self.get_search_string() and not self.is_verbose():
+            page = self.request.query_params.dict().get('page', '').strip()
+            sort = self.request.query_params.dict().get('sortDesc', '').strip()
+            limit = self.request.query_params.dict().get('limit', '').strip()
+            if limit:
+                limit = to_int(limit, 25)
+            return bool(
+                (not limit or limit == 25) and (not page or page in [1, '1']) and (not sort or sort == '_score')
+            )
+        return False
+
+    def should_perform_es_search(self):
+        if self.is_repo_version_children_request():
+            return True
         sort_field, _ = self.get_sort_and_desc()
         return (
                 self.is_only_searchable or
