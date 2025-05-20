@@ -232,7 +232,7 @@ class ListWithHeadersMixin(ListModelMixin):
                 results = paginator.current_page_results
             data = self.serialize_list(results, paginator)
             if cache_key_body is not None:
-                timeout = 60 * 5
+                timeout = 60 * 60 * 24  # 1 day
                 cache.set(cache_key_body, data, timeout=timeout)
                 cache.set(cache_key_headers, headers, timeout=timeout)
 
