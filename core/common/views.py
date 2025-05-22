@@ -843,7 +843,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         return False
 
     def should_perform_es_search(self):
-        if self.is_repo_version_children_request() and not self.request.query_params.get('onlyHierarchyRoot'):
+        if self.is_repo_version_children_request() and self.request.query_params.get('onlyHierarchyRoot') not in TRUTHY:
             return True
         sort_field, _ = self.get_sort_and_desc()
         return (

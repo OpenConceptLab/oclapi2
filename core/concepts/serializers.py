@@ -171,7 +171,7 @@ class ConceptAbstractSerializer(AbstractResourceSerializer):
                 self.fields.pop('summary', None)
             if not get(request, 'instance'):
                 self.fields.pop('references', None)
-            if get(params, 'onlyParentLess') not in TRUTHY:
+            if get(params, 'onlyParentLess') not in TRUTHY and get(params, 'onlyHierarchyRoot') not in TRUTHY:
                 self.fields.pop('has_children', None)
         except:  # pylint: disable=bare-except
             pass
