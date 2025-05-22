@@ -189,9 +189,11 @@ class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
 
         if is_latest_version:
             queryset = queryset.filter(id=F('versioned_object_id'))
-
-        if 'source' in self.kwargs and self.request.query_params.get('onlyParentLess', False) in TRUTHY:
-            queryset = queryset.filter(parent_concepts__isnull=True)
+        if 'source' in self.kwargs:
+            if self.request.query_params.get('onlyParentLess', False) in TRUTHY:
+                queryset = queryset.filter(parent_concepts__isnull=True)
+            elif self.request.query_params.get('onlyHierarchyRoot', False) in TRUTHY:
+                queryset = Concept.objects.filter(id=parent.hierarchy_root_id).filter()
 
         if not self.is_brief():
             queryset = queryset.prefetch_related('names', 'descriptions')
