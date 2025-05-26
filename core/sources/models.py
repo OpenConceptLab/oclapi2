@@ -249,33 +249,26 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         fields = {'code', 'uri', 'description', 'type'}
         allowed_types = {'code', 'Coding', 'string', 'integer', 'boolean', 'dateTime', 'decimal'}
         cleaned_properties = []
+        # code: required string
+        # uri: optional URI
+        # description: optional string
+        # "type": required string code | Coding | string | integer | boolean | dateTime | decimal, defaults string
 
         for idx, prop in enumerate(self.properties or []):
-            # code: required string
-            # uri: optional URI
-            # description: optional string
-            # type: #required string code | Coding | string | integer | boolean | dateTime | decimal, defaults string
-
             if not isinstance(prop, dict):
                 raise ValidationError({'properties': [f'Property at index {idx} must be a dictionary']})
-
             extra_keys = set(prop.keys()) - fields
             if extra_keys:
                 raise ValidationError({'properties': [f'Invalid keys in property at index {idx}: {extra_keys}']})
-
             if not prop.get('code') or not isinstance(prop['code'], str):
                 raise ValidationError({'properties': [f"'code' is required and must be a string at index {idx}"]})
-
             if 'uri' in prop and prop['uri'] is not None and not isinstance(prop['uri'], str):
                 raise ValidationError({'properties': [f"'uri' must be a string if provided at index {idx}"]})
-
             if 'description' in prop and prop['description'] is not None and not isinstance(prop['description'], str):
                 raise ValidationError({'properties': [f"'description' must be a string if provided at index {idx}"]})
-
             prop_type = prop.get('type', 'string')
             if not isinstance(prop_type, str) or prop_type not in allowed_types:
                 raise ValidationError({'properties': [f"'type' must be one of {allowed_types} at index {idx}"]})
-
             prop['type'] = prop_type
             cleaned_properties.append(prop)
 
@@ -291,37 +284,32 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
                              'child-of', 'descendent-leaf', 'exists'}
         cleaned_filters = []
 
+        # code: required string
+        # description: optional string
+        # value: #required string
+        # operator: required list = | is-a | descendent-of | is-not-a | regex | in | not-in | generalizes
+        #                           | child-of | descendent-leaf | exists
+
         for idx, _filter in enumerate(self.filters or []):
-            # code: required string
-            # description: optional string
-            # value: #required string
-            # operator: required list = | is-a | descendent-of | is-not-a | regex | in | not-in | generalizes
-            #                           | child-of | descendent-leaf | exists
             if not isinstance(_filter, dict):
                 raise ValidationError({'filters': [f'Filter at index {idx} must be a dictionary']})
-
             extra_keys = set(_filter.keys()) - fields
             if extra_keys:
                 raise ValidationError({'filters': [f'Invalid keys in filter at index {idx}: {extra_keys}']})
-
             if not _filter.get('code') or not isinstance(_filter['code'], str):
                 raise ValidationError({'filters': [f"'code' is required and must be a string at index {idx}"]})
-
-            if 'description' in _filter and _filter['description'] is not None and not isinstance(_filter['description'], str):
+            if 'description' in _filter and _filter['description'] is not None and not isinstance(
+                    _filter['description'], str):
                 raise ValidationError({'filters': [f"'description' must be a string if provided at index {idx}"]})
-
             operators = _filter.get('operator')
             if not operators or not isinstance(operators, list) or not all(isinstance(op, str) for op in operators):
                 raise ValidationError({'filters': [f"'operator' must be a list of strings at index {idx}"]})
-
             invalid_ops = set(operators) - allowed_operators
             if invalid_ops:
                 raise ValidationError({'filters': [f"Invalid operators at index {idx}: {invalid_ops}"]})
-
             if 'value' not in _filter or not isinstance(_filter['value'], str) or not _filter['value']:
                 raise ValidationError(
                     {'filters': [f"'value' is required and must be a non-empty string at index {idx}"]})
-
             cleaned_filters.append(_filter)
 
         self.filters = cleaned_filters
