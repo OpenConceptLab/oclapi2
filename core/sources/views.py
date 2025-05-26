@@ -471,12 +471,42 @@ class SourceExtrasView(SourceExtrasBaseView, ListAPIView):
         return Response(get(self.get_object(), 'extras', {}))
 
 
+class SourcePropertiesView(SourceExtrasBaseView, ListAPIView):
+    serializer_class = SourceDetailSerializer
+
+    def list(self, request, *args, **kwargs):
+        return Response(get(self.get_object(), 'properties', []))
+
+
+class SourceFiltersView(SourceExtrasBaseView, ListAPIView):
+    serializer_class = SourceDetailSerializer
+
+    def list(self, request, *args, **kwargs):
+        return Response(get(self.get_object(), 'filters', []))
+
+
 class SourceVersionExtrasView(SourceBaseView, ListAPIView):
     serializer_class = SourceDetailSerializer
 
     def list(self, request, *args, **kwargs):
         instance = get_object_or_404(self.get_queryset(), version=decode_string(self.kwargs['version']))
         return Response(get(instance, 'extras', {}))
+
+
+class SourceVersionPropertiesView(SourceBaseView, ListAPIView):
+    serializer_class = SourceDetailSerializer
+
+    def list(self, request, *args, **kwargs):
+        instance = get_object_or_404(self.get_queryset(), version=decode_string(self.kwargs['version']))
+        return Response(get(instance, 'properties', []))
+
+
+class SourceVersionFiltersView(SourceBaseView, ListAPIView):
+    serializer_class = SourceDetailSerializer
+
+    def list(self, request, *args, **kwargs):
+        instance = get_object_or_404(self.get_queryset(), version=decode_string(self.kwargs['version']))
+        return Response(get(instance, 'filters', []))
 
 
 class SourceVersionResourcesChecksumGenerateView(SourceBaseView, TaskMixin):  # pragma: no cover

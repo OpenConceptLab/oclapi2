@@ -1229,6 +1229,61 @@ class SourceTest(OCLTestCase):
         self.assertEqual(result.cascaded_entries['concepts'].count(), 0)
         self.assertEqual(result.cascaded_entries['mappings'].count(), 0)
 
+    def test_clean_properties_valid(self):
+        source = Source(properties=[
+            {'code': 'height', 'type': 'integer'},
+            {'code': 'weight', 'type': 'decimal', 'description': 'in kilograms'}
+        ])
+
+        source.clean_properties()
+
+    def test_clean_properties_missing_code(self):
+        source = Source(properties=[{'type': 'string'}])
+        with self.assertRaises(ValidationError):
+            source.clean_properties()
+
+    def test_clean_properties_invalid_type(self):
+        source = Source(properties=[{'code': 'age', 'type': 'unsupported'}])
+        with self.assertRaises(ValidationError):
+            source.clean_properties()
+
+    def test_clean_properties_extra_keys(self):
+        source = Source(properties=[{'code': 'age', 'type': 'integer', 'foo': 'bar'}])
+        with self.assertRaises(ValidationError):
+            source.clean_properties()
+
+    def test_clean_filters_valid(self):
+        source = Source(filters=[
+            {'code': 'gender', 'operator': ['='], 'value': 'male'},
+            {'code': 'birthdate', 'operator': ['='], 'value': '2000-01-01'}
+        ])
+
+        source.clean_filters()
+
+    def test_clean_filters_invalid_operator(self):
+        source = Source(filters=[{'code': 'status', 'operator': ['unsupported'], 'value': 'active'}])
+        with self.assertRaises(ValidationError):
+            source.clean_filters()
+
+    def test_clean_filters_missing_code(self):
+        source = Source(filters=[{'operator': ['='], 'value': 'yes'}])
+        with self.assertRaises(ValidationError):
+            source.clean_filters()
+
+    def test_clean_filters_missing_value(self):
+        source = Source(filters=[{'code': 'status', 'operator': ['=']}])
+        with self.assertRaises(ValidationError):
+            source.clean_filters()
+
+    def test_clean_filters_operator_not_list(self):
+        source = Source(filters=[{'code': 'status', 'operator': '=', 'value': 'active'}])
+        with self.assertRaises(ValidationError):
+            source.clean_filters()
+
+    def test_clean_filters_extra_keys(self):
+        source = Source(filters=[{'code': 'gender', 'operator': ['='], 'value': 'female', 'extra': 'nope'}])
+        with self.assertRaises(ValidationError):
+            source.clean_filters()
 
 class TasksTest(OCLTestCase):
     @patch('core.sources.models.Source.index_children')

@@ -2,6 +2,7 @@ import uuid
 
 from dirtyfields import DirtyFieldsMixin
 from django.conf import settings
+from django.contrib.postgres.fields import ArrayField
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import UniqueConstraint, F, Max, Count
@@ -100,6 +101,9 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         null=True, blank=True, choices=LOCALE_EXTERNAL_AUTO_ID_CHOICES, max_length=10)
     autoid_concept_description_external_id = models.CharField(
         null=True, blank=True, choices=LOCALE_EXTERNAL_AUTO_ID_CHOICES, max_length=10)
+
+    properties = ArrayField(models.JSONField(), default=list, null=True, blank=True)
+    filters = ArrayField(models.JSONField(), default=list, null=True, blank=True)
 
     OBJECT_TYPE = SOURCE_TYPE
     OBJECT_VERSION_TYPE = SOURCE_VERSION_TYPE
@@ -231,9 +235,96 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
     def clean(self):
         self.hierarchy_meaning = self.hierarchy_meaning or None
 
+        self.clean_properties()
+        self.clean_filters()
+
         super().clean()
         if self.hierarchy_root_id and not self.is_hierarchy_root_belonging_to_self():
             raise ValidationError({'hierarchy_root': [HIERARCHY_ROOT_MUST_BELONG_TO_SAME_SOURCE]})
+
+    def clean_properties(self):
+        if not self.properties:
+            self.properties = []
+            return
+        fields = {'code', 'uri', 'description', 'type'}
+        allowed_types = {'code', 'Coding', 'string', 'integer', 'boolean', 'dateTime', 'decimal'}
+        cleaned_properties = []
+
+        for idx, prop in enumerate(self.properties or []):
+            # code: required string
+            # uri: optional URI
+            # description: optional string
+            # type: #required string code | Coding | string | integer | boolean | dateTime | decimal, defaults string
+
+            if not isinstance(prop, dict):
+                raise ValidationError({'properties': [f'Property at index {idx} must be a dictionary']})
+
+            extra_keys = set(prop.keys()) - fields
+            if extra_keys:
+                raise ValidationError({'properties': [f'Invalid keys in property at index {idx}: {extra_keys}']})
+
+            if not prop.get('code') or not isinstance(prop['code'], str):
+                raise ValidationError({'properties': [f"'code' is required and must be a string at index {idx}"]})
+
+            if 'uri' in prop and prop['uri'] is not None and not isinstance(prop['uri'], str):
+                raise ValidationError({'properties': [f"'uri' must be a string if provided at index {idx}"]})
+
+            if 'description' in prop and prop['description'] is not None and not isinstance(prop['description'], str):
+                raise ValidationError({'properties': [f"'description' must be a string if provided at index {idx}"]})
+
+            prop_type = prop.get('type', 'string')
+            if not isinstance(prop_type, str) or prop_type not in allowed_types:
+                raise ValidationError({'properties': [f"'type' must be one of {allowed_types} at index {idx}"]})
+
+            prop['type'] = prop_type
+            cleaned_properties.append(prop)
+
+        self.properties = cleaned_properties
+
+    def clean_filters(self):
+        if not self.filters:
+            self.filters = []
+            return
+
+        fields = {'code', 'description', 'operator', 'value'}
+        allowed_operators = {'=', 'is-a', 'descendent-of', 'is-not-a', 'regex', 'in', 'not-in', 'generalizes',
+                             'child-of', 'descendent-leaf', 'exists'}
+        cleaned_filters = []
+
+        for idx, _filter in enumerate(self.filters or []):
+            # code: required string
+            # description: optional string
+            # value: #required string
+            # operator: required list = | is-a | descendent-of | is-not-a | regex | in | not-in | generalizes
+            #                           | child-of | descendent-leaf | exists
+            if not isinstance(_filter, dict):
+                raise ValidationError({'filters': [f'Filter at index {idx} must be a dictionary']})
+
+            extra_keys = set(_filter.keys()) - fields
+            if extra_keys:
+                raise ValidationError({'filters': [f'Invalid keys in filter at index {idx}: {extra_keys}']})
+
+            if not _filter.get('code') or not isinstance(_filter['code'], str):
+                raise ValidationError({'filters': [f"'code' is required and must be a string at index {idx}"]})
+
+            if 'description' in _filter and _filter['description'] is not None and not isinstance(_filter['description'], str):
+                raise ValidationError({'filters': [f"'description' must be a string if provided at index {idx}"]})
+
+            operators = _filter.get('operator')
+            if not operators or not isinstance(operators, list) or not all(isinstance(op, str) for op in operators):
+                raise ValidationError({'filters': [f"'operator' must be a list of strings at index {idx}"]})
+
+            invalid_ops = set(operators) - allowed_operators
+            if invalid_ops:
+                raise ValidationError({'filters': [f"Invalid operators at index {idx}: {invalid_ops}"]})
+
+            if 'value' not in _filter or not isinstance(_filter['value'], str) or not _filter['value']:
+                raise ValidationError(
+                    {'filters': [f"'value' is required and must be a non-empty string at index {idx}"]})
+
+            cleaned_filters.append(_filter)
+
+        self.filters = cleaned_filters
 
     def get_parentless_concepts(self):
         return self.concepts.filter(parent_concepts__isnull=True, id=F('versioned_object_id'))

@@ -36,6 +36,8 @@ class SourceDocument(Document):
     custom_validation_schema = fields.KeywordField(attr='custom_validation_schema', normalizer='lowercase')
     hierarchy_meaning = fields.KeywordField()
     created_by = fields.KeywordField()
+    property_codes = fields.ListField(fields.KeywordField())
+    filter_codes = fields.ListField(fields.KeywordField())
 
     class Django:
         model = Source
@@ -117,6 +119,14 @@ class SourceDocument(Document):
     @staticmethod
     def prepare_locale(instance):
         return get(instance.supported_locales, [])
+
+    @staticmethod
+    def prepare_property_codes(instance):
+        return [prop.get('code') for prop in get(instance.properties, [])]
+
+    @staticmethod
+    def prepare_filter_codes(instance):
+        return [prop.get('code') for prop in get(instance.filters, [])]
 
     @staticmethod
     def prepare_extras(instance):
