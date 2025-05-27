@@ -9,6 +9,7 @@ from celery.utils.log import get_task_logger
 from dateutil.relativedelta import relativedelta
 from django.apps import apps
 from django.conf import settings
+from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.core.mail import EmailMessage
 from django.core.management import call_command
@@ -823,10 +824,25 @@ def expire_old_celery_tasks():
     Task.objects.filter(updated_at__lt=timezone.now() - timezone.timedelta(days=7)).delete()
 
 
-@app.task
-def source_version_compare(version1_uri, version2_uri, is_changelog, verbosity):
+def generate_key(*args, **kwargs):
+    key_parts = [repr(arg) for arg in args]
+    key_parts += [f"{k}={repr(v)}" for k, v in sorted(kwargs.items())]
+    return "|".join(key_parts)
+
+@app.task(base=QueueOnceCustomTask)
+def source_version_compare(version1_uri, version2_uri, is_changelog, verbosity, ignore_cache=False):
+    if not ignore_cache:
+        cache_key = generate_key(
+            'source_version_compare', version1_uri, version2_uri, is_changelog, verbosity)
+        result = cache.get(cache_key)
+        if result:
+            return result
+
     from core.sources.models import Source
     version1 = Source.objects.get(uri=version1_uri)
     version2 = Source.objects.get(uri=version2_uri)
     fn = Source.changelog if is_changelog else Source.compare
-    return fn(version1, version2, verbosity)
+    result = fn(version1, version2, verbosity)
+    if not ignore_cache:
+        cache.set(cache_key, result, timeout=60*60*24*4)
+    return result

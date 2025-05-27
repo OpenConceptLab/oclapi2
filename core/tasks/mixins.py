@@ -38,7 +38,7 @@ class TaskMixin:
             if is_async:
                 return self.task_response(celery_task)
 
-            result = wait_until_task_complete(celery_task.id, 15)
+            result = wait_until_task_complete(celery_task.id, 25)
             if result == TASK_NOT_COMPLETED:
                 return self.task_response(celery_task)
 
