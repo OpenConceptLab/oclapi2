@@ -831,6 +831,7 @@ def generate_key(*args, **kwargs):
 
 @app.task(base=QueueOnceCustomTask)
 def source_version_compare(version1_uri, version2_uri, is_changelog, verbosity, ignore_cache=False):
+    ignore_cache = ignore_cache or get(settings, 'TEST_MODE', False)
     if not ignore_cache:
         cache_key = generate_key(
             'source_version_compare', version1_uri, version2_uri, is_changelog, verbosity)
