@@ -154,5 +154,5 @@ class MapProject(BaseModel):
         if self.matches:
             try:
                 self.matches = json.loads(self.matches)
-            except json.JSONDecodeError:
+            except (json.JSONDecodeError, TypeError):
                 pass
