@@ -227,7 +227,7 @@ class SourceImporter(BaseResourceImporter):
         "public_access", "default_locale", "supported_locales", "website", "extras", "external_id",
         'canonical_url', 'identifier', 'contact', 'jurisdiction', 'publisher', 'purpose', 'copyright',
         'revision_date', 'text', 'content_type', 'experimental', 'case_sensitive', 'collection_reference',
-        'hierarchy_meaning', 'compositional', 'version_needed', 'meta',
+        'hierarchy_meaning', 'compositional', 'version_needed', 'meta', 'properties', 'filters'
     ]
 
     @staticmethod
