@@ -210,7 +210,7 @@ class CodeSystemDetailSerializer(serializers.ModelSerializer):
         fields = ('resourceType', 'url', 'title', 'status', 'id', 'language', 'count', 'content', 'property', 'meta',
                   'version', 'identifier', 'contact', 'jurisdiction', 'name', 'description', 'publisher', 'purpose',
                   'copyright', 'revisionDate', 'experimental', 'caseSensitive', 'compositional', 'versionNeeded',
-                  'collectionReference', 'hierarchyMeaning', 'concept', 'text')
+                  'collectionReference', 'hierarchyMeaning', 'concept', 'text', 'filters')
 
     def __new__(cls, *args, **kwargs):
         if kwargs.get('many', False):
@@ -229,28 +229,34 @@ class CodeSystemDetailSerializer(serializers.ModelSerializer):
         return obj.concepts.count()
 
     @staticmethod
-    def get_property(_):
+    def get_property(obj):
+        properties = [
+            {
+                'code': 'conceptclass',
+                'uri': settings.API_BASE_URL + '/orgs/OCL/sources/Classes/concepts',
+                'description': 'Standard list of concept classes.',
+                'type': 'string'
+            },
+            {
+                'code': 'datatype',
+                'uri': settings.API_BASE_URL + '/orgs/OCL/sources/Datatypes/concepts',
+                'description': 'Standard list of concept datatypes.',
+                'type': 'string'
+            },
+            {
+                'code': 'inactive',
+                'uri': 'http://hl7.org/fhir/concept-properties',
+                'description': 'True if the concept is not considered active.',
+                'type': 'Coding'
+            }
+        ]
+        new_properties = [*(obj.properties or [])]
+        defined_property_codes = {prop['code'] for prop in new_properties}
+        for prop in properties:
+            if prop['code'] not in defined_property_codes:
+                new_properties.append(prop)
         return CodeSystemPropertySerializer(
-            [
-                {
-                    'code': 'conceptclass',
-                    'uri': settings.API_BASE_URL + '/orgs/OCL/sources/Classes/concepts',
-                    'description': 'Standard list of concept classes.',
-                    'type': 'string'
-                },
-                {
-                    'code': 'datatype',
-                    'uri': settings.API_BASE_URL + '/orgs/OCL/sources/Datatypes/concepts',
-                    'description': 'Standard list of concept datatypes.',
-                    'type': 'string'
-                },
-                {
-                    'code': 'inactive',
-                    'uri': 'http://hl7.org/fhir/concept-properties',
-                    'description': 'True if the concept is not considered active.',
-                    'type': 'Coding'
-                }
-            ],
+            new_properties,
             many=True
         ).data
 
