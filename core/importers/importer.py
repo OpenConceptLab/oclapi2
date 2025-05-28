@@ -20,6 +20,7 @@ from packaging.version import Version
 from pydantic import BaseModel, computed_field, PrivateAttr
 
 from django.utils import timezone
+from pydash import get
 from rest_framework.exceptions import ValidationError
 
 from core import settings
@@ -96,7 +97,7 @@ class ImportTask(BaseModel):
 
     @staticmethod
     def import_task_from_json(result_json):
-        if result_json.get('import_task', None):
+        if get(result_json, 'import_task', None):
             return ImportTask(**result_json)
         return None
 
