@@ -363,6 +363,7 @@ class SourceMappingsIndexView(SourceBaseView):
 
 class SourceConceptsCloneView(SourceBaseView):
     serializer_class = BundleSerializer
+    permission_classes = (CanEditConceptDictionary, )
 
     def post(self, request, **kwargs):  # pylint: disable=unused-argument, too-many-locals
         """
