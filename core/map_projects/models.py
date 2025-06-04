@@ -13,12 +13,14 @@ from core.common.utils import get_export_service, generate_temp_version
 
 class MapProject(BaseModel):
     name = models.TextField()
+    description = models.TextField(null=True, blank=True)
     organization = models.ForeignKey(
         'orgs.Organization', on_delete=models.CASCADE, null=True, blank=True, related_name='map_projects')
     user = models.ForeignKey(
         'users.UserProfile', on_delete=models.CASCADE, null=True, blank=True, related_name='map_projects')
     input_file_name = models.TextField()
     matches = ArrayField(models.JSONField(), default=list, null=True, blank=True)
+    columns = ArrayField(models.JSONField(), default=list)
 
     OBJECT_TYPE = 'MapProject'
     mnemonic_attr = 'id'
@@ -130,22 +132,30 @@ class MapProject(BaseModel):
         from core.common.tasks import delete_s3_objects
         delete_s3_objects.apply_async((self.file_path,), queue='default', permanent=False)
 
-    @staticmethod
-    def format_request_data(data, parent_resource=None):
+    @classmethod
+    def format_request_data(cls, data, parent_resource=None):
         new_data = {
             key: val[0] if isinstance(val, list) and len(val) == 1 else val for key, val in data.items()
         }
-        if 'matches' in new_data and isinstance(new_data['matches'], str):
-            try:
-                new_data['matches'] = json.loads(new_data['matches'])
-            except json.JSONDecodeError:
-                pass
+        cls.format_json(new_data, 'matches')
+        cls.format_json(new_data, 'columns')
+
         if parent_resource:
             new_data[parent_resource.resource_type.lower() + '_id'] = parent_resource.id
+
         file = data.get('file')
         if file:
             new_data['input_file_name'] = file.name
+
         return new_data
+
+    @staticmethod
+    def format_json(new_data, field):
+        if field in new_data and isinstance(new_data[field], str):
+            try:
+                new_data[field] = json.loads(new_data[field])
+            except json.JSONDecodeError:
+                pass
 
     def soft_delete(self):
         self.delete()

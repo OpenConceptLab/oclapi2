@@ -17,9 +17,9 @@ class MapProjectCreateUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = MapProject
         fields = [
-            'id', 'name', 'input_file_name', 'matches',
+            'id', 'name', 'input_file_name', 'matches', 'columns',
             'created_by', 'updated_by', 'created_at', 'updated_at', 'url', 'is_active',
-            'public_access', 'file', 'user_id', 'organization_id'
+            'public_access', 'file', 'user_id', 'organization_id', 'description'
         ]
 
     def prepare_object(self, validated_data, instance=None, file=None):
@@ -28,7 +28,10 @@ class MapProjectCreateUpdateSerializer(serializers.ModelSerializer):
         matches = validated_data.get('matches', False)
         if matches is not False:
             instance.matches = matches
-        for attr in ['name', 'extras']:
+        columns = validated_data.get('columns', False)
+        if columns is not False:
+            instance.columns = columns
+        for attr in ['name', 'description', 'extras']:
             setattr(instance, attr, validated_data.get(attr, get(instance, attr)))
         if not instance.id:
             for attr in ['organization_id', 'user_id']:
@@ -81,4 +84,4 @@ class MapProjectSerializer(serializers.ModelSerializer):
 class MapProjectDetailSerializer(MapProjectSerializer):
     class Meta:
         model = MapProject
-        fields = MapProjectSerializer.Meta.fields + ['file_url', 'matches']
+        fields = MapProjectSerializer.Meta.fields + ['file_url', 'matches', 'columns']
