@@ -21,6 +21,8 @@ class MapProject(BaseModel):
     input_file_name = models.TextField()
     matches = ArrayField(models.JSONField(), default=list, null=True, blank=True)
     columns = ArrayField(models.JSONField(), default=list)
+    target_repo_url = models.TextField(null=True, blank=True)
+    matching_algorithm = models.CharField(max_length=100, null=True, blank=True)
 
     OBJECT_TYPE = 'MapProject'
     mnemonic_attr = 'id'
