@@ -1376,6 +1376,98 @@ class ConceptTest(OCLTestCase):
         self.assertTrue(checksums['standard'] == concept.checksums['standard'] == concept.checksum)
         self.assertTrue(checksums['smart'] == concept.checksums['smart'])
 
+    def test_properties(self):
+        source = OrganizationSourceFactory(properties=[])
+        concept1 = ConceptFactory(parent=source, concept_class='Diagnosis', datatype='N/A')
+
+        for concept in Concept.objects.filter():
+            concept.set_extras_from_parent_properties()
+            concept.save()
+
+        concept1.refresh_from_db()
+
+        for _concept in [concept1, concept1.get_latest_version()]:
+            self.assertEqual(_concept.extras, {})
+            self.assertEqual(_concept.properties, [])
+            self.assertEqual(_concept.datatype, 'N/A')
+            self.assertEqual(_concept.concept_class, 'Diagnosis')
+
+        source.properties = [
+            {
+                "code": "concept_class",
+                "description": "Type of concept",
+                "type": "code",   # e.g. from /orgs/OCL/collections/Classes/
+                "include_in_concept_summary": True
+            },
+            {
+                "code": "datatype",
+                "description": "Type of data captured for this concept",
+                "type": "code",   # e.g. from /orgs/OCL/collections/Datatypes/
+                "include_in_concept_summary": True
+            },
+            {
+                "code": "units",
+                "description": "Units of measurement",
+                "type": "string"
+            }
+        ]
+        source.save()
+
+        concept2 = ConceptFactory(parent=source, concept_class='Diagnosis', datatype='N/A')
+        concept3 = ConceptFactory(
+            parent=source, concept_class='Diagnosis', datatype='N/A', extras={'foo': 'bar', 'units': 'parts/microliter'}
+        )
+        for concept in Concept.objects.filter():
+            concept.set_extras_from_parent_properties()
+            concept.save()
+
+        concept2.refresh_from_db()
+        concept3.refresh_from_db()
+
+        for _concept in [concept2, concept2.get_latest_version()]:
+            self.assertEqual(_concept.extras, {'concept_class': 'Diagnosis', 'datatype': 'N/A'})
+            self.assertEqual(
+                _concept.properties,
+                [
+                    {'code': 'concept_class', 'valueCode': 'Diagnosis'},
+                    {'code': 'datatype', 'valueCode': 'N/A'},
+                    {'code': 'units', 'valueString': None}
+                ]
+            )
+            self.assertEqual(
+                _concept.summary_properties,
+                [
+                    {'code': 'concept_class', 'valueCode': 'Diagnosis'},
+                    {'code': 'datatype', 'valueCode': 'N/A'},
+                ]
+            )
+        for _concept in [concept3, concept3.get_latest_version()]:
+            self.assertEqual(
+                _concept.extras,
+                {'concept_class': 'Diagnosis', 'datatype': 'N/A', 'foo': 'bar', 'units': 'parts/microliter'})
+            self.assertEqual(
+                _concept.properties,
+                [
+                    {'code': 'concept_class', 'valueCode': 'Diagnosis'},
+                    {'code': 'datatype', 'valueCode': 'N/A'},
+                    {'code': 'units', 'valueString': 'parts/microliter'}
+                ]
+            )
+            self.assertEqual(
+                _concept.summary_properties,
+                [
+                    {'code': 'concept_class', 'valueCode': 'Diagnosis'},
+                    {'code': 'datatype', 'valueCode': 'N/A'},
+                ]
+            )
+
+            concept2.extras = {'foo': 'bar', 'units': 'parts/microliter'}
+            concept2.set_extras_from_parent_properties()
+            self.assertEqual(
+                concept2.extras,
+                {'foo': 'bar', 'units': 'parts/microliter', 'concept_class': 'Diagnosis', 'datatype': 'N/A'}
+            )
+
 
 class OpenMRSConceptValidatorTest(OCLTestCase):
     def setUp(self):

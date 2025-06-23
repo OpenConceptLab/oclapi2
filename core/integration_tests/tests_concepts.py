@@ -100,6 +100,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
                 'created_by',
                 'public_can_view',
                 'checksums',
+                'property',
                 'versioned_object_id',
                 'latest_source_version'
             ])
@@ -199,6 +200,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
                     'created_by',
                     'public_can_view',
                     'checksums',
+                    'property',
                     'latest_source_version',
                     'versioned_object_id'])
         )
@@ -288,6 +290,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
                     'created_by',
                     'public_can_view',
                     'checksums',
+                    'property',
                     'latest_source_version',
                     'versioned_object_id'])
         )
@@ -711,7 +714,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
                     'owner', 'owner_type', 'owner_url', 'display_name', 'display_locale', 'version', 'update_comment',
                     'locale', 'version_created_by', 'version_created_on', 'is_latest_version', 'latest_source_version',
                     'versions_url', 'version_url', 'type', 'versioned_object_id',
-                    'version_updated_on', 'version_updated_by', 'checksums'])
+                    'version_updated_on', 'version_updated_by', 'checksums', 'property'])
         )
 
         response = self.client.get(
@@ -726,7 +729,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
                     'owner', 'owner_type', 'owner_url', 'display_name', 'display_locale', 'names', 'descriptions',
                     'created_on', 'updated_on', 'versions_url', 'version', 'extras', 'type', 'latest_source_version',
                     'update_comment', 'version_url', 'updated_by', 'created_by',
-                    'public_can_view', 'versioned_object_id', 'checksums'])
+                    'public_can_view', 'versioned_object_id', 'checksums', 'property'])
         )
 
         response = self.client.get(

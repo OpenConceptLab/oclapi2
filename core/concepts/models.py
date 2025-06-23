@@ -626,6 +626,52 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     def is_existing_in_parent(self):
         return self.parent.concepts_set.filter(mnemonic__exact=self.mnemonic).exists()
 
+    @property
+    def latest_source_version(self):
+        return self.sources.exclude(version=HEAD).order_by('-created_at').first()
+
+    def get_source_version_before_creation(self):
+        return self.sources.exclude(version=HEAD).filter(
+            created_at__lte=self.created_at).order_by('-created_at').first()
+
+    @property
+    def properties(self):
+        parent = self.get_parent_source_version()
+
+        return self.__get_properties_from_extras_and_definitions(get(parent, 'properties') or [])
+
+    @property
+    def summary_properties(self):
+        parent = self.get_parent_source_version()
+
+        return self.__get_properties_from_extras_and_definitions(get(parent, 'properties') or [], summary=True)
+
+    def get_parent_source_version(self):
+        if self.is_versioned_object or self.is_latest_version:
+            return self.parent
+
+        return self.latest_source_version or self.get_source_version_before_creation()
+
+    def __get_properties_from_extras_and_definitions(self, definitions, summary=False):
+        extras = self.extras or {}
+        result = []
+        for prop in definitions:
+            if summary and not prop.get('include_in_concept_summary'):
+                continue
+            code = prop['code']
+            value_key = f"value{(prop['type'] or '').title()}"
+            result.append({'code': code, value_key: get(extras, code)})
+        return result
+
+    def set_extras_from_parent_properties(self):
+        self.extras = self.extras or {}
+        for prop in (self.parent.properties or []):
+            if prop['code'] in self.extras:
+                continue
+
+            if prop['code'].lower() in ['concept_class', 'class', 'conceptClass', 'datatype']:
+                self.extras[prop['code']] = self.datatype if prop['code'].lower() == 'datatype' else self.concept_class
+
     def save_cloned(self):
         try:
             names = self.cloned_names
@@ -710,6 +756,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                 concept.external_id = parent.concept_external_id_next
             concept.is_latest_version = not create_initial_version
             concept.public_access = parent.public_access
+            concept.set_extras_from_parent_properties()
             concept.save()
             concept.full_clean()
 
