@@ -344,6 +344,7 @@ class ConceptRetrieveUpdateDestroyView(ConceptBaseView, RetrieveAPIView, UpdateA
             return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
 
         self.object = self.get_object()
+        real_partial = kwargs.get('partial', False)
         partial = kwargs.pop('partial', True)
         self.parent_resource = self.object.parent
 
@@ -353,7 +354,8 @@ class ConceptRetrieveUpdateDestroyView(ConceptBaseView, RetrieveAPIView, UpdateA
                 status=status.HTTP_400_BAD_REQUEST
             )
         self.object = self.object.clone()
-        serializer = self.get_serializer(self.object, data=request.data, partial=partial)
+        serializer = self.get_serializer(
+            self.object, data=request.data, partial=partial, is_patch=real_partial)
         success_status_code = status.HTTP_200_OK
 
         if serializer.is_valid():

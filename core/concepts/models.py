@@ -483,8 +483,8 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             versioned_object_id=self.versioned_object_id,
             _index=self._index
         )
-        concept_version.cloned_names = self.__clone_name_locales()
-        concept_version.cloned_descriptions = self.__clone_description_locales()
+        concept_version.cloned_names = self.clone_name_locales()
+        concept_version.cloned_descriptions = self.clone_description_locales()
         concept_version._parent_concepts = self.parent_concepts.all()  # pylint: disable=protected-access
 
         return concept_version
@@ -515,7 +515,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     @classmethod
     def create_new_version_for(
             cls, instance, data, user, create_parent_version=True, add_prev_version_children=True,
-            _hierarchy_processing=False
+            _hierarchy_processing=False, is_patch=False
     ):  # pylint: disable=too-many-arguments
         instance.id = None  # Clear id so it is persisted as a new object
         instance.version = data.get('version', None)
@@ -525,9 +525,16 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         instance.external_id = data.get('external_id', instance.external_id)
         instance.comment = data.get('update_comment') or data.get('comment')
         instance.retired = data.get('retired', instance.retired)
+        if is_patch:
+            prev = instance.versions.exclude(id=instance.id).filter(is_latest_version=True).first()
+            new_names = ConceptName.build(data.get('names', [])) if 'names' in data else (
+                prev.clone_name_locales())
+            new_descriptions = ConceptDescription.build(data.get('descriptions', [])) if 'descriptions' in data else (
+                prev.clone_description_locales())
+        else:
+            new_names = ConceptName.build(data.get('names', []))
+            new_descriptions = ConceptDescription.build(data.get('descriptions', []))
 
-        new_names = ConceptName.build(data.get('names', []))
-        new_descriptions = ConceptDescription.build(data.get('descriptions', []))
         has_parent_concept_uris_attr = 'parent_concept_urls' in data
         parent_concept_uris = data.pop('parent_concept_urls', None)
 
@@ -613,10 +620,10 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         self.names.all().delete()
         self.descriptions.all().delete()
 
-    def __clone_name_locales(self):
+    def clone_name_locales(self):
         return self.__clone_locales(self.names)
 
-    def __clone_description_locales(self):
+    def clone_description_locales(self):
         return self.__clone_locales(self.descriptions)
 
     @staticmethod

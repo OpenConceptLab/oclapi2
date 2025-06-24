@@ -133,6 +133,7 @@ class ConceptAbstractSerializer(AbstractResourceSerializer):
         request = get(kwargs, 'context.request')
         params = get(request, 'query_params')
         self.view_kwargs = get(kwargs, 'context.view.kwargs', {})
+        self.is_patch = kwargs.pop('is_patch', None)
 
         self.query_params = params.dict() if params else {}
         self.include_indirect_mappings = self.query_params.get(INCLUDE_INVERSE_MAPPINGS_PARAM) in TRUTHY
@@ -454,10 +455,10 @@ class ConceptDetailSerializer(ConceptAbstractSerializer):
             self._errors.update(concept.errors)
         return concept
 
-    def update(self, instance, validated_data):
+    def update(self, instance, validated_data, **kwargs):
         errors = Concept.create_new_version_for(
             instance=instance, data=validated_data, user=self.context.get('request').user,
-            create_parent_version=self.create_parent_version
+            create_parent_version=self.create_parent_version, is_patch=self.is_patch
         )
         if errors:
             self._errors.update(errors)
