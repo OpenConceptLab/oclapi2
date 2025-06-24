@@ -158,7 +158,7 @@ class ConceptRetrieveUpdateDestroyViewTest(OCLAPITestCase):
             ['datatype']
         )
 
-    def test_put_200(self):
+    def test_put_200(self):  # pylint: disable=too-many-statements
         concept = ConceptFactory(parent=self.source)
         self.assertEqual(concept.versions.count(), 1)
         concepts_url = f"/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}/concepts/{concept.mnemonic}/"

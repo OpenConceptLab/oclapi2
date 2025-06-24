@@ -455,7 +455,7 @@ class ConceptDetailSerializer(ConceptAbstractSerializer):
             self._errors.update(concept.errors)
         return concept
 
-    def update(self, instance, validated_data, **kwargs):
+    def update(self, instance, validated_data):
         errors = Concept.create_new_version_for(
             instance=instance, data=validated_data, user=self.context.get('request').user,
             create_parent_version=self.create_parent_version, is_patch=self.is_patch
