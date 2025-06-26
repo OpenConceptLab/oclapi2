@@ -3,7 +3,6 @@ import json
 from django.contrib.postgres.fields import ArrayField
 from django.core.exceptions import ValidationError
 from django.db import models, IntegrityError
-from django.db.models import UniqueConstraint
 from pydash import get
 
 from core.common.constants import PERSIST_NEW_ERROR_MESSAGE
@@ -29,18 +28,6 @@ class MapProject(BaseModel):
 
     class Meta:
         db_table = 'map_projects'
-        constraints = [
-            UniqueConstraint(
-                fields=['name', 'organization'],
-                name="org_map_project_unique",
-                condition=models.Q(user=None),
-            ),
-            UniqueConstraint(
-                fields=['name', 'user'],
-                name="user_map_project_unique",
-                condition=models.Q(organization=None),
-            )
-        ]
 
     @property
     def mnemonic(self):
