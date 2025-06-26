@@ -235,7 +235,7 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         return hierarchy_root.parent_id == self.head.id
 
     @property
-    def concept_summary_properties(self):
+    def properties_to_include_in_concept_summary(self):
         return [prop for prop in self.properties or [] if prop.get('include_in_concept_summary', None) is True]
 
     def clean(self):
