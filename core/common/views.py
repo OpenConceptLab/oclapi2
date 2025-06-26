@@ -321,6 +321,12 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         faceted_fields = self.get_faceted_fields()
         query_params = {to_snake_case(k): v for k, v in self.request.query_params.dict().items()}
         for field in faceted_fields:
+            if field == 'properties':
+                property_facets = {
+                    key: val.split(',') if split else val for key, val in query_params.items() if
+                    key.startswith('properties__') and val
+                }
+                faceted_filters = {**faceted_filters, **property_facets}
             if field in query_params:
                 query_value = query_params[field]
                 faceted_filters[field] = query_value.split(',') if split else query_value
@@ -424,8 +430,12 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             if self.is_user_document():
                 return facets
 
+            parent = get(
+                self, 'parent_resource'
+            ) if 'source' in self.kwargs and self.is_concept_document() else None
             faceted_search = self.facet_class(  # pylint: disable=not-callable
-                self.get_search_string(lower=False),
+                source=parent,
+                query=self.get_search_string(lower=False),
                 _search=self.__get_search_results(ignore_retired_filter=True, sort=False, highlight=False, force=True),
             )
             faceted_search.params(request_timeout=ES_REQUEST_TIMEOUT)

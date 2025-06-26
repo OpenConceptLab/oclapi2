@@ -271,6 +271,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         'description_types': {'sortable': False, 'filterable': True, 'facet': True},
         'same_as_map_codes': {'sortable': False, 'filterable': True, 'facet': False, 'exact': True},
         'other_map_codes': {'sortable': False, 'filterable': True, 'facet': False, 'exact': True},
+        'properties': {'sortable': False, 'filterable': True, 'facet': True, 'exact': True},
     }
 
     @staticmethod
