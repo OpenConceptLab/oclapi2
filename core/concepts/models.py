@@ -666,18 +666,13 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             if summary and not prop.get('include_in_concept_summary'):
                 continue
             code = prop['code']
+            if code not in extras and code.lower() in ['concept_class', 'class', 'conceptclass', 'datatype']:
+                value = self.datatype if code.lower() == 'datatype' else self.concept_class
+            else:
+                value = get(extras, code)
             value_key = f"value{(prop['type'] or '').title()}"
-            result.append({'code': code, value_key: get(extras, code)})
+            result.append({'code': code, value_key: value})
         return result
-
-    def set_extras_from_parent_properties(self):
-        self.extras = self.extras or {}
-        for prop in (self.parent.properties or []):
-            if prop['code'] in self.extras:
-                continue
-
-            if prop['code'].lower() in ['concept_class', 'class', 'conceptClass', 'datatype']:
-                self.extras[prop['code']] = self.datatype if prop['code'].lower() == 'datatype' else self.concept_class
 
     def save_cloned(self):
         try:
@@ -763,7 +758,6 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                 concept.external_id = parent.concept_external_id_next
             concept.is_latest_version = not create_initial_version
             concept.public_access = parent.public_access
-            concept.set_extras_from_parent_properties()
             concept.save()
             concept.full_clean()
 
