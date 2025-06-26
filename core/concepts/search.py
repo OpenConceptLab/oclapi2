@@ -1,5 +1,5 @@
 from elasticsearch_dsl import TermsFacet, Q
-from pydash import flatten, is_number
+from pydash import flatten, is_number, get
 
 from core.common.constants import FACET_SIZE
 from core.common.search import CustomESFacetedSearch, CustomESSearch
@@ -49,7 +49,7 @@ class ConceptFacetedSearch(CustomESFacetedSearch):
     def build_property_facets_from_source(source):
         return {
             f"properties__{prop['code']}": TermsFacet(field=f"properties.{prop['code']}.keyword", size=FACET_SIZE)
-            for prop in (source.properties_to_include_in_concept_summary or [])
+            for prop in (get(source, 'properties_to_include_in_concept_summary') or [])
         }
 
 

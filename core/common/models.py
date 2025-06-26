@@ -1172,14 +1172,14 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
     def get_concept_facets(self, filters=None):
         from core.concepts.search import ConceptFacetedSearch
-        return self._get_resource_facets(ConceptFacetedSearch, filters)
+        return self._get_resource_facets(ConceptFacetedSearch, filters, source=self)
 
     def get_mapping_facets(self, filters=None):
         from core.mappings.search import MappingFacetedSearch
         return self._get_resource_facets(MappingFacetedSearch, filters)
 
-    def _get_resource_facets(self, facet_class, filters=None):
-        search = facet_class('', filters=self._get_resource_facet_filters(filters))
+    def _get_resource_facets(self, facet_class, filters=None, **kwargs):
+        search = facet_class(query='', filters=self._get_resource_facet_filters(filters), **kwargs)
         search.params(request_timeout=ES_REQUEST_TIMEOUT)
         try:
             facets = search.execute().facets
