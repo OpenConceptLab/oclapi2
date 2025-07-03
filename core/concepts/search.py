@@ -89,7 +89,7 @@ class ConceptFuzzySearch:  # pragma: no cover
                 }))
 
     @classmethod
-    def search(  # pylint: disable=too-many-locals,too-many-arguments,too-many-branches
+    def search(  # pylint: disable=too-many-locals,too-many-arguments,too-many-branches,too-many-statements
             cls, data, repo_url, repo_params=None, include_retired=False,
             is_semantic=False, num_candidates=5000, k_nearest=5
     ):

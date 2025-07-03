@@ -53,7 +53,7 @@ class MapProject(BaseModel):
     @property
     def visible_columns(self):
         if self.columns:
-            return [col for col in self.columns if 'hidden' not in col or col['hidden'] == False and col.get('label')]
+            return [col for col in self.columns if 'hidden' not in col or col['hidden'] is False and col.get('label')]
         return []
 
     @property
