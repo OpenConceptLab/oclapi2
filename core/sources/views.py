@@ -440,7 +440,10 @@ class SourceVersionRetrieveUpdateDestroyView(SourceVersionBaseView, RetrieveAPIV
         try:
             instance.delete()
         except ValidationError as ex:
-            return Response(get(ex, 'message_dict', {}) or get(ex, 'error_dict', {}), status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                get(ex, 'message_dict', {}) or get(ex, 'error_dict', {}),
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
         return Response(status=status.HTTP_204_NO_CONTENT)
 
