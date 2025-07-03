@@ -520,7 +520,14 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
 
     def get_mapped_sources(self):
         """Returns only direct mapped sources"""
-        return Source.objects.filter(id__in=self.mappings.values_list('to_source_id', flat=True)).exclude(id=self.id)
+        source_ids = set(self.__get_mapped_source_ids()) - {self.id}
+        return Source.objects.filter(id__in=source_ids)
+
+    def get_mapped_sources_including_self(self):
+        return Source.objects.filter(id__in=self.__get_mapped_source_ids())
+
+    def __get_mapped_source_ids(self):
+        return self.mappings.values_list('to_source_id', flat=True)
 
     def clone_resources(self, user, concepts, mappings, **kwargs):
         from core.mappings.models import Mapping

@@ -595,6 +595,21 @@ class SourceMappedSourcesListView(SourceListView):
         raise Http405()
 
 
+class SourceVersionMappedSourcesListView(SourceListView):
+    is_searchable = False
+
+    def get_object(self, queryset=None):
+        instance = get_object_or_404(Source.get_base_queryset(compact_dict_by_values(self.get_filter_params())))
+        self.check_object_permissions(self.request, instance)
+        return instance
+
+    def get_queryset(self):
+        return self.get_object().get_mapped_sources_including_self()
+
+    def post(self, request, **kwargs):
+        raise Http405()
+
+
 class AbstractSourceVersionsDiffView(BaseAPIView, TaskMixin):
     permission_classes = (IsAuthenticated, CanViewConceptDictionaryVersion)
     swagger_schema = None
