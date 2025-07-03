@@ -3,7 +3,7 @@ from django_elasticsearch_dsl.registries import registry
 from elasticsearch_dsl import DenseVector
 from pydash import compact, get
 
-from core.common.utils import jsonify_safe, flatten_dict, get_embeddings
+from core.common.utils import jsonify_safe, flatten_dict, get_embeddings, drop_version
 from core.concepts.models import Concept
 
 
@@ -44,6 +44,7 @@ class ConceptDocument(Document):
     description = fields.TextField()
     same_as_map_codes = fields.ListField(fields.KeywordField())
     other_map_codes = fields.ListField(fields.KeywordField())
+    mapped_codes = fields.ObjectField(dynamic=True)
     _embeddings = fields.NestedField(
         properties={
             "vector": {
@@ -201,9 +202,10 @@ class ConceptDocument(Document):
     def prepare(self, instance):
         data = super().prepare(instance)
 
-        same_as_mapped_codes, other_mapped_codes = self.get_mapped_codes(instance)
+        same_as_mapped_codes, other_mapped_codes, verbose_info = self.get_mapped_codes(instance)
         data['same_as_map_codes'] = same_as_mapped_codes
         data['other_map_codes'] = other_mapped_codes
+        data['mapped_codes'] = verbose_info
 
         preferred_locale = instance.preferred_locale
         name = get(preferred_locale, 'name') or ''
@@ -231,12 +233,18 @@ class ConceptDocument(Document):
         mappings = instance.get_unidirectional_mappings()
         same_as_mapped_codes = []
         other_mapped_codes = []
-        for value in mappings.values('map_type', 'to_concept_code'):
+        verbose_info = {}
+        for value in mappings.values('map_type', 'to_concept_code', 'to_source_url'):
             to_concept_code = value['to_concept_code']
             map_type = value['map_type']
             if to_concept_code and map_type:
+                to_source_url = drop_version(value['to_source_url']) if value['to_source_url'] else None
+                if to_source_url:
+                    if to_source_url not in verbose_info:
+                        verbose_info[to_source_url] = []
+                    verbose_info[to_source_url].append({'map_type': map_type, 'code': to_concept_code})
                 if map_type.lower().startswith('same'):
                     same_as_mapped_codes.append(to_concept_code)
                 else:
                     other_mapped_codes.append(to_concept_code)
-        return same_as_mapped_codes, other_mapped_codes
+        return same_as_mapped_codes, other_mapped_codes, verbose_info
