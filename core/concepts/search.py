@@ -139,6 +139,25 @@ class ConceptFuzzySearch:  # pragma: no cover
         if criterion is not None:
             search = search.query(criterion)
 
+        mapped_codes = data.get('mapped_codes', []) or []
+        nested_mapped_codes_queries = []
+        for mapped_code in mapped_codes:
+            source = mapped_code.get('source', None)
+            code = mapped_code.get('code', None)
+            map_type = mapped_code.get('map_type', None)
+            queries = []
+            if source:
+                queries.append(Q("term", **{"mapped_codes.source": source}))
+            if code:
+                queries.append(Q("term", **{"mapped_codes.code": code}))
+            if map_type:
+                queries.append(Q("term", **{"mapped_codes.map_type": map_type}))
+            if queries:
+                nested_mapped_codes_queries.append(Q("nested", path="mapped_codes", query=Q("bool", must=queries)))
+
+        if nested_mapped_codes_queries:
+            search = search.query("bool", should=nested_mapped_codes_queries, minimum_should_match=1)
+
         if is_semantic:
             filters = get(search.to_dict(), 'query.bool.must', [])
             name = data.get('name', None)

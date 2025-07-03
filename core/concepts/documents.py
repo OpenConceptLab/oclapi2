@@ -44,7 +44,13 @@ class ConceptDocument(Document):
     description = fields.TextField()
     same_as_map_codes = fields.ListField(fields.KeywordField())
     other_map_codes = fields.ListField(fields.KeywordField())
-    mapped_codes = fields.ObjectField(dynamic=True)
+    mapped_codes = fields.NestedField(
+        properties={
+            'source': fields.KeywordField(),
+            'map_type': fields.KeywordField(),
+            'code': fields.KeywordField(),
+        }
+    )
     _embeddings = fields.NestedField(
         properties={
             "vector": {
@@ -233,16 +239,15 @@ class ConceptDocument(Document):
         mappings = instance.get_unidirectional_mappings()
         same_as_mapped_codes = []
         other_mapped_codes = []
-        verbose_info = {}
+        verbose_info = []
         for value in mappings.values('map_type', 'to_concept_code', 'to_source_url'):
             to_concept_code = value['to_concept_code']
             map_type = value['map_type']
             if to_concept_code and map_type:
                 to_source_url = drop_version(value['to_source_url']) if value['to_source_url'] else None
                 if to_source_url:
-                    if to_source_url not in verbose_info:
-                        verbose_info[to_source_url] = []
-                    verbose_info[to_source_url].append({'map_type': map_type, 'code': to_concept_code})
+                    verbose_info.append(
+                        {'source': to_source_url, 'code': to_concept_code, 'map_type': map_type})
                 if map_type.lower().startswith('same'):
                     same_as_mapped_codes.append(to_concept_code)
                 else:
