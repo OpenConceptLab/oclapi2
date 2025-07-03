@@ -1,6 +1,6 @@
 
 from rest_framework import status
-from rest_framework.generics import RetrieveUpdateDestroyAPIView
+from rest_framework.generics import RetrieveUpdateDestroyAPIView, RetrieveAPIView
 from rest_framework.response import Response
 
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryCreateMixin
@@ -8,7 +8,7 @@ from core.common.permissions import CanViewConceptDictionary, HasOwnership
 from core.common.views import BaseAPIView
 from core.map_projects.models import MapProject
 from core.map_projects.serializers import MapProjectSerializer, MapProjectCreateUpdateSerializer, \
-    MapProjectDetailSerializer
+    MapProjectDetailSerializer, MapProjectSummarySerializer
 
 
 class MapProjectBaseView(BaseAPIView):
@@ -59,3 +59,10 @@ class MapProjectView(MapProjectBaseView, RetrieveUpdateDestroyAPIView):
         if self.request.method == 'PUT':
             return MapProjectCreateUpdateSerializer
         return self.serializer_class
+
+
+class MapProjectSummaryView(MapProjectBaseView, RetrieveAPIView):
+    serializer_class = MapProjectSummarySerializer
+    lookup_url_kwarg = 'project'
+    lookup_field = 'project'
+    pk_field = 'id'

@@ -1,4 +1,5 @@
 import json
+from collections import Counter
 
 from django.contrib.postgres.fields import ArrayField
 from django.core.exceptions import ValidationError
@@ -40,6 +41,27 @@ class MapProject(BaseModel):
     @property
     def parent_id(self):
         return self.organization_id or self.user_id
+
+    @property
+    def matches_summary(self):
+        if self.matches:
+            counter = Counter()
+            counter.update(match.get('state') for match in self.matches if 'state' in match)
+            return dict(counter)
+        return None
+
+    @property
+    def visible_columns(self):
+        if self.columns:
+            return [col for col in self.columns if 'hidden' not in col or col['hidden'] == False and col.get('label')]
+        return []
+
+    @property
+    def summary(self):
+        return {
+            'matches': self.matches_summary,
+            'columns': [col.get('label') for col in self.visible_columns],
+        }
 
     def calculate_uri(self):
         return self.parent.uri + "map-projects/" + str((self.id or generate_temp_version())) + "/"

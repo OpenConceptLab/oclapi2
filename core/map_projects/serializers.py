@@ -87,3 +87,9 @@ class MapProjectDetailSerializer(MapProjectSerializer):
     class Meta:
         model = MapProject
         fields = MapProjectSerializer.Meta.fields + ['file_url', 'matches', 'columns']
+
+
+class MapProjectSummarySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = MapProject
+        fields = ['id', 'summary']
