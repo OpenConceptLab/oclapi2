@@ -3,7 +3,8 @@ from pydash import get
 from rest_framework import serializers
 from rest_framework.fields import CharField, DateTimeField, IntegerField, FileField
 
-from core.common.constants import DEFAULT_ACCESS_TYPE
+from core.common.constants import DEFAULT_ACCESS_TYPE, INCLUDE_SUMMARY
+from core.common.utils import get_truthy_values
 from core.map_projects.models import MapProject
 
 
@@ -63,6 +64,11 @@ class MapProjectCreateUpdateSerializer(serializers.ModelSerializer):
         return instance
 
 
+class MapProjectSummarySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = MapProject
+        fields = ['id', 'summary']
+
 class MapProjectSerializer(serializers.ModelSerializer):
     created_by = CharField(source='created_by.username', read_only=True)
     updated_by = CharField(source='updated_by.username', read_only=True)
@@ -79,17 +85,28 @@ class MapProjectSerializer(serializers.ModelSerializer):
             'id', 'name', 'input_file_name',
             'created_by', 'updated_by', 'created_at', 'updated_at', 'url', 'is_active',
             'owner', 'owner_type', 'owner_url', 'public_access',
-            'target_repo_url', 'matching_algorithm'
+            'target_repo_url', 'matching_algorithm', 'summary'
         ]
+
+    def __init__(self, *args, **kwargs):
+        params = get(kwargs, 'context.request.query_params')
+
+        self.query_params = {}
+        if params:
+            self.query_params = params if isinstance(params, dict) else params.dict()
+        self.include_summary = self.query_params.get(INCLUDE_SUMMARY) in get_truthy_values()
+
+        try:
+            if not self.include_summary:
+                self.fields.pop('summary', None)
+        except:  # pylint: disable=bare-except
+            pass
+
+        super().__init__(*args, **kwargs)
+
 
 
 class MapProjectDetailSerializer(MapProjectSerializer):
     class Meta:
         model = MapProject
         fields = MapProjectSerializer.Meta.fields + ['file_url', 'matches', 'columns']
-
-
-class MapProjectSummarySerializer(serializers.ModelSerializer):
-    class Meta:
-        model = MapProject
-        fields = ['id', 'summary']
