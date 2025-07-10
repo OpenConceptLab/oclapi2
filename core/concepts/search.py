@@ -1,9 +1,9 @@
 from elasticsearch_dsl import TermsFacet, Q
 from pydash import flatten, is_number, get, compact
 
-from core.common.constants import FACET_SIZE
+from core.common.constants import FACET_SIZE, HEAD
 from core.common.search import CustomESFacetedSearch, CustomESSearch
-from core.common.utils import get_embeddings
+from core.common.utils import get_embeddings, is_canonical_uri
 from core.concepts.models import Concept
 
 
@@ -91,55 +91,93 @@ class ConceptFuzzySearch:  # pragma: no cover
     @classmethod
     def search(  # pylint: disable=too-many-locals,too-many-arguments,too-many-branches,too-many-statements
             cls, data, repo_url, repo_params=None, include_retired=False,
-            is_semantic=False, num_candidates=5000, k_nearest=5
+            is_semantic=False, num_candidates=5000, k_nearest=5, map_config=None
     ):
         from core.concepts.documents import ConceptDocument
-        search = ConceptDocument.search()
-        repo_params = repo_params or cls.get_target_repo_params(repo_url)
-        for field, value in repo_params.items():
-            search = search.query('match', **{field: value})
-        if not include_retired:
-            search = search.query('match', retired=False)
-        for field in cls.filter_fields:
-            value = data.get(field, None)
-            if value:
-                search = search.query('match', **{field: value})
-        priority_fields_criteria = []
+        map_config = map_config or []
+        filter_query = cls.get_filter_criteria(data, include_retired, repo_params, repo_url)
+        or_clauses = []
+
+        priority_criteria = []
         fields = cls.semantic_priority_fields if is_semantic else cls.priority_fields
         for field_set in fields:
             boost = field_set[-1]
             for field in field_set[:-1]:
                 value = data.get(field, None)
                 if value:
-                    if isinstance(value, list):
-                        for val in value:
-                            val = val or ""
-                            priority_fields_criteria.append(CustomESSearch.get_or_match_criteria(field, val, boost))
-                    else:
-                        priority_fields_criteria.append(CustomESSearch.get_or_match_criteria(field, value, boost))
+                    values = value if isinstance(value, list) else [value]
+                    for val in values:
+                        val = val or ""
+                        priority_criteria.append(CustomESSearch.get_or_match_criteria(field, val, boost))
 
-        if not is_semantic:
+        knn_queries = []
+        if is_semantic:
+            name = data.get('name', None)
+            synonyms = data.get('synonyms')
+            if synonyms and not isinstance(synonyms, list):
+                synonyms = compact([synonyms])
+            synonyms = synonyms or []
+            filters = get(filter_query.to_dict(), 'bool.must', [])
+            def get_knn_query(_field, _value, _boost):
+                return {
+                        "field": _field,
+                        "query_vector": get_embeddings(_value),
+                        "k": k_nearest,
+                        "num_candidates": num_candidates,
+                        "filter": filters,
+                        "boost": _boost
+                }
+            if name:
+                knn_queries.append(get_knn_query("_embeddings.vector", name, 0.3))
+                knn_queries.append(get_knn_query("_synonyms_embeddings.vector", name, 0.15))
+            for synonym in synonyms:
+                if synonym is not None:
+                    knn_queries.append(get_knn_query("_synonyms_embeddings.vector", synonym, 0.1))
+                    knn_queries.append(get_knn_query("_embeddings.vector", synonym, 0.15))
+        else:
             for field in cls.fuzzy_fields:
                 value = data.get(field, None)
                 if value:
-                    if not isinstance(value, list):
-                        value = compact([value])
-                    for val in value:
-                        val = str(val) if val else ""
+                    values = value if isinstance(value, list) else [value]
+                    for val in compact(values):
+                        val = str(val) or ""
                         _search_str = CustomESSearch.get_wildcard_search_string(
                             CustomESSearch.get_search_string(val, decode=True, lower=True)
                         )
-                        wildcard_criteria = CustomESSearch.get_wildcard_criteria(field, _search_str, 0.01)
-                        priority_fields_criteria.append(wildcard_criteria)
-                        criteria = CustomESSearch.fuzzy_criteria(val, field, 0, 3)
-                        priority_fields_criteria.append(criteria)
-        criterion = None
-        for criteria in priority_fields_criteria:
-            criterion = criteria if criterion is None else criterion | criteria
-        if criterion is not None:
-            search = search.query(criterion)
+                        priority_criteria.append(CustomESSearch.get_wildcard_criteria(field, _search_str, 0.01))
+                        priority_criteria.append(CustomESSearch.fuzzy_criteria(val, field, 0, 3))
 
-        mapped_codes = data.get('mapped_codes', []) or []
+        if priority_criteria:
+            combined_or = None
+            for criteria in priority_criteria:
+                combined_or = criteria if combined_or is None else combined_or | criteria
+            or_clauses.append(combined_or)
+
+        nested_mapped_codes_queries = cls.get_mapped_code_queries(data, map_config)
+
+        if nested_mapped_codes_queries:
+            or_clauses.append(Q("bool", should=nested_mapped_codes_queries, minimum_should_match=1, boost=0.1))
+
+        wrapped_clauses = [
+            Q("bool", must=[Q(filter_query), clause])
+            for clause in or_clauses
+        ]
+
+        search = ConceptDocument.search()
+        for knn_query in knn_queries:
+            search = search.knn(**knn_query)
+        if wrapped_clauses:
+            search = search.query(Q("bool", should=wrapped_clauses, minimum_should_match=1))
+        else:
+            search = search.query(Q("bool", must=[Q(filter_query)]))
+
+        highlight = [field for field in flatten([*cls.fuzzy_fields, *cls.priority_fields]) if not is_number(field)]
+        search = search.highlight(*highlight)
+        return search.sort({'_score': {'order': 'desc'}})
+
+    @classmethod
+    def get_mapped_code_queries(cls, data, map_config):
+        mapped_codes = cls.get_mapped_codes(data, map_config)
         nested_mapped_codes_queries = []
         for mapped_code in mapped_codes:
             source = mapped_code.get('source', None)
@@ -154,37 +192,67 @@ class ConceptFuzzySearch:  # pragma: no cover
                 queries.append(Q("term", **{"mapped_codes.map_type": map_type}))
             if queries:
                 nested_mapped_codes_queries.append(Q("nested", path="mapped_codes", query=Q("bool", must=queries)))
+        return nested_mapped_codes_queries
 
-        if nested_mapped_codes_queries:
-            search = search.query("bool", should=nested_mapped_codes_queries, minimum_should_match=1)
+    @classmethod
+    def get_mapped_codes(cls, data, map_config):  # pylint: disable=too-many-locals
+        from core.sources.models import Source
 
-        if is_semantic:
-            filters = get(search.to_dict(), 'query.bool.must', [])
-            name = data.get('name', None)
-            synonyms = data.get('synonyms', None) or []
+        mapped_codes = []
+        for config in map_config:
+            config_type = config.get('type')
+            column = config.get('input_column')
+            target_urls = config.get('target_urls') or []
+            target_source_url = config.get('target_source_url') or None
+            delimiter = config.get('delimiter') or ','
+            separator = config.get('separator') or ':'
+            is_list = config_type == 'mapping-list'
 
-            def get_kwargs_for_knn(_field, _value, _boost):
-                return {
-                    'field': _field,
-                    'query_vector': get_embeddings(_value),
-                    'k': k_nearest,
-                    'num_candidates': num_candidates,
-                    'filter': filters,
-                    'boost': _boost
-                }
-            if synonyms and not isinstance(synonyms, list):
-                synonyms = [synonyms]
-            if name:
-                search = search.knn(**get_kwargs_for_knn('_embeddings.vector', name, 0.3))
-                search = search.knn(**get_kwargs_for_knn('_synonyms_embeddings.vector', name, 0.15))
-            for synonym in synonyms:
-                if synonym is not None:
-                    search = search.knn(**get_kwargs_for_knn('_synonyms_embeddings.vector', synonym, 0.1))
-                    search = search.knn(**get_kwargs_for_knn('_embeddings.vector', synonym, 0.15))
+            if not config_type or not column:
+                continue
+            if (is_list and not target_urls) or (not is_list and not target_source_url):
+                continue
+            value = data.get(column) or None
+            if not value:
+                continue
 
-        highlight = [field for field in flatten([*cls.fuzzy_fields, *cls.priority_fields]) if not is_number(field)]
-        search = search.highlight(*highlight)
-        return search.sort({'_score': {'order': 'desc'}})
+            mapped_code = {'source': None, 'code': None}
+            if is_list:
+                values = {}
+                for val in value.split(delimiter):
+                    parts = val.strip().split(separator)
+                    values[parts[0].strip().lower()] = parts[1].strip() if len(parts) > 1 else None
+                for source_code, url in target_urls.items():
+                    if url and is_canonical_uri(url):
+                        repo, _ = Source.resolve_reference_expression(url, version=HEAD)
+                        url = repo.uri if repo and repo.id else None
+                    mapped_code['source'] = url
+                    mapped_code['code'] = values.get(source_code.strip().lower()) or None
+            else:
+                if is_canonical_uri(target_source_url):
+                    repo, _ = Source.resolve_reference_expression(target_source_url, version=HEAD)
+                    target_source_url = repo.uri if repo and repo.id else None
+                mapped_code['source'] = target_source_url
+                mapped_code['code'] = value
+
+            if mapped_code['source'] and mapped_code['code']:
+                mapped_codes.append(mapped_code)
+        return mapped_codes
+
+    @classmethod
+    def get_filter_criteria(cls, data, include_retired, repo_params, repo_url):
+        must_clauses = []
+        repo_params = repo_params or cls.get_target_repo_params(repo_url)
+        for field, value in repo_params.items():
+            must_clauses.append(Q('match', **{field: value}))
+        if not include_retired:
+            must_clauses.append(Q('match', retired=False))
+        for field in cls.filter_fields:
+            value = data.get(field)
+            if value:
+                must_clauses.append(Q('match', **{field: value}))
+
+        return Q("bool", must=must_clauses)
 
     @classmethod
     def get_search_results(cls, row, repo_url, offset=0, limit=5):

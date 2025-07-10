@@ -790,6 +790,7 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
         rows = self.request.data.get('rows')
         target_repo_url = self.request.data.get('target_repo_url')
         target_repo_params = self.request.data.get('target_repo')
+        map_config = self.request.data.get('map_config', [])
         include_retired = self.request.query_params.get(INCLUDE_RETIRED_PARAM) in get_truthy_values()
         num_candidates = min(to_int(self.request.query_params.get('numCandidates', 0), 5000), 5000)
         k_nearest = min(to_int(self.request.query_params.get('kNearest', 0), 5), 10)
@@ -812,12 +813,12 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
         for row in rows:
             search = ConceptFuzzySearch.search(
                 row, target_repo_url, repo_params, include_retired,
-                is_semantic, num_candidates, k_nearest
+                is_semantic, num_candidates, k_nearest, map_config
             )
             search = search.params(min_score=score_threshold if best_match else 0)
             es_search = CustomESSearch(search[start:end], ConceptDocument)
             es_search.to_queryset(False)
-            result = {'row': row, 'results': []}
+            result = {'row': row, 'results': [], 'map_config': map_config}
             for concept in es_search.queryset:
                 concept._highlight = es_search.highlights.get(concept.id, {})  # pylint:disable=protected-access
                 concept._score = es_search.scores.get(concept.id, {})  # pylint:disable=protected-access
