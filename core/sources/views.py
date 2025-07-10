@@ -28,7 +28,8 @@ from core.common.swagger_parameters import q_param, limit_param, sort_desc_param
     canonical_url_param
 from core.common.tasks import export_source, index_source_concepts, index_source_mappings, delete_source, \
     generate_source_resources_checksums, source_version_compare
-from core.common.utils import parse_boolean_query_param, compact_dict_by_values, to_parent_uri, decode_string
+from core.common.utils import parse_boolean_query_param, compact_dict_by_values, to_parent_uri, decode_string, \
+    get_truthy_values
 from core.common.views import BaseAPIView, BaseLogoView, ConceptContainerExtraRetrieveUpdateDestroyView
 from core.sources.constants import DELETE_FAILURE, DELETE_SUCCESS, VERSION_ALREADY_EXISTS
 from core.sources.documents import SourceDocument
@@ -580,37 +581,35 @@ class SourceClientConfigsView(SourceBaseView, ResourceClientConfigsView):
     permission_classes = (CanViewConceptDictionary, )
 
 
-class SourceMappedSourcesListView(SourceListView):
+class AbstractSourceMappedSourcesListView(SourceListView):
     is_searchable = False
 
+    def get_object_instance(self):
+        return get_object_or_404(super().get_queryset().order_by('-created_at'))
+
     def get_object(self, queryset=None):
-        instance = super().get_queryset().order_by('-created_at').first()
-        if not instance:
-            raise Http404()
+        instance = self.get_object_instance()
         self.check_object_permissions(self.request, instance)
         return instance
 
-    def get_queryset(self):
-        instance = self.get_object()
-        return instance.get_mapped_sources()
+    def is_exclude_self(self):
+        return self.request.query_params.get('excludeSelf', True) in get_truthy_values()
 
+    def get_queryset(self):
+        return self.get_object().get_mapped_sources(exclude_self=self.is_exclude_self())
+
+    @swagger_auto_schema(auto_schema=None)
     def post(self, request, **kwargs):
         raise Http405()
 
 
-class SourceVersionMappedSourcesListView(SourceListView):
-    is_searchable = False
+class SourceMappedSourcesListView(AbstractSourceMappedSourcesListView):
+    pass
 
-    def get_object(self, queryset=None):
-        instance = get_object_or_404(Source.get_base_queryset(compact_dict_by_values(self.get_filter_params())))
-        self.check_object_permissions(self.request, instance)
-        return instance
 
-    def get_queryset(self):
-        return self.get_object().get_mapped_sources_including_self()
-
-    def post(self, request, **kwargs):
-        raise Http405()
+class SourceVersionMappedSourcesListView(AbstractSourceMappedSourcesListView):
+    def get_object_instance(self):
+        return get_object_or_404(Source.get_base_queryset(compact_dict_by_values(self.get_filter_params())))
 
 
 class AbstractSourceVersionsDiffView(BaseAPIView, TaskMixin):

@@ -518,13 +518,12 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
     def last_mapping_update(self):
         return self.get_max_mapping_attribute('updated_at')
 
-    def get_mapped_sources(self):
+    def get_mapped_sources(self, exclude_self=True):
         """Returns only direct mapped sources"""
-        source_ids = set(self.__get_mapped_source_ids()) - {self.id}
+        source_ids = self.__get_mapped_source_ids()
+        if exclude_self:
+            source_ids = set(source_ids) - {self.id}
         return Source.objects.filter(id__in=source_ids)
-
-    def get_mapped_sources_including_self(self):
-        return Source.objects.filter(id__in=self.__get_mapped_source_ids())
 
     def __get_mapped_source_ids(self):
         return self.mappings.values_list('to_source_id', flat=True)

@@ -977,7 +977,7 @@ class SourceTest(OCLTestCase):
         self.assertEqual(mapped_sources.count(), 1)
         self.assertEqual(mapped_sources.first().url, source1.url)
 
-        mapped_sources = source.get_mapped_sources_including_self()
+        mapped_sources = source.get_mapped_sources(exclude_self=False)
 
         self.assertEqual(mapped_sources.count(), 2)
 
