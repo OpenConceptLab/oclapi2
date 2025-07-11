@@ -23,6 +23,7 @@ class MapProject(BaseModel):
     columns = ArrayField(models.JSONField(), default=list)
     target_repo_url = models.TextField(null=True, blank=True)
     matching_algorithm = models.CharField(max_length=100, null=True, blank=True)
+    logs = models.JSONField(default=dict, null=True, blank=True)
 
     OBJECT_TYPE = 'MapProject'
     mnemonic_attr = 'id'

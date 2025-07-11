@@ -1,6 +1,6 @@
 
 from rest_framework import status
-from rest_framework.generics import RetrieveUpdateDestroyAPIView, RetrieveAPIView
+from rest_framework.generics import RetrieveUpdateDestroyAPIView, RetrieveAPIView, CreateAPIView
 from rest_framework.response import Response
 
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryCreateMixin
@@ -8,7 +8,7 @@ from core.common.permissions import CanViewConceptDictionary, HasOwnership
 from core.common.views import BaseAPIView
 from core.map_projects.models import MapProject
 from core.map_projects.serializers import MapProjectSerializer, MapProjectCreateUpdateSerializer, \
-    MapProjectDetailSerializer, MapProjectSummarySerializer
+    MapProjectDetailSerializer, MapProjectSummarySerializer, MapProjectLogsSerializer
 
 
 class MapProjectBaseView(BaseAPIView):
@@ -66,3 +66,19 @@ class MapProjectSummaryView(MapProjectBaseView, RetrieveAPIView):
     lookup_url_kwarg = 'project'
     lookup_field = 'project'
     pk_field = 'id'
+
+
+class MapProjectLogsView(MapProjectBaseView, RetrieveAPIView, CreateAPIView):
+    serializer_class = MapProjectLogsSerializer
+    lookup_url_kwarg = 'project'
+    lookup_field = 'project'
+    pk_field = 'id'
+
+    def create(self, request, *args, **kwargs):
+        map_project = self.get_object()
+        new_logs = request.data.get('logs') or {}
+        if new_logs:
+            map_project.logs = new_logs
+            map_project.updated_by = request.user
+            map_project.save()
+        return Response(status.HTTP_204_NO_CONTENT)
