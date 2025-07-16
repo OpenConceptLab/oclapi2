@@ -171,13 +171,14 @@ class IdentifierSerializer(ReadSerializerMixin, Serializer):
 
 
 class SearchResultSerializer(Serializer):  # pylint: disable=abstract-method
-    match_type = CharField(source='_match_type', allow_null=True, allow_blank=True)
     search_score = FloatField(source='_score', allow_null=True)
+    search_normalized_score = FloatField(source='_normalized_score', allow_null=True)
     search_confidence = CharField(source='_confidence', allow_null=True, allow_blank=True)
     search_highlight = SerializerMethodField()
+    match_type = CharField(source='_match_type', allow_null=True, allow_blank=True)
 
     class Meta:
-        fields = ('search_score', 'search_confidence', 'search_highlight', 'match_type')
+        fields = ('search_score', 'search_normalized_score', 'search_confidence', 'search_highlight', 'match_type')
 
     def to_representation(self, instance):
         rep = super().to_representation(instance)
