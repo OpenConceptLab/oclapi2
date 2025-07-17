@@ -23,6 +23,7 @@ class MapProject(BaseModel):
     columns = ArrayField(models.JSONField(), default=list)
     target_repo_url = models.TextField(null=True, blank=True)
     matching_algorithm = models.CharField(max_length=100, null=True, blank=True)
+    include_retired = models.BooleanField(default=False)
     logs = models.JSONField(default=dict, null=True, blank=True)
 
     OBJECT_TYPE = 'MapProject'
@@ -54,7 +55,7 @@ class MapProject(BaseModel):
     @property
     def visible_columns(self):
         if self.columns:
-            return [col for col in self.columns if 'hidden' not in col or col['hidden'] is False and col.get('label')]
+            return [col for col in self.columns if 'hidden' not in col or col['hidden'] is False and col.get('label')]  # pylint: disable=not-an-iterable,line-too-long
         return []
 
     @property
@@ -173,6 +174,8 @@ class MapProject(BaseModel):
         self.delete()
 
     def clean(self):
+        if not self.include_retired:
+            self.include_retired = False
         if self.matches:
             try:
                 self.matches = json.loads(self.matches)
