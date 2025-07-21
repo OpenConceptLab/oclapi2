@@ -276,7 +276,7 @@ class ConceptListSerializer(ConceptAbstractSerializer):
     version_updated_by = DateTimeField(source='updated_by.username', read_only=True)
     latest_source_version = CharField(
         source='latest_source_version.version', allow_null=True, allow_blank=True, read_only=True, required=False)
-    property = CharField(source='summary_properties', read_only=True)
+    property = JSONField(source='summary_properties', read_only=True)
 
     class Meta:
         model = Concept
@@ -434,7 +434,7 @@ class ConceptDetailSerializer(ConceptAbstractSerializer):
     created_by = DateTimeField(source='created_by.username', read_only=True)
     latest_source_version = CharField(
         source='latest_source_version.version', allow_null=True, allow_blank=True, read_only=True, required=False)
-    property = CharField(source='properties', read_only=True)
+    property = JSONField(source='properties', read_only=True)
 
     class Meta:
         model = Concept
