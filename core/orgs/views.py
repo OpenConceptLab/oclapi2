@@ -1,5 +1,6 @@
 from django.db.models import Count
 from django.http import Http404
+from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
 from pydash import get
 from rest_framework import mixins, status, generics
@@ -31,10 +32,8 @@ from core.users.serializers import UserDetailSerializer
 
 TRUTHY = get_truthy_values()
 
-
-class OrganizationListView(BaseAPIView,
-                           ListWithHeadersMixin,
-                           mixins.CreateModelMixin):
+class OrganizationListView(BaseAPIView, ListWithHeadersMixin, mixins.CreateModelMixin):
+    
     model = Organization
     queryset = Organization.objects.filter(is_active=True)
     es_fields = Organization.es_fields
@@ -77,7 +76,16 @@ class OrganizationListView(BaseAPIView,
 
         return OrganizationListSerializer
 
-    @swagger_auto_schema(manual_parameters=[org_no_members_param])
+    @swagger_auto_schema(
+        manual_parameters=[
+            openapi.Parameter(NO_MEMBERS, openapi.IN_QUERY, description="Filter organizations with no members", type=openapi.TYPE_BOOLEAN),
+            openapi.Parameter('UPDATED_SINCE_PARAM', openapi.IN_QUERY, description="Filter by update date", type=openapi.TYPE_STRING, format=openapi.FORMAT_DATETIME),
+            openapi.Parameter(UPDATED_BY_USERNAME_PARAM, openapi.IN_QUERY, description="Filter Orgs by the update by user", type=openapi.TYPE_STRING),
+            openapi.Parameter('verbose', openapi.IN_QUERY, description="Include verbose details", type=openapi.TYPE_BOOLEAN, default=False),
+        ],
+        
+        responses={status.HTTP_200_OK: OrganizationListSerializer(many=True)}
+    )
     def get(self, request, *args, **kwargs):
         return self.list(request, *args, **kwargs)
 
@@ -107,7 +115,6 @@ class OrganizationBaseView(BaseAPIView, RetrieveAPIView, DestroyAPIView):
     model = Organization
     queryset = Organization.objects.filter(is_active=True)
 
-
 class OrganizationLogoView(OrganizationBaseView, BaseLogoView):
     serializer_class = OrganizationDetailSerializer
 
@@ -116,7 +123,7 @@ class OrganizationLogoView(OrganizationBaseView, BaseLogoView):
             return [HasPrivateAccess(), ]
 
         return [CanViewConceptDictionary(), ]
-
+    
 
 class OrganizationOverviewView(OrganizationBaseView, RetrieveAPIView, UpdateAPIView):
     serializer_class = OrganizationOverviewSerializer
@@ -129,7 +136,7 @@ class OrganizationOverviewView(OrganizationBaseView, RetrieveAPIView, UpdateAPIV
 
     def get_queryset(self):
         return super().get_queryset().filter(mnemonic=self.kwargs['org'])
-
+    
 
 class OrganizationDetailView(OrganizationBaseView, mixins.UpdateModelMixin, mixins.CreateModelMixin, TaskMixin):
     def get_permissions(self):
@@ -171,14 +178,14 @@ class OrganizationDetailView(OrganizationBaseView, mixins.UpdateModelMixin, mixi
             return result
 
         return Response(status=status.HTTP_204_NO_CONTENT)
-
+    
 
 class OrganizationClientConfigsView(ResourceClientConfigsView):
     lookup_field = 'org'
     model = Organization
     queryset = Organization.objects.filter(is_active=True)
     permission_classes = (CanViewConceptDictionary, )
-
+    
 
 class OrganizationMemberView(generics.GenericAPIView):
     userprofile = None
@@ -231,6 +238,7 @@ class OrganizationMemberView(generics.GenericAPIView):
 
         return Response(status=status.HTTP_204_NO_CONTENT)
 
+    
     def delete(self, request, **kwargs):  # pylint: disable=unused-argument
         if not request.user.is_staff and not self.user_in_org:
             return Response(status=status.HTTP_403_FORBIDDEN)
@@ -241,8 +249,7 @@ class OrganizationMemberView(generics.GenericAPIView):
         self.userprofile.save()
 
         return Response(status=status.HTTP_204_NO_CONTENT)
-
-
+        
 class OrganizationResourceAbstractListView:
     def get_queryset(self):
         username = self.kwargs.get('user', None)
@@ -258,8 +265,7 @@ class OrganizationResourceAbstractListView:
 
 class OrganizationSourceListView(OrganizationResourceAbstractListView, SourceListView):
     pass
-
-
+    
 class OrganizationCollectionListView(OrganizationResourceAbstractListView, CollectionListView):
     pass
 
@@ -294,6 +300,7 @@ class OrganizationExtraRetrieveUpdateDestroyView(OrganizationExtrasBaseView, Ret
             return Response({key: extras[key]})
 
         return Response({'detail': NOT_FOUND}, status=status.HTTP_404_NOT_FOUND)
+
 
     def update(self, request, **kwargs):  # pylint: disable=arguments-differ
         key = kwargs.get('extra')
