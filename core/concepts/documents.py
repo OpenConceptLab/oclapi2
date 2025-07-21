@@ -22,6 +22,7 @@ class ConceptDocument(Document):
     updated_by = fields.KeywordField(attr='updated_by.username')
     locale = fields.ListField(fields.KeywordField())
     synonyms = fields.ListField(fields.TextField())
+    _synonyms = fields.ListField(fields.KeywordField())
     source = fields.KeywordField(attr='parent_resource', normalizer="lowercase")
     owner = fields.KeywordField(attr='owner_name', normalizer="lowercase")
     owner_type = fields.KeywordField(attr='owner_type')
@@ -225,6 +226,7 @@ class ConceptDocument(Document):
 
         synonyms = instance.names.exclude(name=name).exclude(name='')
         data['synonyms'] = compact(set(synonyms.values_list('name', flat=True)))
+        data['_synonyms'] = data['synonyms']
         data['_synonyms_embeddings'] = [
             {
                 'vector': get_embeddings(s.name),

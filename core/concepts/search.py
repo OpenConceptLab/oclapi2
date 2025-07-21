@@ -50,8 +50,8 @@ class ConceptFuzzySearch:  # pragma: no cover
     ]
     semantic_priority_fields = [
         ['id', 0.3],
-        ['name', 0],
-        ['synonyms', 0],
+        ['_name', 0],
+        ['_synonyms', 0],
         ['same_as_mapped_codes', 0.1],
         ['other_map_codes', 0.1],
         ['concept_class', 'datatype', 0.01],
@@ -171,7 +171,7 @@ class ConceptFuzzySearch:  # pragma: no cover
         else:
             search = search.query(Q("bool", must=[Q(filter_query)]))
 
-        highlight = [field for field in flatten([*cls.fuzzy_fields, *cls.priority_fields]) if not is_number(field)]
+        highlight = [field for field in flatten([*cls.fuzzy_fields, *fields]) if not is_number(field)]
         search = search.highlight(*highlight)
         return search.sort({'_score': {'order': 'desc'}})
 
