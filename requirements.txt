@@ -21,7 +21,7 @@ redis==5.2.1
 django-redis==5.4.0 # needed for redis sentinel support
 kombu==5.4.2
 django-elasticsearch-dsl==7.3
-drf-yasg==1.21.5
+drf-yasg==1.21.7
 git+https://github.com/snyaggarwal/django-queryset-csv
 ocldev==0.2.2
 coverage==7.3.0
