@@ -241,11 +241,16 @@ class Collection(DirtyFieldsMixin, ConceptContainerModel):
     @transaction.atomic
     def add_expressions(
             self, data, user, cascade=False, transform=False, _async=False):
+        references = self.parse_expressions(data, user, cascade, transform)
+        return self.add_references(references, user, _async)
+
+    @staticmethod
+    def parse_expressions(data, user, cascade=False, transform=False):
         parser = CollectionReferenceParser(data, transform, cascade, user)
         parser.parse()
         parser.to_reference_structure()
         references = parser.to_objects()
-        return self.add_references(references, user, _async)
+        return references
 
     def add_references(self, references, user=None, _async=False):
         errors = {}
@@ -690,6 +695,8 @@ class CollectionReference(models.Model):
             queryset = Concept.objects.filter(id__in=queryset.values_list('versioned_object_id', flat=True))
             mapping_queryset = Mapping.objects.filter(
                 id__in=mapping_queryset.values_list('versioned_object_id', flat=True))
+        if queryset is None:
+            queryset = Concept.objects.none()
         return queryset, mapping_queryset
 
     def get_mappings(self, system_version=None):
@@ -711,6 +718,8 @@ class CollectionReference(models.Model):
                 mapping = queryset.first()
                 self.resource_version = mapping.version
                 self.expression = mapping.uri
+        if queryset is None:
+            queryset = Mapping.objects.none()
         return queryset
 
     @staticmethod

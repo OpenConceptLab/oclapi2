@@ -12,9 +12,9 @@ from core.collections.tests.factories import OrganizationCollectionFactory, User
 from core.common.tasks import export_collection
 from core.common.tests import OCLAPITestCase
 from core.common.utils import get_latest_dir_in_path, drop_version
-from core.concepts.serializers import ConceptVersionExportSerializer
+from core.concepts.serializers import ConceptVersionExportSerializer, ConceptListSerializer
 from core.concepts.tests.factories import ConceptFactory
-from core.mappings.serializers import MappingDetailSerializer
+from core.mappings.serializers import MappingDetailSerializer, MappingListSerializer
 from core.mappings.tests.factories import MappingFactory
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.tests.factories import OrganizationSourceFactory
@@ -1488,6 +1488,611 @@ class CollectionReferencesViewTest(OCLAPITestCase):
 
         response = self.client.put(
             self.collection.uri + 'references/',
+            {
+                "data": {
+                    "concepts": [],
+                    "mappings": [],
+                    "exclude": True
+                }
+            },
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+        self.assertEqual(response.status_code, 400)
+
+
+class CollectionReferencesPreviewTest(OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.user = UserProfileFactory(username='foobar')
+        self.token = self.user.get_token()
+        self.collection = UserCollectionFactory(mnemonic='coll', user=self.user)
+        self.expansion = ExpansionFactory(collection_version=self.collection)
+        self.collection.expansion_uri = self.expansion.uri
+        self.collection.save()
+        self.concept = ConceptFactory()
+        self.reference = CollectionReference(
+            expression=self.concept.uri, collection=self.collection, system=self.concept.parent.uri, version='HEAD')
+        self.reference.full_clean()
+        self.reference.save()
+        self.expansion.concepts.set(self.reference.concepts.all())
+        self.assertEqual(self.collection.references.count(), 1)
+        self.assertEqual(self.expansion.concepts.count(), 1)
+
+    def test_post_200_specific_expression(self):  # pylint: disable=too-many-statements
+        response = self.client.post(
+            self.collection.uri + 'references/preview/',
+            {'data': {'concepts': [self.concept.uri]}},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data,
+            [
+                {
+                    'reference': self.concept.uri,
+                    'concepts': [ConceptListSerializer(self.concept).data],
+                    'mappings': [],
+                    'concepts_count': 1,
+                    'mappings_count': 0,
+                    'exclude': False
+                }
+            ]
+        )
+
+        concept2 = ConceptFactory()
+        response = self.client.post(
+            self.collection.uri + 'references/preview/',
+            {'data': {'concepts': [concept2.uri]}},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data,
+            [
+                {
+                    'reference': concept2.uri,
+                    'concepts': [ConceptListSerializer(concept2).data],
+                    'mappings': [],
+                    'concepts_count': 1,
+                    'mappings_count': 0,
+                    'exclude': False
+                }
+            ]
+        )
+
+        mapping = MappingFactory(from_concept=concept2, to_concept=self.concept, parent=self.concept.parent)
+
+        response = self.client.post(
+            self.collection.uri + 'references/preview/',
+            {'data': {'mappings': [mapping.uri]}},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data,
+            [
+                {
+                    'reference': mapping.uri,
+                    'concepts': [],
+                    'mappings': [MappingListSerializer(mapping).data],
+                    'concepts_count': 0,
+                    'mappings_count': 1,
+                    'exclude': False
+                }
+            ]
+        )
+
+        concept3 = ConceptFactory()
+        latest_version = concept3.get_latest_version()
+        mapping = MappingFactory(from_concept=concept3, parent=concept3.parent)
+
+        response = self.client.post(
+            self.collection.uri + 'references/preview/?cascade=sourcemappings',
+            {'data': {'concepts': [latest_version.uri]}},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 2)
+        self.assertEqual(
+            sorted(response.data, key=lambda ref: ref['reference']),
+            [
+                {
+                    'reference': latest_version.uri,
+                    'concepts': [ConceptListSerializer(latest_version).data],
+                    'mappings': [MappingListSerializer(mapping).data],
+                    'concepts_count': 1,
+                    'mappings_count': 1,
+                    'exclude': False
+                },
+                {
+                    'reference': mapping.uri,
+                    'concepts': [],
+                    'mappings': [MappingListSerializer(mapping).data],
+                    'concepts_count': 0,
+                    'mappings_count': 1,
+                    'exclude': False
+                }
+            ]
+        )
+
+        concept4 = ConceptFactory()
+        latest_version = concept4.get_latest_version()
+        mapping2 = MappingFactory(from_concept=concept4, parent=concept4.parent)
+
+        response = self.client.post(
+            self.collection.uri + 'references/preview/',
+            {
+                'data': {
+                    'system': latest_version.parent.url,
+                    'code': latest_version.mnemonic,
+                    'resource_version': latest_version.version,
+                    'cascade': 'sourcemappings'
+                }
+            },
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data,
+            [
+                {
+                    'reference': latest_version.uri,
+                    'concepts': [ConceptListSerializer(latest_version).data],
+                    'mappings': [MappingListSerializer(mapping2).data],
+                    'concepts_count': 1,
+                    'mappings_count': 1,
+                    'exclude': False
+                }
+            ]
+        )
+
+        response = self.client.post(
+            self.collection.uri + 'references/preview/',
+            {
+                'data': {
+                    'system': latest_version.parent.url,
+                    'code': latest_version.mnemonic,
+                    'resource_version': latest_version.version,
+                    'cascade': 'sourcemappings',
+                    'exclude': True
+                }
+            },
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data,
+            [
+                {
+                    'reference': latest_version.uri,
+                    'concepts': [ConceptListSerializer(latest_version).data],
+                    'mappings': [MappingListSerializer(mapping2).data],
+                    'concepts_count': 1,
+                    'mappings_count': 1,
+                    'exclude': True
+                }
+            ]
+        )
+
+    def test_post_expression_with_cascade_to_concepts(self):
+        source1 = OrganizationSourceFactory()
+        source2 = OrganizationSourceFactory()
+        concept1 = ConceptFactory(parent=source1, mnemonic='concept1')
+        concept2 = ConceptFactory(parent=source1)
+        concept3 = ConceptFactory(parent=source2)
+        concept4 = ConceptFactory(parent=source2)
+
+        mapping1 = MappingFactory(
+            mnemonic='m1-c1-c2-s1', from_concept=concept1.get_latest_version(),
+            to_concept=concept2.get_latest_version(), parent=source1
+        )
+        MappingFactory(
+            mnemonic='m2-c2-c1-s1', from_concept=concept2.get_latest_version(),
+            to_concept=concept1.get_latest_version(), parent=source1
+        )
+        MappingFactory(
+            mnemonic='m3-c1-c3-s2', from_concept=concept1.get_latest_version(),
+            to_concept=concept3.get_latest_version(), parent=source2
+        )
+        mapping4 = MappingFactory(
+            mnemonic='m4-c4-c3-s2', from_concept=concept4.get_latest_version(),
+            to_concept=concept3.get_latest_version(), parent=source2
+        )
+        MappingFactory(
+            mnemonic='m5-c4-c1-s1', from_concept=concept4.get_latest_version(),
+            to_concept=concept1.get_latest_version(), parent=source1
+        )
+
+        response = self.client.post(
+            self.collection.uri + 'references/preview/?cascade=sourceToConcepts',
+            {
+                'data': {
+                    'concepts': [concept1.get_latest_version().uri]
+                }
+            },
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 3)
+        self.assertEqual(
+            sorted(response.data, key=lambda ref: ref['reference']),
+            [
+                {
+                    'reference': concept1.get_latest_version().uri,
+                    'concepts': ConceptListSerializer([concept1.get_latest_version(), concept2], many=True).data,
+                    'concepts_count': 2,
+                    'mappings': [MappingListSerializer(mapping1).data],
+                    'mappings_count': 1,
+                    'exclude': False
+                },
+                {
+                    'reference': concept2.uri,
+                    'concepts': ConceptListSerializer([concept2], many=True).data,
+                    'concepts_count': 1,
+                    'mappings': [],
+                    'mappings_count': 0,
+                    'exclude': False
+                },
+                {
+                    'reference': mapping1.uri,
+                    'concepts': [],
+                    'concepts_count': 0,
+                    'mappings': [MappingListSerializer(mapping1).data],
+                    'mappings_count': 1,
+                    'exclude': False
+                }
+            ]
+        )
+
+        response = self.client.post(
+            self.collection.uri + 'references/preview/?cascade=sourceToConcepts',
+            {
+                'data': {
+                    'concepts': [concept4.get_latest_version().uri]
+                }
+            },
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(len(response.data), 3)
+        self.assertEqual(
+            sorted(response.data, key=lambda ref: ref['reference']),
+            [
+                {
+                    'reference': concept3.uri,
+                    'concepts': ConceptListSerializer([concept3], many=True).data,
+                    'concepts_count': 1,
+                    'mappings': [],
+                    'mappings_count': 0,
+                    'exclude': False
+                },
+                {
+                    'reference': concept4.get_latest_version().uri,
+                    'concepts': ConceptListSerializer([concept3, concept4.get_latest_version()], many=True).data,
+                    'concepts_count': 2,
+                    'mappings': [MappingListSerializer(mapping4).data],
+                    'mappings_count': 1,
+                    'exclude': False
+                },
+                {
+                    'reference': mapping4.uri,
+                    'concepts': [],
+                    'concepts_count': 0,
+                    'mappings': [MappingListSerializer(mapping4).data],
+                    'mappings_count': 1,
+                    'exclude': False
+                }
+            ]
+        )
+
+        random_concept = ConceptFactory()
+
+        response = self.client.post(
+            self.collection.uri + 'references/preview/?transformReferences=extensional',
+            {
+                'data': {'expression': random_concept.parent.uri},
+                'cascade': {
+                    'method': 'sourcetoconcepts',
+                    'cascade levels': '*',
+                    'map types': 'Q AND A,CONCEPT SET',
+                    'return map types': '*'
+                }
+            },
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data,
+            [{
+                 'reference': random_concept.parent.uri,
+                 'concepts': [],
+                 'mappings': [],
+                 'concepts_count': 0,
+                 'mappings_count': 0,
+                 'exclude': False
+             }]
+        )
+
+        expr = random_concept.parent.uri + 'v1/concepts/excludeWildcard=true&excludeFuzzy=true&includeSearchMETA=true'
+        response = self.client.post(
+            self.collection.uri + 'references/preview/?cascade=sourcemappings',
+            {
+                'data': [{
+                    'expression': expr
+                }]
+            },
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data,
+            [{
+                'reference': expr,
+                'concepts': [],
+                'mappings': [],
+                'concepts_count': 0,
+                'mappings_count': 0,
+                'exclude': False
+            }]
+        )
+
+    def test_post_expression_transform_to_latest_version(self):
+        concept2 = ConceptFactory()
+        concept2_latest_version = concept2.get_latest_version()
+        concept3 = ConceptFactory()
+        concept3_latest_version = concept3.get_latest_version()
+
+        self.assertNotEqual(concept2.uri, concept2_latest_version.uri)
+        self.assertNotEqual(concept3.uri, concept3_latest_version.uri)
+
+        response = self.client.post(
+            self.collection.uri + 'references/preview/?transformReferences=resourceVersions',
+            {
+                'data': {
+                    'concepts': [concept2.uri]
+                }
+            },
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data,
+            [{
+                'reference': concept2.get_latest_version().uri,
+                'concepts': [ConceptListSerializer(concept2.get_latest_version()).data],
+                'mappings': [],
+                'concepts_count': 1,
+                'mappings_count': 0,
+                'exclude': False
+            }]
+        )
+
+    def test_post_expression_transform_to_extensional(self):
+        concept2 = ConceptFactory()
+        concept2_latest_version = concept2.get_latest_version()
+        concept3 = ConceptFactory()
+        concept3_latest_version = concept3.get_latest_version()
+
+        self.assertNotEqual(concept2.uri, concept2_latest_version.uri)
+        self.assertNotEqual(concept3.uri, concept3_latest_version.uri)
+
+        response = self.client.post(
+            self.collection.uri + 'references/preview/?transformReferences=extensional',
+            {
+                'data': {
+                    'concepts': [concept2.uri]
+                }
+            },
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data,
+            [{
+                'reference': concept2.uri,
+                'concepts': [ConceptListSerializer(concept2).data],
+                'mappings': [],
+                'concepts_count': 1,
+                'mappings_count': 0,
+                'exclude': False
+            }]
+        )
+
+    def test_post_expression_cascade_and_transform_to_resource_versions_generate_multiple_references(self):
+        source = OrganizationSourceFactory()
+        concept2 = ConceptFactory(parent=source, mnemonic='concept2')
+        concept2_latest_version = concept2.get_latest_version()
+        concept3 = ConceptFactory(parent=source, mnemonic='concept3')
+        concept3_latest_version = concept3.get_latest_version()
+        mapping = MappingFactory(from_concept=concept2, to_concept=concept3, parent=source)
+        mapping_latest_version = mapping.get_latest_version()
+
+        self.assertNotEqual(concept2.uri, concept2_latest_version.uri)
+        self.assertNotEqual(concept3.uri, concept3_latest_version.uri)
+        self.assertNotEqual(mapping.uri, mapping_latest_version.uri)
+        response = self.client.post(
+            self.collection.uri + 'references/preview/?transformReferences=resourceVersions',
+            {
+                'data': {
+                    'expressions': [concept2.uri]
+                },
+                'cascade': {
+                    'cascade_levels': "*",
+                    'return_map_types': '*',
+                    'method': 'sourcetoconcepts'
+                }
+            },
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 3)
+        results = sorted(response.data, key=lambda ref: ref['reference'])
+        self.assertEqual(
+            results[0],
+            {
+                'reference': concept2_latest_version.uri,
+                'concepts': [ConceptListSerializer(concept2_latest_version).data],
+                'mappings': [],
+                'concepts_count': 1,
+                'mappings_count': 0,
+                'exclude': False
+            }
+        )
+        self.assertEqual(
+            results[1],
+            {
+                'reference': concept3_latest_version.uri,
+                'concepts': [ConceptListSerializer(concept3_latest_version).data],
+                'mappings': [],
+                'concepts_count': 1,
+                'mappings_count': 0,
+                'exclude': False
+            }
+        )
+        self.assertEqual(
+            results[2],
+            {
+                'reference': mapping_latest_version.uri,
+                'concepts': [],
+                'mappings': [MappingListSerializer(mapping_latest_version).data],
+                'concepts_count': 0,
+                'mappings_count': 1,
+                'exclude': False
+            }
+        )
+
+        response = self.client.post(
+            self.collection.uri + 'references/preview/',
+            {
+                "data": {
+                    "concepts": [drop_version(concept3.uri)],
+                    "exclude": True
+                }
+            },
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data,
+            [{
+                'reference': concept3.uri,
+                'concepts': [ConceptListSerializer(concept3).data],
+                'mappings': [],
+                'concepts_count': 1,
+                'mappings_count': 0,
+                'exclude': True
+            }]
+        )
+
+    def test_post_expression_cascade_and_transform_to_extensional_generate_multiple_references(self):
+        source = OrganizationSourceFactory()
+        concept2 = ConceptFactory(parent=source)
+        concept2_latest_version = concept2.get_latest_version()
+        concept3 = ConceptFactory(parent=source)
+        concept3_latest_version = concept3.get_latest_version()
+        mapping = MappingFactory(from_concept=concept2, to_concept=concept3, parent=source)
+        mapping_latest_version = mapping.get_latest_version()
+
+        self.assertNotEqual(concept2.uri, concept2_latest_version.uri)
+        self.assertNotEqual(concept3.uri, concept3_latest_version.uri)
+        self.assertNotEqual(mapping.uri, mapping_latest_version.uri)
+        response = self.client.post(
+            self.collection.uri + 'references/preview/?transformReferences=extensional',
+            {
+                'data': {
+                    'expressions': [concept2.uri]
+                },
+                'cascade': {
+                    'cascade_levels': "*",
+                    'return_map_types': '*',
+                    'method': 'sourcetoconcepts'
+                }
+            },
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 3)
+        results = sorted(response.data, key=lambda ref: ref['reference'])
+        self.assertEqual(
+            results[0],
+            {
+                'reference': concept2.uri,
+                'concepts': [ConceptListSerializer(concept2).data],
+                'mappings': [],
+                'concepts_count': 1,
+                'mappings_count': 0,
+                'exclude': False
+            }
+        )
+        self.assertEqual(
+            results[1],
+            {
+                'reference': concept3.uri,
+                'concepts': [ConceptListSerializer(concept3).data],
+                'mappings': [],
+                'concepts_count': 1,
+                'mappings_count': 0,
+                'exclude': False
+            }
+        )
+        self.assertEqual(
+            results[2],
+            {
+                'reference': mapping.uri,
+                'concepts': [],
+                'mappings': [MappingListSerializer(mapping).data],
+                'concepts_count': 0,
+                'mappings_count': 1,
+                'exclude': False
+            }
+        )
+
+    def test_post_bad_expressions(self):
+        expression = {
+           "data": {
+                "url": [
+                    "http://worldhealthorganization.github.io/ddcc/ValueSet/DDCC-QR-Format-ValueSet"
+                ]
+            }
+        }
+        response = self.client.post(
+            self.collection.uri + 'references/preview/',
+            expression,
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, [])
+
+        response = self.client.post(
+            self.collection.uri + 'references/preview/',
             {
                 "data": {
                     "concepts": [],
