@@ -48,8 +48,8 @@ class ConceptFacetedSearch(CustomESFacetedSearch):
     @staticmethod
     def build_property_facets_from_source(source):
         return {
-            f"properties__{prop['code']}": TermsFacet(field=f"properties.{prop['code']}.keyword", size=FACET_SIZE)
-            for prop in (get(source, 'properties_to_include_in_concept_summary') or [])
+            f"properties__{_filter['code']}": TermsFacet(field=f"properties.{_filter['code']}.keyword", size=FACET_SIZE)
+            for _filter in (source.filters or [])
         }
 
 
