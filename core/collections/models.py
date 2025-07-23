@@ -30,7 +30,7 @@ from core.common.tasks import seed_children_to_expansion, batch_index_resources,
 from core.common.utils import drop_version, to_owner_uri, generate_temp_version, es_id_in, \
     get_resource_class_from_resource_name, to_snake_case, \
     es_to_pks, batch_qs, split_list_by_condition, decode_string, is_canonical_uri, encode_string, \
-    get_truthy_values, get_falsy_values, get_current_authorized_user
+    get_truthy_values, get_falsy_values, get_current_authorized_user, to_camel_case
 from core.concepts.constants import LOCALES_FULLY_SPECIFIED
 from core.concepts.models import Concept
 from core.mappings.models import Mapping
@@ -849,7 +849,10 @@ class CollectionReference(models.Model):
                             filter_def['property'] not in self.get_allowed_filter_properties()
                         )
                 ):
-                    continue
+                    if filter_def['property'] in self.get_allowed_filter_properties_but_need_case_switch():
+                        filter_def['property'] = to_snake_case(filter_def['property'])
+                    else:
+                        continue
                 val = filter_def['value']
                 if filter_def['property'] == 'q':
                     self._apply_search(search, val, document)
@@ -995,6 +998,9 @@ class CollectionReference(models.Model):
         elif self.is_mapping:
             common = [*Mapping.es_fields.keys(), *common]
         return common
+
+    def get_allowed_filter_properties_but_need_case_switch(self):
+        return map(to_camel_case, self.get_allowed_filter_properties())
 
     @staticmethod
     def __is_valid_filter_schema(filter_def):
