@@ -39,10 +39,22 @@ class CustomPaginator:
             highlights=None
     ):
         self.request = request
-        self.total_count = total_count
         self.queryset = queryset
-        self.page_size = page_size
-        self.is_sliced = is_sliced
+        self.total = total_count or (
+            self.queryset.count() if isinstance(self.queryset, QuerySet) else len(self.queryset))
+        self.page_size = int(page_size)
+        self.page_number = to_int(request.GET.get('page', '1'), 1)
+        if not is_sliced:
+            bottom = (self.page_number - 1) * self.page_size
+            top = bottom + self.page_size
+            if top >= self.total:
+                top = self.total
+            self.queryset = self.queryset[bottom:top]
+        if isinstance(self.queryset, QuerySet):
+            self.queryset.count = None
+        self.paginator = Paginator(self.queryset, self.page_size)
+        self.page_object = self.paginator.get_page(self.page_number)
+        self.page_count = ceil(int(self.total_count) / int(self.page_size))
         self.max_score = max_score
         self.search_scores = search_scores or {}
         self.highlights = highlights or {}

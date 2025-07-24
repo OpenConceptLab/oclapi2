@@ -209,28 +209,9 @@ class CustomESSearch:
         """
         s, hits = self.__get_response()
 
-        # Gather all scores for normalization
-        all_scores = [get(result, '_score') for result in hits.hits if get(result, '_score') is not None]
-        if all_scores:
-            min_score = min(all_scores)
-            max_score = max(all_scores)
-            score_range = max_score - min_score if max_score != min_score else 1.0
-        else:
-            min_score = 0.0
-            max_score = 1.0
-            score_range = 1.0
-
         for result in hits.hits:
             _id = get(result, '_id')
-            raw_score = get(result, '_score')
-            if raw_score is not None:
-                normalized_score = (raw_score - min_score) / score_range
-            else:
-                normalized_score = None
-            self.scores[int(_id)] = {
-                'raw': raw_score,
-                'normalized': normalized_score
-            }
+            self.scores[int(_id)] = get(result, '_score')
             highlight = get(result, 'highlight')
             if highlight:
                 self.highlights[int(_id)] = highlight.to_dict()
@@ -256,10 +237,6 @@ class CustomESSearch:
                 qs = qs.order_by(preserved_order)
         self.queryset = qs
         self.total = hits.total.value
-        # Store min and max for downstream use
-        self.min_score = min_score
-        self.max_score = max_score
-        self.score_range = score_range
 
     def get_aggregations(self, verbose=False, raw=False):
         s, _ = self.__get_response()
@@ -268,59 +245,55 @@ class CustomESSearch:
         if raw:
             return result
         self.max_score = result['score']['max']
-        self.min_score = result['score']['min'] if 'min' in result['score'] else 0.0
-        score_range = self.max_score - self.min_score if self.max_score != self.min_score else 1.0
         return self._get_score_buckets(
-            self.max_score, self.min_score, score_range, result['distribution']['buckets'], verbose)
+            self.max_score, result['distribution']['buckets'], verbose)
 
     @staticmethod
-    def _get_score_buckets(max_score, min_score, score_range, buckets, verbose=False):
-        # Use normalized scores for bucketing
-        high_threshold = 0.8
-        low_threshold = 0.5
+    def _get_score_buckets(max_score, buckets, verbose=False):
+        high_threshold = max_score * 0.8
+        low_threshold = max_score * 0.5
 
-        def get_confidence(norm_score):
-            return f"~{round(norm_score * 100, 2)}%"
+        def get_confidence(threshold):
+            return round((threshold/max_score) * 100, 2)
 
         def build_confidence(_bucket):
             scores = _bucket['scores']
             if scores:
-                avg_norm = sum(scores) / len(scores)
-                _bucket['confidence'] = get_confidence(avg_norm)
+                _bucket['confidence'] = f"~{get_confidence(sum(scores) / len(scores))}%"
             if not verbose:
                 _bucket = {k: v for k, v in _bucket.items() if k in ['name', 'threshold', 'total', 'confidence']}
             return _bucket
 
-        def build_bucket(name, threshold, confidence_prefix='>='):
+        def build_bucket(name, confidence_threshold, threshold=None, confidence_prefix='>='):
+            threshold = threshold or confidence_threshold
             return {
                 'name': name,
-                'threshold': threshold,
+                'threshold': round(threshold, 2),
                 'scores': [],
                 'doc_counts': [],
-                'confidence': f"{confidence_prefix}{round(threshold * 100, 2)}%",
+                'confidence': f"{confidence_prefix}{get_confidence(confidence_threshold)}%",
                 'total': 0
             }
 
-        def append_to_bucket(_bucket, norm_score, count):
-            _bucket['scores'].append(norm_score)
+        def append_to_bucket(_bucket, _score, count):
+            _bucket['scores'].append(_score)
             _bucket['doc_counts'].append(count)
             _bucket['total'] += count
 
         high = build_bucket('high', high_threshold)
         medium = build_bucket('medium', low_threshold)
-        low = build_bucket('low', 0.01, '<')
+        low = build_bucket('low', low_threshold, 0.01, '<')
 
         for bucket in buckets:
             score = bucket['key']
-            norm_score = (score - min_score) / score_range if score is not None else 0.0
             doc_count = bucket['doc_count']
 
-            if norm_score >= high_threshold:
-                append_to_bucket(high, norm_score, doc_count)
-            elif norm_score < low_threshold:
-                append_to_bucket(low, norm_score, doc_count)
+            if score >= high_threshold:
+                append_to_bucket(high, score, doc_count)
+            elif score < low_threshold:
+                append_to_bucket(low, score, doc_count)
             else:
-                append_to_bucket(medium, norm_score, doc_count)
+                append_to_bucket(medium, score, doc_count)
 
         return [build_confidence(high), build_confidence(medium), build_confidence(low)]
 
