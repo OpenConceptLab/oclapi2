@@ -7,6 +7,7 @@ from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import UniqueConstraint, F, Max, Count
 from django.db.models.functions import Cast
+from pydash import get
 
 from core.common.checksums import ChecksumChangelog
 from core.common.constants import HEAD

@@ -1,5 +1,5 @@
 from elasticsearch_dsl import TermsFacet, Q
-from pydash import flatten, is_number, get
+from pydash import flatten, is_number
 
 from core.common.constants import FACET_SIZE
 from core.common.search import CustomESFacetedSearch, CustomESSearch
