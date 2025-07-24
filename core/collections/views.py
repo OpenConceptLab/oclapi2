@@ -564,6 +564,11 @@ class CollectionReferencesView(
 
 
 class CollectionReferencesPreview(CollectionBaseView):
+    def get_serializer_class(self):
+        if self.is_verbose():
+            return CollectionReferenceDetailSerializer
+        return CollectionReferenceSerializer
+
     def get_data(self):
         cascade = get(self.request, 'data.cascade', None) or self.request.query_params.get('cascade', '').lower()
         transform = self.request.query_params.get('transformReferences', '').lower()
