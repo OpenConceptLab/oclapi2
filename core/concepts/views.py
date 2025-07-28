@@ -237,11 +237,9 @@ class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
 
     def post(self, request, **_):
         self.set_parent_resource()
-        if not self.parent_resource:
+        if not self.parent_resource or isinstance(request.data, list):
             raise Http404()
-        concept_id = request.data.get('id') or generate_temp_version()
-        if isinstance(request.data, list):
-            raise Http400()
+        concept_id = get(request.data, 'id') or generate_temp_version()
         serializer = self.get_serializer(
             data={**request.data, 'parent_id': self.parent_resource.id, 'id': concept_id, 'name': concept_id}
         )
