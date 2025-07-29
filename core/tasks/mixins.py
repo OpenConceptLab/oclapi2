@@ -30,7 +30,7 @@ class TaskMixin:
             celery_task = None
             try:
                 celery_task = Task.new(queue, self.request.user, name=task_func.__name__)
-                task_func.apply_async(task_args, task_id=celery_task.id)
+                task_func.apply_async(task_args, task_id=celery_task.id, queue=queue)
             except AlreadyQueued:
                 if celery_task:
                     celery_task.delete()
