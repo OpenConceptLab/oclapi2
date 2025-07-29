@@ -255,7 +255,7 @@ class OrganizationDetailViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 202)
-        delete_organization_mock.apply_async.assert_called_once_with((self.org.id, ), task_id=ANY)
+        delete_organization_mock.apply_async.assert_called_once_with((self.org.id, ), task_id=ANY, queue='default')
 
     @patch('core.orgs.views.delete_organization')
     def test_delete_202_by_owner(self, delete_organization_mock):
@@ -269,7 +269,7 @@ class OrganizationDetailViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 202)
-        delete_organization_mock.apply_async.assert_called_once_with((self.org.id, ), task_id=ANY)
+        delete_organization_mock.apply_async.assert_called_once_with((self.org.id, ), task_id=ANY, queue='default')
 
     def test_delete_204_inline(self):
         response = self.client.delete(

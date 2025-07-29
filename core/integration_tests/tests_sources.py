@@ -363,7 +363,7 @@ class SourceRetrieveUpdateDestroyViewTest(OCLAPITestCase):
                 'name': 'delete_source_task'
             }
         )
-        delete_source_task_mock.apply_async.assert_called_once_with((source.id,), task_id=ANY)
+        delete_source_task_mock.apply_async.assert_called_once_with((source.id,), task_id=ANY, queue='default')
 
     @patch('core.common.models.delete_s3_objects')
     def test_delete_204(self, delete_s3_objects_mock):  # sync delete

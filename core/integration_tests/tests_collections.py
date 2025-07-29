@@ -470,7 +470,7 @@ class CollectionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
                 'name': 'delete_collection'
             }
         )
-        delete_collection_task_mock.apply_async.assert_called_once_with((coll.id, ), task_id=ANY)
+        delete_collection_task_mock.apply_async.assert_called_once_with((coll.id, ), task_id=ANY, queue='default')
 
     def test_put_401(self):
         coll = OrganizationCollectionFactory(mnemonic='coll1', name='Collection')
