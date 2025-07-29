@@ -310,23 +310,16 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             match_word_fields_map,
         ), fields
 
-    def get_faceted_criterion(self):
-        filters = self.get_faceted_filters()
+    def get_faceted_criterion(self, split=False, params=None, **kwargs):
+        filters = self.get_faceted_filters(split=split, params=params)
 
         def get_query(attr, val):
             not_query = val.startswith('!')
             vals = val.replace('!', '', 1).split(',')
-            query = Q('match', **{attr: vals.pop().strip('\"').strip('\'')})
-            criteria = ~query if not_query else query  # pylint: disable=invalid-unary-operand-type
-
-            for _val in vals:
-                query = Q('match', **{attr: _val.strip('\"').strip('\'')})
-                if not_query:
-                    criteria &= ~query  # pylint: disable=invalid-unary-operand-type
-                else:
-                    criteria |= query
-
-            return criteria
+            queries = [Q('match', **{attr: _val.strip('\"').strip('\'')}) for _val in vals]
+            if not_query:
+                return Q('bool', must=[~q for q in queries])
+            return Q('bool', should=queries, **kwargs)
 
         if filters:
             first_filter = filters.popitem()
@@ -336,10 +329,11 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
             return criterion
 
-    def get_faceted_filters(self, split=False):
+    def get_faceted_filters(self, split=False, params=None):
         faceted_filters = {}
         faceted_fields = self.get_faceted_fields()
-        query_params = {to_snake_case(k): v for k, v in self.request.query_params.dict().items()}
+        params = self.request.query_params.dict() if params is None else params
+        query_params = {to_snake_case(k): v for k, v in params.items()}
         for field in faceted_fields:
             if field in query_params:
                 query_value = query_params[field]

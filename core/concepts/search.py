@@ -1,5 +1,5 @@
 from elasticsearch_dsl import TermsFacet, Q
-from pydash import flatten, is_number, get, compact
+from pydash import flatten, is_number, compact
 
 from core.common.constants import FACET_SIZE, HEAD
 from core.common.search import CustomESFacetedSearch, CustomESSearch
@@ -93,11 +93,12 @@ class ConceptFuzzySearch:  # pragma: no cover
     @classmethod
     def search(  # pylint: disable=too-many-locals,too-many-arguments,too-many-branches,too-many-statements
             cls, data, repo_url, repo_params=None, include_retired=False,
-            is_semantic=False, num_candidates=5000, k_nearest=5, map_config=None
+            is_semantic=False, num_candidates=5000, k_nearest=5, map_config=None, additional_filter_criterion=None
     ):
         from core.concepts.documents import ConceptDocument
         map_config = map_config or []
-        filter_query = cls.get_filter_criteria(data, include_retired, repo_params, repo_url)
+        filter_query = cls.get_filter_criteria(
+            data, include_retired, repo_params, repo_url, additional_filter_criterion)
         or_clauses = []
 
         priority_criteria = []
@@ -119,14 +120,13 @@ class ConceptFuzzySearch:  # pragma: no cover
             if synonyms and not isinstance(synonyms, list):
                 synonyms = compact([synonyms])
             synonyms = synonyms or []
-            filters = get(filter_query.to_dict(), 'bool.must', [])
             def get_knn_query(_field, _value, _boost):
                 return {
                         "field": _field,
                         "query_vector": get_embeddings(_value),
                         "k": k_nearest,
                         "num_candidates": num_candidates,
-                        "filter": filters,
+                        "filter": filter_query,
                         "boost": _boost
                 }
             if name:
@@ -242,7 +242,7 @@ class ConceptFuzzySearch:  # pragma: no cover
         return mapped_codes
 
     @classmethod
-    def get_filter_criteria(cls, data, include_retired, repo_params, repo_url):
+    def get_filter_criteria(cls, data, include_retired, repo_params, repo_url, additional_filter_criterion=None):
         must_clauses = []
         repo_params = repo_params or cls.get_target_repo_params(repo_url)
         for field, value in repo_params.items():
@@ -253,6 +253,9 @@ class ConceptFuzzySearch:  # pragma: no cover
             value = data.get(field)
             if value:
                 must_clauses.append(Q('match', **{field: value}))
+
+        if additional_filter_criterion:
+            must_clauses.append(additional_filter_criterion)
 
         return Q("bool", must=must_clauses)
 

@@ -775,6 +775,7 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
     score_threshold_semantic_very_high = 1.64
     serializer_class = ConceptListSerializer
     permission_classes = (IsAuthenticatedOrReadOnly,)
+    es_fields = Concept.es_fields
 
     def get_serializer_class(self):
         if self.is_brief():
@@ -789,6 +790,7 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
         target_repo_url = self.request.data.get('target_repo_url')
         target_repo_params = self.request.data.get('target_repo')
         map_config = self.request.data.get('map_config', [])
+        filters = self.request.data.get('filter', {})
         include_retired = self.request.query_params.get(INCLUDE_RETIRED_PARAM) in get_truthy_values()
         num_candidates = min(to_int(self.request.query_params.get('numCandidates', 0), 5000), 5000)
         k_nearest = min(to_int(self.request.query_params.get('kNearest', 0), 5), 10)
@@ -808,15 +810,16 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
         if not repo_params:
             raise Http400(f'Unable to resolve "target_repo_url": "{target_repo_url}"')
 
+        faceted_criterion = self.get_faceted_criterion(False, filters, minimum_should_match=1) if filters else None
         for row in rows:
             search = ConceptFuzzySearch.search(
                 row, target_repo_url, repo_params, include_retired,
-                is_semantic, num_candidates, k_nearest, map_config
+                is_semantic, num_candidates, k_nearest, map_config, faceted_criterion
             )
             search = search.params(min_score=score_threshold if best_match else 0)
             es_search = CustomESSearch(search[start:end], ConceptDocument)
             es_search.to_queryset(False)
-            result = {'row': row, 'results': [], 'map_config': map_config}
+            result = {'row': row, 'results': [], 'map_config': map_config, 'filter': filters}
             for concept in es_search.queryset:
                 concept._highlight = es_search.highlights.get(concept.id, {})  # pylint:disable=protected-access
                 concept._score = es_search.scores.get(concept.id, {})  # pylint:disable=protected-access
