@@ -707,7 +707,7 @@ class CollectionReferencesViewTest(OCLAPITestCase):
             {'task_id': ANY}
         )
         self.assertTrue(
-            '-foobar~default' in add_references_mock.apply_async.call_args[1]['task_id'],
+            '-foobar~indexing' in add_references_mock.apply_async.call_args[1]['task_id'],
         )
         self.assertEqual(
             len(add_references_mock.apply_async.call_args[1]['task_id']), 36 + 1 + 7 + 1 + 6
