@@ -693,7 +693,7 @@ class CollectionReferencesViewTest(OCLAPITestCase):
                 'task': ANY,
                 'state': 'PENDING',
                 'name': 'add_references',
-                'queue': 'default',
+                'queue': 'indexing',
                 'username': 'foobar'
             }
         )
