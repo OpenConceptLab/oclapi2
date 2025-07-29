@@ -704,13 +704,13 @@ class CollectionReferencesViewTest(OCLAPITestCase):
         )
         self.assertEqual(
             add_references_mock.apply_async.call_args[1],
-            {'task_id': ANY}
+            {'task_id': ANY, 'queue': 'indexing'}
         )
         self.assertTrue(
             '-foobar~indexing' in add_references_mock.apply_async.call_args[1]['task_id'],
         )
         self.assertEqual(
-            len(add_references_mock.apply_async.call_args[1]['task_id']), 36 + 1 + 7 + 1 + 6
+            len(add_references_mock.apply_async.call_args[1]['task_id']), 36 + 1 + 7 + 1 + 7
         )
 
     def test_put_200_specific_expression(self):  # pylint: disable=too-many-statements
