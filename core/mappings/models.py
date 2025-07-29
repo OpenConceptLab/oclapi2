@@ -321,6 +321,8 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         to_source_url = data.get('to_source_url', None) or to_parent_uri(to_concept_url)
 
         def get_concept(expr):
+            if expr and not expr.endswith('/'):
+                expr = expr + '/'
             concept = Concept.objects.filter(
                 uri=expr).first() or Concept.objects.filter(uri=encode_string(expr, safe='/')).first()
 
