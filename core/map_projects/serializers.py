@@ -21,7 +21,7 @@ class MapProjectCreateUpdateSerializer(serializers.ModelSerializer):
             'id', 'name', 'input_file_name', 'matches', 'columns',
             'created_by', 'updated_by', 'created_at', 'updated_at', 'url', 'is_active',
             'public_access', 'file', 'user_id', 'organization_id', 'description',
-            'target_repo_url', 'matching_algorithm', 'include_retired'
+            'target_repo_url', 'matching_algorithm', 'include_retired', 'match_api_url', 'match_api_token'
         ]
 
     def prepare_object(self, validated_data, instance=None, file=None):
@@ -33,7 +33,10 @@ class MapProjectCreateUpdateSerializer(serializers.ModelSerializer):
         columns = validated_data.get('columns', False)
         if columns is not False:
             instance.columns = columns
-        for attr in ['name', 'description', 'extras', 'target_repo_url', 'matching_algorithm', 'include_retired']:
+        for attr in [
+            'name', 'description', 'extras', 'target_repo_url', 'matching_algorithm', 'include_retired',
+            'match_api_url', 'match_api_token'
+        ]:
             setattr(instance, attr, validated_data.get(attr, get(instance, attr)))
         if not instance.id:
             for attr in ['organization_id', 'user_id']:
@@ -85,7 +88,8 @@ class MapProjectSerializer(serializers.ModelSerializer):
             'id', 'name', 'input_file_name',
             'created_by', 'updated_by', 'created_at', 'updated_at', 'url', 'is_active',
             'owner', 'owner_type', 'owner_url', 'public_access',
-            'target_repo_url', 'matching_algorithm', 'summary', 'logs', 'include_retired'
+            'target_repo_url', 'matching_algorithm', 'summary', 'logs', 'include_retired',
+            'match_api_url', 'match_api_token'
         ]
 
     def __init__(self, *args, **kwargs):

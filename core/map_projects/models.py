@@ -25,6 +25,8 @@ class MapProject(BaseModel):
     matching_algorithm = models.CharField(max_length=100, null=True, blank=True)
     include_retired = models.BooleanField(default=False)
     logs = models.JSONField(default=dict, null=True, blank=True)
+    match_api_url = models.TextField(null=True, blank=True)
+    match_api_token = models.TextField(null=True, blank=True)
 
     OBJECT_TYPE = 'MapProject'
     mnemonic_attr = 'id'
