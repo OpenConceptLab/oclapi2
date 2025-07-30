@@ -248,7 +248,7 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         if not self.properties:
             self.properties = []
             return
-        fields = {'code', 'uri', 'description', 'type'}
+        fields = {'code', 'uri', 'description', 'type', 'include_in_concept_summary'}
         allowed_types = {'code', 'Coding', 'string', 'integer', 'boolean', 'dateTime', 'decimal'}
         cleaned_properties = []
         # code: required string
