@@ -654,6 +654,10 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
         return self.__get_properties_from_extras_and_definitions(get(parent, 'properties') or [], summary=True)
 
+    @property
+    def filter_properties(self):
+        return get(self.get_parent_source_version(), 'filters') or []
+
     def get_parent_source_version(self):
         if self.is_versioned_object or self.is_latest_version:
             return self.parent

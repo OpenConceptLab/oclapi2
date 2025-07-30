@@ -170,10 +170,13 @@ class ConceptDocument(Document):
     def prepare_properties(instance):
         value = {}
 
-        properties = instance.summary_properties
-        for prop in properties:
-            value_key = list(set(prop.keys()) - {'code'})[0]
-            value[prop['code']] = prop[value_key]
+        filters = instance.filter_properties
+        properties = instance.properties
+        for _filter in filters:
+            prop = next((prop for prop in properties if prop['code'] == _filter['code']), None)
+            if prop:
+                value_key = list(set(prop.keys()) - {'code'})[0]
+                value[_filter['code']] = prop.get(value_key, None)
 
         return value
 
