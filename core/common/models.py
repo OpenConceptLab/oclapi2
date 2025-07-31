@@ -1040,7 +1040,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
             if namespace:
                 criteria &= models.Q(models.Q(user__uri=namespace) | models.Q(organization__uri=namespace))
         else:
-            criteria &= models.Q(uri=resolution_url)
+            criteria &= models.Q(uri=(resolution_url if resolution_url.endswith('/') else resolution_url + '/'))
 
         from core.repos.models import Repository
         return cls.resolve_repo(Repository.get(criteria), version, is_canonical, resolution_url), registry_entry
