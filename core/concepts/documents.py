@@ -15,6 +15,7 @@ class ConceptDocument(Document):
 
     id = fields.TextField(attr='mnemonic')
     id_lowercase = fields.KeywordField(attr='mnemonic', normalizer="lowercase")
+    id_raw = fields.KeywordField(attr='mnemonic')
     numeric_id = fields.LongField()
     name = fields.TextField()
     _name = fields.KeywordField()

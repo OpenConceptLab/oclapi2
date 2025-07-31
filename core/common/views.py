@@ -311,27 +311,47 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         ), fields
 
     def get_faceted_criterion(self, split=False, params=None, **kwargs):
-        filters = self.get_faceted_filters(split=split, params=params)
+        filters = self.get_faceted_filters(split=split, params=params, additional_fields=['id', 'id_raw'])
 
         def get_query(attr, val):
+            """
+                Constructs a dynamic Elasticsearch DSL query based on value modifiers:
+                - Supports `!` prefix for negation
+                - Supports `*` suffix for prefix/regex matching
+                - Supports multiple comma-separated values
+            """
+            prefix_query = val.endswith('*')
             not_query = val.startswith('!')
             vals = val.replace('!', '', 1).split(',')
-            queries = [Q('match', **{attr: _val.strip('\"').strip('\'')}) for _val in vals]
-            if not_query:
-                return Q('bool', must=[~q for q in queries])
-            return Q('bool', should=queries, **kwargs)
+            if prefix_query:
+                queries = [
+                    Q(
+                        'regexp',
+                        **{attr: {'value': _val.strip('\"').strip('\'')}}
+                    ) for _val in vals
+                ]
+            else:
+                queries = [
+                    Q(
+                        'match',
+                        **{attr: _val.strip('\"').strip('\'')}
+                    ) for _val in vals
+                ]
+
+            return Q('bool', must=[~q for q in queries]) if not_query else Q('bool', should=queries, **kwargs)
 
         if filters:
             first_filter = filters.popitem()
             criterion = get_query(first_filter[0], first_filter[1])
             for field, value in filters.items():
                 criterion &= get_query(field, value)
-
             return criterion
 
-    def get_faceted_filters(self, split=False, params=None):
+        return None
+
+    def get_faceted_filters(self, split=False, params=None, additional_fields=None):
         faceted_filters = {}
-        faceted_fields = self.get_faceted_fields()
+        faceted_fields = [*self.get_faceted_fields(), *(additional_fields or [])]
         params = self.request.query_params.dict() if params is None else params
         query_params = {to_snake_case(k): v for k, v in params.items()}
         for field in faceted_fields:
