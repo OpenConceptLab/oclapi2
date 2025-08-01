@@ -83,7 +83,7 @@ class ConceptDocument(Document):
 
     @staticmethod
     def get_match_phrase_attrs():
-        return ['_name']
+        return ['_name', '_synonyms', 'name', 'synonyms']
 
     @staticmethod
     def get_exact_match_attrs():
