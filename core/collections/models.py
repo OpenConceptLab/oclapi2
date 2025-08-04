@@ -672,17 +672,28 @@ class CollectionReference(models.Model):
             queryset = queryset.filter(mnemonic=decode_string(self.code))
             if self.resource_version:
                 queryset = queryset.filter(version=self.resource_version)
-        if self.cascade:
-            cascade_params = self.get_concept_cascade_params(system_version or valueset_versions[0])
-            for concept in queryset:
-                result = concept.cascade(**cascade_params)
-                queryset = Concept.objects.filter(
-                    id__in=list(queryset.union(result['concepts']).values_list('id', flat=True)))
-                mapping_queryset = Mapping.objects.filter(
-                    id__in=list(mapping_queryset.union(result['mappings']).values_list('id', flat=True)))
 
         if self.should_apply_filter():
             queryset = self.apply_filters(queryset, Concept)
+
+        if self.cascade:
+            cascade_params = self.get_concept_cascade_params(system_version or valueset_versions[0])
+            concept_ids = set()
+            mapping_ids = set()
+            traversed = []
+            for concept in queryset:
+                concept_uri = drop_version(concept.uri)
+                if concept_uri in traversed:
+                    continue
+                traversed.append(concept_uri)
+                result = concept.cascade(**cascade_params)
+                concept_ids.update(set(result['concepts'].values_list('id', flat=True)))
+                mapping_ids.update(set(result['mappings'].values_list('id', flat=True)))
+            concept_ids.update(set(queryset.values_list('id', flat=True)))
+            mapping_ids.update(set(mapping_queryset.values_list('id', flat=True)))
+            queryset = Concept.objects.filter(id__in=concept_ids)
+            mapping_queryset = Mapping.objects.filter(id__in=mapping_ids)
+
         if self.should_transform_to_latest_version():
             queryset = self.transform_to_latest_version(queryset, Concept)
             if self.code:
