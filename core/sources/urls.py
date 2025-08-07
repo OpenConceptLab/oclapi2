@@ -74,6 +74,16 @@ urlpatterns = [
         name='source-extras'
     ),
     path(
+        "<str:source>/properties/",
+        views.SourcePropertiesView.as_view(),
+        name='source-properties'
+    ),
+    path(
+        "<str:source>/filters/",
+        views.SourceFiltersView.as_view(),
+        name='source-filters'
+    ),
+    path(
         "<str:source>/<str:version>/",
         views.SourceVersionRetrieveUpdateDestroyView.as_view(),
         name='source-version-detail'
@@ -98,6 +108,16 @@ urlpatterns = [
         "<str:source>/<str:version>/extras/",
         views.SourceVersionExtrasView.as_view(),
         name='sourceversion-extras'
+    ),
+    path(
+        "<str:source>/<str:version>/properties/",
+        views.SourceVersionPropertiesView.as_view(),
+        name='sourceversion-properties'
+    ),
+    path(
+        "<str:source>/<str:version>/filters/",
+        views.SourceVersionFiltersView.as_view(),
+        name='sourceversion-filters'
     ),
     path(
         "<str:source>/<str:version>/concepts/",

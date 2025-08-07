@@ -133,6 +133,7 @@ class ConceptAbstractSerializer(AbstractResourceSerializer):
         request = get(kwargs, 'context.request')
         params = get(request, 'query_params')
         self.view_kwargs = get(kwargs, 'context.view.kwargs', {})
+        self.is_patch = kwargs.pop('is_patch', None)
 
         self.query_params = params.dict() if params else {}
         self.include_indirect_mappings = self.query_params.get(INCLUDE_INVERSE_MAPPINGS_PARAM) in TRUTHY
@@ -171,7 +172,7 @@ class ConceptAbstractSerializer(AbstractResourceSerializer):
                 self.fields.pop('summary', None)
             if not get(request, 'instance'):
                 self.fields.pop('references', None)
-            if get(params, 'onlyParentLess') not in TRUTHY:
+            if get(params, 'onlyParentLess') not in TRUTHY and get(params, 'onlyHierarchyRoot') not in TRUTHY:
                 self.fields.pop('has_children', None)
         except:  # pylint: disable=bare-except
             pass
@@ -275,6 +276,7 @@ class ConceptListSerializer(ConceptAbstractSerializer):
     version_updated_by = DateTimeField(source='updated_by.username', read_only=True)
     latest_source_version = CharField(
         source='latest_source_version.version', allow_null=True, allow_blank=True, read_only=True, required=False)
+    property = JSONField(source='summary_properties', read_only=True)
 
     class Meta:
         model = Concept
@@ -283,7 +285,7 @@ class ConceptListSerializer(ConceptAbstractSerializer):
             'owner', 'owner_type', 'owner_url', 'display_name', 'display_locale', 'version', 'update_comment',
             'locale', 'version_created_by', 'version_created_on', 'mappings', 'is_latest_version', 'versions_url',
             'version_url', 'extras', 'type', 'versioned_object_id', 'version_updated_on', 'version_updated_by',
-            'latest_source_version'
+            'latest_source_version', 'property'
         )
 
 
@@ -432,6 +434,7 @@ class ConceptDetailSerializer(ConceptAbstractSerializer):
     created_by = DateTimeField(source='created_by.username', read_only=True)
     latest_source_version = CharField(
         source='latest_source_version.version', allow_null=True, allow_blank=True, read_only=True, required=False)
+    property = JSONField(source='properties', read_only=True)
 
     class Meta:
         model = Concept
@@ -440,7 +443,7 @@ class ConceptDetailSerializer(ConceptAbstractSerializer):
             'owner', 'owner_type', 'owner_url', 'display_name', 'display_locale', 'names', 'descriptions',
             'created_on', 'updated_on', 'versions_url', 'version', 'extras', 'parent_id', 'type',
             'update_comment', 'version_url', 'updated_by', 'created_by',
-            'public_can_view', 'versioned_object_id', 'latest_source_version'
+            'public_can_view', 'versioned_object_id', 'latest_source_version', 'property'
         )
 
     def create(self, validated_data):
@@ -455,7 +458,7 @@ class ConceptDetailSerializer(ConceptAbstractSerializer):
     def update(self, instance, validated_data):
         errors = Concept.create_new_version_for(
             instance=instance, data=validated_data, user=self.context.get('request').user,
-            create_parent_version=self.create_parent_version
+            create_parent_version=self.create_parent_version, is_patch=self.is_patch
         )
         if errors:
             self._errors.update(errors)

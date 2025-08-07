@@ -27,6 +27,7 @@ from core.common.swagger_parameters import (
     cascade_levels_param, cascade_direction_param, cascade_view_hierarchy, return_map_types_param,
     omit_if_exists_in_param, equivalency_map_types_param, search_from_latest_repo_header)
 from core.common.tasks import delete_concept, make_hierarchy
+from core.common.throttling import ThrottleUtil
 from core.common.utils import to_parent_uri_from_kwargs, generate_temp_version, get_truthy_values, to_int
 from core.common.views import SourceChildCommonBaseView, SourceChildExtrasView, \
     SourceChildExtraRetrieveUpdateDestroyView, BaseAPIView
@@ -164,8 +165,12 @@ class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
                 'version' not in self.kwargs or get(self.kwargs, 'version') == HEAD
         )
         parent = get(self, 'parent_resource')
+        is_source_nested = 'source' in self.kwargs
+        only_hierarchy_root = self.request.query_params.get('onlyHierarchyRoot', False) in TRUTHY and is_source_nested
         if parent:
-            if parent.is_head:
+            if only_hierarchy_root:
+                queryset = Concept.objects.filter(id=parent.hierarchy_root_id).filter()
+            elif parent.is_head:
                 queryset = Concept.apply_attribute_based_filters(
                     parent.concepts_set, self.params).filter(is_active=True)
             else:
@@ -188,8 +193,7 @@ class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
 
         if is_latest_version:
             queryset = queryset.filter(id=F('versioned_object_id'))
-
-        if 'source' in self.kwargs and self.request.query_params.get('onlyParentLess', False) in TRUTHY:
+        if is_source_nested and self.request.query_params.get('onlyParentLess', False) in TRUTHY:
             queryset = queryset.filter(parent_concepts__isnull=True)
 
         if not self.is_brief():
@@ -338,6 +342,7 @@ class ConceptRetrieveUpdateDestroyView(ConceptBaseView, RetrieveAPIView, UpdateA
             return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
 
         self.object = self.get_object()
+        real_partial = kwargs.get('partial', False)
         partial = kwargs.pop('partial', True)
         self.parent_resource = self.object.parent
 
@@ -347,7 +352,8 @@ class ConceptRetrieveUpdateDestroyView(ConceptBaseView, RetrieveAPIView, UpdateA
                 status=status.HTTP_400_BAD_REQUEST
             )
         self.object = self.object.clone()
-        serializer = self.get_serializer(self.object, data=request.data, partial=partial)
+        serializer = self.get_serializer(
+            self.object, data=request.data, partial=partial, is_patch=real_partial)
         success_status_code = status.HTTP_200_OK
 
         if serializer.is_valid():
@@ -749,6 +755,9 @@ class ConceptExtraRetrieveUpdateDestroyView(SourceChildExtraRetrieveUpdateDestro
 class ConceptsHierarchyAmendAdminView(APIView):  # pragma: no cover
     swagger_schema = None
     permission_classes = (IsAdminUser, )
+
+    def get_throttles(self):
+        return ThrottleUtil.get_throttles_by_user_plan(self.request.user)
 
     @staticmethod
     def post(request):

@@ -16,7 +16,7 @@ class ConceptFacetedSearch(CustomESFacetedSearch):
         'description_types', 'id', 'synonyms', 'extras', 'updated_by'
     ]
 
-    facets = {
+    base_facets = {
         'datatype': TermsFacet(field='datatype', size=100),
         'conceptClass': TermsFacet(field='concept_class', size=100),
         'locale': TermsFacet(field='locale', size=100),
@@ -35,6 +35,24 @@ class ConceptFacetedSearch(CustomESFacetedSearch):
         'source_version': TermsFacet(field='source_version', size=FACET_SIZE),
         'collection_version': TermsFacet(field='collection_version', size=FACET_SIZE),
     }
+
+    def __init__(self, source=None, **kwargs):
+        facets = {**self.base_facets}
+        if source is not None:
+            facets = {
+                **facets,
+                **self.build_property_facets_from_source(source)
+            }
+        self.facets = facets
+        super().__init__(**kwargs)
+
+    @staticmethod
+    def build_property_facets_from_source(source):
+        return {
+            f"properties__{_filter['code']}": TermsFacet(field=f"properties.{_filter['code']}.keyword", size=FACET_SIZE)
+            for _filter in (source.filters or [])
+        }
+
 
 
 class ConceptFuzzySearch:  # pragma: no cover

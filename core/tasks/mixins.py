@@ -30,7 +30,7 @@ class TaskMixin:
             celery_task = None
             try:
                 celery_task = Task.new(queue, self.request.user, name=task_func.__name__)
-                task_func.apply_async(task_args, task_id=celery_task.id)
+                task_func.apply_async(task_args, task_id=celery_task.id, queue=queue)
             except AlreadyQueued:
                 if celery_task:
                     celery_task.delete()
@@ -38,7 +38,7 @@ class TaskMixin:
             if is_async:
                 return self.task_response(celery_task)
 
-            result = wait_until_task_complete(celery_task.id, 15)
+            result = wait_until_task_complete(celery_task.id, 25)
             if result == TASK_NOT_COMPLETED:
                 return self.task_response(celery_task)
 

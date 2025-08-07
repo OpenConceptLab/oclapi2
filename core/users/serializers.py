@@ -184,6 +184,7 @@ class UserDetailSerializer(AbstractResourceSerializer):
     pins = serializers.SerializerMethodField()
     followers = FollowerSerializer(many=True, read_only=True)
     following = FollowingSerializer(many=True, read_only=True)
+    rate_plan = serializers.CharField(source='api_rate_limit.rate_plan', read_only=True)
 
     class Meta:
         model = UserProfile
@@ -193,7 +194,7 @@ class UserDetailSerializer(AbstractResourceSerializer):
             'url', 'organizations_url', 'extras', 'sources_url', 'collections_url', 'website', 'last_login',
             'logo_url', 'subscribed_orgs', 'is_superuser', 'is_staff', 'first_name', 'last_name', 'verified',
             'verification_token', 'date_joined', 'auth_groups', 'status', 'deactivated_at',
-            'sources', 'collections', 'owned_orgs', 'bookmarks', 'pins', 'bio', 'followers', 'following'
+            'sources', 'collections', 'owned_orgs', 'bookmarks', 'pins', 'bio', 'followers', 'following', 'rate_plan'
         )
 
     def __init__(self, *args, **kwargs):

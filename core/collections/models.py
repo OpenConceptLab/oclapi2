@@ -30,7 +30,7 @@ from core.common.tasks import seed_children_to_expansion, batch_index_resources,
 from core.common.utils import drop_version, to_owner_uri, generate_temp_version, es_id_in, \
     get_resource_class_from_resource_name, to_snake_case, \
     es_to_pks, batch_qs, split_list_by_condition, decode_string, is_canonical_uri, encode_string, \
-    get_truthy_values, get_falsy_values, get_current_authorized_user
+    get_truthy_values, get_falsy_values, get_current_authorized_user, to_camel_case
 from core.concepts.constants import LOCALES_FULLY_SPECIFIED
 from core.concepts.models import Concept
 from core.mappings.models import Mapping
@@ -241,11 +241,16 @@ class Collection(DirtyFieldsMixin, ConceptContainerModel):
     @transaction.atomic
     def add_expressions(
             self, data, user, cascade=False, transform=False, _async=False):
+        references = self.parse_expressions(data, user, cascade, transform)
+        return self.add_references(references, user, _async)
+
+    @staticmethod
+    def parse_expressions(data, user, cascade=False, transform=False):
         parser = CollectionReferenceParser(data, transform, cascade, user)
         parser.parse()
         parser.to_reference_structure()
         references = parser.to_objects()
-        return self.add_references(references, user, _async)
+        return references
 
     def add_references(self, references, user=None, _async=False):
         errors = {}
@@ -667,17 +672,28 @@ class CollectionReference(models.Model):
             queryset = queryset.filter(mnemonic=decode_string(self.code))
             if self.resource_version:
                 queryset = queryset.filter(version=self.resource_version)
-        if self.cascade:
-            cascade_params = self.get_concept_cascade_params(system_version or valueset_versions[0])
-            for concept in queryset:
-                result = concept.cascade(**cascade_params)
-                queryset = Concept.objects.filter(
-                    id__in=list(queryset.union(result['concepts']).values_list('id', flat=True)))
-                mapping_queryset = Mapping.objects.filter(
-                    id__in=list(mapping_queryset.union(result['mappings']).values_list('id', flat=True)))
 
         if self.should_apply_filter():
             queryset = self.apply_filters(queryset, Concept)
+
+        if self.cascade:
+            cascade_params = self.get_concept_cascade_params(system_version or valueset_versions[0])
+            concept_ids = set()
+            mapping_ids = set()
+            traversed = []
+            for concept in queryset:
+                concept_uri = drop_version(concept.uri)
+                if concept_uri in traversed:
+                    continue
+                traversed.append(concept_uri)
+                result = concept.cascade(**cascade_params)
+                concept_ids.update(set(result['concepts'].values_list('id', flat=True)))
+                mapping_ids.update(set(result['mappings'].values_list('id', flat=True)))
+            concept_ids.update(set(queryset.values_list('id', flat=True)))
+            mapping_ids.update(set(mapping_queryset.values_list('id', flat=True)))
+            queryset = Concept.objects.filter(id__in=concept_ids)
+            mapping_queryset = Mapping.objects.filter(id__in=mapping_ids)
+
         if self.should_transform_to_latest_version():
             queryset = self.transform_to_latest_version(queryset, Concept)
             if self.code:
@@ -690,6 +706,8 @@ class CollectionReference(models.Model):
             queryset = Concept.objects.filter(id__in=queryset.values_list('versioned_object_id', flat=True))
             mapping_queryset = Mapping.objects.filter(
                 id__in=mapping_queryset.values_list('versioned_object_id', flat=True))
+        if queryset is None:
+            queryset = Concept.objects.none()
         return queryset, mapping_queryset
 
     def get_mappings(self, system_version=None):
@@ -711,6 +729,8 @@ class CollectionReference(models.Model):
                 mapping = queryset.first()
                 self.resource_version = mapping.version
                 self.expression = mapping.uri
+        if queryset is None:
+            queryset = Mapping.objects.none()
         return queryset
 
     @staticmethod
@@ -840,7 +860,10 @@ class CollectionReference(models.Model):
                             filter_def['property'] not in self.get_allowed_filter_properties()
                         )
                 ):
-                    continue
+                    if filter_def['property'] in self.get_allowed_filter_properties_but_need_case_switch():
+                        filter_def['property'] = to_snake_case(filter_def['property'])
+                    else:
+                        continue
                 val = filter_def['value']
                 if filter_def['property'] == 'q':
                     self._apply_search(search, val, document)
@@ -986,6 +1009,9 @@ class CollectionReference(models.Model):
         elif self.is_mapping:
             common = [*Mapping.es_fields.keys(), *common]
         return common
+
+    def get_allowed_filter_properties_but_need_case_switch(self):
+        return map(to_camel_case, self.get_allowed_filter_properties())
 
     @staticmethod
     def __is_valid_filter_schema(filter_def):

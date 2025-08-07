@@ -278,7 +278,7 @@ def write_export_file(
             logger.info(
                 f'{resource_name} has {total_references:d} references. Getting them in batches of {batch_size:d}...'
             )
-            reference_serializer_class = get_class('core.collections.serializers.CollectionReferenceSerializer')
+            reference_serializer_class = get_class('core.collections.serializers.CollectionReferenceDetailSerializer')
             for start in range(0, total_references, batch_size):
                 end = min(start + batch_size, total_references)
                 logger.info(f'Serializing references {start + 1:d} - {end:d}...')

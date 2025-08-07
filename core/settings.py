@@ -21,8 +21,6 @@ from sentence_transformers import SentenceTransformer
 
 from core import __version__
 
-# from elastic_transport import RequestsHttpNode
-# from elasticsearch import RequestsHttpConnection
 
 # Build paths inside the project like this: os.path.join(BASE_DIR, ...)
 
@@ -42,6 +40,12 @@ SECRET_KEY = '=q1%fd62$x!35xzzlc3lix3g!s&!2%-1d@5a=rm!n4lu74&6)p'
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.environ.get('DEBUG') == 'TRUE'
+ENV = os.environ.get('ENVIRONMENT', 'development')
+
+if not ENV or ENV in ['ci', 'dev', 'development']:
+    ENABLE_THROTTLING = False
+else:
+    ENABLE_THROTTLING = os.environ.get('ENABLE_THROTTLING', False) in ['true', 'True', 'TRUE', True]
 
 ALLOWED_HOSTS = ['*']
 
@@ -176,6 +180,16 @@ MIDDLEWARE = [
     'core.middlewares.middlewares.FhirMiddleware'
 ]
 
+if ENABLE_THROTTLING:
+    REST_FRAMEWORK['DEFAULT_THROTTLE_RATES'] = {
+        'guest_minute': '400/minute',
+        'guest_day': '10000/day',
+        'standard_minute': '500/minute',
+        'standard_day': '20000/day',
+    }
+    MIDDLEWARE = [*MIDDLEWARE, 'core.middlewares.middlewares.ThrottleHeadersMiddleware']
+
+
 ROOT_URLCONF = 'core.urls'
 
 TEMPLATES = [
@@ -225,12 +239,10 @@ if ES_USER and ES_PASSWORD:
 
 ELASTICSEARCH_DSL = {
     'default': {
-        # 'hosts': ES_HOSTS.split(',') if ES_HOSTS else [ES_HOST + ':' + ES_PORT],
         'hosts': [
             f"{ES_SCHEME}://{host}" for host in ES_HOSTS.split(',')
         ] if ES_HOSTS else [f'{ES_SCHEME}://{ES_HOST}:{ES_PORT}'],
         'http_auth': http_auth,
-        # 'use_ssl': ES_SCHEME == 'https',
         'verify_certs': ES_VERIFY_CERTS.lower() == 'true',
         'sniff_on_connection_fail': ES_ENABLE_SNIFFING,
         'sniff_on_start': ES_ENABLE_SNIFFING,
@@ -238,11 +250,9 @@ ELASTICSEARCH_DSL = {
         'sniff_timeout': 10,
         'max_retries': 3,
         'retry_on_timeout': True,
-        # 'connection_class': RequestsHttpNode  # Needed for verify_certs=False to work
     },
 }
 
-ENV = os.environ.get('ENVIRONMENT', 'development')
 CID_GENERATE = True
 CID_RESPONSE_HEADER = None
 if ENV and ENV not in ['ci', 'development']:

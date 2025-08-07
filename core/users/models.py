@@ -7,6 +7,7 @@ from django.contrib.contenttypes.fields import GenericForeignKey, GenericRelatio
 from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
 from django.db import models
+from pydash import get
 from rest_framework.authtoken.models import Token
 
 from core.common.mixins import SourceContainerMixin
@@ -40,6 +41,56 @@ class Follow(models.Model):
     @property
     def uri(self):
         return f"/users/{self.follower.username}/following/{self.id}/"
+
+
+class UserRateLimit(BaseModel):
+    STANDARD_PLAN = 'standard'
+    GUEST_PLAN = 'guest'
+
+    class Meta:
+        db_table = 'user_api_rate_limits'
+
+    RATE_PLANS = (
+        (STANDARD_PLAN, STANDARD_PLAN),
+        (GUEST_PLAN, GUEST_PLAN),
+    )
+
+    user = models.OneToOneField('users.UserProfile', on_delete=models.CASCADE, related_name='api_rate_limit')
+    rate_plan = models.CharField(choices=RATE_PLANS, max_length=100, default=STANDARD_PLAN)
+    public_access = None
+    uri = None
+    extras = None
+
+    @property
+    def is_standard(self):
+        return self.rate_plan == self.STANDARD_PLAN
+
+    @property
+    def is_guest(self):
+        return self.rate_plan == self.GUEST_PLAN
+
+    def clean(self):
+        if not self.rate_plan:
+            self.rate_plan = self.STANDARD_PLAN
+        super().clean()
+
+    @classmethod
+    def upsert(cls, user, rate_plan, updated_by):
+        self = get(user, 'api_rate_limit')
+        update = False
+        if not self:
+            self = cls(user=user, rate_plan=rate_plan, updated_by=updated_by, created_by=updated_by)
+            update = True
+        if rate_plan and self.rate_plan != rate_plan:
+            self.rate_plan = rate_plan
+            self.updated_by = updated_by
+            update = True
+        if update:
+            self.full_clean()
+            self.save()
+
+    def __repr__(self):
+        return f"{self.__class__}:{self.rate_plan}"
 
 
 class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin, ChecksumModel):
@@ -85,7 +136,6 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
     def events(self):
         from core.events.models import Event
         return Event.objects.filter(object_url=self.uri)
-
 
     def calculate_uri(self):
         return f"/users/{self.username}/"

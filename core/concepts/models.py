@@ -271,6 +271,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         'description_types': {'sortable': False, 'filterable': True, 'facet': True},
         'same_as_map_codes': {'sortable': False, 'filterable': True, 'facet': False, 'exact': True},
         'other_map_codes': {'sortable': False, 'filterable': True, 'facet': False, 'exact': True},
+        'properties': {'sortable': False, 'filterable': True, 'facet': True, 'exact': True},
     }
 
     @staticmethod
@@ -483,8 +484,8 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             versioned_object_id=self.versioned_object_id,
             _index=self._index
         )
-        concept_version.cloned_names = self.__clone_name_locales()
-        concept_version.cloned_descriptions = self.__clone_description_locales()
+        concept_version.cloned_names = self.clone_name_locales()
+        concept_version.cloned_descriptions = self.clone_description_locales()
         concept_version._parent_concepts = self.parent_concepts.all()  # pylint: disable=protected-access
 
         return concept_version
@@ -515,7 +516,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     @classmethod
     def create_new_version_for(
             cls, instance, data, user, create_parent_version=True, add_prev_version_children=True,
-            _hierarchy_processing=False
+            _hierarchy_processing=False, is_patch=False
     ):  # pylint: disable=too-many-arguments
         instance.id = None  # Clear id so it is persisted as a new object
         instance.version = data.get('version', None)
@@ -525,9 +526,16 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         instance.external_id = data.get('external_id', instance.external_id)
         instance.comment = data.get('update_comment') or data.get('comment')
         instance.retired = data.get('retired', instance.retired)
+        if is_patch:
+            prev = instance.versions.exclude(id=instance.id).filter(is_latest_version=True).first()
+            new_names = ConceptName.build(data.get('names', [])) if 'names' in data else (
+                prev.clone_name_locales())
+            new_descriptions = ConceptDescription.build(data.get('descriptions', [])) if 'descriptions' in data else (
+                prev.clone_description_locales())
+        else:
+            new_names = ConceptName.build(data.get('names', []))
+            new_descriptions = ConceptDescription.build(data.get('descriptions', []))
 
-        new_names = ConceptName.build(data.get('names', []))
-        new_descriptions = ConceptDescription.build(data.get('descriptions', []))
         has_parent_concept_uris_attr = 'parent_concept_urls' in data
         parent_concept_uris = data.pop('parent_concept_urls', None)
 
@@ -613,10 +621,10 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         self.names.all().delete()
         self.descriptions.all().delete()
 
-    def __clone_name_locales(self):
+    def clone_name_locales(self):
         return self.__clone_locales(self.names)
 
-    def __clone_description_locales(self):
+    def clone_description_locales(self):
         return self.__clone_locales(self.descriptions)
 
     @staticmethod
@@ -625,6 +633,51 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
     def is_existing_in_parent(self):
         return self.parent.concepts_set.filter(mnemonic__exact=self.mnemonic).exists()
+
+    @property
+    def latest_source_version(self):
+        return self.sources.exclude(version=HEAD).order_by('-created_at').first()
+
+    def get_source_version_before_creation(self):
+        return self.sources.exclude(version=HEAD).filter(
+            created_at__lte=self.created_at).order_by('-created_at').first()
+
+    @property
+    def properties(self):
+        parent = self.get_parent_source_version()
+
+        return self.__get_properties_from_extras_and_definitions(get(parent, 'properties') or [])
+
+    @property
+    def summary_properties(self):
+        parent = self.get_parent_source_version()
+
+        return self.__get_properties_from_extras_and_definitions(get(parent, 'properties') or [], summary=True)
+
+    @property
+    def filter_properties(self):
+        return get(self.get_parent_source_version(), 'filters') or []
+
+    def get_parent_source_version(self):
+        if self.is_versioned_object or self.is_latest_version:
+            return self.parent
+
+        return self.latest_source_version or self.get_source_version_before_creation()
+
+    def __get_properties_from_extras_and_definitions(self, definitions, summary=False):
+        extras = self.extras or {}
+        result = []
+        for prop in definitions:
+            if summary and not prop.get('include_in_concept_summary'):
+                continue
+            code = prop['code']
+            if code not in extras and code.lower() in ['concept_class', 'class', 'conceptclass', 'datatype']:
+                value = self.datatype if code.lower() == 'datatype' else self.concept_class
+            else:
+                value = get(extras, code)
+            value_key = f"value{(prop['type'] or '').title()}"
+            result.append({'code': code, value_key: value})
+        return result
 
     def save_cloned(self):
         try:

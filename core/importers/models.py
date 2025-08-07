@@ -137,7 +137,7 @@ class BaseResourceImporter:
         return self.mandatory_fields.issubset(self.data.keys())
 
     def get_owner_type(self):
-        return self.get('owner_type', '').lower()
+        return (self.get('owner_type', '') or '').lower()
 
     def is_user_owner(self):
         return self.get_owner_type() == 'user'
@@ -228,7 +228,7 @@ class SourceImporter(BaseResourceImporter):
         "public_access", "default_locale", "supported_locales", "website", "extras", "external_id",
         'canonical_url', 'identifier', 'contact', 'jurisdiction', 'publisher', 'purpose', 'copyright',
         'revision_date', 'text', 'content_type', 'experimental', 'case_sensitive', 'collection_reference',
-        'hierarchy_meaning', 'compositional', 'version_needed', 'meta',
+        'hierarchy_meaning', 'compositional', 'version_needed', 'meta', 'properties', 'filters'
     ]
 
     @staticmethod
@@ -454,8 +454,10 @@ class ConceptImporter(BaseResourceImporter):
 
     def process(self):
         parent = self.data.get('parent')
+        errors = {}
         if not parent:
-            return FAILED
+            errors['source'] = 'Not Found'
+            return errors
         if parent.has_edit_access(self.user):
             if self.version:
                 self.instance = self.get_queryset().first().clone()
@@ -476,7 +478,7 @@ class ConceptImporter(BaseResourceImporter):
                 data={**self.data, '_counted': None, '_index': False}, user=self.user, create_parent_version=False)
             if self.instance.id:
                 return CREATED
-            return self.instance.errors or FAILED
+            return self.instance.errors or errors or FAILED
 
         return PERMISSION_DENIED
 
@@ -598,8 +600,10 @@ class MappingImporter(BaseResourceImporter):
 
     def process(self):
         parent = self.data.get('parent')
+        errors = {}
         if not parent:
-            return FAILED
+            errors['source'] = 'Not Found'
+            return errors
         if parent.has_edit_access(self.user):
             if self.version:
                 queryset = self.get_queryset()
@@ -618,7 +622,7 @@ class MappingImporter(BaseResourceImporter):
             self.instance = Mapping.persist_new({**self.data, '_counted': None, '_index': False}, self.user)
             if self.instance.id:
                 return CREATED
-            return self.instance.errors or FAILED
+            return self.instance.errors or errors or FAILED
 
         return PERMISSION_DENIED
 
@@ -888,8 +892,7 @@ class BulkImportInline(BaseImporter):
             for chunk in chunks(list(set(new_mapping_ids)), 5000):
                 batch_index_resources.apply_async(
                     ('mapping', {'id__in': chunk}, True), queue='indexing', permanent=False)
-
-        self.elapsed_seconds = time.time() - self.start_time
+        self.elapsed_seconds = round(time.time() - self.start_time, 4)
 
         self.make_result()
 
@@ -1114,7 +1117,7 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
                     if is_child:
                         if part_type not in self.resource_wise_time:
                             self.resource_wise_time[part_type] = 0
-                        self.resource_wise_time[part_type] += (time.time() - start_time)
+                        self.resource_wise_time[part_type] += round(time.time() - start_time, 4)
 
         post_import_update_resource_counts.apply_async(queue='default', permanent=False)
 
@@ -1125,17 +1128,27 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
         return self.result
 
     def update_elapsed_seconds(self):
-        self.elapsed_seconds = time.time() - self.start_time
+        self.elapsed_seconds = round(time.time() - self.start_time, 4)
 
     @property
     def detailed_summary(self):
         result = self.json_result
-        return f"Started: {self.start_time_formatted} | Processed: {result.get('processed')}/{result.get('total')} | " \
-            f"Created: {len(result.get('created'))} | Updated: {len(result.get('updated'))} | " \
-            f"Deleted: {len(result.get('deleted'))} | Existing: {len(result.get('exists'))} | " \
-            f"Permission Denied: {len(result.get('permission_denied'))} | " \
-            f"Unchanged: {len(result.get('unchanged'))} | " \
-            f"Time: {self.elapsed_seconds}secs"
+        message = f"Started: {self.start_time_formatted} | Processed: {result.get('processed')}/{result.get('total')}"
+        if len(result.get('created')):
+            message += f" | Created: {len(result.get('created'))}"
+        if len(result.get('updated')):
+            message += f" | Updated: {len(result.get('updated'))}"
+        if len(result.get('deleted')):
+            message += f" | Deleted: {len(result.get('deleted'))}"
+        if len(result.get('exists')):
+            message += f" | Existing: {len(result.get('exists'))}"
+        if len(result.get('permission_denied')):
+            message += f" | Permission Denied: {len(result.get('permission_denied'))}"
+        if len(result.get('unchanged')):
+            message += f" | Unchanged: {len(result.get('unchanged'))}"
+        message += f" | Time: {self.elapsed_seconds}secs"
+
+        return message
 
     @property
     def start_time_formatted(self):

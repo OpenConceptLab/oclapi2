@@ -15,6 +15,7 @@ from core.common.mixins import ListWithHeadersMixin
 from core.common.permissions import HasPrivateAccess, CanViewConceptDictionary
 from core.common.swagger_parameters import org_no_members_param
 from core.common.tasks import delete_organization
+from core.common.throttling import ThrottleUtil
 from core.common.utils import parse_updated_since_param, get_truthy_values
 from core.common.views import BaseAPIView, BaseLogoView
 from core.map_projects.views import MapProjectListView
@@ -185,6 +186,9 @@ class OrganizationMemberView(generics.GenericAPIView):
     user_in_org = False
     serializer_class = UserDetailSerializer
 
+    def get_throttles(self):
+        return ThrottleUtil.get_throttles_by_user_plan(self.request.user)
+
     def initial(self, request, *args, **kwargs):
         org_id = kwargs.pop('org')
         self.organization = Organization.objects.filter(mnemonic=org_id).first()
@@ -270,6 +274,9 @@ class OrganizationMapProjectListView(OrganizationResourceAbstractListView, MapPr
 
 
 class OrganizationExtrasBaseView(APIView):
+    def get_throttles(self):
+        return ThrottleUtil.get_throttles_by_user_plan(self.request.user)
+
     def get_object(self):
         instance = Organization.objects.filter(is_active=True, mnemonic=self.kwargs['org']).first()
 

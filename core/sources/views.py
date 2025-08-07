@@ -353,6 +353,7 @@ class SourceMappingsIndexView(SourceBaseView):
 
 class SourceConceptsCloneView(SourceBaseView):
     serializer_class = BundleSerializer
+    permission_classes = (CanEditConceptDictionary, )
 
     def post(self, request, **kwargs):  # pylint: disable=unused-argument, too-many-locals
         """
@@ -461,12 +462,42 @@ class SourceExtrasView(SourceExtrasBaseView, ListAPIView):
         return Response(get(self.get_object(), 'extras', {}))
 
 
+class SourcePropertiesView(SourceExtrasBaseView, ListAPIView):
+    serializer_class = SourceDetailSerializer
+
+    def list(self, request, *args, **kwargs):
+        return Response(get(self.get_object(), 'properties', []))
+
+
+class SourceFiltersView(SourceExtrasBaseView, ListAPIView):
+    serializer_class = SourceDetailSerializer
+
+    def list(self, request, *args, **kwargs):
+        return Response(get(self.get_object(), 'filters', []))
+
+
 class SourceVersionExtrasView(SourceBaseView, ListAPIView):
     serializer_class = SourceDetailSerializer
 
     def list(self, request, *args, **kwargs):
         instance = get_object_or_404(self.get_queryset(), version=decode_string(self.kwargs['version']))
         return Response(get(instance, 'extras', {}))
+
+
+class SourceVersionPropertiesView(SourceBaseView, ListAPIView):
+    serializer_class = SourceDetailSerializer
+
+    def list(self, request, *args, **kwargs):
+        instance = get_object_or_404(self.get_queryset(), version=decode_string(self.kwargs['version']))
+        return Response(get(instance, 'properties', []))
+
+
+class SourceVersionFiltersView(SourceBaseView, ListAPIView):
+    serializer_class = SourceDetailSerializer
+
+    def list(self, request, *args, **kwargs):
+        instance = get_object_or_404(self.get_queryset(), version=decode_string(self.kwargs['version']))
+        return Response(get(instance, 'filters', []))
 
 
 class SourceVersionResourcesChecksumGenerateView(SourceBaseView, TaskMixin):  # pragma: no cover
@@ -622,6 +653,8 @@ class AbstractSourceVersionsDiffView(BaseAPIView, TaskMixin):
         version2_uri = self.request.data.get('version2')  # newer version
         version1 = get_object_or_404(Source.objects.filter(uri=version1_uri))
         version2 = get_object_or_404(Source.objects.filter(uri=version2_uri))
+        if version1.created_at > version2.created_at:
+            raise Http400('version1 must be older than version2')
         self.check_object_permissions(self.request, version1)
         self.check_object_permissions(self.request, version2)
         return version1, version2
@@ -634,10 +667,15 @@ class AbstractSourceVersionsDiffView(BaseAPIView, TaskMixin):
 
     def post(self, _):
         version1, version2 = self.get_objects()
+        ignore_cache = bool(version1.is_head or version2.is_head)
         result = self.perform_task(
-            source_version_compare, (version1.uri, version2.uri, self.changelog, self.get_verbosity()))
+            source_version_compare,
+            (version1.uri, version2.uri, self.changelog, self.get_verbosity(), ignore_cache)
+        )
+
         if isinstance(result, Response):
             return result
+
         return Response(result)
 
 

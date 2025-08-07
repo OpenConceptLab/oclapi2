@@ -97,17 +97,22 @@ urlpatterns = [
         name='collection-references'
     ),
     path(
-        '<str:collection>/references/<str:reference>/',
+        '<str:collection>/references/preview/',
+        views.CollectionReferencesPreview.as_view(),
+        name='collection-references-preview'
+    ),
+    path(
+        '<str:collection>/references/<int:reference>/',
         views.CollectionReferenceView.as_view(),
         name='collection-reference'
     ),
     path(
-        '<str:collection>/references/<str:reference>/concepts/',
+        '<str:collection>/references/<int:reference>/concepts/',
         views.CollectionReferenceConceptsView.as_view(),
         name='collection-reference-concepts-list'
     ),
     path(
-        '<str:collection>/references/<str:reference>/mappings/',
+        '<str:collection>/references/<int:reference>/mappings/',
         views.CollectionReferenceMappingsView.as_view(),
         name='collection-reference-mappings-list'
     ),

@@ -11,6 +11,7 @@ class RepoListSerializer(serializers.Serializer):  # pylint: disable=abstract-me
         data = self.get_data(instance)
         if self.context.get('url_registry_entry', None):
             data['url_registry_entry'] = self.context['url_registry_entry'].relative_uri
+        data['repo_type'] = instance.resource_type
         return data
 
     def get_data(self, item):

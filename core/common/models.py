@@ -3,6 +3,7 @@ from celery_once import AlreadyQueued
 from django.conf import settings
 from django.contrib.contenttypes.fields import GenericRelation
 from django.contrib.postgres.fields import ArrayField
+from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
 from django.core.validators import RegexValidator
@@ -591,8 +592,29 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
             delete_s3_objects.apply_async((export_path,), queue='default', permanent=False)
         self.post_delete_actions()
 
+    def get_concepts_cache_keys(self):
+        return self.__get_resources_cache_keys('concepts')
+
+    def get_mappings_cache_keys(self):
+        return self.__get_resources_cache_keys('mappings')
+
+    def __get_resources_cache_keys(self, resources):
+        return f'repo_cache:body:{self.uri}{resources}/', f'repo_cache:headers:{self.uri}{resources}/'
+
     def post_delete_actions(self):
-        pass
+        return self.__clear_cache()
+
+    def __clear_cache(self):
+        try:
+            concepts_body_key, concepts_headers_key = self.get_concepts_cache_keys()
+            mappings_body_key, mappings_headers_key = self.get_mappings_cache_keys()
+            return cache.client.get_client().delete(*[
+                cache.make_key(key) for key in [
+                    concepts_body_key, mappings_body_key, concepts_headers_key, mappings_headers_key
+                ]
+            ])
+        except:  # pylint: disable=bare-except
+            return False
 
     def delete_pins(self):
         if self.is_head:
@@ -783,6 +805,8 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
         except IntegrityError as ex:
             errors.update({'__all__': ex.args})
+        except AlreadyQueued as ex:
+            errors.update({'__all__': 'Already Queued'})
 
         return errors
 
@@ -1010,7 +1034,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
             if namespace:
                 criteria &= models.Q(models.Q(user__uri=namespace) | models.Q(organization__uri=namespace))
         else:
-            criteria &= models.Q(uri=resolution_url)
+            criteria &= models.Q(uri=(resolution_url if resolution_url.endswith('/') else resolution_url + '/'))
 
         from core.repos.models import Repository
         return cls.resolve_repo(Repository.get(criteria), version, is_canonical, resolution_url), registry_entry
@@ -1142,14 +1166,14 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
     def get_concept_facets(self, filters=None):
         from core.concepts.search import ConceptFacetedSearch
-        return self._get_resource_facets(ConceptFacetedSearch, filters)
+        return self._get_resource_facets(ConceptFacetedSearch, filters, source=self)
 
     def get_mapping_facets(self, filters=None):
         from core.mappings.search import MappingFacetedSearch
         return self._get_resource_facets(MappingFacetedSearch, filters)
 
-    def _get_resource_facets(self, facet_class, filters=None):
-        search = facet_class('', filters=self._get_resource_facet_filters(filters))
+    def _get_resource_facets(self, facet_class, filters=None, **kwargs):
+        search = facet_class(query='', filters=self._get_resource_facet_filters(filters), **kwargs)
         search.params(request_timeout=ES_REQUEST_TIMEOUT)
         try:
             facets = search.execute().facets

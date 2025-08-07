@@ -18,7 +18,7 @@ from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
 
 
-class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
+class ConceptRetrieveUpdateDestroyViewTest(OCLAPITestCase):
     def setUp(self):
         self.organization = Organization.objects.first()
         self.user = UserProfile.objects.filter(is_superuser=True).first()
@@ -100,6 +100,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
                 'created_by',
                 'public_can_view',
                 'checksums',
+                'property',
                 'versioned_object_id',
                 'latest_source_version'
             ])
@@ -157,7 +158,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
             ['datatype']
         )
 
-    def test_put_200(self):
+    def test_put_200(self):  # pylint: disable=too-many-statements
         concept = ConceptFactory(parent=self.source)
         self.assertEqual(concept.versions.count(), 1)
         concepts_url = f"/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}/concepts/{concept.mnemonic}/"
@@ -199,6 +200,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
                     'created_by',
                     'public_can_view',
                     'checksums',
+                    'property',
                     'latest_source_version',
                     'versioned_object_id'])
         )
@@ -245,6 +247,78 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
             }
         )
 
+        response = self.client.put(
+            concepts_url,
+            {'datatype': 'N/A', 'update_comment': 'Updated datatype only'},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data, {'names': ['A concept must have at least one name']})
+
+        response = self.client.patch(
+            concepts_url,
+            {'datatype': 'N/A', 'update_comment': 'Updated datatype only'},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertListEqual(
+            sorted(list(response.data.keys())),
+            sorted(['uuid',
+                    'id',
+                    'external_id',
+                    'concept_class',
+                    'datatype',
+                    'url',
+                    'retired',
+                    'source',
+                    'owner',
+                    'owner_type',
+                    'owner_url',
+                    'display_name',
+                    'display_locale',
+                    'names',
+                    'descriptions',
+                    'created_on',
+                    'updated_on',
+                    'versions_url',
+                    'version',
+                    'extras',
+                    'type',
+                    'update_comment',
+                    'version_url',
+                    'updated_by',
+                    'created_by',
+                    'public_can_view',
+                    'checksums',
+                    'property',
+                    'latest_source_version',
+                    'versioned_object_id'])
+        )
+        version = Concept.objects.last()
+        prev_version = version.prev_version
+        concept.refresh_from_db()
+
+        self.assertFalse(version.is_versioned_object)
+        self.assertTrue(version.is_latest_version)
+        self.assertEqual(version.versions.count(), 3)
+        self.assertEqual(response.data['uuid'], str(version.id))
+        self.assertEqual(response.data['datatype'], 'N/A')
+        self.assertEqual(response.data['update_comment'], 'Updated datatype only')
+        self.assertEqual(response.data['concept_class'], prev_version.concept_class)
+        self.assertEqual(response.data['url'], concept.uri)
+        self.assertEqual(response.data['url'], version.versioned_object.uri)
+        self.assertEqual(response.data['version_url'], version.uri)
+        self.assertFalse(response.data['retired'])
+        self.assertEqual(response.data['source'], self.source.mnemonic)
+        self.assertEqual(response.data['owner'], self.organization.mnemonic)
+        self.assertEqual(response.data['owner_type'], "Organization")
+        self.assertEqual(response.data['owner_url'], self.organization.uri)
+        self.assertEqual(response.data['display_name'], prev_version.display_name)
+        self.assertEqual(concept.datatype, "N/A")
+
+
     def test_put_200_openmrs_schema(self):  # pylint: disable=too-many-statements
         self.create_lookup_concept_classes()
         source = OrganizationSourceFactory(custom_validation_schema=OPENMRS_VALIDATION_SCHEMA)
@@ -288,6 +362,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
                     'created_by',
                     'public_can_view',
                     'checksums',
+                    'property',
                     'latest_source_version',
                     'versioned_object_id'])
         )
@@ -711,7 +786,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
                     'owner', 'owner_type', 'owner_url', 'display_name', 'display_locale', 'version', 'update_comment',
                     'locale', 'version_created_by', 'version_created_on', 'is_latest_version', 'latest_source_version',
                     'versions_url', 'version_url', 'type', 'versioned_object_id',
-                    'version_updated_on', 'version_updated_by', 'checksums'])
+                    'version_updated_on', 'version_updated_by', 'checksums', 'property'])
         )
 
         response = self.client.get(
@@ -726,7 +801,7 @@ class ConceptCreateUpdateDestroyViewTest(OCLAPITestCase):
                     'owner', 'owner_type', 'owner_url', 'display_name', 'display_locale', 'names', 'descriptions',
                     'created_on', 'updated_on', 'versions_url', 'version', 'extras', 'type', 'latest_source_version',
                     'update_comment', 'version_url', 'updated_by', 'created_by',
-                    'public_can_view', 'versioned_object_id', 'checksums'])
+                    'public_can_view', 'versioned_object_id', 'checksums', 'property'])
         )
 
         response = self.client.get(

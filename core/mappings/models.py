@@ -321,6 +321,8 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         to_source_url = data.get('to_source_url', None) or to_parent_uri(to_concept_url)
 
         def get_concept(expr):
+            if expr and not expr.endswith('/'):
+                expr = expr + '/'
             concept = Concept.objects.filter(
                 uri=expr).first() or Concept.objects.filter(uri=encode_string(expr, safe='/')).first()
 
@@ -424,6 +426,8 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
             self.errors.update(get(ex, 'message_dict', {}) or get(ex, 'error_dict', {}))
         except IntegrityError as ex:
             self.errors.update({'__all__': ex.args})
+        except Exception as ex:  # pylint: disable=broad-except
+            self.errors.update({'__all__': str(ex)})
 
     def index_from_concept(self):
         if self.from_concept_id:

@@ -40,6 +40,7 @@ class ConceptDocument(Document):
     is_latest_version = fields.KeywordField(attr='is_latest_version')
     is_in_latest_source_version = fields.KeywordField(attr='is_in_latest_source_version')
     extras = fields.ObjectField(dynamic=True)
+    properties = fields.ObjectField(dynamic=True)
     created_by = fields.KeywordField(attr='created_by.username')
     name_types = fields.ListField(fields.KeywordField())
     description_types = fields.ListField(fields.KeywordField())
@@ -194,6 +195,20 @@ class ConceptDocument(Document):
                 value = flatten_dict(value)
 
         return value or {}
+
+    @staticmethod
+    def prepare_properties(instance):
+        value = {}
+
+        filters = instance.filter_properties
+        properties = instance.properties
+        for _filter in filters:
+            prop = next((prop for prop in properties if prop['code'] == _filter['code']), None)
+            if prop:
+                value_key = list(set(prop.keys()) - {'code'})[0]
+                value[_filter['code']] = prop.get(value_key, None)
+
+        return value
 
     @staticmethod
     def prepare_name_types(instance):

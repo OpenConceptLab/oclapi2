@@ -31,6 +31,7 @@ from core.common.mixins import PathWalkerMixin
 from core.common.search import CustomESSearch
 from core.common.serializers import RootSerializer
 from core.common.swagger_parameters import all_resource_query_param
+from core.common.throttling import ThrottleUtil
 from core.common.utils import compact_dict_by_values, to_snake_case, parse_updated_since_param, \
     to_int, get_falsy_values, get_truthy_values, format_url_for_search
 from core.concepts.permissions import CanViewParentDictionary, CanEditParentDictionary
@@ -59,6 +60,9 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     default_qs_sort_attr = '-updated_at'
     facet_class = None
     total_count = 0
+
+    def get_throttles(self):
+        return ThrottleUtil.get_throttles_by_user_plan(self.request.user)
 
     def has_no_kwargs(self):
         return len(self.kwargs.values()) == 0
@@ -355,6 +359,12 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         params = self.request.query_params.dict() if params is None else params
         query_params = {to_snake_case(k): v for k, v in params.items()}
         for field in faceted_fields:
+            if field == 'properties':
+                property_facets = {
+                    key: val.split(',') if split else val for key, val in query_params.items() if
+                    key.startswith('properties__') and val
+                }
+                faceted_filters = {**faceted_filters, **property_facets}
             if field in query_params:
                 query_value = query_params[field]
                 faceted_filters[field] = query_value.split(',') if split else query_value
@@ -458,10 +468,17 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             if self.is_user_document():
                 return facets
 
-            faceted_search = self.facet_class(  # pylint: disable=not-callable
-                self.get_search_string(lower=False),
-                _search=self.__get_search_results(ignore_retired_filter=True, sort=False, highlight=False, force=True),
-            )
+            parent = get(
+                self, 'parent_resource'
+            ) if 'source' in self.kwargs and self.is_concept_document() else None
+            facet_kwargs = {
+                'query': self.get_search_string(lower=False),
+                '_search': self.__get_search_results(
+                    ignore_retired_filter=True, sort=False, highlight=False, force=True)
+            }
+            if parent:
+                facet_kwargs['source'] = parent
+            faceted_search = self.facet_class(**facet_kwargs)  # pylint: disable=not-callable
             faceted_search.params(request_timeout=ES_REQUEST_TIMEOUT)
             try:
                 s = faceted_search.execute()
@@ -855,11 +872,29 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             source_versions, other_filters
         ).get_aggregations(self.is_verbose(), self.is_raw())
 
-    def should_perform_es_search(self):
+    def is_repo_version_children_request(self):
         if self.is_source_child_document_model() and self.kwargs and 'source' in self.kwargs:
             parent = get(self, 'parent_resource')
             if parent and not parent.is_head:
                 return True
+        return False
+
+    def is_repo_version_children_request_without_any_search(self):
+        # used for caching repo versions concepts/mappings first page
+        if self.is_repo_version_children_request() and not self.get_search_string() and not self.is_verbose():
+            page = self.request.query_params.dict().get('page', '').strip()
+            sort = self.request.query_params.dict().get('sortDesc', '').strip()
+            limit = self.request.query_params.dict().get('limit', '').strip()
+            if limit:
+                limit = to_int(limit, 25)
+            return bool(
+                (not limit or limit == 25) and (not page or page in [1, '1']) and (not sort or sort == '_score')
+            )
+        return False
+
+    def should_perform_es_search(self):
+        if self.is_repo_version_children_request() and self.request.query_params.get('onlyHierarchyRoot') not in TRUTHY:
+            return True
         sort_field, _ = self.get_sort_and_desc()
         return (
                 self.is_only_searchable or
@@ -950,6 +985,9 @@ class SourceChildCommonBaseView(BaseAPIView):
 class SourceChildExtrasBaseView:
     default_qs_sort_attr = '-created_at'
 
+    def get_throttles(self):
+        return ThrottleUtil.get_throttles_by_user_plan(self.request.user)
+
     def get_object(self):
         queryset = self.get_queryset()
 
@@ -1017,6 +1055,9 @@ class APIVersionView(APIView):  # pragma: no cover
     permission_classes = (AllowAny,)
     swagger_schema = None
 
+    def get_throttles(self):
+        return []
+
     @staticmethod
     def get(_):
         return Response(__version__)
@@ -1025,6 +1066,9 @@ class APIVersionView(APIView):  # pragma: no cover
 class ChangeLogView(APIView):  # pragma: no cover
     permission_classes = (AllowAny, )
     swagger_schema = None
+
+    def get_throttles(self):
+        return []
 
     @staticmethod
     def get(_):
@@ -1035,6 +1079,9 @@ class ChangeLogView(APIView):  # pragma: no cover
 class RootView(BaseAPIView):  # pragma: no cover
     permission_classes = (AllowAny,)
     serializer_class = RootSerializer
+
+    def get_throttles(self):
+        return []
 
     def get(self, _):
         from core.urls import urlpatterns
@@ -1079,6 +1126,9 @@ class BaseLogoView:
 
 class FeedbackView(APIView):  # pragma: no cover
     permission_classes = (AllowAny, )
+
+    def get_throttles(self):
+        return ThrottleUtil.get_throttles_by_user_plan(self.request.user)
 
     @staticmethod
     @swagger_auto_schema(request_body=openapi.Schema(
@@ -1177,6 +1227,9 @@ class ConceptContainerExtraRetrieveUpdateDestroyView(RetrieveUpdateDestroyAPIVie
 class AbstractChecksumView(APIView):
     permission_classes = (IsAuthenticated,)
     smart = False
+
+    def get_throttles(self):
+        return ThrottleUtil.get_throttles_by_user_plan(self.request.user)
 
     @swagger_auto_schema(
         manual_parameters=[all_resource_query_param],

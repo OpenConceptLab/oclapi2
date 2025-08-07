@@ -40,7 +40,7 @@ from core.collections.utils import is_version_specified
 from core.common.constants import (
     HEAD, RELEASED_PARAM, PROCESSING_PARAM, OK_MESSAGE,
     ACCESS_TYPE_NONE, INCLUDE_RETIRED_PARAM, INCLUDE_INVERSE_MAPPINGS_PARAM, ALL, LATEST)
-from core.common.exceptions import Http409, Http405
+from core.common.exceptions import Http409, Http405, Http400
 from core.common.mixins import (
     ConceptDictionaryCreateMixin, ListWithHeadersMixin, ConceptDictionaryUpdateMixin,
     ConceptContainerExportMixin,
@@ -55,6 +55,7 @@ from core.common.swagger_parameters import q_param, compress_header, page_param,
     canonical_url_param
 from core.common.tasks import add_references, export_collection, delete_collection, index_expansion_concepts, \
     index_expansion_mappings
+from core.common.throttling import ThrottleUtil
 from core.common.utils import compact_dict_by_values, parse_boolean_query_param
 from core.common.views import BaseAPIView, BaseLogoView, ConceptContainerExtraRetrieveUpdateDestroyView
 from core.concepts.documents import ConceptDocument
@@ -461,16 +462,20 @@ class CollectionReferencesView(
 
         return Response({'message': OK_MESSAGE}, status=status.HTTP_204_NO_CONTENT)
 
+    def get_data(self):
+        cascade = get(self.request, 'data.cascade', None) or self.request.query_params.get('cascade', '').lower()
+        transform = self.request.query_params.get('transformReferences', '').lower()
+        data = get(self.request.data, 'data')
+        if isinstance(data, dict) and all(not data.get(key) for key in data.keys() if key not in ['exclude']):
+            raise Http400()
+        return data, cascade, transform
+
     def update(self, request, *args, **kwargs):  # pylint: disable=too-many-locals,unused-argument # Fixme: Sny
         collection = self.get_object()
-        cascade = get(request, 'data.cascade', None) or self.request.query_params.get('cascade', '').lower()
-        transform = self.request.query_params.get('transformReferences', '').lower()
-        data = get(request.data, 'data')
-        if isinstance(data, dict) and all(not data.get(key) for key in data.keys() if key not in ['exclude']):
-            return Response(status=status.HTTP_400_BAD_REQUEST)
+        data, cascade, transform = self.get_data()
         task_args = (self.request.user.id, data, collection.id, cascade, transform)
 
-        result = self.perform_task(add_references, task_args)
+        result = self.perform_task(add_references, task_args, queue='indexing')
         if isinstance(result, Response):
             return result
         added_references_ids, errors = result
@@ -556,6 +561,54 @@ class CollectionReferencesView(
         if resource_type == 'mappings':
             return MAPPING_ADDED_TO_COLLECTION_FMT.format(resource_name, collection_name)
         return UNKNOWN_REFERENCE_ADDED_TO_COLLECTION_FMT.format(collection_name)
+
+
+class CollectionReferencesPreview(CollectionBaseView):
+    def get_serializer_class(self):
+        if self.is_verbose():
+            return CollectionReferenceDetailSerializer
+        return CollectionReferenceSerializer
+
+    def get_data(self):
+        cascade = get(self.request, 'data.cascade', None) or self.request.query_params.get('cascade', '').lower()
+        transform = self.request.query_params.get('transformReferences', '').lower()
+        data = get(self.request.data, 'data')
+        if isinstance(data, dict) and all(not data.get(key) for key in data.keys() if key not in ['exclude']):
+            raise Http400()
+        return data, cascade, transform
+
+    def get_preview(self):
+        from core.concepts.serializers import ConceptListSerializer
+        from core.mappings.serializers import MappingListSerializer
+
+        collection = self.get_object()
+        data, cascade, transform = self.get_data()
+        results = []
+        for reference in collection.parse_expressions(data, self.request.user, cascade, transform):
+            reference.expression = reference.build_expression()
+            for ref in CollectionReference.dedupe_by_expression(reference.generate_references()):
+                ref.collection = collection
+                ref.evaluate()
+                concepts = ref._concepts  # pylint: disable=protected-access
+                mappings = ref._mappings  # pylint: disable=protected-access
+                has_concepts = concepts.exists() if concepts is not None else False
+                has_mappings = mappings.exists() if mappings is not None else False
+                results.append(
+                    {
+                        'reference': ref.expression,
+                        'concepts': ConceptListSerializer(
+                            concepts.order_by('mnemonic')[:25], many=True).data if has_concepts else [],
+                        'mappings': MappingListSerializer(
+                            mappings.order_by('mnemonic')[:25], many=True).data if has_mappings else [],
+                        'concepts_count': concepts.count() if has_concepts else 0,
+                        'mappings_count': mappings.count() if has_mappings else 0,
+                        'exclude': not ref.include
+                    }
+                )
+        return Response(results)
+
+    def post(self, request, **kwargs):  # pylint: disable=unused-argument
+        return self.get_preview()
 
 
 class CollectionVersionReferencesView(CollectionVersionBaseView, ListWithHeadersMixin):
@@ -1102,6 +1155,9 @@ class CollectionClientConfigsView(CollectionBaseView, ResourceClientConfigsView)
 
 class ReferenceExpressionResolveView(APIView):
     serializer_class = ReferenceExpressionResolveSerializer
+
+    def get_throttles(self):
+        return ThrottleUtil.get_throttles_by_user_plan(self.request.user)
 
     def get_results(self):
         data = self.request.data
