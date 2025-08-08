@@ -769,11 +769,16 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
             errors['parent'] = SOURCE_PARENT_CANNOT_BE_NONE
 
         queue_schema_update_task = obj.is_validation_necessary()
+        original_repo = cls.objects.filter(id=obj.id).first()
+
         is_source = cls.__name__ == 'Source'
-        original_source = cls.objects.filter(id=obj.id).first()
-        should_reindex_resources = is_source and obj.released != original_source.released
-        obj._should_update_public_access = is_source and obj.public_access != original_source.public_access  # pylint: disable=protected-access
-        obj._should_update_is_active = is_source and obj.is_active != original_source.is_active  # pylint: disable=protected-access
+        should_reindex_resources = is_source and obj.released != original_repo.released
+        should_reindex_concepts_only = (
+            is_source and obj.has_semantic_match_algorithm != original_repo.has_semantic_match_algorithm
+        )
+
+        obj._should_update_public_access = is_source and obj.public_access != original_repo.public_access  # pylint: disable=protected-access
+        obj._should_update_is_active = is_source and obj.is_active != original_repo.is_active  # pylint: disable=protected-access
 
         try:
             obj.full_clean()
@@ -802,6 +807,8 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
                     obj.index_resources_for_self_as_latest_released()
                 else:
                     obj.index_resources_for_self_as_unreleased()
+            elif should_reindex_concepts_only:
+                obj.index_concepts_async(obj.updated_by)
 
         except IntegrityError as ex:
             errors.update({'__all__': ex.args})

@@ -88,7 +88,10 @@ class ConceptFuzzySearch:  # pragma: no cover
 
     @classmethod
     def get_target_repo_params(cls, repo_url):
-        repo = cls.get_target_repo(repo_url)
+        return cls.get_repo_params(cls.get_target_repo(repo_url))
+
+    @classmethod
+    def get_repo_params(cls, repo):
         if repo:
             return {
                 'owner': repo.parent.mnemonic,
@@ -260,7 +263,7 @@ class ConceptFuzzySearch:  # pragma: no cover
         return mapped_codes
 
     @classmethod
-    def get_filter_criteria(cls, data, include_retired, repo_params, repo_url, additional_filter_criterion=None):
+    def get_filter_criteria(cls, data, include_retired, repo_params, repo_url, additional_filter_criterion=None):  # pylint: disable=too-many-arguments
         must_clauses = []
         repo_params = repo_params or cls.get_target_repo_params(repo_url)
         for field, value in repo_params.items():

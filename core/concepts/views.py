@@ -798,28 +798,28 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
         rows = self.request.data.get('rows')
         target_repo_url = self.request.data.get('target_repo_url')
         target_repo_params = self.request.data.get('target_repo')
+
+        if not rows or (not target_repo_url and not target_repo_params):
+            raise Http400()
+
         map_config = self.request.data.get('map_config', [])
         filters = self.request.data.get('filter', {})
         include_retired = self.request.query_params.get(INCLUDE_RETIRED_PARAM) in get_truthy_values()
         num_candidates = min(to_int(self.request.query_params.get('numCandidates', 0), 5000), 5000)
         k_nearest = min(to_int(self.request.query_params.get('kNearest', 0), 5), 10)
-        if not rows or (not target_repo_url and not target_repo_params):
-            raise Http400()
         offset = max(to_int(self.request.GET.get('offset'), 0), 0)
         limit = max(to_int(self.request.GET.get('limit'), 0), 0) or self.default_limit
         page = max(to_int(self.request.GET.get('page'), 1), 1)
         start = offset or (page - 1) * limit
         end = start + limit
-        results = []
         is_semantic = self.request.query_params.get('semantic', None) in get_truthy_values() and Toggle.get(
             'SEMANTIC_SEARCH_TOGGLE')
         best_match = self.request.query_params.get('bestMatch', None) in get_truthy_values()
         score_threshold = self.score_threshold_semantic_very_high if is_semantic else self.score_threshold
-        repo_params = target_repo_params or ConceptFuzzySearch.get_target_repo_params(target_repo_url)
-        if not repo_params:
-            raise Http400(f'Unable to resolve "target_repo_url": "{target_repo_url}"')
-
+        repo_params = self.get_repo_params(is_semantic, target_repo_params, target_repo_url)
         faceted_criterion = self.get_faceted_criterion(False, filters, minimum_should_match=1) if filters else None
+
+        results = []
         for row in rows:
             search = ConceptFuzzySearch.search(
                 row, target_repo_url, repo_params, include_retired,
@@ -837,7 +837,7 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
                     concept._match_type = 'high'  # pylint:disable=protected-access
                     if concept._highlight.get('name', None):  # pylint:disable=protected-access
                         concept._match_type = 'very_high'  # pylint:disable=protected-access
-                    if is_semantic and concept._score > self.score_threshold_semantic_very_high:  # pylint:disable=protected-access,line-too-long
+                    if is_semantic and concept._score > self.score_threshold_semantic_very_high:  # pylint:disable=protected-access
                         concept._match_type = 'very_high'  # pylint:disable=protected-access
                 if not best_match or concept._match_type == 'very_high':  # pylint:disable=protected-access
                     serializer = ConceptDetailSerializer if self.is_verbose() else ConceptMinimalSerializer
@@ -849,6 +849,19 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
             results.append(result)
 
         return results
+
+    @staticmethod
+    def get_repo_params(is_semantic, target_repo_params, target_repo_url):
+        repo = ConceptFuzzySearch.get_target_repo(target_repo_url)
+        if not repo:
+            raise Http400(f'Unable to resolve "target_repo_url": "{target_repo_url}"')
+        if is_semantic:
+            if repo and not repo.has_semantic_match_algorithm:
+                raise Http400('This repo version does not support semantic search')
+        repo_params = target_repo_params or ConceptFuzzySearch.get_repo_params(repo)
+        if not repo_params:
+            raise Http400(f'Unable to resolve "target_repo_url": "{target_repo_url}"')
+        return repo_params
 
     def post(self, request, **kwargs):  # pylint: disable=unused-argument
         return Response(self.filter_queryset())

@@ -224,7 +224,6 @@ class ConceptDocument(Document):
 
     def prepare(self, instance):
         data = super().prepare(instance)
-
         same_as_mapped_codes, other_mapped_codes, verbose_info = self.get_mapped_codes(instance)
         data['same_as_map_codes'] = same_as_mapped_codes
         data['other_map_codes'] = other_mapped_codes
@@ -234,12 +233,6 @@ class ConceptDocument(Document):
         name = get(preferred_locale, 'name') or ''
         data['_name'] = name.lower()
         data['name'] = name.replace('-', '_')
-        data['_embeddings'] = {
-            'vector': get_embeddings(name),
-            'type': get(preferred_locale, 'type'),
-            'locale': get(preferred_locale, 'locale')
-        }
-
         synonyms = instance.names.exclude(name=name).exclude(name='')
         data['synonyms'] = compact(set(synonyms.values_list('name', flat=True)))
         data['_synonyms'] = data['synonyms']
@@ -250,6 +243,23 @@ class ConceptDocument(Document):
                 'locale': get(s, 'locale')
             } for s in synonyms
         ]
+
+        data['_embeddings'] = {'vector': [], 'type': '', 'locale': ''}
+        data['_synonyms_embeddings'] = []
+        if instance.parent.has_semantic_match_algorithm:
+            data['_embeddings'] = {
+                'vector': get_embeddings(name),
+                'type': get(preferred_locale, 'type'),
+                'locale': get(preferred_locale, 'locale')
+            }
+            data['_synonyms_embeddings'] = [
+                {
+                    'vector': get_embeddings(s.name),
+                    'type': get(s, 'type'),
+                    'locale': get(s, 'locale')
+                } for s in synonyms
+            ]
+
         return data
 
     @staticmethod
