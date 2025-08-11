@@ -221,8 +221,10 @@ def write_export_file(
 
     if is_collection:
         if version.expansion_uri:
-            concepts_qs = Concept.expansion_set.through.objects.filter(expansion_id=version.expansion.id)
-            mappings_qs = Mapping.expansion_set.through.objects.filter(expansion_id=version.expansion.id)
+            expansion = version.expansion
+            if expansion:
+                concepts_qs = Concept.expansion_set.through.objects.filter(expansion_id=version.expansion.id)
+                mappings_qs = Mapping.expansion_set.through.objects.filter(expansion_id=version.expansion.id)
     else:
         concepts_qs = Concept.sources.through.objects.filter(source_id=version.id)
         mappings_qs = Mapping.sources.through.objects.filter(source_id=version.id)
