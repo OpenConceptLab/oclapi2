@@ -103,7 +103,7 @@ class SourceVersionListSerializer(ModelSerializer):
         fields = (
             'type', 'short_code', 'name', 'url', 'canonical_url', 'owner', 'owner_type', 'owner_url', 'version',
             'created_at', 'id', 'source_type', 'updated_at', 'released', 'retired', 'version_url',
-            'previous_version_url', 'checksums'
+            'previous_version_url', 'checksums', 'match_algorithms'
         )
 
     @staticmethod
@@ -468,6 +468,7 @@ class SourceVersionDetailSerializer(SourceCreateOrUpdateSerializer, AbstractRepo
             'content_type', 'revision_date', 'summary', 'text', 'meta',
             'experimental', 'case_sensitive', 'collection_reference', 'hierarchy_meaning', 'compositional',
             'version_needed', 'hierarchy_root_url', 'checksums', 'states', 'tasks', 'properties', 'filters',
+            'match_algorithms'
         ) + AbstractRepoResourcesSerializer.Meta.fields
 
     def __init__(self, *args, **kwargs):
