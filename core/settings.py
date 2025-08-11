@@ -13,13 +13,14 @@ https://docs.djangoproject.com/en/3.0/ref/settings/
 import os
 
 from corsheaders.defaults import default_headers
-from elasticsearch import RequestsHttpConnection
 from kombu import Queue, Exchange
 from redis.backoff import ExponentialBackoff
 from redis.exceptions import ConnectionError  # pylint: disable=redefined-builtin
 from redis.retry import Retry
+from sentence_transformers import SentenceTransformer
 
 from core import __version__
+
 
 # Build paths inside the project like this: os.path.join(BASE_DIR, ...)
 
@@ -113,6 +114,7 @@ INSTALLED_APPS = [
     'core.repos',
     'core.url_registry',
     'core.events',
+    'core.map_projects'
 ]
 REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': (
@@ -230,16 +232,17 @@ ES_SCHEME = os.environ.get('ES_SCHEME', 'http')
 ES_VERIFY_CERTS = os.environ.get('ES_VERIFY_CERTS', str(ES_SCHEME == 'https'))
 ES_USER = os.environ.get('ES_USER', None)
 ES_PASSWORD = os.environ.get('ES_PASSWORD', None)
-ES_ENABLE_SNIFFING = os.environ.get('ES_ENABLE_SNIFFING', True) in ['TRUE', True]
+ES_ENABLE_SNIFFING = os.environ.get('ES_ENABLE_SNIFFING', False) in ['TRUE', True]
 http_auth = None
 if ES_USER and ES_PASSWORD:
     http_auth = (ES_USER, ES_PASSWORD)
 
 ELASTICSEARCH_DSL = {
     'default': {
-        'hosts': ES_HOSTS.split(',') if ES_HOSTS else [ES_HOST + ':' + ES_PORT],
+        'hosts': [
+            f"{ES_SCHEME}://{host}" for host in ES_HOSTS.split(',')
+        ] if ES_HOSTS else [f'{ES_SCHEME}://{ES_HOST}:{ES_PORT}'],
         'http_auth': http_auth,
-        'use_ssl': ES_SCHEME == 'https',
         'verify_certs': ES_VERIFY_CERTS.lower() == 'true',
         'sniff_on_connection_fail': ES_ENABLE_SNIFFING,
         'sniff_on_start': ES_ENABLE_SNIFFING,
@@ -247,7 +250,6 @@ ELASTICSEARCH_DSL = {
         'sniff_timeout': 10,
         'max_retries': 3,
         'retry_on_timeout': True,
-        'connection_class': RequestsHttpConnection # Needed for verify_certs=False to work
     },
 }
 
@@ -602,3 +604,6 @@ MINIO_ACCESS_KEY = os.environ.get('MINIO_ACCESS_KEY', '')
 MINIO_SECRET_KEY = os.environ.get('MINIO_SECRET_KEY', '')
 MINIO_BUCKET_NAME = os.environ.get('MINIO_BUCKET_NAME', '')
 MINIO_SECURE = os.environ.get('MINIO_SECURE') == 'TRUE'
+if ENV != 'ci':
+    LM_MODEL_NAME = 'all-MiniLM-L6-v2'
+    LM = SentenceTransformer(LM_MODEL_NAME)

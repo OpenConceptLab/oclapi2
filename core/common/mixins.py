@@ -24,6 +24,7 @@ from core.common.constants import HEAD, ACCESS_TYPE_NONE, INCLUDE_FACETS, \
 from core.common.permissions import HasPrivateAccess, HasOwnership, CanViewConceptDictionary, \
     CanViewConceptDictionaryVersion
 from .checksums import ChecksumModel
+from .exceptions import Http403
 from .utils import write_csv_to_s3, get_csv_from_s3, get_query_params_from_url_string, compact_dict_by_values, \
     to_owner_uri, parse_updated_since_param, get_export_service, to_int, get_truthy_values, generate_temp_version, \
     canonical_url_to_url_and_version, decode_string
@@ -389,6 +390,18 @@ class SubResourceMixin(PathWalkerMixin):
 class ConceptDictionaryMixin(SubResourceMixin):
     permission_classes = (HasPrivateAccess,)
 
+    def check_for_match_algorithms(self, instance=None):
+        match_algorithms = self.request.data.get('match_algorithms', [])
+        if match_algorithms and not self.request.user.is_staff:
+            if instance and instance.__class__.__name__ == 'Source' and (
+                sorted(match_algorithms or []) != sorted(instance.match_algorithms or [])
+            ):
+                raise Http403('You do not have permissions update a repo with semantic match algorithm.')
+
+            from core.sources.models import Source
+            if not instance and Source.SEMANTIC_MATCH_ALGORITHM in match_algorithms:
+                raise Http403('You do not have permissions create a repo with semantic match algorithm.')
+
 
 class ConceptDictionaryCreateMixin(ConceptDictionaryMixin):
     """
@@ -419,6 +432,9 @@ class ConceptDictionaryCreateMixin(ConceptDictionaryMixin):
         permission = HasOwnership()
         if not permission.has_object_permission(request, self, self.parent_resource):
             return Response(status=status.HTTP_403_FORBIDDEN)
+
+        self.check_for_match_algorithms()
+
         data = request.data.copy()
         supported_locales = data.pop('supported_locales', '')
         if isinstance(supported_locales, str):
@@ -448,7 +464,6 @@ class ConceptDictionaryCreateMixin(ConceptDictionaryMixin):
 
 
 class ConceptDictionaryUpdateMixin(ConceptDictionaryMixin):
-
     """
     Concrete view for updating a model instance.
     """
@@ -461,6 +476,7 @@ class ConceptDictionaryUpdateMixin(ConceptDictionaryMixin):
             return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
 
         self.object = self.get_object()
+        self.check_for_match_algorithms(self.object)
         save_kwargs = {'force_update': True, 'parent_resource': self.parent_resource}
         success_status_code = status.HTTP_200_OK
 

@@ -7,7 +7,7 @@ from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import UniqueConstraint, F, Max, Count
 from django.db.models.functions import Cast
-from pydash import get
+from pydash import get, compact
 
 from core.common.checksums import ChecksumChangelog
 from core.common.constants import HEAD
@@ -24,6 +24,9 @@ from core.tasks.models import Task
 
 class Source(DirtyFieldsMixin, ConceptContainerModel):
     DEFAULT_AUTO_ID_START_FROM = 1
+    TOKEN_MATCH_ALGORITHM = 'es'
+    SEMANTIC_MATCH_ALGORITHM = 'llm'
+    MATCH_ALGORITHMS = [TOKEN_MATCH_ALGORITHM, SEMANTIC_MATCH_ALGORITHM]
 
     es_fields = {
         'source_type': {'sortable': True, 'filterable': True, 'facet': True, 'exact': True},
@@ -43,6 +46,7 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         'experimental': {'sortable': False, 'filterable': False, 'facet': False},
         'hierarchy_meaning': {'sortable': False, 'filterable': True, 'facet': True},
         'external_id': {'sortable': False, 'filterable': True, 'facet': False, 'exact': True},
+        'match_algorithm': {'sortable': False, 'filterable': True, 'facet': True, 'exact': False},
     }
 
     class Meta:
@@ -106,9 +110,15 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
 
     properties = ArrayField(models.JSONField(), default=list, null=True, blank=True)
     filters = ArrayField(models.JSONField(), default=list, null=True, blank=True)
+    match_algorithms = ArrayField(
+        models.CharField(max_length=50), default=list, null=True, blank=True)
 
     OBJECT_TYPE = SOURCE_TYPE
     OBJECT_VERSION_TYPE = SOURCE_VERSION_TYPE
+
+    @property
+    def has_semantic_match_algorithm(self):
+        return self.match_algorithms and self.SEMANTIC_MATCH_ALGORITHM in self.match_algorithms
 
     @property
     def is_sequential_concept_mnemonic(self):
@@ -239,10 +249,23 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
 
         self.clean_properties()
         self.clean_filters()
+        self.clean_match_algorithms()
 
         super().clean()
         if self.hierarchy_root_id and not self.is_hierarchy_root_belonging_to_self():
             raise ValidationError({'hierarchy_root': [HIERARCHY_ROOT_MUST_BELONG_TO_SAME_SOURCE]})
+
+    def clean_match_algorithms(self):
+        self.match_algorithms = self.match_algorithms or []
+
+        if not self.match_algorithms:
+            self.match_algorithms = [self.TOKEN_MATCH_ALGORITHM]
+            return
+
+        self.match_algorithms = compact(set(self.match_algorithms))
+
+        if any(algorithm not in self.MATCH_ALGORITHMS for algorithm in self.match_algorithms):
+            raise ValidationError({'match_algorithms': [f'Match algorithms must be among {self.MATCH_ALGORITHMS}']})
 
     def clean_properties(self):
         if not self.properties:
@@ -601,9 +624,15 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
     def last_mapping_update(self):
         return self.get_max_mapping_attribute('updated_at')
 
-    def get_mapped_sources(self):
+    def get_mapped_sources(self, exclude_self=True):
         """Returns only direct mapped sources"""
-        return Source.objects.filter(id__in=self.mappings.values_list('to_source_id', flat=True)).exclude(id=self.id)
+        source_ids = self.__get_mapped_source_ids()
+        if exclude_self:
+            source_ids = set(source_ids) - {self.id}
+        return Source.objects.filter(id__in=source_ids)
+
+    def __get_mapped_source_ids(self):
+        return self.mappings.values_list('to_source_id', flat=True)
 
     def clone_resources(self, user, concepts, mappings, **kwargs):
         from core.mappings.models import Mapping

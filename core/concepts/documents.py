@@ -1,8 +1,9 @@
 from django_elasticsearch_dsl import Document, fields
 from django_elasticsearch_dsl.registries import registry
-from pydash import compact
+from elasticsearch_dsl import DenseVector
+from pydash import compact, get
 
-from core.common.utils import jsonify_safe, flatten_dict
+from core.common.utils import jsonify_safe, flatten_dict, get_embeddings, drop_version
 from core.concepts.models import Concept
 
 
@@ -14,6 +15,7 @@ class ConceptDocument(Document):
 
     id = fields.TextField(attr='mnemonic')
     id_lowercase = fields.KeywordField(attr='mnemonic', normalizer="lowercase")
+    id_raw = fields.KeywordField(attr='mnemonic')
     numeric_id = fields.LongField()
     name = fields.TextField()
     _name = fields.KeywordField()
@@ -21,6 +23,7 @@ class ConceptDocument(Document):
     updated_by = fields.KeywordField(attr='updated_by.username')
     locale = fields.ListField(fields.KeywordField())
     synonyms = fields.ListField(fields.TextField())
+    _synonyms = fields.ListField(fields.KeywordField())
     source = fields.KeywordField(attr='parent_resource', normalizer="lowercase")
     owner = fields.KeywordField(attr='owner_name', normalizer="lowercase")
     owner_type = fields.KeywordField(attr='owner_type')
@@ -44,6 +47,33 @@ class ConceptDocument(Document):
     description = fields.TextField()
     same_as_map_codes = fields.ListField(fields.KeywordField())
     other_map_codes = fields.ListField(fields.KeywordField())
+    mapped_codes = fields.NestedField(
+        properties={
+            'source': fields.KeywordField(),
+            'map_type': fields.KeywordField(),
+            'code': fields.KeywordField(),
+        }
+    )
+    _embeddings = fields.NestedField(
+        properties={
+            "vector": {
+                "type": "dense_vector",
+            },
+            "type": {
+                "type": "text"
+            }
+        }
+    )
+    _synonyms_embeddings = fields.NestedField(
+        properties={
+            "vector": {
+                "type": "dense_vector",
+            },
+            "type": {
+                "type": "text"
+            }
+        }
+    )
 
     class Django:
         model = Concept
@@ -54,7 +84,7 @@ class ConceptDocument(Document):
 
     @staticmethod
     def get_match_phrase_attrs():
-        return ['_name']
+        return ['_name', '_synonyms', 'name', 'synonyms']
 
     @staticmethod
     def get_exact_match_attrs():
@@ -194,15 +224,39 @@ class ConceptDocument(Document):
 
     def prepare(self, instance):
         data = super().prepare(instance)
-
-        same_as_mapped_codes, other_mapped_codes = self.get_mapped_codes(instance)
+        same_as_mapped_codes, other_mapped_codes, verbose_info = self.get_mapped_codes(instance)
         data['same_as_map_codes'] = same_as_mapped_codes
         data['other_map_codes'] = other_mapped_codes
+        data['mapped_codes'] = verbose_info
 
-        name = instance.display_name or ''
+        preferred_locale = instance.preferred_locale
+        name = get(preferred_locale, 'name') or ''
         data['_name'] = name.lower()
         data['name'] = name.replace('-', '_')
-        data['synonyms'] = compact(set(instance.names.exclude(name=name).values_list('name', flat=True)))
+        synonyms = instance.names.exclude(name=name).exclude(name='')
+        data['synonyms'] = compact(set(synonyms.values_list('name', flat=True)))
+        data['_synonyms'] = data['synonyms']
+        data['_synonyms_embeddings'] = [
+            {
+                'vector': get_embeddings(s.name),
+                'type': get(s, 'type'),
+                'locale': get(s, 'locale')
+            } for s in synonyms
+        ]
+
+        if instance.parent.has_semantic_match_algorithm:
+            data['_embeddings'] = {
+                'vector': get_embeddings(name),
+                'type': get(preferred_locale, 'type'),
+                'locale': get(preferred_locale, 'locale')
+            }
+            data['_synonyms_embeddings'] = [
+                {
+                    'vector': get_embeddings(s.name),
+                    'type': get(s, 'type'),
+                    'locale': get(s, 'locale')
+                } for s in synonyms
+            ]
 
         return data
 
@@ -211,12 +265,17 @@ class ConceptDocument(Document):
         mappings = instance.get_unidirectional_mappings()
         same_as_mapped_codes = []
         other_mapped_codes = []
-        for value in mappings.values('map_type', 'to_concept_code'):
+        verbose_info = []
+        for value in mappings.values('map_type', 'to_concept_code', 'to_source_url'):
             to_concept_code = value['to_concept_code']
             map_type = value['map_type']
             if to_concept_code and map_type:
+                to_source_url = drop_version(value['to_source_url']) if value['to_source_url'] else None
+                if to_source_url:
+                    verbose_info.append(
+                        {'source': to_source_url, 'code': to_concept_code, 'map_type': map_type})
                 if map_type.lower().startswith('same'):
                     same_as_mapped_codes.append(to_concept_code)
                 else:
                     other_mapped_codes.append(to_concept_code)
-        return same_as_mapped_codes, other_mapped_codes
+        return same_as_mapped_codes, other_mapped_codes, verbose_info

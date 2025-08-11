@@ -38,6 +38,7 @@ class SourceDocument(Document):
     created_by = fields.KeywordField()
     property_codes = fields.ListField(fields.KeywordField())
     filter_codes = fields.ListField(fields.KeywordField())
+    match_algorithm = fields.ListField(fields.KeywordField())
 
     class Django:
         model = Source
@@ -119,6 +120,10 @@ class SourceDocument(Document):
     @staticmethod
     def prepare_locale(instance):
         return get(instance.supported_locales, [])
+
+    @staticmethod
+    def prepare_match_algorithm(instance):
+        return instance.match_algorithms or []
 
     @staticmethod
     def prepare_property_codes(instance):

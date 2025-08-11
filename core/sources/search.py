@@ -11,7 +11,8 @@ class SourceFacetedSearch(CustomESFacetedSearch):
     fields = [
         'source_type', 'locale', 'owner', 'owner_type', 'is_active', 'version', 'custom_validation_schema',
         'hierarchy_meaning', 'name', 'canonical_url', 'mnemonic', 'identifier', 'jurisdiction',
-        'publisher', 'content_type', 'extras', 'updated_by', 'property_codes', 'filter_codes'
+        'publisher', 'content_type', 'extras', 'updated_by', 'property_codes', 'filter_codes',
+        'match_algorithm'
     ]
 
     facets = {
@@ -26,4 +27,5 @@ class SourceFacetedSearch(CustomESFacetedSearch):
         'customValidationSchema': TermsFacet(field='custom_validation_schema'),
         'hierarchyMeaning': TermsFacet(field='hierarchy_meaning', size=FACET_SIZE),
         'updatedBy': TermsFacet(field='updated_by', size=FACET_SIZE),
+        'matchAlgorithm': TermsFacet(field='match_algorithm', size=FACET_SIZE),
     }

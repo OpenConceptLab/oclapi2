@@ -23,6 +23,11 @@ urlpatterns = [
         name='source-mapped-sources'
     ),
     path(
+        "<str:source>/<str:version>/mapped-sources/",
+        views.SourceVersionMappedSourcesListView.as_view(),
+        name='source-version-mapped-sources'
+    ),
+    path(
         "<str:source>/summary/",
         views.SourceSummaryView.as_view(),
         name='source-summary'

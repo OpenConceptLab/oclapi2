@@ -20,7 +20,7 @@ git+https://github.com/snyaggarwal/flower # use until https://github.com/mher/fl
 redis==5.2.1
 django-redis==5.4.0 # needed for redis sentinel support
 kombu==5.4.2
-django-elasticsearch-dsl==7.3
+django-elasticsearch-dsl==8.0
 drf-yasg==1.21.5
 git+https://github.com/snyaggarwal/django-queryset-csv
 ocldev==0.2.2
@@ -44,3 +44,5 @@ ijson==3.2.3
 responses==0.25.0
 pydantic==2.6.4
 minio==7.2.9
+sentence-transformers==3.3.1
+elastic-transport==8.17

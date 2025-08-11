@@ -241,11 +241,13 @@ services:
     healthcheck:
       test: "curl --silent --fail -u $${FLOWER_USER:-root}:$${FLOWER_PASSWORD:-Root123} http://localhost:5555/metrics || exit 1"
   es:
-    image: elasticsearch:7.17.10
+    image: elasticsearch:8.15.2
     environment:
       - discovery.type=single-node
       - bootstrap.memory_lock=true
-      - "ES_JAVA_OPTS=-Xms1024m -Xmx1024m"
+      - xpack.security.enabled=false
+      - m=2GB
+      - "ES_JAVA_OPTS=-Xms1500m -Xmx1500m"
     ulimits:
       memlock:
         soft: -1

@@ -18,6 +18,7 @@ from core.common.tasks import delete_organization
 from core.common.throttling import ThrottleUtil
 from core.common.utils import parse_updated_since_param, get_truthy_values
 from core.common.views import BaseAPIView, BaseLogoView
+from core.map_projects.views import MapProjectListView
 from core.tasks.mixins import TaskMixin
 from core.orgs.constants import NO_MEMBERS
 from core.orgs.documents import OrganizationDocument
@@ -244,6 +245,8 @@ class OrganizationMemberView(generics.GenericAPIView):
 
 
 class OrganizationResourceAbstractListView:
+    version = None
+
     def get_queryset(self):
         username = self.kwargs.get('user', None)
         if not username and self.user_is_self:
@@ -252,15 +255,21 @@ class OrganizationResourceAbstractListView:
         user = UserProfile.objects.filter(username=username).first()
         if not user:
             raise Http404()
-
-        return self.queryset.filter(organization__in=user.organizations.all(), version=HEAD)
+        queryset = self.queryset.filter(organization__in=user.organizations.all())
+        if self.version:
+            queryset = queryset.filter(version=self.version)
+        return queryset
 
 
 class OrganizationSourceListView(OrganizationResourceAbstractListView, SourceListView):
-    pass
+    version = HEAD
 
 
 class OrganizationCollectionListView(OrganizationResourceAbstractListView, CollectionListView):
+    version = HEAD
+
+
+class OrganizationMapProjectListView(OrganizationResourceAbstractListView, MapProjectListView):
     pass
 
 

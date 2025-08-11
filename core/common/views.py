@@ -5,6 +5,7 @@ import markdown
 import requests
 from django.conf import settings
 from django.core.mail import EmailMessage
+from django.db import models
 from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404
 from drf_yasg import openapi
@@ -24,7 +25,7 @@ from core.common.constants import SEARCH_PARAM, LIST_DEFAULT_LIMIT, CSV_DEFAULT_
     LIMIT_PARAM, NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY, INCLUDE_RETIRED_PARAM, VERBOSE_PARAM, HEAD, LATEST, \
     BRIEF_PARAM, ES_REQUEST_TIMEOUT, INCLUDE_INACTIVE, FHIR_LIMIT_PARAM, RAW_PARAM, SEARCH_MAP_CODES_PARAM, \
     INCLUDE_SEARCH_META_PARAM, EXCLUDE_FUZZY_SEARCH_PARAM, EXCLUDE_WILDCARD_SEARCH_PARAM, UPDATED_BY_USERNAME_PARAM, \
-    CANONICAL_URL_REQUEST_PARAM, CHECKSUMS_PARAM
+    CANONICAL_URL_REQUEST_PARAM, CHECKSUMS_PARAM, ACCESS_TYPE_NONE
 from core.common.exceptions import Http400
 from core.common.mixins import PathWalkerMixin
 from core.common.search import CustomESSearch
@@ -178,6 +179,29 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                 _queryset = _queryset.order_by(*self.default_qs_sort_attr)
         return _queryset
 
+    def filter_queryset_by_owner(self, queryset):
+        if 'user' in self.kwargs:
+            return queryset.filter(user__username=self.kwargs['user'])
+        if 'org' in self.kwargs:
+            return queryset.filter(organization__mnemonic=self.kwargs['org'])
+
+        return queryset
+
+    def filter_queryset_by_public_access(self, queryset):
+        user = self.request.user
+
+        if get(user, 'is_anonymous'):
+            return queryset.exclude(public_access=ACCESS_TYPE_NONE)
+        if user.is_staff:
+            return queryset
+
+        public_queryset = queryset.exclude(public_access=ACCESS_TYPE_NONE)
+        private_queryset = queryset.filter(public_access=ACCESS_TYPE_NONE)
+        private_queryset = private_queryset.filter(
+            models.Q(user_id=user.id) | models.Q(organization__members__id=user.id))
+
+        return public_queryset.union(private_queryset)
+
     def get_sort_and_desc(self):
         query_params = self.request.query_params.dict()
 
@@ -290,36 +314,50 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             match_word_fields_map,
         ), fields
 
-    def get_faceted_criterion(self):
-        filters = self.get_faceted_filters()
+    def get_faceted_criterion(self, split=False, params=None, **kwargs):
+        filters = self.get_faceted_filters(split=split, params=params, additional_fields=['id', 'id_raw'])
 
         def get_query(attr, val):
+            """
+                Constructs a dynamic Elasticsearch DSL query based on value modifiers:
+                - Supports `!` prefix for negation
+                - Supports `*` suffix for prefix/regex matching
+                - Supports multiple comma-separated values
+            """
+            prefix_query = val.endswith('*')
             not_query = val.startswith('!')
             vals = val.replace('!', '', 1).split(',')
-            query = Q('match', **{attr: vals.pop().strip('\"').strip('\'')})
-            criteria = ~query if not_query else query  # pylint: disable=invalid-unary-operand-type
+            if prefix_query:
+                queries = [
+                    Q(
+                        'regexp',
+                        **{attr: {'value': _val.strip('\"').strip('\'')}}
+                    ) for _val in vals
+                ]
+            else:
+                queries = [
+                    Q(
+                        'match',
+                        **{attr: _val.strip('\"').strip('\'')}
+                    ) for _val in vals
+                ]
 
-            for _val in vals:
-                query = Q('match', **{attr: _val.strip('\"').strip('\'')})
-                if not_query:
-                    criteria &= ~query  # pylint: disable=invalid-unary-operand-type
-                else:
-                    criteria |= query
-
-            return criteria
+            return Q('bool', must=[~q for q in queries]) if not_query else Q('bool', should=queries, **kwargs)
 
         if filters:
             first_filter = filters.popitem()
             criterion = get_query(first_filter[0], first_filter[1])
             for field, value in filters.items():
                 criterion &= get_query(field, value)
-
             return criterion
 
-    def get_faceted_filters(self, split=False):
+        return None
+
+    def get_faceted_filters(self, split=False, params=None, additional_fields=None):
         faceted_filters = {}
-        faceted_fields = self.get_faceted_fields()
-        query_params = {to_snake_case(k): v for k, v in self.request.query_params.dict().items()}
+        faceted_fields = [*self.get_faceted_fields(), *(additional_fields or [])]
+        params = self.request.query_params.dict() if params is None else params
+        query_params = {to_snake_case(k): v for k, v in params.items()}
         for field in faceted_fields:
             if field == 'properties':
                 property_facets = {
@@ -681,7 +719,6 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         results = self.__apply_common_search_filters(ignore_retired_filter, force)
         if results is None:
             return results
-
         exclude_fuzzy = self.request.query_params.get(EXCLUDE_FUZZY_SEARCH_PARAM) in TRUTHY
         exclude_wildcard = self.request.query_params.get(EXCLUDE_WILDCARD_SEARCH_PARAM) in TRUTHY
 
@@ -763,7 +800,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             else:
                 results = results.query('match', **{attr: value})
 
-        if highlight and self.request.query_params.get(INCLUDE_SEARCH_META_PARAM) in get_truthy_values():
+        if fields and highlight and self.request.query_params.get(INCLUDE_SEARCH_META_PARAM) in get_truthy_values():
             results = results.highlight(*self.clean_fields_for_highlight(fields))
         return results.sort(*self._get_sort_attribute()) if sort else results
 

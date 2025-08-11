@@ -55,5 +55,6 @@ urlpatterns = [
     path('collections/', include('core.collections.urls'), extra_kwargs),
     path('repos/', include('core.repos.urls'), extra_kwargs),
     path('url-registry/', include('core.url_registry.urls'), extra_kwargs),
-    path('pins/', include('core.pins.urls'), extra_kwargs)
+    path('pins/', include('core.pins.urls'), extra_kwargs),
+    path('map-projects/', include('core.map_projects.urls'), extra_kwargs),
 ]
