@@ -6,3 +6,5 @@ ignore=migrations,fixtures,scripts,commands,documents.py,password_validation.py,
 max-line-length=120
 [DESIGN]
 max-attributes=12
+[TYPECHECK]
+ignored-modules=elasticsearch_dsl

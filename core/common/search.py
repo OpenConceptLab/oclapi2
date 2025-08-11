@@ -9,9 +9,9 @@ from core.common.utils import is_url_encoded_string
 
 
 class CustomESFacetedSearch(FacetedSearch):
-    def __init__(self, query=None, filters={}, sort=(), _search=None):  # pylint: disable=dangerous-default-value
+    def __init__(self, query=None, filters=None, sort=(), _search=None):  # pylint: disable=dangerous-default-value
         self._search = _search
-        super().__init__(query=query, filters=filters, sort=sort)
+        super().__init__(query=query, filters=filters or {}, sort=sort)
 
     @staticmethod
     def format_search_str(search_str):

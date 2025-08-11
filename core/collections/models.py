@@ -1404,7 +1404,11 @@ class Expansion(BaseResourceModel):
         while processing:
             print("Expansion is still processing, sleeping for 5 secs...")
             time.sleep(5)
-            self.refresh_from_db()
+            try:
+                self.refresh_from_db()
+            except Expansion.DoesNotExist:
+                print("Expansion no longer exists, exiting wait loop.")
+                return
             processing = self.is_processing
             if not processing:
                 print("Expansion processed, waking up...")

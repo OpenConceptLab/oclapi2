@@ -468,17 +468,14 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             if self.is_user_document():
                 return facets
 
-            parent = get(
-                self, 'parent_resource'
-            ) if 'source' in self.kwargs and self.is_concept_document() else None
-            facet_kwargs = {
-                'query': self.get_search_string(lower=False),
-                '_search': self.__get_search_results(
-                    ignore_retired_filter=True, sort=False, highlight=False, force=True)
-            }
-            if parent:
-                facet_kwargs['source'] = parent
-            faceted_search = self.facet_class(**facet_kwargs)  # pylint: disable=not-callable
+            faceted_search = self.facet_class(  # pylint: disable=not-callable
+                query=self.get_search_string(lower=False),
+                _search=self.__get_search_results(
+                    ignore_retired_filter=True, sort=False, highlight=False, force=True),
+                parent=get(
+                    self, 'parent_resource'
+                ) if 'source' in self.kwargs and self.is_concept_document() else None
+            )
             faceted_search.params(request_timeout=ES_REQUEST_TIMEOUT)
             try:
                 s = faceted_search.execute()

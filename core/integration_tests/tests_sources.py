@@ -151,7 +151,7 @@ class SourceListViewTest(OCLAPITestCase):
                 'autoid_concept_name_external_id', 'autoid_concept_description_external_id',
                 'autoid_concept_mnemonic_start_from', 'autoid_concept_external_id_start_from',
                 'autoid_mapping_mnemonic_start_from', 'autoid_mapping_external_id_start_from', 'checksums',
-                'properties', 'filters'
+                'properties', 'filters', 'match_algorithms'
             ])
         )
         source = Source.objects.last()
@@ -273,7 +273,7 @@ class SourceRetrieveUpdateDestroyViewTest(OCLAPITestCase):
                 'autoid_concept_name_external_id', 'autoid_concept_description_external_id',
                 'autoid_concept_mnemonic_start_from', 'autoid_concept_external_id_start_from',
                 'autoid_mapping_mnemonic_start_from', 'autoid_mapping_external_id_start_from', 'checksums',
-                'properties', 'filters'
+                'properties', 'filters', 'match_algorithms'
             ])
         )
         source = Source.objects.last()

@@ -762,7 +762,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         pass
 
     @classmethod
-    def persist_changes(cls, obj, updated_by, original_schema, **kwargs):
+    def persist_changes(cls, obj, updated_by, original_schema, **kwargs):  # pylint: disable=too-many-locals
         errors = {}
         parent_resource = kwargs.pop('parent_resource', obj.parent)
         if not parent_resource:
@@ -1173,7 +1173,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
     def get_concept_facets(self, filters=None):
         from core.concepts.search import ConceptFacetedSearch
-        return self._get_resource_facets(ConceptFacetedSearch, filters, source=self)
+        return self._get_resource_facets(ConceptFacetedSearch, filters, parent=self)
 
     def get_mapping_facets(self, filters=None):
         from core.mappings.search import MappingFacetedSearch

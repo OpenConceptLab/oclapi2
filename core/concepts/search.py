@@ -1,5 +1,5 @@
 from elasticsearch_dsl import TermsFacet, Q
-from pydash import flatten, is_number, compact
+from pydash import flatten, is_number, compact, get
 
 from core.common.constants import FACET_SIZE, HEAD
 from core.common.search import CustomESFacetedSearch, CustomESSearch
@@ -36,21 +36,21 @@ class ConceptFacetedSearch(CustomESFacetedSearch):
         'collection_version': TermsFacet(field='collection_version', size=FACET_SIZE),
     }
 
-    def __init__(self, source=None, **kwargs):
+    def __init__(self, parent=None, **kwargs):
         facets = {**self.base_facets}
-        if source is not None:
+        if parent is not None:
             facets = {
                 **facets,
-                **self.build_property_facets_from_source(source)
+                **self.build_property_facets_from_source(parent)
             }
         self.facets = facets
         super().__init__(**kwargs)
 
     @staticmethod
-    def build_property_facets_from_source(source):
+    def build_property_facets_from_source(parent):
         return {
             f"properties__{_filter['code']}": TermsFacet(field=f"properties.{_filter['code']}.keyword", size=FACET_SIZE)
-            for _filter in (source.filters or [])
+            for _filter in (get(parent, 'filters') or [])
         }
 
 

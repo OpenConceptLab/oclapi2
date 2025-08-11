@@ -244,8 +244,6 @@ class ConceptDocument(Document):
             } for s in synonyms
         ]
 
-        data['_embeddings'] = {'vector': [], 'type': '', 'locale': ''}
-        data['_synonyms_embeddings'] = []
         if instance.parent.has_semantic_match_algorithm:
             data['_embeddings'] = {
                 'vector': get_embeddings(name),
