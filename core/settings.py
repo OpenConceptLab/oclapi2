@@ -42,8 +42,11 @@ SECRET_KEY = '=q1%fd62$x!35xzzlc3lix3g!s&!2%-1d@5a=rm!n4lu74&6)p'
 DEBUG = os.environ.get('DEBUG') == 'TRUE'
 ENV = os.environ.get('ENVIRONMENT', 'development')
 
+ES_SYNC = True
+
 if not ENV or ENV in ['ci', 'dev', 'development']:
     ENABLE_THROTTLING = False
+    ES_SYNC = False
 else:
     ENABLE_THROTTLING = os.environ.get('ENABLE_THROTTLING', False) in ['true', 'True', 'TRUE', True]
 
@@ -514,7 +517,6 @@ ELASTICSEARCH_DSL_PARALLEL = True
 ELASTICSEARCH_DSL_AUTO_REFRESH = True
 ELASTICSEARCH_DSL_AUTOSYNC = True
 ELASTICSEARCH_DSL_SIGNAL_PROCESSOR = 'core.common.models.CelerySignalProcessor'
-ES_SYNC = True
 USE_X_FORWARDED_HOST = True
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 # Only used for flower
