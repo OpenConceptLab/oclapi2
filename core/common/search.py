@@ -202,16 +202,20 @@ class CustomESSearch:
     def apply_aggregation_score_stats(self):
         self._dsl_search.aggs.bucket("score", "stats", script="_score")
 
-    def to_queryset(self, keep_order=True):
+    def to_queryset(self, keep_order=True, normalized_score=False):
         """
         This method return a django queryset from the an elasticsearch result.
         It cost a query to the sql db.
         """
         s, hits = self.__get_response()
+        max_score = hits.max_score or 1
 
         for result in hits.hits:
             _id = get(result, '_id')
-            self.scores[int(_id)] = get(result, '_score')
+            self.scores[int(_id)] = {
+                'raw': get(result, '_score'),
+                'normalized': (get(result, '_score') or 0) / max_score
+            } if normalized_score else get(result, '_score')
             highlight = get(result, 'highlight')
             if highlight:
                 self.highlights[int(_id)] = highlight.to_dict()
