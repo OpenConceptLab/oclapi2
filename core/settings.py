@@ -606,6 +606,6 @@ MINIO_ACCESS_KEY = os.environ.get('MINIO_ACCESS_KEY', '')
 MINIO_SECRET_KEY = os.environ.get('MINIO_SECRET_KEY', '')
 MINIO_BUCKET_NAME = os.environ.get('MINIO_BUCKET_NAME', '')
 MINIO_SECURE = os.environ.get('MINIO_SECURE') == 'TRUE'
-if ENV != 'ci':
+if ENV not in ['ci', 'staging', 'production', 'demo']:
     LM_MODEL_NAME = 'all-MiniLM-L6-v2'
     LM = SentenceTransformer(LM_MODEL_NAME)
