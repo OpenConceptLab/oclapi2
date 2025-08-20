@@ -11,6 +11,10 @@ from core.common.models import BaseModel
 from core.common.utils import get_export_service, generate_temp_version
 
 
+def default_score_configuration():
+    return {'recommended': 100, 'available': 70}
+
+
 class MapProject(BaseModel):
     name = models.TextField()
     description = models.TextField(null=True, blank=True)
@@ -27,6 +31,7 @@ class MapProject(BaseModel):
     logs = models.JSONField(default=dict, null=True, blank=True)
     match_api_url = models.TextField(null=True, blank=True)
     match_api_token = models.TextField(null=True, blank=True)
+    score_configuration = models.JSONField(default=default_score_configuration, null=True, blank=True)
 
     OBJECT_TYPE = 'MapProject'
     mnemonic_attr = 'id'
