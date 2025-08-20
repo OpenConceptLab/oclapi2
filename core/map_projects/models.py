@@ -159,6 +159,7 @@ class MapProject(BaseModel):
         }
         cls.format_json(new_data, 'matches')
         cls.format_json(new_data, 'columns')
+        cls.format_json(new_data, 'score_configuration')
 
         if parent_resource:
             new_data[parent_resource.resource_type.lower() + '_id'] = parent_resource.id
