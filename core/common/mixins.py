@@ -1,6 +1,7 @@
 import logging
 from math import ceil
 from urllib import parse
+from urllib.parse import urlencode
 
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
@@ -156,11 +157,18 @@ class ListWithHeadersMixin(ListModelMixin):
         return res
 
     def __get_cached_data_if_any(self, request):
-        base_path = request.path
+        base_path = request.get_full_path()
+        params = request.query_params.copy()
+        params.pop('verbose', None)
+        params.pop('brief', None)
+        query_string = urlencode(params, doseq=True)
         parent = self.parent_resource
 
         key_body, key_headers = parent.get_concepts_cache_keys() if '/concepts' in base_path else (
             parent.get_mappings_cache_keys())
+        if query_string:
+            key_body += '?' + query_string
+            key_headers += '?' + query_string
 
         return key_body, cache.get(key_body) or None, key_headers, cache.get(key_headers) or None
 
