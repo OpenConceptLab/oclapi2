@@ -794,7 +794,7 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
 
         return ConceptListSerializer
 
-    def filter_queryset(self, _=None):  # pylint:disable=too-many-locals
+    def filter_queryset(self, _=None):  # pylint:disable=too-many-locals,too-many-statements
         rows = self.request.data.get('rows')
         target_repo_url = self.request.data.get('target_repo_url')
         target_repo_params = self.request.data.get('target_repo')
@@ -832,11 +832,13 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
             for concept in es_search.queryset:
                 concept._highlight = es_search.highlights.get(concept.id, {})  # pylint:disable=protected-access
                 score_info = es_search.scores.get(concept.id, {})
-                concept._score = get(score_info, 'raw') or None
-                concept._normalized_score = get(score_info, 'normalized') or None
-                # Use normalized score for thresholding if available
-                score_to_check = concept._normalized_score if concept._normalized_score is not None else concept._score
+                score = get(score_info, 'raw') or None
+                normalized_score = get(score_info, 'normalized') or None
+                concept._score = score  # pylint:disable=protected-access
+                concept._normalized_score = normalized_score  # pylint:disable=protected-access
                 concept._match_type = 'low'  # pylint:disable=protected-access
+                # Use normalized score for thresholding if available
+                score_to_check = normalized_score if normalized_score is not None else score
                 if score_to_check is not None:
                     if is_semantic and score_to_check > 0.9:
                         concept._match_type = 'very_high'  # pylint:disable=protected-access
@@ -850,7 +852,7 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
                 if not best_match or concept._match_type == 'very_high':  # pylint:disable=protected-access
                     serializer = ConceptDetailSerializer if self.is_verbose() else ConceptMinimalSerializer
                     data = serializer(concept, context={'request': self.request}).data
-                    data['search_meta']['search_normalized_score'] = concept._normalized_score * 100
+                    data['search_meta']['search_normalized_score'] = normalized_score * 100
                     result['results'].append(data)
             if 'results' in result:
                 result['results'] = sorted(
