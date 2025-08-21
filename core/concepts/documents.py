@@ -200,7 +200,7 @@ class ConceptDocument(Document):
     def prepare_properties(instance):
         value = {}
 
-        filters = instance.filter_properties
+        filters = instance.filters
         properties = instance.properties
         for _filter in filters:
             prop = next((prop for prop in properties if prop['code'] == _filter['code']), None)

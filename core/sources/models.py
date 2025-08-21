@@ -267,11 +267,23 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         if any(algorithm not in self.MATCH_ALGORITHMS for algorithm in self.match_algorithms):
             raise ValidationError({'match_algorithms': [f'Match algorithms must be among {self.MATCH_ALGORITHMS}']})
 
+    @property
+    def concept_summary_properties(self):
+        return get(self.meta, 'display.concept_summary_properties') or []
+
+    @property
+    def concept_filter_order(self):
+        return get(self.meta, 'display.concept_filter_order') or []
+
+    @property
+    def concept_filter_default(self):
+        return get(self.meta, 'display.concept_filter_default') or []
+
     def clean_properties(self):
         if not self.properties:
             self.properties = []
             return
-        fields = {'code', 'uri', 'description', 'type', 'include_in_concept_summary'}
+        fields = {'code', 'uri', 'description', 'type'}
         allowed_types = {'code', 'Coding', 'string', 'integer', 'boolean', 'dateTime', 'decimal'}
         cleaned_properties = []
         # code: required string

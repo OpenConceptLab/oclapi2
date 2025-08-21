@@ -652,11 +652,26 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     def summary_properties(self):
         parent = self.get_parent_source_version()
 
-        return self.__get_properties_from_extras_and_definitions(get(parent, 'properties') or [], summary=True)
+        return self.__get_properties_from_extras_and_definitions(
+            get(parent, 'properties') or [], summary=get(parent, 'concept_summary_properties') or [])
 
     @property
-    def filter_properties(self):
+    def filters(self):
         return get(self.get_parent_source_version(), 'filters') or []
+
+    @property
+    def filters_ordered(self):
+        parent = self.get_parent_source_version()
+        definitions = get(parent, 'filters') or []
+        filter_order = get(parent, 'concept_filter_order') or []
+        if filter_order and definitions:
+            filters_ordered = []
+            for code in filter_order:
+                _filter = next((_filter for _filter in definitions if _filter['code'] == code), None)
+                if _filter:
+                    filters_ordered.append(_filter)
+            return filters_ordered
+        return definitions
 
     def get_parent_source_version(self):
         if self.is_versioned_object or self.is_latest_version:
@@ -667,16 +682,30 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     def __get_properties_from_extras_and_definitions(self, definitions, summary=False):
         extras = self.extras or {}
         result = []
-        for prop in definitions:
-            if summary and not prop.get('include_in_concept_summary'):
-                continue
-            code = prop['code']
-            if code not in extras and code.lower() in ['concept_class', 'class', 'conceptclass', 'datatype']:
-                value = self.datatype if code.lower() == 'datatype' else self.concept_class
-            else:
-                value = get(extras, code)
-            value_key = f"value{(prop['type'] or '').title()}"
-            result.append({'code': code, value_key: value})
+        summary_codes = summary or []
+
+        def resolve_value(prop):
+            code = prop["code"]
+            if code not in extras and code.lower() in {"concept_class", "class", "conceptclass", "datatype"}:
+                return self.datatype if code.lower() == "datatype" else self.concept_class
+            return get(extras, code)
+
+        def build_property(prop):
+            if not prop:
+                return None
+            value_key = f"value{(prop.get('type') or '').title()}"
+            return {"code": prop["code"], value_key: resolve_value(prop)}
+
+        if summary is False:
+            for _prop in definitions:
+                if built := build_property(_prop):
+                    result.append(built)
+        else:
+            for prop_code in summary_codes:
+                _prop = next((definition for definition in definitions if definition['code'] == prop_code), None)
+                if built := build_property(_prop):
+                    result.append(built)
+
         return result
 
     def save_cloned(self):
