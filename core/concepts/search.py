@@ -144,7 +144,7 @@ class ConceptFuzzySearch:  # pragma: no cover
             def get_knn_query(_field, _value, _boost):
                 return {
                         "field": _field,
-                        "query_vector": get_embeddings(_value).tolist(),
+                        "query_vector": get_embeddings(_value),
                         "k": k_nearest,
                         "num_candidates": num_candidates,
                         "filter": filter_query,
@@ -196,8 +196,6 @@ class ConceptFuzzySearch:  # pragma: no cover
 
         highlight = [field for field in flatten([*cls.fuzzy_fields, *fields]) if not is_number(field)]
         search = search.highlight(*highlight)
-        import json
-        print("***Search Query***", json.dumps(search.to_dict()))
         return search.sort({'_score': {'order': 'desc'}})
 
     @classmethod
