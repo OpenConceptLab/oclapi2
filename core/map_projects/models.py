@@ -16,6 +16,10 @@ def default_score_configuration():
 
 
 class MapProject(BaseModel):
+    OBJECT_TYPE = 'MapProject'
+    mnemonic_attr = 'id'
+    BATCH_SIZE = 50
+
     name = models.TextField()
     description = models.TextField(null=True, blank=True)
     organization = models.ForeignKey(
@@ -29,12 +33,12 @@ class MapProject(BaseModel):
     matching_algorithm = models.CharField(max_length=100, null=True, blank=True)
     include_retired = models.BooleanField(default=False)
     logs = models.JSONField(default=dict, null=True, blank=True)
-    match_api_url = models.TextField(null=True, blank=True)
-    match_api_token = models.TextField(null=True, blank=True)
     score_configuration = models.JSONField(default=default_score_configuration, null=True, blank=True)
 
-    OBJECT_TYPE = 'MapProject'
-    mnemonic_attr = 'id'
+    # Custom API
+    match_api_url = models.TextField(null=True, blank=True)
+    match_api_token = models.TextField(null=True, blank=True)
+    batch_size = models.IntegerField(null=True, blank=True, default=BATCH_SIZE)
 
     class Meta:
         db_table = 'map_projects'
@@ -182,6 +186,8 @@ class MapProject(BaseModel):
         self.delete()
 
     def clean(self):
+        if not self.batch_size:
+            self.batch_size = self.BATCH_SIZE
         if not self.include_retired:
             self.include_retired = False
         if self.matches:
