@@ -494,10 +494,18 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             facets.pop('collection_version', None)
             facets.pop('expansion', None)
             facets.pop('collection_owner_url', None)
+        else:
+            facets.pop('owner', None)
+            facets.pop('owner_type', None)
+            if 'source' in self.kwargs:
+                facets.pop('source', None)
+            elif 'collection' in self.kwargs:
+                facets.pop('collection', None)
+                facets.pop('collection_owner_url', None)
         facets.pop('is_in_latest_source_version', None)
         facets.pop('is_latest_version', None)
 
-        if parent_repo:
+        if parent_repo and self.is_concept_document():
             return parent_repo.get_ordered_concept_facets_by_filter_order(facets)
 
         return facets
