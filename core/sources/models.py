@@ -1,4 +1,5 @@
 import uuid
+from collections import OrderedDict
 
 from dirtyfields import DirtyFieldsMixin
 from django.conf import settings
@@ -14,6 +15,7 @@ from core.common.constants import HEAD
 from core.common.models import ConceptContainerModel
 from core.common.tasks import update_mappings_source, index_source_concepts, index_source_mappings, \
     resolve_url_registry_entries
+from core.common.utils import to_camel_case
 from core.common.validators import validate_non_negative
 from core.concepts.models import ConceptName, Concept
 from core.services.storages.postgres import PostgresQL
@@ -986,3 +988,23 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
     def get_brief_serializer(self):
         from core.sources.serializers import SourceVersionMinimalSerializer, SourceMinimalSerializer
         return SourceMinimalSerializer if self.is_head else SourceVersionMinimalSerializer
+
+    def get_ordered_concept_facets_by_filter_order(self, facets):
+        sorted_facets = OrderedDict()
+        filter_order = self.concept_filter_order or []
+
+        if not filter_order:
+            return facets
+
+        traversed_keys = []
+        for key in filter_order:
+            property_key = f'properties__{key}'
+            if property_key in facets:
+                sorted_facets[property_key] = facets[property_key]
+                traversed_keys += [property_key, key, to_camel_case(key)]
+
+        for k, v in facets.items():
+            if k not in traversed_keys:
+                sorted_facets[k] = v
+
+        return sorted_facets

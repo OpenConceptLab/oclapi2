@@ -173,7 +173,9 @@ class SourceLogoView(SourceBaseView, BaseLogoView):
         return [CanEditConceptDictionary()]
 
 
-class SourceRetrieveUpdateDestroyView(SourceBaseView, ConceptDictionaryUpdateMixin, RetrieveAPIView, TaskMixin):
+class SourceRetrieveUpdateDestroyView(
+    SourceBaseView, ConceptDictionaryUpdateMixin, RetrieveAPIView, UpdateAPIView, TaskMixin
+):
     serializer_class = SourceDetailSerializer
 
     def get_object(self, queryset=None):

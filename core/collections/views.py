@@ -234,7 +234,7 @@ class CollectionLogoView(CollectionBaseView, BaseLogoView):
 
 
 class CollectionRetrieveUpdateDestroyView(
-    CollectionBaseView, ConceptDictionaryUpdateMixin, RetrieveAPIView, TaskMixin
+    CollectionBaseView, ConceptDictionaryUpdateMixin, RetrieveAPIView, UpdateAPIView, TaskMixin
 ):
     serializer_class = CollectionDetailSerializer
 

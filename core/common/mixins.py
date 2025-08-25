@@ -479,7 +479,11 @@ class ConceptDictionaryUpdateMixin(ConceptDictionaryMixin):
         super().initialize(request, request.path_info)
         return self.update(request)
 
-    def update(self, request):
+    def patch(self, request, **kwargs):  # pylint: disable=unused-argument
+        super().initialize(request, request.path_info)
+        return self.update(request)
+
+    def update(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         if not self.parent_resource:
             return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
 

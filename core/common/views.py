@@ -463,6 +463,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
     def get_facets(self):
         facets = {}
+        parent_repo = None
 
         if self.facet_class:
             if self.is_user_document():
@@ -474,7 +475,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                 ignore_retired_filter=True, sort=False, highlight=False, force=True)
             }
             if 'source' in self.kwargs and self.is_concept_document():
-                params['parent'] = get(self, 'parent_resource')
+                parent_repo = params['parent'] = get(self, 'parent_resource')
 
             faceted_search = self.facet_class( **params) # pylint: disable=not-callable
             faceted_search.params(request_timeout=ES_REQUEST_TIMEOUT)
@@ -495,6 +496,10 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             facets.pop('collection_owner_url', None)
         facets.pop('is_in_latest_source_version', None)
         facets.pop('is_latest_version', None)
+
+        if parent_repo:
+            return parent_repo.get_ordered_concept_facets_by_filter_order(facets)
+
         return facets
 
     def get_extras_searchable_fields_from_query_params(self):
