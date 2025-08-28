@@ -219,7 +219,7 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
     def is_validation_necessary(self):
         origin_source = self.get_latest_version()
 
-        if origin_source.custom_validation_schema == self.custom_validation_schema:
+        if origin_source and origin_source.custom_validation_schema == self.custom_validation_schema:
             return False
 
         return self.custom_validation_schema is not None and self.active_concepts

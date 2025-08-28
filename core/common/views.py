@@ -477,7 +477,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             if 'source' in self.kwargs and self.is_concept_document():
                 parent_repo = params['parent'] = get(self, 'parent_resource')
 
-            faceted_search = self.facet_class( **params) # pylint: disable=not-callable
+            faceted_search = self.facet_class(**params) # pylint: disable=not-callable
             faceted_search.params(request_timeout=ES_REQUEST_TIMEOUT)
             try:
                 s = faceted_search.execute()
