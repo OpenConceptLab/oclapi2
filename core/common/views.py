@@ -225,6 +225,8 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         if field in self.es_fields:
             attrs = self.es_fields[field]
             return attrs.get('sortable', False)
+        if self.is_concept_document() and field.startswith('properties.'):
+            return True
 
         return False
 
