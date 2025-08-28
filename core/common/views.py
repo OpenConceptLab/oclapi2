@@ -628,6 +628,9 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         search_kwargs = {'index': self.document_model.indexes} if get(self.document_model, 'indexes') else {}
         results = self.document_model.search(**search_kwargs)
         default_filters = self.default_filters.copy()
+        if ((self.is_concept_container_document_model() or self.is_repo_document_model()) and
+                self.request.query_params.get('allVersions', None) in TRUTHY):
+            default_filters.pop('version', None)
         if self.is_user_document() and self.should_include_inactive():
             default_filters.pop('is_active', None)
 
