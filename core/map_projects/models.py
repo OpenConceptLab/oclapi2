@@ -147,14 +147,15 @@ class MapProject(BaseModel):
         return errors
 
     def delete(self, using=None, keep_parents=False):
-        result = super().delete(using=using, keep_parents=keep_parents)
-
-        self.__delete_uploaded_file()
+        file_path = self.file_path
+        result =  super().delete(using=using, keep_parents=keep_parents)
+        self._delete_uploaded_file(file_path)
         return result
 
-    def __delete_uploaded_file(self):
+    @staticmethod
+    def _delete_uploaded_file(file_path):
         from core.common.tasks import delete_s3_objects
-        delete_s3_objects.apply_async((self.file_path,), queue='default', permanent=False)
+        delete_s3_objects.apply_async((file_path,), queue='default', permanent=False)
 
     @classmethod
     def format_request_data(cls, data, parent_resource=None):
