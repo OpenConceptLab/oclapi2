@@ -272,6 +272,8 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         'same_as_map_codes': {'sortable': False, 'filterable': True, 'facet': False, 'exact': True},
         'other_map_codes': {'sortable': False, 'filterable': True, 'facet': False, 'exact': True},
         'properties': {'sortable': False, 'filterable': True, 'facet': True, 'exact': True},
+        'target_repo': {'sortable': False, 'filterable': True, 'facet': True, 'exact': True},
+        'target_repo_map_type': {'sortable': False, 'filterable': True, 'facet': True, 'exact': True},
     }
 
     @staticmethod

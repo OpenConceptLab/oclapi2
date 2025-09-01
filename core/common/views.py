@@ -326,6 +326,16 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
         def get_query_criteria(attr, val):
             is_property = attr.startswith('properties__')
+            is_target_repo_filter = attr in ['target_repo', 'target_repo_map_type']
+            if is_target_repo_filter:
+                path = 'source'
+                if attr == 'target_repo_map_type':
+                    path = 'map_type'
+                return Q(
+                    "nested",
+                    path="mapped_codes",
+                    query=Q("match", **{f"mapped_codes.{path}": val})
+                )
             if is_property:
                 property_code = attr.split('properties__', 1)[1]
 

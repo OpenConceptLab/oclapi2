@@ -1,4 +1,4 @@
-from elasticsearch_dsl import TermsFacet, Q
+from elasticsearch_dsl import TermsFacet, Q, NestedFacet
 from pydash import flatten, is_number, compact, get
 
 from core.common.constants import FACET_SIZE, HEAD
@@ -34,6 +34,8 @@ class ConceptFacetedSearch(CustomESFacetedSearch):
         'descriptionTypes': TermsFacet(field='description_types', size=FACET_SIZE),
         'source_version': TermsFacet(field='source_version', size=FACET_SIZE),
         'collection_version': TermsFacet(field='collection_version', size=FACET_SIZE),
+        'targetRepo': NestedFacet("mapped_codes", TermsFacet(field="mapped_codes.source", size=FACET_SIZE)),
+        'targetRepoMapType': NestedFacet("mapped_codes", TermsFacet(field="mapped_codes.map_type", size=FACET_SIZE)),
     }
 
     def __init__(self, parent=None, **kwargs):
