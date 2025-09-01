@@ -317,7 +317,24 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         ), fields
 
     def get_faceted_criterion(self, split=False, params=None, **kwargs):
-        filters = self.get_faceted_filters(split=split, params=params, additional_fields=['id', 'id_raw'])
+        filters = self.get_faceted_filters(
+            split=split,
+            params=params,
+            additional_fields=['id', 'id_raw'],
+            repo_default_filters=kwargs.pop('repo_default_filters', None)
+        )
+
+        def get_query_criteria(attr, val):
+            is_property = attr.startswith('properties__')
+            if is_property:
+                property_code = attr.split('properties__', 1)[1]
+
+                if not val:
+                    new_attr = "properties." + property_code
+                    return ~Q("exists", field=new_attr)
+                return Q('term', **{f"properties.{property_code}.keyword": val.strip('\"').strip('\'')})
+
+            return Q('match', **{attr: val.strip('\"').strip('\'')})
 
         def get_query(attr, val):
             """
@@ -338,10 +355,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                 ]
             else:
                 queries = [
-                    Q(
-                        'match',
-                        **{attr: _val.strip('\"').strip('\'')}
-                    ) for _val in vals
+                    get_query_criteria(attr, _val) for _val in vals
                 ]
 
             return Q('bool', must=[~q for q in queries]) if not_query else Q('bool', should=queries, **kwargs)
@@ -355,20 +369,48 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
         return None
 
-    def get_faceted_filters(self, split=False, params=None, additional_fields=None):
+    @staticmethod
+    def merge_filters(filter1, filter2):
+        if not filter1 or not filter2:
+            return filter1 or filter2 or {}
+        merged = {}
+        for key in set(filter1) | set(filter2):
+            v1, v2 = filter1.get(key), filter2.get(key)
+            # Case 1: both values exist
+            if v1 is not None and v2 is not None:
+                if isinstance(v1, list) and isinstance(v2, list):
+                    merged[key] = list(dict.fromkeys(v1 + v2))  # dedup preserve order
+                elif isinstance(v1, str) and isinstance(v2, str):
+                    if "," in v1 or "," in v2:
+                        merged[key] = ",".join(dict.fromkeys((v1.split(",") + v2.split(","))))
+                    else:
+                        merged[key] = ",".join(dict.fromkeys([v1, v2]))
+                else:
+                    merged[key] = v1  # prefer value from `a`
+            else:
+                merged[key] = v1 if v1 is not None else v2
+        return merged
+
+    def get_faceted_filters(self, split=False, params=None, additional_fields=None, repo_default_filters=None):
         faceted_filters = {}
         faceted_fields = [*self.get_faceted_fields(), *(additional_fields or [])]
         params = self.request.query_params.dict() if params is None else params
+
         query_params = {to_snake_case(k): v for k, v in params.items()}
+        repo_default_filters = {
+            to_snake_case(k): v for k, v in repo_default_filters.items()
+        } if repo_default_filters else {}
+        merged_filters = self.merge_filters(repo_default_filters, query_params)
+
         for field in faceted_fields:
             if field == 'properties':
                 property_facets = {
-                    key: val.split(',') if split else val for key, val in query_params.items() if
-                    key.startswith('properties__') and val
+                    key: val.split(',') if split and (val and isinstance(val, str)) else val for key, val in
+                    merged_filters.items() if key.startswith('properties__')
                 }
                 faceted_filters = {**faceted_filters, **property_facets}
-            if field in query_params:
-                query_value = query_params[field]
+            if field in merged_filters:
+                query_value = merged_filters[field]
                 faceted_filters[field] = query_value.split(',') if split else query_value
         return faceted_filters
 
@@ -474,7 +516,9 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             params = {
                 'query': self.get_search_string(lower=False),
                 '_search': self.__get_search_results(
-                ignore_retired_filter=True, sort=False, highlight=False, force=True)
+                    ignore_retired_filter=True, sort=False, highlight=False,
+                    force=True, apply_default_filters=False
+                )
             }
             if 'source' in self.kwargs and self.is_concept_document():
                 parent_repo = params['parent'] = get(self, 'parent_resource')
@@ -620,7 +664,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
         return (not collection or collection.startswith('!')) and (not version or version.startswith('!'))
 
-    def __apply_common_search_filters(self, ignore_retired_filter=False, force=False):
+    def __apply_common_search_filters(self, ignore_retired_filter=False, force=False, apply_default_filters=True):
         results = None
         if not force and not self.should_perform_es_search():
             return results
@@ -660,8 +704,11 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         include_private = self._should_include_private()
         if not include_private:
             results = results.query(self.get_public_criteria())
-
-        faceted_criterion = self.get_faceted_criterion()
+        faceted_criterion = self.get_faceted_criterion(
+            repo_default_filters=get(
+                self, 'parent_resource.concept_filter_default'
+            ) if apply_default_filters and self.is_concept_document() else None
+        )
         if faceted_criterion:
             results = results.query(faceted_criterion)
         return results
@@ -731,8 +778,8 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         criteria &= Q('match', owner_type=source_version.parent.resource_type)
         return criteria
 
-    def __get_search_results(self, ignore_retired_filter=False, sort=True, highlight=True, force=False):  # pylint: disable=too-many-branches,too-many-locals,too-many-statements
-        results = self.__apply_common_search_filters(ignore_retired_filter, force)
+    def __get_search_results(self, ignore_retired_filter=False, sort=True, highlight=True, force=False, apply_default_filters=True):  # pylint: disable=too-many-branches,too-many-locals,too-many-statements,line-too-long,too-many-arguments
+        results = self.__apply_common_search_filters(ignore_retired_filter, force, apply_default_filters)
         if results is None:
             return results
         exclude_fuzzy = self.request.query_params.get(EXCLUDE_FUZZY_SEARCH_PARAM) in TRUTHY
@@ -818,6 +865,8 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
         if fields and highlight and self.request.query_params.get(INCLUDE_SEARCH_META_PARAM) in get_truthy_values():
             results = results.highlight(*self.clean_fields_for_highlight(fields))
+        results = results.source(excludes=['_synonyms_embeddings', '_embeddings'])
+
         return results.sort(*self._get_sort_attribute()) if sort else results
 
     def get_mandatory_words_criteria(self):
@@ -910,6 +959,8 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
     def should_perform_es_search(self):
         if self.is_repo_version_children_request() and self.request.query_params.get('onlyHierarchyRoot') not in TRUTHY:
+            return True
+        if self.is_concept_document() and get(self, 'parent_resource.concept_filter_default'):
             return True
         sort_field, _ = self.get_sort_and_desc()
         return (

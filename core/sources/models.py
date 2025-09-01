@@ -279,7 +279,7 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
 
     @property
     def concept_filter_default(self):
-        return get(self.meta, 'display.concept_filter_default') or []
+        return get(self.meta, 'display.default_filter') or None
 
     def clean_properties(self):
         if not self.properties:
