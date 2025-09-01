@@ -993,18 +993,27 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         sorted_facets = OrderedDict()
         filter_order = self.concept_filter_order or []
 
-        if not filter_order:
-            return facets
-
-        traversed_keys = []
+        traversed_keys = set()
         for key in filter_order:
             property_key = f'properties__{key}'
             if property_key in facets:
                 sorted_facets[property_key] = facets[property_key]
-                traversed_keys += [property_key, key, to_camel_case(key)]
+                traversed_keys.update({property_key, key, to_camel_case(key)})
 
+        properties_facets = {}
+        other_facets = {}
         for k, v in facets.items():
-            if k not in traversed_keys:
-                sorted_facets[k] = v
+            if k in traversed_keys:
+                continue
+            if k.startswith("properties__"):
+                properties_facets[k] = v
+            else:
+                other_facets[k] = v
+
+        for k in sorted(properties_facets.keys()):
+            sorted_facets[k] = properties_facets[k]
+
+        for k in sorted(other_facets.keys()):
+            sorted_facets[k] = other_facets[k]
 
         return sorted_facets
