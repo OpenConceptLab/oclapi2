@@ -17,13 +17,13 @@ class ConceptFacetedSearch(CustomESFacetedSearch):
     ]
 
     base_facets = {
-        'datatype': TermsFacet(field='datatype', size=100),
-        'conceptClass': TermsFacet(field='concept_class', size=100),
+        'datatype': TermsFacet(field='datatype_text.keyword', size=100),
+        'conceptClass': TermsFacet(field='concept_class_text.keyword', size=100),
         'locale': TermsFacet(field='locale', size=100),
         'retired': TermsFacet(field='retired'),
-        'source': TermsFacet(field='source', size=FACET_SIZE),
+        'source': TermsFacet(field='source_text.keyword', size=FACET_SIZE),
         'collection': TermsFacet(field='collection', size=FACET_SIZE),
-        'owner': TermsFacet(field='owner', size=FACET_SIZE),
+        'owner': TermsFacet(field='owner_text.keyword', size=FACET_SIZE),
         'ownerType': TermsFacet(field='owner_type'),
         'updatedBy': TermsFacet(field='updated_by', size=FACET_SIZE),
         'is_latest_version': TermsFacet(field='is_latest_version'),

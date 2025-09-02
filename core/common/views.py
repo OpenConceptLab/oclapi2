@@ -425,7 +425,12 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         return faceted_filters
 
     def get_faceted_fields(self):
-        return [field for field, config in get(self, 'es_fields', {}).items() if config.get('facet', False)]
+        es_fields = get(self, 'es_fields', {})
+        return [
+            get(
+                config, 'facet_field'
+            ) or field for field, config in es_fields.items() if config.get('facet', False)
+        ]
 
     def get_facet_filters_from_kwargs(self):
         kwargs = self.kwargs
