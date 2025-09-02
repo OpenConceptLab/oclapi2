@@ -1,4 +1,5 @@
 import uuid
+from collections import OrderedDict
 
 from dirtyfields import DirtyFieldsMixin
 from django.conf import settings
@@ -14,6 +15,7 @@ from core.common.constants import HEAD
 from core.common.models import ConceptContainerModel
 from core.common.tasks import update_mappings_source, index_source_concepts, index_source_mappings, \
     resolve_url_registry_entries
+from core.common.utils import to_camel_case
 from core.common.validators import validate_non_negative
 from core.concepts.models import ConceptName, Concept
 from core.services.storages.postgres import PostgresQL
@@ -217,7 +219,7 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
     def is_validation_necessary(self):
         origin_source = self.get_latest_version()
 
-        if origin_source.custom_validation_schema == self.custom_validation_schema:
+        if origin_source and origin_source.custom_validation_schema == self.custom_validation_schema:
             return False
 
         return self.custom_validation_schema is not None and self.active_concepts
@@ -267,11 +269,23 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         if any(algorithm not in self.MATCH_ALGORITHMS for algorithm in self.match_algorithms):
             raise ValidationError({'match_algorithms': [f'Match algorithms must be among {self.MATCH_ALGORITHMS}']})
 
+    @property
+    def concept_summary_properties(self):
+        return get(self.meta, 'display.concept_summary_properties') or []
+
+    @property
+    def concept_filter_order(self):
+        return get(self.meta, 'display.concept_filter_order') or []
+
+    @property
+    def concept_filter_default(self):
+        return get(self.meta, 'display.default_filter') or None
+
     def clean_properties(self):
         if not self.properties:
             self.properties = []
             return
-        fields = {'code', 'uri', 'description', 'type', 'include_in_concept_summary'}
+        fields = {'code', 'uri', 'description', 'type'}
         allowed_types = {'code', 'Coding', 'string', 'integer', 'boolean', 'dateTime', 'decimal'}
         cleaned_properties = []
         # code: required string
@@ -974,3 +988,32 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
     def get_brief_serializer(self):
         from core.sources.serializers import SourceVersionMinimalSerializer, SourceMinimalSerializer
         return SourceMinimalSerializer if self.is_head else SourceVersionMinimalSerializer
+
+    def get_ordered_concept_facets_by_filter_order(self, facets):
+        sorted_facets = OrderedDict()
+        filter_order = self.concept_filter_order or []
+
+        traversed_keys = set()
+        for key in filter_order:
+            property_key = f'properties__{key}'
+            if property_key in facets:
+                sorted_facets[property_key] = facets[property_key]
+                traversed_keys.update({property_key, key, to_camel_case(key)})
+
+        properties_facets = {}
+        other_facets = {}
+        for k, v in facets.items():
+            if k in traversed_keys:
+                continue
+            if k.startswith("properties__"):
+                properties_facets[k] = v
+            else:
+                other_facets[k] = v
+
+        for k in sorted(properties_facets.keys()):
+            sorted_facets[k] = properties_facets[k]
+
+        for k in sorted(other_facets.keys()):
+            sorted_facets[k] = other_facets[k]
+
+        return sorted_facets

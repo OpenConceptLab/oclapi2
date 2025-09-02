@@ -1,3 +1,4 @@
+import json
 import logging
 from math import ceil
 from urllib import parse
@@ -163,6 +164,12 @@ class ListWithHeadersMixin(ListModelMixin):
         params.pop('brief', None)
         query_string = urlencode(params, doseq=True)
         parent = self.parent_resource
+        repo_default_filter = get(parent, 'concept_filter_default')
+        if repo_default_filter:
+            query_string += '&' + urlencode({
+                k: json.dumps(v) if isinstance(v, (dict, list)) else v
+                for k, v in repo_default_filter.items()
+            })
 
         key_body, key_headers = parent.get_concepts_cache_keys() if '/concepts' in base_path else (
             parent.get_mappings_cache_keys())
@@ -479,7 +486,11 @@ class ConceptDictionaryUpdateMixin(ConceptDictionaryMixin):
         super().initialize(request, request.path_info)
         return self.update(request)
 
-    def update(self, request):
+    def patch(self, request, **kwargs):  # pylint: disable=unused-argument
+        super().initialize(request, request.path_info)
+        return self.update(request)
+
+    def update(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         if not self.parent_resource:
             return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
 
