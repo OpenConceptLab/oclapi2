@@ -154,10 +154,10 @@ class ConceptFuzzySearch:  # pragma: no cover
                 }
             if name:
                 knn_queries.append(get_knn_query("_embeddings.vector", name, 0.3))
-                knn_queries.append(get_knn_query("_synonyms_embeddings.vector", name, 0.15))
+                knn_queries.append(get_knn_query("_synonyms_embeddings.vector", name, 0.275))
             for synonym in synonyms:
                 if synonym is not None:
-                    knn_queries.append(get_knn_query("_synonyms_embeddings.vector", synonym, 0.1))
+                    knn_queries.append(get_knn_query("_synonyms_embeddings.vector", synonym, 0.125))
                     knn_queries.append(get_knn_query("_embeddings.vector", synonym, 0.15))
         else:
             for field in cls.fuzzy_fields:
