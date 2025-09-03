@@ -137,6 +137,8 @@ class ConceptFuzzySearch:  # pragma: no cover
                         priority_criteria.append(CustomESSearch.get_or_match_criteria(field, val, boost))
 
         knn_queries = []
+        name = None
+        synonyms = []
         if is_semantic:
             name = data.get('name', None)
             synonyms = data.get('synonyms')
@@ -196,9 +198,32 @@ class ConceptFuzzySearch:  # pragma: no cover
         else:
             search = search.query(Q("bool", must=[Q(filter_query)]))
 
+        if is_semantic:
+            rescore_query = []
+            if name:
+                rescore_query.append(Q("term", _name={"value": name, "case_insensitive": True, "boost": 0.3}))
+                synonyms = [name, *synonyms]
+            for synonym in (synonyms or []):
+                rescore_query.append(Q("term", _synonyms={"value": synonym, "case_insensitive": True, "boost": 0.15}))
+            if rescore_query:
+                search = search.extra(rescore={
+                    "window_size": 200,
+                    "query": {
+                        "score_mode": "total",
+                        "query_weight": 1.0,
+                        "rescore_query_weight": 20.0,
+                        "rescore_query": {
+                            "bool": {
+                                "should": rescore_query
+                            }
+                        },
+                    },
+                })
+
         highlight = [field for field in flatten([*cls.fuzzy_fields, *fields]) if not is_number(field)]
         search = search.highlight(*highlight)
-        return search.sort({'_score': {'order': 'desc'}})
+        search = search.sort({'_score': {'order': 'desc'}})
+        return search
 
     @classmethod
     def get_mapped_code_queries(cls, data, map_config):
