@@ -76,7 +76,7 @@ class ConceptFuzzySearch:  # pragma: no cover
         ['synonyms', 0],
         ['same_as_mapped_codes', 0.1],
         ['other_map_codes', 0.1],
-        ['concept_class', 'datatype', 0.001],
+        ['concept_class', 'datatype', 0],
     ]
     fuzzy_fields = ['name', 'synonyms']
 
@@ -116,7 +116,7 @@ class ConceptFuzzySearch:  # pragma: no cover
     @classmethod
     def search(  # pylint: disable=too-many-locals,too-many-arguments,too-many-branches,too-many-statements
             cls, data, repo_url, repo_params=None, include_retired=False,
-            is_semantic=False, num_candidates=5000, k_nearest=5, map_config=None, additional_filter_criterion=None
+            is_semantic=False, num_candidates=5000, k_nearest=50, map_config=None, additional_filter_criterion=None
     ):
         from core.concepts.documents import ConceptDocument
         map_config = map_config or []
@@ -148,7 +148,7 @@ class ConceptFuzzySearch:  # pragma: no cover
             def get_knn_query(_field, _value, _boost):
                 return {
                         "field": _field,
-                        "query_vector": get_embeddings(_value),
+                        "query_vector": get_embeddings(_value).tolist(),
                         "k": k_nearest,
                         "num_candidates": num_candidates,
                         "filter": filter_query,
@@ -201,13 +201,19 @@ class ConceptFuzzySearch:  # pragma: no cover
         if is_semantic:
             rescore_query = []
             if name:
-                rescore_query.append(Q("term", _name={"value": name, "case_insensitive": True, "boost": 3}))
+                if ' ' in name:
+                    rescore_query.append(Q("match_phrase", name={"query": name, "boost": 3}))
+                else:
+                    rescore_query.append(Q("term", _name={"value": name, "case_insensitive": True, "boost": 3}))
                 synonyms = [name, *synonyms]
             for synonym in (synonyms or []):
-                rescore_query.append(Q("term", _synonyms={"value": synonym, "case_insensitive": True, "boost": 1}))
+                if ' ' in synonym:
+                    rescore_query.append(Q("match_phrase", synonyms={"query": synonym, "boost": 1}))
+                else:
+                    rescore_query.append(Q("term", synonyms={"value": synonym, "case_insensitive": True, "boost": 1}))
             if rescore_query:
                 search = search.extra(rescore={
-                    "window_size": 500,
+                    "window_size": 1000,
                     "query": {
                         "score_mode": "total",
                         "query_weight": 1.0,
