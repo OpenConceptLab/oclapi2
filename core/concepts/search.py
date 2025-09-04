@@ -207,7 +207,7 @@ class ConceptFuzzySearch:  # pragma: no cover
                 rescore_query.append(Q("term", _synonyms={"value": synonym, "case_insensitive": True, "boost": 1}))
             if rescore_query:
                 search = search.extra(rescore={
-                    "window_size": 200,
+                    "window_size": 500,
                     "query": {
                         "score_mode": "total",
                         "query_weight": 1.0,
