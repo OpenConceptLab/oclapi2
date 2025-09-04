@@ -201,10 +201,10 @@ class ConceptFuzzySearch:  # pragma: no cover
         if is_semantic:
             rescore_query = []
             if name:
-                rescore_query.append(Q("term", _name={"value": name, "case_insensitive": True, "boost": 0.3}))
+                rescore_query.append(Q("term", _name={"value": name, "case_insensitive": True, "boost": 3}))
                 synonyms = [name, *synonyms]
             for synonym in (synonyms or []):
-                rescore_query.append(Q("term", _synonyms={"value": synonym, "case_insensitive": True, "boost": 0.15}))
+                rescore_query.append(Q("term", _synonyms={"value": synonym, "case_insensitive": True, "boost": 1}))
             if rescore_query:
                 search = search.extra(rescore={
                     "window_size": 200,
