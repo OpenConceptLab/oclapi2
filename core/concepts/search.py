@@ -199,27 +199,54 @@ class ConceptFuzzySearch:  # pragma: no cover
             search = search.query(Q("bool", must=[Q(filter_query)]))
 
         if is_semantic:
-            rescore_query = []
             if name:
-                rescore_query.append(Q("term", _name={"value": name, "case_insensitive": True, "boost": 3}))
-                rescore_query.append(Q("match_phrase", name={"query": name, "boost": 0.3}))
-                synonyms = [name, *synonyms]
-            for synonym in (synonyms or []):
-                rescore_query.append(Q("term", synonyms={"value": synonym, "case_insensitive": True, "boost": 1}))
-                rescore_query.append(Q("match_phrase", synonyms={"query": synonym, "boost": 0.2}))
-            if rescore_query:
                 search = search.extra(rescore={
-                    "window_size": 1000,
-                    "query": {
-                        "score_mode": "total",
-                        "query_weight": 1.0,
-                        "rescore_query_weight": 20.0,
-                        "rescore_query": {
-                            "bool": {
-                                "should": rescore_query
+                  "window_size": 1000,
+                  "query": {
+                    "score_mode": "total",
+                    "query_weight": 1.0,
+                    "rescore_query_weight": 35.0,
+                    "rescore_query": {
+                      "dis_max": {
+                        "tie_breaker": 0.0,
+                        "queries": [
+                          {
+                            "constant_score": {
+                              "filter": {
+                                "term": {
+                                  "_name": {
+                                    "value": name,
+                                    "case_insensitive": True
+                                  }
+                                }
+                              },
+                              "boost": 3
                             }
-                        },
-                    },
+                          },
+                          {
+                            "constant_score": {
+                              "filter": {
+                                "bool": {
+                                  "should": [
+                                      {
+                                          "term": {
+                                              "_synonyms": {
+                                                  "value": synonym,
+                                                  "case_insensitive": True
+                                              }
+                                          }
+                                      } for synonym in synonyms
+                                  ],
+                                  "minimum_should_match": 1
+                                }
+                              },
+                              "boost": 1
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  }
                 })
 
         highlight = [field for field in flatten([*cls.fuzzy_fields, *fields]) if not is_number(field)]
