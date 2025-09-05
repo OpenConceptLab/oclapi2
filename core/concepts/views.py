@@ -806,7 +806,7 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
         filters = self.request.data.get('filter', {})
         include_retired = self.request.query_params.get(INCLUDE_RETIRED_PARAM) in get_truthy_values()
         num_candidates = min(to_int(self.request.query_params.get('numCandidates', 0), 5000), 5000)
-        k_nearest = min(to_int(self.request.query_params.get('kNearest', 0), 5), 10)
+        k_nearest = min(to_int(self.request.query_params.get('kNearest', 0), 50), 50)
         offset = max(to_int(self.request.GET.get('offset'), 0), 0)
         limit = max(to_int(self.request.GET.get('limit'), 0), 0) or self.default_limit
         page = max(to_int(self.request.GET.get('page'), 1), 1)

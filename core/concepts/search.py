@@ -76,7 +76,7 @@ class ConceptFuzzySearch:  # pragma: no cover
         ['synonyms', 0],
         ['same_as_mapped_codes', 0.1],
         ['other_map_codes', 0.1],
-        ['concept_class', 'datatype', 0.01],
+        ['concept_class', 'datatype', 0],
     ]
     fuzzy_fields = ['name', 'synonyms']
 
@@ -116,7 +116,7 @@ class ConceptFuzzySearch:  # pragma: no cover
     @classmethod
     def search(  # pylint: disable=too-many-locals,too-many-arguments,too-many-branches,too-many-statements
             cls, data, repo_url, repo_params=None, include_retired=False,
-            is_semantic=False, num_candidates=5000, k_nearest=5, map_config=None, additional_filter_criterion=None
+            is_semantic=False, num_candidates=5000, k_nearest=50, map_config=None, additional_filter_criterion=None
     ):
         from core.concepts.documents import ConceptDocument
         map_config = map_config or []
@@ -137,6 +137,8 @@ class ConceptFuzzySearch:  # pragma: no cover
                         priority_criteria.append(CustomESSearch.get_or_match_criteria(field, val, boost))
 
         knn_queries = []
+        name = None
+        synonyms = []
         if is_semantic:
             name = data.get('name', None)
             synonyms = data.get('synonyms')
@@ -146,7 +148,7 @@ class ConceptFuzzySearch:  # pragma: no cover
             def get_knn_query(_field, _value, _boost):
                 return {
                         "field": _field,
-                        "query_vector": get_embeddings(_value),
+                        "query_vector": get_embeddings(_value).tolist(),
                         "k": k_nearest,
                         "num_candidates": num_candidates,
                         "filter": filter_query,
@@ -196,9 +198,61 @@ class ConceptFuzzySearch:  # pragma: no cover
         else:
             search = search.query(Q("bool", must=[Q(filter_query)]))
 
+        if is_semantic:
+            if name:
+                search = search.extra(rescore={
+                  "window_size": 1000,
+                  "query": {
+                    "score_mode": "total",
+                    "query_weight": 1.0,
+                    "rescore_query_weight": 35.0,
+                    "rescore_query": {
+                      "dis_max": {
+                        "tie_breaker": 0.0,
+                        "queries": [
+                          {
+                            "constant_score": {
+                              "filter": {
+                                "term": {
+                                  "_name": {
+                                    "value": name,
+                                    "case_insensitive": True
+                                  }
+                                }
+                              },
+                              "boost": 3
+                            }
+                          },
+                          {
+                            "constant_score": {
+                              "filter": {
+                                "bool": {
+                                  "should": [
+                                      {
+                                          "term": {
+                                              "_synonyms": {
+                                                  "value": synonym,
+                                                  "case_insensitive": True
+                                              }
+                                          }
+                                      } for synonym in synonyms
+                                  ],
+                                  "minimum_should_match": 1
+                                }
+                              },
+                              "boost": 1
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  }
+                })
+
         highlight = [field for field in flatten([*cls.fuzzy_fields, *fields]) if not is_number(field)]
         search = search.highlight(*highlight)
-        return search.sort({'_score': {'order': 'desc'}})
+        search = search.sort({'_score': {'order': 'desc'}})
+        return search
 
     @classmethod
     def get_mapped_code_queries(cls, data, map_config):
