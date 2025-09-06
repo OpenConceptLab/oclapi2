@@ -419,8 +419,9 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                     merged_filters.items() if key.startswith('properties__')
                 }
                 faceted_filters = {**faceted_filters, **property_facets}
-            if field in merged_filters:
-                query_value = merged_filters[field]
+            if field in merged_filters or field.replace('_text.keyword', '') in merged_filters:
+                query_value = merged_filters.get(
+                    field, False) or merged_filters.get(field.replace('_text.keyword', ''))
                 faceted_filters[field] = query_value.split(',') if split else query_value
         return faceted_filters
 

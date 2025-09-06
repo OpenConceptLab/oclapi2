@@ -1478,8 +1478,8 @@ class SourceSummaryViewTest(OCLAPITestCase):
             {
                 'active': 4,
                 'retired': 0,
-                'concept_class': [(self.random_key, 2), (f'foobar-{self.random_key}', 2)],
-                'datatype': [(self.random_key, 2), (f'foo-{self.random_key}', 1), (f'foobar-{self.random_key}', 1)],
+                'concept_class': [(self.random_key, 2), (f'FOOBAR-{self.random_key}', 2)],
+                'datatype': [(self.random_key, 2), (f'FOO-{self.random_key}', 1), (f'FOOBAR-{self.random_key}', 1)],
                 'locale': [('en', 2)],
                 'name_type': [('SHORT', 2)]
             }
