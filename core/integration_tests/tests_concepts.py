@@ -1729,6 +1729,10 @@ class ConceptListViewTest(OCLAPITestCase):
         self.random_user = UserProfileFactory()
 
     def test_search(self):  # pylint: disable=too-many-statements
+        if settings.ENV == 'ci':
+            rebuild_indexes(['concepts'])
+        ConceptDocument().update(self.source.concepts_set.all())
+
         response = self.client.get('/concepts/?q=MyConcept2')
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 1)
@@ -1829,6 +1833,10 @@ class ConceptListViewTest(OCLAPITestCase):
         self.assertEqual(len(response.data), 2)
 
     def test_search_with_latest_released_repo_search(self):  # pylint: disable=too-many-statements
+        if settings.ENV == 'ci':
+            rebuild_indexes(['concepts'])
+        ConceptDocument().update(self.source.concepts_set.all())
+
         response = self.client.get(
             '/concepts/?q=MyConcept',
             HTTP_INCLUDESEARCHLATEST=True,
@@ -1962,6 +1970,7 @@ class ConceptListViewTest(OCLAPITestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(list(response.data.keys()), ['facets'])
+        print(response.data)
         class_a_facet = [x for x in response.data['facets']['fields']['conceptClass'] if x[0] == 'classA'][0]
         self.assertEqual(class_a_facet[0], 'classA')
         self.assertTrue(class_a_facet[1] >= 1)
@@ -1982,6 +1991,7 @@ class ConceptListViewTest(OCLAPITestCase):
             HTTP_INCLUDESEARCHLATEST=True,
         )
         self.assertEqual(response.status_code, 200)
+        print(response.data)
         self.assertEqual(list(response.data.keys()), ['facets'])
 
         class_b_facet = [x for x in response.data['facets']['fields']['conceptClass'] if x[0] == 'classB'][0]
