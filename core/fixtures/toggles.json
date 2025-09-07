@@ -48,7 +48,8 @@
       "is_active": true,
       "name": "SEMANTIC_SEARCH_TOGGLE",
       "dev": true,
-      "qa": true
+      "qa": true,
+      "staging": true
     }
   }
 ]
