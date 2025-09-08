@@ -1435,9 +1435,8 @@ class ConceptTest(OCLTestCase):
             self.assertEqual(
                 concept.properties,
                 [
-                    {'code': 'concept_class', 'valueCode': 'Diagnosis'},
                     {'code': 'datatype', 'valueCode': 'N/A'},
-                    {'code': 'units', 'valueString': None}
+                    {'code': 'concept_class', 'valueCode': 'Diagnosis'}
                 ]
             )
             self.assertEqual(
@@ -1462,8 +1461,8 @@ class ConceptTest(OCLTestCase):
             self.assertEqual(
                 concept.properties,
                 [
-                    {'code': 'concept_class', 'valueCode': 'Diagnosis'},
                     {'code': 'datatype', 'valueCode': 'N/A'},
+                    {'code': 'concept_class', 'valueCode': 'Diagnosis'},
                     {'code': 'units', 'valueString': 'parts/microliter'}
                 ]
             )
@@ -1498,7 +1497,6 @@ class ConceptTest(OCLTestCase):
                 [
                     {'code': 'concept_class', 'valueCode': 'Diagnosis'},
                     {'code': 'datatype', 'valueCode': 'N/A'},
-                    {'code': 'units', 'valueString': None}
                 ]
             )
             self.assertEqual(
@@ -1553,8 +1551,7 @@ class ConceptTest(OCLTestCase):
                 concept.properties,
                 [
                     {'code': 'concept_class', 'valueCode': 'Diagnosis'},
-                    {'code': 'datatype', 'valueCode': 'N/A'},
-                    {'code': 'units', 'valueString': None}
+                    {'code': 'datatype', 'valueCode': 'N/A'}
                 ]
             )
             self.assertEqual(
@@ -1595,8 +1592,7 @@ class ConceptTest(OCLTestCase):
                 concept.properties,
                 [
                     {'code': 'concept_class', 'valueCode': 'Diagnosis'},
-                    {'code': 'datatype', 'valueCode': 'N/A'},
-                    {'code': 'units', 'valueString': None}
+                    {'code': 'datatype', 'valueCode': 'N/A'}
                 ]
             )
             self.assertEqual(
