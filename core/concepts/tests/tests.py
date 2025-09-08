@@ -1418,6 +1418,14 @@ class ConceptTest(OCLTestCase):
         }
         source.save()
 
+        self.assertEqual(
+            source.filters_ordered,
+            [
+                {'code': 'concept_class', 'operator': ['='], 'value': 'blah'},
+                {'code': 'datatype', 'operator': ['='], 'value': 'blah'},
+            ]
+        )
+
         concept2 = ConceptFactory(parent=source, concept_class='Diagnosis', datatype='N/A')
         concept3 = ConceptFactory(
             parent=source, concept_class='Diagnosis', datatype='N/A', extras={'foo': 'bar', 'units': 'parts/microliter'}
@@ -1489,6 +1497,14 @@ class ConceptTest(OCLTestCase):
         }
         source.save()
 
+        self.assertEqual(
+            source.filters_ordered,
+            [
+                {'code': 'datatype', 'operator': ['='], 'value': 'blah'},
+                {'code': 'concept_class', 'operator': ['='], 'value': 'blah'},
+            ]
+        )
+
         for concept in concept2s:
             concept.refresh_from_db()
             self.assertEqual(concept.extras, {})
@@ -1541,8 +1557,32 @@ class ConceptTest(OCLTestCase):
                 ]
             )
 
-        source.meta = {'display': {'concept_summary_properties': ['concept_class', 'datatype', 'foobar']}}
+        source.meta = {
+            'display': {
+                'concept_summary_properties': ['concept_class', 'datatype', 'foobar'],
+                'concept_filter_order': ['datatype', 'concept_class', 'foobar', 'barbar', 'bar1'],
+            },
+        }
+        source.filters = [
+            {'code': 'concept_class', 'operator': ['='], 'value': 'blah'},
+            {'code': 'datatype', 'operator': ['='], 'value': 'blah'},
+            {'code': 'bar2', 'operator': ['='], 'value': 'blah'},
+            {'code': 'bar0', 'operator': ['='], 'value': 'blah'},
+            {'code': 'bar1', 'operator': ['='], 'value': 'blah'},
+            {'code': 'barbar', 'operator': ['='], 'value': 'blah'},
+        ]
         source.save()
+        self.assertEqual(
+            source.filters_ordered,
+            [
+                {'code': 'datatype', 'operator': ['='], 'value': 'blah'},
+                {'code': 'concept_class', 'operator': ['='], 'value': 'blah'},
+                {'code': 'barbar', 'operator': ['='], 'value': 'blah'},
+                {'code': 'bar1', 'operator': ['='], 'value': 'blah'},
+                {'code': 'bar0', 'operator': ['='], 'value': 'blah'},
+                {'code': 'bar2', 'operator': ['='], 'value': 'blah'},
+            ]
+        )
 
         for concept in concept2s:
             concept.refresh_from_db()

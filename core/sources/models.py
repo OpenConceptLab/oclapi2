@@ -281,6 +281,24 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
     def concept_filter_default(self):
         return get(self.meta, 'display.default_filter') or None
 
+    @property
+    def filters_ordered(self):
+        if not self.filters:
+            return []
+
+        ordered = []
+        ordered_code = [
+            *(self.concept_filter_order or []),
+            *sorted([
+                f['code'] for f in self.filters if f.get('code', None) and f['code'] not in self.concept_filter_order
+            ])
+        ]
+        for code in ordered_code:
+            filter_obj = next((f for f in self.filters if f.get('code') == code), None)
+            if filter_obj:
+                ordered.append(filter_obj)
+        return ordered
+
     def clean_properties(self):
         if not self.properties:
             self.properties = []
