@@ -363,6 +363,7 @@ class SourceDetailSerializer(SourceCreateOrUpdateSerializer, AbstractRepoResourc
     client_configs = SerializerMethodField()
     hierarchy_root = SerializerMethodField()
     hierarchy_root_url = CharField(source='hierarchy_root.url', required=False, allow_blank=True, allow_null=True)
+    filters = ListField(source='filters_ordered', allow_null=True)
 
     class Meta:
         model = Source
@@ -454,6 +455,7 @@ class SourceVersionDetailSerializer(SourceCreateOrUpdateSerializer, AbstractRepo
     states = SerializerMethodField()
     tasks = SerializerMethodField()
     hierarchy_root_url = CharField(source='hierarchy_root.url', required=False, allow_blank=True, allow_null=True)
+    filters = ListField(source='filters_ordered', allow_null=True)
 
     class Meta:
         model = Source
