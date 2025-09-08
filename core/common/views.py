@@ -546,15 +546,15 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             facets['source_version'] = [facet for facet in facets['source_version'] if facet[0] != 'HEAD']
         is_global_scope = ('org' not in self.kwargs and 'user' not in self.kwargs and not self.user_is_self)
         if is_global_scope:
-            facets.pop('source_version', None)
             facets.pop('collection_version', None)
             facets.pop('expansion', None)
             facets.pop('collection_owner_url', None)
         else:
             facets.pop('owner', None)
-            facets.pop('owner_type', None)
+            facets.pop('ownerType', None)
             if 'source' in self.kwargs:
                 facets.pop('source', None)
+                facets.pop('source_version', None)
             elif 'collection' in self.kwargs:
                 facets.pop('collection', None)
                 facets.pop('collection_owner_url', None)
