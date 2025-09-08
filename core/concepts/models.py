@@ -4,7 +4,7 @@ from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator
 from django.db import models, IntegrityError
 from django.db.models import F, Q
-from pydash import get, compact
+from pydash import get, compact, has
 
 from core.common.checksums import ChecksumModel
 from core.common.constants import ISO_639_1, LATEST, HEAD, ALL
@@ -657,14 +657,21 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     def properties(self):
         parent = self.get_parent_source_version()
 
-        return self.__get_properties_from_extras_and_definitions(get(parent, 'properties') or [])
+        return self.__get_properties_from_extras_and_definitions(
+            get(parent, 'properties') or [],
+            summary=get(parent, 'concept_summary_properties'),
+            return_all=True
+        )
 
     @property
     def summary_properties(self):
         parent = self.get_parent_source_version()
 
         return self.__get_properties_from_extras_and_definitions(
-            get(parent, 'properties') or [], summary=get(parent, 'concept_summary_properties') or [])
+            get(parent, 'properties') or [],
+            summary=get(parent, 'concept_summary_properties') or [],
+            return_all=False
+        )
 
     @property
     def filters(self):
@@ -690,29 +697,36 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
         return self.latest_source_version or self.get_source_version_before_creation()
 
-    def __get_properties_from_extras_and_definitions(self, definitions, summary=False):
+    def __get_properties_from_extras_and_definitions(self, definitions, summary=False, return_all=True):
         extras = self.extras or {}
         result = []
         summary_codes = summary or []
+        NOT_EXISTING_VALUE = '____FAlse____'
 
         def resolve_value(prop):
             code = prop["code"]
             if code not in extras and code.lower() in {"concept_class", "class", "conceptclass", "datatype"}:
                 return self.datatype if code.lower() == "datatype" else self.concept_class
-            return get(extras, code)
+            return get(extras, code) if has(extras, code) else NOT_EXISTING_VALUE
 
         def build_property(prop):
             if not prop:
-                return None
+                return False
+            value = resolve_value(prop)
+            if value == NOT_EXISTING_VALUE:
+                return False
             value_key = f"value{(prop.get('type') or '').title()}"
-            return {"code": prop["code"], value_key: resolve_value(prop)}
+            return {"code": prop["code"], value_key: value}
 
-        if summary is False:
-            for _prop in definitions:
-                if built := build_property(_prop):
-                    result.append(built)
-        else:
-            for prop_code in summary_codes:
+        for prop_code in summary_codes:
+            _prop = next((definition for definition in definitions if definition['code'] == prop_code), None)
+            if built := build_property(_prop):
+                result.append(built)
+
+        if return_all:
+            rest = sorted([
+                _prop['code'] for _prop in definitions if _prop.get('code') and _prop.get('code') not in summary_codes])
+            for prop_code in rest:
                 _prop = next((definition for definition in definitions if definition['code'] == prop_code), None)
                 if built := build_property(_prop):
                     result.append(built)
