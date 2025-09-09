@@ -22,13 +22,13 @@ class OrganizationDocument(Document):
     _mnemonic = fields.KeywordField(attr='mnemonic', normalizer='lowercase')
     extras = fields.ObjectField(dynamic=True)
     user = fields.ListField(fields.TextField())
+    created_on = fields.DateField(attr='created_at')
+    location = fields.KeywordField(attr='location')
+    company = fields.KeywordField(attr='company')
 
     class Django:
         model = Organization
-        fields = [
-            'company',
-            'location',
-        ]
+        fields = []
 
     @staticmethod
     def get_match_phrase_attrs():
