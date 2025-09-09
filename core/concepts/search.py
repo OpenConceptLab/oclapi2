@@ -135,6 +135,11 @@ class ConceptFuzzySearch:  # pragma: no cover
                     for val in values:
                         val = val or ""
                         priority_criteria.append(CustomESSearch.get_or_match_criteria(field, val, boost))
+        for field, value in data.items():
+            if field.startswith('properties__'):
+                property_code = field.split('properties__', 1)[-1]
+                priority_criteria.append(
+                    Q('term', **{f"properties.{property_code}.keyword": value.strip('\"').strip('\'')}))
 
         knn_queries = []
         name = None
