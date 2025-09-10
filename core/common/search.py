@@ -5,6 +5,7 @@ from django.db.models import Case, When, IntegerField
 from elasticsearch_dsl import FacetedSearch, Q
 from pydash import compact, get
 
+from core.common.constants import ES_REQUEST_TIMEOUT
 from core.common.utils import is_url_encoded_string
 
 
@@ -305,7 +306,8 @@ class CustomESSearch:
         # Do not query again if the es result is already cached
         if not hasattr(self._dsl_search, '_response'):
             # We only need the meta fields with the models ids
-            s = self._dsl_search.source(excludes=['*'])
+            s = self._dsl_search.source(False)
+            s = s.params(request_timeout=ES_REQUEST_TIMEOUT)
             s = s.execute()
             hits = s.hits
             self.max_score = hits.max_score
