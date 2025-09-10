@@ -1,5 +1,5 @@
 from django.db import models
-from pydash import has
+from pydash import has, compact
 
 
 class Event(models.Model):
@@ -47,18 +47,14 @@ class Event(models.Model):
 
     @classmethod
     def get_user_organization_events(cls, user, private=False):
-        criterion = None
-        for org in user.organizations.filter():
-            criteria = Event.object_criteria(org.uri)
-            repo_events_criteria = org.get_repo_events_criteria(private)
-            if repo_events_criteria is not None:
-                criteria |= repo_events_criteria
-            if criterion is None:
-                criterion = criteria
-            else:
-                criterion |= criteria
+        org_uris = list(user.organizations.values_list('uri', flat=True))
+        source_uris = compact(user.organizations.values_list('source__uri', flat=True))
+        collection_uris = compact(user.organizations.values_list('collection__uri', flat=True))
 
-        queryset = Event.objects.none() if criterion is None else Event.objects.filter(criterion)
+        queryset = Event.objects.filter(
+            models.Q(object_url__in=org_uris) |
+            models.Q(referenced_object_url__in=[*org_uris, *source_uris, *collection_uris])
+        )
 
         return queryset if private else queryset.filter(public=True)
 

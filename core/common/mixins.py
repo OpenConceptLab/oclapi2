@@ -580,32 +580,21 @@ class SourceContainerMixin:
         return self.uri + 'collections/'
 
     def get_repo_events_criteria(self, private=False):
-        criteria = None
         sources = self.source_set.filter(is_active=True)
         collections = self.collection_set.filter(is_active=True)
 
         if not private:
-            sources = self.source_set.filter(public_access__in=[ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT])
-            collections = self.collection_set.filter(public_access__in=[ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT])
+            sources = sources.filter(public_access__in=[ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT])
+            collections = collections.filter(public_access__in=[ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT])
 
-        for source in sources:
-            if criteria is None:
-                criteria = Q(referenced_object_url=source.uri)
-            else:
-                criteria |= Q(referenced_object_url=source.uri)
-        for collection in collections:
-            if criteria is None:
-                criteria = Q(referenced_object_url=collection.uri)
-            else:
-                criteria |= Q(referenced_object_url=collection.uri)
+        source_uris = sources.values_list('uri', flat=True)
+        collection_uris = collections.values_list('uri', flat=True)
 
-        return criteria
+        return Q(referenced_object_url__in=[*source_uris, *collection_uris])
 
     def get_repo_events(self, private=False):
         from core.events.models import Event
         criteria = self.get_repo_events_criteria(private)
-        if criteria is None:
-            return Event.objects.none()
         queryset = Event.objects.filter(criteria)
         return queryset if private else queryset.filter(public=True)
 
