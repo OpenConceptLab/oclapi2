@@ -206,7 +206,7 @@ class ConceptFuzzySearch:  # pragma: no cover
         if is_semantic:
             if name:
                 search = search.extra(rescore={
-                  "window_size": 500,
+                  "window_size": 250,
                   "query": {
                     "score_mode": "total",
                     "query_weight": 1.0,
