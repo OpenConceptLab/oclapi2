@@ -116,7 +116,7 @@ class ConceptFuzzySearch:  # pragma: no cover
     @classmethod
     def search(  # pylint: disable=too-many-locals,too-many-arguments,too-many-branches,too-many-statements
             cls, data, repo_url, repo_params=None, include_retired=False,
-            is_semantic=False, num_candidates=5000, k_nearest=50, map_config=None, additional_filter_criterion=None
+            is_semantic=False, num_candidates=2000, k_nearest=50, map_config=None, additional_filter_criterion=None
     ):
         from core.concepts.documents import ConceptDocument
         map_config = map_config or []
@@ -254,7 +254,9 @@ class ConceptFuzzySearch:  # pragma: no cover
                   }
                 })
 
-        highlight = [field for field in flatten([*cls.fuzzy_fields, *fields]) if not is_number(field)]
+        highlight = [
+            'name', 'synonyms'
+        ] if is_semantic else  [field for field in flatten([*cls.fuzzy_fields, *fields]) if not is_number(field)]
         search = search.highlight(*highlight)
         search = search.sort({'_score': {'order': 'desc'}})
         return search

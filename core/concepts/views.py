@@ -805,7 +805,7 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
         map_config = self.request.data.get('map_config', [])
         filters = self.request.data.get('filter', {})
         include_retired = self.request.query_params.get(INCLUDE_RETIRED_PARAM) in get_truthy_values()
-        num_candidates = min(to_int(self.request.query_params.get('numCandidates', 0), 5000), 5000)
+        num_candidates = min(to_int(self.request.query_params.get('numCandidates', 0), 2000), 2000)
         k_nearest = min(to_int(self.request.query_params.get('kNearest', 0), 50), 50)
         offset = max(to_int(self.request.GET.get('offset'), 0), 0)
         limit = max(to_int(self.request.GET.get('limit'), 0), 0) or self.default_limit
@@ -826,6 +826,7 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
                 is_semantic, num_candidates, k_nearest, map_config, faceted_criterion
             )
             search = search.params(min_score=score_threshold if best_match else 0)
+            search = search.params(track_total_hits=False, request_cache=True)
             es_search = CustomESSearch(search[start:end], ConceptDocument)
             es_search.to_queryset(False, True)
             result = {'row': row, 'results': [], 'map_config': map_config, 'filter': filters}
