@@ -29,7 +29,7 @@ from .checksums import ChecksumModel
 from .exceptions import Http403
 from .utils import write_csv_to_s3, get_csv_from_s3, get_query_params_from_url_string, compact_dict_by_values, \
     to_owner_uri, parse_updated_since_param, get_export_service, to_int, get_truthy_values, generate_temp_version, \
-    canonical_url_to_url_and_version, decode_string
+    canonical_url_to_url_and_version, decode_string, get_falsy_values
 from ..concepts.constants import PERSIST_CLONE_ERROR
 from ..toggles.models import Toggle
 
@@ -165,7 +165,8 @@ class ListWithHeadersMixin(ListModelMixin):
         query_string = urlencode(params, doseq=True)
         parent = self.parent_resource
         repo_default_filter = get(parent, 'concept_filter_default')
-        if repo_default_filter:
+        include_default_filter = self.request.query_params.get('conceptFilterDefault') not in get_falsy_values()
+        if repo_default_filter and include_default_filter:
             query_string += '&' + urlencode({
                 k: json.dumps(v) if isinstance(v, (dict, list)) else v
                 for k, v in repo_default_filter.items()
