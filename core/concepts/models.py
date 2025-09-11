@@ -692,7 +692,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         return definitions
 
     def get_parent_source_version(self):
-        if self.is_versioned_object or self.is_latest_version:
+        if self.is_versioned_object:
             return self.parent
 
         return self.latest_source_version or self.get_source_version_before_creation()
