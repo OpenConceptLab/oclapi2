@@ -825,7 +825,6 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
                 row, target_repo_url, repo_params, include_retired,
                 is_semantic, num_candidates, k_nearest, map_config, faceted_criterion
             )
-            search = search.params(min_score=score_threshold if best_match else 0)
             search = search.params(track_total_hits=False, request_cache=True)
             es_search = CustomESSearch(search[start:end], ConceptDocument)
             es_search.to_queryset(False, True)
@@ -837,20 +836,16 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
                 normalized_score = get(score_info, 'normalized') or None
                 concept._score = score  # pylint:disable=protected-access
                 concept._normalized_score = normalized_score  # pylint:disable=protected-access
-                concept._match_type = 'low'  # pylint:disable=protected-access
-                # Use normalized score for thresholding if available
-                score_to_check = normalized_score if normalized_score is not None else score
-                if score_to_check is not None:
-                    if is_semantic and score_to_check > 0.9:
+                if limit > 1:
+                    concept._match_type = 'low'  # pylint:disable=protected-access
+                    score_to_check = normalized_score if normalized_score is not None else score
+                    if concept._highlight.get('name', None) or is_semantic and score_to_check > score_threshold:  # pylint:disable=protected-access
                         concept._match_type = 'very_high'  # pylint:disable=protected-access
-                    elif score_to_check > 0.6:
+                    elif concept._highlight.get('synonyms', None):   # pylint:disable=protected-access
                         concept._match_type = 'high'  # pylint:disable=protected-access
-                # Optionally, keep existing highlight logic
-                if concept._highlight.get('name', None):  # pylint:disable=protected-access
-                    concept._match_type = 'very_high'  # pylint:disable=protected-access
-                if is_semantic and score_to_check > self.score_threshold_semantic_very_high:  # pylint:disable=protected-access,line-too-long
-                    concept._match_type = 'very_high'  # pylint:disable=protected-access
-                if not best_match or concept._match_type == 'very_high':  # pylint:disable=protected-access
+                else:
+                    concept._match_type = 'very_high' # pylint:disable=protected-access
+                if not best_match or concept._match_type in ['high', 'very_high']:  # pylint:disable=protected-access
                     serializer = ConceptDetailSerializer if self.is_verbose() else ConceptMinimalSerializer
                     data = serializer(concept, context={'request': self.request}).data
                     data['search_meta']['search_normalized_score'] = normalized_score * 100
