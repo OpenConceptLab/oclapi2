@@ -241,7 +241,7 @@ class CustomESSearch:
                 )
                 qs = qs.order_by(preserved_order)
         self.queryset = qs
-        self.total = get(hits, 'total.value') or None
+        self.total = get(hits, 'total.value') or 0
 
     def get_aggregations(self, verbose=False, raw=False):
         s, _ = self.__get_response()
