@@ -1,10 +1,12 @@
-
+from django.conf import settings
 from rest_framework import status
 from rest_framework.generics import RetrieveUpdateDestroyAPIView, RetrieveAPIView, CreateAPIView
+from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
 
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryCreateMixin
 from core.common.permissions import CanViewConceptDictionary, HasOwnership
+from core.common.utils import get_truthy_values
 from core.common.views import BaseAPIView
 from core.map_projects.models import MapProject
 from core.map_projects.serializers import MapProjectSerializer, MapProjectCreateUpdateSerializer, \
@@ -59,6 +61,46 @@ class MapProjectView(MapProjectBaseView, RetrieveUpdateDestroyAPIView):
         if self.request.method == 'PUT':
             return MapProjectCreateUpdateSerializer
         return self.serializer_class
+
+
+class MapProjectRecommendView(MapProjectBaseView):  # pragma: no cover
+    serializer_class = MapProjectDetailSerializer
+    lookup_url_kwarg = 'project'
+    lookup_field = 'project'
+    pk_field = 'id'
+    permission_classes = (IsAdminUser,)
+    swagger_schema = None
+
+    def post(self, request, *args, **kwargs):  # pylint: disable=unused-argument
+        params = self.request.query_params
+        map_project = self.get_object()
+        candidates = request.data.get('candidates') or []
+        row = request.data.get('row') or {}
+        target_repo_url = request.data.get('target_repo_url') or map_project.target_repo_url
+
+        if not candidates or not isinstance(candidates, list) or not row or not isinstance(row, dict):
+            return Response(
+                {'detail': 'candidates (list) and row (dict) are required.'}, status=status.HTTP_400_BAD_REQUEST
+            )
+        if not target_repo_url:
+            return Response(
+                {'detail': 'target_repo_url is required either in the request body or the map project.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        from core.services.litellm import LiteLLMService
+        if not settings.ENV or settings.ENV in ['ci', 'development', 'test']:
+            return Response(LiteLLMService.mock_response)
+
+        try:
+            litellm = LiteLLMService()
+            map_project.target_repo_url = target_repo_url
+            response = litellm.recommend(
+                map_project, row, candidates, params.get('conceptFilterDefault') in get_truthy_values()
+            )
+            return Response(litellm.to_dict(response), status=status.HTTP_200_OK)
+        except Exception as ex:
+            return Response({'detail': str(ex)}, status=status.HTTP_400_BAD_REQUEST)
 
 
 class MapProjectSummaryView(MapProjectBaseView, RetrieveAPIView):

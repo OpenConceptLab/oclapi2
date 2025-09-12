@@ -609,3 +609,5 @@ MINIO_SECURE = os.environ.get('MINIO_SECURE') == 'TRUE'
 if ENV not in ['ci', 'staging', 'production', 'demo']:
     LM_MODEL_NAME = 'all-MiniLM-L6-v2'
     LM = SentenceTransformer(LM_MODEL_NAME)
+
+ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY', None)
