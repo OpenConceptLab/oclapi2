@@ -60,6 +60,7 @@ services:
       - MINIO_SECRET_KEY
       - MINIO_SECURE
       - ENABLE_THROTTLING
+      - ANTHROPIC_API_KEY
     healthcheck:
       test: "curl --silent --fail http://localhost:8000/version/ || exit 1"
     volumes:

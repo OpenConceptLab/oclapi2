@@ -196,3 +196,23 @@ class MapProject(BaseModel):
                 self.matches = json.loads(self.matches)
             except (json.JSONDecodeError, TypeError):
                 pass
+
+    @property
+    def target_repo(self):
+        if not self.target_repo_url:
+            return None
+
+        from core.sources.models import Source
+        repo, _ = Source.resolve_reference_expression(self.target_repo_url)
+        return repo if repo and repo.id else None
+
+    @property
+    def fields_mapped(self):
+        return [
+            col.get('label') for col in self.visible_columns if (
+                    col['label'].lower() in [
+                        'id', 'description', 'mapping: list', 'mapping: code',
+                        'concept_class', 'class', 'datatype', 'name', 'synonyms'
+                    ] or col['label'].lower().startswith('property:')
+            )
+        ] if self.columns else []
