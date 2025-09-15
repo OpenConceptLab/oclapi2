@@ -656,7 +656,7 @@ class CollectionReferencesViewTest(OCLAPITestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.collection.refresh_from_db()
-        self.assertEqual(self.collection.references.count(), 2)
+        self.assertEqual(self.collection.references.count(), 1)
         self.assertEqual(self.collection.expansion.concepts.count(), 1)
         self.assertEqual(self.collection.expansion.mappings.count(), 1)
 
@@ -670,9 +670,9 @@ class CollectionReferencesViewTest(OCLAPITestCase):
         )
         self.assertEqual(response.status_code, 204)
         self.collection.refresh_from_db()
-        self.assertEqual(self.collection.references.count(), 1)
+        self.assertEqual(self.collection.references.count(), 0)
         self.assertEqual(self.collection.expansion.concepts.count(), 0)
-        self.assertEqual(self.collection.expansion.mappings.count(), 1)
+        self.assertEqual(self.collection.expansion.mappings.count(), 0)
 
     @patch('core.collections.views.add_references')
     def test_put_202_all(self, add_references_mock):
@@ -728,16 +728,10 @@ class CollectionReferencesViewTest(OCLAPITestCase):
             response.data,
             [
                 {
-                    'added': False,
+                    'added': True,
                     'expression': self.concept.uri,
-                    'message': {
-                        self.concept.uri: {
-                            'errors': [{
-                                'description': 'Concept or Mapping reference name must be unique in a collection.',
-                                'conflicting_references': [self.reference.uri]
-                            }]
-                        }
-                    }
+                    'message': f'The concept {self.concept.mnemonic} is successfully added to '
+                               f'collection {self.collection.name}'
                 }
             ]
         )
@@ -756,7 +750,7 @@ class CollectionReferencesViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.collection.refresh_from_db()
-        self.assertEqual(self.collection.references.count(), 2)
+        self.assertEqual(self.collection.references.count(), 3)
         self.assertEqual(self.collection.expansion.concepts.count(), 2)
         self.assertEqual(self.collection.active_concepts, 2)
         self.assertEqual(self.collection.active_mappings, 0)
@@ -788,7 +782,7 @@ class CollectionReferencesViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.collection.refresh_from_db()
-        self.assertEqual(self.collection.references.count(), 3)
+        self.assertEqual(self.collection.references.count(), 4)
         self.assertEqual(self.collection.expansion.concepts.count(), 2)
         self.assertEqual(self.collection.expansion.mappings.count(), 1)
         self.assertEqual(self.collection.active_concepts, 2)
@@ -891,7 +885,7 @@ class CollectionReferencesViewTest(OCLAPITestCase):
         concept3 = ConceptFactory(parent=source2)
         concept4 = ConceptFactory(parent=source2)
 
-        mapping1 = MappingFactory(
+        MappingFactory(
             mnemonic='m1-c1-c2-s1', from_concept=concept1.get_latest_version(),
             to_concept=concept2.get_latest_version(), parent=source1
         )
@@ -903,7 +897,7 @@ class CollectionReferencesViewTest(OCLAPITestCase):
             mnemonic='m3-c1-c3-s2', from_concept=concept1.get_latest_version(),
             to_concept=concept3.get_latest_version(), parent=source2
         )
-        mapping4 = MappingFactory(
+        MappingFactory(
             mnemonic='m4-c4-c3-s2', from_concept=concept4.get_latest_version(),
             to_concept=concept3.get_latest_version(), parent=source2
         )
@@ -924,14 +918,11 @@ class CollectionReferencesViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.data), 3)
+        self.assertEqual(len(response.data), 1)
         self.assertTrue(all(data['added'] for data in response.data))
         self.assertEqual(
             sorted([data['expression'] for data in response.data]),
-            sorted([
-                concept1.get_latest_version().uri, mapping1.uri,
-                mapping1.to_concept.versioned_object.uri
-            ])
+            sorted([concept1.get_latest_version().uri])
         )
         reference = self.collection.references.last()
         self.assertEqual(reference.cascade, 'sourcetoconcepts')
@@ -952,14 +943,11 @@ class CollectionReferencesViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.data), 3)
+        self.assertEqual(len(response.data), 1)
         self.assertTrue(all(data['added'] for data in response.data))
         self.assertEqual(
             sorted([data['expression'] for data in response.data]),
-            sorted([
-                concept4.get_latest_version().uri, mapping4.uri,
-                mapping4.to_concept.versioned_object.uri
-            ])
+            sorted([concept4.get_latest_version().uri])
         )
 
         random_concept = ConceptFactory()
@@ -1600,7 +1588,7 @@ class CollectionReferencesPreviewTest(OCLAPITestCase):
             format='json'
         )
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.data), 2)
+        self.assertEqual(len(response.data), 1)
         self.assertEqual(
             sorted(response.data, key=lambda ref: ref['reference']),
             [
@@ -1609,14 +1597,6 @@ class CollectionReferencesPreviewTest(OCLAPITestCase):
                     'concepts': [ConceptListSerializer(latest_version).data],
                     'mappings': [MappingListSerializer(mapping).data],
                     'concepts_count': 1,
-                    'mappings_count': 1,
-                    'exclude': False
-                },
-                {
-                    'reference': mapping.uri,
-                    'concepts': [],
-                    'mappings': [MappingListSerializer(mapping).data],
-                    'concepts_count': 0,
                     'mappings_count': 1,
                     'exclude': False
                 }
@@ -1725,7 +1705,7 @@ class CollectionReferencesPreviewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.data), 3)
+        self.assertEqual(len(response.data), 1)
         self.assertEqual(
             sorted(response.data, key=lambda ref: ref['reference']),
             [
@@ -1733,22 +1713,6 @@ class CollectionReferencesPreviewTest(OCLAPITestCase):
                     'reference': concept1.get_latest_version().uri,
                     'concepts': ConceptListSerializer([concept1.get_latest_version(), concept2], many=True).data,
                     'concepts_count': 2,
-                    'mappings': [MappingListSerializer(mapping1).data],
-                    'mappings_count': 1,
-                    'exclude': False
-                },
-                {
-                    'reference': concept2.uri,
-                    'concepts': ConceptListSerializer([concept2], many=True).data,
-                    'concepts_count': 1,
-                    'mappings': [],
-                    'mappings_count': 0,
-                    'exclude': False
-                },
-                {
-                    'reference': mapping1.uri,
-                    'concepts': [],
-                    'concepts_count': 0,
                     'mappings': [MappingListSerializer(mapping1).data],
                     'mappings_count': 1,
                     'exclude': False
@@ -1767,30 +1731,14 @@ class CollectionReferencesPreviewTest(OCLAPITestCase):
             format='json'
         )
 
-        self.assertEqual(len(response.data), 3)
+        self.assertEqual(len(response.data), 1)
         self.assertEqual(
             sorted(response.data, key=lambda ref: ref['reference']),
             [
                 {
-                    'reference': concept3.uri,
-                    'concepts': ConceptListSerializer([concept3], many=True).data,
-                    'concepts_count': 1,
-                    'mappings': [],
-                    'mappings_count': 0,
-                    'exclude': False
-                },
-                {
                     'reference': concept4.get_latest_version().uri,
                     'concepts': ConceptListSerializer([concept3, concept4.get_latest_version()], many=True).data,
                     'concepts_count': 2,
-                    'mappings': [MappingListSerializer(mapping4).data],
-                    'mappings_count': 1,
-                    'exclude': False
-                },
-                {
-                    'reference': mapping4.uri,
-                    'concepts': [],
-                    'concepts_count': 0,
                     'mappings': [MappingListSerializer(mapping4).data],
                     'mappings_count': 1,
                     'exclude': False
