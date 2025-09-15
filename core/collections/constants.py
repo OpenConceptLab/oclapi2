@@ -4,7 +4,6 @@ COLLECTION_VERSION_TYPE = 'Collection Version'
 EXPRESSION_NUMBER_OF_PARTS_WITH_VERSION = 9
 INCLUDE_REFERENCES_PARAM = 'includeReferences'
 
-REFERENCE_ALREADY_EXISTS = 'Concept or Mapping reference name must be unique in a collection.'
 CONCEPT_FULLY_SPECIFIED_NAME_UNIQUE_PER_COLLECTION_AND_LOCALE = "Concept fully specified name must be unique for " \
                                                                 "same collection and locale."
 CONCEPT_PREFERRED_NAME_UNIQUE_PER_COLLECTION_AND_LOCALE = "Concept preferred name must be unique for same collection " \
