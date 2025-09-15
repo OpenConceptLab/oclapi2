@@ -83,7 +83,7 @@ class CollectionReferenceParser(CollectionReferenceAbstractParser):
         from core.collections.models import CollectionReference
         cascade_to_concepts = self.cascade == SOURCE_TO_CONCEPTS
         cascade_mappings = self.cascade == SOURCE_MAPPINGS
-        should_cascade_now = cascade_mappings or cascade_to_concepts
+        should_cascade_now = (cascade_mappings or cascade_to_concepts) and self.transform
         for reference in self.references:
             reference['valueset'] = self.get_formatted_valueset(reference.get('valueset'))
             collection_reference = CollectionReference(**reference)
