@@ -742,7 +742,7 @@ class BulkImportInlineTest(OCLTestCase):
         self.assertEqual(collection.expansions.count(), 1)
         self.assertEqual(collection.expansion.concepts.count(), 4)
         self.assertEqual(collection.expansion.mappings.count(), 0)
-        self.assertEqual(collection.references.count(), 5)
+        self.assertEqual(collection.references.count(), 10)
         batch_index_resources_mock.apply_async.assert_not_called()
 
     @patch('core.collections.models.batch_index_resources', Mock())
