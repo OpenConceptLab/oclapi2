@@ -1,6 +1,7 @@
 from rest_framework.permissions import BasePermission
 
 from core.common.constants import ACCESS_TYPE_EDIT, ACCESS_TYPE_VIEW
+from core.users.constants import MAPPER_AI_ASSISTANT_GROUP
 
 
 class HasPrivateAccess(BasePermission):
@@ -95,3 +96,11 @@ class CanViewConceptDictionaryVersion(HasAccessToVersionedObject):
         if obj.public_access in [ACCESS_TYPE_EDIT, ACCESS_TYPE_VIEW]:
             return True
         return super().has_object_permission(request, view, obj)
+
+class IsInAuthGroup(BasePermission):
+    """
+    The user belongs to one of the authorized groups
+    """
+    def has_permission(self, request, view):
+        user = request.user
+        return user.is_authenticated and user.has_auth_group(MAPPER_AI_ASSISTANT_GROUP)
