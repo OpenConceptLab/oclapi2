@@ -1,11 +1,10 @@
 from django.conf import settings
 from rest_framework import status
 from rest_framework.generics import RetrieveUpdateDestroyAPIView, RetrieveAPIView, CreateAPIView
-from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
 
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryCreateMixin
-from core.common.permissions import CanViewConceptDictionary, HasOwnership
+from core.common.permissions import CanViewConceptDictionary, HasOwnership, IsInAuthGroup
 from core.common.utils import get_truthy_values
 from core.common.views import BaseAPIView
 from core.map_projects.models import MapProject
@@ -68,7 +67,7 @@ class MapProjectRecommendView(MapProjectBaseView):  # pragma: no cover
     lookup_url_kwarg = 'project'
     lookup_field = 'project'
     pk_field = 'id'
-    permission_classes = (IsAdminUser,)
+    permission_classes = (IsInAuthGroup,)
     swagger_schema = None
 
     def post(self, request, *args, **kwargs):  # pylint: disable=unused-argument
