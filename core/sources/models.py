@@ -291,7 +291,7 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
             *(self.concept_filter_order or []),
             *sorted([
                 f['code'] for f in self.filters if f.get('code', None) and f['code'] not in self.concept_filter_order
-            ])
+            ], key=str.lower)
         ]
         for code in ordered_code:
             filter_obj = next((f for f in self.filters if f.get('code') == code), None)
