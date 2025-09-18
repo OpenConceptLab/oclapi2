@@ -496,6 +496,8 @@ def is_versioned_uri(expression):
 
 
 def to_parent_uri(expression):
+    if not expression:
+        return expression
     splitter = None
     if '/concepts/' in expression:
         splitter = '/concepts/'
