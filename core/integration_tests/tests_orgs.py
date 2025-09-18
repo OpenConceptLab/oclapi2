@@ -596,16 +596,7 @@ class OrganizationSourceListViewTest(OCLAPITestCase):
 
         response = self.client.get('/users/batman/orgs/sources/')
 
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.data), 2)
-        self.assertEqual(
-            [data['short_code'] for data in response.data],
-            ['corporate', 'city']
-        )
-        self.assertEqual(
-            [data['owner_url'] for data in response.data],
-            ['/orgs/wayne-enterprise/', '/orgs/gotham/']
-        )
+        self.assertEqual(response.status_code, 401)
 
         response = self.client.get(
             '/user/orgs/sources/',
@@ -656,16 +647,7 @@ class OrganizationCollectionListViewTest(OCLAPITestCase):
 
         response = self.client.get('/users/batman/orgs/collections/')
 
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.data), 2)
-        self.assertEqual(
-            [data['short_code'] for data in response.data],
-            ['corporate', 'city']
-        )
-        self.assertEqual(
-            [data['owner_url'] for data in response.data],
-            ['/orgs/wayne-enterprise/', '/orgs/gotham/']
-        )
+        self.assertEqual(response.status_code, 401)
 
         response = self.client.get(
             '/user/orgs/collections/',
