@@ -1,6 +1,5 @@
 from django_elasticsearch_dsl import Document, fields
 from django_elasticsearch_dsl.registries import registry
-from elasticsearch_dsl import DenseVector
 from pydash import compact, get
 
 from core.common.utils import jsonify_safe, flatten_dict, get_embeddings, drop_version
@@ -90,10 +89,13 @@ class ConceptDocument(Document):
     def get_exact_match_attrs():
         return {
             'id': {
-                'boost': 50
+                'boost': 15
             },
             'name': {
                 'boost': 15
+            },
+            'synonyms': {
+                'boost': 10
             },
             'external_id': {
                 'boost': 6
@@ -110,10 +112,10 @@ class ConceptDocument(Document):
     def get_wildcard_search_attrs():
         return {
             'id': {
-                'boost': 35
+                'boost': 5
             },
             'name': {
-                'boost': 23
+                'boost': 3
             },
             'synonyms': {
                 'boost': 0.3,
