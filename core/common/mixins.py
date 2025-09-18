@@ -164,13 +164,6 @@ class ListWithHeadersMixin(ListModelMixin):
         params.pop('brief', None)
         query_string = urlencode(params, doseq=True)
         parent = self.parent_resource
-        repo_default_filter = get(parent, 'concept_filter_default')
-        include_default_filter = self.request.query_params.get('conceptFilterDefault') not in get_falsy_values()
-        if repo_default_filter and include_default_filter:
-            query_string += '&' + urlencode({
-                k: json.dumps(v) if isinstance(v, (dict, list)) else v
-                for k, v in repo_default_filter.items()
-            })
 
         key_body, key_headers = parent.get_concepts_cache_keys() if '/concepts' in base_path else (
             parent.get_mappings_cache_keys())

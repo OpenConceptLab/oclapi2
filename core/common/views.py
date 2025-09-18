@@ -721,12 +721,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         include_private = self._should_include_private()
         if not include_private:
             results = results.filter(self.get_public_criteria())
-        include_default_filter = self.request.query_params.get('conceptFilterDefault') not in get_falsy_values()
-        faceted_criterion = self.get_faceted_criterion(
-            repo_default_filters=get(
-                self, 'parent_resource.concept_filter_default'
-            ) if (self.is_concept_document() and apply_default_filters and include_default_filter) else None
-        )
+        faceted_criterion = self.get_faceted_criterion()
         if faceted_criterion:
             results = results.filter(faceted_criterion)
         return results
@@ -1008,10 +1003,6 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
     def should_perform_es_search(self):
         if self.is_repo_version_children_request() and self.request.query_params.get('onlyHierarchyRoot') not in TRUTHY:
-            return True
-        include_default_filter = self.request.query_params.get('conceptFilterDefault') not in get_falsy_values()
-        if self.is_concept_document() and get(
-                self, 'parent_resource.concept_filter_default') and include_default_filter:
             return True
         sort_field, _ = self.get_sort_and_desc()
         return (
