@@ -874,7 +874,8 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             else:
                 results = results.filter('term', **{attr: value})
 
-        if self.is_concept_document():
+        sort_attrs = self._get_sort_attribute()
+        if self.is_concept_document() and (not sort_attrs or '_score' in get(sort_attrs, '0', {})):
             search_str = self.get_search_string(lower=False)
             results = results.extra(
                 rescore={
@@ -908,8 +909,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         if fields and highlight and self.request.query_params.get(INCLUDE_SEARCH_META_PARAM) in get_truthy_values():
             results = results.highlight(*self.clean_fields_for_highlight(fields))
         results = results.source(excludes=['_synonyms_embeddings', '_embeddings'])
-
-        return results.sort(*self._get_sort_attribute()) if sort else results
+        return results.sort(*sort_attrs) if sort else results
 
     def get_mandatory_words_criteria(self):
         criterion = None
