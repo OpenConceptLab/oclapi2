@@ -24,6 +24,7 @@ from core.common.utils import reverse_resource, reverse_resource_version, parse_
     canonical_url_to_url_and_version, get_current_authorized_user, encode_string, decode_string
 from core.common.utils import to_owner_uri
 from core.settings import DEFAULT_LOCALE
+from . import ERRBIT_LOGGER
 from .checksums import ChecksumModel
 from .constants import (
     ACCESS_TYPE_CHOICES, DEFAULT_ACCESS_TYPE, NAMESPACE_REGEX,
@@ -1105,6 +1106,11 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
     @property
     def concepts_distribution(self):
         facets = self.get_concept_facets()
+        print("Concept facets Raw", facets)
+        try:
+            print("Concept facets", facets.to_dict())
+        except: # pylint: disable=bare-except
+            pass
         return {
             'active': self.active_concepts,
             'retired': self.retired_concepts_count,
@@ -1185,6 +1191,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         try:
             facets = search.execute().facets
         except TransportError as ex:  # pragma: no cover
+            ERRBIT_LOGGER.log(ex)
             raise Http400(detail=get(ex, 'info') or get(ex, 'error') or str(ex)) from ex
 
         return facets
