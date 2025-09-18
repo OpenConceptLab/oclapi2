@@ -135,20 +135,20 @@ class CustomESSearch:
 
     @staticmethod
     def get_match_phrase_criteria(field, search_str, boost):
-        criteria = CustomESSearch.get_term_match_criteria(field, search_str, boost)
-        if field == 'external_id':
-            return criteria
-        return criteria | CustomESSearch.get_prefix_criteria(
-            field, search_str, boost
-        ) | Q('match_phrase', **{field: {'query': search_str, 'boost': boost}})
+        if field in ['external_id', '_name', '_synonyms'] or field.startswith('_'):
+            return CustomESSearch.get_term_match_criteria(field, search_str, boost)
+
+        return Q(
+            'match_phrase', **{field: {'query': search_str.lower(), 'boost': boost + 75}}
+        ) | CustomESSearch.get_prefix_criteria(field, search_str.lower(), boost + 50)
 
     @staticmethod
     def get_term_match_criteria(field, search_str, boost):
-        return Q('term', **{field: {'value': search_str, 'boost': boost + 100}})
+        return Q('term', **{field: {'value': search_str, 'boost': boost + 100, 'case_insensitive': True}})
 
     @staticmethod
     def get_prefix_criteria(field, search_str, boost):
-        return Q('prefix', **{field: {'value': search_str, 'boost': boost + 95}})
+        return Q('match_phrase_prefix', **{field: {'query': search_str.lower(), 'boost': boost, "max_expansions": 20}})
 
     @staticmethod
     def get_match_criteria(field, search_str, boost):

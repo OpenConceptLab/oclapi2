@@ -334,7 +334,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                 return Q(
                     "nested",
                     path="mapped_codes",
-                    query=Q("match", **{f"mapped_codes.{path}": val})
+                    query=Q("term", **{f"mapped_codes.{path}": val})
                 )
             if is_property:
                 property_code = attr.split('properties__', 1)[1]
@@ -344,7 +344,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                     return ~Q("exists", field=new_attr)
                 return Q('term', **{f"properties.{property_code}.keyword": val.strip('\"').strip('\'')})
 
-            return Q('match', **{attr: val.strip('\"').strip('\'')})
+            return Q('term', **{attr: val.strip('\"').strip('\'')})
 
         def get_query(attr, val):
             """
@@ -655,16 +655,16 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         return False
 
     def get_public_criteria(self):
-        criteria = Q('match', public_can_view=True)
+        criteria = Q('term', public_can_view=True)
         user = self.request.user
 
         if user.is_authenticated:
             username = user.username
             from core.orgs.documents import OrganizationDocument
             if self.document_model in [OrganizationDocument]:
-                criteria |= (Q('match', public_can_view=False) & Q('match', user=username))
+                criteria |= (Q('term', public_can_view=False) & Q('term', user=username))
             if self.is_concept_container_document_model() or self.is_source_child_document_model():
-                criteria |= (Q('match', public_can_view=False) & Q('match', created_by=username))
+                criteria |= (Q('term', public_can_view=False) & Q('term', created_by=username))
 
         return criteria
 
@@ -696,9 +696,9 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
         updated_by = self.request.query_params.get(UPDATED_BY_USERNAME_PARAM, None)
         if updated_by:
-            results = results.query("terms", updated_by=compact(updated_by.split(',')))
+            results = results.filter("terms", updated_by=compact(updated_by.split(',')))
         if self.is_canonical_specified():
-            results = results.query(
+            results = results.filter(
                 'match_phrase',
                 _canonical_url=format_url_for_search(self.request.query_params.get(CANONICAL_URL_REQUEST_PARAM))
             )
@@ -708,18 +708,18 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                 default_filters[latest_attr] = True
 
         for field, value in default_filters.items():
-            results = results.query("match", **{field: value})
+            results = results.filter("term", **{field: value})
 
         updated_since = parse_updated_since_param(self.request.query_params)
         if updated_since:
-            results = results.query('range', last_update={"gte": updated_since})
+            results = results.filter('range', last_update={"gte": updated_since})
 
         if not ignore_retired_filter and self._should_exclude_retired_from_search_results():
-            results = results.query('match', retired=False)
+            results = results.filter('term', retired=False)
 
         include_private = self._should_include_private()
         if not include_private:
-            results = results.query(self.get_public_criteria())
+            results = results.filter(self.get_public_criteria())
         include_default_filter = self.request.query_params.get('conceptFilterDefault') not in get_falsy_values()
         faceted_criterion = self.get_faceted_criterion(
             repo_default_filters=get(
@@ -727,7 +727,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             ) if (self.is_concept_document() and apply_default_filters and include_default_filter) else None
         )
         if faceted_criterion:
-            results = results.query(faceted_criterion)
+            results = results.filter(faceted_criterion)
         return results
 
     def is_canonical_specified(self):
@@ -873,13 +873,44 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         for key, value in kwargs_filters.items():
             attr = to_snake_case(key)
             if isinstance(value, list):
-                criteria = Q('match', **{attr: get(value, '0')})
+                criteria = Q('term', **{attr: get(value, '0')})
                 for val in value[1:]:
-                    criteria |= Q('match', **{attr: val})
-                results = results.query(criteria)
+                    criteria |= Q('term', **{attr: val})
+                results = results.filter(criteria)
             else:
-                results = results.query('match', **{attr: value})
+                results = results.filter('term', **{attr: value})
 
+        if self.is_concept_document():
+            search_str = self.get_search_string(lower=False)
+            results = results.extra(
+                rescore={
+                  "window_size": 400,
+                  "query": {
+                    "score_mode": "total",
+                    "query_weight": 1.0,
+                    "rescore_query_weight": 800.0,
+                    "rescore_query": {
+                      "dis_max": {
+                        "tie_breaker": 0.0,
+                        "queries": [
+                          {
+                            "constant_score": {
+                              "filter": { "term": { "_name": { "value": search_str, "case_insensitive": True } } },
+                              "boost": 10.0
+                            }
+                          },
+                          {
+                            "constant_score": {
+                              "filter": { "term": { "_synonyms": { "value": search_str, "case_insensitive": True } } },
+                              "boost": 8.0
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+            )
         if fields and highlight and self.request.query_params.get(INCLUDE_SEARCH_META_PARAM) in get_truthy_values():
             results = results.highlight(*self.clean_fields_for_highlight(fields))
         results = results.source(excludes=['_synonyms_embeddings', '_embeddings'])
