@@ -203,12 +203,12 @@ class CustomESSearch:
     def apply_aggregation_score_stats(self):
         self._dsl_search.aggs.bucket("score", "stats", script="_score")
 
-    def to_queryset(self, keep_order=True, normalized_score=False):
+    def to_queryset(self, keep_order=True, normalized_score=False, exact_count=True):  # pylint:disable=too-many-locals
         """
         This method return a django queryset from the an elasticsearch result.
         It cost a query to the sql db.
         """
-        s, hits, total = self.__get_response()
+        s, hits, total = self.__get_response(exact_count)
         max_score = hits.max_score or 1
 
         for result in hits.hits:
@@ -303,16 +303,18 @@ class CustomESSearch:
 
         return [build_confidence(high), build_confidence(medium), build_confidence(low)]
 
-    def __get_response(self):
+    def __get_response(self, exact_count=True):
         # Do not query again if the es result is already cached
+        total = None
         if not hasattr(self._dsl_search, '_response'):
             # We only need the meta fields with the models ids
             s = self._dsl_search.source(False)
             s = s.params(request_timeout=ES_REQUEST_TIMEOUT)
-            total = s.count()
+            if exact_count:
+                total = s.count()
             s = s.params(track_total_hits=False, request_cache=True)
             s = s.execute()
             hits = s.hits
             self.max_score = hits.max_score
             return s, hits, total
-        return self._dsl_search, None, None
+        return self._dsl_search, None, total
