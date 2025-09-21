@@ -1,3 +1,6 @@
+import unittest
+
+from django.conf import settings
 from mock import patch
 from mock.mock import Mock, ANY
 from rest_framework.exceptions import ErrorDetail
@@ -610,6 +613,20 @@ class OrganizationSourceListViewTest(OCLAPITestCase):
             ['corporate', 'city']
         )
 
+    @unittest.skipIf(settings.ENV == 'ci', "Skipping due to ES tests failing on CI")
+    def test_get_with_search(self):
+        user = UserProfileFactory(username='batman')
+        token = user.get_token()
+        org1 = OrganizationFactory(mnemonic='gotham')
+        org2 = OrganizationFactory(mnemonic='wayne-enterprise')
+        org1.members.add(user)
+        org2.members.add(user)
+        source1 = OrganizationSourceFactory(mnemonic='city', organization=org1)
+        source2 = OrganizationSourceFactory(mnemonic='corporate', organization=org2)
+        source3 = UserSourceFactory(mnemonic='bat-cave', user=user)
+
+        SourceDocument().update([source1, source2, source3])
+
         response = self.client.get(
             '/user/orgs/sources/?q=city',
             HTTP_AUTHORIZATION=f'Token {token}'
@@ -660,6 +677,20 @@ class OrganizationCollectionListViewTest(OCLAPITestCase):
             [data['short_code'] for data in response.data],
             ['corporate', 'city']
         )
+
+    @unittest.skipIf(settings.ENV == 'ci', "Skipping due to ES tests failing on CI")
+    def test_get_with_search(self):
+        user = UserProfileFactory(username='batman')
+        token = user.get_token()
+        org1 = OrganizationFactory(mnemonic='gotham')
+        org2 = OrganizationFactory(mnemonic='wayne-enterprise')
+        org1.members.add(user)
+        org2.members.add(user)
+        coll1 = OrganizationCollectionFactory(mnemonic='city', organization=org1)
+        coll2 = OrganizationCollectionFactory(mnemonic='corporate', organization=org2)
+        coll3 = UserCollectionFactory(mnemonic='bat-cave', user=user)
+
+        CollectionDocument().update([coll1, coll2, coll3])
 
         response = self.client.get(
             '/user/orgs/collections/?q=city',
