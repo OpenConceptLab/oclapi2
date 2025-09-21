@@ -4,7 +4,7 @@ from rest_framework.generics import RetrieveUpdateDestroyAPIView, RetrieveAPIVie
 from rest_framework.response import Response
 
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryCreateMixin
-from core.common.permissions import CanViewConceptDictionary, HasOwnership, IsInAuthGroup
+from core.common.permissions import HasOwnership, IsInAuthGroup, CanEditConceptDictionary
 from core.common.utils import get_truthy_values
 from core.common.views import BaseAPIView
 from core.map_projects.models import MapProject
@@ -15,7 +15,7 @@ from core.map_projects.serializers import MapProjectSerializer, MapProjectCreate
 class MapProjectBaseView(BaseAPIView):
     is_searchable = False
     queryset = MapProject.objects.filter(is_active=True)
-    permission_classes = (CanViewConceptDictionary,)
+    permission_classes = (CanEditConceptDictionary,)
     serializer_class = MapProjectSerializer
 
 
