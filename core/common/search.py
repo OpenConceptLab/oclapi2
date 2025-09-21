@@ -135,7 +135,7 @@ class CustomESSearch:
 
     @staticmethod
     def get_match_phrase_criteria(field, search_str, boost):
-        if field in ['external_id', '_name', '_synonyms'] or field.startswith('_'):
+        if field in ['external_id', '_name', '_synonyms', 'repo_owner'] or field.startswith('_'):
             return CustomESSearch.get_term_match_criteria(field, search_str, boost)
 
         return Q(
