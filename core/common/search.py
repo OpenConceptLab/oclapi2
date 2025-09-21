@@ -208,7 +208,7 @@ class CustomESSearch:
         This method return a django queryset from the an elasticsearch result.
         It cost a query to the sql db.
         """
-        s, hits = self.__get_response()
+        s, hits, total = self.__get_response()
         max_score = hits.max_score or 1
 
         for result in hits.hits:
@@ -241,15 +241,16 @@ class CustomESSearch:
                 )
                 qs = qs.order_by(preserved_order)
         self.queryset = qs
-        self.total = get(hits, 'total.value') or 0
+        self.total = total or 0
 
     def get_aggregations(self, verbose=False, raw=False):
-        s, _ = self.__get_response()
+        s, _, total = self.__get_response()
 
         result = s.aggs.to_dict()
         if raw:
             return result
         self.max_score = result['score']['max']
+        self.total = total or 0
         return self._get_score_buckets(
             self.max_score, result['distribution']['buckets'], verbose)
 
@@ -308,8 +309,10 @@ class CustomESSearch:
             # We only need the meta fields with the models ids
             s = self._dsl_search.source(False)
             s = s.params(request_timeout=ES_REQUEST_TIMEOUT)
+            total = s.count()
+            s = s.params(track_total_hits=False, request_cache=True)
             s = s.execute()
             hits = s.hits
             self.max_score = hits.max_score
-            return s, hits
-        return self._dsl_search, None
+            return s, hits, total
+        return self._dsl_search, None, None
