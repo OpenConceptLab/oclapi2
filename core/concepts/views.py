@@ -827,7 +827,7 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
             )
             search = search.params(track_total_hits=False, request_cache=True)
             es_search = CustomESSearch(search[start:end], ConceptDocument)
-            es_search.to_queryset(False, True)
+            es_search.to_queryset(False, True, False)
             result = {'row': row, 'results': [], 'map_config': map_config, 'filter': filters}
             for concept in es_search.queryset:
                 concept._highlight = es_search.highlights.get(concept.id, {})  # pylint:disable=protected-access
