@@ -208,9 +208,13 @@ class CustomESSearch:
         This method return a django queryset from the an elasticsearch result.
         It cost a query to the sql db.
         """
+        import time
+        start_time = time.time()
         s, hits, total = self.__get_response(exact_count)
+        print("ES query execute", time.time() - start_time)
         max_score = hits.max_score or 1
 
+        start_time = time.time()
         for result in hits.hits:
             _id = get(result, '_id')
             self.scores[int(_id)] = {
@@ -220,6 +224,7 @@ class CustomESSearch:
             highlight = get(result, 'highlight')
             if highlight:
                 self.highlights[int(_id)] = highlight.to_dict()
+        print("Highlights/Score", time.time() - start_time)
         if self.document and self.document.__name__ == 'RepoDocument':
             from core.sources.models import Source
             from core.collections.models import Collection

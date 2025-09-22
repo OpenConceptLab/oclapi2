@@ -820,15 +820,21 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
         faceted_criterion = self.get_faceted_criterion(False, filters, minimum_should_match=1) if filters else None
 
         results = []
+        import time
         for row in rows:
+            start_time = time.time()
             search = ConceptFuzzySearch.search(
                 row, target_repo_url, repo_params, include_retired,
                 is_semantic, num_candidates, k_nearest, map_config, faceted_criterion
             )
+            print("Search Query", time.time() - start_time)
+            start_time = time.time()
             search = search.params(track_total_hits=False, request_cache=True)
             es_search = CustomESSearch(search[start:end], ConceptDocument)
             es_search.to_queryset(False, True, False)
+            print("Search to Queryset", time.time() - start_time)
             result = {'row': row, 'results': [], 'map_config': map_config, 'filter': filters}
+            start_time = time.time()
             for concept in es_search.queryset:
                 concept._highlight = es_search.highlights.get(concept.id, {})  # pylint:disable=protected-access
                 score_info = es_search.scores.get(concept.id, {})
@@ -850,10 +856,13 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
                     data = serializer(concept, context={'request': self.request}).data
                     data['search_meta']['search_normalized_score'] = normalized_score * 100
                     result['results'].append(data)
+            print("Queryset to Serializer", time.time() - start_time)
+            start_time = time.time()
             if 'results' in result:
                 result['results'] = sorted(
                     result['results'], key=lambda res: get(res, 'search_meta.search_normalized_score'), reverse=True)
             results.append(result)
+            print("Sorting", time.time() - start_time)
 
         return results
 
