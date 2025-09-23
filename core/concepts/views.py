@@ -780,8 +780,8 @@ class ConceptsHierarchyAmendAdminView(APIView):  # pragma: no cover
 
 class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
     default_limit = 1
-    score_threshold = 5
-    score_threshold_semantic_very_high = 1.64
+    score_threshold = 0.9
+    score_threshold_semantic_very_high = 0.9
     serializer_class = ConceptListSerializer
     permission_classes = (IsAuthenticatedOrReadOnly,)
     es_fields = Concept.es_fields
@@ -845,13 +845,15 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
                 if limit > 1:
                     concept._match_type = 'low'  # pylint:disable=protected-access
                     score_to_check = normalized_score if normalized_score is not None else score
-                    if concept._highlight.get('name', None) or is_semantic and score_to_check > score_threshold:  # pylint:disable=protected-access
+                    if concept._highlight.get('name', None) or (is_semantic and score_to_check >= score_threshold):  # pylint:disable=protected-access
                         concept._match_type = 'very_high'  # pylint:disable=protected-access
                     elif concept._highlight.get('synonyms', None):   # pylint:disable=protected-access
                         concept._match_type = 'high'  # pylint:disable=protected-access
+                    elif concept._highlight:   # pylint:disable=protected-access
+                        concept._match_type = 'medium'  # pylint:disable=protected-access
                 else:
                     concept._match_type = 'very_high' # pylint:disable=protected-access
-                if not best_match or concept._match_type in ['high', 'very_high']:  # pylint:disable=protected-access
+                if not best_match or concept._match_type in ['medium', 'high', 'very_high']:  # pylint:disable=protected-access
                     serializer = ConceptDetailSerializer if self.is_verbose() else ConceptMinimalSerializer
                     data = serializer(concept, context={'request': self.request}).data
                     data['search_meta']['search_normalized_score'] = normalized_score * 100
