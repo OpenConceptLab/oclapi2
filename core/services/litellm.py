@@ -197,6 +197,10 @@ class LiteLLMService:
     @staticmethod
     def get_project_context(map_project, include_default_filter=False):  # pragma: no cover
         target_repo = map_project.target_repo
+        project_filters = {
+            **(map_project.filters or {}),
+            **(target_repo.concept_filter_default if include_default_filter else {})
+        }
         if target_repo:
             return {
               "project": {
@@ -207,7 +211,7 @@ class LiteLLMService:
               "target_repository": {
                 "name": target_repo.mnemonic,
                 "version": target_repo.version,
-                "filters": (target_repo.concept_filter_default if include_default_filter else None) or "Active concepts"
+                "filters": project_filters or "Active concepts"
               },
               "matching_config": {
                 "algorithms": ["Fuzzy String", "Semantic Vector", "Lexical"],
