@@ -189,8 +189,7 @@ class MapProject(BaseModel):
         self.delete()
 
     def clean(self):
-        if not self.filters:
-            self.filters = {}
+        self.clean_filters()
         if not self.batch_size:
             self.batch_size = self.BATCH_SIZE
         if not self.include_retired:
@@ -200,6 +199,13 @@ class MapProject(BaseModel):
                 self.matches = json.loads(self.matches)
             except (json.JSONDecodeError, TypeError):
                 pass
+
+    def clean_filters(self):
+        if not self.filters:
+            self.filters = {}
+        for key, value in self.filters.copy().items():
+            if not value:
+                self.filters.pop(key)
 
     @property
     def target_repo(self):
