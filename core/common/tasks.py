@@ -606,12 +606,12 @@ def make_hierarchy(concept_map):  # pragma: no cover
     ignore_result=True, autoretry_for=(Exception, WorkerLostError, ), retry_kwargs={'max_retries': 2, 'countdown': 2},
     acks_late=True, reject_on_worker_lost=True, base=QueueOnceCustomTask
 )
-def index_source_concepts(source_id, single_batch=False):
+def index_source_concepts(source_id):
     from core.sources.models import Source
     source = Source.objects.filter(id=source_id).first()
     if source:
         from core.concepts.documents import ConceptDocument
-        source.batch_index(source.concepts, ConceptDocument, single_batch)
+        source.batch_index(source.concepts, ConceptDocument)
 
 
 @app.task(
