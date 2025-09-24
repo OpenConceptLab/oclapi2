@@ -320,7 +320,10 @@ class SourceConceptsIndexView(SourceBaseView):
         source = self.get_object()
         task = Task.new(queue='indexing', user=request.user, name=index_source_concepts.__name__)
         try:
-            index_source_concepts.apply_async((source.id,), queue=task.queue, task_id=task.id)
+            index_source_concepts.apply_async(
+                (source.id, self.request.query_params.get('single_batch', None) in get_truthy_values()),
+                queue=task.queue, task_id=task.id
+            )
         except AlreadyQueued:
             if task:
                 task.delete()
