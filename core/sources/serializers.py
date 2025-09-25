@@ -363,7 +363,7 @@ class SourceDetailSerializer(SourceCreateOrUpdateSerializer, AbstractRepoResourc
     client_configs = SerializerMethodField()
     hierarchy_root = SerializerMethodField()
     hierarchy_root_url = CharField(source='hierarchy_root.url', required=False, allow_blank=True, allow_null=True)
-    filters = ListField(source='filters_ordered', allow_null=True)
+    filters = ListField(required=False, allow_null=True)
 
     class Meta:
         model = Source
@@ -430,6 +430,7 @@ class SourceDetailSerializer(SourceCreateOrUpdateSerializer, AbstractRepoResourc
     def to_representation(self, instance):  # used to be to_native
         ret = super().to_representation(instance)
         ret.update({"supported_locales": instance.get_supported_locales()})
+        ret.update({"filters": instance.filters_ordered})
         return ret
 
 
@@ -455,7 +456,7 @@ class SourceVersionDetailSerializer(SourceCreateOrUpdateSerializer, AbstractRepo
     states = SerializerMethodField()
     tasks = SerializerMethodField()
     hierarchy_root_url = CharField(source='hierarchy_root.url', required=False, allow_blank=True, allow_null=True)
-    filters = ListField(source='filters_ordered', allow_null=True)
+    filters = ListField(required=False, allow_null=True)
 
     class Meta:
         model = Source
@@ -519,6 +520,12 @@ class SourceVersionDetailSerializer(SourceCreateOrUpdateSerializer, AbstractRepo
             tasks = obj.get_tasks_info()
 
         return tasks
+
+    def to_representation(self, instance):  # used to be to_native
+        ret = super().to_representation(instance)
+        ret.update({"supported_locales": instance.get_supported_locales()})
+        ret.update({"filters": instance.filters_ordered})
+        return ret
 
 
 class SourceVersionExportSerializer(SourceVersionDetailSerializer):

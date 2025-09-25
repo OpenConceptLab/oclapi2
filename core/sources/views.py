@@ -244,9 +244,15 @@ class SourceVersionListView(SourceVersionBaseView, CreateAPIView, ListWithHeader
         head_object = self.get_queryset().first()
         version = request.data.pop('id', None)
         payload = {
-            "mnemonic": head_object.mnemonic, "id": head_object.mnemonic, "name": head_object.name, **request.data,
-            "organization_id": head_object.organization_id, "user_id": head_object.user_id,
-            'version': version
+            "mnemonic": head_object.mnemonic,
+            "id": head_object.mnemonic,
+            "name": head_object.name, **request.data,
+            "organization_id": head_object.organization_id,
+            "user_id": head_object.user_id,
+            'version': version,
+            "meta": request.data.get('meta', head_object.meta),
+            "properties": request.data.get('properties', head_object.properties),
+            "filters": request.data.get('filters', head_object.filters)
         }
         serializer = self.get_serializer(data=payload)
         if serializer.is_valid():
