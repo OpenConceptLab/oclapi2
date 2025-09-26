@@ -553,6 +553,14 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             facets['source_version'] = [facet for facet in facets['source_version'] if facet[0] != 'HEAD']
         is_global_scope = ('org' not in self.kwargs and 'user' not in self.kwargs and not self.user_is_self)
 
+        normalized_facet_concept_class = facets.pop('_conceptClass', None) or []
+        normalized_facet_datatype = facets.pop('_datatype', None) or []
+        if len(facets.get('conceptClass', [])) == 0 and len(normalized_facet_concept_class) > 0:
+            facets['conceptClass'] = normalized_facet_concept_class
+        if len(facets.get('datatype', [])) == 0 and len(normalized_facet_datatype) > 0:
+            facets['datatype'] = normalized_facet_datatype
+
+
         facets.pop('collection_owner_url', None)
         if is_global_scope:
             facets.pop('collection_version', None)
@@ -568,6 +576,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                 facets.pop('collection_owner_url', None)
         facets.pop('is_in_latest_source_version', None)
         facets.pop('is_latest_version', None)
+        print("Only Facets Query2", facets)
 
         if parent_repo and self.is_concept_document():
             return parent_repo.get_ordered_concept_facets_by_filter_order(facets)

@@ -18,7 +18,9 @@ class ConceptFacetedSearch(CustomESFacetedSearch):
 
     base_facets = {
         'datatype': TermsFacet(field='datatype_text.keyword', size=100),
+        '_datatype': TermsFacet(field='datatype', size=100),
         'conceptClass': TermsFacet(field='concept_class_text.keyword', size=100),
+        '_conceptClass': TermsFacet(field='concept_class', size=100),
         'locale': TermsFacet(field='locale', size=100),
         'retired': TermsFacet(field='retired'),
         'source': TermsFacet(field='source_text.keyword', size=FACET_SIZE),
