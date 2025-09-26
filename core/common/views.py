@@ -544,6 +544,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             try:
                 s = faceted_search.execute()
                 facets = s.facets.to_dict()
+                print("Only Facets Query", facets)
             except TransportError as ex:  # pragma: no cover
                 raise Http400(detail=get(ex, 'info') or get(ex, 'error') or str(ex)) from ex
         if not get(self.request.user, 'is_authenticated'):
