@@ -174,8 +174,8 @@ class ListWithHeadersMixin(ListModelMixin):
         return key_body, cache.get(key_body) or None, key_headers, cache.get(key_headers) or None
 
     def __can_cache(self):
-        return self.should_perform_es_search() and self.is_repo_version_children_request_without_any_search() and \
-            not self.only_facets() and get(self, 'parent_resource.is_latest_version', False)
+        return (self.should_perform_es_search() and self.is_repo_version_children_request_without_any_search() and
+                get(self, 'parent_resource.is_latest_version', False))
 
     def list(self, request, *args, **kwargs):  # pylint:disable=too-many-locals,too-many-branches
         cache_key_body = None
@@ -202,7 +202,12 @@ class ListWithHeadersMixin(ListModelMixin):
                 return self.get_csv(request)
 
             if self.only_facets():
-                return Response({'facets': {'fields': self.get_facets()}})
+                data = {'facets': {'fields': self.get_facets()}}
+                if cache_key_body is not None:
+                    timeout = 60 * 60 * 24  # 1 day
+                    cache.set(cache_key_body, data, timeout=timeout)
+                    cache.set(cache_key_headers, headers, timeout=timeout)
+                return Response(data)
             if self.only_search_stats() and search_term:
                 return Response(
                     self.get_search_stats(
@@ -247,9 +252,10 @@ class ListWithHeadersMixin(ListModelMixin):
                 cache.set(cache_key_headers, headers, timeout=timeout)
 
         response = Response(data)
-        for key, value in headers.items():
-            response[key] = value
-        if not headers:
+        if headers:
+            for key, value in headers.items():
+                response[key] = value
+        if not headers and not self.only_facets():
             response['num_found'] = len(sorted_list)
         return response
 
