@@ -198,6 +198,7 @@ class ConceptAbstractSerializer(AbstractResourceSerializer):
         request = get(context, 'request')
         is_mapping_brief = request.query_params.get('mappingBrief', None) in TRUTHY
         map_types = compact((request.query_params.get('mapTypes', '') or '').split(','))
+        target_repo_urls = compact((request.query_params.get('targetRepoUrls', '') or '').split(','))
         serializer_class = MappingMinimalSerializer if is_mapping_brief else MappingDetailSerializer
         is_collection = 'collection' in self.view_kwargs
         collection_version = self.view_kwargs.get('version', HEAD) if is_collection else None
@@ -212,6 +213,8 @@ class ConceptAbstractSerializer(AbstractResourceSerializer):
                 parent_uri, collection_version) if is_collection else obj.get_unidirectional_mappings()
             if map_types:
                 mappings = mappings.filter(map_type__in=map_types)
+            if target_repo_urls:
+                mappings = mappings.filter(to_source_url__in=target_repo_urls)
             return serializer_class(mappings, many=True).data
 
         return []
