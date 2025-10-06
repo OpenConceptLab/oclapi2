@@ -242,13 +242,6 @@ class ConceptDocument(Document):
         synonyms = instance.names.exclude(name=name).exclude(name='')
         data['synonyms'] = compact(set(synonyms.values_list('name', flat=True)))
         data['_synonyms'] = data['synonyms']
-        data['_synonyms_embeddings'] = [
-            {
-                'vector': get_embeddings(s.name),
-                'type': get(s, 'type'),
-                'locale': get(s, 'locale')
-            } for s in synonyms
-        ]
 
         if instance.parent.has_semantic_match_algorithm:
             data['_embeddings'] = {
