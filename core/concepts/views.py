@@ -817,6 +817,7 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
         best_match = self.request.query_params.get('bestMatch', None) in get_truthy_values()
         score_threshold = self.score_threshold_semantic_very_high if is_semantic else self.score_threshold
         repo_params = self.get_repo_params(is_semantic, target_repo_params, target_repo_url)
+        locale_filter = filters.pop('locale', None) if is_semantic else get(filters, 'locale', None)
         faceted_criterion = self.get_faceted_criterion(False, filters, minimum_should_match=1) if filters else None
 
         results = []
@@ -825,7 +826,7 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
             start_time = time.time()
             search = ConceptFuzzySearch.search(
                 row, target_repo_url, repo_params, include_retired,
-                is_semantic, num_candidates, k_nearest, map_config, faceted_criterion
+                is_semantic, num_candidates, k_nearest, map_config, faceted_criterion, locale_filter
             )
             print("Search Query", time.time() - start_time)
             start_time = time.time()

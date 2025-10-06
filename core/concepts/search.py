@@ -118,7 +118,8 @@ class ConceptFuzzySearch:  # pragma: no cover
     @classmethod
     def search(  # pylint: disable=too-many-locals,too-many-arguments,too-many-branches,too-many-statements
             cls, data, repo_url, repo_params=None, include_retired=False,
-            is_semantic=False, num_candidates=2000, k_nearest=50, map_config=None, additional_filter_criterion=None
+            is_semantic=False, num_candidates=2000, k_nearest=50, map_config=None, additional_filter_criterion=None,
+            locale_filter=None
     ):
         from core.concepts.documents import ConceptDocument
         map_config = map_config or []
@@ -152,6 +153,18 @@ class ConceptFuzzySearch:  # pragma: no cover
             if synonyms and not isinstance(synonyms, list):
                 synonyms = compact([synonyms])
             synonyms = synonyms or []
+            locale_filter = locale_filter if isinstance(
+                locale_filter, list) else locale_filter.split(',') if locale_filter else []
+            locale_filter = [loc.strip() for loc in locale_filter]
+            if locale_filter:
+                def get_locale_filter(path):
+                    return Q({"nested": {"path": path, "query": {"terms": {f"{path}.locale": locale_filter}}}})
+                filter_query.must.append(Q(
+                    "bool",
+                    should=[get_locale_filter("_embeddings"), get_locale_filter("_synonyms_embeddings")],
+                    minimum_should_match=1
+                ))
+
             def get_knn_query(_field, _value, _boost):
                 return {
                         "field": _field,
