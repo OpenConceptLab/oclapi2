@@ -52,7 +52,7 @@ class LiteLLMService:
     - INSUFFICIENT: Cannot assess confidently with available information
     
     CRITICAL Constraints:
-    - Primary and alternative candidates MUST come from the provided candidate list only
+    - Primary and alternative candidates MUST come from the provided candidate pool only. The map targets for CIEL bridge terminology candidates are considered part of the candidate pool.
     - Out-of-scope suggestions (use sparingly) capture concepts NOT in the candidate list that may be relevant, but MUST be in the same target repository
     - Prioritize primary_mapped_fields as the primary basis for evaluating match candidates. Use additional_metadata fields as secondary signals, but they should not override strong mismatches in primary fields. Can ignore fields like id, pk, serial number, etc.
     - Assess alignment and suitability; avoid unverifiable claims about "clinical value" or "safety"
@@ -348,6 +348,9 @@ class LiteLLMService:
     def recommend(self, map_project, row, metadata, candidates, bridge_candidates=None, scispacy_candidates=None, include_default_filter=False):  # pragma: no cover  # pylint: disable=too-many-arguments,line-too-long
         prompt = self.get_prompt(
             map_project, row, metadata, candidates, bridge_candidates, scispacy_candidates, include_default_filter)
+        print("*****LLM as Judge Prompt: Start****")
+        print(prompt)
+        print("*****LLM as Judge Prompt: END****")
         response = self.__call_anthropic(prompt)
         print("****ANT RESPONSE****")
         return response
