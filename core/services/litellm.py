@@ -35,6 +35,37 @@ class LiteLLMService:
     
     You must respond with a valid JSON object following the specified output template.
     """
+    RECOMMEND_CANDIDATE_SYSTEM_PROMPT_V2 = """
+    You are a medical terminology curator evaluating candidate concept matches for standardizing local clinical terms to target terminologies (LOINC, SNOMED CT, or custom). Assess algorithm-generated candidates and provide structured recommendations prioritizing semantic precision, clinical safety, and implementation viability.
+
+    Core Methodology:
+    1. Analyze input term: name, description, properties, clinical context, intended use
+    2. Evaluate each candidate: semantic alignment, specificity, clinical appropriateness  
+    3. Consider algorithm confidence and methodology alongside clinical judgment
+    4. Apply project-specific rules and constraints
+    5. Provide structured recommendations with clear rationale
+    
+    Recommendation Types:
+    - RECOMMEND: Single candidate with strong alignment (>90% confidence or clear clinical match)
+    - CONDITIONAL: Good candidate(s) exist with specific limitations or require additional context
+    - REJECT: No candidates meet minimum thresholds
+    - INSUFFICIENT: Cannot assess confidently with available information
+    
+    CRITICAL Constraints:
+    - Primary and alternative candidates MUST come from the provided candidate list only
+    - Out-of-scope suggestions (use sparingly) capture concepts NOT in the candidate list that may be relevant, but MUST be in the same target repository
+    - Assess alignment and suitability; avoid unverifiable claims about "clinical value" or "safety"
+    - Note data gaps explicitly rather than making unsupported determinations
+    - Be transparent about uncertainty and missing information
+    - If a candidate’s rank within the target repo (not within the match results) is available, preference for higher ranking candidates, though alignment and accuracy is much more important
+    
+    Before finalizing response:
+    1. Verify primary_candidate.concept_id is from input list or null
+    2. Verify all alternative_candidates concept_ids are from input list  
+    3. Place any other concepts in out_of_scope_suggestions
+    
+    Output valid JSON only.
+    """
 
     RECOMMEND_CANDIDATE_INPUT_PROMPT = """
     Evaluate the following medical terminology matching task:
@@ -94,6 +125,99 @@ class LiteLLMService:
     }
     
     Important: Your response must be a valid JSON object only, with no additional text or explanation outside the JSON.
+    """
+    RECOMMEND_CANDIDATE_TASK_PROMPT_V2 = """
+    Evaluate candidates and provide recommendation as JSON following this exact schema:
+    {
+      "recommendation": "RECOMMEND|CONDITIONAL|REJECT|INSUFFICIENT",
+      "primary_candidate": {
+        "concept_id": "string or null",
+        "confidence_level": "HIGH|MEDIUM|LOW", 
+        "match_strength": "percentage as string"
+      },
+      "alternative_candidates": [
+        {
+          "concept_id": "string from candidate list",
+          "rank": "integer",
+          "rationale": "why this is alternative"
+        }
+      ],
+      "out_of_scope_suggestions": [
+        {
+          "suggested_concept": "specific concept ID, family of codes, or area for exploration within target repository",
+          "rationale": "why this would improve the match or should be verified",
+          "source": "clinical_knowledge|algorithm_gap|terminology_limitation|partial_match_extension"
+        }
+      ],
+      "rationale": "Concisely explain reasoning for recommendation and provide actionable guidance for human reviewer addressing: (1) Alignment of specific data points that contribute to a confident mapping - do not indicate that a user should proceed with a selection, simply say why they might choose a candidate. (2) What specifically should I verify before accepting? Are there specific data points that, if available, would help to make a full determination? (3) Should I refine the search? If so, what terms, filters, or concept areas should I explore? (4) What is the key decision point or uncertainty I need to resolve? Focus on making the human's mapping decision and any follow-up searching faster and more targeted."
+    }
+    
+    Selection Rules:
+    1. Primary/alternative candidates MUST be from input candidate list
+    2. Assess semantic alignment between input term and candidates
+    3. Apply project-specific rules and constraints
+    4. Flag data gaps preventing confident determination
+    
+    Out-of-Scope Suggestions (use sparingly):
+    - MUST be from the same target repository as candidates. If a custom target repository, then it is probably not possible to provide out-of-scope suggestions.
+    - Only provide when: (a) primary/alternative candidates are weak/absent, OR (b) verification against specific other concepts is highly recommended
+    - Format as: specific concept ID (e.g., "LOINC 12345-6"), family of codes (e.g., "LOINC 2345-* series for method-specific variants"), or exploration suggestion (e.g., "Search for more specific timing qualifiers")
+    - Do NOT provide if primary and alternative candidates are strong unless verification is critical
+    
+    Return only valid JSON with no additional text before or after.
+    
+    Example for RECOMMEND:
+    {
+      "recommendation": "RECOMMEND",
+      "primary_candidate": {
+        "concept_id": "58450-8",
+        "confidence_level": "HIGH",
+        "match_strength": "95%"
+      },
+      "alternative_candidates": [],
+      "out_of_scope_suggestions": [],
+      "rationale": "58450-8 has strong alignment on system (Urine), property (PrThr), and scale (Ord) with high algorithm consensus (>90% across 3 algorithms). Verify that the local term's qualitative result categories align with standard ordinal values (Negative/Trace/1+/2+/3+)."
+    }
+    
+    Example for CONDITIONAL:
+    {
+      "recommendation": "CONDITIONAL",
+      "primary_candidate": {
+        "concept_id": "2345-7",
+        "confidence_level": "MEDIUM",
+        "match_strength": "78%"
+      },
+      "alternative_candidates": [
+        {
+          "concept_id": "2345-8",
+          "rank": 2,
+          "rationale": "Alternative method specification; select if local term uses confirmatory testing"
+        }
+      ],
+      "out_of_scope_suggestions": [
+        {
+          "suggested_concept": "LOINC 2345-* family with method qualifiers",
+          "rationale": "If method specificity is critical for your use case, verify which method your lab uses",
+          "source": "terminology_limitation"
+        }
+      ],
+      "rationale": "Cannot select between 2345-7 (general) and 2345-8 (confirmatory method) without knowing your lab's testing methodology. Both are semantically appropriate. Decision point: Does your local term imply a specific testing method? If method doesn't matter for your use case, proceed with 2345-7. If method IS critical, verify lab protocol then choose accordingly. Consider searching 'glucose METHOD confirmatory' to see full method-specific options."
+    }
+    
+    Example for INSUFFICIENT:
+    {
+      "recommendation": "INSUFFICIENT",
+      "primary_candidate": null,
+      "alternative_candidates": [],
+      "out_of_scope_suggestions": [
+        {
+          "suggested_concept": "Explore LOINC codes with System='Serum' Property='MCnc'",
+          "rationale": "Current candidates have wrong specimen type; need to refine search",
+          "source": "algorithm_gap"
+        }
+      ],
+      "rationale": "Cannot recommend from current candidates - all have System='Urine' but your local term specifies serum testing. Refine search with: (1) Add filter 'System=Serum', (2) Search for 'glucose serum mass concentration', (3) Review LOINC codes in 2345-2349 range which covers serum glucose variants. Key gap: Need candidates matching the correct specimen type."
+    }
     """
 
     mock_response = {
@@ -159,8 +283,8 @@ class LiteLLMService:
     def __init__(self):
         self.anthropic_api_key = settings.ANTHROPIC_API_KEY
 
-    def recommend(self, map_project, row, candidates, include_default_filter=False):  # pragma: no cover
-        prompt = self.get_prompt(map_project, row, candidates, include_default_filter)
+    def recommend(self, map_project, row, candidates, bridge_candidates=None, include_default_filter=False):  # pragma: no cover  # pylint: disable=too-many-arguments
+        prompt = self.get_prompt(map_project, row, candidates, bridge_candidates, include_default_filter)
         response = self.__call_anthropic(prompt)
         print("****ANT RESPONSE****")
         return response
@@ -177,19 +301,63 @@ class LiteLLMService:
             pass
         return data
 
-    def get_prompt(self, map_project, row, candidates, include_default_filter=False):  # pragma: no cover
+    @staticmethod
+    def clean_candidate(candidate, locales=None):  # pragma: no cover
+        candidate.pop('search_meta', None)
+        candidate.pop('checksums', None)
+        candidate.pop('uuid', None)
+        candidate.pop('created_at', None)
+        candidate.pop('created_on', None)
+        candidate.pop('created_by', None)
+        candidate.pop('updated_at', None)
+        candidate.pop('updated_on', None)
+        candidate.pop('updated_by', None)
+        candidate.pop('versions_url', None)
+        candidate.pop('public_can_view', None)
+        candidate.pop('versioned_object_id', None)
+        candidate.pop('latest_source_version', None)
+        candidate.pop('update_comment', None)
+        candidate.pop('version', None)
+        if not candidate.get('external_id', None):
+            candidate.pop('external_id', None)
+
+        locales_ = locales.split(',') if locales else []
+        names = []
+        for name in candidate.get('names', []):
+            if not locales or name.get('locale', None) in locales_:
+                name_ = {k: v for k, v in name.items() if k in ['name', 'locale', 'external_id', 'name_type', 'locale_preferred'] and v}
+                names.append(name_)
+        candidate['names'] = names
+
+        properties = candidate.get('properties', [])
+        existing_extras = candidate.get('extras', {})
+        if existing_extras and properties and isinstance(properties, list):
+            extras = {}
+            for k, v in existing_extras.items():
+                if not next((prop for prop in properties if prop.get('code') == k), None):
+                    extras[k] = v
+            candidate['extras'] = extras
+
+        return candidate
+
+    def get_prompt(self, map_project, row, candidates, bridge_candidates=None, include_default_filter=False):  # pragma: no cover  # pylint: disable=too-many-arguments
         project_context = self.get_project_context(
             map_project, include_default_filter=include_default_filter)
         if not project_context:
             raise ValueError("Map project must have a valid target repository.")
 
-        system_prompt = self.RECOMMEND_CANDIDATE_SYSTEM_PROMPT.strip()
+        system_prompt = self.RECOMMEND_CANDIDATE_SYSTEM_PROMPT_V2.strip()
+        locales = get(map_project, 'filters.locale') or None
+        all_candidates = {
+            'ocl-semantic': [self.clean_candidate(candidate, locales) for candidate in (candidates or [])],
+            'ciel-bridge': [self.clean_candidate(candidate, locales) for candidate in (bridge_candidates or [])]
+        }
         input_prompt = self.RECOMMEND_CANDIDATE_INPUT_PROMPT.strip().format(
             project=json.dumps(project_context, indent=2),
             row=json.dumps(row, indent=2),
-            candidates=json.dumps(candidates, indent=2)
+            candidates=json.dumps(all_candidates, indent=2)
         )
-        task_prompt = self.RECOMMEND_CANDIDATE_TASK_PROMPT.strip()
+        task_prompt = self.RECOMMEND_CANDIDATE_TASK_PROMPT_V2.strip()
 
         full_prompt = f"{system_prompt}\n\n{input_prompt}\n\n{task_prompt}"
         return full_prompt
@@ -206,15 +374,18 @@ class LiteLLMService:
               "project": {
                 "name": map_project.name,
                 "description": map_project.description,
-                "domain": "General Medical Terminology"
               },
               "target_repository": {
                 "name": target_repo.mnemonic,
                 "version": target_repo.version,
+                "description": target_repo.description,
                 "filters": project_filters or "Active concepts"
               },
               "matching_config": {
-                "algorithms": ["Fuzzy String", "Semantic Vector", "Lexical"],
+                "algorithms": {
+                    "ocl-semantic": "Cosine similarity search on names combined with string matching on properties. Default embedding uses miniLM for cross-lingual support, but multiple models are supported.",
+                    "ciel-bridge": "Lexical and semantic search on the names for the Columbia International eHealth Laboratory (CIEL) interface terminology. Applicable when CIEL has maps to the project’s target repository. This can significantly expand lexical variance, making it more likely to match the source term. Candidates returned by this algorithm are CIEL concepts with 1 or more maps to the target terminology. However, the top-candidate recommended by this prompt must be only one of the maps to the target terminology, and the rationale MUST indicate that it was derived through a CIEL concept.",
+                },
                 "fields_mapped": map_project.fields_mapped,
                 "thresholds": map_project.score_configuration or {}
               },
@@ -228,4 +399,5 @@ class LiteLLMService:
 
 
     def __call_anthropic(self, message):  # pragma: no cover
-        return completion(model=self.ANTHROPIC_MODEL, messages=[{'content': message, 'role': 'user'}])
+        return completion(
+            model=self.ANTHROPIC_MODEL, messages=[{'content': message, 'role': 'user'}], temperature=0.2)

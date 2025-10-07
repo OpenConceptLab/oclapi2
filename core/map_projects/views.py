@@ -74,6 +74,7 @@ class MapProjectRecommendView(MapProjectBaseView):  # pragma: no cover
         params = self.request.query_params
         map_project = self.get_object()
         candidates = request.data.get('candidates') or []
+        bridge_candidates = request.data.get('bridgeCandidates') or []
         row = request.data.get('row') or {}
         target_repo_url = request.data.get('target_repo_url') or map_project.target_repo_url
 
@@ -95,7 +96,8 @@ class MapProjectRecommendView(MapProjectBaseView):  # pragma: no cover
             litellm = LiteLLMService()
             map_project.target_repo_url = target_repo_url
             response = litellm.recommend(
-                map_project, row, candidates, params.get('conceptFilterDefault') in get_truthy_values()
+                map_project, row, candidates, bridge_candidates,
+                params.get('conceptFilterDefault') in get_truthy_values()
             )
             return Response(litellm.to_dict(response), status=status.HTTP_200_OK)
         except Exception as ex:
