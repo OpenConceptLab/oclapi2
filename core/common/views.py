@@ -406,7 +406,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         faceted_fields = [*self.get_faceted_fields(), *(additional_fields or [])]
         params = self.request.query_params.dict() if params is None else params
 
-        query_params = {to_snake_case(k): v for k, v in params.items()}
+        query_params = {k if k.startswith('properties__') else to_snake_case(k): v for k, v in params.items()}
         repo_default_filters = {
             to_snake_case(k): v for k, v in repo_default_filters.items()
         } if repo_default_filters else {}
